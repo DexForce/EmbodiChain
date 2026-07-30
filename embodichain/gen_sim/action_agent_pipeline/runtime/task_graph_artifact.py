@@ -81,6 +81,11 @@ class RuntimeTaskGraphRecorder:
             for step in self.seed_graph["semantic_steps"]
             for edge_id in step["edge_ids"]
         }
+        self._incoming_by_node: dict[str, list[str]] = {}
+        for edge in self.seed_graph["edges"]:
+            self._incoming_by_node.setdefault(str(edge["target"]), []).append(
+                str(edge["id"])
+            )
 
     def begin_step(
         self,
@@ -140,8 +145,11 @@ class RuntimeTaskGraphRecorder:
         failed_after: torch.Tensor,
         grounding_failed: torch.Tensor,
         action_steps: int,
-        arm_actions: Mapping[str, Any],
+        arm_actions: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+        failure_class: str = "fatal",
     ) -> None:
+        if failure_class not in {"cleanup", "fatal"}:
+            raise ValueError(f"Unsupported runtime failure class: {failure_class!r}.")
         for env_id in range(self.num_envs):
             edge = self._edge_by_id[env_id][edge_id]
             was_active = not bool(failed_before[env_id].item())
@@ -149,23 +157,38 @@ class RuntimeTaskGraphRecorder:
             did_fail = failed_during_grounding or (
                 bool(failed_after[env_id].item()) and was_active
             )
-            if len(edge["actions"]) != len(grounded_actions):
+            if len(edge["actions"]) == 1 and grounded_actions:
+                assigned_arm = assignments[env_id]
+                grounded_for_env = next(
+                    (
+                        grounded
+                        for grounded in grounded_actions
+                        if grounded.action_spec.get("robot_name") == assigned_arm
+                    ),
+                    grounded_actions[0],
+                )
+                grounded_pairs = ((edge["actions"][0], grounded_for_env),)
+            elif len(edge["actions"]) == len(grounded_actions):
+                grounded_pairs = tuple(zip(edge["actions"], grounded_actions))
+            else:
                 raise ValueError(
                     f"Runtime edge {edge_id!r} action count changed during grounding."
                 )
-            for action_record, grounded in zip(
-                edge["actions"],
-                grounded_actions,
-            ):
+            env_arm_actions = (
+                arm_actions[env_id]
+                if not isinstance(arm_actions, Mapping)
+                else arm_actions
+            )
+            for action_record, grounded in grounded_pairs:
                 assigned_arm = (
                     assignments[env_id]
-                    if len(grounded_actions) == 1
+                    if len(edge["actions"]) == 1
                     else str(grounded.action_spec["robot_name"])
                 )
                 runtime = action_record.setdefault("runtime", {})
                 selected_action = _selected_arm_action(
                     assigned_arm,
-                    arm_actions,
+                    env_arm_actions,
                 )
                 resolved_object_pose = getattr(
                     selected_action,
@@ -232,11 +255,15 @@ class RuntimeTaskGraphRecorder:
                             or resolved_right_eef_pose is not None
                             else _pose_at(resolved_eef_pose, env_id)
                         ),
-                        "resolved_motion_policy": deepcopy(grounded.motion_policy),
+                        "resolved_motion_policy": _motion_policy_at(
+                            grounded.motion_policy,
+                            env_id,
+                            self.num_envs,
+                        ),
                         "planning": _planning_record(
                             assigned_arm,
                             env_id,
-                            arm_actions,
+                            env_arm_actions,
                             did_fail=did_fail,
                             was_active=was_active or failed_during_grounding,
                         ),
@@ -264,15 +291,17 @@ class RuntimeTaskGraphRecorder:
                             if did_fail
                             else None
                         ),
+                        "failure_class": failure_class if did_fail else None,
                     }
                 )
+            if did_fail and failure_class == "cleanup":
+                self.documents[env_id]["cleanup_failures"].append(edge_id)
             target_node = str(edge["target"])
             for node in self.documents[env_id]["nodes"]:
                 if node["id"] == target_node:
-                    node["runtime_status"] = (
-                        "failed"
-                        if did_fail
-                        else ("skipped" if not was_active else "reached")
+                    node["runtime_status"] = self._joined_node_status(
+                        env_id,
+                        target_node,
                     )
                     break
 
@@ -286,6 +315,7 @@ class RuntimeTaskGraphRecorder:
         target_positions: torch.Tensor | None,
         position_error: torch.Tensor | None,
         tolerance: float | None,
+        cleanup_failed_mask: torch.Tensor | None = None,
     ) -> None:
         for env_id, document in enumerate(self.documents):
             record = self._step_by_id[env_id][step_id]["runtime"]
@@ -305,6 +335,12 @@ class RuntimeTaskGraphRecorder:
                 ),
                 "tolerance": tolerance,
             }
+            record["cleanup_status"] = (
+                "degraded"
+                if cleanup_failed_mask is not None
+                and bool(cleanup_failed_mask[env_id].item())
+                else "complete"
+            )
             if bool(failed_mask[env_id].item()) and not succeeded:
                 record.setdefault("failure_reason", "postcondition not satisfied")
             if prior_status != "skipped":
@@ -331,6 +367,7 @@ class RuntimeTaskGraphRecorder:
         *,
         aborted_reason: str | None = None,
         relation_success: torch.Tensor | None = None,
+        cleanup_failed_mask: torch.Tensor | None = None,
     ) -> None:
         """Publish final JSON and PNG even when execution aborted."""
         files: list[tuple[Path, str | bytes]] = []
@@ -346,6 +383,11 @@ class RuntimeTaskGraphRecorder:
                 bool(relation_success[env_id].item())
                 if relation_success is not None
                 else None
+            )
+            document["cleanup_degraded"] = (
+                bool(cleanup_failed_mask[env_id].item())
+                if cleanup_failed_mask is not None
+                else False
             )
             document["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
             directory = self._env_dir(env_id)
@@ -385,7 +427,7 @@ class RuntimeTaskGraphRecorder:
                     "assigned_arm": None,
                 }
         return {
-            "schema_version": "runtime_task_graph_v2",
+            "schema_version": "runtime_task_graph_v3",
             "task": self.seed_graph["task"],
             "run_id": self.run_id,
             "episode_index": self.episode_index,
@@ -402,12 +444,33 @@ class RuntimeTaskGraphRecorder:
                 "semantic_step_schema_version"
             ],
             "semantic_steps": steps,
+            "allocation_groups": deepcopy(self.seed_graph.get("allocation_groups", [])),
             "status": "pending",
+            "cleanup_failures": [],
+            "cleanup_degraded": False,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
         }
 
     def _env_dir(self, env_id: int) -> Path:
         return self.output_dir / f"env_{env_id:04d}"
+
+    def _joined_node_status(self, env_id: int, node_id: str) -> str:
+        """Reach a fork/join node only after all of its incoming actions finish."""
+        incoming = self._incoming_by_node.get(node_id, [])
+        statuses = []
+        for edge_id in incoming:
+            edge = self._edge_by_id[env_id][edge_id]
+            statuses.extend(
+                action.get("runtime", {}).get("status", "pending")
+                for action in edge["actions"]
+            )
+        if any(status == "pending" for status in statuses):
+            return "pending"
+        if any(status == "failed" for status in statuses):
+            return "failed"
+        if statuses and all(status == "skipped" for status in statuses):
+            return "skipped"
+        return "reached"
 
 
 def _planning_record(
@@ -439,6 +502,23 @@ def _planning_record(
         "ik_success": None if not was_active else not did_fail,
         "trajectory_step_count": trajectory_steps if was_active else 0,
     }
+
+
+def _motion_policy_at(
+    policy: Mapping[str, Any],
+    env_id: int,
+    num_envs: int,
+) -> dict[str, Any]:
+    """Project per-environment resolved policy arrays into one Task graph."""
+    result = deepcopy(dict(policy))
+    heights = result.pop("resolved_retreat_height_by_env", None)
+    if heights is not None:
+        if not isinstance(heights, Sequence) or len(heights) != num_envs:
+            raise ValueError(
+                "resolved_retreat_height_by_env must match the environment batch."
+            )
+        result["resolved_retreat_height"] = float(heights[env_id])
+    return result
 
 
 def _selected_arm_action(

@@ -348,10 +348,29 @@ def _validate_target_pose(target_pose: Mapping[str, Any]) -> None:
     if reference == "absolute":
         _validate_target_fields(
             target_pose,
-            {"reference", "position", "position_by_env"},
+            {
+                "reference",
+                "position",
+                "position_by_env",
+                "rotation_matrix_by_env",
+            },
             "target_pose",
         )
         _validate_absolute_position(target_pose, "target_pose")
+        rotation_matrices = target_pose.get("rotation_matrix_by_env")
+        if rotation_matrices is not None and (
+            not isinstance(rotation_matrices, list)
+            or not rotation_matrices
+            or any(
+                not isinstance(matrix, list)
+                or len(matrix) != 3
+                or any(not isinstance(row, list) or len(row) != 3 for row in matrix)
+                for matrix in rotation_matrices
+            )
+        ):
+            raise ValueError(
+                "absolute target_pose rotation_matrix_by_env requires an Nx3x3 list."
+            )
         return
 
     _validate_target_fields(

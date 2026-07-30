@@ -121,32 +121,41 @@ Semantic-step execution
 -----------------------
 
 Object-manipulation model output is an ordered semantic program. Deterministic
-generation expands that program into seed_task_graph_v3, the complete symbolic
-execution topology. Seed v3 owns stable state and edge IDs, atomic-action
+generation expands that program into seed_task_graph_v5, the complete symbolic
+execution topology. Seed v5 owns stable state and edge IDs, atomic-action
 classes, target bindings, named motion policies, semantic edge groups,
-dependencies, postconditions, and user-required arm bindings. It never owns
+action dependencies, resources, postconditions, user-required arm bindings,
+and optional distinct-arm allocation groups. Allocation groups preserve a
+dual-arm participation request without turning nominal config geometry into a
+hard arm assignment. Seed never owns
 absolute targets, geometric distances, tolerances, IK results, trajectories,
 joint arrays, or execution status. The same Seed can therefore drive every
 environment that shares the object registry.
 
 Arrangement generation may use the transformed nominal scene internally to
 minimize cross-side and transport cost. It discards that geometry after
-choosing an object-to-slot binding. Seed v3 stores only nominal slot indices,
+choosing an object-to-slot binding. Seed v5 stores only nominal slot indices,
 required versus free-reassignable constraints, and a six-edge
 pickup/staging/final/place/retreat/home skeleton. Ordered slots are immutable;
 free slots are defaults that runtime may globally rematch for unfinished
 objects after a nominal path is proven infeasible.
 
-Runtime consumes Seed v3 directly and executes semantic edge ranges in order.
+Runtime consumes Seed v5 directly and schedules its action dependency DAG.
 At each boundary it validates dependencies, reads live object bindings,
 materializes centered slots from each environment's live table bounds and
 object footprints, resolves the robot-profile motion policy, selects an
-automatic arm per environment through pickup/staging/final candidate planning,
-grounds only the current step, executes it, settles physics, and verifies its
-symbolic postcondition. A chosen arm remains fixed for the rest of that
-semantic step. Required arms remain hard constraints.
+automatic arm per environment through complete-path candidate planning, and
+executes every ready action. The first parallel scheduler packs independent
+PickUp actions assigned to different required arms or declared as one
+distinct-arm allocation group. Auto groups compare both complete-path
+permutations per environment, isolate held-object state by semantic step and
+arm, and execute opposite permutations in separate vectorized masks.
+Transport and placement through shared workspaces remain serialized. Runtime
+settles physics and verifies each symbolic postcondition before releasing
+dependent actions. A chosen arm remains fixed for the rest of that semantic
+step. Required arms remain hard constraints.
 
-Each environment and episode owns a runtime_task_graph_v2 execution record.
+Each environment and episode owns a runtime_task_graph_v3 execution record.
 The recorder keeps Seed topology for direct comparison and adds observed poses,
 resolved targets and policies, selected arms, planning summaries, execution
 status, postcondition results, and failures. It atomically checkpoints JSON
@@ -171,7 +180,7 @@ module preserve established private import paths without moving ownership back
 into the dispatcher.
 
 The package-level graph_visualization module owns headless review rendering
-shared by generation and runtime. Config publication renders only Seed v3 PNG
+shared by generation and runtime. Config publication renders only Seed v5 PNG
 from the same in-memory snapshot as seed_task_graph.json. Runtime renders one
 grounded Task PNG for each environment and episode after execution. The images
 are diagnostic artifacts only and never become execution inputs.

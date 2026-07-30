@@ -97,6 +97,7 @@ def _execute_atomic_action_result(
     **runtime_kwargs,
 ) -> ExecutedAtomicAction:
     """Execute one atomic action spec and keep the typed WorldState result."""
+    diagnostic_context = runtime_kwargs.get("_diagnostic_context")
     spec = (
         action_spec
         if isinstance(action_spec, AtomicActionSpec)
@@ -158,12 +159,21 @@ def _execute_atomic_action_result(
     if failed_env_mask is not None and bool(failed_env_mask.any()):
         n_failed = int(failed_env_mask.sum().item())
         n_total = result.trajectory.shape[0]
-        log_warning(
-            f"Atomic action failed in {n_failed}/{n_total} environment(s): "
+        failure_message = (
             f"atomic_action_class={spec.atomic_action_class}, "
-            f"robot_name={spec.robot_name}, target={_target_summary(spec)}. "
-            "Holding failed environments at their current joint positions."
+            f"robot_name={spec.robot_name}, target={_target_summary(spec)}."
         )
+        if diagnostic_context == "arm_candidate":
+            log_info(
+                f"Rejected arm candidate in {n_failed}/{n_total} environment(s): "
+                f"{failure_message}"
+            )
+        else:
+            log_warning(
+                f"Atomic action failed in {n_failed}/{n_total} environment(s): "
+                f"{failure_message} Holding failed environments at their current "
+                "joint positions."
+            )
         result.trajectory = _ensure_failure_hold_step(result.trajectory, state)
         full_joint_ids = list(range(state.last_qpos.shape[-1]))
         result.trajectory = _pad_failed_trajectory_with_init_qpos(
@@ -203,8 +213,13 @@ def _execute_atomic_action_result(
         int(spec.cfg.get("post_hold_steps", 0)),
         "atomic action",
     )
+    action_log_prefix = (
+        "Planned arm candidate with atomic action"
+        if diagnostic_context == "arm_candidate"
+        else "Using atomic action"
+    )
     log_info(
-        "Using atomic action: "
+        f"{action_log_prefix}: "
         f"atomic_action_class={spec.atomic_action_class}, cfg={cfg.__class__.__name__}, "
         f"control={spec.control}, target={_target_summary(spec)}, "
         f"steps={len(action_np)}.",

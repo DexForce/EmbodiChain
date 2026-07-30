@@ -509,7 +509,7 @@ def _relative_dataset_instruction(
         )
     if spec.intent == "hold_hover":
         return " ".join(
-            f"Use the {placement.active_side} arm to pick up "
+            f"{_relative_instruction_actor(placement)} to pick up "
             f"{placement.moved_runtime_uid} and keep it hovering in a closed "
             "gripper."
             for placement in spec.placements
@@ -517,18 +517,24 @@ def _relative_dataset_instruction(
     if len(spec.placements) == 1:
         placement = spec.placements[0]
         return (
-            f"Use the {placement.active_side} arm to move "
+            f"{_relative_instruction_actor(placement)} to move "
             f"{placement.moved_runtime_uid} "
             f"{relation_phrase(placement.relation)} "
             f"{placement.reference_runtime_uid}."
         )
     return " ".join(
-        f"Use the {placement.active_side} arm to move "
+        f"{_relative_instruction_actor(placement)} to move "
         f"{placement.moved_runtime_uid} "
         f"{relation_phrase(placement.relation)} "
         f"{placement.reference_runtime_uid}."
         for placement in spec.placements
     )
+
+
+def _relative_instruction_actor(placement: RelativePlacementStepSpec) -> str:
+    if placement.arm_request == "auto":
+        return "Use a runtime-selected arm"
+    return f"Use the required {placement.arm_request} arm"
 
 
 def _make_background_config(

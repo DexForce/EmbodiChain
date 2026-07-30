@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compile executable Seed Graph v3 into the live runtime graph."""
+"""Compile executable Seed Graph v5 into the live runtime graph."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def compile_agent_graph_from_file(
     graph_cls: type | None = None,
     action_module: Any = None,
 ) -> Any:
-    """Compile Seed v3 from disk into an executable runtime graph."""
+    """Compile Seed v5 from disk into an executable runtime graph."""
     return compile_agent_graph_spec(
         load_agent_graph_bundle(path),
         graph_cls=graph_cls,
@@ -67,7 +67,7 @@ def compile_agent_graph_spec(
     graph_cls: type | None = None,
     action_module: Any = None,
 ) -> Any:
-    """Compile a validated Seed v3 mapping without grounding its actions."""
+    """Compile a validated Seed v5 mapping without grounding its actions."""
     del action_module
     seed_spec = extract_json_object(seed_graph)
     validate_seed_task_graph(seed_spec)
@@ -92,6 +92,8 @@ def compile_agent_graph_spec(
             edge["source"],
             edge["target"],
             symbolic_actions=edge["actions"],
+            depends_on=edge["depends_on"],
+            resources=edge["resources"],
         )
     for step in seed_spec["semantic_steps"]:
         graph.add_semantic_step(

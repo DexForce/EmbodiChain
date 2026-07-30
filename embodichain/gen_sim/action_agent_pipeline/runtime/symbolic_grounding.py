@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Ground Seed v3 bindings from the current state of every environment."""
+"""Ground Seed v5 bindings from the current state of every environment."""
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ def ground_symbolic_action(
     env: Any,
     arm: str,
     arrangement_plan: Any = None,
+    policy_reference_pose: torch.Tensor | None = None,
 ) -> GroundedSymbolicAction:
     """Resolve one symbolic action without mutating the Seed graph."""
     robot_profile = str(getattr(env, "agent_robot_profile", ""))
@@ -122,11 +123,27 @@ def ground_symbolic_action(
             "orientation_axis": "none",
         }
     elif binding_kind == "policy_pose":
-        spec["target_pose"] = {
-            "reference": "relative",
-            "offset": [0.0, 0.0, float(policy["retreat_height"])],
-            "frame": "world",
-        }
+        retreat_target = _resolved_retreat_target(
+            env,
+            arm,
+            policy,
+            reference_pose=policy_reference_pose,
+        )
+        if retreat_target is None:
+            resolved_heights = [float(policy["retreat_height"])] * int(env.num_envs)
+            spec["target_pose"] = {
+                "reference": "relative",
+                "offset": [0.0, 0.0, float(policy["retreat_height"])],
+                "frame": "world",
+            }
+        else:
+            target_positions, target_rotations, resolved_heights = retreat_target
+            spec["target_pose"] = {
+                "reference": "absolute",
+                "position_by_env": target_positions,
+                "rotation_matrix_by_env": target_rotations,
+            }
+        policy["resolved_retreat_height_by_env"] = resolved_heights
     elif binding_kind == "joint_state":
         source = str(binding.get("source", "initial"))
         if source in {"gripper_closed", "gripper_open"}:
@@ -166,6 +183,56 @@ def ground_symbolic_action(
         object_pose=object_pose,
         reference_pose=reference_pose,
         target_object_pose=target_object_pose,
+    )
+
+
+def _resolved_retreat_target(
+    env: Any,
+    arm: str,
+    policy: Mapping[str, Any],
+    *,
+    reference_pose: torch.Tensor | None,
+) -> tuple[list[list[float]], list[list[list[float]]], list[float]] | None:
+    """Cap the upward retreat against the robot profile's EEF workspace."""
+    pose = reference_pose
+    if pose is None:
+        if not hasattr(env, "get_current_xpos_agent"):
+            return None
+        left_pose, right_pose = env.get_current_xpos_agent()
+        pose = left_pose if arm == "left_arm" else right_pose
+    pose = torch.as_tensor(pose, dtype=torch.float32, device=env.device)
+    if pose.ndim == 2:
+        pose = pose.unsqueeze(0)
+    if pose.ndim != 3 or tuple(pose.shape[-2:]) != (4, 4):
+        raise ValueError(
+            "Dynamic retreat reference pose must have shape (4, 4) or (N, 4, 4)."
+        )
+    if pose.shape[0] == 1 and int(env.num_envs) > 1:
+        pose = pose.expand(int(env.num_envs), -1, -1)
+    if pose.shape[0] != int(env.num_envs):
+        raise ValueError("Dynamic retreat pose batch does not match env.num_envs.")
+
+    desired = float(policy["retreat_height"])
+    minimum = float(policy["minimum_retreat_height"])
+    ceiling = float(policy["maximum_eef_height"])
+    available = torch.clamp(ceiling - pose[:, 2, 3], min=0.0)
+    heights = torch.minimum(
+        available,
+        torch.full_like(available, desired),
+    )
+    # A zero-distance MoveEndEffector is not useful. When the current EEF is
+    # already near the ceiling, keep the target at the current pose and let
+    # the cleanup failure policy fall through to Home.
+    heights = torch.where(heights >= minimum, heights, torch.zeros_like(heights))
+    target = pose[:, :3, 3].clone()
+    target[:, 2] += heights
+    return (
+        [[float(value) for value in row] for row in target.detach().cpu().tolist()],
+        [
+            [[float(value) for value in row] for row in matrix]
+            for matrix in pose[:, :3, :3].detach().cpu().tolist()
+        ],
+        [float(value) for value in heights.detach().cpu().tolist()],
     )
 
 

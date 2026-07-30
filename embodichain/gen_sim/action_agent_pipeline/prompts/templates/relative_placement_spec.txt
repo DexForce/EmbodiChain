@@ -1,4 +1,4 @@
-Parse a simple dual-arm tabletop relative-placement task and produce a constrained config-level JSON spec. Deterministic config generation uses this JSON to build executable seed_task_graph_v3, agent_success, and the human-readable task_prompt.txt, basic_background.txt, and atom_actions.txt diagnostic records. Runtime execution grounds the Seed graph from live environment state and does not invoke a second graph-generation LLM.
+Parse a simple dual-arm tabletop relative-placement task and produce a constrained config-level JSON spec. Deterministic config generation uses this JSON to build executable seed_task_graph_v5, agent_success, and human-readable diagnostic records derived from that Seed. Runtime execution grounds the Seed graph from live environment state and does not invoke a second graph-generation LLM.
 
 Return exactly one JSON object with this schema:
 {

@@ -31,9 +31,9 @@ __all__ = [
     "validate_seed_task_graph",
 ]
 
-SEED_TASK_GRAPH_SCHEMA_VERSION = "seed_task_graph_v3"
-SEMANTIC_STEP_SCHEMA_VERSION = "semantic_steps_v3"
-MOTION_POLICY_VERSION = "action_agent_motion_policy_v2"
+SEED_TASK_GRAPH_SCHEMA_VERSION = "seed_task_graph_v5"
+SEMANTIC_STEP_SCHEMA_VERSION = "semantic_steps_v4"
+MOTION_POLICY_VERSION = "action_agent_motion_policy_v4"
 
 _ROUTES = {"arrangement_line", "object_manipulation", "stacking"}
 _ACTOR_MODES = {"auto", "coordinated", "required"}
@@ -86,6 +86,7 @@ _ACTION_POLICIES = {
     "Place": "default_release",
 }
 _TOP_LEVEL_KEYS = {
+    "allocation_groups",
     "edges",
     "goal",
     "motion_policy_version",
@@ -97,6 +98,22 @@ _TOP_LEVEL_KEYS = {
     "semantic_steps",
     "start",
     "task",
+}
+_ALLOCATION_GROUP_KEYS = {
+    "arm_constraint",
+    "execution_policy",
+    "id",
+    "parallel_action_classes",
+    "semantic_step_ids",
+    "workspace_policy",
+}
+_EDGE_KEYS = {
+    "actions",
+    "depends_on",
+    "id",
+    "resources",
+    "source",
+    "target",
 }
 _STEP_KEYS = {
     "actor",
@@ -183,7 +200,7 @@ def validate_seed_task_graph(
     task_name: str | None = None,
     route: str | None = None,
 ) -> None:
-    """Validate Seed v3 topology and reject runtime-grounded data leakage."""
+    """Validate Seed v5 topology and reject runtime-grounded data leakage."""
     if not isinstance(seed_graph, Mapping):
         raise TypeError("Seed task graph must be a mapping.")
     unknown_graph_keys = set(seed_graph) - _TOP_LEVEL_KEYS
@@ -194,7 +211,12 @@ def validate_seed_task_graph(
         )
     if seed_graph.get("schema_version") != SEED_TASK_GRAPH_SCHEMA_VERSION:
         actual = seed_graph.get("schema_version")
-        if actual in {"seed_task_graph_v1", "seed_task_graph_v2"}:
+        if actual in {
+            "seed_task_graph_v1",
+            "seed_task_graph_v2",
+            "seed_task_graph_v3",
+            "seed_task_graph_v4",
+        }:
             raise ValueError(
                 f"{actual} is no longer supported. Regenerate the action-agent "
                 "config with --overwrite."
@@ -234,12 +256,15 @@ def validate_seed_task_graph(
     nodes = seed_graph.get("nodes")
     edges = seed_graph.get("edges")
     steps = seed_graph.get("semantic_steps")
+    allocation_groups = seed_graph.get("allocation_groups")
     if not isinstance(nodes, list) or len(nodes) < 2:
         raise ValueError("Seed task graph requires at least two nodes.")
     if not isinstance(edges, list) or not edges:
         raise ValueError("Seed task graph requires a non-empty edges list.")
     if not isinstance(steps, list) or not steps:
         raise ValueError("Seed task graph requires non-empty semantic_steps.")
+    if not isinstance(allocation_groups, list):
+        raise TypeError("Seed task graph allocation_groups must be a list.")
 
     node_ids: set[str] = set()
     for index, node in enumerate(nodes):
@@ -258,17 +283,41 @@ def validate_seed_task_graph(
     edge_ids: set[str] = set()
     incoming = {node_id: 0 for node_id in node_ids}
     outgoing = {node_id: 0 for node_id in node_ids}
+    known_edge_ids: set[str] = set()
     for index, edge in enumerate(edges):
         if not isinstance(edge, Mapping):
             raise TypeError(f"Seed edge {index} must be a mapping.")
-        if set(edge) != {"actions", "id", "source", "target"}:
+        if set(edge) != _EDGE_KEYS:
             raise ValueError(
-                f"Seed edge {index} must contain id/source/target/actions."
+                "Seed edge "
+                f"{index} must contain id/source/target/actions/depends_on/resources."
             )
         edge_id = edge["id"]
         if not isinstance(edge_id, str) or not edge_id or edge_id in edge_ids:
             raise ValueError(f"Invalid or duplicate seed edge id: {edge_id!r}.")
         edge_ids.add(edge_id)
+        dependencies = edge["depends_on"]
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies
+        ):
+            raise TypeError(f"Seed edge {edge_id!r} depends_on must be a list.")
+        if len(dependencies) != len(set(dependencies)):
+            raise ValueError(f"Seed edge {edge_id!r} has duplicate dependencies.")
+        unknown_dependencies = set(dependencies) - known_edge_ids
+        if unknown_dependencies:
+            raise ValueError(
+                f"Seed edge {edge_id!r} depends on non-prior edges: "
+                f"{sorted(unknown_dependencies)}."
+            )
+        resources = edge["resources"]
+        if (
+            not isinstance(resources, list)
+            or not all(isinstance(item, str) and item for item in resources)
+            or len(resources) != len(set(resources))
+        ):
+            raise ValueError(
+                f"Seed edge {edge_id!r} resources must be unique non-empty strings."
+            )
         source = edge["source"]
         target = edge["target"]
         if source not in node_ids or target not in node_ids:
@@ -280,16 +329,13 @@ def validate_seed_task_graph(
             raise ValueError(f"Seed edge {edge_id!r} requires symbolic actions.")
         for action in actions:
             _validate_symbolic_action(edge_id, action)
+        known_edge_ids.add(edge_id)
 
     start = str(seed_graph["start"])
     goal = str(seed_graph["goal"])
     if incoming[start] != 0 or outgoing[goal] != 0:
         raise ValueError("Seed start/goal topology is invalid.")
-    if any(outgoing[node_id] != 1 for node_id in node_ids - {goal}):
-        raise ValueError("Seed v3 currently requires one deterministic outgoing edge.")
-    if any(incoming[node_id] != 1 for node_id in node_ids - {start}):
-        raise ValueError("Seed v3 currently requires one deterministic incoming edge.")
-    _validate_single_chain(start, goal, node_ids, edges)
+    _validate_action_dag(start, goal, node_ids, edges)
 
     known_steps: set[str] = set()
     covered_edges: list[str] = []
@@ -326,7 +372,9 @@ def validate_seed_task_graph(
         if any(edge_id not in edge_ids for edge_id in assigned):
             raise ValueError(f"Semantic step {step_id!r} references unknown edges.")
         for edge_id in assigned:
-            edge_actions = edge_by_id[str(edge_id)]["actions"]
+            edge_record = edge_by_id[str(edge_id)]
+            edge_actions = edge_record["actions"]
+            _validate_edge_resources(step_id, step, edge_record)
             for action in edge_actions:
                 actor_matches_step = action["actor"] == step["actor"]
                 coordinated_child = (
@@ -370,12 +418,74 @@ def validate_seed_task_graph(
                 )
         covered_edges.extend(assigned)
         known_steps.add(step_id)
-    if covered_edges != [str(edge["id"]) for edge in edges]:
+    if len(covered_edges) != len(set(covered_edges)) or set(covered_edges) != edge_ids:
         raise ValueError(
-            "Semantic step edge_ids must cover every Seed edge exactly once in order."
+            "Semantic step edge_ids must cover every Seed edge exactly once."
         )
+    _validate_allocation_groups(allocation_groups, steps, edge_by_id)
     if graph_route == "arrangement_line":
         _validate_arrangement_steps(steps, edge_by_id)
+
+
+def _validate_allocation_groups(
+    groups: Sequence[Mapping[str, Any]],
+    steps: Sequence[Mapping[str, Any]],
+    edge_by_id: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Validate group-level arm allocation without resolving a runtime arm."""
+    step_by_id = {str(step["id"]): step for step in steps}
+    grouped_steps: set[str] = set()
+    group_ids: set[str] = set()
+    for index, group in enumerate(groups):
+        if not isinstance(group, Mapping) or set(group) != _ALLOCATION_GROUP_KEYS:
+            raise ValueError(f"Seed allocation group {index} has invalid fields.")
+        group_id = group["id"]
+        if not isinstance(group_id, str) or not group_id or group_id in group_ids:
+            raise ValueError(f"Invalid or duplicate allocation group id: {group_id!r}.")
+        step_ids = group["semantic_step_ids"]
+        if (
+            not isinstance(step_ids, list)
+            or len(step_ids) != 2
+            or len(set(step_ids)) != 2
+            or any(step_id not in step_by_id for step_id in step_ids)
+        ):
+            raise ValueError(
+                f"Allocation group {group_id!r} requires two known semantic steps."
+            )
+        if grouped_steps.intersection(step_ids):
+            raise ValueError("A semantic step may belong to only one allocation group.")
+        if group["arm_constraint"] != "distinct_arms":
+            raise ValueError(f"Allocation group {group_id!r} requires distinct_arms.")
+        if group["execution_policy"] != "parallel_if_feasible":
+            raise ValueError(
+                f"Allocation group {group_id!r} requires parallel_if_feasible."
+            )
+        if group["parallel_action_classes"] != ["PickUp"]:
+            raise ValueError(
+                f"Allocation group {group_id!r} may parallelize only PickUp."
+            )
+        if group["workspace_policy"] != "shared_target_serial":
+            raise ValueError(
+                f"Allocation group {group_id!r} requires shared_target_serial."
+            )
+        objects = {str(step_by_id[step_id]["object"]) for step_id in step_ids}
+        if len(objects) != 2:
+            raise ValueError(
+                f"Allocation group {group_id!r} requires two distinct objects."
+            )
+        for step_id in step_ids:
+            step = step_by_id[step_id]
+            if step["actor"]["mode"] not in {"auto", "required"}:
+                raise ValueError(
+                    f"Allocation group {group_id!r} has an unsupported actor."
+                )
+            first_edge = edge_by_id[str(step["edge_ids"][0])]
+            if first_edge["actions"][0]["atomic_action_class"] != "PickUp":
+                raise ValueError(
+                    f"Allocation group {group_id!r} steps must begin with PickUp."
+                )
+        grouped_steps.update(step_ids)
+        group_ids.add(group_id)
 
 
 def _validate_seed_actor(step_id: str, actor: Any) -> None:
@@ -402,6 +512,28 @@ def _validate_seed_actor(step_id: str, actor: Any) -> None:
             raise ValueError(
                 f"Seed task graph step {step_id!r} coordinated actor needs both arms."
             )
+
+
+def _validate_edge_resources(
+    step_id: str,
+    step: Mapping[str, Any],
+    edge: Mapping[str, Any],
+) -> None:
+    resources = set(edge["resources"])
+    required = {f"object:{step['object']}"}
+    actor = step["actor"]
+    if actor["mode"] == "required":
+        required.add(f"arm:{actor['arm']}")
+    elif actor["mode"] == "coordinated":
+        required.update({"arm:left_arm", "arm:right_arm"})
+    else:
+        required.add("arm:auto")
+    missing = required - resources
+    if missing:
+        raise ValueError(
+            f"Seed edge {edge['id']!r} for semantic step {step_id!r} is "
+            f"missing required resources: {sorted(missing)}."
+        )
 
 
 def _validate_symbolic_action(edge_id: str, action: Any) -> None:
@@ -476,27 +608,52 @@ def _validate_symbolic_action(edge_id: str, action: Any) -> None:
         )
 
 
-def _validate_single_chain(
+def _validate_action_dag(
     start: str,
     goal: str,
     node_ids: set[str],
     edges: Sequence[Mapping[str, Any]],
 ) -> None:
-    """Reject disconnected cycles that degree-only validation cannot detect."""
-    edge_by_source = {str(edge["source"]): edge for edge in edges}
-    visited = {start}
-    current = start
-    for _ in range(len(edges)):
-        edge = edge_by_source.get(current)
-        if edge is None:
-            break
-        current = str(edge["target"])
-        if current in visited:
-            raise ValueError("Seed v3 topology contains a cycle.")
-        visited.add(current)
-    if current != goal or visited != node_ids:
+    """Validate both the displayed state DAG and the action dependency DAG."""
+    successors = {node_id: [] for node_id in node_ids}
+    predecessors = {node_id: [] for node_id in node_ids}
+    for edge in edges:
+        source = str(edge["source"])
+        target = str(edge["target"])
+        successors[source].append(target)
+        predecessors[target].append(source)
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in visiting:
+            raise ValueError("Seed v5 state topology contains a cycle.")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for successor in successors[node_id]:
+            visit(successor)
+        visiting.remove(node_id)
+        visited.add(node_id)
+
+    visit(start)
+    if visited != node_ids:
         raise ValueError(
-            "Seed v3 topology must be one connected chain from start to goal."
+            "Seed v5 state topology requires every node to be reachable from start."
+        )
+
+    reverse_reachable = {goal}
+    pending = [goal]
+    while pending:
+        node_id = pending.pop()
+        for predecessor in predecessors[node_id]:
+            if predecessor not in reverse_reachable:
+                reverse_reachable.add(predecessor)
+                pending.append(predecessor)
+    if reverse_reachable != node_ids:
+        raise ValueError(
+            "Seed v5 state topology requires every node to be able to reach goal."
         )
 
 
@@ -632,7 +789,7 @@ def _reject_grounded_fields(value: Any, path: str = "seed_task_graph") -> None:
         for key, child in value.items():
             key_text = str(key)
             normalized_key = key_text.lower()
-            is_grounded_field = (
+            is_grounded_field = normalized_key != "execution_policy" and (
                 normalized_key in _GROUNDED_FIELD_NAMES
                 or normalized_key in _DEFERRED_POLICY_FIELDS
                 or normalized_key == "absolute_axis_target"

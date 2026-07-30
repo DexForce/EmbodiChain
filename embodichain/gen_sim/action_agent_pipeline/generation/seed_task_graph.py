@@ -89,11 +89,16 @@ def make_relative_seed_task_graph(
             }
         )
         previous_step_id = step_id
+    allocation_groups = _relative_allocation_groups(
+        semantic_steps,
+        task_description=str(getattr(spec, "task_description", "")),
+    )
     return _build_executable_seed(
         task_name=task_name,
         route="object_manipulation",
         program=spec.intent,
         semantic_steps=semantic_steps,
+        allocation_groups=allocation_groups,
     )
 
 
@@ -129,7 +134,7 @@ def make_arrangement_seed_task_graph(
     if anchor == "center":
         anchor = "table_center"
     if anchor != "table_center":
-        raise ValueError("Arrangement Seed v3 requires anchor='table_center'.")
+        raise ValueError("Arrangement Seed v5 requires anchor='table_center'.")
     semantic_steps: list[dict[str, Any]] = []
     previous_step_id: str | None = None
     for slot_index, object_uid in enumerate(ordered_uids):
@@ -227,9 +232,10 @@ def _build_executable_seed(
     route: str,
     program: str,
     semantic_steps: list[dict[str, Any]],
+    allocation_groups: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not semantic_steps:
-        raise ValueError("Executable Seed v3 requires at least one semantic step.")
+        raise ValueError("Executable Seed v5 requires at least one semantic step.")
     nodes = [
         {
             "id": "v0_start",
@@ -238,43 +244,262 @@ def _build_executable_seed(
     ]
     edges: list[dict[str, Any]] = []
     previous_node_id = "v0_start"
+    previous_edge_id: str | None = None
     edge_index = 0
-    for step in semantic_steps:
+    node_index = 0
+
+    def new_node(action_name: str, state_semantic: str) -> str:
+        nonlocal node_index
+        node_index += 1
+        slug = _slugify(action_name)
+        node_id = f"v{node_index}_{slug}"
+        nodes.append({"id": node_id, "semantic": state_semantic})
+        return node_id
+
+    def append_edge(
+        step: Mapping[str, Any],
+        action_record: tuple[str, str, list[dict[str, Any]]],
+        *,
+        source: str,
+        dependencies: list[str],
+        target: str | None = None,
+    ) -> tuple[str, str]:
+        nonlocal edge_index
+        action_name, state_semantic, actions = action_record
+        edge_index += 1
+        slug = _slugify(f"{step['id']}_{action_name}")
+        edge_id = f"e{edge_index:02d}_{slug}"
+        target_id = target or new_node(slug, state_semantic)
+        edges.append(
+            {
+                "id": edge_id,
+                "source": source,
+                "target": target_id,
+                "actions": actions,
+                "depends_on": list(dependencies),
+                "resources": _symbolic_edge_resources(step, actions),
+            }
+        )
+        return edge_id, target_id
+
+    step_index = 0
+    while step_index < len(semantic_steps):
+        first_step = semantic_steps[step_index]
+        second_step = (
+            semantic_steps[step_index + 1]
+            if step_index + 1 < len(semantic_steps)
+            else None
+        )
+        if second_step is not None and _can_prefetch_pickups(
+            first_step,
+            second_step,
+            route=route,
+            allocation_groups=allocation_groups or [],
+        ):
+            first_records = _symbolic_actions_for_step(first_step)
+            second_records = _symbolic_actions_for_step(second_step)
+            shared_dependencies = (
+                [previous_edge_id] if previous_edge_id is not None else []
+            )
+            first_pick_id, first_holding_node = append_edge(
+                first_step,
+                first_records[0],
+                source=previous_node_id,
+                dependencies=shared_dependencies,
+            )
+            join_node = new_node(
+                f"{first_step['id']}_{second_step['id']}_join",
+                (
+                    f"Step `{first_step['id']}` complete; "
+                    f"`{second_step['object']}` remains held"
+                ),
+            )
+            second_pick_id, _ = append_edge(
+                second_step,
+                second_records[0],
+                source=previous_node_id,
+                dependencies=shared_dependencies,
+                target=join_node,
+            )
+            first_edge_ids = [first_pick_id]
+            source = first_holding_node
+            dependency_ids = [first_pick_id, second_pick_id]
+            for record_index, record in enumerate(first_records[1:], start=1):
+                is_last = record_index == len(first_records) - 1
+                edge_id, source = append_edge(
+                    first_step,
+                    record,
+                    source=source,
+                    dependencies=dependency_ids,
+                    target=join_node if is_last else None,
+                )
+                first_edge_ids.append(edge_id)
+                dependency_ids = [edge_id]
+            first_step["edge_ids"] = first_edge_ids
+
+            second_edge_ids = [second_pick_id]
+            source = join_node
+            dependency_ids = [first_edge_ids[-1], second_pick_id]
+            for record in second_records[1:]:
+                edge_id, source = append_edge(
+                    second_step,
+                    record,
+                    source=source,
+                    dependencies=dependency_ids,
+                )
+                second_edge_ids.append(edge_id)
+                dependency_ids = [edge_id]
+            second_step["edge_ids"] = second_edge_ids
+            previous_node_id = source
+            previous_edge_id = second_edge_ids[-1]
+            step_index += 2
+            continue
+
         step_edge_ids: list[str] = []
-        for action_name, state_semantic, actions in _symbolic_actions_for_step(step):
-            edge_index += 1
-            slug = _slugify(f"{step['id']}_{action_name}")
-            edge_id = f"e{edge_index:02d}_{slug}"
-            target_id = f"v{edge_index}_{slug}"
-            nodes.append({"id": target_id, "semantic": state_semantic})
-            edges.append(
-                {
-                    "id": edge_id,
-                    "source": previous_node_id,
-                    "target": target_id,
-                    "actions": actions,
-                }
+        for record in _symbolic_actions_for_step(first_step):
+            dependencies = [previous_edge_id] if previous_edge_id is not None else []
+            edge_id, previous_node_id = append_edge(
+                first_step,
+                record,
+                source=previous_node_id,
+                dependencies=dependencies,
             )
             step_edge_ids.append(edge_id)
-            previous_node_id = target_id
-        step["edge_ids"] = step_edge_ids
-    nodes[-1]["id"] = f"v{edge_index}_done"
-    edges[-1]["target"] = nodes[-1]["id"]
+            previous_edge_id = edge_id
+        first_step["edge_ids"] = step_edge_ids
+        step_index += 1
+
+    goal_id = f"v{node_index}_done"
+    nodes[-1]["id"] = goal_id
+    for edge in edges:
+        if edge["target"] == previous_node_id:
+            edge["target"] = goal_id
+    previous_node_id = goal_id
     graph = {
         "schema_version": SEED_TASK_GRAPH_SCHEMA_VERSION,
         "task": task_name,
         "route": route,
         "program": program,
         "start": "v0_start",
-        "goal": nodes[-1]["id"],
+        "goal": previous_node_id,
         "nodes": nodes,
         "edges": edges,
         "semantic_step_schema_version": SEMANTIC_STEP_SCHEMA_VERSION,
         "semantic_steps": semantic_steps,
+        "allocation_groups": allocation_groups or [],
         "motion_policy_version": MOTION_POLICY_VERSION,
     }
     validate_seed_task_graph(graph)
     return graph
+
+
+def _can_prefetch_pickups(
+    first_step: Mapping[str, Any],
+    second_step: Mapping[str, Any],
+    *,
+    route: str,
+    allocation_groups: list[dict[str, Any]],
+) -> bool:
+    """Allow only declared, resource-safe dual-PickUp parallelism."""
+    if route != "object_manipulation":
+        return False
+    first_actor = first_step["actor"]
+    second_actor = second_step["actor"]
+    group_declares_pair = any(
+        group["semantic_step_ids"] == [first_step["id"], second_step["id"]]
+        for group in allocation_groups
+    )
+    required_opposite = (
+        first_actor.get("mode") == "required"
+        and second_actor.get("mode") == "required"
+        and first_actor.get("arm") != second_actor.get("arm")
+    )
+    if not group_declares_pair and not required_opposite:
+        return False
+    if first_step["object"] == second_step["object"]:
+        return False
+    if second_step.get("depends_on") != [first_step["id"]]:
+        return False
+    moved_objects = {str(first_step["object"]), str(second_step["object"])}
+    references = {
+        str(step["goal"].get("reference_object"))
+        for step in (first_step, second_step)
+        if step["goal"].get("reference_object") is not None
+    }
+    return moved_objects.isdisjoint(references)
+
+
+def _relative_allocation_groups(
+    semantic_steps: list[dict[str, Any]],
+    *,
+    task_description: str,
+) -> list[dict[str, Any]]:
+    """Preserve a dual-arm participation request without fixing arm identity."""
+    if len(semantic_steps) != 2:
+        return []
+    first, second = semantic_steps
+    first_actor = first["actor"]
+    second_actor = second["actor"]
+    explicitly_opposite = (
+        first_actor.get("mode") == "required"
+        and second_actor.get("mode") == "required"
+        and first_actor.get("arm") != second_actor.get("arm")
+    )
+    dual_arm_requested = bool(
+        re.search(
+            r"双臂|两臂|左右(?:手|臂)|both\s+arms|two\s+arms|left\s+arm.*right\s+arm",
+            task_description,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not explicitly_opposite and not dual_arm_requested:
+        return []
+    if first["object"] == second["object"]:
+        return []
+    moved_objects = {str(first["object"]), str(second["object"])}
+    references = {
+        str(step["goal"].get("reference_object"))
+        for step in (first, second)
+        if step["goal"].get("reference_object") is not None
+    }
+    if not moved_objects.isdisjoint(references):
+        return []
+    return [
+        {
+            "id": "g01_dual_pickup",
+            "semantic_step_ids": [first["id"], second["id"]],
+            "arm_constraint": "distinct_arms",
+            "execution_policy": "parallel_if_feasible",
+            "parallel_action_classes": ["PickUp"],
+            "workspace_policy": "shared_target_serial",
+        }
+    ]
+
+
+def _symbolic_edge_resources(
+    step: Mapping[str, Any],
+    actions: list[dict[str, Any]],
+) -> list[str]:
+    """Declare conservative resources consumed by one symbolic action edge."""
+    resources = {f"object:{step['object']}"}
+    actor = step["actor"]
+    if actor.get("mode") == "required":
+        resources.add(f"arm:{actor['arm']}")
+    elif actor.get("mode") == "coordinated":
+        resources.update({"arm:left_arm", "arm:right_arm"})
+    else:
+        resources.add("arm:auto")
+
+    action_classes = {str(action["atomic_action_class"]) for action in actions}
+    if action_classes & {"MoveHeldObject", "Place", "CoordinatedPickment"}:
+        reference = step["goal"].get("reference_object")
+        if reference is not None:
+            resources.add(f"workspace:{reference}")
+        elif step["operator"] == "place_in_line":
+            resources.add("workspace:table")
+        else:
+            resources.add("workspace:world")
+    return sorted(resources)
 
 
 def _symbolic_actions_for_step(

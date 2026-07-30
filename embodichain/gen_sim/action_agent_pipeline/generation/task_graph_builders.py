@@ -119,6 +119,6 @@ def _validate_compilation_input(
     validate_seed_task_graph(seed_graph, task_name=task_name, route=route)
     if dict(seed_graph) != dict(expected):
         raise ValueError(
-            f"{route} Seed v3 was not derived from the supplied semantic plan."
+            f"{route} Seed v5 was not derived from the supplied semantic plan."
         )
     return deepcopy(dict(seed_graph))

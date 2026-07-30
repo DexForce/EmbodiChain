@@ -30,6 +30,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import
 )
 from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
     _compact_node_link_layout,
+    _dag_node_link_layout,
     _display_edge,
     _display_edge_lane,
     _display_edge_lines,
@@ -95,6 +96,46 @@ def test_seed_node_link_layout_folds_each_semantic_step_deterministically() -> N
     assert layouts[0].bottom == pytest.approx(layouts[1].top)
 
 
+def test_parallel_seed_uses_compact_fork_join_swimlane_layout() -> None:
+    seed = _parallel_seed_graph()
+    graph, _, edges = _validated_task_display_graph(seed)
+    groups = _task_groups(seed, edges)
+    group_by_edge = {str(edge["id"]): group for group in groups for edge in group.edges}
+    display_edges = {
+        str(edge["id"]): _display_edge(
+            edge,
+            group_by_edge[str(edge["id"])],
+        )
+        for edge in edges
+    }
+    center_x = 8.7
+
+    positions, layouts, routing_lanes = _dag_node_link_layout(
+        seed,
+        graph,
+        groups,
+        display_edges=display_edges,
+        center_x=center_x,
+    )
+    first_step, second_step = seed["semantic_steps"]
+    edge_by_id = {str(edge["id"]): edge for edge in edges}
+    first_pick = edge_by_id[first_step["edge_ids"][0]]
+    second_pick = edge_by_id[second_step["edge_ids"][0]]
+    second_transport = edge_by_id[second_step["edge_ids"][1]]
+
+    assert set(positions) == {str(node["id"]) for node in seed["nodes"]}
+    assert len(layouts) == 2
+    assert positions[seed["start"]][0] == pytest.approx(center_x)
+    assert positions[first_pick["target"]][0] < center_x
+    assert positions[second_pick["target"]][0] == pytest.approx(center_x)
+    assert positions[second_transport["target"]][0] > center_x
+    assert routing_lanes[first_pick["id"]] == "left"
+    assert routing_lanes[second_pick["id"]] == "right"
+
+    image = _assert_nonblank_png(render_seed_task_graph_png(seed))
+    assert image.width > image.height
+
+
 def test_seed_auto_actor_stays_visually_unassigned() -> None:
     seed = _relative_seed_graph()
     first_step = seed["semantic_steps"][0]
@@ -102,6 +143,10 @@ def test_seed_auto_actor_stays_visually_unassigned() -> None:
     edge_by_id = {edge["id"]: edge for edge in seed["edges"]}
     for edge_id in first_step["edge_ids"]:
         edge_by_id[edge_id]["actions"][0]["actor"] = {"mode": "auto"}
+        edge_by_id[edge_id]["resources"] = [
+            "arm:auto" if resource.startswith("arm:") else resource
+            for resource in edge_by_id[edge_id]["resources"]
+        ]
 
     _, _, edges = _validated_task_display_graph(seed)
     groups = _task_groups(seed, edges)
@@ -284,6 +329,47 @@ def _relative_seed_graph(task_name: str = "relative_visualization") -> dict:
     )
 
 
+def _parallel_seed_graph(task_name: str = "parallel_visualization") -> dict:
+    def placement(
+        step_id: str,
+        object_uid: str,
+        *,
+        depends_on: tuple[str, ...] = (),
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            intent="place_relative",
+            moved_runtime_uid=object_uid,
+            reference_runtime_uid="basket",
+            relation="inside",
+            reference_is_initial_pose=False,
+            orientation_goal="preserve",
+            orientation_axis="none",
+            orientation_align_to_runtime_uid=None,
+            arm_request="auto",
+            step_id=step_id,
+            depends_on=depends_on,
+        )
+
+    first_step_id = "s01_cube_inside"
+    return make_relative_seed_task_graph(
+        task_name,
+        SimpleNamespace(
+            intent="place_relative",
+            task_description="Use both arms to place the cube and cup in the basket.",
+            placements=(
+                placement(first_step_id, "cube"),
+                placement(
+                    "s02_cup_inside",
+                    "cup",
+                    depends_on=(first_step_id,),
+                ),
+            ),
+            coordinated_direction=None,
+            coordinated_terminal_behavior=None,
+        ),
+    )
+
+
 def _runtime_graph() -> dict:
     seed = _relative_seed_graph()
     first_seed_step = seed["semantic_steps"][0]
@@ -292,8 +378,8 @@ def _runtime_graph() -> dict:
     for edge_id in first_seed_step["edge_ids"]:
         edge_by_id[edge_id]["actions"][0]["actor"] = {"mode": "auto"}
     runtime = deepcopy(seed)
-    runtime["schema_version"] = "runtime_task_graph_v2"
-    runtime["seed_graph_schema_version"] = "seed_task_graph_v3"
+    runtime["schema_version"] = "runtime_task_graph_v3"
+    runtime["seed_graph_schema_version"] = "seed_task_graph_v5"
     runtime["seed_graph_hash"] = "a" * 64
     runtime["run_id"] = "20260729T000000.000000Z"
     runtime["episode_index"] = 0

@@ -66,9 +66,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import
     make_arrangement_atom_actions_prompt,
     make_arrangement_basic_background,
     make_arrangement_task_prompt,
-    make_relative_atom_actions_prompt,
-    make_relative_basic_background,
-    make_relative_task_prompt,
     make_stacking_atom_actions_prompt,
     make_stacking_basic_background,
     make_stacking_task_prompt,
@@ -103,6 +100,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import
     make_relative_seed_task_graph,
     make_stacking_seed_task_graph,
     seed_task_graph_hash,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.seed_diagnostics import (
+    make_seed_diagnostic_records,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
@@ -552,7 +552,6 @@ def _build_relative_placement_bundle(
     surface_release_clearance: float,
     load_template_material: bool,
 ) -> dict[str, Any]:
-    seed_task_graph = make_relative_seed_task_graph(task_name, spec)
     spec = _with_relative_surface_release_clearance(
         spec,
         _validate_surface_release_clearance(surface_release_clearance),
@@ -677,6 +676,13 @@ def _build_relative_placement_bundle(
         )
         spec = _with_on_surface_release_offsets(spec, gym_config)
         spec = _with_coordinated_transport_geometry(spec, gym_config)
+    seed_task_graph = make_relative_seed_task_graph(task_name, spec)
+    seed_diagnostics = make_seed_diagnostic_records(
+        seed_task_graph,
+        task_description=spec.task_description,
+        project_name=project_name,
+        robot_display_name=robot_profile.display_name,
+    )
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
         robot_profile=robot_profile,
@@ -691,23 +697,10 @@ def _build_relative_placement_bundle(
     return {
         "gym_config": gym_config,
         "agent_config": make_agent_config(),
-        "task_prompt": make_relative_task_prompt(
-            task_name,
-            project_name,
-            spec,
-            robot_profile=robot_profile,
-        ),
+        "task_prompt": seed_diagnostics["task_prompt"],
         "seed_task_graph": seed_task_graph,
-        "basic_background": make_relative_basic_background(
-            project_name,
-            spec,
-            robot_profile=robot_profile,
-            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
-        ),
-        "atom_actions": make_relative_atom_actions_prompt(
-            spec,
-            robot_profile=robot_profile,
-        ),
+        "basic_background": seed_diagnostics["basic_background"],
+        "atom_actions": seed_diagnostics["atom_actions"],
         "summary": {
             "robot_profile": robot_profile.summary(),
             **_make_relative_summary(spec),

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Execute Seed v3 one semantic step at a time against live environment state."""
+"""Execute a Seed v5 action DAG against live environment state."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from embodichain.lab.sim.atomic_actions import WorldState
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import defaults_section
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_execution import (
     _execute_atomic_action_result,
@@ -78,6 +79,8 @@ class AgentGraphEdge:
     source: str
     target: str
     symbolic_actions: tuple[dict[str, Any], ...]
+    depends_on: tuple[str, ...] = ()
+    resources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,7 @@ class ExecutedActionList(Sequence[Any]):
 
 
 class AgentTaskGraph:
-    """Runtime executor for one immutable executable Seed Graph v3."""
+    """Runtime executor for one immutable executable Seed Graph v5."""
 
     def __init__(
         self,
@@ -135,7 +138,16 @@ class AgentTaskGraph:
         self.outgoing: dict[str, list[str]] = defaultdict(list)
         self.semantic_steps: dict[str, AgentSemanticStep] = {}
         self.semantic_step_by_edge: dict[str, AgentSemanticStep] = {}
+        self.allocation_groups = tuple(
+            deepcopy(group) for group in seed_graph.get("allocation_groups", ())
+        )
+        self.allocation_group_by_step = {
+            str(step_id): group
+            for group in self.allocation_groups
+            for step_id in group["semantic_step_ids"]
+        }
         self._candidate_failure_phases: dict[tuple[str, str], list[str | None]] = {}
+        self._step_arm_world_states: dict[tuple[str, str], Any] = {}
 
     def add_node(self, node_id: str, semantic: str = "") -> "AgentTaskGraph":
         self.nodes[node_id] = AgentGraphNode(node_id, semantic)
@@ -148,6 +160,8 @@ class AgentTaskGraph:
         target: str,
         *,
         symbolic_actions: Sequence[Mapping[str, Any]],
+        depends_on: Sequence[str] = (),
+        resources: Sequence[str] = (),
     ) -> "AgentTaskGraph":
         self.edges[edge_id] = AgentGraphEdge(
             id=edge_id,
@@ -156,6 +170,8 @@ class AgentTaskGraph:
             symbolic_actions=tuple(
                 deepcopy(dict(action)) for action in symbolic_actions
             ),
+            depends_on=tuple(str(edge_id) for edge_id in depends_on),
+            resources=tuple(str(resource) for resource in resources),
         )
         self.outgoing[source].append(edge_id)
         return self
@@ -188,7 +204,7 @@ class AgentTaskGraph:
         return self
 
     def run(self, *, env, **kwargs) -> ExecutedActionList:
-        """Ground, execute, verify, and record every semantic step per env."""
+        """Execute all ready Seed actions with conservative resource packing."""
         if env is None:
             raise ValueError("env is required to run an agent task graph.")
         recorder = RuntimeTaskGraphRecorder(
@@ -205,31 +221,70 @@ class AgentTaskGraph:
             if self.seed_graph.get("route") == "arrangement_line"
             else None
         )
-        current = self.start
         executed_actions: list[Any] = []
+        self._step_arm_world_states.clear()
         world_states = init_parallel_world_states(env)
         failed = torch.zeros(int(env.num_envs), dtype=torch.bool, device=env.device)
+        cleanup_failed = torch.zeros_like(failed)
+        step_cleanup_failed: dict[str, torch.Tensor] = {}
         semantic_success: dict[str, torch.Tensor] = {}
         step_assignments: dict[str, list[str | None]] = {}
         step_selection_failures: dict[str, torch.Tensor] = {}
         step_target_positions: dict[str, torch.Tensor] = {}
         step_motion_policies: dict[str, dict[str, Any]] = {}
+        dependency_checked_steps: set[str] = set()
+        completed_edges: set[str] = set()
+        remaining_edges = list(self.edges)
         transitions = 0
         aborted_reason = None
         relation_success = None
         try:
-            while current != self.goal:
-                transitions += 1
+            while remaining_edges:
+                ready_edges = [
+                    self.edges[edge_id]
+                    for edge_id in remaining_edges
+                    if set(self.edges[edge_id].depends_on) <= completed_edges
+                ]
+                if not ready_edges:
+                    raise RuntimeError(
+                        "Seed action DAG has no ready edge; dependencies are invalid."
+                    )
+                batch = self._pack_ready_edges(ready_edges)
+                transitions += len(batch)
                 if transitions > self.max_transitions:
                     raise RuntimeError("Agent task graph exceeded max_transitions.")
-                edge = self.edges[self._next_edge(current)]
-                step = self.semantic_step_by_edge[edge.id]
-                if step.id not in step_assignments:
-                    failed = self._check_dependencies(
-                        step,
-                        failed=failed,
-                        semantic_success=semantic_success,
+
+                if len(batch) == 2 and self._batch_has_distinct_arm_group(batch):
+                    assignments_by_step, selection_failed = (
+                        self._select_parallel_pickup_arms(
+                            batch,
+                            env=env,
+                            world_states=world_states,
+                            failed=failed,
+                            runtime_kwargs=kwargs,
+                            arrangement_plan=arrangement_plan,
+                        )
                     )
+                    failed |= selection_failed
+                    for step_id, assignments in assignments_by_step.items():
+                        step_assignments[step_id] = assignments
+                        step_selection_failures[step_id] = selection_failed
+
+                for edge in batch:
+                    step = self.semantic_step_by_edge[edge.id]
+                    deferred_dependency = self._is_prefetched_pickup(edge, step)
+                    if (
+                        step.id not in dependency_checked_steps
+                        and not deferred_dependency
+                    ):
+                        failed = self._check_dependencies(
+                            step,
+                            failed=failed,
+                            semantic_success=semantic_success,
+                        )
+                        dependency_checked_steps.add(step.id)
+                    if step.id in step_assignments:
+                        continue
                     eligible_for_step = ~failed
                     assignments, selection_failed = self._select_step_arms(
                         step,
@@ -280,84 +335,126 @@ class AgentTaskGraph:
                         f"physical_control_parts={physical_control_parts}."
                     )
 
-                assignments = step_assignments[step.id]
                 failed_before = failed.clone()
-                result, grounded_actions = self._execute_symbolic_edge(
-                    edge,
-                    step,
-                    assignments=assignments,
-                    env=env,
-                    world_states=world_states,
-                    failed=failed,
-                    runtime_kwargs=kwargs,
-                    arrangement_plan=arrangement_plan,
-                )
+                if len(batch) == 2:
+                    result, grounded_by_edge = self._execute_parallel_pickup_edges(
+                        batch,
+                        assignments_by_step=step_assignments,
+                        env=env,
+                        world_states=world_states,
+                        failed=failed,
+                        runtime_kwargs=kwargs,
+                        arrangement_plan=arrangement_plan,
+                    )
+                else:
+                    edge = batch[0]
+                    step = self.semantic_step_by_edge[edge.id]
+                    result, grounded_actions = self._execute_symbolic_edge(
+                        edge,
+                        step,
+                        assignments=step_assignments[step.id],
+                        env=env,
+                        world_states=world_states,
+                        failed=failed,
+                        runtime_kwargs=kwargs,
+                        arrangement_plan=arrangement_plan,
+                    )
+                    grounded_by_edge = {edge.id: grounded_actions}
                 world_states = result["world_states"]
-                failed = result["failed_env_mask"]
                 actions = result["actions"]
                 executed_actions.extend(actions)
-                resolved_target_positions = _postcondition_target_positions(
-                    edge,
-                    arm_actions=result["arm_actions"],
-                    grounded_actions=grounded_actions,
+                execution_failed = result["failed_env_mask"]
+                batch_is_cleanup = all(_is_cleanup_edge(edge) for edge in batch)
+                failed, newly_cleanup_failed = _classify_execution_failure(
+                    failed_before,
+                    execution_failed,
+                    cleanup=batch_is_cleanup,
                 )
-                if resolved_target_positions is not None:
-                    step_target_positions[step.id] = resolved_target_positions
-                    for grounded in grounded_actions:
-                        if "postcondition_tolerance" in grounded.motion_policy:
-                            step_motion_policies[step.id] = grounded.motion_policy
-                            break
-                recorder.record_edge(
-                    edge.id,
-                    assignments=assignments,
-                    grounded_actions=grounded_actions,
-                    failed_before=failed_before,
-                    failed_after=failed,
-                    grounding_failed=(
-                        step_selection_failures[step.id]
-                        if edge.id == step.edge_ids[0]
-                        else torch.zeros_like(failed)
-                    ),
-                    action_steps=len(actions),
-                    arm_actions=result["arm_actions"],
-                )
-                current = edge.target
-                log_info(
-                    f"Completed symbolic edge {edge.id}: action_steps={len(actions)}, "
-                    f"failed_envs={int(failed.sum().item())}."
-                )
-                if edge.id == step.edge_ids[-1]:
-                    (
-                        failed,
-                        success,
-                        observed_positions,
-                        position_error,
-                        tolerance,
-                    ) = self._complete_semantic_step(
-                        step,
-                        env=env,
-                        failed=failed,
-                        target_positions=step_target_positions.get(step.id),
-                        motion_policy=step_motion_policies.get(step.id),
-                        settle_steps=int(
-                            kwargs.get(
-                                "semantic_step_settle_steps",
-                                _SEMANTIC_STEP_SETTLE_STEPS,
-                            )
+                if batch_is_cleanup:
+                    cleanup_failed |= newly_cleanup_failed
+                    for edge in batch:
+                        step_id = self.semantic_step_by_edge[edge.id].id
+                        current_cleanup = step_cleanup_failed.setdefault(
+                            step_id,
+                            torch.zeros_like(failed),
+                        )
+                        current_cleanup |= newly_cleanup_failed
+
+                for edge in batch:
+                    step = self.semantic_step_by_edge[edge.id]
+                    grounded_actions = grounded_by_edge[edge.id]
+                    assignments = step_assignments[step.id]
+                    resolved_target_positions = _postcondition_target_positions(
+                        edge,
+                        arm_actions=result["arm_actions"],
+                        grounded_actions=grounded_actions,
+                    )
+                    if resolved_target_positions is not None:
+                        step_target_positions[step.id] = resolved_target_positions
+                        for grounded in grounded_actions:
+                            if "postcondition_tolerance" in grounded.motion_policy:
+                                step_motion_policies[step.id] = grounded.motion_policy
+                                break
+                    recorder.record_edge(
+                        edge.id,
+                        assignments=assignments,
+                        grounded_actions=grounded_actions,
+                        failed_before=failed_before,
+                        failed_after=execution_failed,
+                        grounding_failed=(
+                            step_selection_failures[step.id]
+                            if edge.id == step.edge_ids[0]
+                            else torch.zeros_like(failed)
+                        ),
+                        action_steps=len(actions),
+                        arm_actions=result.get(
+                            "arm_actions_by_env",
+                            result["arm_actions"],
+                        ),
+                        failure_class=(
+                            "cleanup" if _is_cleanup_edge(edge) else "fatal"
                         ),
                     )
-                    semantic_success[step.id] = success
-                    if arrangement_plan is not None:
-                        arrangement_plan.mark_completed(step.id, success)
-                    recorder.complete_step(
-                        step.id,
-                        success=success,
-                        failed_mask=failed,
-                        observed_positions=observed_positions,
-                        target_positions=step_target_positions.get(step.id),
-                        position_error=position_error,
-                        tolerance=tolerance,
+                    completed_edges.add(edge.id)
+                    remaining_edges.remove(edge.id)
+                    log_info(
+                        f"Completed symbolic edge {edge.id}: "
+                        f"action_steps={len(actions)}, "
+                        f"failed_envs={int(execution_failed.sum().item())}."
                     )
+                    if edge.id == step.edge_ids[-1]:
+                        (
+                            failed,
+                            success,
+                            observed_positions,
+                            position_error,
+                            tolerance,
+                        ) = self._complete_semantic_step(
+                            step,
+                            env=env,
+                            failed=failed,
+                            target_positions=step_target_positions.get(step.id),
+                            motion_policy=step_motion_policies.get(step.id),
+                            settle_steps=int(
+                                kwargs.get(
+                                    "semantic_step_settle_steps",
+                                    _SEMANTIC_STEP_SETTLE_STEPS,
+                                )
+                            ),
+                        )
+                        semantic_success[step.id] = success
+                        if arrangement_plan is not None:
+                            arrangement_plan.mark_completed(step.id, success)
+                        recorder.complete_step(
+                            step.id,
+                            success=success,
+                            failed_mask=failed,
+                            observed_positions=observed_positions,
+                            target_positions=step_target_positions.get(step.id),
+                            position_error=position_error,
+                            tolerance=tolerance,
+                            cleanup_failed_mask=step_cleanup_failed.get(step.id),
+                        )
             if arrangement_plan is not None:
                 relation_success = evaluate_configured_success(env)
                 semantic_all = torch.ones_like(failed)
@@ -372,6 +469,7 @@ class AgentTaskGraph:
                 failed,
                 aborted_reason=aborted_reason,
                 relation_success=relation_success,
+                cleanup_failed_mask=cleanup_failed,
             )
 
         result = ExecutedActionList(executed_actions)
@@ -379,6 +477,268 @@ class AgentTaskGraph:
         result.runtime_success = ~failed
         result.runtime_graph_output_dir = str(recorder.output_dir)
         return result
+
+    def _pack_ready_edges(
+        self,
+        ready_edges: Sequence[AgentGraphEdge],
+    ) -> tuple[AgentGraphEdge, ...]:
+        """Pack one declared, resource-safe dual-PickUp group."""
+        first = ready_edges[0]
+        if not _is_parallel_pickup_candidate(first, self.semantic_step_by_edge):
+            return (first,)
+        first_step = self.semantic_step_by_edge[first.id]
+        first_resources = set(first.resources)
+        for second in ready_edges[1:]:
+            if not _is_parallel_pickup_candidate(
+                second,
+                self.semantic_step_by_edge,
+            ):
+                continue
+            second_step = self.semantic_step_by_edge[second.id]
+            if first_step.object_uid == second_step.object_uid:
+                continue
+            if (
+                first_step.actor.get("mode") == "required"
+                and second_step.actor.get("mode") == "required"
+                and first_step.actor["arm"] == second_step.actor["arm"]
+            ):
+                continue
+            shared_resources = first_resources & set(second.resources)
+            if shared_resources - {"arm:auto"}:
+                continue
+            if not self._steps_share_parallel_group(first_step.id, second_step.id):
+                if (
+                    first_step.actor.get("mode") != "required"
+                    or second_step.actor.get("mode") != "required"
+                ):
+                    continue
+            return (first, second)
+        return (first,)
+
+    def _steps_share_parallel_group(self, first_id: str, second_id: str) -> bool:
+        first_group = self.allocation_group_by_step.get(first_id)
+        second_group = self.allocation_group_by_step.get(second_id)
+        return first_group is not None and first_group is second_group
+
+    def _batch_has_distinct_arm_group(
+        self,
+        edges: Sequence[AgentGraphEdge],
+    ) -> bool:
+        if len(edges) != 2:
+            return False
+        first = self.semantic_step_by_edge[edges[0].id]
+        second = self.semantic_step_by_edge[edges[1].id]
+        return self._steps_share_parallel_group(first.id, second.id) and any(
+            step.actor.get("mode") == "auto" for step in (first, second)
+        )
+
+    def _select_parallel_pickup_arms(
+        self,
+        edges: Sequence[AgentGraphEdge],
+        *,
+        env: Any,
+        world_states: Mapping[str, Any],
+        failed: torch.Tensor,
+        runtime_kwargs: Mapping[str, Any],
+        arrangement_plan: ArrangementRuntimePlan | None,
+    ) -> tuple[dict[str, list[str | None]], torch.Tensor]:
+        """Jointly choose one distinct-arm assignment for a dual-PickUp group.
+
+        The selected permutation may differ by environment. Held-object states
+        are isolated by semantic step and arm so one vectorized arm can safely
+        carry different step objects in disjoint environment masks.
+        """
+        steps = [self.semantic_step_by_edge[edge.id] for edge in edges]
+        candidates: dict[tuple[str, str], tuple[torch.Tensor, torch.Tensor]] = {}
+        for step in steps:
+            for arm in ("left_arm", "right_arm"):
+                if (
+                    step.actor.get("mode") == "required"
+                    and step.actor.get("arm") != arm
+                ):
+                    candidates[(step.id, arm)] = (
+                        torch.zeros_like(failed),
+                        torch.full_like(failed, float("inf"), dtype=torch.float32),
+                    )
+                    continue
+                side = arm.removesuffix("_arm")
+                try:
+                    feasible, cost = self._plan_arm_candidate(
+                        step,
+                        arm=arm,
+                        env=env,
+                        initial_state=world_states.get(side),
+                        failed=failed,
+                        runtime_kwargs=runtime_kwargs,
+                        arrangement_plan=arrangement_plan,
+                    )
+                except Exception as error:
+                    log_info(
+                        f"Rejected {arm} candidate for {step.id}: {error}",
+                    )
+                    feasible = torch.zeros_like(failed)
+                    cost = torch.full_like(failed, float("inf"), dtype=torch.float32)
+                    self._candidate_failure_phases[(step.id, arm)] = [
+                        "candidate_exception" if not bool(value.item()) else None
+                        for value in failed
+                    ]
+                candidates[(step.id, arm)] = (feasible & ~failed, cost)
+
+        permutations = (
+            ("left_arm", "right_arm"),
+            ("right_arm", "left_arm"),
+        )
+        assignments = {step.id: [None] * int(env.num_envs) for step in steps}
+        selection_failed = torch.zeros_like(failed)
+        selected_counts = {permutation: 0 for permutation in permutations}
+        for env_id in range(int(env.num_envs)):
+            if bool(failed[env_id].item()):
+                continue
+            ranked = []
+            for permutation in permutations:
+                first_arm, second_arm = permutation
+                first_feasible, first_cost = candidates[(steps[0].id, first_arm)]
+                second_feasible, second_cost = candidates[(steps[1].id, second_arm)]
+                feasible = bool(
+                    first_feasible[env_id].item() and second_feasible[env_id].item()
+                )
+                cost = float(first_cost[env_id].item() + second_cost[env_id].item())
+                ranked.append((not feasible, cost, permutation))
+            ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+            infeasible, _, selected = ranked[0]
+            if infeasible:
+                selection_failed[env_id] = True
+                continue
+            assignments[steps[0].id][env_id] = selected[0]
+            assignments[steps[1].id][env_id] = selected[1]
+            selected_counts[selected] += 1
+        log_info(
+            "Selected per-environment dual-PickUp assignments: "
+            + ", ".join(
+                f"{permutation[0]}/{permutation[1]}={count}"
+                for permutation, count in selected_counts.items()
+            )
+            + f"; failed={int(selection_failed.sum().item())}."
+        )
+        return assignments, selection_failed
+
+    def _is_prefetched_pickup(
+        self,
+        edge: AgentGraphEdge,
+        step: AgentSemanticStep,
+    ) -> bool:
+        if not _edge_has_action_class(edge, "PickUp") or not step.depends_on:
+            return False
+        dependency_tails = {
+            self.semantic_steps[step_id].edge_ids[-1] for step_id in step.depends_on
+        }
+        return dependency_tails.isdisjoint(edge.depends_on)
+
+    def _execute_parallel_pickup_edges(
+        self,
+        edges: Sequence[AgentGraphEdge],
+        *,
+        assignments_by_step: Mapping[str, Sequence[str | None]],
+        env: Any,
+        world_states: Mapping[str, Any],
+        failed: torch.Tensor,
+        runtime_kwargs: Mapping[str, Any],
+        arrangement_plan: ArrangementRuntimePlan | None,
+    ) -> tuple[dict[str, Any], dict[str, tuple[Any, ...]]]:
+        """Ground and execute one selected PickUp per semantic arm."""
+        grounded_lists: dict[str, list[Any]] = {edge.id: [] for edge in edges}
+        result: dict[str, Any] = {
+            "actions": [],
+            "world_states": dict(world_states),
+            "arm_actions": {},
+            "failed_env_mask": failed.clone(),
+            "arm_actions_by_env": [{} for _ in range(int(env.num_envs))],
+        }
+        steps = [self.semantic_step_by_edge[edge.id] for edge in edges]
+        permutations = (
+            ("left_arm", "right_arm"),
+            ("right_arm", "left_arm"),
+        )
+        for permutation in permutations:
+            partition_mask = torch.tensor(
+                [
+                    assignments_by_step[steps[0].id][env_id] == permutation[0]
+                    and assignments_by_step[steps[1].id][env_id] == permutation[1]
+                    for env_id in range(int(env.num_envs))
+                ],
+                dtype=torch.bool,
+                device=env.device,
+            )
+            if not bool(partition_mask.any()):
+                continue
+            edge_by_arm = {
+                permutation[index]: edges[index] for index in range(len(edges))
+            }
+            grounded_by_arm = {}
+            downstream: dict[str, tuple[dict[str, Any], ...]] = {}
+            for arm, edge in edge_by_arm.items():
+                step = self.semantic_step_by_edge[edge.id]
+                grounded = ground_symbolic_action(
+                    edge.symbolic_actions[0],
+                    step,
+                    env=env,
+                    arm=arm,
+                    arrangement_plan=arrangement_plan,
+                )
+                grounded_lists[edge.id].append(grounded)
+                grounded_by_arm[arm] = grounded
+                downstream.update(
+                    self._pickup_downstream_targets(
+                        step,
+                        env=env,
+                        arms=(arm,),
+                        arrangement_plan=arrangement_plan,
+                    )
+                )
+            execution_kwargs = _execution_kwargs(runtime_kwargs)
+            execution_kwargs["pickup_downstream_object_target_specs"] = downstream
+            partition_world_states = dict(result["world_states"])
+            for side in ("left", "right"):
+                state = partition_world_states.get(side)
+                if state is not None:
+                    partition_world_states[side] = WorldState(
+                        last_qpos=state.last_qpos.clone()
+                    )
+            partition_result = execute_parallel_atomic_actions(
+                left_arm_action=grounded_by_arm["left_arm"].action_spec,
+                right_arm_action=grounded_by_arm["right_arm"].action_spec,
+                left_active_env_mask=partition_mask,
+                right_active_env_mask=partition_mask,
+                env=env,
+                world_states=partition_world_states,
+                failed_env_mask=result["failed_env_mask"],
+                return_result=True,
+                **execution_kwargs,
+            )
+            result["actions"].extend(partition_result["actions"])
+            result["world_states"] = partition_result["world_states"]
+            result["arm_actions"] = partition_result["arm_actions"]
+            result["failed_env_mask"] = partition_result["failed_env_mask"]
+            for env_id in torch.nonzero(partition_mask).flatten().tolist():
+                result["arm_actions_by_env"][env_id] = partition_result["arm_actions"]
+            for arm, edge in edge_by_arm.items():
+                executed = partition_result["arm_actions"][arm.removesuffix("_arm")]
+                next_state = getattr(executed, "next_state", None)
+                if next_state is not None:
+                    step = self.semantic_step_by_edge[edge.id]
+                    self._step_arm_world_states[(step.id, arm)] = next_state
+        grounded_by_edge = {
+            edge_id: tuple(grounded) for edge_id, grounded in grounded_lists.items()
+        }
+        log_info(
+            "Executed parallel distinct-arm PickUps: "
+            + ", ".join(
+                f"{self.semantic_step_by_edge[edge.id].id}="
+                f"{assignments_by_step[self.semantic_step_by_edge[edge.id].id]}"
+                for edge in edges
+            )
+        )
+        return result, grounded_by_edge
 
     def _execute_symbolic_edge(
         self,
@@ -465,6 +825,11 @@ class AgentTaskGraph:
                     arrangement_plan=arrangement_plan,
                 )
             )
+        execution_world_states = dict(world_states)
+        for arm in ("left_arm", "right_arm"):
+            step_state = self._step_arm_world_states.get((step.id, arm))
+            if step_state is not None:
+                execution_world_states[arm.removesuffix("_arm")] = step_state
         result = execute_parallel_atomic_actions(
             left_arm_action=(
                 left_grounded.action_spec if left_grounded is not None else None
@@ -475,11 +840,16 @@ class AgentTaskGraph:
             left_active_env_mask=left_mask,
             right_active_env_mask=right_mask,
             env=env,
-            world_states=dict(world_states),
+            world_states=execution_world_states,
             failed_env_mask=failed,
             return_result=True,
             **execution_kwargs,
         )
+        for arm in ("left_arm", "right_arm"):
+            executed = result["arm_actions"].get(arm.removesuffix("_arm"))
+            next_state = getattr(executed, "next_state", None)
+            if next_state is not None:
+                self._step_arm_world_states[(step.id, arm)] = next_state
         return result, (grounded,)
 
     def _execute_coordinated_edge(
@@ -773,15 +1143,12 @@ class AgentTaskGraph:
         runtime_kwargs: Mapping[str, Any],
         arrangement_plan: ArrangementRuntimePlan | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Plan pickup and semantic transport before fixing one arm assignment."""
-        candidate_edges = [
-            self.edges[edge_id]
-            for edge_id in step.edge_ids
-            if self.edges[edge_id].symbolic_actions[0]["atomic_action_class"]
-            in {"PickUp", "MoveHeldObject"}
-        ]
-        if not candidate_edges:
-            candidate_edges = [self.edges[step.edge_ids[0]]]
+        """Plan the complete manipulation path before fixing one arm assignment."""
+        log_info(
+            f"Evaluating non-executing arm candidate: step={step.id}, arm={arm}. "
+            "Any IK rejection before the selection summary is diagnostic."
+        )
+        candidate_edges = [self.edges[edge_id] for edge_id in step.edge_ids]
         downstream = self._pickup_downstream_targets(
             step,
             env=env,
@@ -790,6 +1157,7 @@ class AgentTaskGraph:
         )
         planner_kwargs = _execution_kwargs(runtime_kwargs)
         planner_kwargs["pickup_downstream_object_target_specs"] = downstream
+        planner_kwargs["_diagnostic_context"] = "arm_candidate"
         feasible = ~failed
         total_cost = torch.zeros(
             int(env.num_envs),
@@ -797,6 +1165,7 @@ class AgentTaskGraph:
             device=failed.device,
         )
         state = initial_state
+        previous_eef_target: torch.Tensor | None = None
         failure_phases: list[str | None] = [None] * int(env.num_envs)
         for edge in candidate_edges:
             grounded = ground_symbolic_action(
@@ -805,6 +1174,7 @@ class AgentTaskGraph:
                 env=env,
                 arm=arm,
                 arrangement_plan=arrangement_plan,
+                policy_reference_pose=previous_eef_target,
             )
             executed = _execute_atomic_action_result(
                 grounded.action_spec,
@@ -827,6 +1197,8 @@ class AgentTaskGraph:
             feasible &= edge_feasible
             total_cost += _trajectory_cost(executed.action, env, failed.device)
             state = executed.next_state
+            if isinstance(executed.resolved_eef_target_pose, torch.Tensor):
+                previous_eef_target = executed.resolved_eef_target_pose
             if not bool((feasible & ~failed).any()):
                 break
         self._candidate_failure_phases[(step.id, arm)] = failure_phases
@@ -925,7 +1297,33 @@ class AgentTaskGraph:
         observed = env.sim.get_rigid_object(step.object_uid).get_local_pose(
             to_matrix=True
         )[:, :3, 3]
-        if target_positions is None:
+        relation = str(step.goal.get("relation", ""))
+        reference_object = step.goal.get("reference_object")
+        if relation == "inside" and isinstance(reference_object, str):
+            postcondition_success = evaluate_configured_success(
+                env,
+                {
+                    "type": "object_in_container",
+                    "object": step.object_uid,
+                    "container": reference_object,
+                },
+            )
+            distance = None
+            tolerance = None
+        elif relation in {"on", "on_top", "on_top_of"} and isinstance(
+            reference_object, str
+        ):
+            postcondition_success = evaluate_configured_success(
+                env,
+                {
+                    "type": "object_on_object",
+                    "object": step.object_uid,
+                    "support": reference_object,
+                },
+            )
+            distance = None
+            tolerance = None
+        elif target_positions is None:
             postcondition_success = ~failed
             distance = None
             tolerance = None
@@ -974,11 +1372,70 @@ def _trajectory_cost(
 
 def _candidate_edge_phase(edge: AgentGraphEdge) -> str:
     action = edge.symbolic_actions[0]
-    if action["atomic_action_class"] == "PickUp":
+    action_class = str(action["atomic_action_class"])
+    if action_class == "PickUp":
         return "pickup"
+    if action_class == "Place":
+        return "release"
+    if action_class == "MoveEndEffector":
+        return "retreat"
+    if action_class == "MoveJoints":
+        return "home"
     binding = action.get("target_binding", {})
     phase = binding.get("phase")
     return str(phase) if phase in {"staging", "final"} else "transport"
+
+
+def _edge_has_action_class(edge: AgentGraphEdge, action_class: str) -> bool:
+    return any(
+        str(action["atomic_action_class"]) == action_class
+        for action in edge.symbolic_actions
+    )
+
+
+def _is_parallel_pickup_candidate(
+    edge: AgentGraphEdge,
+    step_by_edge: Mapping[str, AgentSemanticStep],
+) -> bool:
+    step = step_by_edge[edge.id]
+    return (
+        len(edge.symbolic_actions) == 1
+        and _edge_has_action_class(edge, "PickUp")
+        and step.actor.get("mode") in {"auto", "required"}
+        and (
+            step.actor.get("mode") == "auto"
+            or step.actor.get("arm") in {"left_arm", "right_arm"}
+        )
+    )
+
+
+def _is_cleanup_edge(edge: AgentGraphEdge) -> bool:
+    """Classify best-effort post-release retreat and home actions."""
+    for action in edge.symbolic_actions:
+        binding = action.get("target_binding", {})
+        if binding.get("kind") == "policy_pose":
+            continue
+        if (
+            action.get("atomic_action_class") == "MoveJoints"
+            and binding.get("kind") == "joint_state"
+            and binding.get("source") == "initial"
+        ):
+            continue
+        return False
+    return True
+
+
+def _classify_execution_failure(
+    failed_before: torch.Tensor,
+    execution_failed: torch.Tensor,
+    *,
+    cleanup: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Keep cleanup failures observable without poisoning task semantics."""
+    newly_failed = execution_failed & ~failed_before
+    if cleanup:
+        return failed_before.clone(), newly_failed
+    return execution_failed, torch.zeros_like(execution_failed)
 
 
 def _resolved_object_target_positions(

@@ -55,6 +55,8 @@ _COMMON_POLICIES: dict[str, dict[str, Any]] = {
     "default_retreat": {
         "sample_interval": 20,
         "retreat_height": 0.30,
+        "minimum_retreat_height": 0.05,
+        "maximum_eef_height": 1.10,
     },
     "default_home": {"sample_interval": 30},
 }

@@ -31,10 +31,12 @@ matplotlib.use("Agg", force=True)
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.font_manager import FontProperties, fontManager
+from matplotlib.path import Path as MatplotlibPath
 from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch
 import networkx as nx
 
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
+    SEED_TASK_GRAPH_SCHEMA_VERSION,
     seed_task_graph_hash,
     validate_seed_task_graph,
 )
@@ -137,10 +139,11 @@ class _NodeLinkGroupLayout:
     group: _TaskGroup
     top: float
     bottom: float
+    visual_lane: str | None = None
 
 
 def render_seed_task_graph_png(seed_graph: Mapping[str, Any]) -> bytes:
-    """Render every Seed v3 state and symbolic action in execution order."""
+    """Render every Seed v5 state and symbolic action in dependency order."""
     validate_seed_task_graph(seed_graph)
     return _render_graph_timeline(seed_graph)
 
@@ -412,7 +415,7 @@ def _draw_node_link_group(
 ) -> None:
     """Draw semantic ownership as a quiet cluster behind its state graph."""
     group = layout.group
-    actor = _group_actor_badge(group)
+    actor = _group_actor_badge(group, visual_lane=layout.visual_lane)
     accent = _group_actor_color(actor)
     axis.add_patch(
         FancyBboxPatch(
@@ -504,10 +507,11 @@ def _draw_node_link_edge(
     source: tuple[float, float],
     target: tuple[float, float],
     edge_index: int,
+    routing_lane: str | None = None,
 ) -> None:
     """Draw one curved directed edge with its complete symbolic action label."""
     color = _display_edge_color(edge)
-    lane = _display_edge_lane(edge)
+    lane = routing_lane or _display_edge_lane(edge)
     linestyle = (
         (0, (4, 2))
         if lane == "auto"
@@ -515,26 +519,42 @@ def _draw_node_link_edge(
         in ({"pending"}, {"skipped"})
         else "solid"
     )
-    curvature = _node_link_edge_curvature(source, target, edge_index=edge_index)
-    axis.add_patch(
-        FancyArrowPatch(
+    curvature = _node_link_edge_curvature(
+        source,
+        target,
+        edge_index=edge_index,
+        routing_lane=lane,
+    )
+    routed_path = _node_link_edge_path(
+        source,
+        target,
+        routing_lane=lane,
+    )
+    arrow_kwargs = {
+        "arrowstyle": "-|>",
+        "mutation_scale": 11,
+        "linewidth": 2.0 if lane == "coordinated" else 1.55,
+        "linestyle": linestyle,
+        "color": color,
+        "zorder": 1,
+    }
+    if routed_path is not None:
+        arrow = FancyArrowPatch(path=routed_path, **arrow_kwargs)
+    else:
+        arrow = FancyArrowPatch(
             source,
             target,
-            arrowstyle="-|>",
-            mutation_scale=11,
-            linewidth=2.0 if lane == "coordinated" else 1.55,
-            linestyle=linestyle,
-            color=color,
             connectionstyle=f"arc3,rad={curvature}",
             shrinkA=22,
             shrinkB=22,
-            zorder=1,
+            **arrow_kwargs,
         )
-    )
+    axis.add_patch(arrow)
     label_x, label_y = _node_link_edge_label_position(
         source,
         target,
         edge_index=edge_index,
+        routing_lane=lane,
     )
     axis.text(
         label_x,
@@ -561,7 +581,17 @@ def _node_link_edge_curvature(
     target: tuple[float, float],
     *,
     edge_index: int,
+    routing_lane: str | None = None,
 ) -> float:
+    if (
+        abs(source[0] - target[0]) < 1e-6
+        and abs(source[1] - target[1]) > _NODE_LINK_ROW_GAP * 1.5
+    ):
+        if routing_lane == "left":
+            return -0.32
+        if routing_lane == "right":
+            return 0.32
+        return 0.24 if edge_index % 2 == 0 else -0.24
     if abs(source[1] - target[1]) < 1e-6:
         return 0.14 if source[0] < target[0] else -0.14
     if abs(source[0] - target[0]) < 1e-6:
@@ -569,16 +599,54 @@ def _node_link_edge_curvature(
     return 0.06 if edge_index % 2 == 0 else -0.06
 
 
+def _node_link_edge_path(
+    source: tuple[float, float],
+    target: tuple[float, float],
+    *,
+    routing_lane: str | None,
+) -> MatplotlibPath | None:
+    """Route a long fork edge through its reserved arm lane."""
+    if (
+        routing_lane not in {"left", "right"}
+        or abs(source[0] - target[0]) >= 1e-6
+        or abs(source[1] - target[1]) <= _NODE_LINK_ROW_GAP * 1.5
+    ):
+        return None
+    direction = -1.0 if routing_lane == "left" else 1.0
+    route_x = source[0] + direction * (_NODE_LINK_ACTOR_LANE_OFFSET - 0.65)
+    vertical_span = target[1] - source[1]
+    start = (source[0], source[1] + _NODE_LINK_RADIUS)
+    end = (target[0], target[1] - _NODE_LINK_RADIUS)
+    control_one = (route_x, source[1] + vertical_span * 0.20)
+    control_two = (route_x, target[1] - vertical_span * 0.20)
+    return MatplotlibPath(
+        (start, control_one, control_two, end),
+        (
+            MatplotlibPath.MOVETO,
+            MatplotlibPath.CURVE4,
+            MatplotlibPath.CURVE4,
+            MatplotlibPath.CURVE4,
+        ),
+    )
+
+
 def _node_link_edge_label_position(
     source: tuple[float, float],
     target: tuple[float, float],
     *,
     edge_index: int,
+    routing_lane: str | None = None,
 ) -> tuple[float, float]:
     mid_x = (source[0] + target[0]) / 2.0
     mid_y = (source[1] + target[1]) / 2.0
     dx = target[0] - source[0]
     dy = target[1] - source[1]
+    if abs(dx) < 1e-6 and abs(dy) > _NODE_LINK_ROW_GAP * 1.5:
+        direction = -1.0 if routing_lane == "left" else 1.0
+        return (
+            source[0] + direction * (_NODE_LINK_ACTOR_LANE_OFFSET - 0.65),
+            source[1] + min(abs(dy) * 0.22, 1.45),
+        )
     if abs(dy) < 1e-6:
         return mid_x, mid_y - 0.28
     norm = max((dx * dx + dy * dy) ** 0.5, 1e-6)
@@ -668,7 +736,18 @@ def _draw_node_link_state(
         )
 
 
-def _group_actor_badge(group: _TaskGroup) -> str:
+def _group_actor_badge(
+    group: _TaskGroup,
+    *,
+    visual_lane: str | None = None,
+) -> str:
+    runtime_arms = _group_runtime_arms(group)
+    if runtime_arms == {"left_arm"}:
+        return "[L]"
+    if runtime_arms == {"right_arm"}:
+        return "[R]"
+    if runtime_arms == {"left_arm", "right_arm"}:
+        return "[L+R]"
     assigned = (
         group.runtime.get("assigned_arm")
         if isinstance(group.runtime, Mapping)
@@ -681,6 +760,12 @@ def _group_actor_badge(group: _TaskGroup) -> str:
     if assigned == "coordinated":
         return "[L+R]"
     actor = group.actor_text
+    if "distinct arms" in actor:
+        if visual_lane == "left":
+            return "[AUTO→L]"
+        if visual_lane == "right":
+            return "[AUTO→R]"
+        return "[L/R]"
     if "left_arm + right_arm" in actor or "coordinated" in actor:
         return "[L+R]"
     if "left_arm" in actor:
@@ -690,12 +775,26 @@ def _group_actor_badge(group: _TaskGroup) -> str:
     return "[AUTO]"
 
 
+def _group_runtime_arms(group: _TaskGroup) -> set[str]:
+    """Collect actual runtime assignments without treating Seed hints as facts."""
+    return {
+        str(runtime["assigned_arm"])
+        for edge in group.edges
+        for action in (
+            edge.get("actions") if isinstance(edge.get("actions"), list) else ()
+        )
+        if isinstance(action, Mapping)
+        and isinstance((runtime := action.get("runtime")), Mapping)
+        and runtime.get("assigned_arm") in {"left_arm", "right_arm"}
+    }
+
+
 def _group_actor_color(actor_badge: str) -> str:
-    if actor_badge == "[L]":
+    if actor_badge in {"[L]", "[AUTO→L]"}:
         return _LEFT
-    if actor_badge == "[R]":
+    if actor_badge in {"[R]", "[AUTO→R]"}:
         return _RIGHT
-    if actor_badge == "[L+R]":
+    if actor_badge in {"[L+R]", "[L/R]"}:
         return _DUAL
     return _AUTO
 
@@ -965,7 +1064,7 @@ def _draw_task_header(
     edge_count: int,
     group_count: int,
 ) -> None:
-    is_seed = task_graph.get("schema_version") == "seed_task_graph_v3"
+    is_seed = task_graph.get("schema_version") == SEED_TASK_GRAPH_SCHEMA_VERSION
     title = (
         "Executable Seed Directed State-Action Graph"
         if is_seed
@@ -1632,16 +1731,31 @@ def _task_groups(
     if isinstance(semantic_steps, list) and semantic_steps:
         groups = []
         assigned: set[str] = set()
+        allocation_group_by_step = {
+            str(step_id): group
+            for group in task_graph.get("allocation_groups", ())
+            if isinstance(group, Mapping)
+            for step_id in group.get("semantic_step_ids", ())
+        }
         for step in semantic_steps:
             edge_ids = [str(edge_id) for edge_id in step.get("edge_ids", [])]
             group_edges = tuple(edge_by_id[edge_id] for edge_id in edge_ids)
             assigned.update(edge_ids)
+            actor_text = _actor_text(step.get("actor", {}))
+            step_runtime = step.get("runtime")
+            if isinstance(step_runtime, Mapping) and step_runtime.get("assigned_arm"):
+                actor_text = f"runtime {step_runtime['assigned_arm']}"
+            allocation_group = allocation_group_by_step.get(str(step["id"]))
+            if allocation_group is not None:
+                actor_text += (
+                    f" · distinct arms · {allocation_group['execution_policy']}"
+                )
             groups.append(
                 _TaskGroup(
                     group_id=str(step["id"]),
                     operator=str(step.get("operator", "semantic_step")),
                     object_uid=_optional_string(step.get("object")),
-                    actor_text=_actor_text(step.get("actor", {})),
+                    actor_text=actor_text,
                     goal=(
                         step.get("goal")
                         if isinstance(step.get("goal"), Mapping)
@@ -1658,9 +1772,7 @@ def _task_groups(
                     edges=group_edges,
                     derived=False,
                     runtime=(
-                        step.get("runtime")
-                        if isinstance(step.get("runtime"), Mapping)
-                        else None
+                        step_runtime if isinstance(step_runtime, Mapping) else None
                     ),
                 )
             )
@@ -1876,76 +1988,313 @@ def _render_task_dag(
     nodes: Sequence[Mapping[str, Any]],
     edges: Sequence[Mapping[str, Any]],
 ) -> bytes:
-    generations = list(nx.topological_generations(graph))
-    width = max(11.0, max(len(generation) for generation in generations) * 3.0)
-    height = max(6.0, len(generations) * 2.0 + 1.5)
-    figure = _make_figure(min(width, 25.0), min(height, 28.0))
+    """Render fork/join graphs with the same swimlane language as chains."""
+    groups = _task_groups(task_graph, edges)
+    group_by_edge = _group_by_edge(groups)
+    display_edges = {
+        str(edge["id"]): _display_edge(
+            edge,
+            group_by_edge[str(edge["id"])],
+        )
+        for edge in edges
+    }
+    levels = _dag_longest_path_levels(graph)
+    edge_order = {str(edge["id"]): index for index, edge in enumerate(edges)}
+    ordered_edges = sorted(
+        edges,
+        key=lambda edge: (
+            levels[str(edge["target"])],
+            edge_order[str(edge["id"])],
+        ),
+    )
+    display_nodes = _display_chain_nodes(
+        task_graph,
+        ordered_edges,
+        group_by_edge,
+    )
+    canvas_width = 17.4
+    positions, group_layouts, routing_lanes = _dag_node_link_layout(
+        task_graph,
+        graph,
+        groups,
+        display_edges=display_edges,
+        center_x=canvas_width / 2.0,
+    )
+    canvas_height = max(6.0, max(y for _, y in positions.values()) + 1.25)
+    figure = _make_figure(canvas_width, canvas_height)
     try:
         axis = figure.subplots()
         axis.set_axis_off()
-        positions = {}
-        for generation_index, generation in enumerate(generations):
-            ordered = sorted(generation)
-            for column, node_id in enumerate(ordered):
-                positions[str(node_id)] = (
-                    column - (len(ordered) - 1) / 2.0,
-                    -generation_index,
-                )
-        nx.draw_networkx_nodes(
-            graph,
-            positions,
-            ax=axis,
-            node_color="#FFFFFF",
-            edgecolors=_BORDER,
-            node_size=2200,
+        axis.set_xlim(0.0, canvas_width)
+        axis.set_ylim(canvas_height, 0.0)
+        _draw_task_header(
+            axis,
+            task_graph,
+            node_count=len(nodes),
+            edge_count=len(edges),
+            group_count=len(groups),
         )
-        nx.draw_networkx_edges(
-            graph,
-            positions,
-            ax=axis,
-            edge_color=[_edge_color(edge) for edge in edges],
-            arrows=True,
-            arrowsize=14,
-            width=1.6,
+        _draw_node_link_lanes(
+            axis,
+            top=1.17,
+            bottom=canvas_height - 0.42,
+            canvas_width=canvas_width,
+            center_x=canvas_width / 2.0,
         )
-        node_labels = {
-            str(node["id"]): (
-                f"{_compact_id(str(node['id']))}\n"
-                f"{_truncate(str(node.get('semantic', 'state')), 28)}"
+        for layout in group_layouts:
+            _draw_node_link_group(axis, layout, canvas_width=canvas_width)
+
+        incoming_colors: dict[str, str] = {}
+        for edge_index, edge_record in enumerate(edges):
+            edge_id = str(edge_record["id"])
+            edge = display_edges[edge_id]
+            incoming_colors[edge.target] = _display_edge_color(edge)
+            _draw_node_link_edge(
+                axis,
+                edge,
+                source=positions[edge.source],
+                target=positions[edge.target],
+                edge_index=edge_index,
+                routing_lane=routing_lanes.get(edge_id),
             )
-            for node in nodes
-        }
-        edge_labels = {
-            (str(edge["source"]), str(edge["target"])): "\n".join(
-                _display_edge_lines(_display_edge(edge, _inferred_group((edge,), 1)))
+        for node_id, position in positions.items():
+            _draw_node_link_state(
+                axis,
+                display_nodes[node_id],
+                center=position,
+                incoming_color=incoming_colors.get(node_id),
             )
-            for edge in edges
-        }
-        nx.draw_networkx_labels(
-            graph,
-            positions,
-            labels=node_labels,
-            ax=axis,
-            font_size=6,
-            font_family=_font_family(),
-        )
-        nx.draw_networkx_edge_labels(
-            graph,
-            positions,
-            edge_labels=edge_labels,
-            ax=axis,
-            font_size=5,
-            font_family=_font_family(),
-            rotate=False,
-        )
-        axis.set_title(
-            f"{task_graph.get('task', 'unknown')} | Compiled State–Action DAG",
-            fontproperties=_font(size=13, weight="bold"),
-            color=_TEXT,
+
+        axis.text(
+            canvas_width - 0.5,
+            canvas_height - 0.18,
+            _graph_footer(task_graph),
+            ha="right",
+            va="bottom",
+            color=_MUTED,
+            fontproperties=_font(size=6.0),
         )
         return _figure_png_bytes(figure)
     finally:
         figure.clear()
+
+
+def _dag_node_link_layout(
+    task_graph: Mapping[str, Any],
+    graph: nx.DiGraph,
+    groups: Sequence[_TaskGroup],
+    *,
+    display_edges: Mapping[str, _DisplayEdge],
+    center_x: float,
+) -> tuple[
+    dict[str, tuple[float, float]],
+    list[_NodeLinkGroupLayout],
+    dict[str, str],
+]:
+    """Fold structured fork/join groups into stable actor-specific lanes."""
+    group_by_edge = _group_by_edge(groups)
+    routing_lanes = {
+        edge_id: _dag_visual_lane(
+            task_graph,
+            group_by_edge[edge_id],
+            display_edge,
+        )
+        for edge_id, display_edge in display_edges.items()
+    }
+    prefetched = {
+        edge_id
+        for edge_id, edge in display_edges.items()
+        if _is_prefetched_display_edge(edge, graph, group_by_edge)
+    }
+    positions: dict[str, tuple[float, float]] = {}
+    layouts: list[_NodeLinkGroupLayout] = []
+    current_y = 2.30
+
+    for group_index, group in enumerate(groups):
+        body_edges = [
+            display_edges[str(edge["id"])]
+            for edge in group.edges
+            if str(edge["id"]) not in prefetched
+        ]
+        if not body_edges or not _display_edges_form_chain(body_edges):
+            return _topological_swimlane_layout(
+                task_graph,
+                graph,
+                groups,
+                display_edges=display_edges,
+                routing_lanes=routing_lanes,
+                center_x=center_x,
+            )
+        entry = body_edges[0].source
+        if entry not in positions:
+            positions[entry] = (center_x, current_y)
+        source_y = positions[entry][1]
+        intermediate_count = max(0, len(body_edges) - 1)
+        intermediate_rows = (intermediate_count + 1) // 2
+        final_y = source_y + (intermediate_rows + 1) * _NODE_LINK_ROW_GAP
+        current_node = entry
+        for edge_index, edge in enumerate(body_edges):
+            if edge.source != current_node:
+                return _topological_swimlane_layout(
+                    task_graph,
+                    graph,
+                    groups,
+                    display_edges=display_edges,
+                    routing_lanes=routing_lanes,
+                    center_x=center_x,
+                )
+            if edge_index == len(body_edges) - 1:
+                target_position = (center_x, final_y)
+            else:
+                row = edge_index // 2 + 1
+                target_position = (
+                    _node_link_lane_target_x(
+                        routing_lanes[edge.edge_id],
+                        center_x=center_x,
+                        edge_index=edge_index,
+                    ),
+                    source_y + row * _NODE_LINK_ROW_GAP,
+                )
+            positions[edge.target] = target_position
+            current_node = edge.target
+        layouts.append(
+            _NodeLinkGroupLayout(
+                group=group,
+                top=source_y - (0.52 if group_index == 0 else 0.05),
+                bottom=final_y,
+                visual_lane=_group_visual_lane(group, routing_lanes),
+            )
+        )
+        current_y = final_y
+
+    if set(positions) != set(graph.nodes):
+        return _topological_swimlane_layout(
+            task_graph,
+            graph,
+            groups,
+            display_edges=display_edges,
+            routing_lanes=routing_lanes,
+            center_x=center_x,
+        )
+    return positions, layouts, routing_lanes
+
+
+def _is_prefetched_display_edge(
+    edge: _DisplayEdge,
+    graph: nx.DiGraph,
+    group_by_edge: Mapping[str, _TaskGroup],
+) -> bool:
+    """Identify a pickup branch that reserves an object until a later join."""
+    if not any(action.action_class == "PickUp" for action in edge.actions):
+        return False
+    if graph.in_degree(edge.target) < 2:
+        return False
+    return any(
+        group_by_edge[str(graph[source][edge.target]["edge_id"])]
+        is not group_by_edge[edge.edge_id]
+        for source in graph.predecessors(edge.target)
+        if str(graph[source][edge.target]["edge_id"]) != edge.edge_id
+    )
+
+
+def _display_edges_form_chain(edges: Sequence[_DisplayEdge]) -> bool:
+    return all(
+        edges[index - 1].target == edges[index].source for index in range(1, len(edges))
+    )
+
+
+def _group_visual_lane(
+    group: _TaskGroup,
+    routing_lanes: Mapping[str, str],
+) -> str | None:
+    lanes = {
+        routing_lanes[str(edge["id"])]
+        for edge in group.edges
+        if routing_lanes[str(edge["id"])] in {"left", "right"}
+    }
+    return next(iter(lanes)) if len(lanes) == 1 else None
+
+
+def _dag_visual_lane(
+    task_graph: Mapping[str, Any],
+    group: _TaskGroup,
+    edge: _DisplayEdge,
+) -> str:
+    lane = _display_edge_lane(edge)
+    if lane != "auto":
+        return lane
+    for allocation_group in task_graph.get("allocation_groups", ()):
+        if not isinstance(allocation_group, Mapping):
+            continue
+        step_ids = list(allocation_group.get("semantic_step_ids", ()))
+        if group.group_id not in step_ids:
+            continue
+        return "left" if step_ids.index(group.group_id) == 0 else "right"
+    return lane
+
+
+def _topological_swimlane_layout(
+    task_graph: Mapping[str, Any],
+    graph: nx.DiGraph,
+    groups: Sequence[_TaskGroup],
+    *,
+    display_edges: Mapping[str, _DisplayEdge],
+    routing_lanes: Mapping[str, str],
+    center_x: float,
+) -> tuple[
+    dict[str, tuple[float, float]],
+    list[_NodeLinkGroupLayout],
+    dict[str, str],
+]:
+    """Provide a deterministic swimlane fallback for arbitrary Seed DAGs."""
+    levels = _dag_longest_path_levels(graph)
+    positions = {}
+    for node_id in nx.topological_sort(graph):
+        node_id = str(node_id)
+        level = levels[node_id]
+        incoming = list(graph.in_edges(node_id, data=True))
+        if not incoming or len(incoming) > 1 or graph.out_degree(node_id) == 0:
+            x = center_x
+        else:
+            edge_id = str(incoming[0][2]["edge_id"])
+            x = _node_link_lane_target_x(
+                routing_lanes[edge_id],
+                center_x=center_x,
+                edge_index=level,
+            )
+        positions[node_id] = (x, 2.30 + level * 1.55)
+    layouts = []
+    group_starts = []
+    for group in groups:
+        group_edges = [display_edges[str(edge["id"])] for edge in group.edges]
+        group_starts.append(min(positions[edge.source][1] for edge in group_edges))
+    for index, group in enumerate(groups):
+        bottom = (
+            group_starts[index + 1]
+            if index + 1 < len(group_starts)
+            else max(positions[edge.target][1] for edge in display_edges.values())
+        )
+        layouts.append(
+            _NodeLinkGroupLayout(
+                group=group,
+                top=group_starts[index] - 0.45,
+                bottom=bottom,
+                visual_lane=_group_visual_lane(group, routing_lanes),
+            )
+        )
+    return positions, layouts, dict(routing_lanes)
+
+
+def _dag_longest_path_levels(graph: nx.DiGraph) -> dict[str, int]:
+    levels: dict[str, int] = {}
+    for node_id in nx.topological_sort(graph):
+        predecessors = list(graph.predecessors(node_id))
+        levels[str(node_id)] = (
+            max(levels[str(predecessor)] for predecessor in predecessors) + 1
+            if predecessors
+            else 0
+        )
+    return levels
 
 
 def _row_color(edges: Sequence[Mapping[str, Any]]) -> str:
@@ -2068,7 +2417,7 @@ def _symbolic_action_arm(action: Mapping[str, Any]) -> str:
 
 
 def _graph_footer(graph: Mapping[str, Any]) -> str:
-    if graph.get("schema_version") == "seed_task_graph_v3":
+    if graph.get("schema_version") == SEED_TASK_GRAPH_SCHEMA_VERSION:
         return "Symbolic bindings and named policies only; no runtime coordinates."
     return "One environment and episode; coordinates and execution status are grounded."
 
@@ -2095,6 +2444,7 @@ def _compact_runtime_policy(policy: Mapping[str, Any]) -> str:
         "surface_clearance",
         "pre_grasp_distance",
         "lift_height",
+        "resolved_retreat_height",
         "retreat_height",
         "postcondition_tolerance",
         "sample_interval",
@@ -2110,6 +2460,7 @@ def _compact_runtime_policy(policy: Mapping[str, Any]) -> str:
             "surface_clearance": "clear",
             "sample_interval": "samples",
             "retreat_height": "retreat",
+            "resolved_retreat_height": "actual_retreat",
             "line_spacing": "spacing",
             "transport_clearance": "clear",
             "staging_lift_height": "stage",

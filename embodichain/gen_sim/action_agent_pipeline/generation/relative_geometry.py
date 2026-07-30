@@ -19,8 +19,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from embodichain.gen_sim.action_agent_pipeline.protocol.actions import DUAL_ARM_NAME
-
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     RelativePlacementSpec,
     RelativePlacementStepSpec,
@@ -96,7 +94,7 @@ def _make_relative_summary(spec: RelativePlacementSpec) -> dict[str, Any]:
             "moved_object": spec.moved_runtime_uid,
             "reference_object": spec.reference_runtime_uid,
             "relation": spec.relation,
-            "active_arm": DUAL_ARM_NAME,
+            "actor": {"mode": "coordinated", "arms": ["left_arm", "right_arm"]},
             "release_offset": spec.release_offset,
             "target_position": spec.release_position,
             "orientation_goal": spec.orientation_goal,
@@ -121,7 +119,7 @@ def _make_relative_summary(spec: RelativePlacementSpec) -> dict[str, Any]:
             "moved_object": spec.moved_runtime_uid,
             "reference_object": spec.reference_runtime_uid,
             "relation": spec.relation,
-            "active_arm": f"{spec.active_side}_arm",
+            "actor": _relative_summary_actor(spec.placements[0]),
             "release_offset": spec.release_offset,
             "hover_height": spec.hover_height,
             "orientation_goal": spec.orientation_goal,
@@ -153,7 +151,7 @@ def _relative_placement_summary(
         "moved_object": placement.moved_runtime_uid,
         "reference_object": placement.reference_runtime_uid,
         "relation": placement.relation,
-        "active_arm": f"{placement.active_side}_arm",
+        "actor": _relative_summary_actor(placement),
         "release_offset": placement.release_offset,
         "hover_height": placement.hover_height,
         "orientation_goal": placement.orientation_goal,
@@ -169,3 +167,11 @@ def _relative_placement_summary(
     if placement.pickup_rotate_upright is not None:
         summary["pickup_rotate_upright"] = placement.pickup_rotate_upright
     return summary
+
+
+def _relative_summary_actor(
+    placement: RelativePlacementStepSpec,
+) -> dict[str, str]:
+    if placement.arm_request == "auto":
+        return {"mode": "auto"}
+    return {"mode": "required", "arm": f"{placement.arm_request}_arm"}

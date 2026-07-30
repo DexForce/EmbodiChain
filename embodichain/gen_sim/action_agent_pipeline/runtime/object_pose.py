@@ -703,6 +703,7 @@ def _resolve_object_pose_target(env, spec: AtomicActionSpec):
 def _resolve_absolute_pose_target(env, spec: AtomicActionSpec):
     position = spec.target_pose.get("position")
     position_by_env = spec.target_pose.get("position_by_env")
+    rotation_matrix_by_env = spec.target_pose.get("rotation_matrix_by_env")
     _, _, _, current_pose, _ = get_arm_states(env, spec.robot_name)
     target_pose = deepcopy(current_pose)
     if position_by_env is not None:
@@ -717,6 +718,18 @@ def _resolve_absolute_pose_target(env, spec: AtomicActionSpec):
                 "environment batch."
             )
         target_pose[:, :3, 3] = positions
+        if rotation_matrix_by_env is not None:
+            rotations = torch.as_tensor(
+                rotation_matrix_by_env,
+                dtype=torch.float32,
+                device=env.robot.device,
+            )
+            if rotations.shape != (target_pose.shape[0], 3, 3):
+                raise ValueError(
+                    "absolute target_pose rotation_matrix_by_env must match the "
+                    "runtime environment batch."
+                )
+            target_pose[:, :3, :3] = rotations
         return torch.as_tensor(
             target_pose, dtype=torch.float32, device=env.robot.device
         )

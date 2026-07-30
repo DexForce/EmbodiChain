@@ -61,12 +61,12 @@ class CompileAgent:
             )
         if "seed_task_graph" not in kwargs:
             raise ValueError(
-                "CompileAgent requires seed_task_graph_v3. Regenerate the "
+                "CompileAgent requires seed_task_graph_v5. Regenerate the "
                 "action-agent config with --overwrite."
             )
         seed_graph = extract_json_object(kwargs["seed_task_graph"])
         validate_seed_task_graph(seed_graph, task_name=self.task_name)
-        log_info("Validated executable Seed Graph v3 for runtime grounding.")
+        log_info("Validated executable Seed Graph v5 for runtime grounding.")
         return seed_graph, kwargs, None
 
     def act(self, seed_graph, **kwargs: Any):
@@ -77,7 +77,7 @@ class CompileAgent:
         runtime_kwargs = _runtime_kwargs(kwargs)
         graph = compile_agent_graph_spec(seed_graph)
         result = graph.run(**runtime_kwargs)
-        log_info("Executable Seed Graph v3 completed runtime execution.")
+        log_info("Executable Seed Graph v5 completed runtime execution.")
         return result
 
 
@@ -86,7 +86,7 @@ def resolve_precomputed_seed_task_graph_path(
     configured_path: str | None,
     agent_config_path: str | None,
 ) -> Path:
-    """Resolve the required executable Seed v3 runtime input."""
+    """Resolve the required executable Seed v5 runtime input."""
     config_file = (
         Path(agent_config_path).expanduser().resolve() if agent_config_path else None
     )
@@ -114,7 +114,7 @@ def resolve_precomputed_seed_task_graph_path(
         legacy = adjacent.with_name(TASK_GRAPH_FILENAME)
         if legacy.is_file():
             raise ValueError(
-                "Found legacy task_graph.json without Seed v3. Regenerate the "
+                "Found legacy task_graph.json without Seed v5. Regenerate the "
                 "action-agent config with --overwrite."
             )
         raise FileNotFoundError(
