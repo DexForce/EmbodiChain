@@ -63,4 +63,21 @@ You can also pass arguments to customize the simulation. For example, to run in 
 
    python scripts/tutorials/sim/create_softbody.py --headless --num_envs <n> --device <cuda/cpu>
 
+To inspect the deforming collision surface in a browser:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/create_softbody.py \
+       --viser \
+       --viser-soft-body-fps 5
+
+DexSim exposes live soft-body collision vertices but not their triangle
+connectivity. The Viser preview therefore uses a stable convex-hull surface:
+motion and deformation are visible, while concave details of the original cow
+render mesh are intentionally simplified. Lower
+``--viser-soft-body-fps`` when publishing large soft bodies or several
+environments.
+
+See :doc:`/overview/sim/viser_visualization` for details.
+
 Now that we have a basic understanding of how to create a soft-body scene, let's move on to more advanced topics.

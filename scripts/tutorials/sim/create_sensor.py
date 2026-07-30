@@ -19,6 +19,8 @@ This script demonstrates how to create and simulate a camera sensor attached to 
 It shows how to configure a camera sensor, attach it to the robot's end-effector, and visualize the sensor's output during simulation.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import torch
@@ -30,6 +32,7 @@ from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
@@ -71,7 +74,7 @@ def mask_to_color_map(mask, user_ids, fix_seed=True):
     return color_map
 
 
-def main():
+def main() -> None:
     """Main function to demonstrate robot sensor simulation."""
 
     # Parse command line arguments
@@ -84,8 +87,13 @@ def main():
         action="store_true",
         help="Attach sensor to robot end-effector",
     )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=0,
+        help="Stop after this many simulation steps; zero runs until Ctrl+C.",
+    )
     args = parser.parse_args()
-
     # Initialize simulation
     print("Creating simulation...")
     config = SimulationManagerCfg(
@@ -95,6 +103,7 @@ def main():
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -121,7 +130,13 @@ def main():
         sim.open_window()
 
     # Run simulation loop
-    run_simulation(sim, robot, sensor)
+    run_simulation(
+        sim,
+        robot,
+        sensor,
+        use_viser=args.viser,
+        max_steps=args.steps,
+    )
 
 
 def create_sensor(sim: SimulationManager, args):
@@ -271,7 +286,14 @@ def get_sensor_image(camera: Camera, headless=False, step_count=0):
         plt.close(fig)
 
 
-def run_simulation(sim: SimulationManager, robot: Robot, camera: Camera):
+def run_simulation(
+    sim: SimulationManager,
+    robot: Robot,
+    camera: Camera,
+    *,
+    use_viser: bool = False,
+    max_steps: int = 0,
+) -> None:
     """Run the simulation loop with robot and camera sensor control."""
 
     print("Starting simulation...")
@@ -310,16 +332,21 @@ def run_simulation(sim: SimulationManager, robot: Robot, camera: Camera):
                 print(f"Moving to arm position 1")
 
                 # Refresh and get image from sensor
-                get_sensor_image(camera)
+                if not use_viser:
+                    get_sensor_image(camera)
 
             if cycle_step == ACTION_SWITCH_INTERVAL:
                 robot.set_qpos(qpos=arm_position2, joint_ids=arm_joint_ids)
                 print(f"Moving to arm position 2")
 
                 # Refresh and get image from sensor
-                get_sensor_image(camera)
+                if not use_viser:
+                    get_sensor_image(camera)
 
             step_count += 1
+            if max_steps > 0 and step_count >= max_steps:
+                print(f"Reached {max_steps} simulation steps")
+                break
 
     except KeyboardInterrupt:
         print("Stopping simulation...")

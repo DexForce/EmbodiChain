@@ -131,6 +131,16 @@ class BaseSoftObjectTest:
             3,
         ), "Vertex positions shape mismatch"
 
+    def test_get_deformable_mesh_geometry(self):
+        """Test current cloth vertices and matching surface triangles."""
+        self.sim.init_gpu_physics()
+        vertices = self.cloth.get_current_vertex_position()
+        triangles = self.cloth.get_triangles(env_ids=[0])
+
+        assert vertices.ndim == 3 and vertices.shape[0] == self.sim.num_envs
+        assert triangles.ndim == 3 and triangles.shape[0] == 1
+        assert int(triangles.max()) < vertices.shape[1]
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

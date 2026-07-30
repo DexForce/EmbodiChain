@@ -19,10 +19,13 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It shows the basic setup of simulation context, adding objects, and sensors.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
@@ -44,12 +47,13 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
-        headless=args.headless,
+        headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
         sim_device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance
@@ -85,23 +89,33 @@ def main():
         )
     )
 
-    # Enable Gizmo for both cubes using the new API (only in window mode)
+    native_window_opened = False
     if not args.headless:
-        sim.enable_gizmo(uid="cube1")
-        sim.enable_gizmo(uid="cube2")
+        native_window_opened = sim.open_window()
+
+    # Enable native-window or Viser Gizmo control.
+    if native_window_opened or args.viser:
+        sim.enable_gizmo(
+            uid="cube1",
+            enable_native=native_window_opened,
+        )
+        sim.enable_gizmo(
+            uid="cube2",
+            enable_native=native_window_opened,
+        )
+    else:
+        logger.log_warning(
+            "Gizmo interaction is disabled in headless mode without Viser."
+        )
 
     logger.log_info("Scene setup complete!")
     logger.log_info(f"Running simulation with 1 environment(s)")
-    if not args.headless:
+    if native_window_opened or args.viser:
         if sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")
         if sim.has_gizmo("cube2"):
             logger.log_info("Gizmo enabled for cube2 - you can drag it around!")
     logger.log_info("Press Ctrl+C to stop the simulation")
-
-    # Open window when the scene has been set up
-    if not args.headless:
-        sim.open_window()
 
     # Run the simulation
     run_simulation(sim)
@@ -120,15 +134,13 @@ def run_simulation(sim: SimulationManager):
         while True:
             sim.update(step=1)
 
-            # Update all gizmos if any are enabled
-            sim.update_gizmos()
-
             step_count += 1
 
             # Disable gizmo after 200000 steps (example)
             if step_count == 200000 and gizmo_enabled:
                 logger.log_info("Disabling gizmo at step 200000")
-                sim.disable_gizmo("cube")
+                sim.disable_gizmo("cube1")
+                sim.disable_gizmo("cube2")
                 gizmo_enabled = False
 
             # Print FPS every second

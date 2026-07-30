@@ -14,6 +14,9 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+import argparse
 import time
 import numpy as np
 import torch
@@ -23,9 +26,14 @@ from IPython import embed
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
-def main():
+def main(visualization: VisualizationCfg | None = None) -> None:
     # Set print options for better readability
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -34,7 +42,11 @@ def main():
     sim_device = "cpu"
     sim = SimulationManager(
         SimulationManagerCfg(
-            headless=False, sim_device=sim_device, width=2200, height=1200
+            headless=False,
+            sim_device=sim_device,
+            width=2200,
+            height=1200,
+            visualization=visualization or VisualizationCfg(),
         )
     )
 
@@ -77,8 +89,11 @@ def main():
     print("fk_xpos_list: ", fk_xpos_list)
     print("ik_xpos_list: ", ik_xpos_list)
 
+    sim.capture_visualization(force=True)
     embed(header="Test SRSSolver example. Press Ctrl-D to exit.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
+    main(visualization=visualization_cfg_from_args(parser.parse_args()))

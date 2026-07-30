@@ -464,25 +464,15 @@ def preview(env: gymnasium.Env) -> None:
     exit(0)
 
 
-def cli(argv: Sequence[str] | None = None) -> None:
-    """Command-line interface for environment runner.
-
-    Parses CLI arguments, builds the environment config, and launches
-    the data generation, preview, or replay workflow.
-
-    Args:
-        argv: Arguments excluding the command name. Uses ``sys.argv`` when
-            omitted.
-    """
-    np.set_printoptions(5, suppress=True)
-    torch.set_printoptions(precision=5, sci_mode=False)
-
+def _create_parser() -> argparse.ArgumentParser:
+    """Create the ``run-env`` argument parser."""
     parser = argparse.ArgumentParser(
         prog="embodichain run-env",
         description="Run an environment for data generation or interactive preview.",
     )
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
+    parser.set_defaults(viser_image_fps=None)
 
     parser.add_argument(
         "--replay",
@@ -503,8 +493,23 @@ def cli(argv: Sequence[str] | None = None) -> None:
         help="Replay mode: kinematic (exact, default), dynamic (physics), "
         "control (interactive scrubber).",
     )
+    return parser
 
-    args = parser.parse_args(argv)
+
+def cli(argv: Sequence[str] | None = None) -> None:
+    """Command-line interface for environment runner.
+
+    Parses CLI arguments, builds the environment config, and launches
+    the data generation, preview, or replay workflow.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+    """
+    np.set_printoptions(5, suppress=True)
+    torch.set_printoptions(precision=5, sci_mode=False)
+
+    args = _create_parser().parse_args(argv)
 
     if getattr(args, "replay", False):
         if not args.replay_trajectory:

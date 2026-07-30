@@ -42,6 +42,16 @@ All gizmo creation, visibility, and destruction operations must be managed via t
 
 Always use the SimulationManager API to control gizmo visibility and lifecycle. Do not operate on the Gizmo instance directly.
 
+The same target behavior is available in either the DexSim window or Viser.
+The standard Viser mode includes interactive Gizmo control:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/gizmo_robot.py --viser
+
+Only expose the Viser endpoint to trusted browser clients because dragging a
+Gizmo mutates simulation targets.
+
 What is a Gizmo?
 -----------------
 
@@ -83,7 +93,11 @@ After configuring the robot, enable the gizmo for interactive control using the 
 .. code-block:: python
 
    # Enable gizmo for the robot's arm
-   sim.enable_gizmo(uid="ur10_gizmo_test", control_part="arm")
+   sim.enable_gizmo(
+       uid="ur10_gizmo_test",
+       control_part="arm",
+       enable_native=False,  # Pure Viser; use True for a DexSim window too.
+   )
    if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
        logger.log_error("Failed to enable gizmo!")
        return
@@ -112,8 +126,8 @@ How Gizmo-Robot Interaction Works
 
 The gizmo-robot interaction follows this efficient workflow:
 
-1. **Gizmo Callback**: When the user drags the gizmo, a callback function updates the proxy object's transform
-2. **Deferred IK Solving**: Instead of solving IK immediately in the callback (which causes UI lag), the target transform is stored
+1. **Gizmo Callback**: DexSim or Viser records the requested transform
+2. **Deferred IK Solving**: Instead of solving IK in the UI callback, the target transform is queued
 3. **Update Loop**: During each simulation step, ``gizmo.update()`` solves IK and applies joint commands
 4. **Robot Motion**: The robot smoothly moves to follow the gizmo position
 
@@ -138,6 +152,7 @@ In the main loop, simply call `sim.update_gizmos()`. There is no need to manuall
            while True:
                time.sleep(0.033)  # 30Hz
                sim.update_gizmos()  # Update all gizmos
+               sim.capture_visualization_safely()  # Publish Viser state, if enabled
                step_count += 1
                # ...performance statistics, etc...
        except KeyboardInterrupt:
@@ -151,6 +166,7 @@ In the main loop, simply call `sim.update_gizmos()`. There is no need to manuall
 Main loop highlights:
 
 - **Gizmo update**: Only `sim.update_gizmos()` is needed, no `gizmo.update()`
+- **Viser update**: Automatic-physics loops also call `sim.capture_visualization_safely()`
 - **Performance monitoring**: Optional FPS statistics
 - **Resource cleanup**: Only `sim.destroy()` is needed, no manual Gizmo destruction
 - **Graceful shutdown**: Supports Ctrl+C interruption

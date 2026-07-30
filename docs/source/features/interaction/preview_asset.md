@@ -20,6 +20,35 @@ embodichain preview-asset \
     --asset_type articulation
 ```
 
+## Viser Browser Preview
+
+Use `--viser` to inspect rigid objects and articulations in a browser without
+opening the native simulation window:
+
+```bash
+embodichain preview-asset \
+    --asset_path /path/to/asset.usda \
+    --asset_type rigid \
+    --viser
+```
+
+Viser implies headless simulation. The command keeps stepping the simulation
+until `Ctrl+C`, so dynamic assets continue moving and their poses update in the
+browser. Assets are published immediately after loading because the Viser
+server starts together with `SimulationManager`.
+
+Combine `--viser` with `--preview` to retain the interactive REPL:
+
+```bash
+embodichain preview-asset \
+    --asset_path /path/to/robot.urdf \
+    --viser \
+    --preview
+```
+
+Use `--viser-host`, `--viser-port`, `--viser-fps`, and the other standard
+`--viser-*` options to configure the browser server and update rates.
+
 ## Asset Type Detection
 
 The asset type is determined as follows:
@@ -76,6 +105,13 @@ asset.set_root_pose(pos=[0, 0, 1.0], rot=[0, 0, 0])
 | `--headless`         | Run without rendering window                                       | `False`              |
 | `--renderer`         | Renderer backend: `hybrid`, `fast-rt` or `rt`            | `hybrid`             |
 | `--preview`          | Enter interactive embed mode after loading                         | `False`              |
+| `--viser`            | Enable the headless Viser browser preview                           | `False`              |
+| `--viser-host`       | Viser bind host                                                     | `127.0.0.1`          |
+| `--viser-port`       | Viser bind port                                                     | `8080`               |
+| `--viser-fps`        | Maximum scene update rate                                           | `15.0`               |
+| `--viser-image-fps`  | Maximum camera RGB preview rate                                     | `2.0`                |
+| `--viser-soft-body-fps` | Maximum deformable mesh update rate                             | `5.0`                |
+| `--viser-env-ids`    | Environment IDs published to Viser, or `all`                       | `0`                  |
 
 ## Examples
 

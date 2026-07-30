@@ -248,6 +248,24 @@ Optional GPU smoke test:
 python scripts/tutorials/sim/create_scene.py --headless --device cuda
 ```
 
+For a headless browser view, enable Viser:
+
+```bash
+python scripts/tutorials/sim/create_scene.py --viser
+```
+
+Open the endpoint printed in the terminal, normally
+`http://127.0.0.1:8080`. On a remote machine, keep the default loopback binding
+and forward the port:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8080 user@worker-host
+```
+
+See [Browser visualization with Viser](../overview/sim/viser_visualization.md)
+for supported objects, camera preview, update-rate options, and remote-access
+guidance.
+
 Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 
 ## Troubleshooting
@@ -266,4 +284,5 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 
 - [Quick Start Tutorial](../tutorial/index.rst)
 - [Simulation Manager](../overview/sim/sim_manager.md)
+- [Browser visualization with Viser](../overview/sim/viser_visualization.md)
 - [Build documentation](docs.md)

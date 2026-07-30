@@ -14,23 +14,35 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
+from __future__ import annotations
+
+import argparse
+
 import numpy as np
+import torch
 from IPython import embed
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import DexforceW1Cfg
-from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
-    WorkspaceAnalyzer,
-    WorkspaceAnalyzerConfig,
-    AnalysisMode,
-)
 from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg
+from embodichain.lab.sim.robots import DexforceW1Cfg
 from embodichain.lab.sim.utility.workspace_analyzer.configs.visualization_config import (
     VisualizationConfig,
 )
+from embodichain.lab.sim.utility.workspace_analyzer.workspace_analyzer import (
+    AnalysisMode,
+    WorkspaceAnalyzer,
+    WorkspaceAnalyzerConfig,
+)
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
+    args = parser.parse_args()
+
     # Example usage
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -40,6 +52,7 @@ if __name__ == "__main__":
         sim_device="cpu",
         width=1080,
         height=1080,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
@@ -104,4 +117,5 @@ if __name__ == "__main__":
     print(f"  Analysis time: {results_cartesian['analysis_time']:.2f}s")
     print(f"  Metrics: {results_cartesian['metrics']}")
 
+    sim.capture_visualization(force=True)
     embed(header="Workspace Analyzer Test Environment")

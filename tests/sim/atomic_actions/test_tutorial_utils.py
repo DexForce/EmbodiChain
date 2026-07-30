@@ -29,6 +29,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    should_open_tutorial_window,
     should_wait_for_tutorial_input,
 )
 
@@ -39,6 +40,18 @@ def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None
             Namespace(
                 auto_play=False,
                 headless=True,
+                diagnose_plan=False,
+                headless_play=False,
+            )
+        )
+        is False
+    )
+    assert (
+        should_wait_for_tutorial_input(
+            Namespace(
+                auto_play=False,
+                headless=False,
+                viser=True,
                 diagnose_plan=False,
                 headless_play=False,
             )
@@ -67,6 +80,17 @@ def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None
         )
         is False
     )
+
+
+def test_viser_does_not_open_native_tutorial_window() -> None:
+    args = Namespace(
+        headless=False,
+        viser=True,
+        diagnose_plan=False,
+        headless_play=False,
+    )
+
+    assert not should_open_tutorial_window(args)
 
 
 def test_broadcast_pose_batch_repeats_single_pose_for_each_env() -> None:

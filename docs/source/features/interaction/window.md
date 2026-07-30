@@ -2,7 +2,14 @@
 
 This section describes the default window interaction controls available in the simulation. These controls allow users to interact with the simulation environment using keyboard, mouse, and customizable input events.
 
-The main visualization window is provided by **DexSim**. When `SimConfig.headless=False` or `SimulationManager.open_window()` is called, DexSim creates the viewer with **ORBIT** camera control by default.
+The main visualization window is provided by **DexSim**. When
+`SimulationManagerCfg.headless=False` or `SimulationManager.open_window()` is
+called, DexSim creates the viewer with **ORBIT** camera control by default.
+The native window and the Viser backend are mutually exclusive;
+`SimulationManager.open_window()` safely returns `False` without opening a
+native window while Viser is enabled.
+Likewise, `SimulationManager.start_visualization()` rejects Viser startup while
+the native window is open.
 
 ## Default Window Controls
 

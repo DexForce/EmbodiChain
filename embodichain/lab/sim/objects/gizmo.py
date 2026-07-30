@@ -13,72 +13,68 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo: A reusable controller for interactive manipulation of simulation elements (object, robot, camera, etc.)
-"""
 
+"""Backend-neutral Gizmo target control with an optional DexSim handle."""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import Callable
+from typing import Any
+
+import dexsim
 import numpy as np
 import torch
-import dexsim
-from typing import Callable
-from scipy.spatial.transform import Rotation as R
+from dexsim.types import (
+    AxisArrowType,
+    AxisCornerType,
+    AxisOption,
+    AxisTagType,
+    RotationRingsOption,
+)
+from scipy.spatial.transform import Rotation
 
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.sensors import Camera
 from embodichain.utils import configclass, logger
 
-from dexsim.types import (
-    AxisOption,
-    RotationRingsOption,
-    AxisArrowType,
-    AxisCornerType,
-    AxisTagType,
-    TransformMask,
-    ActorType,
-    RigidBodyShape,
-    PhysicalAttr,
-)
-
-from embodichain.lab.sim.utility.gizmo_utils import create_gizmo_callback
+__all__ = ["Gizmo", "GizmoCfg"]
 
 
 @configclass
 class GizmoCfg:
-    """Configuration class for Gizmo parameters.
+    """Configure native and Viser Gizmo appearance."""
 
-    This class defines the visual and interaction parameters for gizmo controllers,
-    including axis appearance and rotation rings settings.
-    """
-
-    # Axis configuration
     axis_length_x: float = 0.2
-    """Length of X-axis arrow."""
+    """Length of the X-axis arrow."""
+
     axis_length_y: float = 0.2
-    """Length of Y-axis arrow."""
+    """Length of the Y-axis arrow."""
+
     axis_length_z: float = 0.2
-    """Length of Z-axis arrow."""
+    """Length of the Z-axis arrow."""
+
     axis_size: float = 0.01
-    """Thickness of axis lines."""
+    """Thickness of the native axis lines."""
+
     arrow_type: AxisArrowType = AxisArrowType.CONE
-    """Type of arrow head."""
+    """Native axis arrow-head style."""
+
     corner_type: AxisCornerType = AxisCornerType.SPHERE
-    """Type of axis corner."""
+    """Native axis corner style."""
+
     tag_type: AxisTagType = AxisTagType.PLANE
-    """Type of axis label."""
+    """Native axis-label style."""
 
-    # Rotation rings configuration
     rings_radius: float = 0.15
-    """Radius of rotation rings."""
+    """Radius of the rotation rings."""
+
     rings_size: float = 0.01
-    """Thickness of rotation rings."""
+    """Thickness of the native rotation rings."""
 
-    def to_options_dict(self) -> dict:
-        """Convert configuration to options dictionary format expected by gizmo creation.
-
-        Returns:
-            Dictionary containing AxisOption and RotationRingsOption objects.
-        """
+    def to_options_dict(self) -> dict[str, AxisOption | RotationRingsOption]:
+        """Convert this configuration to DexSim Gizmo options."""
         return {
             "axis": AxisOption(
                 lx=self.axis_length_x,
@@ -90,19 +86,28 @@ class GizmoCfg:
                 tag_type=self.tag_type,
             ),
             "rings": RotationRingsOption(
-                radius=self.rings_radius, size=self.rings_size
+                radius=self.rings_radius,
+                size=self.rings_size,
             ),
         }
 
 
 class Gizmo:
-    """
-    Generic Gizmo controller for simulation elements.
-    Supports RigidObject, Robot, and Camera with type-specific handling.
+    """Control a rigid object, robot end-effector, or camera.
 
-    Note:
-        Gizmo can only be used in single environment mode (num_envs=1).
-        Will raise RuntimeError if used with multiple environments.
+    Target mutation is backend-neutral: both DexSim callbacks and Viser commands
+    submit a local target pose, and :meth:`update` applies it on the simulation
+    thread. A DexSim Gizmo handle is optional, which allows the same controller
+    to work in a headless Viser process.
+
+    .. attention::
+        Gizmo control currently supports exactly one simulation environment.
+
+    Args:
+        target: Simulation element controlled by this Gizmo.
+        cfg: Appearance configuration.
+        control_part: Robot control part used for FK and IK.
+        enable_native: Whether to create a DexSim Gizmo and proxy actor.
     """
 
     def __init__(
@@ -110,441 +115,444 @@ class Gizmo:
         target: BatchEntity,
         cfg: GizmoCfg | None = None,
         control_part: str | None = "arm",
-    ):
-        """
-        Args:
-            target: The simulation element to control (RigidObject, Robot, or Camera)
-            cfg: Gizmo configuration parameters (optional, uses default if None)
-            control_part: For robots, specifies which control part to use (optional, default: "arm")
-        """
-        self.target = target
-        self._target_type = self._detect_target_type(target)
-        self._control_part = control_part
-        self._env = dexsim.default_world().get_env()
-        self._windows = dexsim.default_world().get_windows()
-
-        # Check if running in single environment (num_env must be 1)
+        *,
+        enable_native: bool = True,
+    ) -> None:
         num_envs = dexsim.get_world_num()
         if num_envs > 1:
             raise RuntimeError(
-                f"Gizmo can only be used in single environment mode (num_env=1), "
-                f"but current num_envs={num_envs}. Please create simulation with num_envs=1."
+                "Gizmo can only be used in single environment mode "
+                f"(num_envs=1), but current num_envs={num_envs}."
             )
 
-        # Use provided config or get default
-        if cfg is None:
-            cfg = self._get_default_cfg()
-        self.cfg = cfg
-        self._gizmo = self._create_gizmo(self.cfg)
-        self._callback = None
-        self._state = "active"
-        self._setup_gizmo_follow()
+        self.target: BatchEntity | None = target
+        self.cfg = cfg or GizmoCfg()
+        self._control_part = control_part
+        self._target_type = self._detect_target_type(target)
+        self._env = dexsim.default_world().get_env()
+        self._gizmo: object | None = None
+        self._proxy_cube: object | None = None
+        self._callback: Callable[..., Any] | None = None
+        self._is_visible = True
+        self._state_lock = threading.RLock()
+        self._interaction_owner: str | None = None
+        self._pending_target_transform: torch.Tensor | None = None
+        self._desired_target_transform: torch.Tensor | None = None
+        self._robot_arm_name: str | None = None
+
+        if self._target_type == "robot":
+            self._configure_robot()
+        self._desired_target_transform = self._read_target_pose()
+
+        if enable_native:
+            self._gizmo = self._create_native_gizmo(self.cfg)
+            self._setup_native_gizmo()
+
+    @property
+    def target_type(self) -> str:
+        """Return ``rigid_object``, ``robot``, or ``camera``."""
+        return self._target_type
+
+    @property
+    def control_part(self) -> str | None:
+        """Return the robot control part, if applicable."""
+        return self._control_part
+
+    @property
+    def native_enabled(self) -> bool:
+        """Whether this controller owns a DexSim Gizmo handle."""
+        return self._gizmo is not None
 
     def _detect_target_type(self, target: BatchEntity) -> str:
-        """Detect target type: 'rigidobject', 'robot', or 'camera' using isinstance only."""
-        if Robot is not None and isinstance(target, Robot):
+        if isinstance(target, Robot):
             return "robot"
-        if Camera is not None and isinstance(target, Camera):
+        if isinstance(target, Camera):
             return "camera"
-        if RigidObject is not None and isinstance(target, RigidObject):
-            return "rigidobject"
-
+        if isinstance(target, RigidObject):
+            return "rigid_object"
         raise ValueError(
-            f"Unsupported target type: {type(target)}. Only RigidObject, Robot, and Camera are supported."
+            f"Unsupported Gizmo target type {type(target)!r}; expected "
+            "RigidObject, Robot, or Camera."
         )
 
-    def _get_default_cfg(self) -> GizmoCfg:
-        """Get default gizmo configuration (same for all target types)"""
-        return GizmoCfg()
-
-    def _create_gizmo(self, cfg: GizmoCfg):
-        """Create gizmo using configuration object"""
-        options = cfg.to_options_dict()
-        axis = options["axis"]
-        rings = options["rings"]
-        return self._env.create_gizmo(axis, rings)
-
-    def _compute_ee_pose_fk(self):
-        """Compute end-effector pose using forward kinematics"""
-        # Get current joint positions for this arm
-        proprioception = self.target.get_proprioception()
-        current_qpos_full = proprioception["qpos"]
-        current_joint_ids = self.target.get_joint_ids(self._robot_arm_name)
-
-        joint_positions = current_qpos_full[:, current_joint_ids]
-        if joint_positions.dim() > 1:
-            joint_positions = joint_positions[0]
-
-        # Compute forward kinematics
-        ee_pose = self.target.compute_fk(
-            joint_positions, name=self._control_part, to_matrix=True
-        )
-
-        return ee_pose
-
-    def _create_proxy_cube(
-        self, position: np.ndarray, rotation_matrix: np.ndarray, name: str
-    ):
-        """Create a proxy cube for gizmo tracking"""
-        # Convert rotation matrix to euler angles
-        euler = R.from_matrix(rotation_matrix).as_euler("xyz", degrees=False)
-
-        # Create small proxy cube at specified position
-        proxy_cube = self._env.create_cube(0.02, 0.02, 0.02)  # 2cm cube
-        proxy_cube.set_location(position[0], position[1], position[2])
-        proxy_cube.set_rotation_euler(euler[0], euler[1], euler[2])
-
-        # Connect gizmo to proxy cube.
-        self._gizmo.follow(proxy_cube.node)
-
-        logger.log_info(f"{name} gizmo proxy created at position: {position}")
-        return proxy_cube
-
-    def _setup_camera_gizmo(self):
-        """Setup gizmo for Camera by creating a proxy RigidObject at camera position"""
-        # Get current camera pose
-        camera_pose = self.target.get_local_pose(to_matrix=True)[0]  # Get first camera
-        camera_pos = camera_pose[:3, 3].cpu().numpy()
-        camera_rot_matrix = camera_pose[:3, :3].cpu().numpy()
-
-        # Create proxy cube and set callback
-        self._proxy_cube = self._create_proxy_cube(
-            camera_pos, camera_rot_matrix, "Camera"
-        )
-        # New API uses set_flush_localpose_callback
-        self._gizmo.set_flush_localpose_callback(self._proxy_gizmo_callback)
-
-    def _proxy_gizmo_callback(self, *args):
-        """Generic callback for proxy-based gizmo.
-
-        Supports both old signature: (node, translation, rotation, flag)
-        and new signature: (node, local_pose, flag) where local_pose is a 4x4 matrix.
-        Updates the proxy cube transform and sets `_pending_target_transform`.
-        """
-        # New API callback signature: (node, local_pose, flag)
-        if len(args) != 3:
-            return
-        node, local_pose, flag = args
-        if node is None:
-            return
-
-        # Check if proxy cube still exists
-        if not hasattr(self, "_proxy_cube") or self._proxy_cube is None:
-            return
-
-            # convert to numpy 4x4 matrix
-        if isinstance(local_pose, torch.Tensor):
-            lp = local_pose.cpu().numpy()
-        else:
-            lp = np.asarray(local_pose)
-
-        if lp.shape != (4, 4):
-            return
-
-        trans = lp[:3, 3]
-        rot_mat = lp[:3, :3]
-        euler = R.from_matrix(rot_mat).as_euler("xyz", degrees=False)
-
-        self._proxy_cube.set_location(float(trans[0]), float(trans[1]), float(trans[2]))
-        self._proxy_cube.set_rotation_euler(
-            float(euler[0]), float(euler[1]), float(euler[2])
-        )
-
-        # Build pending target transform (1,4,4)
-        target_transform = torch.eye(4, dtype=torch.float32)
-        target_transform[:3, 3] = torch.tensor(
-            [trans[0], trans[1], trans[2]], dtype=torch.float32
-        )
-        target_transform[:3, :3] = torch.tensor(rot_mat, dtype=torch.float32)
-        self._pending_target_transform = target_transform.unsqueeze(0)
-
-    def _update_camera_pose(self, target_transform: torch.Tensor):
-        """Update camera pose to match target transform"""
-        try:
-            # Set camera pose using set_local_pose method
-            self.target.set_local_pose(target_transform)
-            return True
-        except Exception as e:
-            logger.log_error(f"Error updating camera pose: {e}")
-            return False
-
-    def _setup_robot_gizmo(self):
-        """Setup gizmo for Robot by creating a proxy RigidObject at end-effector"""
-        # Get end-effector pose using specified control part
+    def _configure_robot(self) -> None:
+        if self.target is None or not isinstance(self.target, Robot):
+            raise RuntimeError("Robot Gizmo has no attached Robot.")
         if self.target.cfg.solver_cfg is None:
-            raise ValueError(
-                "Robot has no solver configured for IK/FK computations for gizmo"
-            )
-
+            raise ValueError("Robot has no solver configured for Gizmo IK/FK.")
         arm_names = list(self.target.control_parts.keys())
         if not arm_names:
-            raise ValueError("Robot has no control parts defined")
-
-        # Use specified control part or fall back to first available
-        if self._control_part and self._control_part in arm_names:
+            raise ValueError("Robot has no control parts defined.")
+        if self._control_part is None:
+            self._robot_arm_name = arm_names[0]
+            self._control_part = self._robot_arm_name
+        elif self._control_part in arm_names:
             self._robot_arm_name = self._control_part
         else:
-            logger.log_error(f"Control part '{self._control_part}' not found.")
-
-        logger.log_info(f"Using control part: {self._robot_arm_name}")
-
-        # Get end-effector pose using forward kinematics
-        ee_pose = self._compute_ee_pose_fk()[0]  # remove batch dimension
-
-        ee_pos = ee_pose[:3, 3].cpu().numpy()
-        ee_rot_matrix = ee_pose[:3, :3].cpu().numpy()
-
-        # Create proxy cube and set callback (use new callback API)
-        self._proxy_cube = self._create_proxy_cube(ee_pos, ee_rot_matrix, "Robot")
-        self._gizmo.set_flush_localpose_callback(self._proxy_gizmo_callback)
-
-    def _update_robot_ik(self, target_transform: torch.Tensor):
-        """Update robot joints using IK to reach target transform"""
-        try:
-            # Get current joint positions as seed using proprioception
-            proprioception = self.target.get_proprioception()
-            current_qpos_full = proprioception["qpos"]  # Full joint positions
-
-            # Get joint IDs for this arm
-            current_joint_ids = self.target.get_joint_ids(self._robot_arm_name)
-
-            # Extract joint positions for this specific arm
-            if len(current_joint_ids) > 0:
-                joint_seed = current_qpos_full[
-                    :, current_joint_ids
-                ]  # Select arm joints
-                if joint_seed.dim() > 1:
-                    joint_seed = joint_seed[0]  # Take first batch element
-            else:
-                logger.log_warning(
-                    f"No joint IDs found for arm: {self._robot_arm_name}"
-                )
-                return False
-
-            # Solve IK
-            ik_success, new_qpos = self.target.compute_ik(
-                pose=target_transform, name=self._robot_arm_name, joint_seed=joint_seed
+            raise ValueError(
+                f"Control part {self._control_part!r} was not found; "
+                f"available parts are {arm_names}."
             )
 
-            if ik_success:
-                # Ensure correct dimensions for setting qpos
-                # new_qpos from IK solver may be (1, N, dof) or (N, dof), flatten to (dof,) for single env
-                if new_qpos.dim() > 1:
-                    new_qpos = new_qpos.squeeze()  # Remove all singleton dimensions
-                if new_qpos.dim() == 1:
-                    new_qpos = new_qpos.unsqueeze(0)  # Make it (1, dof) for set_qpos
+    def _target_device(self) -> torch.device:
+        if self.target is None:
+            return torch.device("cpu")
+        return torch.device(getattr(self.target, "device", "cpu"))
 
-                # Update robot joint positions
-                self.target.set_qpos(qpos=new_qpos[0], joint_ids=current_joint_ids)
-                return True
-            else:
-                logger.log_warning("IK solution not found")
+    @staticmethod
+    def _as_pose_matrix(pose: object, device: torch.device) -> torch.Tensor:
+        matrix = torch.as_tensor(pose, dtype=torch.float32, device=device)
+        if matrix.shape == (4, 4):
+            matrix = matrix.unsqueeze(0)
+        if matrix.shape != (1, 4, 4):
+            raise ValueError(
+                "Gizmo target pose must have shape (4, 4) or (1, 4, 4), "
+                f"received {tuple(matrix.shape)}."
+            )
+        if not bool(torch.isfinite(matrix).all().item()):
+            raise ValueError("Gizmo target pose must contain only finite values.")
+        return matrix.detach().clone()
+
+    def _compute_ee_pose_fk(self) -> torch.Tensor:
+        if self.target is None or not isinstance(self.target, Robot):
+            raise RuntimeError("Robot Gizmo has no attached Robot.")
+        if self._robot_arm_name is None:
+            raise RuntimeError("Robot Gizmo control part is not configured.")
+        current_qpos = self.target.get_proprioception()["qpos"]
+        joint_ids = self.target.get_joint_ids(self._robot_arm_name)
+        joint_positions = current_qpos[:, joint_ids]
+        pose = self.target.compute_fk(
+            joint_positions,
+            name=self._robot_arm_name,
+            env_ids=[0],
+            to_matrix=True,
+        )
+        if pose is None:
+            raise RuntimeError("Robot forward kinematics returned no pose.")
+        return self._as_pose_matrix(pose, self._target_device())
+
+    def _read_target_pose(self) -> torch.Tensor:
+        if self.target is None:
+            raise RuntimeError("Gizmo is detached.")
+        if self._target_type == "robot":
+            return self._compute_ee_pose_fk()
+        pose = self.target.get_local_pose(to_matrix=True)
+        return self._as_pose_matrix(pose[0], self._target_device())
+
+    def get_control_pose(self) -> torch.Tensor:
+        """Return the Gizmo pose in the local arena frame as ``(1, 4, 4)``."""
+        with self._state_lock:
+            if (
+                self._target_type == "robot"
+                and self._desired_target_transform is not None
+            ):
+                return self._desired_target_transform.detach().clone()
+        return self._read_target_pose()
+
+    def begin_interaction(self, source_id: str) -> bool:
+        """Acquire this Gizmo for one native or Viser drag source."""
+        if not source_id:
+            raise ValueError("source_id must not be empty.")
+        with self._state_lock:
+            if self._interaction_owner not in {None, source_id}:
                 return False
+            self._interaction_owner = source_id
+            return True
 
-        except Exception as e:
-            logger.log_error(f"Error in robot IK: {e}")
-            return False
-
-    def _setup_gizmo_follow(self):
-        """Setup gizmo based on target type"""
-        if self._target_type == "rigidobject":
-            # RigidObject: direct node access through MeshObject — use follow/attach
-            tgt_node = self.target._entities[0].node
-            self._gizmo.follow(tgt_node)
-            # set callback (localpose-style)
-            self._gizmo.set_flush_localpose_callback(create_gizmo_callback())
-
-        elif self._target_type == "robot":
-            # Robot: create proxy object at end-effector position
-            self._setup_robot_gizmo()
-        elif self._target_type == "camera":
-            # Camera: create proxy object at camera position
-            self._setup_camera_gizmo()
-
-    def attach(self, target: BatchEntity):
-        """Attach gizmo to a new simulation element."""
-        self.target = target
-        self._target_type = self._detect_target_type(target)
-        self._setup_gizmo_follow()
-
-    def detach(self):
-        """Detach gizmo from current element."""
-        self.target = None
-        # Detach gizmo using new API
-        self._gizmo.detach_parent()
-
-    def set_transform_callback(self, callback: Callable):
-        """Set callback for gizmo transform events (translation/rotation)."""
-        self._callback = callback
-        self._gizmo.set_transform_flush_callback(callback)
-
-    def set_world_pose(self, pose):
-        """Set gizmo's world pose."""
-        self._gizmo.set_world_pose(pose)
-
-    def set_local_pose(self, pose):
-        """Set gizmo's local pose."""
-        self._gizmo.set_local_pose(pose)
-
-    def set_line_width(self, width: float):
-        """Set gizmo line width."""
-        self._gizmo.set_line_width(width)
-
-    def enable_collision(self, enabled: bool):
-        """Enable or disable gizmo collision."""
-        self._gizmo.enable_collision(enabled)
-
-    def get_world_pose(self):
-        """Get gizmo's world pose."""
-        return self._gizmo.get_world_pose()
-
-    def get_local_pose(self):
-        """Get gizmo's local pose."""
-        return self._gizmo.get_local_pose()
-
-    def get_name(self):
-        """Get gizmo node name."""
-        return self._gizmo.get_name()
-
-    def get_parent(self):
-        """Get gizmo's parent node."""
-        return self._gizmo.get_parent()
-
-    def toggle_visibility(self) -> bool:
-        """
-        Toggle the visibility of the gizmo.
+    def request_local_pose(self, pose: object, *, source_id: str) -> bool:
+        """Queue a local target pose for application by :meth:`update`.
 
         Returns:
-            bool: The new visibility state (True = visible, False = hidden)
+            ``False`` if another client currently owns the drag.
         """
-        if not hasattr(self, "_is_visible"):
-            self._is_visible = True  # Default to visible
+        matrix = self._as_pose_matrix(pose, self._target_device())
+        with self._state_lock:
+            if self._interaction_owner not in {None, source_id}:
+                return False
+            self._pending_target_transform = matrix
+            self._desired_target_transform = matrix.detach().clone()
+            return True
 
-        # Toggle the state
-        self._is_visible = not self._is_visible
+    def end_interaction(self, source_id: str) -> bool:
+        """Release a drag source's ownership of this Gizmo."""
+        with self._state_lock:
+            if self._interaction_owner != source_id:
+                return False
+            self._interaction_owner = None
+            return True
 
-        # Apply the visibility setting to the gizmo node
-        if self._gizmo:
-            self._gizmo.set_visible(self._is_visible)
+    def cancel_interaction(self, source_prefix: str | None = None) -> bool:
+        """Cancel the active owner, optionally only for a source prefix."""
+        with self._state_lock:
+            owner = self._interaction_owner
+            if owner is None:
+                return False
+            if source_prefix is not None and not owner.startswith(source_prefix):
+                return False
+            self._interaction_owner = None
+            return True
 
+    def _create_native_gizmo(self, cfg: GizmoCfg) -> object:
+        options = cfg.to_options_dict()
+        return self._env.create_gizmo(options["axis"], options["rings"])
+
+    def _create_proxy_cube(self, pose: torch.Tensor, name: str) -> object:
+        matrix = pose[0].detach().cpu().numpy()
+        euler = Rotation.from_matrix(matrix[:3, :3]).as_euler("xyz", degrees=False)
+        proxy_cube = self._env.create_cube(0.02, 0.02, 0.02)
+        proxy_cube.set_location(*matrix[:3, 3].tolist())
+        proxy_cube.set_rotation_euler(*euler.tolist())
+        self._require_native().follow(proxy_cube.node)
+        logger.log_info(
+            f"{name} Gizmo proxy created at position: {matrix[:3, 3].tolist()}"
+        )
+        return proxy_cube
+
+    def _set_proxy_pose(self, pose: torch.Tensor) -> None:
+        if self._proxy_cube is None:
+            return
+        matrix = pose[0].detach().cpu().numpy()
+        euler = Rotation.from_matrix(matrix[:3, :3]).as_euler("xyz", degrees=False)
+        self._proxy_cube.set_location(*matrix[:3, 3].tolist())
+        self._proxy_cube.set_rotation_euler(*euler.tolist())
+
+    def _native_pose_callback(self, *args: object) -> None:
+        if len(args) != 3 or args[0] is None:
+            return
+        try:
+            pose = self._as_pose_matrix(args[1], self._target_device())
+            if self._proxy_cube is not None:
+                self._set_proxy_pose(pose)
+            if not self.request_local_pose(pose, source_id="native"):
+                self._set_proxy_pose(self.get_control_pose())
+        except (TypeError, ValueError) as error:
+            logger.log_warning(f"Ignoring invalid native Gizmo pose: {error}")
+
+    def _setup_native_gizmo(self) -> None:
+        native = self._require_native()
+        if self.target is None:
+            raise RuntimeError("Gizmo is detached.")
+        if self._target_type == "rigid_object":
+            native.follow(self.target._entities[0].node)
+        else:
+            label = "Robot" if self._target_type == "robot" else "Camera"
+            self._proxy_cube = self._create_proxy_cube(
+                self.get_control_pose(),
+                label,
+            )
+        native.set_flush_localpose_callback(self._native_pose_callback)
+
+    def _update_camera_pose(self, target_transform: torch.Tensor) -> bool:
+        if self.target is None or not isinstance(self.target, Camera):
+            return False
+        try:
+            self.target.set_local_pose(target_transform, env_ids=[0])
+            return True
+        except Exception as error:
+            logger.log_error(f"Error updating camera pose: {error}")
+            return False
+
+    def _update_rigid_object_pose(self, target_transform: torch.Tensor) -> bool:
+        if self.target is None or not isinstance(self.target, RigidObject):
+            return False
+        try:
+            self.target.set_local_pose(target_transform, env_ids=[0])
+            return True
+        except Exception as error:
+            logger.log_error(f"Error updating rigid object pose: {error}")
+            return False
+
+    def _update_robot_ik(self, target_transform: torch.Tensor) -> bool:
+        if self.target is None or not isinstance(self.target, Robot):
+            return False
+        if self._robot_arm_name is None:
+            return False
+        try:
+            current_qpos = self.target.get_proprioception()["qpos"]
+            joint_ids = self.target.get_joint_ids(self._robot_arm_name)
+            if len(joint_ids) == 0:
+                logger.log_warning(
+                    f"No joint IDs found for control part {self._robot_arm_name!r}."
+                )
+                return False
+            joint_seed = current_qpos[:, joint_ids]
+            result = self.target.compute_ik(
+                pose=target_transform,
+                name=self._robot_arm_name,
+                joint_seed=joint_seed,
+                env_ids=[0],
+            )
+            if result is None:
+                return False
+            success, new_qpos = result
+            if not bool(torch.as_tensor(success).reshape(-1)[0].item()):
+                logger.log_warning("Gizmo IK solution not found.")
+                return False
+            new_qpos = torch.as_tensor(
+                new_qpos,
+                dtype=torch.float32,
+                device=self._target_device(),
+            ).reshape(1, -1)
+            self.target.set_qpos(
+                qpos=new_qpos,
+                joint_ids=joint_ids,
+                env_ids=[0],
+            )
+            return True
+        except Exception as error:
+            logger.log_error(f"Error in Gizmo robot IK: {error}")
+            return False
+
+    def update(self) -> None:
+        """Apply the latest queued target pose on the simulation thread."""
+        with self._state_lock:
+            pending = self._pending_target_transform
+            self._pending_target_transform = None
+
+        if pending is not None:
+            if self._target_type == "rigid_object":
+                self._update_rigid_object_pose(pending)
+            elif self._target_type == "robot":
+                self._update_robot_ik(pending)
+            elif self._target_type == "camera":
+                self._update_camera_pose(pending)
+            self._set_proxy_pose(pending)
+
+        if self._gizmo is None or self.target is None:
+            return
+        if self._target_type == "rigid_object":
+            self._gizmo.follow(self.target._entities[0].node)
+        elif self._target_type == "camera" and pending is None:
+            self._set_proxy_pose(self._read_target_pose())
+
+    def attach(self, target: BatchEntity) -> None:
+        """Attach this Gizmo to a supported target."""
+        self.target = target
+        self._target_type = self._detect_target_type(target)
+        self._robot_arm_name = None
+        if self._target_type == "robot":
+            self._configure_robot()
+        with self._state_lock:
+            self._interaction_owner = None
+            self._pending_target_transform = None
+            self._desired_target_transform = self._read_target_pose()
+        if self._gizmo is not None:
+            self._remove_proxy_cube()
+            self._setup_native_gizmo()
+
+    def detach(self) -> None:
+        """Detach this Gizmo from its current target."""
+        if self._gizmo is not None:
+            self._gizmo.detach_parent()
+        self._remove_proxy_cube()
+        with self._state_lock:
+            self._interaction_owner = None
+            self._pending_target_transform = None
+        self.target = None
+
+    def _require_native(self) -> object:
+        if self._gizmo is None:
+            raise RuntimeError("This Gizmo was created without a native DexSim handle.")
+        return self._gizmo
+
+    def set_transform_callback(self, callback: Callable[..., Any]) -> None:
+        """Set a callback directly on the native transform handle."""
+        self._callback = callback
+        self._require_native().set_transform_flush_callback(callback)
+
+    def set_world_pose(self, pose: object) -> None:
+        """Set the native Gizmo world pose."""
+        self._require_native().set_world_pose(pose)
+
+    def set_local_pose(self, pose: object) -> None:
+        """Set the native Gizmo pose or queue it for a headless controller."""
+        if self._gizmo is None:
+            self.request_local_pose(pose, source_id="api")
+        else:
+            self._gizmo.set_local_pose(pose)
+
+    def set_line_width(self, width: float) -> None:
+        """Set the native Gizmo line width."""
+        self._require_native().set_line_width(width)
+
+    def enable_collision(self, enabled: bool) -> None:
+        """Enable or disable native Gizmo collision."""
+        self._require_native().enable_collision(enabled)
+
+    def get_world_pose(self) -> object:
+        """Return the native Gizmo world pose."""
+        return self._require_native().get_world_pose()
+
+    def get_local_pose(self) -> object:
+        """Return the native pose, or the logical local control pose."""
+        if self._gizmo is None:
+            return self.get_control_pose()
+        return self._gizmo.get_local_pose()
+
+    def get_name(self) -> object:
+        """Return the native Gizmo node name."""
+        return self._require_native().get_name()
+
+    def get_parent(self) -> object:
+        """Return the native Gizmo parent node."""
+        return self._require_native().get_parent()
+
+    def toggle_visibility(self) -> bool:
+        """Toggle visibility and return the new state."""
+        self.set_visible(not self._is_visible)
         return self._is_visible
 
-    def set_visible(self, visible: bool):
-        """
-        Set the visibility of the gizmo.
-
-        Args:
-            visible (bool): True to show, False to hide the gizmo
-        """
-        self._is_visible = visible
-
-        # Apply the visibility setting to the gizmo node
-        if self._gizmo:
+    def set_visible(self, visible: bool) -> None:
+        """Set native and Viser Gizmo visibility."""
+        self._is_visible = bool(visible)
+        if self._gizmo is not None:
             self._gizmo.set_visible(self._is_visible)
 
     def is_visible(self) -> bool:
-        """
-        Check if the gizmo is currently visible.
+        """Return whether this Gizmo should be visible."""
+        return self._is_visible
 
-        Returns:
-            bool: True if visible, False if hidden
-        """
-        return getattr(self, "_is_visible", True)
+    def apply_transform(
+        self,
+        translation: object,
+        rotation: object,
+    ) -> None:
+        """Apply a translation and XYZ Euler rotation through the shared path."""
+        matrix = np.eye(4, dtype=np.float32)
+        matrix[:3, 3] = np.asarray(translation, dtype=np.float32)
+        matrix[:3, :3] = Rotation.from_euler(
+            "xyz",
+            np.asarray(rotation, dtype=np.float32),
+        ).as_matrix()
+        self.request_local_pose(matrix, source_id="api")
 
-    def update(self):
-        """Synchronize gizmo with target's current transform, and handle IK solving here."""
-        if self._target_type == "rigidobject":
-            tgt_node = self.target._entities[0].node
-            self._gizmo.follow(tgt_node)
+    def _remove_proxy_cube(self) -> None:
+        if self._proxy_cube is None:
+            return
+        try:
+            if self._gizmo is not None:
+                self._gizmo.detach_parent()
+            self._env.remove_actor(self._proxy_cube)
+        except Exception as error:
+            logger.log_warning(f"Failed to remove Gizmo proxy: {error}")
+        self._proxy_cube = None
 
-        elif self._target_type == "robot":
-            # If there is a pending target, solve IK and clear it
-            if (
-                hasattr(self, "_pending_target_transform")
-                and self._pending_target_transform is not None
-            ):
-                self._update_robot_ik(self._pending_target_transform)
-                self._pending_target_transform = None
-        elif self._target_type == "camera":
-            # Update proxy cube position to match current camera pose
-            if hasattr(self, "_proxy_cube") and self._proxy_cube:
-                camera_pose = self.target.get_local_pose(to_matrix=True)[0]
-                camera_pos = camera_pose[:3, 3].cpu().numpy()
-                self._proxy_cube.set_location(
-                    camera_pos[0], camera_pos[1], camera_pos[2]
-                )
-
-            # If there is a pending camera target, update camera pose and clear it
-            if (
-                hasattr(self, "_pending_target_transform")
-                and self._pending_target_transform is not None
-            ):
-                self._update_camera_pose(self._pending_target_transform)
-                self._pending_target_transform = None
-
-    def apply_transform(self, translation, rotation):
-        """Apply transform based on target type"""
-        if self._target_type == "rigidobject":
-            self.target.set_location(*translation)
-            self.target.set_rotation_euler(*rotation)
-        elif self._target_type == "robot":
-            # Robot transforms are handled by IK in the gizmo callback
-            if hasattr(self, "_proxy_cube") and self._proxy_cube:
-                self._proxy_cube.set_location(*translation)
-                self._proxy_cube.set_rotation_euler(*rotation)
-        elif self._target_type == "camera":
-            # Camera transforms are handled by pose update in the gizmo callback
-            if hasattr(self, "_proxy_cube") and self._proxy_cube:
-                self._proxy_cube.set_location(*translation)
-                self._proxy_cube.set_rotation_euler(*rotation)
-        else:
-            # Other target types
-            pass
-
-    def destroy(self):
-        """Clean up gizmo resources and release references."""
-        # Clear transform callback first to avoid bad_function_call
-        if hasattr(self, "_gizmo") and self._gizmo and hasattr(self._gizmo, "node"):
+    def destroy(self) -> None:
+        """Release native resources and target references."""
+        if self._gizmo is not None and hasattr(self._gizmo, "node"):
             try:
-                # Clear transform callback before any other cleanup
                 self._gizmo.node.set_flush_transform_callback(None)
-                logger.log_info("Cleared gizmo transform callback")
-            except Exception as e:
-                logger.log_warning(f"Failed to clear gizmo callback: {e}")
-
-        # Remove proxy cube if exists (before detaching gizmo)
-        if hasattr(self, "_proxy_cube") and self._proxy_cube:
+            except Exception as error:
+                logger.log_warning(f"Failed to clear Gizmo callback: {error}")
+        self._remove_proxy_cube()
+        if self._gizmo is not None:
             try:
-                # Detach gizmo from proxy cube first
-                if (
-                    hasattr(self, "_gizmo")
-                    and self._gizmo
-                    and hasattr(self._gizmo, "node")
-                ):
-                    self._gizmo.detach_parent()
-                # Then remove the proxy cube
-                self._env.remove_actor(self._proxy_cube)
-                logger.log_info("Successfully removed proxy cube from environment")
-            except Exception as e:
-                logger.log_warning(f"Failed to remove proxy cube: {e}")
-            self._proxy_cube = None
-
-        # Final gizmo cleanup
-        if hasattr(self, "_gizmo") and self._gizmo and hasattr(self._gizmo, "node"):
-            try:
-                # Ensure detach_parent is called if not done above
-                if self._target_type in ["robot", "camera"]:
-                    pass  # Already detached above
-                else:
-                    self._gizmo.node.detach_parent()
-                logger.log_info("Successfully cleaned up gizmo node")
-            except Exception as e:
-                logger.log_warning(f"Failed to cleanup gizmo node: {e}")
-
-        # Clear pending transform
-        if hasattr(self, "_pending_target_transform"):
+                self._gizmo.detach_parent()
+            except Exception as error:
+                logger.log_warning(f"Failed to detach Gizmo: {error}")
+        with self._state_lock:
+            self._interaction_owner = None
             self._pending_target_transform = None
-
-        # Directly release references
+            self._desired_target_transform = None
         self._gizmo = None
         self.target = None

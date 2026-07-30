@@ -35,6 +35,11 @@ Usage examples::
         --asset_path /path/to/asset.usda \\
         --headless
 
+    # Preview in a browser with Viser
+    embodichain preview-asset \\
+        --asset_path /path/to/asset.usda \\
+        --viser
+
     # Preview with a built-in environment map
     embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
@@ -57,10 +62,11 @@ from typing import TYPE_CHECKING
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.objects import Articulation, RigidObject
+    from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
 
 
-def build_sim_cfg(args: argparse.Namespace):
+def build_sim_cfg(args: argparse.Namespace) -> SimulationManagerCfg:
     """Build a SimulationManagerCfg from CLI arguments.
 
     Args:
@@ -71,15 +77,20 @@ def build_sim_cfg(args: argparse.Namespace):
     """
     from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
+    from embodichain.lab.visualization import visualization_cfg_from_args
 
     return SimulationManagerCfg(
         headless=args.headless,
         sim_device=args.sim_device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
 
-def load_assets(sim: SimulationManager, args: argparse.Namespace):
+def load_assets(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+) -> list[RigidObject | Articulation]:
     """Load one or more assets into the simulation.
 
     URDF files are always loaded as articulations. Other file types use the
@@ -163,7 +174,10 @@ def load_assets(sim: SimulationManager, args: argparse.Namespace):
     return loaded_assets
 
 
-def preview(sim: SimulationManager, assets) -> None:
+def preview(
+    sim: SimulationManager,
+    assets: list[RigidObject | Articulation],
+) -> None:
     """Enter interactive preview mode.
 
     Provides a simple REPL:
@@ -205,6 +219,46 @@ def preview(sim: SimulationManager, assets) -> None:
             log_warning(f"Unknown command: {txt!r}")
 
 
+def _publish_loaded_assets(sim: SimulationManager, args: argparse.Namespace) -> None:
+    """Immediately publish assets loaded after Viser startup.
+
+    Args:
+        sim: Simulation manager containing the newly loaded assets.
+        args: Parsed CLI arguments.
+    """
+    if getattr(args, "viser", False):
+        sim.capture_visualization_safely(force=True)
+
+
+def _run_preview_mode(
+    sim: SimulationManager,
+    assets: list[RigidObject | Articulation],
+    args: argparse.Namespace,
+) -> None:
+    """Run the interactive REPL or keep the selected visualizer alive.
+
+    Args:
+        sim: Active simulation manager.
+        assets: Loaded assets exposed to the interactive REPL.
+        args: Parsed CLI arguments.
+    """
+    if args.preview:
+        preview(sim, assets)
+        return
+
+    viser_enabled = bool(getattr(args, "viser", False))
+    if args.headless and not viser_enabled:
+        return
+
+    target = "Viser browser preview" if viser_enabled else "Simulation window"
+    log_info(f"{target} open. Press Ctrl+C to exit.", color="green")
+    try:
+        while True:
+            sim.update(step=1)
+    except KeyboardInterrupt:
+        pass
+
+
 def main(args: argparse.Namespace) -> None:
     """Orchestrate: create simulation, load asset, optionally preview, destroy.
 
@@ -224,29 +278,15 @@ def main(args: argparse.Namespace) -> None:
 
         assets = load_assets(sim, args)
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
-
-        if args.preview:
-            preview(sim, assets)
-        elif not args.headless:
-            # Keep window open when not headless and not in preview mode
-            log_info("Window open. Press Ctrl+C to exit.", color="green")
-            try:
-                while True:
-                    sim.update(step=1)
-            except KeyboardInterrupt:
-                pass
+        _publish_loaded_assets(sim, args)
+        _run_preview_mode(sim, assets, args)
     finally:
         log_info("Destroying simulation ...", color="green")
         sim.destroy()
 
 
-def cli(argv: Sequence[str] | None = None) -> None:
-    """Command-line interface for asset preview.
-
-    Args:
-        argv: Arguments excluding the command name. Uses ``sys.argv`` when
-            omitted.
-    """
+def _create_parser() -> argparse.ArgumentParser:
+    """Create the complete asset-preview argument parser."""
     parser = argparse.ArgumentParser(
         prog="embodichain preview-asset",
         description="Preview a USD or mesh asset in the EmbodiChain simulation.",
@@ -351,7 +391,20 @@ def cli(argv: Sequence[str] | None = None) -> None:
         help="Enter interactive embed mode after loading.",
     )
 
-    args = parser.parse_args(argv)
+    from embodichain.lab.visualization import add_viser_args_to_parser
+
+    add_viser_args_to_parser(parser)
+    return parser
+
+
+def cli(argv: Sequence[str] | None = None) -> None:
+    """Command-line interface for asset preview.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+    """
+    args = _create_parser().parse_args(argv)
 
     main(args)
 

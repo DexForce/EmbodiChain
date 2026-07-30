@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -32,9 +34,15 @@ from embodichain.lab.sim import (
     BatchEntity,
 )
 from embodichain.lab.sim.material import VisualMaterial, VisualMaterialInst
+from ._mesh_utils import (
+    get_combined_triangles,
+    get_combined_vertices,
+)
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
+
+__all__ = ["RigidBodyGroupData", "RigidObjectGroup", "RigidObjectGroupCfg"]
 
 
 @dataclass
@@ -395,6 +403,70 @@ class RigidObjectGroup(BatchEntity):
             pose[:, :3, :3] = mat
             pose = pose.reshape(self.num_instances, self.num_objects, 4, 4)
         return pose
+
+    def get_object_vertices(
+        self,
+        object_id: int,
+        env_ids: Sequence[int] | None = None,
+        scale: bool = False,
+    ) -> torch.Tensor:
+        """Get one constituent object's vertices across selected environments.
+
+        Args:
+            object_id: Constituent object index within the group.
+            env_ids: Environment indices. If ``None``, returns all instances.
+            scale: Whether to apply each object's body scale.
+
+        Returns:
+            Vertices with shape ``(N, num_vertices, 3)``.
+        """
+        if not 0 <= object_id < self.num_objects:
+            raise IndexError(
+                f"object_id {object_id} is outside [0, {self.num_objects - 1}]."
+            )
+        ids = self._all_indices if env_ids is None else env_ids
+        vertices = np.asarray(
+            [
+                get_combined_vertices(self._entities[env_id][object_id])
+                for env_id in ids
+            ],
+            dtype=np.float32,
+        )
+        if scale:
+            scales = np.asarray(
+                [self._entities[env_id][object_id].get_body_scale() for env_id in ids],
+                dtype=np.float32,
+            )
+            vertices = vertices * scales[:, None, :]
+        return torch.as_tensor(vertices, dtype=torch.float32, device=self.device)
+
+    def get_object_triangles(
+        self,
+        object_id: int,
+        env_ids: Sequence[int] | None = None,
+    ) -> torch.Tensor:
+        """Get one constituent object's triangle indices.
+
+        Args:
+            object_id: Constituent object index within the group.
+            env_ids: Environment indices. If ``None``, returns all instances.
+
+        Returns:
+            Triangle indices with shape ``(N, num_triangles, 3)``.
+        """
+        if not 0 <= object_id < self.num_objects:
+            raise IndexError(
+                f"object_id {object_id} is outside [0, {self.num_objects - 1}]."
+            )
+        ids = self._all_indices if env_ids is None else env_ids
+        triangles = np.asarray(
+            [
+                get_combined_triangles(self._entities[env_id][object_id])
+                for env_id in ids
+            ],
+            dtype=np.int32,
+        )
+        return torch.as_tensor(triangles, dtype=torch.int32, device=self.device)
 
     def get_user_ids(self) -> torch.Tensor:
         """Get the user ids of the rigid body group.

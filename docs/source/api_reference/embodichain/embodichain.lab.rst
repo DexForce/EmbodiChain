@@ -10,6 +10,15 @@
       devices
       gym
       sim
+      visualization
+
+Browser Visualization
+---------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.visualization
 
 Device Management
 -----------------

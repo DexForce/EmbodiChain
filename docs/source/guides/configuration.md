@@ -35,7 +35,8 @@ EmbodiedEnvCfg
 ├── sim_cfg: SimulationManagerCfg
 │   ├── render_cfg: RenderCfg
 │   ├── physics_config: PhysicsCfg
-│   └── gpu_memory_config: GPUMemoryCfg
+│   ├── gpu_memory_config: GPUMemoryCfg
+│   └── visualization: VisualizationCfg
 ├── robot: RobotCfg
 │   ├── urdf_cfg: URDFCfg
 │   ├── drive_pros: JointDrivePropertiesCfg
@@ -158,6 +159,17 @@ When a training config references a gym config (via `trainer.gym_config`), the n
         "tone_mapping_enabled": false,
         "tone_mapping_exposure": 1.0
     },
+    "visualization": {
+        "backend": "viser",
+        "scene_fps": 15.0,
+        "sensor_image_fps": 2.0,
+        "soft_body_fps": 5.0,
+        "env_ids": [0],
+        "viser_server": {
+            "host": "127.0.0.1",
+            "port": 8080
+        }
+    },
     "robot": {
         "uid": "robot",
         "urdf_cfg": {
@@ -228,6 +240,22 @@ When a training config references a gym config (via `trainer.gym_config`), the n
     }
 }
 ```
+
+The `visualization` section is optional and defaults to
+`{"backend": "none"}`. Setting `"backend": "viser"` starts browser
+visualization when the environment constructs its `SimulationManager`. The
+`--viser*` command-line options override these values for
+`embodichain run-env`.
+
+Set `sensor_image_fps` to `null` to capture camera previews once per eligible
+simulation step instead of applying a wall-clock FPS limit. `run-env --viser`
+uses this step-synchronized mode by default when neither the configuration nor
+`--viser-image-fps` supplies a rate.
+
+Keep `viser_server.host` on loopback for remote workers and use SSH port
+forwarding unless the service is behind an authenticated gateway. See
+[Browser visualization with Viser](../overview/sim/viser_visualization.md) for
+the full schema, supported scene content, and deformable-object behavior.
 
 ### RL Training Config (`train_config.json` / `train_config.yaml`)
 
@@ -342,5 +370,6 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 
 - [Custom Functors Guide](custom_functors.md) — How to write observation, reward, event, and action functors
 - [Embodied Environments](../overview/gym/env.md) — Full environment configuration reference
+- [Browser Visualization](../overview/sim/viser_visualization.md) — Viser configuration and runtime behavior
 - [Tutorial: Modular Environment](../tutorial/modular_env.rst) — Complete example using config-driven setup
 - [Tutorial: RL Training](../tutorial/rl.rst) — RL training configuration walkthrough

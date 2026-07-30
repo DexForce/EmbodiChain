@@ -17,12 +17,15 @@
 Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
 """
 
+from __future__ import annotations
+
 import time
 import torch
 import numpy as np
 import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.solvers import PytorchSolverCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -50,9 +53,11 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
+        headless=True,
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
     sim = SimulationManager(sim_cfg)
@@ -109,16 +114,28 @@ def main():
 
     time.sleep(0.2)  # Wait for a moment to ensure everything is set up
 
-    # Enable gizmo using the new API
-    sim.enable_gizmo(uid="ur10_gizmo_test", control_part="arm")
-    if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
-        logger.log_error("Failed to enable gizmo!")
-        return
+    native_window_opened = False
+    if not args.headless:
+        native_window_opened = sim.open_window()
 
-    sim.open_window()
+    # Enable gizmo using the new API
+    if native_window_opened or args.viser:
+        sim.enable_gizmo(
+            uid="ur10_gizmo_test",
+            control_part="arm",
+            enable_native=native_window_opened,
+        )
+        if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
+            logger.log_error("Failed to enable gizmo!")
+            return
+    else:
+        logger.log_warning(
+            "Gizmo interaction is disabled in headless mode without Viser."
+        )
 
     logger.log_info("Gizmo-Robot example started!")
-    logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    if native_window_opened or args.viser:
+        logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     run_simulation(sim)
@@ -133,6 +150,7 @@ def run_simulation(sim: SimulationManager):
             time.sleep(0.033)  # 30Hz
             # Update all gizmos managed by sim
             sim.update_gizmos()
+            sim.capture_visualization_safely()
             step_count += 1
 
             if step_count % 100 == 0:

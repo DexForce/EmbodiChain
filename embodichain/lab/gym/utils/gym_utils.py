@@ -415,6 +415,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         RenderCfg,
     )
     from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.visualization import VisualizationCfg, ViserServerCfg
     from embodichain.lab.sim.sensors import SensorCfg
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.gym.envs.managers import (
@@ -457,6 +458,17 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
 
+    visualization_config = deepcopy(config.get("visualization", {}))
+    legacy_server_config = visualization_config.pop("server", None)
+    viser_server_config = visualization_config.pop(
+        "viser_server",
+        legacy_server_config if legacy_server_config is not None else {},
+    )
+    if isinstance(viser_server_config, ViserServerCfg):
+        viser_server = viser_server_config
+    else:
+        viser_server = ViserServerCfg(**viser_server_config)
+
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=config.get("headless", False),
         sim_device=config.get("device", "cpu"),
@@ -464,6 +476,10 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
         physics_config=PhysicsCfg(**physics_config),
+        visualization=VisualizationCfg(
+            **visualization_config,
+            viser_server=viser_server,
+        ),
     )
 
     # parser robot config
@@ -804,6 +820,8 @@ def add_env_launcher_args_to_parser(
         --preview: Whether to preview the environment after launching (default: False)
         --filter_visual_rand: Whether to filter out visual randomization (default: False)
         --filter_dataset_saving: Whether to filter out dataset saving (default: False)
+        --viser: Whether to expose the environment through Viser (default: False)
+        --viser-*: Viser server, update-rate, and environment selection options
 
     Note:
         1. In preview mode, the environment will be launched and keep running in a loop for user interaction.
@@ -921,6 +939,10 @@ def add_env_launcher_args_to_parser(
         type=str,
     )
 
+    from embodichain.lab.visualization.cli import add_viser_args_to_parser
+
+    add_viser_args_to_parser(parser)
+
 
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
     """Merge command-line arguments with gym configuration.
@@ -938,13 +960,39 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
     merged_config["device"] = args.device
-    merged_config["headless"] = args.headless
+    viser_enabled = bool(getattr(args, "viser", False))
+    merged_config["headless"] = args.headless or viser_enabled
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
         merged_config["max_episodes"] = args.max_episodes
+    if viser_enabled:
+        from embodichain.lab.visualization.cli import visualization_cfg_from_args
+
+        cli_visualization = visualization_cfg_from_args(args)
+        visualization = deepcopy(merged_config.get("visualization", {}))
+        visualization["backend"] = cli_visualization.backend
+        visualization["scene_fps"] = cli_visualization.scene_fps
+        if (
+            cli_visualization.sensor_image_fps is not None
+            or "sensor_image_fps" not in visualization
+        ):
+            visualization["sensor_image_fps"] = cli_visualization.sensor_image_fps
+        visualization["soft_body_fps"] = cli_visualization.soft_body_fps
+        visualization["env_ids"] = (
+            None
+            if cli_visualization.env_ids is None
+            else list(cli_visualization.env_ids)
+        )
+        visualization["allow_commands"] = cli_visualization.allow_commands
+        legacy_server = visualization.pop("server", {})
+        viser_server = deepcopy(visualization.get("viser_server", legacy_server))
+        viser_server["host"] = cli_visualization.viser_server.host
+        viser_server["port"] = cli_visualization.viser_server.port
+        visualization["viser_server"] = viser_server
+        merged_config["visualization"] = visualization
     return merged_config
 
 

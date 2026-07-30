@@ -300,6 +300,63 @@ def test_merge_args_with_gym_config_keeps_default_max_episodes():
     assert merged_config["max_episodes"] == 3
 
 
+def test_merge_args_with_gym_config_enables_headless_viser():
+    """The --viser options are translated into simulation configuration."""
+    args = argparse.Namespace(
+        num_envs=4,
+        device="cpu",
+        headless=False,
+        renderer=None,
+        gpu_id=0,
+        arena_space=5.0,
+        max_episodes=None,
+        viser=True,
+        viser_host="0.0.0.0",
+        viser_port=9000,
+        viser_fps=12.5,
+        viser_image_fps=1.5,
+        viser_soft_body_fps=4.0,
+        viser_env_ids=[1, 3],
+    )
+
+    merged_config = merge_args_with_gym_config(args, {"id": "Dummy-v0"})
+
+    assert merged_config["headless"] is True
+    assert merged_config["visualization"] == {
+        "backend": "viser",
+        "scene_fps": 12.5,
+        "sensor_image_fps": 1.5,
+        "soft_body_fps": 4.0,
+        "env_ids": [1, 3],
+        "allow_commands": True,
+        "viser_server": {"host": "0.0.0.0", "port": 9000},
+    }
+
+
+def test_merge_args_with_gym_config_accepts_all_viser_environments():
+    """The all selector is preserved as an unbounded environment selection."""
+    args = argparse.Namespace(
+        num_envs=1024,
+        device="cpu",
+        headless=False,
+        renderer=None,
+        gpu_id=0,
+        arena_space=5.0,
+        max_episodes=None,
+        viser=True,
+        viser_host="127.0.0.1",
+        viser_port=8080,
+        viser_fps=15.0,
+        viser_image_fps=2.0,
+        viser_soft_body_fps=5.0,
+        viser_env_ids=["all"],
+    )
+
+    merged_config = merge_args_with_gym_config(args, {"id": "Dummy-v0"})
+
+    assert merged_config["visualization"]["env_ids"] is None
+
+
 def test_launcher_preserves_gym_renderer_when_cli_omits_override():
     """A required gym config supplies the renderer unless CLI overrides it."""
     parser = argparse.ArgumentParser()
@@ -312,6 +369,52 @@ def test_launcher_preserves_gym_renderer_when_cli_omits_override():
     assert args.renderer is None
     assert "renderer" not in merged_config
     assert merged_config["render_cfg"]["renderer"] == "rt"
+
+
+def test_env_launcher_includes_viser_arguments():
+    """The common environment launcher registers Viser options by default."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+
+    args = parser.parse_args(
+        [
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            "9000",
+            "--viser-fps",
+            "12.5",
+            "--viser-image-fps",
+            "1.5",
+            "--viser-soft-body-fps",
+            "4.0",
+            "--viser-env-ids",
+            "1",
+            "3",
+        ]
+    )
+
+    assert args.viser is True
+    assert not hasattr(args, "viser_gizmo")
+    assert args.viser_host == "0.0.0.0"
+    assert args.viser_port == 9000
+    assert args.viser_fps == 12.5
+    assert args.viser_image_fps == 1.5
+    assert args.viser_soft_body_fps == 4.0
+    assert args.viser_env_ids == [1, 3]
+
+
+def test_viser_launcher_flag_implies_headless_viser_commands():
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+
+    args = parser.parse_args(["--viser"])
+    merged_config = merge_args_with_gym_config(args, {"id": "Dummy-v0"})
+
+    assert merged_config["headless"] is True
+    assert merged_config["visualization"]["backend"] == "viser"
+    assert merged_config["visualization"]["allow_commands"] is True
 
 
 def test_sensor_and_extra_obs_together():
@@ -422,6 +525,14 @@ class TestConfigToCfgFromFile:
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
             },
+            "visualization": {
+                "backend": "viser",
+                "scene_fps": 12.5,
+                "viser_server": {
+                    "host": "0.0.0.0",
+                    "port": 9000,
+                },
+            },
             "env": {
                 "events": {},
                 "observations": {},
@@ -462,6 +573,10 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
+        assert cfg.sim_cfg.visualization.backend == "viser"
+        assert cfg.sim_cfg.visualization.scene_fps == 12.5
+        assert cfg.sim_cfg.visualization.viser_server.host == "0.0.0.0"
+        assert cfg.sim_cfg.visualization.viser_server.port == 9000
 
     def test_json_dataset_save_failed_episodes_parses_from_top_level(self, tmp_path):
         config = {
