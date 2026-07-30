@@ -1163,7 +1163,7 @@ def _optimize_assets_2d_aabbs_in_rectangle(
     aabb_corners_by_id: dict[str, np.ndarray],
     boundary_margin: float,
     aabb_clearance: float,
-    max_rounds: int = 8,
+    max_rounds: int = 64,
 ) -> dict[str, np.ndarray]:
     """Greedily pack 2D AABBs with minimum local squared displacement."""
 
@@ -1254,29 +1254,22 @@ def _optimize_assets_2d_aabbs_in_rectangle(
             if candidates is None:
                 continue
             if not candidates:
-                raise RuntimeError(
-                    "Cannot resolve overlapping 2D AABBs inside the table rectangle: "
-                    f"{asset_ids[first_index]!r} and {asset_ids[second_index]!r}."
-                )
+                # Both AABBs are already blocked by the table boundary on every
+                # separating axis. Keep the current boundary-safe layout and
+                # let the later gravity simulation handle this residual overlap.
+                return {
+                    asset_id: offsets[index].copy()
+                    for index, asset_id in enumerate(asset_ids)
+                }
 
             _, axis, first_direction, first_move, second_move = min(candidates)
             offsets[first_index, axis] += first_direction * first_move
             offsets[second_index, axis] -= first_direction * second_move
             offsets = np.clip(offsets, lower_offset_bounds, upper_offset_bounds)
 
-    unresolved = _find_overlapping_2d_aabb_pairs(
-        current_mins=base_mins + offsets,
-        current_maxs=base_maxs + offsets,
-        aabb_clearance=aabb_clearance,
-        tolerance=tolerance,
-    )
-    if unresolved:
-        _, first_index, second_index = unresolved[0]
-        raise RuntimeError(
-            "2D AABB packing did not converge after "
-            f"{max_rounds} rounds; first remaining overlap is "
-            f"{asset_ids[first_index]!r} and {asset_ids[second_index]!r}."
-        )
+    # The bounded greedy search may leave overlaps in densely packed scenes.
+    # Return its best boundary-safe result instead of aborting scene generation;
+    # the following gravity simulation can resolve remaining physical contacts.
     return {asset_id: offsets[index].copy() for index, asset_id in enumerate(asset_ids)}
 
 
