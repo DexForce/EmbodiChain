@@ -55,7 +55,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg, URSolverCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     create_antipodal_semantics,
@@ -70,8 +70,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
-BUG_TCP_X_OFFSET = 0.00
-GRIPPER_TCP_Z = 0.155
+GRIPPER_TCP_Z = 0.15
 ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
@@ -164,7 +163,7 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
     arm_urdf_path = ARM_URDF_PATH
     gripper_urdf_path = GRIPPER_URDF_PATH
     tcp = [
-        [1.0, 0.0, 0.0, BUG_TCP_X_OFFSET],
+        [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
         [0.0, 0.0, 0.0, 1.0],
@@ -218,18 +217,6 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
             "right_hand": ["RIGHT_GRIPPER_FINGER1_JOINT_1"],
         },
         solver_cfg={
-            # "left_arm": PytorchSolverCfg(
-            #     end_link_name="left_ee_link",
-            #     root_link_name="left_base_link",
-            #     tcp=tcp,
-            #     ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
-            # ),
-            # "right_arm": PytorchSolverCfg(
-            #     end_link_name="right_ee_link",
-            #     root_link_name="right_base_link",
-            #     tcp=tcp,
-            #     ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
-            # ),
             "left_arm": URSolverCfg(
                 ur_type="ur5",
                 tcp=tcp,

@@ -41,7 +41,6 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     GraspTarget,
-    Affordance,
     AtomicActionEngine,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
@@ -55,7 +54,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -296,17 +295,19 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
             "right_hand": ["RIGHT_GRIPPER_FINGER1_JOINT_1"],
         },
         solver_cfg={
-            "left_arm": PytorchSolverCfg(
+            "left_arm": URSolverCfg(
+                ur_type="ur5",
+                tcp=tcp,
                 end_link_name="left_ee_link",
                 root_link_name="left_base_link",
-                tcp=tcp,
-                num_samples=30,
+                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
             ),
-            "right_arm": PytorchSolverCfg(
+            "right_arm": URSolverCfg(
+                ur_type="ur5",
+                tcp=tcp,
                 end_link_name="right_ee_link",
                 root_link_name="right_base_link",
-                tcp=tcp,
-                num_samples=30,
+                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
             ),
         },
         init_pos=list(ROBOT_INIT_POS),
