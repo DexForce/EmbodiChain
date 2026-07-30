@@ -102,7 +102,9 @@ def _config_entries(
     if not isinstance(entries, list) or not all(
         isinstance(entry, dict) for entry in entries
     ):
-        raise ValueError(f"Scene config field {field_name!r} must be a list of objects.")
+        raise ValueError(
+            f"Scene config field {field_name!r} must be a list of objects."
+        )
     return entries
 
 
