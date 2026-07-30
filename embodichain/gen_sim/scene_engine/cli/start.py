@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
 
 from embodichain.gen_sim.scene_engine.pipeline.generate import generate_scene_from_image
@@ -57,8 +58,9 @@ def cli_scene_engine(
     print("Successfully completed!")
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
+        prog="embodichain scene-engine",
         description="embodichain.gen_sim.scene_engine Scene Engine Pipeline"
     )
     parser.add_argument(
@@ -82,7 +84,7 @@ def main() -> None:
             "image_segmentation, and geometry_generation service settings."
         ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cli_scene_engine(args.image, args.output_root, config_path=args.config)
 

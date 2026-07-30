@@ -22,6 +22,7 @@ import json
 import math
 from pathlib import Path
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -178,9 +179,10 @@ def _vector3(value: object, *, field_name: str) -> list[float]:
         raise ValueError(f"Scene config field {field_name!r} must be numeric.") from exc
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="Preview a Scene Engine scene-only export in EmbodiChain simulation."
+        prog="embodichain preview-scene",
+        description="Preview a Scene Engine scene export in EmbodiChain simulation.",
     )
     parser.add_argument(
         "output_root",
@@ -197,7 +199,7 @@ def main() -> None:
         action="store_true",
         help="Load and validate the exported scene without opening a window.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     preview_scene_export(
         output_root=args.output_root,
         device=args.device,
