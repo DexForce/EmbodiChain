@@ -34,6 +34,8 @@ The simulation stack can be read from the bottom up:
     |-- sensors
     |   |-- cameras and stereo cameras
     |   `-- contact sensors
+    |-- browser visualization
+    |   `-- Viser scene, cameras, overlays, and runtime telemetry
     |-- solvers
     |   |-- forward kinematics
     |   |-- inverse kinematics
@@ -112,6 +114,8 @@ Choosing Where to Start
 - Use :doc:`sim_assets` when adding physical entities, materials, lights, or USD
   assets. The asset pages underneath it cover each object family in detail.
 - Use :doc:`sim_sensor` when adding camera, stereo, or contact observations.
+- Use :doc:`viser_visualization` when inspecting a headless or remote scene in
+  a browser.
 - Use :doc:`solvers/index` when a robot needs FK, IK, or velocity-level
   kinematics.
 - Use :doc:`planners/index` when a target pose or joint goal must become a
@@ -138,6 +142,7 @@ See Also
    sim_manager.md
    sim_assets.md
    sim_sensor.md
+   viser_visualization.md
    solvers/index
    planners/index
    atomic_actions/index

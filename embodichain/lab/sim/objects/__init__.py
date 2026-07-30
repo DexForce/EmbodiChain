@@ -26,7 +26,7 @@ from .cloth_object import ClothObject, ClothBodyData, ClothObjectCfg
 from .articulation import Articulation, ArticulationData, ArticulationCfg
 from .robot import Robot, RobotCfg
 from .light import Light, LightCfg
-from .gizmo import Gizmo
+from .gizmo import Gizmo, GizmoCfg
 from .constraint import RigidConstraint
 
 

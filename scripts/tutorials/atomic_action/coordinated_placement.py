@@ -985,6 +985,7 @@ def run_coordinated_placement_demo(
             sim,
             support_target_pose,
             placing_target_pose,
+            num_envs=n_envs,
         )
     coordinated_target = CoordinatedPlacementTarget(
         placing_object_target_pose=broadcast_pose_batch(
