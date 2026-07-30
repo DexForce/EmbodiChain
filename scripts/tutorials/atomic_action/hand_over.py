@@ -70,6 +70,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
+BUG_TCP_X_OFFSET = 0.01
 GRIPPER_TCP_Z = 0.155
 ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
@@ -97,13 +98,13 @@ FINAL_OBJECT_YAW_DEG = 0.0
 HAND_CLOSE_QPOS = 0.026
 PICKUP_SAMPLE_INTERVAL = 80
 PICKUP_HAND_INTERP_STEPS = 5
-PICKUP_PRE_GRASP_DISTANCE = 0.2
+PICKUP_PRE_GRASP_DISTANCE = 0.08
 PICKUP_LIFT_HEIGHT = 0.1
 HANDOVER_SAMPLE_INTERVAL = 140
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_HOLD_STEPS = 4
 HANDOVER_RETREAT_STEPS = 28
-HANDOVER_PRE_GRASP_DISTANCE = 0.2
+HANDOVER_PRE_GRASP_DISTANCE = 0.08
 HANDOVER_LIFT_HEIGHT = 0.08
 TRAJECTORY_SIM_STEPS = 4
 HANDOVER_RECORD_LOOK_AT = (
@@ -163,7 +164,7 @@ def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
     arm_urdf_path = ARM_URDF_PATH
     gripper_urdf_path = GRIPPER_URDF_PATH
     tcp = [
-        [1.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, BUG_TCP_X_OFFSET],
         [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
         [0.0, 0.0, 0.0, 1.0],
