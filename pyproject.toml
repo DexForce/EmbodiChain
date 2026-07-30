@@ -78,7 +78,9 @@ curobo-cu13-torch = [
 # ``embodichain run-env`` discovers all installed task packages (via the
 # ``embodichain.tasks`` entry points) and runs their init hooks (via
 # ``embodichain.init``) before building and launching the environment.
-# Other sub-commands: preview-asset, annotate-grasp, train-rl.
+# Other commands cover data assets, SimReady generation, asset preview,
+# grasp annotation, RL training, URDF convex decomposition, benchmarks, and
+# workspace cache management.
 embodichain = "embodichain.__main__:main"
 
 [tool.uv.sources]

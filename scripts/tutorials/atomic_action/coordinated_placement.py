@@ -982,7 +982,10 @@ def run_coordinated_placement_demo(
     )
     if not args.auto_play and not args.no_vis_eef_axis:
         draw_coordinated_axes(
-            sim, support_target_pose, placing_target_pose, sim.num_envs
+            sim,
+            support_target_pose,
+            placing_target_pose,
+            num_envs=n_envs,
         )
     coordinated_target = CoordinatedPlacementTarget(
         placing_object_target_pose=broadcast_pose_batch(

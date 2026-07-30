@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
 import os
 import xml.etree.ElementTree as ET
 import open3d as o3d
@@ -322,48 +325,9 @@ class URDFModifider:
 
 
 if __name__ == "__main__":
-    import argparse
+    from embodichain.toolkits.acd.cli import main
 
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a camera with gizmo in SimulationManager"
-    )
-    parser.add_argument(
-        "--urdf_path",
-        type=str,
-        help="Input urdf file path",
-    )
-    parser.add_argument(
-        "--output_urdf_name",
-        type=str,
-        default="articulation_acd.urdf",
-        help="Output urdf file name, ",
-    )
-    parser.add_argument(
-        "--max_convex_hull_num",
-        type=int,
-        default=8,
-        help="Maximum number of convex hulls for decomposition",
-    )
-    parser.add_argument(
-        "--recompute_inertia",
-        default=False,
-        action="store_true",
-        help="Whether to recompute inertia after convex decomposition",
-    )
+    main()
 
-    parser.add_argument(
-        "--scale",
-        type=float,
-        nargs=3,
-        default=None,
-        help="Scale the urdf by [scale_x, scale_y, scale_z]",
-    )
 
-    args = parser.parse_args()
-    generate_urdf_collision_convexes(
-        args.urdf_path,
-        args.output_urdf_name,
-        max_convex_hull_num=args.max_convex_hull_num,
-        recompute_inertia=args.recompute_inertia,
-        scale=args.scale,
-    )
+__all__ = ["URDFModifider", "generate_urdf_collision_convexes"]

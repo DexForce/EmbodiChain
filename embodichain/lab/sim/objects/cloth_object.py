@@ -27,6 +27,7 @@ from typing import List, Sequence, Union
 from dexsim.models import MeshObject
 from dexsim.engine import ClothBody, PhysicsScene
 from dexsim.types import ClothBodyGPUAPIReadWriteType
+from scipy.spatial import cKDTree
 from embodichain.lab.sim.common import (
     BatchEntity,
 )
@@ -45,6 +46,8 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
 )
 from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+__all__ = ["ClothBodyData", "ClothObject", "ClothObjectCfg"]
 
 
 @dataclass
@@ -133,6 +136,10 @@ class ClothObject(BatchEntity):
         self._data = ClothBodyData(entities=entities, ps=self._ps, device=device)
 
         self._world.update(0.001)
+        self._surface_triangles = self._build_surface_triangles(
+            entities[0],
+            self._data.rest_vertices[0].detach().cpu().numpy(),
+        )
 
         self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
         self.is_shared_visual_material = False
@@ -142,6 +149,39 @@ class ClothObject(BatchEntity):
         self._initialize_existing_visual_material()
 
         self._set_default_collision_filter()
+
+    @staticmethod
+    def _build_surface_triangles(
+        entity: MeshObject,
+        rest_vertices: np.ndarray,
+    ) -> np.ndarray:
+        """Map render triangles onto DexSim's welded cloth vertex buffer."""
+        render_body = entity.get_render_body()
+        render_vertices: list[np.ndarray] = []
+        render_triangles: list[np.ndarray] = []
+        vertex_offset = 0
+        for mesh_id in range(render_body.get_mesh_count()):
+            vertices = np.asarray(
+                render_body.get_vertices(mesh_id),
+                dtype=np.float32,
+            )
+            triangles = np.asarray(
+                render_body.get_triangles(mesh_id),
+                dtype=np.int64,
+            )
+            render_vertices.append(vertices)
+            render_triangles.append(triangles + vertex_offset)
+            vertex_offset += len(vertices)
+
+        vertices = np.concatenate(render_vertices, axis=0)
+        triangles = np.concatenate(render_triangles, axis=0)
+        distances, cloth_vertex_ids = cKDTree(rest_vertices).query(vertices)
+        scale = max(float(np.ptp(rest_vertices, axis=0).max()), 1.0)
+        if float(distances.max(initial=0.0)) > scale * 1.0e-5:
+            raise RuntimeError(
+                "Could not map cloth render vertices onto the physical vertex buffer."
+            )
+        return np.asarray(cloth_vertex_ids[triangles], dtype=np.int32)
 
     def _initialize_existing_visual_material(self) -> None:
         """Wrap asset-parsed materials during cloth-object construction.
@@ -293,6 +333,23 @@ class ClothObject(BatchEntity):
             torch.Tensor: The current vertex velocity of the cloth bodies, shape (num_instances, n_vertices, 3).
         """
         return self._data.vertex_velocity
+
+    def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get surface triangle indices for selected cloth instances.
+
+        Args:
+            env_ids: Environment indices. If ``None``, returns all instances.
+
+        Returns:
+            Triangle indices with shape ``(N, num_triangles, 3)``.
+        """
+        ids = self._all_indices if env_ids is None else env_ids
+        triangles = torch.as_tensor(
+            self._surface_triangles,
+            dtype=torch.int32,
+            device=self.device,
+        )
+        return triangles.unsqueeze(0).expand(len(ids), -1, -1).clone()
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None

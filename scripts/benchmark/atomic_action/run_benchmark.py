@@ -17,7 +17,7 @@
 """Dispatch benchmarks for all atomic actions.
 
 Run a single action benchmark or all action benchmarks in sequence.
-Run: python -m scripts.benchmark.atomic_action.run_benchmark --action press
+Run: embodichain benchmark atomic-action --action press
 """
 
 from __future__ import annotations

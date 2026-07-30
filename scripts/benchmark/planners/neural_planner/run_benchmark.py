@@ -35,8 +35,7 @@ Output
 
 Run::
 
-    python -m scripts.benchmark planners-neural-planner
-    python -m scripts.benchmark.planners.neural_planner.run_benchmark
+    embodichain benchmark planners-neural-planner
 """
 
 from __future__ import annotations

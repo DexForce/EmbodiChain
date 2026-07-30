@@ -83,7 +83,17 @@ Important parameters are:
 - **env.control_parts**: Controlled robot parts in the environment.
 
 
-In the current implementation, ``LeRobotRecorder`` stores robot state and action features following LeRobot official format: ``observation.state`` for joint positions, ``action`` for applied actions, and ``observation.images.{sensor_name}`` for camera images.
+``LeRobotRecorder`` stores robot state and action features following the LeRobot
+format: ``observation.state`` for joint positions, ``action`` for applied
+actions, and ``observation.images.{sensor_name}`` for RGB camera images. When a
+camera also produces depth or segmentation data, the recorder preserves those
+arrays: masks are always stored as exact numeric features under
+``observation.mask.{sensor_name}``, while depth is stored either as a numeric
+feature (``observation.depth.{sensor_name}``, the default) or as compressed
+``gray12le``/HEVC sidecar videos when ``dataset.lerobot.params.depth_video.enable``
+is set (issue #424, Path A). Stereo-camera keys use the ``_right`` suffix. The
+``use_videos`` option applies only to RGB images; see
+:doc:`/overview/gym/dataset_functors` for the depth sidecar configuration.
 
 Step 2: Prepare the Action Configuration
 ----------------------------------------
@@ -142,7 +152,7 @@ The recommended CLI entrypoint is:
 
 .. code-block:: bash
 
-   python -m embodichain run-env \
+   embodichain run-env \
        --gym_config embodichain_tasks/configs/gym/pour_water/gym_config.json \
        --action_config embodichain_tasks/configs/gym/pour_water/action_config.json \
        --headless

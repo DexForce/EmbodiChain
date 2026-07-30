@@ -16,11 +16,13 @@
 
 from __future__ import annotations
 
+import os
 import numpy as np
 import torch
 import dexsim
 import argparse
 import gymnasium
+import gymnasium as gym
 
 from typing import Callable, Dict, Any, List, Tuple, Union, Sequence
 from gymnasium import spaces
@@ -409,7 +411,11 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
+        PhysicsCfg,
+        RenderCfg,
     )
+    from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.visualization import VisualizationCfg, ViserServerCfg
     from embodichain.lab.sim.sensors import SensorCfg
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
     from embodichain.lab.gym.envs.managers import (
@@ -442,6 +448,39 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
+
+    physics_config = deepcopy(config.get("physics_config", {}))
+    if "gravity" in physics_config:
+        physics_config["gravity"] = np.asarray(physics_config["gravity"])
+
+    render_config = deepcopy(config.get("render_cfg", {}))
+    if "renderer" in config:
+        # Keep the existing flat renderer option as the command-line override.
+        render_config["renderer"] = config["renderer"]
+
+    visualization_config = deepcopy(config.get("visualization", {}))
+    legacy_server_config = visualization_config.pop("server", None)
+    viser_server_config = visualization_config.pop(
+        "viser_server",
+        legacy_server_config if legacy_server_config is not None else {},
+    )
+    if isinstance(viser_server_config, ViserServerCfg):
+        viser_server = viser_server_config
+    else:
+        viser_server = ViserServerCfg(**viser_server_config)
+
+    env_cfg.sim_cfg = SimulationManagerCfg(
+        headless=config.get("headless", False),
+        sim_device=config.get("device", "cpu"),
+        render_cfg=RenderCfg(**render_config),
+        gpu_id=config.get("gpu_id", 0),
+        arena_space=config.get("arena_space", 5.0),
+        physics_config=PhysicsCfg(**physics_config),
+        visualization=VisualizationCfg(
+            **visualization_config,
+            viser_server=viser_server,
+        ),
+    )
 
     # parser robot config
     # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
@@ -763,7 +802,11 @@ def assign_data_to_dict(data_dict: TensorDict, name: str, value: Any) -> None:
     current_data[last_key] = value
 
 
-def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
+def add_env_launcher_args_to_parser(
+    parser: argparse.ArgumentParser,
+    *,
+    require_gym_config: bool = False,
+) -> None:
     """Add common environment launcher arguments to an existing argparse parser.
 
     This function adds the following arguments to the provided parser:
@@ -777,12 +820,17 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         --preview: Whether to preview the environment after launching (default: False)
         --filter_visual_rand: Whether to filter out visual randomization (default: False)
         --filter_dataset_saving: Whether to filter out dataset saving (default: False)
+        --viser: Whether to expose the environment through Viser (default: False)
+        --viser-*: Viser server, update-rate, and environment selection options
 
     Note:
         1. In preview mode, the environment will be launched and keep running in a loop for user interaction.
 
     Args:
-        parser (argparse.ArgumentParser): The parser to which arguments will be added.
+        parser: The parser to which arguments will be added.
+        require_gym_config: Whether ``--gym_config`` is required. Environment
+            runners should enable this; standalone simulation scripts can
+            leave it disabled.
     """
     parser.add_argument(
         "--num_envs",
@@ -807,8 +855,10 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         "--renderer",
         type=str,
         choices=["auto", "hybrid", "fast-rt", "rt"],
-        default="auto",
-        help="Renderer backend to use for the simulation.",
+        default=None if require_gym_config else "auto",
+        help="Renderer backend to use for the simulation. When loading a gym "
+        "config, the configured render_cfg.renderer is used unless this option "
+        "is provided.",
     )
     parser.add_argument(
         "--arena_space",
@@ -827,7 +877,7 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         type=str,
         help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
-        required=False,
+        required=require_gym_config,
     )
     parser.add_argument(
         "--action_config",
@@ -859,6 +909,39 @@ def add_env_launcher_args_to_parser(parser: argparse.ArgumentParser) -> None:
         default=None,
         type=int,
     )
+    parser.add_argument(
+        "--record_trajectory",
+        help="Whether to record per-object kinematic trajectories (for replay). "
+        "Episodes auto-save to --trajectory_save_dir (or "
+        "~/.cache/embodichain_data/trajectories/<run_id>/ by default).",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--trajectory_save_dir",
+        help="Directory for auto-saved trajectories (default: "
+        "~/.cache/embodichain_data/trajectories/<run_id>/).",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--profile",
+        help="Enable per-section time profiling of reset/step (prints a report "
+        "on env.close()).",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--profile_output",
+        help="If set, also dump the profiling report as JSON to this path on "
+        "env.close().",
+        default=None,
+        type=str,
+    )
+
+    from embodichain.lab.visualization.cli import add_viser_args_to_parser
+
+    add_viser_args_to_parser(parser)
 
 
 def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> dict:
@@ -877,12 +960,39 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     if args.num_envs is not None:
         merged_config["num_envs"] = args.num_envs
     merged_config["device"] = args.device
-    merged_config["headless"] = args.headless
-    merged_config["renderer"] = args.renderer
+    viser_enabled = bool(getattr(args, "viser", False))
+    merged_config["headless"] = args.headless or viser_enabled
+    if args.renderer is not None:
+        merged_config["renderer"] = args.renderer
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
         merged_config["max_episodes"] = args.max_episodes
+    if viser_enabled:
+        from embodichain.lab.visualization.cli import visualization_cfg_from_args
+
+        cli_visualization = visualization_cfg_from_args(args)
+        visualization = deepcopy(merged_config.get("visualization", {}))
+        visualization["backend"] = cli_visualization.backend
+        visualization["scene_fps"] = cli_visualization.scene_fps
+        if (
+            cli_visualization.sensor_image_fps is not None
+            or "sensor_image_fps" not in visualization
+        ):
+            visualization["sensor_image_fps"] = cli_visualization.sensor_image_fps
+        visualization["soft_body_fps"] = cli_visualization.soft_body_fps
+        visualization["env_ids"] = (
+            None
+            if cli_visualization.env_ids is None
+            else list(cli_visualization.env_ids)
+        )
+        visualization["allow_commands"] = cli_visualization.allow_commands
+        legacy_server = visualization.pop("server", {})
+        viser_server = deepcopy(visualization.get("viser_server", legacy_server))
+        viser_server["host"] = cli_visualization.viser_server.host
+        viser_server["port"] = cli_visualization.viser_server.port
+        visualization["viser_server"] = viser_server
+        merged_config["visualization"] = visualization
     return merged_config
 
 
@@ -903,8 +1013,6 @@ def build_env_cfg_from_args(
     """
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
-    from embodichain.lab.sim import SimulationManagerCfg
-    from embodichain.lab.sim.cfg import RenderCfg
 
     gym_config = load_config(args.gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
@@ -916,23 +1024,34 @@ def build_env_cfg_from_args(
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+    cfg.record_trajectory = getattr(args, "record_trajectory", False)
+    if getattr(args, "trajectory_save_dir", None):
+        cfg.trajectory_save_dir = args.trajectory_save_dir
+
+    if getattr(args, "profile", False):
+        from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
+
+        cfg.profiler = EnvProfilerCfg(
+            enable_time=True,
+            output_path=getattr(args, "profile_output", None),
+        )
 
     if args.preview:
         # In preview mode, we typically don't want to save data
+        cfg.filter_dataset_saving = True
+    if (
+        getattr(args, "replay", False)
+        and getattr(args, "replay_mode", None) == "control"
+    ):
+        # Interactive replay only reads recorded states. Disable dataset
+        # functors before environment construction so recorders do not create
+        # empty output datasets.
         cfg.filter_dataset_saving = True
 
     action_config = {}
     if args.action_config is not None:
         action_config = load_config(args.action_config)
         action_config["action_config"] = action_config
-
-    cfg.sim_cfg = SimulationManagerCfg(
-        headless=gym_config["headless"],
-        sim_device=gym_config["device"],
-        render_cfg=RenderCfg(renderer=gym_config["renderer"]),
-        gpu_id=gym_config["gpu_id"],
-        arena_space=gym_config["arena_space"],
-    )
 
     return cfg, gym_config, action_config
 
@@ -1007,6 +1126,31 @@ def init_rollout_buffer_from_gym_space(
         device=device,
     )
     return rollout_buffer
+
+
+__all__ = [
+    "DEFAULT_MANAGER_MODULES",
+    "add_env_launcher_args_to_parser",
+    "assign_data_to_dict",
+    "batch",
+    "build_env_cfg_from_args",
+    "cat_tensor_with_ids",
+    "clip_and_scale_action",
+    "config_to_cfg",
+    "convert_observation_to_space",
+    "dict_array_to_torch_inplace",
+    "fetch_data_from_dict",
+    "flatten_state_dict",
+    "get_dtype_bounds",
+    "get_manager_modules",
+    "init_rollout_buffer_from_config",
+    "init_rollout_buffer_from_gym_space",
+    "map_qpos_to_eef_pose",
+    "merge_args_with_gym_config",
+    "register_manager_modules",
+    "to_cpu_tensor",
+    "to_tensor",
+]
 
 
 def init_rollout_buffer_from_config(
@@ -1186,3 +1330,128 @@ def init_rollout_buffer_from_config(
             assign_data_to_dict(rollout_buffer["obs"], obs_name, obs_tensor)
 
     return rollout_buffer
+
+
+def build_trajectory_buffer(
+    env,
+    max_steps: int,
+    num_envs: int,
+    device: str | torch.device,
+    uids: list[str] | None = None,
+    action_space: "gym.Space" | None = None,
+) -> TensorDict:
+    """Preallocate a nested trajectory buffer for per-env recording.
+
+    Records per-object kinematic state over time (the robot always, plus all
+    non-robot articulations and rigid objects unless ``uids`` restricts the
+    non-robot set) and, when ``action_space`` is provided, pre-process actions.
+    Layout is ``[num_envs, max_steps, ...]``.
+
+    Args:
+        env: An environment exposing ``robot`` and ``sim._articulations`` /
+            ``sim._rigid_objects`` registries.
+        max_steps: Number of per-env timesteps to preallocate.
+        num_envs: Number of parallel environments.
+        device: Torch device for the buffers.
+        uids: Optional allow-list of non-robot object uids to record.
+        action_space: Optional batched action space. If supplied, an ``actions``
+            field is allocated with shape ``[num_envs, max_steps, *action_shape]``
+            where ``action_shape`` is ``action_space.shape[1:]``.
+
+    Returns:
+        A nested ``TensorDict`` with ``states`` and optionally ``actions`` fields
+        and batch size ``[num_envs, max_steps]``.
+    """
+
+    def _zeros(*shape: int) -> torch.Tensor:
+        return torch.zeros(*shape, dtype=torch.float32, device=device)
+
+    states: dict = {}
+    states["robot"] = TensorDict(
+        {
+            "root_pose": _zeros(num_envs, max_steps, 7),
+            "qpos": _zeros(num_envs, max_steps, env.robot.dof),
+        },
+        batch_size=[num_envs, max_steps],
+        device=device,
+    )
+
+    art_items = {
+        uid: art
+        for uid, art in env.sim._articulations.items()
+        if uids is None or uid in uids
+    }
+    if art_items:
+        states["articulations"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {
+                        "root_pose": _zeros(num_envs, max_steps, 7),
+                        "qpos": _zeros(num_envs, max_steps, art.dof),
+                    },
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, art in art_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    rigid_items = {
+        uid: obj
+        for uid, obj in env.sim._rigid_objects.items()
+        if uids is None or uid in uids
+    }
+    if rigid_items:
+        states["rigid_objects"] = TensorDict(
+            {
+                uid: TensorDict(
+                    {"pose": _zeros(num_envs, max_steps, 7)},
+                    batch_size=[num_envs, max_steps],
+                    device=device,
+                )
+                for uid, obj in rigid_items.items()
+            },
+            batch_size=[num_envs, max_steps],
+            device=device,
+        )
+
+    td: dict = {
+        "states": TensorDict(states, batch_size=[num_envs, max_steps], device=device)
+    }
+    if action_space is not None and hasattr(action_space, "shape"):
+        # action_space is the batched space (shape[0] == num_envs).
+        action_shape = tuple(action_space.shape[1:])
+        td["actions"] = torch.zeros(
+            (num_envs, max_steps, *action_shape), dtype=torch.float32, device=device
+        )
+    return TensorDict(td, batch_size=[num_envs, max_steps], device=device)
+
+
+def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
+    """Load a recorded trajectory from a path or pass through an in-memory dict.
+
+    Args:
+        trajectory: A ``.pt`` path produced by :meth:`EmbodiedEnv.save_trajectory`
+            or an already-loaded dict.
+
+    Returns:
+        A dict with keys ``states`` (TensorDict), ``actions`` (Tensor) and
+        ``meta`` (dict).
+
+    Raises:
+        ValueError: If required top-level or ``meta`` keys are missing.
+    """
+    if isinstance(trajectory, dict):
+        data = trajectory
+    else:
+        data = torch.load(trajectory, weights_only=False)
+    for key in ("states", "actions", "meta"):
+        if key not in data:
+            raise ValueError(f"Trajectory is missing required key: {key!r}")
+    meta = data["meta"]
+    for key in ("num_steps", "num_envs"):
+        if key not in meta:
+            raise ValueError(f"Trajectory meta is missing key: {key!r}")
+    return data
