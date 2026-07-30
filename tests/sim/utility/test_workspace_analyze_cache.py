@@ -147,22 +147,43 @@ def test_serialize_deserialize_plane_config(tmp_path):
 
 
 def test_compute_cache_key_stability_and_sensitivity():
-    """Same inputs -> same key; changed inputs -> different key."""
+    """Keys are readable and remain stable/sensitive to complete inputs."""
     base = {
         "mode": "joint_space",
         "num_samples": 100,
-        "robot": {"fpath": "/a/b.urdf", "joint_names": ["j1", "j2"]},
+        "robot": {
+            "name": "URRobot",
+            "parameters": {"robot_type": "ur5"},
+            "control_part": "arm",
+            "fpath": "/a/b.urdf",
+            "joint_names": ["j1", "j2"],
+        },
+        "sampling": {"strategy": "sobol", "seed": 42},
     }
     k1 = compute_cache_key(base)
     k2 = compute_cache_key(dict(base))
     assert k1 == k2  # stable / order-independent
+    assert k1.startswith(
+        "urrobot__robot_type-ur5__part-arm__mode-joint_space__"
+        "sampler-sobol__samples-100__seed-42__"
+    )
 
     assert compute_cache_key({**base, "num_samples": 200}) != k1
     assert compute_cache_key({**base, "mode": "cartesian_space"}) != k1
-    assert compute_cache_key({**base, "robot": {"fpath": "/a/c.urdf"}}) != k1
+    assert (
+        compute_cache_key({**base, "robot": {**base["robot"], "fpath": "/a/c.urdf"}})
+        != k1
+    )
     # Key insertion order must not matter.
     reordered = {
-        "robot": {"joint_names": ["j1", "j2"], "fpath": "/a/b.urdf"},
+        "sampling": {"seed": 42, "strategy": "sobol"},
+        "robot": {
+            "joint_names": ["j1", "j2"],
+            "fpath": "/a/b.urdf",
+            "control_part": "arm",
+            "parameters": {"robot_type": "ur5"},
+            "name": "URRobot",
+        },
         "num_samples": 100,
         "mode": "joint_space",
     }
@@ -268,13 +289,51 @@ def test_preview_colors_hide_unreachable():
     assert np.allclose(colors, np.array([[0.0, 1.0, 0.0]] * 2))
 
 
-def test_parse_args_preview_cache_no_robot_required():
-    """--preview-cache does not require --robot/--asset (mutex source group)."""
+def test_parse_args_preview_cache_requires_robot_source():
+    """--preview-cache is combined with the robot source for in-sim preview."""
     from embodichain.lab.scripts.analyze_workspace import parse_args
 
-    a = parse_args(["--preview-cache", "/tmp/foo", "--headless"])
+    a = parse_args(["--robot", "franka_panda", "--preview-cache", "/tmp/foo"])
     assert a.preview_cache == "/tmp/foo"
-    assert a.asset is None and a.robot is None
+    assert a.asset is None and a.robot == "franka_panda"
+
+    with pytest.raises(SystemExit):
+        parse_args(["--preview-cache", "/tmp/foo"])
+
+
+def test_preview_cache_uses_embodichain_sim_backend(tmp_path):
+    """Cached points are restored and rendered in the robot simulation."""
+    from embodichain.lab.scripts.analyze_workspace import preview_cache
+
+    results = _cartesian_results()
+    cache_dir, _key, entry = _write_cache_entry(tmp_path, results, "cartesian_space")
+
+    class AnalyzerStub:
+        restored_results = None
+        visualize_kwargs = None
+
+        def _restore_analysis_state(self, restored_results):
+            self.restored_results = restored_results
+
+        def visualize(self, **kwargs):
+            self.visualize_kwargs = kwargs
+
+    analyzer = AnalyzerStub()
+    args = argparse.Namespace(
+        preview_cache=str(entry),
+        cache_dir=str(cache_dir),
+        hide_unreachable=False,
+        vis_type="point_cloud",
+    )
+    preview_cache(args, analyzer)
+
+    assert analyzer.restored_results["mode"] == "cartesian_space"
+    assert isinstance(analyzer.restored_results["workspace_points"], torch.Tensor)
+    assert analyzer.visualize_kwargs == {
+        "vis_type": "point_cloud",
+        "show": False,
+        "backend": "sim_manager",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +617,9 @@ class TestWorkspaceResultsCacheIntegration:
         assert first["workspace_points"].shape[0] > 0
         cache_path = analyzer.get_results_cache_path()
         assert cache_path is not None and cache_path.exists()
+        assert cache_path.name.startswith(
+            "cobotmagic__part-left_arm__mode-joint_space__"
+        )
 
         # Force the recompute path to fail; a cache hit must not reach it.
         def _boom(*_args, **_kwargs):
@@ -685,6 +747,9 @@ def test_main_robot_preset_runs_and_caches(tmp_path):
     # The run should have written a results cache entry.
     npz_files = list(cache_dir.glob("*/results.npz"))
     assert npz_files, f"no results.npz under {cache_dir}"
+    assert npz_files[0].parent.name.startswith(
+        "cobotmagic__part-left_arm__mode-joint_space__"
+    )
     with np.load(npz_files[0]) as data:
         assert "workspace_points" in data.files
         assert data["workspace_points"].shape[0] > 0

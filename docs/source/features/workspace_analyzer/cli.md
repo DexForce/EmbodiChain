@@ -25,7 +25,8 @@ embodichain analyze-workspace \
     --mode joint_space --num-samples 20000
 ```
 
-`--robot` and `--asset` are mutually exclusive; exactly one is required.
+`--robot` and `--asset` are mutually exclusive; exactly one is required,
+including when previewing an existing cache.
 
 ## Predefined robots (`--robot`)
 
@@ -104,9 +105,11 @@ embodichain analyze-workspace \
 
 ## Caching results
 
-Analysis results are cached to disk keyed by the robot identity and all
-analysis parameters, so repeated runs and other applications can reuse the
-reachable workspace without recomputing.
+Analysis results are cached to disk using a readable
+`robot name + parameters + hash` key. The name exposes the robot variant,
+control part, mode, sampler, sample count, and seed; the short hash covers all
+remaining inputs such as bounds and IK settings. Repeated runs with identical
+inputs reuse the reachable workspace without recomputing.
 
 | Argument | Description |
 |----------|-------------|
@@ -119,7 +122,7 @@ reachable workspace without recomputing.
 After a run, the CLI prints the cache entry path, e.g.:
 
 ```
-Results cached at: ~/.cache/embodichain_data/robot_workspace/4c0a3a3190d75d28
+Results cached at: ~/.cache/embodichain_data/robot_workspace/urrobot__robot_type-ur5__part-arm__mode-joint_space__sampler-random__samples-20000__seed-42__4c0a3a3190d7
 ```
 
 Each entry is a directory containing:
@@ -131,21 +134,24 @@ Each entry is a directory containing:
 
 ### Previewing a cached workspace
 
-To re-visualize an already-computed workspace without recomputing (and without
-specifying the robot again), pass `--preview-cache`. It loads the cache and
-opens an Open3D window; no `--robot`/`--asset` is required (it is mutually
-exclusive with them).
+To re-visualize an already-computed workspace without recomputing, pass
+`--preview-cache` together with the corresponding `--robot` or `--asset`.
+EmbodiChain loads the robot and cached workspace into the same simulation
+window.
 
 ```bash
 # By cache entry directory (the path printed after a run)
 embodichain analyze-workspace \
-    --preview-cache ~/.cache/embodichain_data/robot_workspace/4c0a3a3190d75d28
+    --robot ur --robot-params '{"robot_type":"ur5"}' \
+    --preview-cache ~/.cache/embodichain_data/robot_workspace/<cache-name>
 
 # By results.npz file directly
-embodichain analyze-workspace --preview-cache /path/to/results.npz
+embodichain analyze-workspace \
+    --robot franka_panda --preview-cache /path/to/results.npz
 
 # By cache key (looked up under --cache-dir)
-embodichain analyze-workspace --preview-cache 4c0a3a3190d75d28
+embodichain analyze-workspace \
+    --robot franka_panda --preview-cache <cache-name>
 ```
 
 Reachable points are shown green and unreachable points red (Cartesian/plane
@@ -162,7 +168,9 @@ import json
 import numpy as np
 from pathlib import Path
 
-entry = Path("~/.cache/embodichain_data/robot_workspace/4c0a3a3190d75d28").expanduser()
+entry = Path(
+    "~/.cache/embodichain_data/robot_workspace/<cache-name>"
+).expanduser()
 data = np.load(entry / "results.npz")
 meta = json.loads((entry / "meta.json").read_text())
 

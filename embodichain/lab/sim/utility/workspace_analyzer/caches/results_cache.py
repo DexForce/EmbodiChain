@@ -18,15 +18,15 @@
 
 The low-level :class:`DiskCache` / :class:`MemoryCache` caches store raw sample
 poses. This module caches the *analysis results* (reachable workspace points,
-joint configurations, metrics and metadata) keyed by a content hash of the
-inputs that affect the output. It backs
+joint configurations, metrics and metadata) keyed by a readable robot and
+parameter name plus a content hash of the inputs that affect the output. It backs
 :meth:`WorkspaceAnalyzer._save_to_cache` / :meth:`WorkspaceAnalyzer._load_from_cache`
 and lets other applications (e.g. environment data generation) reuse a computed
 workspace without re-running sampling + FK/IK.
 
 On-disk layout::
 
-    <cache_dir>/<key>/
+    <cache_dir>/<robot-and-parameters>__<hash>/
         results.npz   # workspace_points, reachable_points, all_points,
                       # joint_configurations, success_rates, reachability_mask
         meta.json     # mode, counts, metrics, analysis_time, config snapshot
@@ -40,7 +40,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +103,8 @@ def _to_jsonable(value: Any) -> Any:
         return value.item()
     if isinstance(value, np.bool_):
         return bool(value)
+    if isinstance(value, Enum):
+        return value.value
     if isinstance(value, dict):
         return {str(k): _to_jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -108,18 +112,74 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
+def _slug_component(value: Any, fallback: str, max_length: int = 40) -> str:
+    """Convert a cache-key value to a filesystem-safe readable component."""
+    value = _to_jsonable(value)
+    text = str(value).strip().lower()
+    text = re.sub(r"[^a-z0-9._-]+", "-", text).strip("-._")
+    return (text or fallback)[:max_length]
+
+
 def compute_cache_key(metadata: dict) -> str:
-    """Compute a stable content-hash key for analysis inputs.
+    """Compute a stable, readable key for analysis inputs.
+
+    The directory name begins with the robot name and the most useful analysis
+    parameters, while a short content hash covers the complete metadata. This
+    keeps cache entries identifiable without losing collision resistance when
+    less-visible parameters such as bounds or IK settings change.
 
     Args:
         metadata: Dictionary of all inputs that affect the analysis output
             (robot identity, mode, sampling, constraints, ...).
 
     Returns:
-        A short hex string (16 chars) used as the cache directory name.
+        A filesystem-safe ``robot + parameters + hash`` directory name.
     """
     canonical = json.dumps(_to_jsonable(metadata), sort_keys=True, default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+    robot = metadata.get("robot")
+    robot = robot if isinstance(robot, dict) else {}
+    robot_name = robot.get("name") or robot.get("uid")
+    if not robot_name and robot.get("fpath"):
+        robot_name = Path(str(robot["fpath"])).stem
+    if not robot_name:
+        robot_name = robot.get("config_class") or "robot"
+
+    components = [_slug_component(robot_name, "robot")]
+    robot_params = robot.get("parameters")
+    if isinstance(robot_params, dict):
+        for name, value in sorted(robot_params.items()):
+            components.append(
+                f"{_slug_component(name, 'param', 24)}-"
+                f"{_slug_component(value, 'default', 32)}"
+            )
+
+    control_part = robot.get("control_part")
+    if control_part:
+        components.append(f"part-{_slug_component(control_part, 'default', 32)}")
+
+    mode = metadata.get("mode")
+    if mode:
+        components.append(f"mode-{_slug_component(mode, 'unknown', 32)}")
+
+    sampling = metadata.get("sampling")
+    sampling = sampling if isinstance(sampling, dict) else {}
+    strategy = sampling.get("strategy")
+    if strategy:
+        components.append(f"sampler-{_slug_component(strategy, 'unknown', 24)}")
+
+    if metadata.get("num_samples") is not None:
+        components.append(
+            f"samples-{_slug_component(metadata['num_samples'], 'unknown', 20)}"
+        )
+    if sampling.get("seed") is not None:
+        components.append(f"seed-{_slug_component(sampling['seed'], 'unknown', 20)}")
+
+    # Keep the final directory component below common filesystem NAME_MAX
+    # limits while retaining the collision-resistant suffix.
+    readable = "__".join(components)[:220].rstrip("-._")
+    return f"{readable}__{digest}"
 
 
 def serialize_results(results: dict) -> tuple[dict, dict]:
@@ -181,11 +241,11 @@ def deserialize_results(arrays: dict, meta: dict) -> dict:
 
 
 class ResultsCache:
-    """Disk cache for workspace analysis results, keyed by content hash.
+    """Disk cache for workspace results, keyed by robot and parameters.
 
     Results are stored under ``<cache_dir>/<key>/`` as ``results.npz`` plus a
-    ``meta.json`` sidecar. The key is derived from the analysis inputs so that
-    identical configurations reuse the same cache entry.
+    ``meta.json`` sidecar. A short content-hash suffix covers the complete
+    analysis inputs so identical configurations reuse the same cache entry.
     """
 
     RESULTS_FILENAME = "results.npz"

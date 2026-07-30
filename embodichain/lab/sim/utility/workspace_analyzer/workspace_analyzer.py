@@ -2065,7 +2065,26 @@ class WorkspaceAnalyzer:
 
         fpath = getattr(self.robot.cfg, "fpath", None)
         solver_urdf = self._get_solver_urdf_path()
+        config_class = self.robot.cfg.__class__.__name__
+        if config_class == "RobotCfg" and fpath:
+            robot_name = Path(fpath).stem
+        else:
+            robot_name = config_class.removesuffix("Cfg")
+        robot_parameters = {}
+        for parameter_name in (
+            "robot_type",
+            "version",
+            "arm_kind",
+            "with_default_eef",
+        ):
+            if not hasattr(self.robot.cfg, parameter_name):
+                continue
+            value = getattr(self.robot.cfg, parameter_name)
+            robot_parameters[parameter_name] = getattr(value, "value", value)
         robot_info = {
+            "name": robot_name,
+            "config_class": config_class,
+            "parameters": robot_parameters,
             "fpath": os.path.abspath(fpath) if fpath else None,
             "urdf_path": os.path.abspath(solver_urdf) if solver_urdf else None,
             "control_part": self.control_part_name,

@@ -43,8 +43,10 @@ Usage examples::
         --asset /path/to/robot.usd --urdf /path/to/robot.urdf \\
         --ee-link tcp_link --joints "joint_[1-6]"
 
-    # Preview an already-computed workspace cache (no robot/analysis needed)
-    embodichain analyze-workspace --preview-cache ~/.cache/embodichain_data/robot_workspace/<key>
+    # Preview an already-computed workspace cache with its robot in EmbodiChain
+    embodichain analyze-workspace \\
+        --robot franka_panda \\
+        --preview-cache ~/.cache/embodichain_data/robot_workspace/<key>
 
 Results are cached to disk (``--cache-dir``, default
 ``~/.cache/embodichain_data/robot_workspace``) keyed by the robot + parameters,
@@ -560,47 +562,41 @@ def _preview_points_and_colors(
     return points, colors
 
 
-def preview_cache(args: argparse.Namespace) -> None:
-    """Visualize an already-computed workspace cache without recomputing.
+def preview_cache(args: argparse.Namespace, analyzer: WorkspaceAnalyzer) -> None:
+    """Visualize cached workspace data beside its robot in EmbodiChain.
 
-    Loads the cached results from ``--preview-cache`` and renders them with an
-    Open3D window. No robot or simulation is required.
+    Loads the cached results from ``--preview-cache``, restores the analyzer
+    visualization state, and renders the workspace through the active
+    ``SimulationManager`` so the robot and workspace share one scene.
 
     Args:
         args: Parsed CLI arguments. Uses ``args.preview_cache``, ``args.cache_dir``,
             ``args.vis_type``, ``args.point_size``, ``args.voxel_size`` and
             ``args.hide_unreachable``.
+        analyzer: Analyzer attached to the loaded robot and simulation.
     """
     from embodichain.lab.sim.utility.workspace_analyzer.caches.results_cache import (
         DEFAULT_RESULTS_CACHE_DIR,
-    )
-    from embodichain.lab.sim.utility.workspace_analyzer.configs import (
-        VisualizationType,
-    )
-    from embodichain.lab.sim.utility.workspace_analyzer.visualizers import (
-        VisualizerFactory,
+        deserialize_results,
     )
 
     cache_dir = args.cache_dir or DEFAULT_RESULTS_CACHE_DIR
     arrays, mode = _load_preview_data(args.preview_cache, cache_dir)
-    points, colors = _preview_points_and_colors(arrays, mode, args.hide_unreachable)
+    points, _ = _preview_points_and_colors(arrays, mode, args.hide_unreachable)
     log_info(
         f"Previewing workspace cache: {args.preview_cache} | mode={mode} | "
         f"{len(points)} points",
         color="green",
     )
 
-    viz_type = VisualizationType(args.vis_type)
-    factory = VisualizerFactory()
-    kwargs: dict = {"backend": "open3d"}
-    if viz_type == VisualizationType.POINT_CLOUD:
-        kwargs["point_size"] = args.point_size
-    elif viz_type == VisualizationType.VOXEL:
-        kwargs["voxel_size"] = args.voxel_size
-    visualizer = factory.create_visualizer(viz_type=viz_type, **kwargs)
-    visualizer.visualize(points, colors=colors)
-    log_info("Preview window open. Close the window to exit.", color="green")
-    visualizer.show()
+    results = deserialize_results(arrays, {"mode": mode})
+    analyzer._restore_analysis_state(results)
+    analyzer.visualize(vis_type=args.vis_type, show=False, backend="sim_manager")
+    log_info(
+        "Workspace cache and robot are visible in the EmbodiChain window. "
+        "Press Ctrl+C to exit.",
+        color="green",
+    )
 
 
 def main(args: argparse.Namespace) -> None:
@@ -608,16 +604,12 @@ def main(args: argparse.Namespace) -> None:
 
     Loads the robot, runs analysis (with caching), prints a summary, optionally
     exports results, and keeps the visualization window open until Ctrl+C.
-    With ``--preview-cache``, instead loads and visualizes an already-computed
-    cache without running any analysis.
+    With ``--preview-cache``, loads the requested robot and visualizes an
+    already-computed cache in the same EmbodiChain scene without recomputing.
 
     Args:
         args: Parsed CLI arguments.
     """
-    if args.preview_cache:
-        preview_cache(args)
-        return
-
     import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManager
@@ -660,23 +652,32 @@ def main(args: argparse.Namespace) -> None:
         analyzer = WorkspaceAnalyzer(robot=robot, config=analyzer_cfg, sim_manager=sim)
 
         visualize = args.visualize and not args.headless
-        results = analyzer.analyze(
-            num_samples=args.num_samples,
-            force_recompute=args.force_recompute,
-            visualize=visualize,
-        )
+        if args.preview_cache:
+            if not visualize:
+                raise ValueError(
+                    "--preview-cache requires an EmbodiChain window; remove "
+                    "--headless/--no-visualize."
+                )
+            preview_cache(args, analyzer)
+        else:
+            results = analyzer.analyze(
+                num_samples=args.num_samples,
+                force_recompute=args.force_recompute,
+                visualize=visualize,
+            )
 
-        _print_summary(results, analyzer)
+            _print_summary(results, analyzer)
 
-        if args.output:
-            log_info(f"Exporting results to {args.output} ...", color="green")
-            analyzer.export_results(args.output, format=args.export_format)
+            if args.output:
+                log_info(f"Exporting results to {args.output} ...", color="green")
+                analyzer.export_results(args.output, format=args.export_format)
 
         if visualize:
-            log_info(
-                "Workspace visualization window open. Press Ctrl+C to exit.",
-                color="green",
-            )
+            if not args.preview_cache:
+                log_info(
+                    "Workspace visualization window open. Press Ctrl+C to exit.",
+                    color="green",
+                )
             try:
                 while True:
                     sim.update(step=1)
@@ -735,16 +736,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "kinematics solver come from the preset, so --ee-link/--joints are not "
         "needed -- only --control-part (optional). Choices: franka_panda, "
         "cobotmagic, dexforce_w1, ur.",
-    )
-    source.add_argument(
-        "--preview-cache",
-        type=str,
-        default=None,
-        metavar="PATH",
-        help="Preview an already-computed workspace cache without recomputing. "
-        "PATH is a cache entry directory, a results.npz file, or a cache key "
-        "(looked up under --cache-dir). Opens an Open3D window; no "
-        "--robot/--asset needed.",
     )
     robot.add_argument(
         "--robot-params",
@@ -935,6 +926,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Directory for cached results. Default: "
         "~/.cache/embodichain_data/robot_workspace.",
+    )
+    cache.add_argument(
+        "--preview-cache",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Preview an already-computed workspace cache beside the selected "
+        "robot in the EmbodiChain window without recomputing. PATH is a cache "
+        "entry directory, a results.npz file, or a cache key looked up under "
+        "--cache-dir. Requires --robot or --asset.",
     )
     cache.add_argument(
         "--no-cache",
