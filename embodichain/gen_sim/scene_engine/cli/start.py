@@ -61,7 +61,7 @@ def cli_scene_engine(
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="embodichain scene-engine",
-        description="embodichain.gen_sim.scene_engine Scene Engine Pipeline"
+        description="embodichain.gen_sim.scene_engine Scene Engine Pipeline",
     )
     parser.add_argument(
         "--image",
