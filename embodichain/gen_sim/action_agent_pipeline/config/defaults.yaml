@@ -193,3 +193,10 @@ success_evaluator_fallbacks:
 # evaluating their postconditions. Callers may override this at runtime.
 closed_loop:
   semantic_step_settle_steps: 10
+
+# Runtime launch policy is package-owned so API callers and the optional CLI
+# prepare vectorized environments identically.
+runner:
+  rigid_object_position_range: [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]]
+  rigid_object_rotation_range: [[0.0, 0.0, -30.0], [0.0, 0.0, 30.0]]
+  table_height_delta_range: [[-0.05], [0.05]]

@@ -34,6 +34,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import
 )
 from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
     render_seed_task_graph_png,
+    render_task_graph_png,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
     make_agent_config,
@@ -1503,6 +1504,7 @@ def test_recorder_writes_every_environment_json_and_png(
         env=env,
         run_id="test_run",
         episode_index=3,
+        graph_renderer=render_task_graph_png,
     )
 
     step_data = seed["semantic_steps"][0]
@@ -1645,6 +1647,7 @@ def test_recorder_finalizes_aborted_episode(
         env=env,
         run_id="aborted_run",
         episode_index=0,
+        graph_renderer=render_task_graph_png,
     )
 
     recorder.finalize(None, aborted_reason="RuntimeError: injected")

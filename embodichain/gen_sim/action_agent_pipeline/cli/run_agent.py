@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import os
 from pathlib import Path
 from typing import Any
@@ -27,9 +26,16 @@ import numpy as np
 import torch
 import tqdm
 
-from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.gen_sim.action_agent_pipeline.env_adapters.tableware.agent_env import (  # noqa: F401
     AgenticGenSimEnv,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.runner import (
+    add_vectorized_reset_randomization as _add_vectorized_reset_randomization,
+    generate_action_agent_trajectory,
+    log_task_success as _log_task_success,
+    normalize_legacy_dataset_functor_config as _normalize_legacy_dataset_functor_config,
+    prepare_gym_config_for_run_agent as _modify_gym_config_for_run_agent,
+    run_action_agent,
 )
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -42,7 +48,6 @@ __all__ = ["build_parser", "cli"]
 
 _RUN_AGENT_DEFAULTS = load_config(Path(__file__).with_name("run_agent_defaults.yaml"))
 _PHYSICAL_COLLISION_CONFIG = _RUN_AGENT_DEFAULTS["physical_collision"]
-_VECTORIZED_RESET_CONFIG = _RUN_AGENT_DEFAULTS["vectorized_reset_randomization"]
 _WINDOW_LOOK_AT_CONFIG = _RUN_AGENT_DEFAULTS["window_look_at"]
 
 _SHOW_PHYSICAL_COLLISION_ENV = _PHYSICAL_COLLISION_CONFIG["environment_variable"]
@@ -63,26 +68,16 @@ def cli() -> None:
     )
     agent_config = load_config(args.agent_config)
 
-    with timing_scope(
-        "run_agent.make_env",
-        metadata={"task_name": args.task_name, "gym_id": gym_config["id"]},
-    ):
-        env = gymnasium.make(
-            id=gym_config["id"],
-            cfg=env_cfg,
-            agent_config=agent_config,
-            agent_config_path=args.agent_config,
-            task_name=args.task_name,
-        )
+    env = gymnasium.make(
+        id=gym_config["id"],
+        cfg=env_cfg,
+        agent_config=agent_config,
+        agent_config_path=args.agent_config,
+        task_name=args.task_name,
+    )
     _show_physical_collision_if_requested(env)
     _set_default_window_look_at(env, gym_config.get("num_envs", 1))
-
-    with timing_scope("run_agent.total", metadata={"task_name": args.task_name}):
-        _run_action_agent(args, env, gym_config)
-
-    if args.headless:
-        with timing_scope("run_agent.final_reset"):
-            _reset_env_with_physical_collision(env, options={"final": True})
+    _run_action_agent(args, env, gym_config)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -110,136 +105,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _modify_gym_config_for_run_agent(gym_config: dict[str, Any]) -> None:
-    _normalize_legacy_dataset_functor_config(gym_config)
-    _add_vectorized_reset_randomization(gym_config)
-
-
-def _normalize_legacy_dataset_functor_config(gym_config: dict[str, Any]) -> None:
-    """Move legacy manager-only dataset options out of functor parameters."""
-    env_config = gym_config.get("env")
-    if not isinstance(env_config, dict):
-        return
-
-    dataset_config = env_config.get("dataset")
-    if not isinstance(dataset_config, dict):
-        return
-
-    for functor_config in dataset_config.values():
-        if not isinstance(functor_config, dict) or "func" not in functor_config:
-            continue
-
-        params = functor_config.get("params")
-        if not isinstance(params, dict) or "save_failed_episodes" not in params:
-            continue
-
-        legacy_value = params.pop("save_failed_episodes")
-        functor_config.setdefault("save_failed_episodes", legacy_value)
-
-
-def _add_vectorized_reset_randomization(gym_config: dict[str, Any]) -> None:
-    """Add default reset randomization for parallel action-agent environments.
-
-    Dataset functors are removed because dataset recorders are not supported for
-    vectorized action-agent execution. Plain dataset configuration is retained
-    for consumers that use it as metadata.
-
-    A pose randomizer is added for every configured rigid object. The table-height
-    randomizer runs after those pose randomizers so all randomized objects are
-    shifted together with the table.
-
-    Args:
-        gym_config: Merged gym configuration that will be parsed into the
-            environment configuration.
-    """
-    if gym_config.get("num_envs", 1) <= 1:
-        return
-
-    env_config = gym_config.setdefault("env", {})
-    dataset_config = env_config.get("dataset")
-    if isinstance(dataset_config, dict):
-        dataset_functor_names = [
-            dataset_name
-            for dataset_name, dataset_params in dataset_config.items()
-            if isinstance(dataset_params, dict) and "func" in dataset_params
-        ]
-        for dataset_name in dataset_functor_names:
-            del dataset_config[dataset_name]
-
-    events = env_config.setdefault("events", {})
-    for rigid_object in gym_config.get("rigid_object", []):
-        uid = rigid_object.get("uid")
-        if not isinstance(uid, str) or not uid:
-            log_warning(
-                "Skipping reset pose randomization for a rigid object without a UID."
-            )
-            continue
-
-        events.setdefault(
-            f"init_{uid}_pose",
-            {
-                "func": "randomize_rigid_object_pose",
-                "mode": "reset",
-                "params": {
-                    "entity_cfg": {"uid": uid},
-                    "position_range": [
-                        list(
-                            _VECTORIZED_RESET_CONFIG["rigid_object_position_range"][0]
-                        ),
-                        list(
-                            _VECTORIZED_RESET_CONFIG["rigid_object_position_range"][1]
-                        ),
-                    ],
-                    "rotation_range": [
-                        list(
-                            _VECTORIZED_RESET_CONFIG["rigid_object_rotation_range"][0]
-                        ),
-                        list(
-                            _VECTORIZED_RESET_CONFIG["rigid_object_rotation_range"][1]
-                        ),
-                    ],
-                    "relative_position": True,
-                    "relative_rotation": True,
-                },
-            },
-        )
-
-    events.setdefault(
-        "random_table_height",
-        {
-            "func": "randomize_anchor_height",
-            "mode": "reset",
-            "params": {
-                "anchor_uid": "table",
-                "height_delta_range": [
-                    list(_VECTORIZED_RESET_CONFIG["table_height_delta_range"][0]),
-                    list(_VECTORIZED_RESET_CONFIG["table_height_delta_range"][1]),
-                ],
-            },
-        },
-    )
-
-
 def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: dict):
-    """Run action-agent graphs without relying on the shared run_env runner."""
+    """Compatibility wrapper around the runtime-owned episode runner."""
     if getattr(args, "preview", False):
         log_warning("Preview mode is handled by the shared runner and is skipped here.")
-
-    log_info("Start action-agent data generation.", color="green")
-    runtime_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    log_info(
-        f"Runtime task graph run_id: {runtime_run_id}; output root: "
-        f"outputs/graph/{args.task_name}/runs/{runtime_run_id}",
-        color="green",
+    run_action_agent(
+        env=env,
+        gym_config=gym_config,
+        task_name=args.task_name,
+        regenerate=getattr(args, "regenerate", False),
+        save_path=getattr(args, "save_path", ""),
+        save_video=getattr(args, "save_video", False),
+        debug_mode=getattr(args, "debug_mode", False),
+        reset=lambda *reset_args, **reset_kwargs: _reset_env_with_physical_collision(
+            env, *reset_args, **reset_kwargs
+        ),
+        action_iterator=lambda actions, episode_index: tqdm.tqdm(
+            actions,
+            desc=f"Executing action list #{episode_index}",
+            unit="step",
+        ),
+        final_reset=bool(getattr(args, "headless", False)),
     )
-    for trajectory_idx in range(gym_config.get("max_episodes", 1)):
-        _generate_action_agent_trajectory(
-            args,
-            env,
-            trajectory_idx,
-            runtime_run_id=runtime_run_id,
-        )
-    _, _ = _reset_env_with_physical_collision(env)
 
 
 def _generate_action_agent_trajectory(
@@ -249,92 +136,23 @@ def _generate_action_agent_trajectory(
     *,
     runtime_run_id: str,
 ) -> bool:
-    with timing_scope(
-        "run_agent.trajectory_reset",
-        metadata={"trajectory_idx": trajectory_idx},
-    ):
-        _, _ = _reset_env_with_physical_collision(env)
-    with timing_scope(
-        "run_agent.create_demo_action_list",
-        metadata={"trajectory_idx": trajectory_idx},
-    ):
-        action_list = env.get_wrapper_attr("create_demo_action_list")(
-            action_sentence=str(trajectory_idx),
-            save_path=getattr(args, "save_path", ""),
-            save_video=getattr(args, "save_video", False),
-            debug_mode=getattr(args, "debug_mode", False),
-            regenerate=getattr(args, "regenerate", False),
-            runtime_run_id=runtime_run_id,
-            episode_index=trajectory_idx,
-        )
-    if action_list is None or len(action_list) == 0:
-        log_warning("Action is invalid. Skip to next generation.")
-        return False
-
-    if getattr(action_list, "already_executed", False):
-        log_info("Action list was already executed by the action-agent runtime.")
-        runtime_graph_dir = getattr(action_list, "runtime_graph_output_dir", None)
-        if runtime_graph_dir:
-            log_info(f"Runtime task graphs saved to: {runtime_graph_dir}")
-        with timing_scope(
-            "run_agent.evaluate_success",
-            metadata={"trajectory_idx": trajectory_idx},
-        ):
-            _log_task_success(
-                env,
-                semantic_success=getattr(action_list, "runtime_success", None),
-            )
-        return True
-
-    with timing_scope(
-        "run_agent.execute_action_list",
-        metadata={"trajectory_idx": trajectory_idx, "actions": len(action_list)},
-    ):
-        for action in tqdm.tqdm(
-            action_list,
+    return generate_action_agent_trajectory(
+        env=env,
+        episode_index=trajectory_idx,
+        runtime_run_id=runtime_run_id,
+        regenerate=getattr(args, "regenerate", False),
+        save_path=getattr(args, "save_path", ""),
+        save_video=getattr(args, "save_video", False),
+        debug_mode=getattr(args, "debug_mode", False),
+        reset=lambda *reset_args, **reset_kwargs: _reset_env_with_physical_collision(
+            env, *reset_args, **reset_kwargs
+        ),
+        action_iterator=lambda actions, episode_index: tqdm.tqdm(
+            actions,
             desc=f"Executing action list #{trajectory_idx}",
             unit="step",
-        ):
-            env.step(action)
-    with timing_scope(
-        "run_agent.evaluate_success",
-        metadata={"trajectory_idx": trajectory_idx},
-    ):
-        _log_task_success(env)
-    return True
-
-
-def _log_task_success(
-    env: gymnasium.Env,
-    *,
-    semantic_success: torch.Tensor | None = None,
-) -> bool | None:
-    try:
-        success_fn = (
-            env.get_wrapper_attr("is_task_success")
-            if hasattr(env, "get_wrapper_attr")
-            else env.is_task_success
-        )
-        success = success_fn()
-    except Exception as exc:
-        log_warning(f"Failed to evaluate task success after execution: {exc}")
-        return None
-
-    if isinstance(success, torch.Tensor):
-        success_bool = success.detach().cpu().flatten().bool()
-        if semantic_success is not None:
-            success_bool &= semantic_success.detach().cpu().flatten().bool()
-        n_success = int(success_bool.sum().item())
-        n_total = int(success_bool.numel())
-        log_info(
-            f"Task success after execution: {n_success}/{n_total} environments succeeded.",
-            color="green",
-        )
-        success_value = bool(success_bool.all().item())
-    else:
-        success_value = bool(np.asarray(success).flatten().all())
-        log_info(f"Task success after execution: {success_value}", color="green")
-    return success_value
+        ),
+    )
 
 
 def _reset_env_with_physical_collision(

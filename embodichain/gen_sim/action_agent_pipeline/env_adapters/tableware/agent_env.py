@@ -36,7 +36,6 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.success_evaluator import 
 from embodichain.gen_sim.action_agent_pipeline.runtime.pytorch_solver_compat import (
     install_action_agent_pytorch_solver_compat,
 )
-from embodichain.gen_sim.action_agent_pipeline.utils.timing import timing_scope
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim.cfg import MarkerCfg
@@ -492,11 +491,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
             f"Using executable Seed Graph v3: {self.seed_task_graph_path}",
             color="green",
         )
-        with timing_scope(
-            "action_agent.seed_task_graph.read",
-            metadata={"regenerate": bool(regenerate)},
-        ):
-            seed_task_graph = self.seed_task_graph_path.read_text(encoding="utf-8")
+        seed_task_graph = self.seed_task_graph_path.read_text(encoding="utf-8")
         if not getattr(self, "_task_graph_logged", False):
             # The graph is immutable for this environment instance, so print
             # the full source once without flooding logs on later episodes.
@@ -533,15 +528,12 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     def _execute_seed_task_graph(self, regenerate=False, *args, **kwargs):
         """Ground and execute the configured Seed graph against the live env."""
-        with timing_scope(
-            "action_agent.generate_graph_for_actions",
-            metadata={"regenerate": bool(regenerate)},
-        ):
-            graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
-                regenerate=regenerate,
-                runtime_run_id=kwargs.get("runtime_run_id"),
-                episode_index=kwargs.get("episode_index", 0),
-            )
+        graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
+            regenerate=regenerate,
+            runtime_run_id=kwargs.get("runtime_run_id"),
+            episode_index=kwargs.get("episode_index", 0),
+            runtime_graph_renderer=kwargs.get("runtime_graph_renderer"),
+        )
         atomic_action_kwargs = {
             "allow_grasp_annotation": True,
             "force_grasp_reannotate": False,
@@ -555,22 +547,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
         if isinstance(grasp_runtime_defaults, Mapping):
             for key, value in grasp_runtime_defaults.items():
                 compile_kwargs.setdefault(str(key), value)
-        with timing_scope(
-            "action_agent.execute_compiled_graph",
-            metadata={
-                "allow_grasp_annotation": bool(
-                    atomic_action_kwargs["allow_grasp_annotation"]
-                ),
-                "force_grasp_reannotate": bool(
-                    atomic_action_kwargs["force_grasp_reannotate"]
-                ),
-                "grasp_convex_decomposition_method": atomic_action_kwargs[
-                    "grasp_convex_decomposition_method"
-                ],
-            },
-        ):
-            action_list = self.compile_agent.act(graph_file_path, **compile_kwargs)
-        return action_list
+        return self.compile_agent.act(graph_file_path, **compile_kwargs)
 
 
 def _split_env_and_agent_kwargs(

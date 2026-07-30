@@ -30,6 +30,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
     make_relative_seed_task_graph,
 )
+from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
+    render_seed_task_graph_png,
+)
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -43,6 +46,7 @@ def test_config_bundle_publishes_only_seed_graph_artifacts(tmp_path: Path) -> No
         bundle=_bundle("initial"),
         overwrite=False,
         graph_output_root=graph_root,
+        graph_renderer=render_seed_task_graph_png,
     )
 
     assert paths.seed_task_graph.is_file()
@@ -71,6 +75,29 @@ def test_existing_graph_artifact_requires_overwrite(
         )
 
 
+def test_config_bundle_does_not_load_or_write_graphs_by_default(
+    tmp_path: Path,
+) -> None:
+    bundle = _bundle("core")
+    for key in ("task_prompt", "basic_background", "atom_actions"):
+        del bundle[key]
+    paths = write_config_bundle(
+        output_dir=tmp_path / "configs",
+        bundle=bundle,
+        overwrite=False,
+        graph_output_root=tmp_path / "outputs" / "graph",
+    )
+
+    assert paths.graph_output_dir is None
+    assert paths.seed_task_graph_png is None
+    assert not (tmp_path / "outputs" / "graph").exists()
+    assert {path.name for path in paths.output_dir.iterdir()} == {
+        "fast_gym_config.json",
+        "agent_config.json",
+        "seed_task_graph.json",
+    }
+
+
 def test_overwrite_removes_legacy_task_and_compiled_graphs(tmp_path: Path) -> None:
     config_dir = tmp_path / "configs"
     graph_root = tmp_path / "outputs" / "graph"
@@ -91,6 +118,7 @@ def test_overwrite_removes_legacy_task_and_compiled_graphs(tmp_path: Path) -> No
         bundle=_bundle("new", task_name="bundle_cleanup"),
         overwrite=True,
         graph_output_root=graph_root,
+        graph_renderer=render_seed_task_graph_png,
     )
 
     assert paths.seed_task_graph.is_file()
@@ -112,6 +140,7 @@ def test_seed_png_publication_failure_restores_old_bundle(
         bundle=_bundle("old", task_name="bundle_rollback"),
         overwrite=False,
         graph_output_root=graph_root,
+        graph_renderer=render_seed_task_graph_png,
     )
     old_contents = {path: path.read_bytes() for path in _artifact_paths(paths)}
     real_replace = os.replace
@@ -132,6 +161,7 @@ def test_seed_png_publication_failure_restores_old_bundle(
             bundle=_bundle("new", task_name="bundle_rollback"),
             overwrite=True,
             graph_output_root=graph_root,
+            graph_renderer=render_seed_task_graph_png,
         )
 
     assert {path: path.read_bytes() for path in _artifact_paths(paths)} == old_contents
@@ -188,12 +218,16 @@ def _bundle(label: str, *, task_name: str | None = None) -> dict:
 
 
 def _artifact_paths(paths) -> tuple[Path, ...]:
-    return (
-        paths.gym_config,
-        paths.agent_config,
-        paths.task_prompt,
-        paths.seed_task_graph,
-        paths.seed_task_graph_png,
-        paths.basic_background,
-        paths.atom_actions,
+    return tuple(
+        path
+        for path in (
+            paths.gym_config,
+            paths.agent_config,
+            paths.task_prompt,
+            paths.seed_task_graph,
+            paths.seed_task_graph_png,
+            paths.basic_background,
+            paths.atom_actions,
+        )
+        if path is not None
     )

@@ -48,23 +48,20 @@ class GeneratedActionAgentConfigPaths:
     """Paths written by the action-agent config generator.
 
     ``gym_config``, ``agent_config``, and ``seed_task_graph`` are runtime inputs.
-    The Seed PNG is published under the repository-level
-    ``outputs/graph/<task_name>`` folder. Runtime Task graphs are created later
-    for each environment and episode and therefore are not part of this
-    config-stage path contract. ``task_prompt``, ``basic_background``, and
-    ``atom_actions`` remain diagnostic records retained for human review.
+    Review artifacts are optional and are populated only when an explicit
+    diagnostic or rendering producer is supplied.
     """
 
     output_dir: Path
-    graph_output_dir: Path
     gym_config: Path
     agent_config: Path
-    task_prompt: Path
     seed_task_graph: Path
-    seed_task_graph_png: Path
-    basic_background: Path
-    atom_actions: Path
     summary: dict[str, Any]
+    graph_output_dir: Path | None = None
+    task_prompt: Path | None = None
+    seed_task_graph_png: Path | None = None
+    basic_background: Path | None = None
+    atom_actions: Path | None = None
 
 
 @dataclass(frozen=True)

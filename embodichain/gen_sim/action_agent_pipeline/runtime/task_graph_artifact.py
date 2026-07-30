@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -32,9 +32,6 @@ import torch
 
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
     seed_task_graph_hash,
-)
-from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
-    render_task_graph_png,
 )
 
 __all__ = ["RuntimeTaskGraphRecorder"]
@@ -52,11 +49,13 @@ class RuntimeTaskGraphRecorder:
         env: Any,
         run_id: str | None,
         episode_index: int,
+        graph_renderer: Callable[[Mapping[str, Any]], bytes] | None = None,
     ) -> None:
         self.seed_graph = deepcopy(dict(seed_graph))
         self.num_envs = int(env.num_envs)
         self.run_id = _safe_component(run_id or _new_run_id())
         self.episode_index = int(episode_index)
+        self.graph_renderer = graph_renderer
         self.robot_profile = str(getattr(env, "agent_robot_profile", "unknown"))
         self.output_dir = (
             _outputs_root()
@@ -392,18 +391,19 @@ class RuntimeTaskGraphRecorder:
             document["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
             directory = self._env_dir(env_id)
             directory.mkdir(parents=True, exist_ok=True)
-            files.extend(
-                [
-                    (
-                        directory / "task_graph.json",
-                        json.dumps(document, ensure_ascii=False, indent=4) + "\n",
-                    ),
+            files.append(
+                (
+                    directory / "task_graph.json",
+                    json.dumps(document, ensure_ascii=False, indent=4) + "\n",
+                )
+            )
+            if self.graph_renderer is not None:
+                files.append(
                     (
                         directory / "task_graph.png",
-                        render_task_graph_png(document),
-                    ),
-                ]
-            )
+                        self.graph_renderer(document),
+                    )
+                )
         _write_file_transaction(files)
 
     def _initial_document(self, env_id: int) -> dict[str, Any]:

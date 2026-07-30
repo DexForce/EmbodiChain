@@ -47,7 +47,7 @@ def _finalize_and_write_bundle(
     acd_method: str,
     overwrite: bool,
 ) -> GeneratedActionAgentConfigPaths:
-    """Finalize runtime configuration and its matching diagnostic records.
+    """Finalize and write the runtime configuration bundle.
 
     Geometry metadata is attached before writing the simulator configuration.
     The executable Seed remains coordinate-free and is the sole graph input to

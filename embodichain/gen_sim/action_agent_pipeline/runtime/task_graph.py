@@ -212,6 +212,7 @@ class AgentTaskGraph:
             env=env,
             run_id=kwargs.get("runtime_run_id"),
             episode_index=int(kwargs.get("episode_index", 0)),
+            graph_renderer=kwargs.get("runtime_graph_renderer"),
         )
         arrangement_plan = (
             ArrangementRuntimePlan(

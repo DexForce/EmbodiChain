@@ -36,7 +36,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.arrangement_spec impor
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.bundle_support import (
     _make_sensor_config_factory_for_robot,
-    _runtime_object_registry,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
     _container_rigid_object_max_convex_hull_num,
@@ -60,15 +59,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking im
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.mesh_bounds import (
     _mesh_config_world_zmax,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.prompt_builders import (
-    make_agent_config,
-    make_arrangement_atom_actions_prompt,
-    make_arrangement_basic_background,
-    make_arrangement_task_prompt,
-    make_stacking_atom_actions_prompt,
-    make_stacking_basic_background,
-    make_stacking_task_prompt,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.relative_geometry import (
     _make_relative_summary,
@@ -95,14 +85,14 @@ from embodichain.gen_sim.action_agent_pipeline.generation.relative_transport_geo
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     RobotProfile,
 )
+from embodichain.gen_sim.action_agent_pipeline.generation.runtime_config import (
+    make_runtime_agent_config,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
     make_arrangement_seed_task_graph,
     make_relative_seed_task_graph,
     make_stacking_seed_task_graph,
     seed_task_graph_hash,
-)
-from embodichain.gen_sim.action_agent_pipeline.generation.seed_diagnostics import (
-    make_seed_diagnostic_records,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.scene_objects import (
     _collect_scene_objects,
@@ -261,25 +251,8 @@ def _build_arrangement_line_bundle(
     )
     return {
         "gym_config": gym_config,
-        "agent_config": make_agent_config(),
-        "task_prompt": make_arrangement_task_prompt(
-            task_name,
-            project_name,
-            seed_task_graph,
-            robot_profile=robot_profile,
-            task_description=spec.task_description,
-        ),
+        "agent_config": make_runtime_agent_config(),
         "seed_task_graph": seed_task_graph,
-        "basic_background": make_arrangement_basic_background(
-            project_name,
-            seed_task_graph,
-            robot_profile=robot_profile,
-            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
-        ),
-        "atom_actions": make_arrangement_atom_actions_prompt(
-            seed_task_graph,
-            robot_profile=robot_profile,
-        ),
         "summary": {
             "robot_profile": robot_profile.summary(),
             **_make_arrangement_summary(seed_task_graph),
@@ -434,24 +407,8 @@ def _build_stacking_bundle(
     )
     return {
         "gym_config": gym_config,
-        "agent_config": make_agent_config(),
-        "task_prompt": make_stacking_task_prompt(
-            task_name,
-            project_name,
-            spec,
-            robot_profile=robot_profile,
-        ),
+        "agent_config": make_runtime_agent_config(),
         "seed_task_graph": seed_task_graph,
-        "basic_background": make_stacking_basic_background(
-            project_name,
-            spec,
-            robot_profile=robot_profile,
-            object_registry=_runtime_object_registry(runtime_uids, by_uid=by_uid),
-        ),
-        "atom_actions": make_stacking_atom_actions_prompt(
-            spec,
-            robot_profile=robot_profile,
-        ),
         "summary": {
             "robot_profile": robot_profile.summary(),
             **_make_stacking_summary(spec),
@@ -677,12 +634,6 @@ def _build_relative_placement_bundle(
         spec = _with_on_surface_release_offsets(spec, gym_config)
         spec = _with_coordinated_transport_geometry(spec, gym_config)
     seed_task_graph = make_relative_seed_task_graph(task_name, spec)
-    seed_diagnostics = make_seed_diagnostic_records(
-        seed_task_graph,
-        task_description=spec.task_description,
-        project_name=project_name,
-        robot_display_name=robot_profile.display_name,
-    )
     gym_config["env"]["extensions"] = _make_relative_extensions_config(
         spec,
         robot_profile=robot_profile,
@@ -696,11 +647,8 @@ def _build_relative_placement_bundle(
     )
     return {
         "gym_config": gym_config,
-        "agent_config": make_agent_config(),
-        "task_prompt": seed_diagnostics["task_prompt"],
+        "agent_config": make_runtime_agent_config(),
         "seed_task_graph": seed_task_graph,
-        "basic_background": seed_diagnostics["basic_background"],
-        "atom_actions": seed_diagnostics["atom_actions"],
         "summary": {
             "robot_profile": robot_profile.summary(),
             **_make_relative_summary(spec),

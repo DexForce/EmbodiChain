@@ -23,9 +23,6 @@ from embodichain.gen_sim.action_agent_pipeline.utils.llm_config import (
     DEFAULT_LLM_MODEL,
     get_openai_compatible_llm_config,
 )
-from embodichain.gen_sim.action_agent_pipeline.utils.llm_usage import (
-    UsageTrackedChatModel,
-)
 
 __all__ = [
     "DEFAULT_LLM_MODEL",
@@ -111,10 +108,8 @@ def create_chat_openai(
     http_client = _proxy_http_client(cfg.get("proxy_url"))
     if http_client is not None:
         kwargs["http_client"] = http_client
-    return UsageTrackedChatModel(
-        ChatOpenAI(**kwargs),
-        stage=usage_stage,
-    )
+    del usage_stage
+    return ChatOpenAI(**kwargs)
 
 
 def _proxy_http_client(proxy_url: str | None) -> Any | None:

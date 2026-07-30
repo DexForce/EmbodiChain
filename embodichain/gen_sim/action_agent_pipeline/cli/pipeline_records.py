@@ -171,9 +171,10 @@ def build_pipeline_record(
         "source_gym_config": _record_path(source_gym_config, repo_root),
         "input_path": _record_path(Path(resolution.path), repo_root),
         "config_output_dir": _record_path(Path(generated_paths.output_dir), repo_root),
-        "graph_output_dir": _record_path(
-            Path(generated_paths.graph_output_dir),
-            repo_root,
+        "graph_output_dir": (
+            _record_path(Path(generated_paths.graph_output_dir), repo_root)
+            if getattr(generated_paths, "graph_output_dir", None) is not None
+            else None
         ),
         "generated_gym_config": _record_path(
             Path(generated_paths.gym_config),
@@ -183,9 +184,10 @@ def build_pipeline_record(
             Path(generated_paths.agent_config),
             repo_root,
         ),
-        "generated_task_prompt": _record_path(
-            Path(generated_paths.task_prompt),
-            repo_root,
+        "generated_task_prompt": (
+            _record_path(Path(generated_paths.task_prompt), repo_root)
+            if getattr(generated_paths, "task_prompt", None) is not None
+            else None
         ),
         "generated_seed_task_graph": (
             _record_path(Path(generated_paths.seed_task_graph), repo_root)
@@ -197,13 +199,15 @@ def build_pipeline_record(
             if getattr(generated_paths, "seed_task_graph_png", None) is not None
             else None
         ),
-        "generated_basic_background": _record_path(
-            Path(generated_paths.basic_background),
-            repo_root,
+        "generated_basic_background": (
+            _record_path(Path(generated_paths.basic_background), repo_root)
+            if getattr(generated_paths, "basic_background", None) is not None
+            else None
         ),
-        "generated_atom_actions": _record_path(
-            Path(generated_paths.atom_actions),
-            repo_root,
+        "generated_atom_actions": (
+            _record_path(Path(generated_paths.atom_actions), repo_root)
+            if getattr(generated_paths, "atom_actions", None) is not None
+            else None
         ),
         "pipeline_history_path": _record_path(history_path, repo_root),
         "robot_profile": getattr(args, "robot_profile", None),

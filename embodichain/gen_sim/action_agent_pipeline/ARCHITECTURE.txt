@@ -159,9 +159,10 @@ Each environment and episode owns a runtime_task_graph_v3 execution record.
 The recorder keeps Seed topology for direct comparison and adds observed poses,
 resolved targets and policies, selected arms, planning summaries, execution
 status, postcondition results, and failures. It atomically checkpoints JSON
-after every semantic step and publishes final JSON and PNG under
+after every semantic step and publishes final JSON under
 outputs/graph/<task>/runs/<run_id>/episode_N/env_N. Runtime records never
-mutate Seed.
+mutate Seed. A caller may inject a graph renderer to publish a PNG beside the
+JSON; runtime does not import the rendering layer.
 
 Config bundle ownership
 -----------------------
@@ -179,8 +180,19 @@ modules may import action_agent_config. Compatibility aliases in the entry
 module preserve established private import paths without moving ownership back
 into the dispatcher.
 
-The package-level graph_visualization module owns headless review rendering
-shared by generation and runtime. Config publication renders only Seed v5 PNG
-from the same in-memory snapshot as seed_task_graph.json. Runtime renders one
-grounded Task PNG for each environment and episode after execution. The images
-are diagnostic artifacts only and never become execution inputs.
+The runtime config bundle requires exactly fast_gym_config.json,
+agent_config.json, and seed_task_graph.json. Prompt records, usage statistics,
+timing hooks, and graph images are peripheral diagnostics and are not imported
+by the main generation or execution path.
+
+The package-level graph_visualization module remains available for headless
+review rendering. Config and runtime publication accept a renderer callback
+when a caller explicitly requests PNG output. Images are diagnostic artifacts
+only and never become execution inputs.
+
+Runtime launch ownership
+------------------------
+
+Episode preparation and execution belong to runtime.runner. The CLI adapts
+arguments, progress display, collision visualization, and window settings to
+that package API; runtime never imports the CLI, tqdm, or timing utilities.

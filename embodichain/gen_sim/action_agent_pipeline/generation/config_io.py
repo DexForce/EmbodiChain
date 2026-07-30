@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 import json
 import os
 from pathlib import Path
@@ -42,9 +42,6 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import (
     validate_seed_task_graph,
 )
-from embodichain.gen_sim.action_agent_pipeline.graph_visualization import (
-    render_seed_task_graph_png,
-)
 
 __all__ = [
     "read_json",
@@ -63,28 +60,43 @@ def write_config_bundle(
     bundle: Mapping[str, Any],
     overwrite: bool,
     graph_output_root: Path | None = None,
+    graph_renderer: Callable[[Mapping[str, Any]], bytes] | None = None,
 ) -> GeneratedActionAgentConfigPaths:
-    """Write Seed v5 runtime inputs and review diagnostics as one bundle."""
+    """Write the three runtime inputs and any explicitly requested reviews."""
     task_name = _bundle_task_name(bundle, fallback=output_dir.name)
-    graph_output_dir = _resolve_graph_output_root(graph_output_root) / _safe_task_dir(
-        task_name
+    graph_output_dir = (
+        _resolve_graph_output_root(graph_output_root) / _safe_task_dir(task_name)
+        if graph_renderer is not None
+        else None
     )
     paths = GeneratedActionAgentConfigPaths(
         output_dir=output_dir,
-        graph_output_dir=graph_output_dir,
         gym_config=output_dir / FAST_GYM_CONFIG_FILENAME,
         agent_config=output_dir / AGENT_CONFIG_FILENAME,
-        task_prompt=output_dir / TASK_PROMPT_FILENAME,
         seed_task_graph=output_dir / SEED_TASK_GRAPH_FILENAME,
-        seed_task_graph_png=graph_output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
-        basic_background=output_dir / BASIC_BACKGROUND_FILENAME,
-        atom_actions=output_dir / ATOM_ACTIONS_FILENAME,
         summary=dict(bundle.get("summary", {})),
+        graph_output_dir=graph_output_dir,
+        task_prompt=(
+            output_dir / TASK_PROMPT_FILENAME if "task_prompt" in bundle else None
+        ),
+        seed_task_graph_png=(
+            graph_output_dir / SEED_TASK_GRAPH_PNG_FILENAME
+            if graph_output_dir is not None
+            else None
+        ),
+        basic_background=(
+            output_dir / BASIC_BACKGROUND_FILENAME
+            if "basic_background" in bundle
+            else None
+        ),
+        atom_actions=(
+            output_dir / ATOM_ACTIONS_FILENAME if "atom_actions" in bundle else None
+        ),
     )
     raise_if_generated_files_exist(
         output_dir,
         overwrite,
-        task_name=task_name,
+        task_name=task_name if graph_renderer is not None else None,
         graph_output_root=graph_output_root,
     )
     _validate_seed_bundle(bundle)
@@ -92,25 +104,24 @@ def write_config_bundle(
     serialized_files: list[tuple[Path, str | bytes]] = [
         (paths.gym_config, _serialize_json(bundle["gym_config"])),
         (paths.agent_config, _serialize_json(bundle["agent_config"])),
-        (paths.task_prompt, _serialize_text(bundle["task_prompt"])),
+        (paths.seed_task_graph, _serialize_json(bundle["seed_task_graph"])),
     ]
-    serialized_files.append(
-        (paths.seed_task_graph, _serialize_json(bundle["seed_task_graph"]))
-    )
-    try:
-        seed_graph_png = render_seed_task_graph_png(bundle["seed_task_graph"])
-    except Exception as error:
-        raise RuntimeError("Failed to render seed_task_graph.png.") from error
-    serialized_files.append((paths.seed_task_graph_png, seed_graph_png))
-    serialized_files.extend(
-        [
-            (paths.basic_background, _serialize_text(bundle["basic_background"])),
-            (paths.atom_actions, _serialize_text(bundle["atom_actions"])),
-        ]
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if any(path.parent == graph_output_dir for path, _ in serialized_files):
-        graph_output_dir.mkdir(parents=True, exist_ok=True)
+    for key, path in (
+        ("task_prompt", paths.task_prompt),
+        ("basic_background", paths.basic_background),
+        ("atom_actions", paths.atom_actions),
+    ):
+        if path is not None:
+            serialized_files.append((path, _serialize_text(bundle[key])))
+    if graph_renderer is not None and paths.seed_task_graph_png is not None:
+        serialized_files.append(
+            (
+                paths.seed_task_graph_png,
+                graph_renderer(bundle["seed_task_graph"]),
+            )
+        )
+    for path, _ in serialized_files:
+        path.parent.mkdir(parents=True, exist_ok=True)
     _write_file_transaction(serialized_files)
     if overwrite:
         # These legacy artifacts are not valid runtime inputs for Seed v5. Remove
@@ -120,7 +131,11 @@ def write_config_bundle(
             output_dir / TASK_GRAPH_FILENAME,
             output_dir / TASK_GRAPH_PNG_FILENAME,
             output_dir / COMPILED_GRAPH_FILENAME,
-            graph_output_dir / TASK_GRAPH_PNG_FILENAME,
+            *(
+                (graph_output_dir / TASK_GRAPH_PNG_FILENAME,)
+                if graph_output_dir is not None
+                else ()
+            ),
         ):
             obsolete.unlink(missing_ok=True)
     return paths
@@ -138,14 +153,7 @@ def raise_if_generated_files_exist(
     output_files = [
         output_dir / FAST_GYM_CONFIG_FILENAME,
         output_dir / AGENT_CONFIG_FILENAME,
-        output_dir / TASK_PROMPT_FILENAME,
         output_dir / SEED_TASK_GRAPH_FILENAME,
-        output_dir / SEED_TASK_GRAPH_PNG_FILENAME,
-        output_dir / TASK_GRAPH_FILENAME,
-        output_dir / TASK_GRAPH_PNG_FILENAME,
-        output_dir / COMPILED_GRAPH_FILENAME,
-        output_dir / BASIC_BACKGROUND_FILENAME,
-        output_dir / ATOM_ACTIONS_FILENAME,
     ]
     if task_name:
         graph_output_dir = _resolve_graph_output_root(
@@ -183,6 +191,9 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def _validate_seed_bundle(bundle: Mapping[str, Any]) -> None:
     """Require the executable Seed v5 that is the sole config-stage graph."""
+    for key in ("gym_config", "agent_config"):
+        if not isinstance(bundle.get(key), Mapping):
+            raise TypeError(f"{key} bundle entry must be a mapping.")
     seed_graph = bundle.get("seed_task_graph")
     if not isinstance(seed_graph, Mapping):
         raise TypeError("seed_task_graph bundle entry must be a mapping.")

@@ -194,7 +194,6 @@ def generate_action_agent_config_from_project(
     _raise_if_generated_files_exist(
         output_dir_path,
         overwrite,
-        task_name,
     )
     robot_profile = resolve_robot_profile(robot_profile)
 
