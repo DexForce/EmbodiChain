@@ -507,7 +507,8 @@ def gravity_settle_assets_on_table(
                 z_up_to_y_up_matrix @ final_z_up_layout_matrix @ y_up_to_z_up_matrix,
             )
     finally:
-        sim._deferred_destroy()
+        sim.destroy(exit_process=False)
+        _EmbodiSimManager.flush_cleanup_queue()
 
     settled_assets_layout = [
         settled_layout_by_id[str(asset_layout["id"])] for asset_layout in assets_layout

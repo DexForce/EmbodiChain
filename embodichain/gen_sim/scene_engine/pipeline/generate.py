@@ -76,15 +76,17 @@ def generate_scene_from_image(
     image_segmentation_client = ImageSegmentationClient.from_config(
         image_segmentation_config_path
     )
-    image_segmentation_client.check_health()  # Error raising will happen internally.
-    scene = segment_scene(
-        image_path=image_path,
-        output_root=resolved_output_root,
-        scene=scene,
-        vlm_client=vlm_client,
-        image_segmentation_client=image_segmentation_client,
-    )
-    image_segmentation_client.close()  # Kill the session.
+    try:
+        image_segmentation_client.check_health() # Error raising will happen internally.
+        scene = segment_scene(
+            image_path=image_path,
+            output_root=resolved_output_root,
+            scene=scene,
+            vlm_client=vlm_client,
+            image_segmentation_client=image_segmentation_client,
+        )
+    finally:
+        image_segmentation_client.close() # Kill the session to avoid resource leaks.
     log_stage_end("Scene Segmentation")
 
     # 3. Objects + Coarse Layout Generation
@@ -93,16 +95,17 @@ def generate_scene_from_image(
     geometry_generation_client = GeometryGenerationClient.from_config(
         geometry_generation_config_path
     )
-    geometry_generation_client.check_health()
-
-    scene = generate_scene_and_refine(
-        image_path=image_path,
-        output_root=resolved_output_root,
-        scene=scene,
-        vlm_client=vlm_client,
-        geometry_generation_client=geometry_generation_client,
-    )
-    geometry_generation_client.close()  # Kill the session.
+    try:
+        geometry_generation_client.check_health() # Error raising will happen internally.
+        scene = generate_scene_and_refine(
+            image_path=image_path,
+            output_root=resolved_output_root,
+            scene=scene,
+            vlm_client=vlm_client,
+            geometry_generation_client=geometry_generation_client,
+        )
+    finally:
+        geometry_generation_client.close() # Kill the session to avoid resource leaks.
     log_stage_end("Objects + Coarse Layout Generation")
 
     # 4. Scene Export

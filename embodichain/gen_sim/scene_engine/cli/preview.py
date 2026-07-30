@@ -92,7 +92,8 @@ def preview_scene_export(
     except KeyboardInterrupt:
         print("Stopping preview.")
     finally:
-        sim.destroy()
+        sim.destroy(exit_process=False)
+        _EmbodiSimManager.flush_cleanup_queue()
 
 
 def _config_entries(
