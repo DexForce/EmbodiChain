@@ -70,7 +70,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
-GRIPPER_TCP_Z = 0.15
+GRIPPER_TCP_Z = 0.155
 ROBOT_INIT_POS = (1.95, 0.0, 0.1)
 ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
 LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)

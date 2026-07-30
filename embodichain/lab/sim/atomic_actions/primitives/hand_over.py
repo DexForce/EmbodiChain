@@ -204,8 +204,12 @@ class HandOver(AtomicAction):
     def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
         semantics = target.semantics
         transfer_object_to_eef = self._resolve_transfer_object_to_eef(state)
-        middle_object_pose = self.middle_object_pose
+        middle_object_pose = self.middle_object_pose.clone()
         final_object_pose = self.final_object_pose
+        # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
+        current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
+        middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
+        final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
         # 2.1 - EEF target that keeps the object at the handover pose.
         transfer_middle_eef = torch.bmm(middle_object_pose, transfer_object_to_eef)
