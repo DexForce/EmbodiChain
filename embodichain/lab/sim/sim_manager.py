@@ -66,7 +66,7 @@ from embodichain.lab.sim.objects import (
     Light,
     RigidConstraint,
 )
-from embodichain.lab.sim.objects.gizmo import Gizmo
+from embodichain.lab.sim.objects.gizmo import Gizmo, GizmoCfg
 from embodichain.lab.sim.sensors import (
     SensorCfg,
     BaseSensor,
@@ -93,7 +93,7 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import look_at_to_pose, pose_inv
+from embodichain.utils.math import look_at_to_pose, matrix_from_quat, pose_inv
 
 if TYPE_CHECKING:
     from embodichain.lab.visualization import (
@@ -128,7 +128,7 @@ class SimulationManagerCfg:
 
     This is forced to ``True`` when the Viser backend is enabled. Call
     :meth:`SimulationManager.open_window` explicitly when a native window is
-    still required, such as for Gizmo interaction.
+    still required. Viser Gizmos do not require a native window.
     """
 
     render_cfg: RenderCfg = field(default_factory=RenderCfg)
@@ -527,9 +527,19 @@ class SimulationManager:
 
         from embodichain.lab.visualization import SceneExporter, VisualizationRuntime
 
+        visualization_cfg = self.sim_config.visualization
+        if (
+            visualization_cfg.allow_commands
+            and visualization_cfg.viser_server.host
+            not in {"127.0.0.1", "localhost", "::1"}
+        ):
+            logger.log_warning(
+                "Viser Gizmo commands are enabled on a non-loopback interface. "
+                "Only expose this endpoint behind a trusted, authenticated boundary."
+            )
         runtime = VisualizationRuntime(
-            SceneExporter(self, self.sim_config.visualization),
-            self.sim_config.visualization,
+            SceneExporter(self, visualization_cfg),
+            visualization_cfg,
         )
         runtime.start()
         self._visualization_runtime = runtime
@@ -550,6 +560,10 @@ class SimulationManager:
         runtime = self.start_visualization()
         if runtime is None:
             return None
+        for _, gizmo in self.get_gizmo_items():
+            cancel = getattr(gizmo, "cancel_interaction", None)
+            if cancel is not None:
+                cancel("viser:")
         manifest = runtime.refresh_scene()
         self._visualization_manifest_topology_revision = (
             self._visualization_topology_revision
@@ -621,6 +635,10 @@ class SimulationManager:
         try:
             runtime.stop()
         finally:
+            for _, gizmo in self.get_gizmo_items():
+                cancel = getattr(gizmo, "cancel_interaction", None)
+                if cancel is not None:
+                    cancel("viser:")
             self._visualization_runtime = None
 
     def _convert_sim_config(
@@ -751,6 +769,7 @@ class SimulationManager:
             if physics_dt is None:
                 physics_dt = self.sim_config.physics_dt
             for i in range(step):
+                self.update_gizmos()
                 self._world.update(physics_dt)
                 self._visualization_sim_step += 1
                 self._visualization_sim_time += physics_dt
@@ -1804,14 +1823,24 @@ class SimulationManager:
         return list(self._robots.keys())
 
     def enable_gizmo(
-        self, uid: str, control_part: str | None = None, gizmo_cfg: object = None
-    ) -> Gizmo:
+        self,
+        uid: str,
+        control_part: str | None = None,
+        gizmo_cfg: GizmoCfg | None = None,
+        *,
+        enable_native: bool | None = None,
+    ) -> Gizmo | None:
         """Enable gizmo control for any simulation object (Robot, RigidObject, Camera, etc.).
 
         Args:
-            uid (str): UID of the object to attach gizmo to (searches in robots, rigid_objects, sensors, etc.)
-            control_part (str | None, optional): Control part name for robots. Defaults to "arm".
-            gizmo_cfg (object, optional): Gizmo configuration object. Defaults to None.
+            uid: UID of the robot, rigid object, or camera sensor.
+            control_part: Robot control part used for IK/FK.
+            gizmo_cfg: Native and Viser Gizmo appearance configuration.
+            enable_native: Whether to create a DexSim Gizmo. By default, native
+                controls are created only when a native window is active.
+
+        Returns:
+            The created Gizmo, or ``None`` if setup failed.
         """
         # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
@@ -1821,7 +1850,7 @@ class SimulationManager:
             logger.log_warning(
                 f"Gizmo for '{uid}' with control_part '{control_part}' already exists."
             )
-            return
+            return self._gizmos[gizmo_key]
 
         # Search for target object in different collections
         target = None
@@ -1841,80 +1870,94 @@ class SimulationManager:
             logger.log_error(
                 f"Object with uid '{uid}' not found in any collection (robots, rigid_objects, sensors, articulations)."
             )
-            return
+            return None
 
+        if enable_native is None:
+            enable_native = self.is_window_opened or not self.sim_config.headless
+        gizmo: Gizmo | None = None
         try:
-            gizmo = Gizmo(target, gizmo_cfg, control_part)
-            self._gizmos[gizmo_key] = gizmo
-            logger.log_info(
-                f"Gizmo enabled for {object_type} '{uid}' with control_part '{control_part}'"
+            gizmo = Gizmo(
+                target,
+                gizmo_cfg,
+                control_part,
+                enable_native=enable_native,
             )
-
-            # Initialize GizmoController if not already done.
-            if not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None:
+            if enable_native and (
+                not hasattr(self, "_gizmo_controller") or self._gizmo_controller is None
+            ):
                 window = (
                     self._world.get_windows()
                     if hasattr(self._world, "get_windows")
                     else None
                 )
+                if window is None:
+                    raise RuntimeError(
+                        "A native window is required for the DexSim Gizmo controller."
+                    )
                 self._gizmo_controller = GizmoController()
                 window.add_input_control(self._gizmo_controller)
+            self._gizmos[gizmo_key] = gizmo
+            self.notify_visualization_topology_changed()
+            logger.log_info(
+                f"Gizmo enabled for {object_type} '{uid}' with control_part "
+                f"'{control_part}' (native={enable_native}, "
+                f"viser={self.sim_config.visualization.allow_commands})"
+            )
 
         except Exception as e:
+            if gizmo is not None:
+                gizmo.destroy()
             logger.log_error(
                 f"Failed to create gizmo for {object_type} '{uid}' with control_part '{control_part}': {e}"
             )
+            return None
 
         return gizmo
 
     def disable_gizmo(self, uid: str, control_part: str | None = None) -> None:
-        """Disable and remove gizmo for a robot.
+        """Disable and remove a Gizmo.
 
         Args:
-            uid (str): Object UID to disable gizmo for
-            control_part (str | None, optional): Control part name for robots. Defaults to None.
+            uid: Target asset UID.
+            control_part: Robot control part, if applicable.
         """
-        # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
-
         if gizmo_key not in self._gizmos:
-            from embodichain.utils import logger
-
             logger.log_warning(
                 f"No gizmo found for '{uid}' with control_part '{control_part}'."
             )
             return
 
         try:
-            gizmo = self._gizmos[gizmo_key]
-            if gizmo is not None:
-                gizmo.destroy()
-            del self._gizmos[gizmo_key]
-
-            from embodichain.utils import logger
-
+            gizmo = self._gizmos.pop(gizmo_key)
+            try:
+                if gizmo is not None:
+                    gizmo.destroy()
+            finally:
+                self.notify_visualization_topology_changed()
             logger.log_info(
                 f"Gizmo disabled for '{uid}' with control_part '{control_part}'"
             )
-
-        except Exception as e:
-            from embodichain.utils import logger
-
+        except Exception as error:
             logger.log_error(
-                f"Failed to disable gizmo for '{uid}' with control_part '{control_part}': {e}"
+                f"Failed to disable gizmo for '{uid}' with control_part "
+                f"'{control_part}': {error}"
             )
 
-    def get_gizmo(self, uid: str, control_part: str | None = None) -> object:
-        """Get gizmo instance for a robot.
+    def get_gizmo(
+        self,
+        uid: str,
+        control_part: str | None = None,
+    ) -> Gizmo | None:
+        """Return an active Gizmo.
 
         Args:
-            uid (str): Object UID
-            control_part (str | None, optional): Control part name for robots. Defaults to None.
+            uid: Target asset UID.
+            control_part: Robot control part, if applicable.
 
         Returns:
-            object: Gizmo instance if found, None otherwise.
+            Gizmo instance if found, otherwise ``None``.
         """
-        # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
         return self._gizmos.get(gizmo_key, None)
 
@@ -1928,40 +1971,96 @@ class SimulationManager:
         Returns:
             bool: True if gizmo exists, False otherwise.
         """
-        # Create gizmo key combining uid and control_part
         gizmo_key = f"{uid}:{control_part}" if control_part else uid
         return gizmo_key in self._gizmos
 
-    def list_gizmos(self) -> Dict[str, bool]:
-        """List all active gizmos and their status.
+    def list_gizmos(self) -> dict[str, bool]:
+        """List active Gizmo IDs and availability.
 
         Returns:
-            Dict[str, bool]: Dictionary mapping gizmo keys (uid:control_part) to gizmo active status.
+            Mapping from ``uid[:control_part]`` to availability.
         """
         return {
             gizmo_key: (gizmo is not None) for gizmo_key, gizmo in self._gizmos.items()
         }
 
-    def update_gizmos(self):
-        """Update all active gizmos."""
+    def get_gizmo_items(self) -> tuple[tuple[str, Gizmo], ...]:
+        """Return a stable snapshot of active Gizmo IDs and controllers."""
+        return tuple(
+            (gizmo_key, gizmo)
+            for gizmo_key, gizmo in getattr(self, "_gizmos", {}).items()
+            if gizmo is not None
+        )
+
+    def process_visualization_commands(self) -> int:
+        """Apply queued Viser Gizmo commands on the simulation thread.
+
+        Returns:
+            Number of commands accepted for active Gizmos.
+        """
+        runtime = self._visualization_runtime
+        if runtime is None or not getattr(
+            self.sim_config.visualization,
+            "allow_commands",
+            False,
+        ):
+            return 0
+        accepted = 0
+        for command in runtime.drain_gizmo_commands():
+            if (
+                command.run_id != runtime.exporter.run_id
+                or command.scene_revision != runtime.exporter.scene_revision
+            ):
+                continue
+            gizmo = self._gizmos.get(command.gizmo_id)
+            if gizmo is None:
+                continue
+            source_id = f"viser:{command.client_id}"
+            if command.phase in {"start", "update"} and not gizmo.begin_interaction(
+                source_id
+            ):
+                continue
+            position = torch.as_tensor(
+                command.position,
+                dtype=torch.float32,
+                device=self.device,
+            )
+            position = position - self.arena_offsets[0]
+            wxyz = torch.as_tensor(
+                command.wxyz,
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(0)
+            pose = torch.eye(
+                4,
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(0)
+            pose[0, :3, :3] = matrix_from_quat(wxyz)[0]
+            pose[0, :3, 3] = position
+            if not gizmo.request_local_pose(pose, source_id=source_id):
+                continue
+            accepted += 1
+            if command.phase == "end":
+                gizmo.end_interaction(source_id)
+        return accepted
+
+    def update_gizmos(self) -> None:
+        """Apply Viser commands and update all active Gizmos."""
+        self.process_visualization_commands()
         for gizmo_key, gizmo in list(
-            self._gizmos.items()
+            getattr(self, "_gizmos", {}).items()
         ):  # Use list() to avoid modification during iteration
             if gizmo is not None:
                 try:
                     gizmo.update()
-                except Exception as e:
-                    from embodichain.utils import logger
-
-                    logger.log_error(f"Error updating gizmo '{gizmo_key}': {e}")
+                except Exception as error:
+                    logger.log_error(f"Error updating gizmo '{gizmo_key}': {error}")
 
     def toggle_gizmo_visibility(
         self, uid: str, control_part: str | None = None
-    ) -> bool:
-        """
-        Toggle the visibility of a gizmo by uid and optional control_part.
-        Returns the new visibility state (True=visible, False=hidden), or None if not found.
-        """
+    ) -> bool | None:
+        """Toggle Gizmo visibility and return the new state, if it exists."""
         gizmo = self.get_gizmo(uid, control_part)
         if gizmo is not None:
             return gizmo.toggle_visibility()
@@ -1970,9 +2069,7 @@ class SimulationManager:
     def set_gizmo_visibility(
         self, uid: str, visible: bool, control_part: str | None = None
     ) -> None:
-        """
-        Set the visibility of a gizmo by uid and optional control_part.
-        """
+        """Set Gizmo visibility by target UID and optional control part."""
         gizmo = self.get_gizmo(uid, control_part)
         if gizmo is not None:
             gizmo.set_visible(visible)

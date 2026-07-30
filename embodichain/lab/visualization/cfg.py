@@ -55,25 +55,28 @@ class VisualizationCfg:
     """Configure live scene visualization.
 
     Args:
-        backend: Visualization backend name. Phase V0 supports ``"none"`` and
-            ``"viser"``.
+        backend: Visualization backend name. Supported values are ``"none"``
+            and ``"viser"``.
         scene_fps: Maximum scene capture rate.
-        env_ids: Environment indices exposed by the visualizer.
-        max_visible_envs: Hard limit on the number of selected environments.
+        env_ids: Environment indices exposed by the visualizer. ``None`` selects
+            every simulation environment.
+        max_visible_envs: Optional safety limit on the number of selected
+            environments. ``None`` disables the limit.
         point_cloud_max_points: Maximum number of points retained per point cloud.
         sensor_image_fps: Maximum camera RGB preview update rate. ``None``
             captures once per visualization step instead of using wall-clock
             rate limiting.
         soft_body_fps: Maximum soft-body and cloth vertex update rate.
         allow_commands: Whether simulation-mutating browser commands are allowed.
-            Phase V0 is read-only and requires this to remain ``False``.
+            This enables Viser Gizmo dragging. Keep it disabled for untrusted
+            or publicly reachable browser sessions.
         viser_server: Viser HTTP/WebSocket server binding settings.
     """
 
     backend: str = "none"
     scene_fps: float = 15.0
-    env_ids: list[int] = [0]
-    max_visible_envs: int = 4
+    env_ids: list[int] | None = [0]
+    max_visible_envs: int | None = None
     point_cloud_max_points: int = 100_000
     sensor_image_fps: float | None = 2.0
     soft_body_fps: float = 5.0
@@ -88,7 +91,7 @@ class VisualizationCfg:
             )
         if self.scene_fps <= 0.0:
             raise ValueError("scene_fps must be greater than zero.")
-        if self.max_visible_envs <= 0:
+        if self.max_visible_envs is not None and self.max_visible_envs <= 0:
             raise ValueError("max_visible_envs must be greater than zero.")
         if self.point_cloud_max_points <= 0:
             raise ValueError("point_cloud_max_points must be greater than zero.")
@@ -96,18 +99,22 @@ class VisualizationCfg:
             raise ValueError("sensor_image_fps must be greater than zero.")
         if self.soft_body_fps <= 0.0:
             raise ValueError("soft_body_fps must be greater than zero.")
-        if not self.env_ids:
-            raise ValueError("env_ids must contain at least one environment index.")
-        if len(set(self.env_ids)) != len(self.env_ids):
-            raise ValueError("env_ids must not contain duplicates.")
-        if any(env_id < 0 for env_id in self.env_ids):
-            raise ValueError("env_ids must contain non-negative environment indices.")
-        if len(self.env_ids) > self.max_visible_envs:
-            raise ValueError(
-                f"Selected {len(self.env_ids)} environments, exceeding max_visible_envs="
-                f"{self.max_visible_envs}."
-            )
-        if self.allow_commands:
-            raise ValueError(
-                "Phase V0 visualization is read-only; allow_commands must be False."
-            )
+        if self.env_ids is not None:
+            if not self.env_ids:
+                raise ValueError("env_ids must contain at least one environment index.")
+            if len(set(self.env_ids)) != len(self.env_ids):
+                raise ValueError("env_ids must not contain duplicates.")
+            if any(env_id < 0 for env_id in self.env_ids):
+                raise ValueError(
+                    "env_ids must contain non-negative environment indices."
+                )
+            if (
+                self.max_visible_envs is not None
+                and len(self.env_ids) > self.max_visible_envs
+            ):
+                raise ValueError(
+                    f"Selected {len(self.env_ids)} environments, exceeding "
+                    f"max_visible_envs={self.max_visible_envs}."
+                )
+        if self.allow_commands and self.backend != "viser":
+            raise ValueError("allow_commands is only supported by the Viser backend.")

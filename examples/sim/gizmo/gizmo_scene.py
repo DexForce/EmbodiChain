@@ -165,22 +165,36 @@ def main():
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
 
     # Enable gizmo for all assets after all are created and initialized
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
+    sim.enable_gizmo(
+        uid="w1_gizmo_test",
+        control_part="left_arm",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
         logger.log_error("Failed to enable left arm gizmo!")
         return
 
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="right_arm")
+    sim.enable_gizmo(
+        uid="w1_gizmo_test",
+        control_part="right_arm",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
         logger.log_error("Failed to enable right arm gizmo!")
         return
 
-    sim.enable_gizmo(uid="interactive_cube")
+    sim.enable_gizmo(
+        uid="interactive_cube",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("interactive_cube"):
         logger.log_error("Failed to enable gizmo for cube!")
         return
 
-    sim.enable_gizmo(uid="scene_camera")
+    sim.enable_gizmo(
+        uid="scene_camera",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("scene_camera"):
         logger.log_error("Failed to enable gizmo for camera!")
         return
@@ -208,6 +222,7 @@ def run_simulation(sim: SimulationManager):
         while True:
             time.sleep(0.033)  # 30Hz
             sim.update_gizmos()
+            sim.capture_visualization_safely()
             step_count += 1
 
             # Display camera view in a window every 5 steps

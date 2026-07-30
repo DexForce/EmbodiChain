@@ -24,6 +24,9 @@ from .protocol import (
     CameraSpec,
     DynamicMeshUpdate,
     FrameOverlay,
+    GizmoCommand,
+    GizmoSpec,
+    GizmoState,
     MeshGeometry,
     PointCloudOverlay,
     SceneFrame,
@@ -35,6 +38,7 @@ from .protocol import (
     pose_to_position_wxyz,
 )
 from .runtime import (
+    GizmoCommandQueue,
     LatestFrameQueue,
     RuntimeHealth,
     RuntimeStats,
@@ -50,6 +54,10 @@ __all__ = [
     "CaptureResult",
     "DynamicMeshUpdate",
     "FrameOverlay",
+    "GizmoCommand",
+    "GizmoCommandQueue",
+    "GizmoSpec",
+    "GizmoState",
     "LatestFrameQueue",
     "MeshGeometry",
     "PointCloudOverlay",

@@ -8,8 +8,9 @@ EmbodiChain can publish a running simulation to a
 headless servers, SSH workflows, multi-environment inspection, and lightweight
 debugging when opening the native DexSim window is inconvenient.
 
-Viser visualization is read-only: it mirrors simulation state without changing
-physics, actions, or assets. Simulation remains owned by
+Programmatic Viser configurations are read-only by default. The common
+`--viser` launcher enables Gizmo target commands for trusted clients, but does
+not allow arbitrary physics, action, or asset operations. Simulation remains owned by
 {class}`~embodichain.lab.sim.SimulationManager`; Viser runs on a background
 update thread and keeps only the latest unconsumed frame so a slow browser
 cannot accumulate simulation lag.
@@ -100,6 +101,8 @@ The browser scene currently includes:
 - every visible link of `Robot` and `Articulation`;
 - dynamic `SoftObject` and `ClothObject` geometry;
 - camera frustums and low-frequency RGB previews;
+- read-only Gizmo frames, or interactive transform controls when commands are
+  explicitly enabled;
 - a default XY ground grid with 1 m cells and 10 m major sections;
 - optional coordinate-frame, target, trajectory, and point-cloud overlays when
   using {class}`SceneOverlays`.
@@ -107,10 +110,46 @@ The browser scene currently includes:
 Static geometry is content-addressed and batched. Normal scene frames update
 only poses, orientations, and visibility.
 
-Lights, rigid constraints, and DexSim gizmos do not own ordinary scene meshes,
-so they are not exported as Viser mesh nodes. Their affected objects remain
-visible. Camera depth, segmentation masks, normals, and position buffers are
-also not currently shown in the browser RGB panel.
+Lights and rigid constraints do not own ordinary scene meshes, so they are not
+exported as Viser mesh nodes. Gizmos are exported separately under
+`/interactions/gizmos`; their affected objects remain ordinary scene nodes.
+Camera depth, segmentation masks, normals, and position buffers are also not
+currently shown in the browser RGB panel.
+
+## Interactive Gizmos
+
+The `--viser` launcher option enables browser Gizmo commands by default. Create
+each Gizmo through `SimulationManager.enable_gizmo`; a pure browser process can
+omit the DexSim handle:
+
+```python
+sim.enable_gizmo("cube", enable_native=False)
+```
+
+Viser and DexSim use the same deferred target-control path:
+
+- rigid-object drags set its local arena pose;
+- camera drags set its local pose;
+- robot drags invoke FK/IK for the selected `control_part`.
+
+Viser callbacks only enqueue immutable pose commands. `update_gizmos()` drains
+and applies them on the simulation thread; manual `SimulationManager.update()`
+does this automatically. Automatic-update loops must continue calling
+`update_gizmos()` and `capture_visualization_safely()`.
+
+Only one client owns a Gizmo from drag start through drag end or disconnect.
+Other clients are returned to the latest authoritative simulation pose. Gizmo
+control currently requires `num_envs=1`. The Viser transform-control appearance
+is browser-native and therefore does not exactly reproduce DexSim's arrow,
+corner, tag, and ring styling.
+
+Programmatic configurations remain explicit:
+`VisualizationCfg(backend="viser", allow_commands=True)` enables interaction,
+while `allow_commands=False` creates read-only Gizmo frames. Command-line
+`--viser` grants connected browser clients permission to mutate the simulation,
+and Viser does not add application authentication here. Keep the default
+loopback bind for local use; expose the server only behind an authenticated,
+trusted network boundary.
 
 ## Deformable objects
 
@@ -144,6 +183,9 @@ after each eligible simulation step; `run-env --viser` uses this mode by
 default.
 
 The **Environments** panel independently hides or shows exported environments.
+For more than 16 environments, it switches to a scalable **Show all
+environments** toggle plus a selected-environment dropdown instead of creating
+one GUI checkbox per environment.
 The **Overlays** panel controls frames, trajectories, targets, and point clouds.
 Hiding an environment affects its static meshes, deformable meshes, and camera
 frustum together.
@@ -156,12 +198,12 @@ frustum together.
 |---|---:|---|
 | `backend` | `"none"` | Use `"viser"` to enable browser visualization. |
 | `scene_fps` | `15.0` | Maximum rigid pose and overlay capture rate. |
-| `env_ids` | `[0]` | Environment IDs published to the browser. |
-| `max_visible_envs` | `4` | Maximum number of selected environment IDs. |
+| `env_ids` | `[0]` | Environment IDs published to the browser; `None` selects every simulation environment. |
+| `max_visible_envs` | `None` | Optional safety limit; `None` disables the limit. |
 | `point_cloud_max_points` | `100000` | Per-overlay point-cloud limit. |
 | `sensor_image_fps` | `2.0` | Maximum RGB preview capture rate; `None` synchronizes capture to simulation steps. |
 | `soft_body_fps` | `5.0` | Maximum cloth and soft-body vertex rate. |
-| `allow_commands` | `False` | Browser mutation is not supported; must remain `False`. |
+| `allow_commands` | `False` | Allow trusted Viser clients to drag exported Gizmos and mutate simulation targets. |
 | `viser_server` | `ViserServerCfg()` | HTTP/WebSocket bind settings. |
 
 ### `ViserServerCfg`
@@ -179,13 +221,13 @@ Scripts using the common environment launcher accept:
 
 | Option | Default | Description |
 |---|---:|---|
-| `--viser` | disabled | Enable Viser and use headless execution. |
+| `--viser` | disabled | Enable headless Viser with trusted browser Gizmo dragging. |
 | `--viser-host` | `127.0.0.1` | Bind interface. |
 | `--viser-port` | `8080` | Server port. |
 | `--viser-fps` | `15.0` | Scene pose update limit. |
 | `--viser-image-fps` | `2.0`; `run-env`: every environment step | Camera RGB update limit when explicitly supplied. |
 | `--viser-soft-body-fps` | `5.0` | Deformable mesh update limit. |
-| `--viser-env-ids ID ...` | `0` | Environment IDs to publish. |
+| `--viser-env-ids ID ...` | `0` | Environment IDs to publish, or `all`. |
 
 ## Health and telemetry
 
@@ -219,7 +261,7 @@ Viser port behind an authenticated gateway.
 | Symptom | Check |
 |---|---|
 | Browser cannot connect | Verify the printed endpoint, port, firewall, and SSH forwarding. |
-| `env_ids` validation error | Every selected ID must be below `SimulationManager.num_envs`; at most four are selected by default. |
+| `env_ids` validation error | Every selected ID must be below `SimulationManager.num_envs` and any configured `max_visible_envs` limit. |
 | Newly added asset is absent | Step the simulation once or call `refresh_visualization()`. |
 | Soft body looks simplified | This is the collision-vertex convex-hull preview described above. |
 | Browser motion is expensive | Lower scene, image, or soft-body FPS and publish fewer environments. |

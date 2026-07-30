@@ -188,13 +188,13 @@ embodichain run-env --gym_config config.yaml \
 | ``--replay_mode`` | ``kinematic`` | Replay mode: ``kinematic`` (exact, physics off), ``dynamic`` (feed recorded actions, physics on), ``control`` (interactive scrubber) |
 | ``--profile`` | ``False`` | Enable per-section wall-time profiling of reset/step; prints a breakdown report on ``env.close()`` |
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON to this path on ``env.close()`` |
-| ``--viser`` | ``False`` | Enable the read-only Viser browser scene and force headless execution |
+| ``--viser`` | ``False`` | Enable headless Viser and allow trusted clients to drag configured Gizmos |
 | ``--viser-host`` | ``127.0.0.1`` | Viser bind interface |
 | ``--viser-port`` | ``8080`` | Viser HTTP/WebSocket port |
 | ``--viser-fps`` | ``15.0`` | Maximum rigid pose and overlay update rate |
 | ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-env` captures after every environment step |
 | ``--viser-soft-body-fps`` | ``5.0`` | Maximum cloth and soft-body vertex rate |
-| ``--viser-env-ids`` | ``0`` | Space-separated environment IDs published to Viser |
+| ``--viser-env-ids`` | ``0`` | Space-separated environment IDs published to Viser, or ``all`` |
 
 The Viser panel supports environment visibility, camera-frustum selection, RGB
 preview, and overlay visibility. For supported object types, programmatic

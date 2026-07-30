@@ -27,6 +27,8 @@ from embodichain.lab.visualization import (
     CameraImageCaptureResult,
     CameraImageFrame,
     CaptureResult,
+    GizmoCommand,
+    GizmoCommandQueue,
     LatestFrameQueue,
     SceneFrame,
     SceneManifest,
@@ -57,6 +59,36 @@ def test_latest_frame_queue_replaces_unconsumed_frame() -> None:
     assert frames.put_latest(_frame(2))
 
     assert frames.get_nowait().sequence == 2
+
+
+def _gizmo_command(sequence: int, phase: str) -> GizmoCommand:
+    return GizmoCommand(
+        run_id="run",
+        scene_revision=1,
+        sequence=sequence,
+        gizmo_id="cube",
+        phase=phase,
+        client_id="client-a",
+        position=np.array([float(sequence), 0.0, 0.0], dtype=np.float32),
+        wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+    )
+
+
+def test_gizmo_command_queue_coalesces_updates_but_retains_lifecycle() -> None:
+    commands = GizmoCommandQueue(maxsize=3)
+
+    commands.put(_gizmo_command(1, "start"))
+    commands.put(_gizmo_command(2, "update"))
+    commands.put(_gizmo_command(3, "update"))
+    commands.put(_gizmo_command(4, "end"))
+
+    drained = commands.drain()
+
+    assert [(command.sequence, command.phase) for command in drained] == [
+        (1, "start"),
+        (3, "update"),
+        (4, "end"),
+    ]
 
 
 @dataclass

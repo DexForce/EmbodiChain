@@ -17,14 +17,22 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
-from ..protocol import CameraImageFrame, SceneFrame, SceneManifest
+from ..protocol import CameraImageFrame, GizmoCommand, SceneFrame, SceneManifest
 
 __all__ = ["VisualizationBackend"]
 
 
 class VisualizationBackend(ABC):
     """Lifecycle and publishing contract for live visualization backends."""
+
+    def set_gizmo_command_sink(
+        self,
+        sink: Callable[[GizmoCommand], None] | None,
+    ) -> None:
+        """Set the thread-safe sink used for browser Gizmo commands."""
+        self._gizmo_command_sink = sink
 
     @property
     @abstractmethod

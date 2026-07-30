@@ -53,6 +53,7 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
+        headless=args.headless,
         physics_dt=1.0 / 100.0,
         sim_device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
@@ -102,12 +103,17 @@ def main():
     time.sleep(0.2)  # Wait for a moment to ensure everything is set up
 
     # Enable gizmo using the new API
-    sim.enable_gizmo(uid="ur10_gizmo_test", control_part="arm")
+    sim.enable_gizmo(
+        uid="ur10_gizmo_test",
+        control_part="arm",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
         logger.log_error("Failed to enable gizmo!")
         return
 
-    sim.open_window()
+    if not args.headless:
+        sim.open_window()
 
     logger.log_info("Gizmo-Robot example started!")
     logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
@@ -125,6 +131,7 @@ def run_simulation(sim: SimulationManager):
             time.sleep(0.033)  # 30Hz
             # Update all gizmos managed by sim
             sim.update_gizmos()
+            sim.capture_visualization_safely()
             step_count += 1
 
             if step_count % 100 == 0:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from collections import deque
 from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Generic, TypeVar
@@ -26,6 +27,7 @@ from .backends.base import VisualizationBackend
 from .cfg import VisualizationCfg
 from .protocol import (
     CameraImageFrame,
+    GizmoCommand,
     SceneFrame,
     SceneManifest,
     SceneOverlays,
@@ -36,6 +38,7 @@ from .protocol import (
 from .scene_exporter import SceneExporter
 
 __all__ = [
+    "GizmoCommandQueue",
     "LatestFrameQueue",
     "RuntimeHealth",
     "RuntimeStats",
@@ -86,6 +89,53 @@ class LatestFrameQueue(Generic[FrameT]):
             self._queue.get_nowait()
         except queue.Empty:
             pass
+
+
+class GizmoCommandQueue:
+    """Bounded command queue that coalesces high-rate drag updates.
+
+    Drag lifecycle commands are retained. When the queue reaches its soft
+    capacity, an older ``update`` for the same Gizmo/client is replaced first.
+    """
+
+    def __init__(self, maxsize: int = 256) -> None:
+        if maxsize <= 0:
+            raise ValueError("maxsize must be greater than zero.")
+        self._maxsize = maxsize
+        self._commands: deque[GizmoCommand] = deque()
+        self._lock = threading.Lock()
+
+    def put(self, command: GizmoCommand) -> None:
+        """Enqueue a command without blocking the Viser callback thread."""
+        with self._lock:
+            if command.phase == "update":
+                for index in range(len(self._commands) - 1, -1, -1):
+                    queued = self._commands[index]
+                    if (
+                        queued.phase == "update"
+                        and queued.gizmo_id == command.gizmo_id
+                        and queued.client_id == command.client_id
+                    ):
+                        self._commands[index] = command
+                        return
+            if len(self._commands) >= self._maxsize:
+                for index, queued in enumerate(self._commands):
+                    if queued.phase == "update":
+                        del self._commands[index]
+                        break
+            self._commands.append(command)
+
+    def drain(self) -> tuple[GizmoCommand, ...]:
+        """Return and clear all queued commands in arrival order."""
+        with self._lock:
+            commands = tuple(self._commands)
+            self._commands.clear()
+        return commands
+
+    def clear(self) -> None:
+        """Discard all queued commands."""
+        with self._lock:
+            self._commands.clear()
 
 
 @dataclass(frozen=True)
@@ -147,8 +197,13 @@ class VisualizationRuntime:
         if backend is None:
             from .backends.viser import ViserBackend
 
-            backend = ViserBackend(cfg.viser_server)
+            backend = ViserBackend(
+                cfg.viser_server,
+                allow_commands=cfg.allow_commands,
+            )
         self._backend = backend
+        self._gizmo_commands = GizmoCommandQueue()
+        self._backend.set_gizmo_command_sink(self._enqueue_gizmo_command)
         self._frames: LatestFrameQueue[SceneFrame] = LatestFrameQueue()
         self._camera_images: LatestFrameQueue[CameraImageFrame] = LatestFrameQueue()
         self._manifests: queue.Queue[SceneManifest] = queue.Queue()
@@ -162,6 +217,16 @@ class VisualizationRuntime:
         self._next_deformable_capture_time = 0.0
         self._stats = RuntimeStats()
         self._stats_lock = threading.Lock()
+
+    def _enqueue_gizmo_command(self, command: GizmoCommand) -> None:
+        if self.cfg.allow_commands:
+            self._gizmo_commands.put(command)
+
+    def drain_gizmo_commands(self) -> tuple[GizmoCommand, ...]:
+        """Drain browser Gizmo commands for simulation-thread processing."""
+        if not self.cfg.allow_commands:
+            return ()
+        return self._gizmo_commands.drain()
 
     @property
     def endpoint(self) -> str | None:
@@ -414,6 +479,7 @@ class VisualizationRuntime:
         self._thread = None
         self._frames.clear()
         self._camera_images.clear()
+        self._gizmo_commands.clear()
         self._raise_worker_error()
 
     def __enter__(self) -> VisualizationRuntime:

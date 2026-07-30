@@ -30,6 +30,10 @@ Runtime
    :members:
    :undoc-members:
 
+.. autoclass:: GizmoCommandQueue
+   :members:
+   :undoc-members:
+
 .. autoclass:: RuntimeHealth
    :members:
    :undoc-members:
@@ -63,6 +67,18 @@ Scene Export
    :undoc-members:
 
 .. autoclass:: DynamicMeshUpdate
+   :members:
+   :undoc-members:
+
+.. autoclass:: GizmoSpec
+   :members:
+   :undoc-members:
+
+.. autoclass:: GizmoState
+   :members:
+   :undoc-members:
+
+.. autoclass:: GizmoCommand
    :members:
    :undoc-members:
 

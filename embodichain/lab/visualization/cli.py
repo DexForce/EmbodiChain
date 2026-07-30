@@ -23,6 +23,21 @@ from .cfg import VisualizationCfg, ViserServerCfg
 __all__ = ["add_viser_args_to_parser", "visualization_cfg_from_args"]
 
 
+def _parse_viser_env_id(value: str) -> int | str:
+    """Parse one environment ID or the ``all`` selector."""
+    if value.lower() == "all":
+        return "all"
+    try:
+        env_id = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Expected a non-negative environment ID or 'all', received {value!r}."
+        ) from exc
+    if env_id < 0:
+        raise argparse.ArgumentTypeError("Environment IDs must be non-negative.")
+    return env_id
+
+
 def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
     """Add the standard EmbodiChain Viser command-line options.
 
@@ -34,7 +49,10 @@ def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--viser",
         action="store_true",
-        help="Enable the headless Viser browser scene.",
+        help=(
+            "Enable the headless Viser browser scene; configured Gizmos are "
+            "interactive. Only expose it to trusted clients."
+        ),
     )
     parser.add_argument(
         "--viser-host",
@@ -70,10 +88,14 @@ def add_viser_args_to_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--viser-env-ids",
-        type=int,
+        type=_parse_viser_env_id,
         nargs="+",
-        default=list(visualization_defaults.env_ids),
-        help="Environment IDs published to Viser.",
+        default=(
+            ["all"]
+            if visualization_defaults.env_ids is None
+            else list(visualization_defaults.env_ids)
+        ),
+        help="Environment IDs published to Viser, or 'all'.",
     )
 
 
@@ -92,6 +114,19 @@ def visualization_cfg_from_args(
     server_defaults = defaults.viser_server
     enabled = bool(getattr(args, "viser", False))
     image_fps_arg = getattr(args, "viser_image_fps", defaults.sensor_image_fps)
+    env_ids_arg = list(
+        getattr(
+            args,
+            "viser_env_ids",
+            ["all"] if defaults.env_ids is None else defaults.env_ids,
+        )
+    )
+    if "all" in env_ids_arg:
+        if env_ids_arg != ["all"]:
+            raise ValueError("'all' cannot be combined with explicit Viser env IDs.")
+        env_ids = None
+    else:
+        env_ids = [int(env_id) for env_id in env_ids_arg]
     visualization_cfg = VisualizationCfg(
         backend="viser" if enabled else "none",
         scene_fps=float(getattr(args, "viser_fps", defaults.scene_fps)),
@@ -99,7 +134,8 @@ def visualization_cfg_from_args(
         soft_body_fps=float(
             getattr(args, "viser_soft_body_fps", defaults.soft_body_fps)
         ),
-        env_ids=list(getattr(args, "viser_env_ids", defaults.env_ids)),
+        env_ids=env_ids,
+        allow_commands=enabled,
         viser_server=ViserServerCfg(
             host=str(getattr(args, "viser_host", server_defaults.host)),
             port=int(getattr(args, "viser_port", server_defaults.port)),

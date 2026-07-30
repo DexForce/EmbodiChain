@@ -89,14 +89,20 @@ def main():
         )
     )
 
-    # Enable Gizmo for both cubes using the new API (only in window mode)
-    if not args.headless:
-        sim.enable_gizmo(uid="cube1")
-        sim.enable_gizmo(uid="cube2")
+    # Enable native-window or Viser Gizmo control.
+    if not sim.sim_config.headless or args.viser:
+        sim.enable_gizmo(
+            uid="cube1",
+            enable_native=not sim.sim_config.headless,
+        )
+        sim.enable_gizmo(
+            uid="cube2",
+            enable_native=not sim.sim_config.headless,
+        )
 
     logger.log_info("Scene setup complete!")
     logger.log_info(f"Running simulation with 1 environment(s)")
-    if not args.headless:
+    if not sim.sim_config.headless or args.viser:
         if sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")
         if sim.has_gizmo("cube2"):

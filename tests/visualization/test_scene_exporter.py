@@ -281,6 +281,33 @@ class _EmptySimulation:
         raise AssertionError(f"Unexpected sensor lookup: {uid}")
 
 
+class _Gizmo:
+    target = SimpleNamespace(cfg=SimpleNamespace(uid="cube"))
+    target_type = "rigid_object"
+    control_part = None
+    cfg = SimpleNamespace(
+        axis_length_x=0.2,
+        axis_length_y=0.2,
+        axis_length_z=0.2,
+        axis_size=0.01,
+        rings_radius=0.15,
+        rings_size=0.01,
+    )
+
+    def get_control_pose(self) -> np.ndarray:
+        pose = np.eye(4, dtype=np.float32)[None]
+        pose[0, :3, 3] = [0.2, 0.3, 0.4]
+        return pose
+
+    def is_visible(self) -> bool:
+        return True
+
+
+class _GizmoSimulation(_EmptySimulation):
+    def get_gizmo_items(self) -> tuple[tuple[str, _Gizmo], ...]:
+        return (("cube", _Gizmo()),)
+
+
 class _Camera:
     def __init__(self) -> None:
         self.cfg = SimpleNamespace(
@@ -379,6 +406,26 @@ def test_manifest_deduplicates_geometry_and_escapes_paths() -> None:
     assert manifest.nodes[0].geometry_id == manifest.nodes[1].geometry_id
 
 
+def test_manifest_all_environment_selector_exports_every_arena() -> None:
+    exporter = SceneExporter(
+        _Simulation(),
+        VisualizationCfg(backend="viser", env_ids=None),
+        run_id="all-envs",
+    )
+
+    manifest = exporter.build_manifest()
+    result = exporter.capture(sim_step=1, sim_time=0.01)
+
+    assert {node.env_id for node in manifest.nodes} == {0, 1}
+    assert len(manifest.nodes) == 6
+    np.testing.assert_allclose(
+        result.frame.positions[
+            result.frame.node_ids.index("env:1/robot:robot/link:tip%2Flink")
+        ],
+        [2.5, 0.0, 0.6],
+    )
+
+
 def test_capture_adds_arena_offsets_and_limits_point_clouds() -> None:
     max_points = 4
     exporter = SceneExporter(
@@ -420,6 +467,21 @@ def test_empty_scene_can_publish_a_current_frame() -> None:
     assert manifest.nodes == ()
     assert result.frame.scene_revision == 1
     assert result.frame.positions.shape == (0, 3)
+
+
+def test_gizmo_manifest_and_authoritative_pose_are_exported() -> None:
+    exporter = SceneExporter(
+        _GizmoSimulation(),
+        VisualizationCfg(backend="viser", allow_commands=True),
+        run_id="gizmo-run",
+    )
+
+    manifest = exporter.build_manifest()
+    result = exporter.capture(sim_step=1, sim_time=0.01)
+
+    assert manifest.gizmos[0].gizmo_id == "cube"
+    assert manifest.gizmos[0].path == "/interactions/gizmos/cube"
+    np.testing.assert_allclose(result.frame.gizmos[0].position, [0.2, 0.3, 0.4])
 
 
 def test_camera_frustum_pose_and_low_frequency_rgb_are_exported() -> None:

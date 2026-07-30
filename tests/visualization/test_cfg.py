@@ -35,6 +35,17 @@ def test_visualization_cfg_enforces_visible_environment_limit() -> None:
         VisualizationCfg(backend="viser", env_ids=[0, 1], max_visible_envs=1)
 
 
+def test_visualization_cfg_supports_all_environments_without_a_default_cap() -> None:
+    all_environments = VisualizationCfg(backend="viser", env_ids=None)
+    many_environments = VisualizationCfg(
+        backend="viser",
+        env_ids=list(range(1024)),
+    )
+
+    assert all_environments.env_ids is None
+    assert many_environments.max_visible_envs is None
+
+
 def test_visualization_cfg_accepts_step_synchronized_images() -> None:
     cfg = VisualizationCfg(backend="viser", sensor_image_fps=None)
 
@@ -46,9 +57,15 @@ def test_visualization_cfg_rejects_non_positive_image_fps() -> None:
         VisualizationCfg(backend="viser", sensor_image_fps=0.0)
 
 
-def test_visualization_cfg_rejects_mutating_commands_in_phase_v0() -> None:
-    with pytest.raises(ValueError, match="read-only"):
-        VisualizationCfg(backend="viser", allow_commands=True)
+def test_visualization_cfg_accepts_explicit_viser_commands() -> None:
+    cfg = VisualizationCfg(backend="viser", allow_commands=True)
+
+    assert cfg.allow_commands
+
+
+def test_visualization_cfg_rejects_commands_without_viser() -> None:
+    with pytest.raises(ValueError, match="Viser"):
+        VisualizationCfg(backend="none", allow_commands=True)
 
 
 def test_viser_server_cfg_requires_bindable_port() -> None:

@@ -260,6 +260,7 @@ topics:
       - embodichain/lab/visualization/
       - embodichain/lab/gym/utils/gym_utils.py
       - embodichain/lab/gym/envs/base_env.py
+      - embodichain/lab/scripts/preview_asset.py
       - embodichain/lab/sim/objects/rigid_object.py
       - embodichain/lab/sim/objects/rigid_object_group.py
       - embodichain/lab/sim/objects/soft_object.py

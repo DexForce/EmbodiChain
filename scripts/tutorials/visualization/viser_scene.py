@@ -165,8 +165,7 @@ def main() -> None:
     visualization_cfg = VisualizationCfg(
         backend="viser",
         scene_fps=args.scene_fps,
-        env_ids=list(range(min(args.num_envs, 4))),
-        max_visible_envs=4,
+        env_ids=None,
         viser_server=ViserServerCfg(host=args.host, port=args.port),
     )
     exporter = SceneExporter(sim, visualization_cfg)

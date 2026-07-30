@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from embodichain.lab.visualization import (
     add_viser_args_to_parser,
     visualization_cfg_from_args,
@@ -50,6 +52,7 @@ def test_viser_flag_builds_visualization_configuration() -> None:
 
     assert visualization_cfg.backend == "viser"
     assert visualization_cfg.scene_fps == 12.5
+    assert visualization_cfg.allow_commands
     assert visualization_cfg.sensor_image_fps == 1.5
     assert visualization_cfg.soft_body_fps == 4.0
     assert visualization_cfg.env_ids == [1, 3]
@@ -64,3 +67,32 @@ def test_viser_is_disabled_by_default() -> None:
     visualization_cfg = visualization_cfg_from_args(parser.parse_args([]))
 
     assert visualization_cfg.backend == "none"
+    assert not visualization_cfg.allow_commands
+
+
+def test_viser_all_environment_selector_builds_unbounded_selection() -> None:
+    parser = argparse.ArgumentParser()
+    add_viser_args_to_parser(parser)
+
+    args = parser.parse_args(["--viser", "--viser-env-ids", "all"])
+    visualization_cfg = visualization_cfg_from_args(args)
+
+    assert args.viser_env_ids == ["all"]
+    assert visualization_cfg.env_ids is None
+
+
+def test_viser_all_environment_selector_cannot_be_combined_with_ids() -> None:
+    parser = argparse.ArgumentParser()
+    add_viser_args_to_parser(parser)
+
+    args = parser.parse_args(["--viser-env-ids", "all", "1"])
+    with pytest.raises(ValueError, match="cannot be combined"):
+        visualization_cfg_from_args(args)
+
+
+def test_removed_viser_gizmo_flag_is_rejected() -> None:
+    parser = argparse.ArgumentParser()
+    add_viser_args_to_parser(parser)
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--viser-gizmo"])

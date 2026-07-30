@@ -3,9 +3,9 @@ Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Viser Phase V0 tutorial
+# Viser visualization tutorial
 
-`viser_scene.py` demonstrates the first EmbodiChain Viser integration without
+`viser_scene.py` demonstrates EmbodiChain's Viser integration without
 modifying DexSim. It runs a headless simulation and publishes:
 
 - batched rigid-object meshes and poses;
@@ -13,6 +13,7 @@ modifying DexSim. It runs a headless simulation and publishes:
 - per-link articulation meshes and poses;
 - low-frequency soft-body and cloth deformation;
 - camera frustums and low-frequency RGB previews;
+- read-only Gizmo frames or opt-in interactive transform controls;
 - coordinate frame, target pose, trajectory, and sampled point-cloud overlays;
 - environment and overlay visibility controls.
 
@@ -45,9 +46,8 @@ embodichain run-env --gym_config path/to/task.yaml --viser
 Use `--viser-host`, `--viser-port`, `--viser-fps`, `--viser-image-fps`,
 `--viser-soft-body-fps`, and `--viser-env-ids` to override the standard
 server and sampling settings. `--viser` automatically runs the simulation
-headlessly; `--headless` by itself does not enable Viser. Gizmo examples still
-open their native window explicitly because browser visualization is
-read-only.
+headlessly and enables trusted clients to drag configured Gizmos; `--headless`
+by itself does not enable Viser.
 `embodichain run-env --viser` captures camera previews after every environment
 step by default; pass `--viser-image-fps` to restore wall-clock rate limiting.
 
@@ -73,10 +73,9 @@ python scripts/tutorials/sim/create_cloth.py --viser
 
 The atomic-action tutorials receive the same options through
 `tutorial_utils.py`. Gym tutorials pass the generated visualization
-configuration into their environment configuration. Gizmo examples also
-accept `--viser`; their scene assets are mirrored into the browser, while
-interactive Gizmo manipulation continues to use the native window because
-the Viser integration is read-only.
+configuration into their environment configuration. Gizmo examples accept
+`--viser`, which uses a headless simulation with browser-native transform
+controls. Omit `--viser` to use the DexSim native window instead.
 
 Cloth uses its welded physical surface topology. DexSim does not currently
 expose the PhysX soft-body collision topology, so the soft-body preview uses
@@ -95,7 +94,7 @@ Then open `http://127.0.0.1:8080` locally. A deployed service should instead
 place the worker port behind its authenticated gateway. Do not expose a worker
 Viser port directly to the public internet.
 
-## Phase V0 boundary
+## Current boundary
 
 The runtime reports captured, published, dropped, and rejected frame counts,
 along with capture/upload time and approximate payload bytes. Static geometry
@@ -105,5 +104,8 @@ Viser mesh handles while preserving the server state used by reconnecting
 clients.
 
 Depth/mask preview, endpoint registration, and authenticated command handling
-remain later work. Lights, rigid constraints, and DexSim gizmos do not own
-scene meshes, so they are not exported as mesh nodes.
+remain later work. Lights and rigid constraints do not own scene meshes.
+Programmatic deployments with `allow_commands=False` export Gizmos as read-only
+frames. Common `--viser` launchers use browser-native transform controls by
+default. Commands are queued and applied by
+`SimulationManager.update_gizmos()` on the simulation thread.

@@ -43,7 +43,7 @@ sim_config = SimulationManagerCfg(
 | `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 | `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
 | `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
-| `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Optional read-only browser visualization and Viser server settings. |
+| `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
 
 ### Physics Configuration
 

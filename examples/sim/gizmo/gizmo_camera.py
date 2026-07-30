@@ -101,7 +101,10 @@ def main():
     time.sleep(0.2)
 
     # Enable gizmo for interactive camera control using the new unified API
-    sim.enable_gizmo(uid="gizmo_camera")
+    sim.enable_gizmo(
+        uid="gizmo_camera",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("gizmo_camera"):
         logger.log_error("Failed to enable gizmo for camera!")
         return
@@ -138,6 +141,7 @@ def run_simulation(sim, camera):
         while True:
             # Update all gizmos managed by sim (including camera gizmo)
             sim.update_gizmos()
+            sim.capture_visualization_safely()
 
             # Update camera to get latest sensor data
             camera.update()

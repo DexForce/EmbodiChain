@@ -155,12 +155,20 @@ def main():
     time.sleep(0.2)  # Wait for a moment to ensure everything is set up
 
     # Enable gizmo for both arms using the new API
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="left_arm")
+    sim.enable_gizmo(
+        uid="w1_gizmo_test",
+        control_part="left_arm",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
         logger.log_error("Failed to enable left arm gizmo!")
         return
 
-    sim.enable_gizmo(uid="w1_gizmo_test", control_part="right_arm")
+    sim.enable_gizmo(
+        uid="w1_gizmo_test",
+        control_part="right_arm",
+        enable_native=not sim.sim_config.headless,
+    )
     if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
         logger.log_error("Failed to enable right arm gizmo!")
         return
@@ -183,6 +191,7 @@ def run_simulation(sim: SimulationManager):
             time.sleep(0.033)  # 30Hz
             # Update all gizmos managed by sim
             sim.update_gizmos()
+            sim.capture_visualization_safely()
             step_count += 1
 
             if step_count % 100 == 0:

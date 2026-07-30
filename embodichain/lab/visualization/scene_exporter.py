@@ -32,6 +32,8 @@ from .protocol import (
     CameraImageFrame,
     CameraSpec,
     DynamicMeshUpdate,
+    GizmoSpec,
+    GizmoState,
     MeshGeometry,
     PointCloudOverlay,
     SceneFrame,
@@ -104,9 +106,26 @@ class _NodeSource:
 
 
 @dataclass(frozen=True)
+class _PoseBatch:
+    """Vectorized pose selection for all exported nodes of one asset."""
+
+    asset_kind: str
+    asset: object
+    destination_indices: np.ndarray
+    env_ids: np.ndarray
+    component_indices: np.ndarray | None
+
+
+@dataclass(frozen=True)
 class _CameraSource:
     spec: CameraSpec
     camera: object
+
+
+@dataclass(frozen=True)
+class _GizmoSource:
+    spec: GizmoSpec
+    gizmo: object
 
 
 class SceneExporter:
@@ -144,7 +163,15 @@ class SceneExporter:
         self._sequence = 0
         self._image_sequence = 0
         self._sources: tuple[_NodeSource, ...] = ()
+        self._pose_batches: tuple[_PoseBatch, ...] = ()
+        self._source_visibility = np.empty((0,), dtype=np.bool_)
+        self._dynamic_source_indices = np.empty((0,), dtype=np.int64)
+        self._dynamic_env_ids = np.empty((0,), dtype=np.int64)
         self._camera_sources: tuple[_CameraSource, ...] = ()
+        self._gizmo_sources: tuple[_GizmoSource, ...] = ()
+        self._env_ids = (
+            tuple(range(sim.num_envs)) if cfg.env_ids is None else tuple(cfg.env_ids)
+        )
         self._env_offsets = np.zeros((sim.num_envs, 3), dtype=np.float32)
         self._validate_env_ids()
 
@@ -167,14 +194,67 @@ class SceneExporter:
         return any(source.node.dynamic_geometry for source in self._sources)
 
     def _validate_env_ids(self) -> None:
-        invalid = [
-            env_id for env_id in self.cfg.env_ids if env_id >= self._sim.num_envs
-        ]
+        invalid = [env_id for env_id in self._env_ids if env_id >= self._sim.num_envs]
         if invalid:
             raise ValueError(
                 f"Visualization env_ids {invalid} are outside simulation range "
                 f"[0, {self._sim.num_envs - 1}]."
             )
+        if (
+            self.cfg.max_visible_envs is not None
+            and len(self._env_ids) > self.cfg.max_visible_envs
+        ):
+            raise ValueError(
+                f"Selected {len(self._env_ids)} environments, exceeding "
+                f"max_visible_envs={self.cfg.max_visible_envs}."
+            )
+
+    @staticmethod
+    def _build_pose_batches(sources: tuple[_NodeSource, ...]) -> tuple[_PoseBatch, ...]:
+        """Compile per-asset node selections into NumPy indexing arrays."""
+        grouped: dict[tuple[str, str], list[tuple[int, _NodeSource]]] = {}
+        for destination_index, source in enumerate(sources):
+            if source.node.dynamic_geometry:
+                continue
+            grouped.setdefault(source.asset_key, []).append((destination_index, source))
+
+        batches: list[_PoseBatch] = []
+        for asset_key, indexed_sources in grouped.items():
+            component_indices = [
+                (
+                    source.link_index
+                    if source.link_index is not None
+                    else source.object_index
+                )
+                for _, source in indexed_sources
+            ]
+            has_components = component_indices[0] is not None
+            if any(
+                (index is not None) != has_components for index in component_indices
+            ):
+                raise ValueError(
+                    f"Visualization asset {asset_key!r} mixes component and root poses."
+                )
+            batches.append(
+                _PoseBatch(
+                    asset_kind=asset_key[0],
+                    asset=indexed_sources[0][1].asset,
+                    destination_indices=np.asarray(
+                        [index for index, _ in indexed_sources],
+                        dtype=np.int64,
+                    ),
+                    env_ids=np.asarray(
+                        [source.node.env_id for _, source in indexed_sources],
+                        dtype=np.int64,
+                    ),
+                    component_indices=(
+                        np.asarray(component_indices, dtype=np.int64)
+                        if has_components
+                        else None
+                    ),
+                )
+            )
+        return tuple(batches)
 
     def _read_arena_offsets(self) -> np.ndarray:
         offsets = _to_numpy(self._sim.arena_offsets, np.float32)
@@ -217,14 +297,21 @@ class SceneExporter:
         geometries: dict[str, MeshGeometry] = {}
         sources: list[_NodeSource] = []
         camera_sources: list[_CameraSource] = []
+        gizmo_sources: list[_GizmoSource] = []
 
         for uid in self._sim.get_rigid_object_uid_list():
             asset = self._sim.get_rigid_object(uid)
             if asset is None:
                 continue
-            for env_id in self.cfg.env_ids:
-                vertices = asset.get_vertices(env_ids=[env_id], scale=True)[0]
-                faces = asset.get_triangles(env_ids=[env_id])[0]
+            selected_env_ids = list(self._env_ids)
+            vertices_by_env = asset.get_vertices(
+                env_ids=selected_env_ids,
+                scale=True,
+            )
+            faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
+            for selected_index, env_id in enumerate(self._env_ids):
+                vertices = vertices_by_env[selected_index]
+                faces = faces_by_env[selected_index]
                 geometry_id = self._add_geometry(
                     geometries, vertices, faces, self._COLORS["rigid_object"]
                 )
@@ -277,17 +364,80 @@ class SceneExporter:
             asset_prefix="cloth",
         )
         self._append_cameras(camera_sources)
+        self._append_gizmos(gizmo_sources)
 
         self._scene_revision += 1
         self._sources = tuple(sources)
+        self._pose_batches = self._build_pose_batches(self._sources)
+        self._source_visibility = np.asarray(
+            [source.node.visible for source in self._sources],
+            dtype=np.bool_,
+        )
+        self._dynamic_source_indices = np.asarray(
+            [
+                index
+                for index, source in enumerate(self._sources)
+                if source.node.dynamic_geometry
+            ],
+            dtype=np.int64,
+        )
+        self._dynamic_env_ids = np.asarray(
+            [
+                self._sources[index].node.env_id
+                for index in self._dynamic_source_indices
+            ],
+            dtype=np.int64,
+        )
         self._camera_sources = tuple(camera_sources)
+        self._gizmo_sources = tuple(gizmo_sources)
         return SceneManifest(
             run_id=self.run_id,
             scene_revision=self._scene_revision,
             nodes=tuple(source.node for source in sources),
             geometries=tuple(geometries.values()),
             cameras=tuple(source.spec for source in camera_sources),
+            gizmos=tuple(source.spec for source in gizmo_sources),
         )
+
+    def _append_gizmos(self, sources: list[_GizmoSource]) -> None:
+        if 0 not in self._env_ids:
+            return
+        get_gizmo_items = getattr(self._sim, "get_gizmo_items", None)
+        if get_gizmo_items is None:
+            return
+        for gizmo_id, gizmo in get_gizmo_items():
+            target = gizmo.target
+            if target is None:
+                continue
+            target_uid = str(
+                getattr(getattr(target, "cfg", None), "uid", None) or gizmo_id
+            )
+            scale = max(
+                float(gizmo.cfg.axis_length_x),
+                float(gizmo.cfg.axis_length_y),
+                float(gizmo.cfg.axis_length_z),
+                float(gizmo.cfg.rings_radius),
+            )
+            line_width = max(
+                1.0,
+                float(max(gizmo.cfg.axis_size, gizmo.cfg.rings_size)) * 250.0,
+            )
+            sources.append(
+                _GizmoSource(
+                    spec=GizmoSpec(
+                        gizmo_id=gizmo_id,
+                        target_uid=target_uid,
+                        target_type=gizmo.target_type,
+                        control_part=gizmo.control_part,
+                        env_id=0,
+                        path=f"/interactions/gizmos/{safe_path_component(gizmo_id)}",
+                        scale=scale,
+                        line_width=line_width,
+                        visible=gizmo.is_visible(),
+                    ),
+                    gizmo=gizmo,
+                )
+            )
 
     def _append_rigid_object_groups(
         self,
@@ -300,18 +450,21 @@ class SceneExporter:
                 continue
             uid_component = safe_path_component(uid)
             object_names = tuple(asset.cfg.rigid_objects)
+            selected_env_ids = list(self._env_ids)
             for object_index, object_name in enumerate(object_names):
                 object_component = safe_path_component(object_name)
-                for env_id in self.cfg.env_ids:
-                    vertices = asset.get_object_vertices(
-                        object_index,
-                        env_ids=[env_id],
-                        scale=True,
-                    )[0]
-                    faces = asset.get_object_triangles(
-                        object_index,
-                        env_ids=[env_id],
-                    )[0]
+                vertices_by_env = asset.get_object_vertices(
+                    object_index,
+                    env_ids=selected_env_ids,
+                    scale=True,
+                )
+                faces_by_env = asset.get_object_triangles(
+                    object_index,
+                    env_ids=selected_env_ids,
+                )
+                for selected_index, env_id in enumerate(self._env_ids):
+                    vertices = vertices_by_env[selected_index]
+                    faces = faces_by_env[selected_index]
                     geometry_id = self._add_geometry(
                         geometries,
                         vertices,
@@ -368,14 +521,16 @@ class SceneExporter:
                     np.float32,
                 )
             uid_component = safe_path_component(uid)
-            for env_id in self.cfg.env_ids:
+            selected_env_ids = list(self._env_ids)
+            if kind == "soft_object":
+                faces_by_env = asset.get_collision_surface_triangles(
+                    env_ids=selected_env_ids,
+                )
+            else:
+                faces_by_env = asset.get_triangles(env_ids=selected_env_ids)
+            for selected_index, env_id in enumerate(self._env_ids):
                 vertices = current_vertices[env_id] - self._env_offsets[env_id]
-                if kind == "soft_object":
-                    faces = asset.get_collision_surface_triangles(
-                        env_ids=[env_id],
-                    )[0]
-                else:
-                    faces = asset.get_triangles(env_ids=[env_id])[0]
+                faces = faces_by_env[selected_index]
                 geometry_id = self._add_geometry(
                     geometries,
                     vertices,
@@ -430,7 +585,7 @@ class SceneExporter:
             uid_component = safe_path_component(uid)
             width = int(camera.cfg.width)
             height = int(camera.cfg.height)
-            for env_id in self.cfg.env_ids:
+            for env_id in self._env_ids:
                 camera_id = f"env:{env_id}/camera:{uid_component}"
                 sources.append(
                     _CameraSource(
@@ -471,7 +626,7 @@ class SceneExporter:
                 if geometry_id is None:
                     continue
                 link_component = safe_path_component(link_name)
-                for env_id in self.cfg.env_ids:
+                for env_id in self._env_ids:
                     node = SceneNode(
                         node_id=(
                             f"env:{env_id}/{asset_prefix}:{uid_component}/"
@@ -553,54 +708,41 @@ class SceneExporter:
         if self._scene_revision == 0:
             raise RuntimeError("build_manifest() must be called before capture().")
         started = perf_counter()
-        pose_cache: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
-
-        for source in self._sources:
-            if source.asset_key in pose_cache:
-                continue
-            asset_kind = source.asset_key[0]
-            if asset_kind == "rigid":
-                pose = source.asset.get_local_pose(to_matrix=False)
-            elif asset_kind == "rigid_group":
-                pose = source.asset.get_local_pose(to_matrix=False)
-            elif asset_kind in {"soft", "cloth"}:
-                continue
-            else:
-                pose = source.asset.body_data.body_link_pose
-            pose_cache[source.asset_key] = pose_to_position_wxyz(pose)
 
         positions = np.empty((len(self._sources), 3), dtype=np.float32)
         wxyz = np.empty((len(self._sources), 4), dtype=np.float32)
-        visible = np.empty((len(self._sources),), dtype=np.bool_)
-        for index, source in enumerate(self._sources):
-            if source.node.dynamic_geometry:
-                positions[index] = self._env_offsets[source.node.env_id]
-                wxyz[index] = np.array(
-                    [1.0, 0.0, 0.0, 0.0],
-                    dtype=np.float32,
-                )
-                visible[index] = source.node.visible
-                continue
-            all_positions, all_wxyz = pose_cache[source.asset_key]
-            if source.link_index is None:
-                if source.object_index is None:
-                    position = all_positions[source.node.env_id]
-                    quaternion = all_wxyz[source.node.env_id]
-                else:
-                    position = all_positions[
-                        source.node.env_id,
-                        source.object_index,
-                    ]
-                    quaternion = all_wxyz[
-                        source.node.env_id,
-                        source.object_index,
-                    ]
+        visible = self._source_visibility.copy()
+        if self._dynamic_source_indices.size:
+            positions[self._dynamic_source_indices] = self._env_offsets[
+                self._dynamic_env_ids
+            ]
+            wxyz[self._dynamic_source_indices] = np.array(
+                [1.0, 0.0, 0.0, 0.0],
+                dtype=np.float32,
+            )
+
+        for batch in self._pose_batches:
+            if batch.asset_kind in {"rigid", "rigid_group"}:
+                pose = batch.asset.get_local_pose(to_matrix=False)
             else:
-                position = all_positions[source.node.env_id, source.link_index]
-                quaternion = all_wxyz[source.node.env_id, source.link_index]
-            positions[index] = position + self._env_offsets[source.node.env_id]
-            wxyz[index] = quaternion
-            visible[index] = source.node.visible
+                pose = batch.asset.body_data.body_link_pose
+            all_positions, all_wxyz = pose_to_position_wxyz(pose)
+            if batch.component_indices is None:
+                batch_positions = all_positions[batch.env_ids]
+                batch_wxyz = all_wxyz[batch.env_ids]
+            else:
+                batch_positions = all_positions[
+                    batch.env_ids,
+                    batch.component_indices,
+                ]
+                batch_wxyz = all_wxyz[
+                    batch.env_ids,
+                    batch.component_indices,
+                ]
+            positions[batch.destination_indices] = (
+                batch_positions + self._env_offsets[batch.env_ids]
+            )
+            wxyz[batch.destination_indices] = batch_wxyz
 
         dynamic_meshes: list[DynamicMeshUpdate] = []
         if capture_dynamic_geometry:
@@ -652,6 +794,21 @@ class SceneExporter:
             camera_positions[index] = all_positions[env_id] + self._env_offsets[env_id]
             camera_wxyz[index] = all_wxyz[env_id]
 
+        gizmo_states: list[GizmoState] = []
+        for source in self._gizmo_sources:
+            position, quaternion = pose_to_position_wxyz(
+                source.gizmo.get_control_pose()
+            )
+            env_id = source.spec.env_id
+            gizmo_states.append(
+                GizmoState(
+                    gizmo_id=source.spec.gizmo_id,
+                    position=position[0] + self._env_offsets[env_id],
+                    wxyz=quaternion[0],
+                    visible=source.gizmo.is_visible(),
+                )
+            )
+
         self._sequence += 1
         frame = SceneFrame(
             run_id=self.run_id,
@@ -667,6 +824,7 @@ class SceneExporter:
             camera_positions=camera_positions,
             camera_wxyz=camera_wxyz,
             dynamic_meshes=tuple(dynamic_meshes),
+            gizmos=tuple(gizmo_states),
             overlays=self._prepare_overlays(overlays),
         )
         return CaptureResult(frame=frame, capture_seconds=perf_counter() - started)

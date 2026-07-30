@@ -23,6 +23,9 @@ from embodichain.lab.visualization.protocol import (
     CameraImage,
     CameraSpec,
     DynamicMeshUpdate,
+    GizmoCommand,
+    GizmoSpec,
+    GizmoState,
     MeshGeometry,
     pose_to_position_wxyz,
 )
@@ -115,3 +118,36 @@ def test_dynamic_mesh_update_owns_vertex_copy() -> None:
 
     assert update.vertices.dtype == np.float32
     assert update.vertices[0, 0] == 0.0
+
+
+def test_gizmo_protocol_owns_and_normalizes_pose_arrays() -> None:
+    position = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+    quaternion = np.array([2.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+    state = GizmoState("cube", position, quaternion)
+    command = GizmoCommand(
+        run_id="run",
+        scene_revision=1,
+        sequence=1,
+        gizmo_id="cube",
+        phase="update",
+        client_id="client-a",
+        position=position,
+        wxyz=quaternion,
+    )
+    position[0] = 99.0
+
+    np.testing.assert_allclose(state.position, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(command.wxyz, [1.0, 0.0, 0.0, 0.0])
+
+
+def test_gizmo_spec_rejects_unsupported_target_type() -> None:
+    with pytest.raises(ValueError, match="target_type"):
+        GizmoSpec(
+            gizmo_id="bad",
+            target_uid="bad",
+            target_type="cloth",
+            control_part=None,
+            env_id=0,
+            path="/interactions/gizmos/bad",
+        )

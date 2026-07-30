@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
 from embodichain.lab.sim.sim_manager import (
@@ -28,7 +29,7 @@ from embodichain.lab.sim.sim_manager import (
     SimulationManagerCfg,
     _WindowRecordState,
 )
-from embodichain.lab.visualization import VisualizationCfg
+from embodichain.lab.visualization import GizmoCommand, VisualizationCfg
 
 DEFAULT_LOOK_AT = (
     (2.6, -2.2, 1.6),
@@ -126,6 +127,32 @@ class FakeVisualizationRuntime:
         self.stopped = True
 
 
+class FakeInteractiveGizmo:
+    """Minimal shared target controller for browser-command routing tests."""
+
+    def __init__(self) -> None:
+        self.owner: str | None = None
+        self.requested_poses: list[torch.Tensor] = []
+
+    def begin_interaction(self, source_id: str) -> bool:
+        if self.owner not in {None, source_id}:
+            return False
+        self.owner = source_id
+        return True
+
+    def request_local_pose(self, pose: torch.Tensor, *, source_id: str) -> bool:
+        if self.owner not in {None, source_id}:
+            return False
+        self.requested_poses.append(pose.clone())
+        return True
+
+    def end_interaction(self, source_id: str) -> bool:
+        if self.owner != source_id:
+            return False
+        self.owner = None
+        return True
+
+
 def _make_sim_manager(window: object | None = None) -> SimulationManager:
     """Create a minimally initialized simulation manager for recorder tests."""
     sim = object.__new__(SimulationManager)
@@ -176,6 +203,43 @@ def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -
         False,
         True,
     ]
+
+
+def test_sim_manager_routes_viser_gizmo_commands_in_local_arena_frame() -> None:
+    sim = object.__new__(SimulationManager)
+    gizmo = FakeInteractiveGizmo()
+    commands = tuple(
+        GizmoCommand(
+            run_id="run",
+            scene_revision=2,
+            sequence=sequence,
+            gizmo_id="cube",
+            phase=phase,
+            client_id="client-a",
+            position=np.array([2.0 + sequence, 0.0, 0.5], dtype=np.float32),
+            wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        )
+        for sequence, phase in enumerate(("start", "update", "end"), start=1)
+    )
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(allow_commands=True),
+    )
+    sim.device = torch.device("cpu")
+    sim._gizmos = {"cube": gizmo}
+    sim.__dict__["arena_offsets"] = torch.tensor([[2.0, 0.0, 0.0]])
+    sim._visualization_runtime = SimpleNamespace(
+        exporter=SimpleNamespace(run_id="run", scene_revision=2),
+        drain_gizmo_commands=lambda: commands,
+    )
+
+    accepted = sim.process_visualization_commands()
+
+    assert accepted == 3
+    assert gizmo.owner is None
+    np.testing.assert_allclose(
+        gizmo.requested_poses[-1][0, :3, 3],
+        [3.0, 0.0, 0.5],
+    )
 
 
 def test_simulation_config_nests_viser_server_under_visualization() -> None:

@@ -25,6 +25,8 @@ from embodichain.lab.visualization import (
     CameraImageFrame,
     CameraSpec,
     DynamicMeshUpdate,
+    GizmoSpec,
+    GizmoState,
     MeshGeometry,
     SceneFrame,
     SceneManifest,
@@ -37,6 +39,20 @@ from embodichain.lab.visualization.backends.viser import ViserBackend
 class _Handle(SimpleNamespace):
     def remove(self) -> None:
         self.removed = True
+
+
+class _TransformControls(_Handle):
+    def on_update(self, callback: object) -> object:
+        self.update_callback = callback
+        return callback
+
+    def on_drag_start(self, callback: object) -> object:
+        self.drag_start_callback = callback
+        return callback
+
+    def on_drag_end(self, callback: object) -> object:
+        self.drag_end_callback = callback
+        return callback
 
 
 class _Folder:
@@ -112,6 +128,7 @@ class _Scene:
         self.dynamic_mesh_handles: list[_Handle] = []
         self.camera_handles: list[_Handle] = []
         self.grid_handles: list[_Handle] = []
+        self.transform_controls: list[_TransformControls] = []
 
     def reset(self) -> None:
         pass
@@ -120,7 +137,8 @@ class _Scene:
         self.up_direction = direction
 
     def add_frame(self, name: str, **kwargs: object) -> _Handle:
-        return _Handle(name=name, visible=True, **kwargs)
+        kwargs.setdefault("visible", True)
+        return _Handle(name=name, **kwargs)
 
     def add_batched_meshes_simple(self, name: str, **kwargs: object) -> _Handle:
         self.mesh_uploads += 1
@@ -145,6 +163,23 @@ class _Scene:
         self.grid_handles.append(handle)
         return handle
 
+    def add_transform_controls(
+        self,
+        name: str,
+        **kwargs: object,
+    ) -> _TransformControls:
+        kwargs.setdefault(
+            "position",
+            np.zeros((3,), dtype=np.float32),
+        )
+        kwargs.setdefault(
+            "wxyz",
+            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        )
+        handle = _TransformControls(name=name, removed=False, **kwargs)
+        self.transform_controls.append(handle)
+        return handle
+
 
 class _Server:
     def __init__(self, **kwargs: object) -> None:
@@ -152,6 +187,7 @@ class _Server:
         self.scene = _Scene()
         self.gui = _Gui()
         self.stopped = False
+        self.disconnect_callback: object | None = None
 
     def get_port(self) -> int:
         return 8765
@@ -161,6 +197,10 @@ class _Server:
 
     def flush(self) -> None:
         pass
+
+    def on_client_disconnect(self, callback: object) -> object:
+        self.disconnect_callback = callback
+        return callback
 
     def stop(self) -> None:
         self.stopped = True
@@ -307,6 +347,69 @@ def test_viser_backend_uploads_static_mesh_once_and_updates_only_poses() -> None
     assert server.stopped
 
 
+def test_viser_backend_batches_large_scenes_without_per_env_gui_nodes() -> None:
+    num_envs = 1024
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    geometry = MeshGeometry(
+        geometry_id="sha256:large-batch",
+        vertices=np.array(
+            [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            dtype=np.float32,
+        ),
+        faces=np.array([[0, 1, 2]], dtype=np.uint32),
+    )
+    nodes = tuple(
+        SceneNode(
+            node_id=f"env:{env_id}/robot:robot/link:base",
+            path=f"/envs/{env_id}/robots/robot/links/base",
+            parent_id=f"env:{env_id}/robot:robot",
+            env_id=env_id,
+            kind="robot_link",
+            geometry_id=geometry.geometry_id,
+        )
+        for env_id in range(num_envs)
+    )
+    positions = np.zeros((num_envs, 3), dtype=np.float32)
+    positions[:, 0] = np.arange(num_envs, dtype=np.float32)
+    frame = SceneFrame(
+        run_id="large",
+        scene_revision=1,
+        sequence=1,
+        sim_step=1,
+        sim_time=0.01,
+        node_ids=tuple(node.node_id for node in nodes),
+        positions=positions,
+        wxyz=np.tile(
+            np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+            (num_envs, 1),
+        ),
+        visible=np.ones((num_envs,), dtype=np.bool_),
+    )
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("large", 1, nodes, (geometry,)))
+    assert backend.publish_frame(frame)
+
+    assert server.scene.mesh_uploads == 1
+    handle = server.scene.mesh_handles[0]
+    assert handle.batched_positions.shape == (num_envs, 3)
+    assert "Show all environments" in server.gui.checkboxes
+    assert "Environment 1023" not in server.gui.checkboxes
+
+    show_all = server.gui.checkboxes["Show all environments"]
+    show_all.callback(SimpleNamespace(target=SimpleNamespace(value=False)))
+    backend.poll()
+    assert np.count_nonzero(handle.batched_opacities) == 1
+
+    selected = server.gui.dropdowns["Selected environment"]
+    selected.callback(SimpleNamespace(target=SimpleNamespace(value="17")))
+    backend.poll()
+    assert handle.batched_opacities[17] == 1.0
+    assert np.count_nonzero(handle.batched_opacities) == 1
+    backend.stop()
+
+
 def test_viser_backend_recreates_dynamic_mesh_only_for_vertex_updates() -> None:
     server = _Server()
     backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
@@ -375,4 +478,108 @@ def test_viser_backend_recreates_dynamic_mesh_only_for_vertex_updates() -> None:
 
     backend.publish_manifest(SceneManifest("run", 2, (), ()))
     assert updated_handle.removed
+    backend.stop()
+
+
+def test_viser_backend_emits_owned_gizmo_drag_commands() -> None:
+    server = _Server()
+    commands = []
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    backend.set_gizmo_command_sink(commands.append)
+    spec = GizmoSpec(
+        gizmo_id="cube",
+        target_uid="cube",
+        target_type="rigid_object",
+        control_part=None,
+        env_id=0,
+        path="/interactions/gizmos/cube",
+    )
+    manifest = SceneManifest("run", 1, (), (), gizmos=(spec,))
+    frame = SceneFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=1,
+        sim_step=1,
+        sim_time=0.01,
+        node_ids=(),
+        positions=np.empty((0, 3), dtype=np.float32),
+        wxyz=np.empty((0, 4), dtype=np.float32),
+        visible=np.empty((0,), dtype=np.bool_),
+        gizmos=(
+            GizmoState(
+                gizmo_id="cube",
+                position=np.array([0.0, 0.0, 1.0], dtype=np.float32),
+                wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+            ),
+        ),
+    )
+
+    backend.start()
+    backend.publish_manifest(manifest)
+    assert backend.publish_frame(frame)
+    handle = server.scene.transform_controls[0]
+
+    def event(client_id: str, position: list[float]) -> SimpleNamespace:
+        return SimpleNamespace(
+            client_id=client_id,
+            target=SimpleNamespace(
+                position=np.asarray(position, dtype=np.float32),
+                wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+            ),
+        )
+
+    handle.drag_start_callback(event("client-a", [0.0, 0.0, 1.0]))
+    handle.drag_start_callback(event("client-b", [5.0, 0.0, 1.0]))
+    handle.update_callback(event("client-a", [0.2, 0.0, 1.0]))
+    backend.poll()
+
+    assert [(command.client_id, command.phase) for command in commands] == [
+        ("client-a", "start"),
+        ("client-a", "update"),
+    ]
+
+    handle.position = np.array([0.2, 0.0, 1.0], dtype=np.float32)
+    assert backend.publish_frame(frame)
+    np.testing.assert_allclose(handle.position, [0.2, 0.0, 1.0])
+
+    handle.drag_end_callback(event("client-a", [0.2, 0.0, 1.0]))
+    backend.poll()
+    assert commands[-1].phase == "end"
+
+    assert backend.publish_frame(frame)
+    np.testing.assert_allclose(handle.position, [0.0, 0.0, 1.0])
+
+    handle.drag_start_callback(event("client-a", [0.0, 0.0, 1.0]))
+    handle.update_callback(event("client-a", [0.4, 0.0, 1.0]))
+    backend.poll()
+    server.disconnect_callback(SimpleNamespace(client_id="client-a"))
+    backend.poll()
+    assert commands[-1].phase == "end"
+    np.testing.assert_allclose(commands[-1].position, [0.4, 0.0, 1.0])
+    backend.stop()
+
+
+def test_viser_backend_keeps_gizmos_read_only_without_command_permission() -> None:
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+    )
+    spec = GizmoSpec(
+        gizmo_id="cube",
+        target_uid="cube",
+        target_type="rigid_object",
+        control_part=None,
+        env_id=0,
+        path="/interactions/gizmos/cube",
+    )
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), (), gizmos=(spec,)))
+
+    assert not server.scene.transform_controls
     backend.stop()

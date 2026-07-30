@@ -1,8 +1,8 @@
 # sim-visualization
 
-> Topic: Read-only simulation visualization — `SimulationManager` lifecycle,
-> backend-neutral scene snapshots, the Viser backend, cameras, deformables, and
-> launcher integration.
+> Topic: Simulation visualization — `SimulationManager` lifecycle,
+> backend-neutral scene snapshots, the Viser backend, cameras, deformables,
+> interactive Gizmos, and launcher integration.
 
 ---
 
@@ -20,6 +20,7 @@
 | `embodichain/lab/visualization/backends/viser.py` | Viser server, scene handles, GUI controls, and browser publishing |
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing, common launcher arguments, and CLI overrides |
 | `embodichain/lab/gym/envs/base_env.py` | Environment scene setup, post-setup start, and forced reset capture |
+| `embodichain/lab/scripts/preview_asset.py` | Standalone rigid-object and articulation browser preview |
 
 Human-facing behavior and usage are documented in
 `docs/source/overview/sim/viser_visualization.md`.
@@ -43,9 +44,9 @@ VisualizationBackend
              └── ViserBackend → HTTP/WebSocket browser UI
 ```
 
-The simulation owns physics and assets. Visualization is read-only and never
-applies browser commands to simulation state. `allow_commands=True` is rejected
-by `VisualizationCfg`.
+The simulation owns physics and assets. Scene export is read-only. When
+`allow_commands=True`, Viser Gizmo callbacks enqueue pose commands that
+`SimulationManager` later applies on the simulation thread.
 
 All DexSim and Torch reads happen in `SceneExporter` on the simulation thread.
 Protocol objects make detached CPU copies before crossing into the runtime.
@@ -65,12 +66,12 @@ are nested under `visualization.viser_server`; there is no top-level
 |---|---:|---|
 | `backend` | `"none"` | `"viser"` enables the runtime |
 | `scene_fps` | `15.0` | Maximum rigid pose, camera-frustum pose, and overlay capture rate |
-| `env_ids` | `[0]` | Environment instances exported to the browser |
-| `max_visible_envs` | `4` | Validation limit for `env_ids` |
+| `env_ids` | `[0]` | Environment instances exported to the browser; `None` selects all |
+| `max_visible_envs` | `None` | Optional validation limit for `env_ids` |
 | `point_cloud_max_points` | `100000` | Deterministic per-cloud downsampling limit |
 | `sensor_image_fps` | `2.0` | Maximum RGB image capture rate; `None` captures once per eligible simulation step |
 | `soft_body_fps` | `5.0` | Maximum soft-body and cloth vertex capture rate |
-| `allow_commands` | `False` | Must remain false; the current protocol is read-only |
+| `allow_commands` | `False` | Allow trusted Viser clients to drag configured Gizmos; common `--viser` launchers set this to `True` |
 | `viser_server` | `ViserServerCfg()` | Server bind configuration |
 
 ### `ViserServerCfg`
@@ -82,10 +83,11 @@ are nested under `visualization.viser_server`; there is no top-level
 | `label` | `"EmbodiChain"` | Browser application label |
 | `verbose` | `False` | Viser diagnostics |
 
-Validation rejects an unsupported backend, empty or duplicate `env_ids`,
-negative IDs, too many visible environments, non-positive sampling rates,
-invalid server fields, and mutating browser commands. `SceneExporter` performs
-the later check that every selected environment exists in the simulation.
+Validation rejects an unsupported backend, empty or duplicate explicit
+`env_ids`, negative IDs, a violated optional environment limit, non-positive
+sampling rates, invalid server fields, and commands enabled without the Viser backend.
+`SceneExporter` performs the later check that every selected environment
+exists in the simulation.
 
 ## Activation
 
@@ -122,7 +124,7 @@ manifest when manager APIs marked the topology dirty.
 - `--viser-fps`
 - `--viser-image-fps`
 - `--viser-soft-body-fps`
-- `--viser-env-ids ID ...`
+- `--viser-env-ids ID ...` or `--viser-env-ids all`
 
 `merge_args_with_gym_config()` makes `--viser` set `headless=True`, changes the
 backend to `"viser"`, and applies the CLI sampling/server overrides. A
@@ -137,7 +139,18 @@ limiting.
 
 `visualization_cfg_from_args()` only builds visualization config.
 `SimulationManagerCfg` makes the simulation headless whenever the resulting
-backend is `"viser"`.
+backend is `"viser"`. The common `--viser` option also enables Gizmo commands;
+there is no separate `--viser-gizmo` option. Programmatic configurations may
+retain `allow_commands=False` for read-only deployments.
+
+### Asset preview
+
+`embodichain preview-asset --asset_path <path> --viser` loads rigid objects or
+articulations and keeps the headless simulation stepping until `Ctrl+C`.
+Because `SimulationManager` starts Viser before the requested assets are
+loaded, the command forces a safe capture immediately after loading; this
+refreshes the dirty topology and publishes the initial poses before entering
+the update loop or optional `--preview` REPL.
 
 ## Manager Lifecycle
 
@@ -241,7 +254,8 @@ The browser GUI has:
 
 - **Environments** — visibility per exported environment;
 - **Cameras** — selected environment, camera, frustum, and RGB preview;
-- **Overlays** — visibility for frames, targets, trajectories, and point clouds.
+- **Overlays** — visibility for frames, targets, trajectories, and point clouds;
+- **Gizmos** — transform controls for configured robot, rigid-object, and camera targets.
 
 GUI callbacks enqueue events; the visualization worker applies them, preserving
 the single-threaded Viser-handle invariant. Environment visibility affects
@@ -275,7 +289,8 @@ payload bytes plus capture/upload time.
 
 ## Invariants
 
-- Visualization must not mutate physics, actions, or asset state.
+- Scene export must not mutate physics, actions, or asset state.
+- Gizmo commands mutate targets only after simulation-thread validation.
 - Simulation/DexSim reads stay on the simulation thread.
 - Viser server and handle operations stay on one private worker thread.
 - Cross-thread snapshots own detached contiguous CPU arrays.
@@ -315,3 +330,4 @@ Relevant tests:
 - `tests/visualization/test_viser_backend.py`
 - `tests/sim/test_sim_manager.py`
 - `tests/gym/utils/test_gym_utils.py`
+- `tests/lab/scripts/test_preview_asset.py`

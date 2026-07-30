@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Literal
+
 import numpy as np
 
 from ._utils import to_numpy_array as _array
@@ -29,6 +31,9 @@ __all__ = [
     "CameraSpec",
     "DynamicMeshUpdate",
     "FrameOverlay",
+    "GizmoCommand",
+    "GizmoSpec",
+    "GizmoState",
     "MeshGeometry",
     "PointCloudOverlay",
     "SceneFrame",
@@ -43,7 +48,7 @@ __all__ = [
     "pose_to_position_wxyz",
 ]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 Color = tuple[int, int, int]
 
 
@@ -256,6 +261,94 @@ class DynamicMeshUpdate:
 
 
 @dataclass(frozen=True)
+class GizmoSpec:
+    """Static description of one simulation Gizmo exposed by a backend."""
+
+    gizmo_id: str
+    target_uid: str
+    target_type: str
+    control_part: str | None
+    env_id: int
+    path: str
+    scale: float = 0.2
+    line_width: float = 2.5
+    visible: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.gizmo_id:
+            raise ValueError("Gizmo ID must not be empty.")
+        if not self.target_uid:
+            raise ValueError("Gizmo target UID must not be empty.")
+        if self.target_type not in {"rigid_object", "robot", "camera"}:
+            raise ValueError(
+                "Gizmo target_type must be 'rigid_object', 'robot', or 'camera'."
+            )
+        if self.env_id < 0:
+            raise ValueError("Gizmo env_id must be non-negative.")
+        if not self.path.startswith("/"):
+            raise ValueError("Gizmo path must be an absolute scene path.")
+        if self.scale <= 0.0:
+            raise ValueError("Gizmo scale must be greater than zero.")
+        if self.line_width <= 0.0:
+            raise ValueError("Gizmo line_width must be greater than zero.")
+
+
+@dataclass(frozen=True)
+class GizmoState:
+    """Authoritative world pose and visibility of one simulation Gizmo."""
+
+    gizmo_id: str
+    position: np.ndarray
+    wxyz: np.ndarray
+    visible: bool = True
+
+    def __post_init__(self) -> None:
+        position, wxyz = pose_to_position_wxyz(
+            np.concatenate(
+                (_array(self.position, np.float32), _array(self.wxyz, np.float32))
+            )
+        )
+        object.__setattr__(self, "position", position)
+        object.__setattr__(self, "wxyz", wxyz)
+
+
+@dataclass(frozen=True)
+class GizmoCommand:
+    """Immutable browser drag command consumed on the simulation thread."""
+
+    run_id: str
+    scene_revision: int
+    sequence: int
+    gizmo_id: str
+    phase: Literal["start", "update", "end"]
+    client_id: str
+    position: np.ndarray
+    wxyz: np.ndarray
+    schema_version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("Gizmo command run_id must not be empty.")
+        if self.scene_revision < 0:
+            raise ValueError("Gizmo command scene_revision must be non-negative.")
+        if self.sequence < 0:
+            raise ValueError("Gizmo command sequence must be non-negative.")
+        if not self.gizmo_id:
+            raise ValueError("Gizmo command gizmo_id must not be empty.")
+        if self.phase not in {"start", "update", "end"}:
+            raise ValueError("Gizmo command phase must be 'start', 'update', or 'end'.")
+        if not self.client_id:
+            raise ValueError("Gizmo command client_id must not be empty.")
+        position, wxyz = pose_to_position_wxyz(
+            np.concatenate(
+                (_array(self.position, np.float32), _array(self.wxyz, np.float32))
+            )
+        )
+        object.__setattr__(self, "position", position)
+        object.__setattr__(self, "wxyz", wxyz)
+
+
+@dataclass(frozen=True)
 class SceneNode:
     """One mesh-bearing logical node in a scene manifest."""
 
@@ -278,6 +371,7 @@ class SceneManifest:
     nodes: tuple[SceneNode, ...]
     geometries: tuple[MeshGeometry, ...]
     cameras: tuple[CameraSpec, ...] = field(default_factory=tuple)
+    gizmos: tuple[GizmoSpec, ...] = field(default_factory=tuple)
     schema_version: int = SCHEMA_VERSION
     up_direction: str = "+z"
     length_unit: str = "meter"
@@ -294,6 +388,9 @@ class SceneManifest:
         camera_ids = {camera.camera_id for camera in self.cameras}
         if len(camera_ids) != len(self.cameras):
             raise ValueError("SceneManifest contains duplicate camera IDs.")
+        gizmo_ids = {gizmo.gizmo_id for gizmo in self.gizmos}
+        if len(gizmo_ids) != len(self.gizmos):
+            raise ValueError("SceneManifest contains duplicate Gizmo IDs.")
         missing = {node.geometry_id for node in self.nodes} - geometry_ids
         if missing:
             raise ValueError(
@@ -419,6 +516,7 @@ class SceneFrame:
         default_factory=lambda: np.empty((0, 4), dtype=np.float32)
     )
     dynamic_meshes: tuple[DynamicMeshUpdate, ...] = field(default_factory=tuple)
+    gizmos: tuple[GizmoState, ...] = field(default_factory=tuple)
     overlays: SceneOverlays = field(default_factory=SceneOverlays)
     wall_time: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -434,6 +532,9 @@ class SceneFrame:
         dynamic_node_ids = [mesh.node_id for mesh in self.dynamic_meshes]
         if len(dynamic_node_ids) != len(set(dynamic_node_ids)):
             raise ValueError("SceneFrame contains duplicate dynamic mesh node IDs.")
+        gizmo_ids = [gizmo.gizmo_id for gizmo in self.gizmos]
+        if len(gizmo_ids) != len(set(gizmo_ids)):
+            raise ValueError("SceneFrame contains duplicate Gizmo IDs.")
         node_count = len(self.node_ids)
         if positions.shape != (node_count, 3):
             raise ValueError(
@@ -500,4 +601,6 @@ def estimate_frame_bytes(frame: SceneFrame) -> int:
         total += overlay.points.nbytes + overlay.colors.nbytes
     for overlay in (*frame.overlays.frames, *frame.overlays.targets):
         total += overlay.position.nbytes + overlay.wxyz.nbytes
+    for gizmo in frame.gizmos:
+        total += gizmo.position.nbytes + gizmo.wxyz.nbytes
     return total

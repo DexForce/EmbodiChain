@@ -981,7 +981,12 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         ):
             visualization["sensor_image_fps"] = cli_visualization.sensor_image_fps
         visualization["soft_body_fps"] = cli_visualization.soft_body_fps
-        visualization["env_ids"] = list(cli_visualization.env_ids)
+        visualization["env_ids"] = (
+            None
+            if cli_visualization.env_ids is None
+            else list(cli_visualization.env_ids)
+        )
+        visualization["allow_commands"] = cli_visualization.allow_commands
         legacy_server = visualization.pop("server", {})
         viser_server = deepcopy(visualization.get("viser_server", legacy_server))
         viser_server["host"] = cli_visualization.viser_server.host
