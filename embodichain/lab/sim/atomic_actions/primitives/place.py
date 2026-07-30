@@ -26,10 +26,11 @@ from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
-from ._helpers import arm_qpos_from_state
+from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..core import (
     ActionCfg,
     ActionResult,
+    AssembleTarget,
     AtomicAction,
     EndEffectorPoseTarget,
     WorldState,
@@ -77,9 +78,17 @@ class Place(AtomicAction):
     first waypoint, descending through each waypoint, then opening the gripper
     at the final waypoint and retracting to above the last waypoint. Starting
     joint positions are inherited from ``WorldState.last_qpos``.
+
+    An :class:`AssembleTarget` replaces the explicit EEF pose with an assembly
+    affordance: the place pose is derived from the base object's current pose
+    and ``assemble_to_base_pose``, converted to an EEF pose through the held
+    object's ``object_to_eef`` (read from ``WorldState.held_object``).
     """
 
-    TargetType: ClassVar[type] = EndEffectorPoseTarget
+    TargetType: ClassVar[type | tuple[type, ...]] = (
+        EndEffectorPoseTarget,
+        AssembleTarget,
+    )
 
     def __init__(
         self,
@@ -105,8 +114,10 @@ class Place(AtomicAction):
         if self.cfg.cartesian_waypoint_count < 1:
             logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
 
-    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
-        place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+    def execute(
+        self, target: EndEffectorPoseTarget | AssembleTarget, state: WorldState
+    ) -> ActionResult:
+        place_xpos = self._resolve_place_xpos(target, state)
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
 
@@ -116,7 +127,10 @@ class Place(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
-        if target.tcp_symmetry == "z_roll_180":
+        if (
+            isinstance(target, EndEffectorPoseTarget)
+            and target.tcp_symmetry == "z_roll_180"
+        ):
             place_xpos = self._select_tcp_symmetric_place_variant(
                 place_xpos, start_arm_qpos
             )
@@ -209,6 +223,67 @@ class Place(AtomicAction):
                 coordinated_held_object=state.coordinated_held_object,
             ),
         )
+
+    def _resolve_place_xpos(
+        self, target: EndEffectorPoseTarget | AssembleTarget, state: WorldState
+    ) -> torch.Tensor:
+        """Resolve the place EEF poses from a typed target.
+
+        Args:
+            target: Either an explicit EEF pose target or an assembly target.
+            state: World state carrying the held-object transform.
+
+        Returns:
+            Place EEF poses with shape ``(n_envs, 4, 4)`` or
+            ``(n_envs, n_waypoint, 4, 4)``.
+        """
+        if isinstance(target, EndEffectorPoseTarget):
+            return self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+        return self._resolve_assemble_place_xpos(target, state)
+
+    def _resolve_assemble_place_xpos(
+        self, target: AssembleTarget, state: WorldState
+    ) -> torch.Tensor:
+        """Derive the place EEF pose from an assembly affordance.
+
+        The assemble object target pose is ``base_pose @ assemble_to_base_pose``;
+        the EEF pose is that target posed through the held object's
+        ``object_to_eef``.
+
+        Args:
+            target: Assembly target carrying the base/assemble affordance.
+            state: World state carrying the held-object transform.
+
+        Returns:
+            Place EEF poses with shape ``(n_envs, 4, 4)``.
+
+        Raises:
+            ValueError: If no held object or no base object entity is available.
+        """
+        if state.held_object is None:
+            logger.log_error(
+                "Place with AssembleTarget requires WorldState.held_object - "
+                "run PickUp first.",
+                ValueError,
+            )
+        affordance = target.affordance
+        if affordance.base_object_entity is None:
+            logger.log_error(
+                "AssembleAffordance.base_object_entity must be set to assemble "
+                "onto a base object.",
+                ValueError,
+            )
+        base_pose = affordance.base_object_entity.get_local_pose(to_matrix=True).to(
+            device=self.device, dtype=torch.float32
+        )
+        assemble_object_pose = affordance.get_assemble_object_pose(base_pose)
+        object_to_eef = resolve_object_target(
+            state.held_object.object_to_eef,
+            n_envs=self.n_envs,
+            device=self.device,
+            name="object_to_eef",
+        )
+        return torch.bmm(assemble_object_pose, object_to_eef)
 
     def _lifted_pose(self, release_xpos: torch.Tensor) -> torch.Tensor:
         """Build an above-release pose while respecting the optional TCP z cap."""

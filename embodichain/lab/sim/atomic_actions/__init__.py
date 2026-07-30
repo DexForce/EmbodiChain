@@ -28,11 +28,13 @@ from __future__ import annotations
 from .affordance import (
     Affordance,
     AntipodalAffordance,
+    AssembleAffordance,
     InteractionPoints,
 )
 from .core import (
     ActionCfg,
     ActionResult,
+    AssembleTarget,
     AtomicAction,
     CoordinatedHeldObjectState,
     CoordinatedPlacementTarget,
@@ -78,6 +80,7 @@ __all__ = [
     # Core classes
     "Affordance",
     "AntipodalAffordance",
+    "AssembleAffordance",
     "InteractionPoints",
     "ObjectSemantics",
     "HeldObjectState",
@@ -87,6 +90,7 @@ __all__ = [
     "NamedJointPositionTarget",
     "EndEffectorPoseTarget",
     "CoordinatedPlacementTarget",
+    "AssembleTarget",
     "GraspTarget",
     "Target",
     "WorldState",

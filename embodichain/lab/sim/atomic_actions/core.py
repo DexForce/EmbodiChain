@@ -24,7 +24,7 @@ from typing import Any, ClassVar, Literal, TYPE_CHECKING
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import configclass
 
-from .affordance import Affordance
+from .affordance import Affordance, AssembleAffordance
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
@@ -170,6 +170,21 @@ class CoordinatedPlacementTarget:
     """Whether the placing hand releases. ``None`` uses the action config."""
 
 
+@dataclass(frozen=True)
+class AssembleTarget:
+    """Place a held assemble object onto a base object at a relative pose.
+
+    The base object pose is read at planning time from
+    :attr:`AssembleAffordance.base_object_entity`, and the assemble object's
+    target pose is ``base_pose @ assemble_to_base_pose``. The held-object
+    transform (``object_to_eef``) is read from :attr:`WorldState.held_object`,
+    which a prior :class:`PickUp` populates.
+    """
+
+    affordance: AssembleAffordance
+    """Assembly affordance anchoring the assemble object to the base object."""
+
+
 Target = (
     EndEffectorPoseTarget
     | JointPositionTarget
@@ -177,6 +192,7 @@ Target = (
     | GraspTarget
     | HeldObjectPoseTarget
     | CoordinatedPlacementTarget
+    | AssembleTarget
 )
 
 
@@ -335,6 +351,7 @@ class AtomicAction(ABC):
 __all__ = [
     "ActionCfg",
     "ActionResult",
+    "AssembleTarget",
     "AtomicAction",
     "CoordinatedHeldObjectState",
     "CoordinatedPlacementTarget",

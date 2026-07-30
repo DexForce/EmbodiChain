@@ -23,10 +23,14 @@ import dataclasses
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions.affordance import Affordance
+from embodichain.lab.sim.atomic_actions.affordance import (
+    Affordance,
+    AssembleAffordance,
+)
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
     ActionResult,
+    AssembleTarget,
     CoordinatedHeldObjectState,
     CoordinatedPlacementTarget,
     GraspTarget,
@@ -113,7 +117,18 @@ class TestTypedTargets:
             support_held_object=held,
         )
         assert target.placing_held_object is held
+        assert target.support_held_object is held
         assert target.support_object_target_pose.shape == (4, 4)
+
+    def test_assemble_target_holds_affordance(self):
+        affordance = AssembleAffordance(base_object_label="cube")
+        target = AssembleTarget(affordance=affordance)
+        assert target.affordance is affordance
+
+    def test_assemble_target_is_frozen(self):
+        t = AssembleTarget(affordance=AssembleAffordance())
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            t.affordance = AssembleAffordance()  # type: ignore[misc]
 
 
 class TestObjectSemantics:

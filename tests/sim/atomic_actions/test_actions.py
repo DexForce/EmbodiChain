@@ -24,10 +24,12 @@ from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
+    AssembleAffordance,
 )
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult
 from embodichain.lab.sim.atomic_actions.core import (
     ActionResult,
+    AssembleTarget,
     AtomicAction,
     CoordinatedPlacementTarget,
     GraspTarget,
@@ -745,8 +747,12 @@ class TestPlaceAction:
     def setup_method(self):
         self.mg = _make_mock_motion_generator()
 
-    def test_target_type_is_pose_target(self):
-        assert Place.TargetType is EndEffectorPoseTarget
+    def test_target_type_accepts_pose_and_assemble_targets(self):
+        target_types = Place.TargetType
+        if isinstance(target_types, type):
+            target_types = (target_types,)
+        assert EndEffectorPoseTarget in target_types
+        assert AssembleTarget in target_types
 
     def test_rejects_non_positive_cartesian_waypoint_count(self):
         with pytest.raises(Exception, match="cartesian_waypoint_count"):
@@ -1030,6 +1036,106 @@ class TestPlaceAction:
         assert torch.allclose(
             seen_poses[2], expected_retract.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
         )
+
+    def test_execute_with_assemble_target_places_above_base(self):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            lift_height=0.1,
+        )
+        action = Place(self.mg, cfg)
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="soda_can"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF), held_object=held)
+
+        base_pose = torch.eye(4)
+        base_pose[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+        assemble_to_base = torch.eye(4)
+        assemble_to_base[:3, :3] = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+        )
+        assemble_to_base[2, 3] = 0.1
+        base_entity = Mock()
+        base_entity.get_local_pose.return_value = base_pose.unsqueeze(0).repeat(
+            NUM_ENVS, 1, 1
+        )
+        affordance = AssembleAffordance(
+            base_object_label="cube",
+            base_object_entity=base_entity,
+            assemble_object_label="soda_can",
+            assemble_to_base_pose=assemble_to_base,
+        )
+
+        seen_poses = []
+
+        def compute_ik(pose=None, name=None, joint_seed=None, **kwargs):
+            seen_poses.append(pose.clone())
+            return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed.clone()
+
+        def repeat_last_keyframe(trajectory, interp_num, device):
+            return trajectory[:, -1:, :].repeat(1, interp_num, 1)
+
+        self.mg.robot.compute_ik = Mock(side_effect=compute_ik)
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=repeat_last_keyframe,
+        ):
+            result = action.execute(AssembleTarget(affordance=affordance), state)
+
+        assert result.success.all()
+        assert result.next_state.held_object is None
+        # IK order: down phase (approach, release) then back phase (retract).
+        assert len(seen_poses) == 3
+        expected_release = base_pose @ assemble_to_base
+        assert torch.allclose(
+            seen_poses[1], expected_release.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        expected_lifted = expected_release.clone()
+        expected_lifted[2, 3] += cfg.lift_height
+        assert torch.allclose(
+            seen_poses[0], expected_lifted.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        assert torch.allclose(
+            seen_poses[2], expected_lifted.unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+
+    def test_assemble_target_requires_held_object(self):
+        action = Place(
+            self.mg,
+            PlaceCfg(hand_open_qpos=_hand_open(), hand_close_qpos=_hand_close()),
+        )
+        affordance = AssembleAffordance(
+            base_object_label="cube", base_object_entity=Mock()
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        with pytest.raises(ValueError, match="held_object"):
+            action.execute(AssembleTarget(affordance=affordance), state)
+
+    def test_assemble_target_requires_base_entity(self):
+        action = Place(
+            self.mg,
+            PlaceCfg(hand_open_qpos=_hand_open(), hand_close_qpos=_hand_close()),
+        )
+        sem = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="soda_can"
+        )
+        held = HeldObjectState(
+            semantics=sem,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF), held_object=held)
+        affordance = AssembleAffordance(base_object_label="cube")
+        with pytest.raises(ValueError, match="base_object_entity"):
+            action.execute(AssembleTarget(affordance=affordance), state)
 
 
 # ---------------------------------------------------------------------------

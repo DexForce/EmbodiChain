@@ -1,0 +1,501 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Demonstrate object assembly with a dual-arm UR5.
+
+The left arm picks up a soda can (object A) and places it directly above a cube
+(object B). The relative pose of the can with respect to the cube is declared on
+an :class:`~embodichain.lab.sim.atomic_actions.AssembleAffordance` and consumed
+by the :class:`~embodichain.lab.sim.atomic_actions.Place` action through an
+:class:`~embodichain.lab.sim.atomic_actions.AssembleTarget`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+import numpy as np
+import torch
+
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.sim import SimulationManager
+from embodichain.lab.sim.atomic_actions import (
+    AssembleAffordance,
+    AssembleTarget,
+    AtomicActionEngine,
+    GraspTarget,
+    PickUp,
+    PickUpCfg,
+    Place,
+    PlaceCfg,
+)
+from embodichain.lab.sim.cfg import (
+    JointDrivePropertiesCfg,
+    RigidBodyAttributesCfg,
+    RigidObjectCfg,
+    RobotCfg,
+    URDFCfg,
+)
+from embodichain.data import get_data_path
+from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
+from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.utils import logger
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    broadcast_pose_batch,
+    clone_local_pose_from_first_env,
+    create_antipodal_semantics,
+    create_toppra_motion_generator,
+    create_tutorial_simulation,
+    draw_axis_marker,
+    get_hand_open_close_qpos,
+    prepare_tutorial_scene,
+    replay_trajectory,
+)
+
+ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
+GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
+OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
+GRIPPER_TCP_Z = 0.155
+ROBOT_INIT_POS = (1.95, 0.0, 0.1)
+ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
+LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
+RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
+SUPPORT_SURFACE_Z = 0.50
+SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
+SUPPORT_SURFACE_CENTER = (
+    0.0,
+    0.0,
+    SUPPORT_SURFACE_Z - 0.5 * SUPPORT_SURFACE_SIZE[2],
+)
+
+# --- Adjustable scene placeholders -----------------------------------------
+# Object A (soda can) is staged for the left arm to pick up; object B (cube) is
+# the assembly base the can is placed onto. Tweak these to match the dual-UR5
+# reach and the soda-can mesh geometry.
+OBJECT_A_XY = (0.0, 0.02)
+OBJECT_B_XY = (0.0, 0.20)
+CUBE_SIZE = 0.08
+CAN_INIT_ROT = (90.0, 0.0, 0.0)
+"""Soda-can initial rotation (xyz Euler, degrees); lays the can on its side."""
+CAN_INIT_Z_OFFSET = 0.12
+"""Hover height above the support surface so the side grasp can approach."""
+ASSEMBLE_MARGIN = 0.01
+"""Small gap between the can and the cube so the placement settles cleanly."""
+# ---------------------------------------------------------------------------
+
+# Rot_x(90 deg), matching CAN_INIT_ROT (xyz Euler, degrees). The can is held and
+# placed in this orientation, so the assembly pose needs no reorientation.
+_CAN_INIT_ROTATION = torch.tensor(
+    [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]], dtype=torch.float32
+)
+
+HAND_CLOSE_QPOS = 0.026
+PICKUP_SAMPLE_INTERVAL = 80
+PICKUP_HAND_INTERP_STEPS = 5
+PICKUP_PRE_GRASP_DISTANCE = 0.08
+PICKUP_LIFT_HEIGHT = 0.1
+PLACE_SAMPLE_INTERVAL = 120
+PLACE_HAND_INTERP_STEPS = 8
+PLACE_LIFT_HEIGHT = 0.1
+TRAJECTORY_SIM_STEPS = 4
+ASSEMBLE_RECORD_LOOK_AT = (
+    (-0.25, 0.02, 2.5),
+    (0.0, 0.10, 0.75),
+    (0.0, 0.0, 1.0),
+)
+
+
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments for the assembly demo."""
+    parser = argparse.ArgumentParser(description="Dual-arm object assembly demo")
+    add_env_launcher_args_to_parser(parser)
+    parser.set_defaults(device="cpu", renderer="hybrid")
+    parser.add_argument("--n_sample", type=int, default=10000)
+    parser.add_argument("--force_reannotate", action="store_true")
+    parser.add_argument(
+        "--diagnose_plan",
+        action="store_true",
+        help="Plan and print diagnostics without playing the trajectory.",
+    )
+    parser.add_argument(
+        "--auto_play",
+        action="store_true",
+        help="Run the viewer demo without waiting for keyboard input.",
+    )
+    parser.add_argument(
+        "--headless_play",
+        action="store_true",
+        help="Execute planned trajectories without opening the viewer window.",
+    )
+    parser.add_argument(
+        "--no_vis_eef_axis",
+        action="store_true",
+        help="Skip drawing the assembly target axis marker.",
+    )
+    return parser.parse_args()
+
+
+def rotation_z(yaw: float) -> np.ndarray:
+    """Build a 3x3 yaw rotation matrix."""
+    cos_yaw = math.cos(yaw)
+    sin_yaw = math.sin(yaw)
+    return np.array(
+        [
+            [cos_yaw, -sin_yaw, 0.0],
+            [sin_yaw, cos_yaw, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+
+def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
+    """Build a homogeneous transform from translation and yaw."""
+    transform = np.eye(4, dtype=np.float32)
+    transform[:3, :3] = rotation_z(yaw)
+    transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
+    return transform
+
+
+def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
+    """Create a dual-UR5 robot with one PGI gripper on each arm."""
+    arm_urdf_path = ARM_URDF_PATH
+    gripper_urdf_path = GRIPPER_URDF_PATH
+    tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    cfg = RobotCfg(
+        uid="DualUR5Assemble",
+        urdf_cfg=URDFCfg(
+            components=[
+                {
+                    "component_type": "left_arm",
+                    "urdf_path": arm_urdf_path,
+                    "transform": make_transform((-0.3, -1.45, 0.4), np.pi / 2),
+                },
+                {
+                    "component_type": "right_arm",
+                    "urdf_path": arm_urdf_path,
+                    "transform": make_transform((0.3, -1.45, 0.4), np.pi / 2),
+                },
+                {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
+                {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
+            ],
+            fname="dual_ur5_assemble",
+            name_case={"joint": "upper", "link": "lower"},
+        ),
+        drive_pros=JointDrivePropertiesCfg(
+            stiffness={
+                "LEFT_JOINT[0-9]": 1e4,
+                "RIGHT_JOINT[0-9]": 1e4,
+                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
+                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
+            },
+            damping={
+                "LEFT_JOINT[0-9]": 1e3,
+                "RIGHT_JOINT[0-9]": 1e3,
+                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e1,
+                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e1,
+            },
+            max_effort={
+                "LEFT_JOINT[0-9]": 1e5,
+                "RIGHT_JOINT[0-9]": 1e5,
+                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
+                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
+            },
+            drive_type="force",
+        ),
+        control_parts={
+            "left_arm": ["LEFT_JOINT[0-9]"],
+            "right_arm": ["RIGHT_JOINT[0-9]"],
+            "dual_arm": ["LEFT_JOINT[0-9]", "RIGHT_JOINT[0-9]"],
+            "left_hand": ["LEFT_GRIPPER_FINGER1_JOINT_1"],
+            "right_hand": ["RIGHT_GRIPPER_FINGER1_JOINT_1"],
+        },
+        solver_cfg={
+            "left_arm": URSolverCfg(
+                ur_type="ur5",
+                tcp=tcp,
+                end_link_name="left_ee_link",
+                root_link_name="left_base_link",
+                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
+            ),
+            "right_arm": URSolverCfg(
+                ur_type="ur5",
+                tcp=tcp,
+                end_link_name="right_ee_link",
+                root_link_name="right_base_link",
+                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
+            ),
+        },
+        init_pos=list(ROBOT_INIT_POS),
+        init_rot=list(ROBOT_INIT_ROT),
+        init_qpos=list(LEFT_ARM_HOME) + list(RIGHT_ARM_HOME) + [0.0, 0.0, 0.0, 0.0],
+    )
+    return sim.add_robot(cfg=cfg)
+
+
+def create_support_surface(sim: SimulationManager) -> RigidObject:
+    """Create a compact support slab under the staged objects."""
+    return sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="support_surface",
+            shape=CubeCfg(size=list(SUPPORT_SURFACE_SIZE)),
+            attrs=RigidBodyAttributesCfg(
+                mass=10.0,
+                dynamic_friction=0.9,
+                static_friction=0.95,
+                restitution=0.01,
+            ),
+            body_type="static",
+            init_pos=list(SUPPORT_SURFACE_CENTER),
+            init_rot=[0.0, 0.0, 0.0],
+        )
+    )
+
+
+def create_assemble_object(sim: SimulationManager) -> RigidObject:
+    """Create the soda can (object A) staged for the left arm to pick up."""
+    return sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="assemble_object",
+            shape=MeshCfg(fpath=OBJECT_MESH_PATH, compute_uv=False),
+            attrs=RigidBodyAttributesCfg(
+                mass=0.01,
+                dynamic_friction=0.97,
+                static_friction=0.99,
+                angular_damping=1.0,
+                linear_damping=0.5,
+                contact_offset=0.001,
+                rest_offset=0.0,
+                restitution=0.01,
+                min_position_iters=32,
+                min_velocity_iters=8,
+                max_depenetration_velocity=2.0,
+            ),
+            max_convex_hull_num=1,
+            init_pos=[
+                OBJECT_A_XY[0],
+                OBJECT_A_XY[1],
+                SUPPORT_SURFACE_Z + CAN_INIT_Z_OFFSET,
+            ],
+            init_rot=list(CAN_INIT_ROT),
+            body_scale=(0.56, 0.56, 0.56),
+        )
+    )
+
+
+def create_base_object(sim: SimulationManager) -> RigidObject:
+    """Create the cube (object B) the soda can is assembled onto."""
+    return sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="base_object",
+            shape=CubeCfg(size=[CUBE_SIZE, CUBE_SIZE, CUBE_SIZE]),
+            attrs=RigidBodyAttributesCfg(
+                mass=1.0,
+                dynamic_friction=0.9,
+                static_friction=0.95,
+                restitution=0.01,
+            ),
+            body_type="static",
+            init_pos=[
+                OBJECT_B_XY[0],
+                OBJECT_B_XY[1],
+                SUPPORT_SURFACE_Z + 0.5 * CUBE_SIZE,
+            ],
+            init_rot=[0.0, 0.0, 0.0],
+        )
+    )
+
+
+def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
+    """Settle an object before planning."""
+    if sim.device.type == "cuda":
+        sim.init_gpu_physics()
+    obj.reset()
+    if step > 0:
+        sim.update(step=step)
+    obj.clear_dynamics()
+
+
+def compute_can_half_height(can: RigidObject) -> float:
+    """Return half the soda-can extent along world Z when laid on its side."""
+    vertices = can.get_vertices(env_ids=[0], scale=True)[0].to(torch.float32)
+    rotated = vertices @ _CAN_INIT_ROTATION.T
+    extent_z = float(rotated[:, 2].max().item() - rotated[:, 2].min().item())
+    return 0.5 * extent_z
+
+
+def make_assemble_to_base_pose(dz: float) -> torch.Tensor:
+    """Build the can pose relative to the cube: above it, same orientation."""
+    pose = torch.eye(4, dtype=torch.float32)
+    pose[:3, :3] = _CAN_INIT_ROTATION
+    pose[2, 3] = dz
+    return pose
+
+
+def run_assemble_demo(
+    args: argparse.Namespace,
+    sim: SimulationManager,
+    robot: Robot,
+) -> None:
+    """Plan and optionally execute a pick-up followed by an assembly place."""
+    create_support_surface(sim)
+    can = create_assemble_object(sim)
+    cube = create_base_object(sim)
+
+    settle_object(sim, can, step=0)
+    clone_local_pose_from_first_env(can)
+    can.clear_dynamics()
+    sim.update(step=10)
+    clone_local_pose_from_first_env(cube)
+    cube.clear_dynamics()
+
+    can_semantics = create_antipodal_semantics(
+        can,
+        label="soda_can",
+        n_sample=args.n_sample,
+        force_reannotate=args.force_reannotate,
+    )
+    motion_gen = create_toppra_motion_generator(robot)
+    left_open, left_close = get_hand_open_close_qpos(
+        robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+    )
+
+    can_half_z = compute_can_half_height(can)
+    assemble_to_base = make_assemble_to_base_pose(
+        0.5 * CUBE_SIZE + can_half_z + ASSEMBLE_MARGIN
+    )
+    cube_pose = cube.get_local_pose(to_matrix=True)
+    assemble_object_target_pose = cube_pose[0] @ assemble_to_base
+
+    n_envs = robot.get_qpos().shape[0]
+    if not args.no_vis_eef_axis:
+        draw_axis_marker(
+            sim,
+            "assemble_target_axis",
+            broadcast_pose_batch(assemble_object_target_pose, n_envs),
+        )
+
+    # Step 1 - the left arm picks the soda can up by its top part.
+    pick_up_action = PickUp(
+        motion_generator=motion_gen,
+        cfg=PickUpCfg(
+            name="pick_up",
+            control_part="left_arm",
+            hand_control_part="left_hand",
+            hand_open_qpos=left_open,
+            hand_close_qpos=left_close,
+            pick_object_part="top",
+            pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
+            lift_height=PICKUP_LIFT_HEIGHT,
+            sample_interval=PICKUP_SAMPLE_INTERVAL,
+            hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
+            approach_direction=torch.as_tensor(
+                [0.0, -math.sqrt(0.5), -math.sqrt(0.5)], dtype=torch.float32
+            ),
+            downstream_object_target_poses=(assemble_object_target_pose,),
+        ),
+    )
+    # Step 2 - the left arm places the can directly above the cube.
+    place_action = Place(
+        motion_generator=motion_gen,
+        cfg=PlaceCfg(
+            name="place",
+            control_part="left_arm",
+            hand_control_part="left_hand",
+            hand_open_qpos=left_open,
+            hand_close_qpos=left_close,
+            lift_height=PLACE_LIFT_HEIGHT,
+            sample_interval=PLACE_SAMPLE_INTERVAL,
+            hand_interp_steps=PLACE_HAND_INTERP_STEPS,
+        ),
+    )
+    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine.register(pick_up_action)
+    engine.register(place_action)
+
+    wait_for_user = prepare_tutorial_scene(
+        sim, args, "Inspect the scene, then press Enter to plan PickUp -> Place..."
+    )
+    # Let the staged can settle into a stable pose before planning.
+    for _ in range(20):
+        sim.update(step=10)
+
+    assemble_affordance = AssembleAffordance(
+        base_object_label="cube",
+        base_object_entity=cube,
+        assemble_object_label="soda_can",
+        assemble_object_entity=can,
+        assemble_to_base_pose=assemble_to_base,
+    )
+    success, traj, _ = engine.run(
+        [
+            ("pick_up", GraspTarget(can_semantics)),
+            ("place", AssembleTarget(affordance=assemble_affordance)),
+        ]
+    )
+
+    if not success.all():
+        logger.log_warning("Failed to plan the assemble demo trajectory.")
+        return
+
+    if args.diagnose_plan:
+        logger.log_info(f"Planned full trajectory with {traj.shape[1]} waypoints.")
+        return
+
+    if wait_for_user:
+        input("Press Enter to execute the assembly...")
+
+    replay_trajectory(
+        sim,
+        robot,
+        traj,
+        args,
+        video_prefix="assemble_auto_play",
+        hold_steps=0,
+        trajectory_sim_steps=TRAJECTORY_SIM_STEPS,
+        look_at=ASSEMBLE_RECORD_LOOK_AT,
+    )
+    if wait_for_user:
+        input("Press Enter to exit the simulation...")
+
+
+def main() -> None:
+    """Run the dual-arm object assembly demo."""
+    args = parse_arguments()
+    sim = create_tutorial_simulation(
+        args,
+        arena_space=3.0,
+        light_pos=(0.0, -0.4, 3.0),
+    )
+    robot = create_dual_ur5_robot(sim)
+    run_assemble_demo(args, sim, robot)
+
+
+if __name__ == "__main__":
+    main()
