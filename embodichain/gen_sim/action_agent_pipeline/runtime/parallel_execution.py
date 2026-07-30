@@ -60,6 +60,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.failure_handling import (
     _merge_failed_env_masks,
     _normalize_failed_env_mask,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.joint_path_safety import (
+    validate_dual_arm_joint_path,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.trajectory_runtime import (
     _as_2d_action,
     _sync_agent_state_from_atomic_action,
@@ -93,6 +96,7 @@ def execute_parallel_atomic_actions(
     environments receive a full-robot hold command and remain failed in the
     returned result.
     """
+    require_joint_safety = bool(runtime_kwargs.pop("require_joint_safety", False))
     result = build_parallel_action_stream(
         left_arm_action=left_arm_action,
         right_arm_action=right_arm_action,
@@ -105,6 +109,24 @@ def execute_parallel_atomic_actions(
         **runtime_kwargs,
     )
     actions = result["actions"]
+    if require_joint_safety:
+        accepted, reason = validate_dual_arm_joint_path(
+            env,
+            actions,
+            payloads={
+                "left": _action_payload_uid(left_arm_action),
+                "right": _action_payload_uid(right_arm_action),
+            },
+        )
+        result["parallel_safety"] = {
+            "accepted": accepted,
+            "reason": reason,
+        }
+        if not accepted:
+            result["parallel_rejected"] = True
+            if return_result:
+                return result
+            return []
     step_env_with_actions(env, actions)
     _sync_agent_states_from_parallel_actions(
         env,
@@ -135,6 +157,20 @@ def execute_parallel_atomic_actions(
     if return_result:
         return result
     return actions
+
+
+def _action_payload_uid(action: Any) -> str | None:
+    if action is None:
+        return None
+    target = (
+        action.target_object
+        if isinstance(action, AtomicActionSpec)
+        else action.get("target_object", {})
+    )
+    if isinstance(target, Mapping):
+        uid = target.get("obj_name")
+        return str(uid) if uid is not None else None
+    return None
 
 
 def build_parallel_action_stream(

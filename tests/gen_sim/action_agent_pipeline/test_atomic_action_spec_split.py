@@ -98,6 +98,30 @@ def test_all_atomic_action_classes_normalize(spec: dict) -> None:
     assert AtomicActionSpec.from_mapping(spec).to_dict() == normalized
 
 
+def test_normalize_place_release_cfg() -> None:
+    normalized = normalize_atomic_action_spec(
+        {
+            "atomic_action_class": "Place",
+            "robot_name": "left_arm",
+            "control": "arm",
+            "target_pose": {
+                "reference": "relative",
+                "offset": [0.0, 0.0, 0.0],
+                "frame": "world",
+            },
+            "cfg": {
+                "sample_interval": 64,
+                "hand_interp_steps": 12,
+                "post_hold_steps": 12,
+            },
+        }
+    )
+
+    assert normalized["cfg"]["sample_interval"] == 64
+    assert normalized["cfg"]["hand_interp_steps"] == 12
+    assert normalized["cfg"]["post_hold_steps"] == 12
+
+
 @pytest.mark.parametrize(
     ("control", "target_qpos"),
     [

@@ -166,6 +166,8 @@ success:
   absolute_axis_tolerance: 0.05
   relative_axis_tolerance: 0.05
   relative_zero_offset_tolerance: 0.06
+  upright_in_place_xy_tolerance: 0.05
+  upright_max_tilt: 0.261799
 
 # These values preserve the historical behavior of incomplete or hand-written
 # success specs. Generated configs normally provide explicit predicate values.
@@ -193,6 +195,8 @@ success_evaluator_fallbacks:
 # evaluating their postconditions. Callers may override this at runtime.
 closed_loop:
   semantic_step_settle_steps: 10
+  upright_in_place_xy_tolerance: 0.05
+  upright_max_tilt: 0.261799
 
 # Runtime launch policy is package-owned so API callers and the optional CLI
 # prepare vectorized environments identically.

@@ -403,6 +403,11 @@ def _can_prefetch_pickups(
     """Allow only declared, resource-safe dual-PickUp parallelism."""
     if route != "object_manipulation":
         return False
+    if any(
+        step["goal"].get("placement_mode") == "upright_in_place"
+        for step in (first_step, second_step)
+    ):
+        return False
     first_actor = first_step["actor"]
     second_actor = second_step["actor"]
     group_declares_pair = any(
@@ -438,6 +443,13 @@ def _relative_allocation_groups(
     if len(semantic_steps) != 2:
         return []
     first, second = semantic_steps
+    if any(
+        step["goal"].get("placement_mode") == "upright_in_place"
+        for step in (first, second)
+    ):
+        # Do not prefetch one upright object while the other arm completes its
+        # full manipulation. Upright parallelism requires a complete joint plan.
+        return []
     first_actor = first["actor"]
     second_actor = second["actor"]
     explicitly_opposite = (
@@ -570,7 +582,11 @@ def _symbolic_actions_for_step(
                     "PickUp",
                     actor,
                     "object",
-                    "default_pickup",
+                    (
+                        "upright_in_place_pickup"
+                        if step["goal"].get("placement_mode") == "upright_in_place"
+                        else "default_pickup"
+                    ),
                     object=object_uid,
                     affordance="antipodal",
                 )
@@ -603,6 +619,39 @@ def _symbolic_actions_for_step(
                             actor,
                             "semantic_goal",
                             "default_transport",
+                            semantic_step=str(step["id"]),
+                            phase="final",
+                        )
+                    ],
+                ),
+            ]
+        )
+    elif step["goal"].get("placement_mode") == "upright_in_place":
+        actions.extend(
+            [
+                (
+                    "upright_at_staging",
+                    f"`{object_uid}` held upright above its initial position",
+                    [
+                        _symbolic_action(
+                            "MoveHeldObject",
+                            actor,
+                            "semantic_goal",
+                            "upright_in_place_transport",
+                            semantic_step=str(step["id"]),
+                            phase="staging",
+                        )
+                    ],
+                ),
+                (
+                    "move_to_semantic_goal",
+                    f"`{object_uid}` held upright at its initial XY",
+                    [
+                        _symbolic_action(
+                            "MoveHeldObject",
+                            actor,
+                            "semantic_goal",
+                            "upright_in_place_transport",
                             semantic_step=str(step["id"]),
                             phase="final",
                         )
@@ -653,7 +702,11 @@ def _symbolic_actions_for_step(
                         "Place",
                         actor,
                         "current_held_pose",
-                        "default_release",
+                        (
+                            "upright_in_place_release"
+                            if step["goal"].get("placement_mode") == "upright_in_place"
+                            else "default_release"
+                        ),
                     )
                 ],
             ),
@@ -665,7 +718,11 @@ def _symbolic_actions_for_step(
                         "MoveEndEffector",
                         actor,
                         "policy_pose",
-                        "default_retreat",
+                        (
+                            "upright_in_place_retreat"
+                            if step["goal"].get("placement_mode") == "upright_in_place"
+                            else "default_retreat"
+                        ),
                     )
                 ],
             ),
@@ -765,6 +822,15 @@ def _relative_seed_goal(
         goal["orientation_reference_object"] = (
             placement.orientation_align_to_runtime_uid
         )
+    if bool(getattr(placement, "upright_in_place", False)):
+        goal["placement_mode"] = "upright_in_place"
+        pickup_direction = getattr(placement, "pickup_upright_direction", None)
+        if pickup_direction is not None:
+            axis_index = max(
+                range(3),
+                key=lambda index: abs(float(pickup_direction[index])),
+            )
+            goal["upright_local_axis"] = ("x", "y", "z")[axis_index]
     return goal
 
 

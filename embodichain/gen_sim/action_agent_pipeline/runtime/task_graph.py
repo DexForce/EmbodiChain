@@ -29,6 +29,9 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import WorldState
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import defaults_section
+from embodichain.gen_sim.action_agent_pipeline.domain.success_policy import (
+    upright_in_place_success_spec,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.action_execution import (
     _execute_atomic_action_result,
 )
@@ -61,6 +64,10 @@ __all__ = [
 
 _CLOSED_LOOP_DEFAULTS = defaults_section("closed_loop")
 _SEMANTIC_STEP_SETTLE_STEPS = int(_CLOSED_LOOP_DEFAULTS["semantic_step_settle_steps"])
+_UPRIGHT_IN_PLACE_XY_TOLERANCE = float(
+    _CLOSED_LOOP_DEFAULTS["upright_in_place_xy_tolerance"]
+)
+_UPRIGHT_MAX_TILT = float(_CLOSED_LOOP_DEFAULTS["upright_max_tilt"])
 
 
 @dataclass
@@ -250,7 +257,10 @@ class AgentTaskGraph:
                     raise RuntimeError(
                         "Seed action DAG has no ready edge; dependencies are invalid."
                     )
-                batch = self._pack_ready_edges(ready_edges)
+                batch = self._pack_ready_edges(
+                    ready_edges,
+                    strict_serial=bool(kwargs.get("strict_serial", False)),
+                )
                 transitions += len(batch)
                 if transitions > self.max_transitions:
                     raise RuntimeError("Agent task graph exceeded max_transitions.")
@@ -482,9 +492,13 @@ class AgentTaskGraph:
     def _pack_ready_edges(
         self,
         ready_edges: Sequence[AgentGraphEdge],
+        *,
+        strict_serial: bool = False,
     ) -> tuple[AgentGraphEdge, ...]:
         """Pack one declared, resource-safe dual-PickUp group."""
         first = ready_edges[0]
+        if strict_serial:
+            return (first,)
         if not _is_parallel_pickup_candidate(first, self.semantic_step_by_edge):
             return (first,)
         first_step = self.semantic_step_by_edge[first.id]
@@ -580,7 +594,11 @@ class AgentTaskGraph:
                     feasible = torch.zeros_like(failed)
                     cost = torch.full_like(failed, float("inf"), dtype=torch.float32)
                     self._candidate_failure_phases[(step.id, arm)] = [
-                        "candidate_exception" if not bool(value.item()) else None
+                        (
+                            _candidate_exception_phase(error)
+                            if not bool(value.item())
+                            else None
+                        )
                         for value in failed
                     ]
                 candidates[(step.id, arm)] = (feasible & ~failed, cost)
@@ -655,6 +673,7 @@ class AgentTaskGraph:
             "failed_env_mask": failed.clone(),
             "arm_actions_by_env": [{} for _ in range(int(env.num_envs))],
         }
+        fell_back_to_serial = False
         steps = [self.semantic_step_by_edge[edge.id] for edge in edges]
         permutations = (
             ("left_arm", "right_arm"),
@@ -698,6 +717,7 @@ class AgentTaskGraph:
                 )
             execution_kwargs = _execution_kwargs(runtime_kwargs)
             execution_kwargs["pickup_downstream_object_target_specs"] = downstream
+            execution_kwargs["require_joint_safety"] = True
             partition_world_states = dict(result["world_states"])
             for side in ("left", "right"):
                 state = partition_world_states.get(side)
@@ -716,6 +736,32 @@ class AgentTaskGraph:
                 return_result=True,
                 **execution_kwargs,
             )
+            if partition_result.get("parallel_rejected", False):
+                fell_back_to_serial = True
+                reason = partition_result.get("parallel_safety", {}).get(
+                    "reason", "unknown"
+                )
+                log_info(
+                    "Parallel PickUp preflight rejected; falling back to serial "
+                    f"execution before stepping: {reason}."
+                )
+                for edge in edges:
+                    step = self.semantic_step_by_edge[edge.id]
+                    serial_result, serial_grounded = self._execute_symbolic_edge(
+                        edge,
+                        step,
+                        assignments=assignments_by_step[step.id],
+                        env=env,
+                        world_states=result["world_states"],
+                        failed=result["failed_env_mask"],
+                        runtime_kwargs=runtime_kwargs,
+                        arrangement_plan=arrangement_plan,
+                    )
+                    result["actions"].extend(serial_result["actions"])
+                    result["world_states"] = serial_result["world_states"]
+                    result["failed_env_mask"] = serial_result["failed_env_mask"]
+                    grounded_lists[edge.id].extend(serial_grounded)
+                break
             result["actions"].extend(partition_result["actions"])
             result["world_states"] = partition_result["world_states"]
             result["arm_actions"] = partition_result["arm_actions"]
@@ -732,7 +778,11 @@ class AgentTaskGraph:
             edge_id: tuple(grounded) for edge_id, grounded in grounded_lists.items()
         }
         log_info(
-            "Executed parallel distinct-arm PickUps: "
+            (
+                "Executed serial fallback for distinct-arm PickUps: "
+                if fell_back_to_serial
+                else "Executed parallel distinct-arm PickUps: "
+            )
             + ", ".join(
                 f"{self.semantic_step_by_edge[edge.id].id}="
                 f"{assignments_by_step[self.semantic_step_by_edge[edge.id].id]}"
@@ -955,7 +1005,11 @@ class AgentTaskGraph:
                 log_warning(f"Required-arm {arm} planning failed: {error}")
                 feasible = torch.zeros_like(failed)
                 self._candidate_failure_phases[(step.id, arm)] = [
-                    "candidate_exception" if not bool(value.item()) else None
+                    (
+                        _candidate_exception_phase(error)
+                        if not bool(value.item())
+                        else None
+                    )
                     for value in failed
                 ]
             selection_failed = ~feasible & ~failed
@@ -993,7 +1047,11 @@ class AgentTaskGraph:
                 feasible = torch.zeros_like(failed)
                 cost = torch.full_like(failed, float("inf"), dtype=torch.float32)
                 self._candidate_failure_phases[(step.id, arm)] = [
-                    "candidate_exception" if not bool(value.item()) else None
+                    (
+                        _candidate_exception_phase(error)
+                        if not bool(value.item())
+                        else None
+                    )
                     for value in failed
                 ]
             candidates[side] = (feasible & ~failed, cost)
@@ -1144,12 +1202,25 @@ class AgentTaskGraph:
         runtime_kwargs: Mapping[str, Any],
         arrangement_plan: ArrangementRuntimePlan | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Plan the complete manipulation path before fixing one arm assignment."""
+        """Plan mandatory grasp and held transport before assigning one arm."""
         log_info(
             f"Evaluating non-executing arm candidate: step={step.id}, arm={arm}. "
             "Any IK rejection before the selection summary is diagnostic."
         )
-        candidate_edges = [self.edges[edge_id] for edge_id in step.edge_ids]
+        candidate_edges = [
+            self.edges[edge_id]
+            for edge_id in step.edge_ids
+            if _edge_has_action_class(
+                self.edges[edge_id],
+                "PickUp",
+            )
+            or _edge_has_action_class(
+                self.edges[edge_id],
+                "MoveHeldObject",
+            )
+        ]
+        if not candidate_edges:
+            candidate_edges = [self.edges[step.edge_ids[0]]]
         downstream = self._pickup_downstream_targets(
             step,
             env=env,
@@ -1300,7 +1371,31 @@ class AgentTaskGraph:
         )[:, :3, 3]
         relation = str(step.goal.get("relation", ""))
         reference_object = step.goal.get("reference_object")
-        if relation == "inside" and isinstance(reference_object, str):
+        if step.goal.get("placement_mode") == "upright_in_place":
+            initial_pose = getattr(env, "agent_initial_object_poses", {}).get(
+                step.object_uid
+            )
+            if initial_pose is None:
+                raise ValueError(
+                    f"Upright-in-place step {step.id!r} requires the initial "
+                    f"pose of {step.object_uid!r}."
+                )
+            target = initial_pose[:, :3, 3].to(
+                device=observed.device,
+                dtype=observed.dtype,
+            )
+            distance = torch.linalg.norm(observed[:, :2] - target[:, :2], dim=-1)
+            tolerance = _UPRIGHT_IN_PLACE_XY_TOLERANCE
+            postcondition_success = evaluate_configured_success(
+                env,
+                upright_in_place_success_spec(
+                    step.object_uid,
+                    local_axis=str(step.goal.get("upright_local_axis", "z")),
+                    xy_tolerance=_UPRIGHT_IN_PLACE_XY_TOLERANCE,
+                    max_tilt=_UPRIGHT_MAX_TILT,
+                ),
+            )
+        elif relation == "inside" and isinstance(reference_object, str):
             postcondition_success = evaluate_configured_success(
                 env,
                 {
@@ -1385,6 +1480,13 @@ def _candidate_edge_phase(edge: AgentGraphEdge) -> str:
     binding = action.get("target_binding", {})
     phase = binding.get("phase")
     return str(phase) if phase in {"staging", "final"} else "transport"
+
+
+def _candidate_exception_phase(error: Exception) -> str:
+    """Keep the concrete candidate failure without allowing multiline artifacts."""
+    message = " ".join(str(error).split())
+    detail = f": {message}" if message else ""
+    return f"candidate_exception:{type(error).__name__}{detail}"
 
 
 def _edge_has_action_class(edge: AgentGraphEdge, action_class: str) -> bool:

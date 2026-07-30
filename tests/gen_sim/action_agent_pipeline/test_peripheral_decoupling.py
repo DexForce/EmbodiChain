@@ -81,13 +81,14 @@ def test_runtime_trajectory_executes_without_importing_the_cli() -> None:
             self.reset_count = 0
             self.actions = []
 
-        def reset(self):
+        def reset(self, *, seed=None):
             self.reset_count += 1
+            self.seed = seed
             return None, {}
 
         def get_wrapper_attr(self, name):
             if name == "create_demo_action_list":
-                return lambda **_: ["first", "second"]
+                return self.create_demo_action_list
             if name == "is_task_success":
                 return lambda: True
             raise AttributeError(name)
@@ -95,14 +96,22 @@ def test_runtime_trajectory_executes_without_importing_the_cli() -> None:
         def step(self, action) -> None:
             self.actions.append(action)
 
+        def create_demo_action_list(self, **kwargs):
+            self.create_kwargs = kwargs
+            return ["first", "second"]
+
     env = FakeEnv()
 
     assert generate_action_agent_trajectory(
         env=env,
         episode_index=0,
         runtime_run_id="test",
+        seed=17,
+        strict_serial=True,
     )
     assert env.reset_count == 1
+    assert env.seed == 17
+    assert env.create_kwargs["strict_serial"] is True
     assert env.actions == ["first", "second"]
 
 

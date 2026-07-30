@@ -79,6 +79,13 @@ def ground_symbolic_action(
             "obj_name": str(binding["object"]),
             "affordance": str(binding.get("affordance", "antipodal")),
         }
+        if action["motion_policy"] == "upright_in_place_pickup":
+            axis = str(semantic_step.goal.get("upright_local_axis", "z"))
+            spec["cfg"]["obj_upright_direction"] = {
+                "x": [1.0, 0.0, 0.0],
+                "y": [0.0, 1.0, 0.0],
+                "z": [0.0, 0.0, 1.0],
+            }[axis]
     elif binding_kind == "semantic_goal":
         target_object_pose = _semantic_target_positions(
             env,
@@ -100,27 +107,33 @@ def ground_symbolic_action(
         align_to = semantic_step.goal.get("orientation_reference_object")
         if align_to is not None:
             target_spec["align_to"] = str(align_to)
+        phase = str(binding.get("phase", "final"))
+        upright_staging = (
+            phase == "staging"
+            and semantic_step.goal.get("placement_mode") == "upright_in_place"
+        )
         support = (
-            None
-            if binding.get("phase") == "staging"
-            else _surface_support(semantic_step)
+            _surface_support(semantic_step)
+            if phase != "staging" or upright_staging
+            else None
         )
         if support is not None:
+            surface_clearance = float(policy["surface_clearance"])
+            if upright_staging:
+                surface_clearance += float(policy["staging_lift_height"])
             target_spec.update(
                 {
                     "z_policy": "object_on_surface",
                     "support": support,
-                    "surface_clearance": float(policy["surface_clearance"]),
+                    "surface_clearance": surface_clearance,
                 }
             )
         spec["target_object_pose"] = target_spec
     elif binding_kind == "current_held_pose":
-        spec["target_object_pose"] = {
+        spec["target_pose"] = {
             "reference": "relative",
             "offset": [0.0, 0.0, 0.0],
             "frame": "world",
-            "orientation_goal": "preserve",
-            "orientation_axis": "none",
         }
     elif binding_kind == "policy_pose":
         retreat_target = _resolved_retreat_target(
@@ -227,11 +240,8 @@ def _resolved_retreat_target(
     target = pose[:, :3, 3].clone()
     target[:, 2] += heights
     return (
-        [[float(value) for value in row] for row in target.detach().cpu().tolist()],
-        [
-            [[float(value) for value in row] for row in matrix]
-            for matrix in pose[:, :3, :3].detach().cpu().tolist()
-        ],
+        target.detach().cpu().tolist(),
+        pose[:, :3, :3].detach().cpu().tolist(),
         [float(value) for value in heights.detach().cpu().tolist()],
     )
 
@@ -268,13 +278,23 @@ def _atomic_cfg(action_class: str, policy: Mapping[str, Any]) -> dict[str, Any]:
     if action_class in {"PickUp", "CoordinatedPickment"}:
         return {
             key: policy[key]
-            for key in ("pre_grasp_distance", "lift_height", "sample_interval")
+            for key in (
+                "pre_grasp_distance",
+                "lift_height",
+                "sample_interval",
+                "rotate_upright",
+            )
             if key in policy
         }
     if action_class == "Place":
         return {
             key: policy[key]
-            for key in ("lift_height", "post_hold_steps", "sample_interval")
+            for key in (
+                "hand_interp_steps",
+                "lift_height",
+                "post_hold_steps",
+                "sample_interval",
+            )
             if key in policy
         }
     return {
@@ -348,6 +368,15 @@ def _semantic_target_positions(
             object_pose=object_pose,
             phase=phase,
             policy=policy,
+        )
+    if goal.get("placement_mode") == "upright_in_place":
+        initial_pose = getattr(env, "agent_initial_object_poses", {}).get(
+            semantic_step.object_uid
+        )
+        return (
+            initial_pose[:, :3, 3].clone()
+            if initial_pose is not None
+            else object_pose[:, :3, 3].clone()
         )
 
     base = (

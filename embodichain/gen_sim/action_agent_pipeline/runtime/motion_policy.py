@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
+from embodichain.gen_sim.action_agent_pipeline.config.defaults import defaults_section
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
     MOTION_POLICY_VERSION,
 )
@@ -31,11 +32,32 @@ __all__ = [
     "resolve_motion_policy",
 ]
 
+_RELATIVE_DEFAULTS = defaults_section("relative_placement")
+_GEOMETRY_DEFAULTS = defaults_section("geometry")
+
 _COMMON_POLICIES: dict[str, dict[str, Any]] = {
     "default_pickup": {
         "pre_grasp_distance": 0.08,
         "lift_height": 0.30,
         "sample_interval": 45,
+    },
+    "upright_in_place_pickup": {
+        "pre_grasp_distance": 0.08,
+        "lift_height": 0.30,
+        "sample_interval": 45,
+        "rotate_upright": 0.7853981633974483,
+    },
+    "upright_in_place_transport": {
+        "sample_interval": 45,
+        "relation_distance": 0.18,
+        "hover_height": 0.10,
+        "line_spacing": 0.14,
+        "transport_clearance": 0.10,
+        "staging_lift_height": float(
+            _RELATIVE_DEFAULTS["pose_sensitive_staging_z_delta"]
+        ),
+        "surface_clearance": float(_GEOMETRY_DEFAULTS["surface_release_clearance"]),
+        "postcondition_tolerance": 0.08,
     },
     "default_transport": {
         "sample_interval": 45,
@@ -52,11 +74,23 @@ _COMMON_POLICIES: dict[str, dict[str, Any]] = {
         "lift_height": 0.0,
         "post_hold_steps": 0,
     },
+    "upright_in_place_release": {
+        "sample_interval": 64,
+        "lift_height": 0.0,
+        "post_hold_steps": 12,
+        "hand_interp_steps": 12,
+    },
     "default_retreat": {
         "sample_interval": 20,
         "retreat_height": 0.30,
         "minimum_retreat_height": 0.05,
         "maximum_eef_height": 1.10,
+    },
+    "upright_in_place_retreat": {
+        "sample_interval": 30,
+        "retreat_height": 0.10,
+        "minimum_retreat_height": 0.05,
+        "maximum_eef_height": 1.50,
     },
     "default_home": {"sample_interval": 30},
 }

@@ -28,9 +28,11 @@ class SuccessTerm:
 
     OBJECT_POSITION_NEAR: Final = "object_position_near"
     OBJECT_XY_NEAR: Final = "object_xy_near"
+    OBJECT_XY_NEAR_INITIAL: Final = "object_xy_near_initial"
     OBJECT_IN_CONTAINER: Final = "object_in_container"
     OBJECT_ON_OBJECT: Final = "object_on_object"
     OBJECT_NOT_FALLEN: Final = "object_not_fallen"
+    OBJECT_UPRIGHT: Final = "object_upright"
     OBJECT_AXIS_OFFSET_NEAR: Final = "object_axis_offset_near"
     OBJECT_AXIS_NEAR: Final = "object_axis_near"
     OBJECTS_COLLINEAR: Final = "objects_collinear"

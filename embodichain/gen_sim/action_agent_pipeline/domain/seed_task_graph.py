@@ -61,6 +61,10 @@ _MOTION_POLICIES = {
     "default_release",
     "default_retreat",
     "default_transport",
+    "upright_in_place_pickup",
+    "upright_in_place_release",
+    "upright_in_place_retreat",
+    "upright_in_place_transport",
 }
 _BINDING_FIELDS = {
     "coordinated_goal": {"kind", "object"},
@@ -80,10 +84,10 @@ _ACTION_CONTRACTS = {
 }
 _ACTION_POLICIES = {
     "CoordinatedPickment": "default_transport",
-    "MoveEndEffector": "default_retreat",
-    "MoveHeldObject": "default_transport",
-    "PickUp": "default_pickup",
-    "Place": "default_release",
+    "MoveEndEffector": {"default_retreat", "upright_in_place_retreat"},
+    "MoveHeldObject": {"default_transport", "upright_in_place_transport"},
+    "PickUp": {"default_pickup", "upright_in_place_pickup"},
+    "Place": {"default_release", "upright_in_place_release"},
 }
 _TOP_LEVEL_KEYS = {
     "allocation_groups",
@@ -601,7 +605,12 @@ def _validate_symbolic_action(edge_id: str, action: Any) -> None:
         expected_policy = (
             "default_home" if binding.get("source") == "initial" else "default_release"
         )
-    if policy != expected_policy:
+    policy_matches = (
+        policy in expected_policy
+        if isinstance(expected_policy, set)
+        else policy == expected_policy
+    )
+    if not policy_matches:
         raise ValueError(
             f"Seed edge {edge_id!r} action {action_class!r} requires motion "
             f"policy {expected_policy!r}."

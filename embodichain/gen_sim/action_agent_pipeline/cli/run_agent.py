@@ -41,6 +41,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
 )
+from embodichain.utils import set_seed
 from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.utility import load_config
 
@@ -62,10 +63,14 @@ def cli() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.seed is not None:
+        set_seed(args.seed)
     env_cfg, gym_config, _ = build_env_cfg_from_args(
         args,
         gym_config_modifier=_modify_gym_config_for_run_agent,
     )
+    if args.seed is not None:
+        env_cfg.seed = args.seed
     agent_config = load_config(args.agent_config)
 
     env = gymnasium.make(
@@ -99,8 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--regenerate",
         action="store_true",
-        help="Force Seed Graph v3 to be reparsed and revalidated before execution.",
+        help="Force Seed Graph v5 to be reparsed and revalidated before execution.",
         default=False,
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Base random seed; episode N uses seed + N.",
+    )
+    parser.add_argument(
+        "--strict_serial",
+        action="store_true",
+        help="Disable all parallel action packing for validation runs.",
     )
     return parser
 
@@ -126,6 +142,8 @@ def _run_action_agent(args: argparse.Namespace, env: gymnasium.Env, gym_config: 
             unit="step",
         ),
         final_reset=bool(getattr(args, "headless", False)),
+        seed=getattr(args, "seed", None),
+        strict_serial=bool(getattr(args, "strict_serial", False)),
     )
 
 
@@ -152,6 +170,12 @@ def _generate_action_agent_trajectory(
             desc=f"Executing action list #{trajectory_idx}",
             unit="step",
         ),
+        seed=(
+            None
+            if getattr(args, "seed", None) is None
+            else int(args.seed) + trajectory_idx
+        ),
+        strict_serial=bool(getattr(args, "strict_serial", False)),
     )
 
 

@@ -49,6 +49,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.nominal_graph import (
 from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
     compile_agent_graph_spec,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.joint_path_safety import (
+    validate_dual_arm_joint_path,
+)
 
 
 class _RigidObject:
@@ -172,6 +175,72 @@ def test_success_value_precedence_is_predicate_then_environment_then_yaml() -> N
     assert evaluate_configured_success(env, base_spec).item() is True
     assert (
         evaluate_configured_success(env, {**base_spec, "radius": 0.105}).item() is False
+    )
+
+
+def test_upright_in_place_success_uses_initial_xy_and_semantic_local_axis() -> None:
+    can = _RigidObject((0.02, 0.01, 0.2))
+    can._pose[0, :3, :3] = torch.tensor(
+        [
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+        ]
+    )
+    initial_pose = torch.eye(4, dtype=torch.float32)
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        sim=_Simulation({"can": can}),
+        agent_initial_object_poses={"can": initial_pose},
+    )
+    spec = {
+        "op": "all",
+        "terms": [
+            {
+                "type": "object_xy_near_initial",
+                "object": "can",
+                "tolerance": 0.03,
+            },
+            {
+                "type": "object_upright",
+                "object": "can",
+                "local_axis": "x",
+                "max_tilt": 0.1,
+            },
+        ],
+    }
+
+    assert evaluate_configured_success(env, spec).item() is True
+    can._pose[0, 0, 3] = 0.04
+    assert evaluate_configured_success(env, spec).item() is False
+
+
+def test_dual_arm_joint_path_validation_is_fail_closed() -> None:
+    robot = SimpleNamespace(
+        get_qpos_limits=lambda: torch.tensor([[[-1.0, 1.0], [-1.0, 1.0]]])
+    )
+    actions = [torch.tensor([[0.0, 0.0]]), torch.tensor([[0.5, -0.5]])]
+    env = SimpleNamespace(robot=robot)
+
+    assert validate_dual_arm_joint_path(env, actions) == (
+        False,
+        "collision_checker_unavailable",
+    )
+
+    env.validate_dual_arm_joint_path = lambda path, *, payloads: torch.tensor(
+        [payloads == {"left": "can"}]
+    )
+    assert validate_dual_arm_joint_path(
+        env,
+        actions,
+        payloads={"left": "can"},
+    ) == (True, "accepted")
+
+    unsafe_actions = [torch.tensor([[0.0, 0.0]]), torch.tensor([[1.5, 0.0]])]
+    assert validate_dual_arm_joint_path(env, unsafe_actions) == (
+        False,
+        "joint_limit_violation",
     )
 
 

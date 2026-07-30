@@ -464,6 +464,98 @@ def test_auto_arm_candidate_checks_transport_reachability(
     assert failed.tolist() == [False, False]
 
 
+def test_upright_arm_candidate_does_not_preflight_release_or_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime import task_graph
+    from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
+        ExecutedAtomicAction,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(
+        make_relative_seed_task_graph("upright_candidate", _upright_relative_spec())
+    )
+    step = next(iter(graph.semantic_steps.values()))
+    initial_pose = torch.eye(4).unsqueeze(0)
+    initial_pose[:, :3, 3] = torch.tensor([[-0.2, 0.3, 0.1]])
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "can_left": _Object([[-0.2, 0.3, 0.1]]),
+                "table": _Object([[0.0, 0.0, 0.0]]),
+            }
+        ),
+        agent_initial_object_poses={"can_left": initial_pose},
+    )
+    planned_classes = []
+
+    def plan(action_spec, *, state, **kwargs):
+        del kwargs
+        action_class = action_spec["atomic_action_class"]
+        planned_classes.append(action_class)
+        return ExecutedAtomicAction(
+            action=np.zeros((1, 2, 1), dtype=np.float32),
+            next_state=state,
+            robot_name="left_arm",
+            control="arm",
+            failed_env_mask=torch.tensor([False]),
+            atomic_action_class=action_class,
+        )
+
+    monkeypatch.setattr(task_graph, "_execute_atomic_action_result", plan)
+    feasible, _ = graph._plan_arm_candidate(
+        step,
+        arm="left_arm",
+        env=env,
+        initial_state=None,
+        failed=torch.tensor([False]),
+        runtime_kwargs={},
+    )
+
+    assert feasible.tolist() == [True]
+    assert planned_classes == ["PickUp", "MoveHeldObject", "MoveHeldObject"]
+
+
+def test_arm_candidate_exception_records_concrete_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(
+        make_relative_seed_task_graph("candidate_diagnostic", _upright_relative_spec())
+    )
+    step = next(iter(graph.semantic_steps.values()))
+    env = SimpleNamespace(num_envs=1, device=torch.device("cpu"))
+
+    def fail_candidate(*args, **kwargs):
+        del args, kwargs
+        raise ValueError("unsupported release cfg")
+
+    monkeypatch.setattr(graph, "_plan_arm_candidate", fail_candidate)
+    assignments, selection_failed = graph._select_step_arms(
+        step,
+        env=env,
+        world_states={"left": None, "right": None},
+        failed=torch.tensor([False]),
+        runtime_kwargs={},
+    )
+
+    failures = graph._step_candidate_failures(step, 1)
+    assert assignments == [None]
+    assert selection_failed.tolist() == [True]
+    assert failures[0]["left_arm"] == (
+        "candidate_exception:ValueError: unsupported release cfg"
+    )
+
+
 def test_required_opposite_arm_steps_compile_to_pickup_fork_join() -> None:
     from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
         compile_agent_graph_spec,
@@ -500,6 +592,126 @@ def test_required_opposite_arm_steps_compile_to_pickup_fork_join() -> None:
     packed = graph._pack_ready_edges(ready)
     assert [edge.id for edge in packed] == [first_pick["id"], second_pick["id"]]
     assert render_seed_task_graph_png(seed).startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_upright_in_place_preserves_xy_and_compiles_strictly_serial() -> None:
+    seed = make_relative_seed_task_graph(
+        "serial_upright",
+        _upright_relative_spec(),
+    )
+    first_step, second_step = seed["semantic_steps"]
+    edge_by_id = {edge["id"]: edge for edge in seed["edges"]}
+
+    assert seed["allocation_groups"] == []
+    assert first_step["goal"]["placement_mode"] == "upright_in_place"
+    assert first_step["goal"]["upright_local_axis"] == "z"
+    assert (
+        edge_by_id[first_step["edge_ids"][0]]["actions"][0]["motion_policy"]
+        == "upright_in_place_pickup"
+    )
+    assert len(first_step["edge_ids"]) == 6
+    staging_action = edge_by_id[first_step["edge_ids"][1]]["actions"][0]
+    final_action = edge_by_id[first_step["edge_ids"][2]]["actions"][0]
+    release_action = edge_by_id[first_step["edge_ids"][3]]["actions"][0]
+    retreat_action = edge_by_id[first_step["edge_ids"][4]]["actions"][0]
+    assert staging_action["motion_policy"] == "upright_in_place_transport"
+    assert staging_action["target_binding"]["phase"] == "staging"
+    assert final_action["motion_policy"] == "upright_in_place_transport"
+    assert final_action["target_binding"]["phase"] == "final"
+    assert release_action["motion_policy"] == "upright_in_place_release"
+    assert retreat_action["motion_policy"] == "upright_in_place_retreat"
+    assert edge_by_id[second_step["edge_ids"][0]]["depends_on"] == [
+        first_step["edge_ids"][-1]
+    ]
+
+
+def test_upright_grounding_restores_pickup_hint_and_initial_xy() -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(
+        make_relative_seed_task_graph("upright_grounding", _upright_relative_spec())
+    )
+    step = next(iter(graph.semantic_steps.values()))
+    initial_pose = torch.eye(4).unsqueeze(0)
+    initial_pose[:, :3, 3] = torch.tensor([[-0.2, 0.3, 0.1]])
+    current_eef_pose = torch.eye(4).unsqueeze(0)
+    current_eef_pose[:, :3, 2] = torch.tensor([[1.0, 0.0, 0.0]])
+    current_eef_pose[:, :3, 0] = torch.tensor([[0.0, 1.0, 0.0]])
+    current_eef_pose[:, 2, 3] = 1.2
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "can_left": _Object([[0.4, -0.4, 0.3]]),
+                "table": _Object([[0.0, 0.0, 0.0]]),
+            }
+        ),
+        agent_initial_object_poses={"can_left": initial_pose},
+        get_current_xpos_agent=lambda: (current_eef_pose, current_eef_pose),
+    )
+    pickup = ground_symbolic_action(
+        graph.edges[step.edge_ids[0]].symbolic_actions[0],
+        step,
+        env=env,
+        arm="left_arm",
+    )
+    staging = ground_symbolic_action(
+        graph.edges[step.edge_ids[1]].symbolic_actions[0],
+        step,
+        env=env,
+        arm="left_arm",
+    )
+    final = ground_symbolic_action(
+        graph.edges[step.edge_ids[2]].symbolic_actions[0],
+        step,
+        env=env,
+        arm="left_arm",
+    )
+    release = ground_symbolic_action(
+        graph.edges[step.edge_ids[3]].symbolic_actions[0],
+        step,
+        env=env,
+        arm="left_arm",
+    )
+    retreat = ground_symbolic_action(
+        graph.edges[step.edge_ids[4]].symbolic_actions[0],
+        step,
+        env=env,
+        arm="left_arm",
+    )
+
+    assert pickup.action_spec["cfg"]["obj_upright_direction"] == [0.0, 0.0, 1.0]
+    assert pickup.action_spec["cfg"]["rotate_upright"] == pytest.approx(np.pi / 4.0)
+    assert staging.target_object_pose[0, :2].tolist() == pytest.approx([-0.2, 0.3])
+    assert final.target_object_pose[0, :2].tolist() == pytest.approx([-0.2, 0.3])
+    assert staging.action_spec["target_object_pose"]["surface_clearance"] == (
+        pytest.approx(0.30)
+    )
+    assert final.action_spec["target_object_pose"][
+        "surface_clearance"
+    ] == pytest.approx(0.05)
+    assert release.action_spec["cfg"] == {
+        "hand_interp_steps": 12,
+        "lift_height": 0.0,
+        "post_hold_steps": 12,
+        "sample_interval": 64,
+    }
+    assert release.action_spec["target_pose"] == {
+        "reference": "relative",
+        "offset": [0.0, 0.0, 0.0],
+        "frame": "world",
+    }
+    assert "target_object_pose" not in release.action_spec
+    assert retreat.action_spec["target_pose"]["position_by_env"][0] == pytest.approx(
+        [0.0, 0.0, 1.30]
+    )
+    assert retreat.motion_policy["resolved_retreat_height_by_env"] == pytest.approx(
+        [0.10]
+    )
 
 
 def test_auto_dual_arm_request_compiles_to_distinct_pickup_group() -> None:
@@ -669,6 +881,7 @@ def test_parallel_pickup_runtime_packs_both_required_arms(
         if not graph.edges[edge_id].depends_on
     ]
     batch = graph._pack_ready_edges(ready)
+    assert graph._pack_ready_edges(ready, strict_serial=True) == (ready[0],)
     env = SimpleNamespace(
         num_envs=1,
         device=torch.device("cpu"),
@@ -715,6 +928,80 @@ def test_parallel_pickup_runtime_packs_both_required_arms(
     assert captured["right_arm_action"]["target_object"]["obj_name"] == "cup"
     assert captured["left_active_env_mask"].tolist() == [True]
     assert captured["right_active_env_mask"].tolist() == [True]
+
+
+def test_parallel_pickup_rejection_falls_back_before_serial_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime import task_graph
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(
+        make_relative_seed_task_graph("parallel_fallback", _parallel_relative_spec())
+    )
+    ready = [edge for edge in graph.edges.values() if not edge.depends_on]
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "cube": _Object([[-0.2, 0.0, 0.1]]),
+                "cup": _Object([[0.2, 0.0, 0.1]]),
+                "basket": _Object([[0.0, 0.3, 0.1]]),
+            }
+        ),
+        agent_initial_object_poses={},
+    )
+    serial_edges = []
+
+    monkeypatch.setattr(
+        task_graph,
+        "execute_parallel_atomic_actions",
+        lambda **kwargs: {
+            "actions": [torch.ones((1, 1))],
+            "world_states": kwargs["world_states"],
+            "arm_actions": {"left": None, "right": None},
+            "failed_env_mask": kwargs["failed_env_mask"],
+            "parallel_rejected": True,
+            "parallel_safety": {
+                "accepted": False,
+                "reason": "joint_path_collision",
+            },
+        },
+    )
+
+    def execute_serial(edge, step, **kwargs):
+        serial_edges.append(edge.id)
+        return (
+            {
+                "actions": [torch.zeros((1, 1))],
+                "world_states": kwargs["world_states"],
+                "failed_env_mask": kwargs["failed"],
+            },
+            (),
+        )
+
+    monkeypatch.setattr(graph, "_execute_symbolic_edge", execute_serial)
+    assignments = {
+        step.id: [str(step.actor["arm"])] for step in graph.semantic_steps.values()
+    }
+
+    result, _ = graph._execute_parallel_pickup_edges(
+        ready,
+        assignments_by_step=assignments,
+        env=env,
+        world_states={},
+        failed=torch.tensor([False]),
+        runtime_kwargs={},
+        arrangement_plan=None,
+    )
+
+    assert serial_edges == [edge.id for edge in ready]
+    assert len(result["actions"]) == 2
+    assert all(torch.equal(action, torch.zeros((1, 1))) for action in result["actions"])
 
 
 def test_action_dag_runtime_executes_parallel_pickups_before_serial_transports(
@@ -843,7 +1130,7 @@ def test_action_dag_runtime_executes_parallel_pickups_before_serial_transports(
     )
 
 
-def test_required_arm_candidate_preflights_release_retreat_and_home(
+def test_required_arm_candidate_preflights_only_mandatory_manipulation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from embodichain.gen_sim.action_agent_pipeline.runtime import task_graph
@@ -894,13 +1181,7 @@ def test_required_arm_candidate_preflights_release_retreat_and_home(
 
     assert assignments == ["left_arm"]
     assert failed.tolist() == [False]
-    assert planned_classes == [
-        "PickUp",
-        "MoveHeldObject",
-        "Place",
-        "MoveEndEffector",
-        "MoveJoints",
-    ]
+    assert planned_classes == ["PickUp", "MoveHeldObject"]
 
 
 def test_dynamic_retreat_caps_target_at_profile_workspace_height() -> None:
@@ -1731,6 +2012,37 @@ def _parallel_relative_spec(*, auto: bool = False):
                 "right",
                 ("s01_cube_inside",),
             ),
+        ),
+        coordinated_direction=None,
+        coordinated_terminal_behavior=None,
+    )
+
+
+def _upright_relative_spec():
+    def placement(step_id: str, object_uid: str, arm: str, depends_on=()):
+        return SimpleNamespace(
+            intent="place_relative",
+            moved_runtime_uid=object_uid,
+            reference_runtime_uid="table",
+            relation="on",
+            reference_is_initial_pose=False,
+            orientation_goal="upright",
+            orientation_axis="none",
+            orientation_align_to_runtime_uid=None,
+            upright_in_place=True,
+            pickup_upright_direction=[0.0, 0.0, 1.0],
+            pickup_rotate_upright=np.pi / 4.0,
+            arm_request=arm,
+            step_id=step_id,
+            depends_on=depends_on,
+        )
+
+    return SimpleNamespace(
+        intent="place_relative",
+        task_description="Use both arms to stand both cans upright in place.",
+        placements=(
+            placement("s01_left", "can_left", "left"),
+            placement("s02_right", "can_right", "right", ("s01_left",)),
         ),
         coordinated_direction=None,
         coordinated_terminal_behavior=None,

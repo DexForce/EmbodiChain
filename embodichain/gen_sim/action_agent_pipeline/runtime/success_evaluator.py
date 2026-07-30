@@ -109,12 +109,16 @@ def _evaluate_spec(
         return _object_position_near(env, spec)
     if term_type == SuccessTerm.OBJECT_XY_NEAR:
         return _object_xy_near(env, spec)
+    if term_type == SuccessTerm.OBJECT_XY_NEAR_INITIAL:
+        return _object_xy_near_initial(env, spec)
     if term_type == SuccessTerm.OBJECT_IN_CONTAINER:
         return _object_in_container(env, spec)
     if term_type == SuccessTerm.OBJECT_ON_OBJECT:
         return _object_on_object(env, spec)
     if term_type == SuccessTerm.OBJECT_NOT_FALLEN:
         return _object_not_fallen(env, spec)
+    if term_type == SuccessTerm.OBJECT_UPRIGHT:
+        return _object_upright(env, spec)
     if term_type == SuccessTerm.OBJECT_AXIS_OFFSET_NEAR:
         return _object_axis_offset_near(env, spec)
     if term_type == SuccessTerm.OBJECT_AXIS_NEAR:
@@ -227,6 +231,35 @@ def _object_xy_near(env, spec: Mapping[str, Any]) -> torch.Tensor:
     )
 
 
+def _object_xy_near_initial(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    object_name = _object_name(spec)
+    position = _position(env, object_name)
+    initial_pose = getattr(env, "agent_initial_object_poses", {}).get(object_name)
+    if initial_pose is None:
+        raise ValueError(
+            f"Success term object_xy_near_initial requires {object_name!r} "
+            "in env.agent_initial_object_poses."
+        )
+    initial_pose = torch.as_tensor(
+        initial_pose,
+        dtype=position.dtype,
+        device=position.device,
+    )
+    if initial_pose.ndim == 2:
+        initial_pose = initial_pose.unsqueeze(0)
+    if initial_pose.shape[0] == 1 and position.shape[0] > 1:
+        initial_pose = initial_pose.expand(position.shape[0], -1, -1)
+    if initial_pose.shape != (position.shape[0], 4, 4):
+        raise ValueError(
+            "Initial object poses must have shape (num_envs, 4, 4), got "
+            f"{tuple(initial_pose.shape)} for num_envs={position.shape[0]}."
+        )
+    tolerance = float(_success_default(env, spec, "tolerance", _XY_TOLERANCE))
+    return (
+        torch.linalg.norm(position[:, :2] - initial_pose[:, :2, 3], dim=-1) <= tolerance
+    )
+
+
 def _object_in_container(env, spec: Mapping[str, Any]) -> torch.Tensor:
     object_position = _position(env, _object_name(spec))
     container_position = _position(
@@ -312,6 +345,17 @@ def _object_not_fallen(env, spec: Mapping[str, Any]) -> torch.Tensor:
     world_z_axis = torch.tensor([0, 0, 1], dtype=pose.dtype, device=pose.device)
     dot_product = torch.sum(pose_z_axis * world_z_axis, dim=-1).clamp(-1.0, 1.0)
     return torch.arccos(dot_product) < float(
+        _success_default(env, spec, "max_tilt", _MAX_TILT)
+    )
+
+
+def _object_upright(env, spec: Mapping[str, Any]) -> torch.Tensor:
+    pose = _pose(env, _object_name(spec))
+    axis_name = str(spec.get("local_axis", "z"))
+    axis_index = _axis_index(axis_name)
+    world_axis = pose[:, :3, axis_index]
+    dot_product = world_axis[:, 2].clamp(-1.0, 1.0)
+    return torch.arccos(dot_product) <= float(
         _success_default(env, spec, "max_tilt", _MAX_TILT)
     )
 

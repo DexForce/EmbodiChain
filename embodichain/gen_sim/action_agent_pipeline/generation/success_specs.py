@@ -38,6 +38,9 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
     validate_seed_task_graph,
 )
+from embodichain.gen_sim.action_agent_pipeline.domain.success_policy import (
+    upright_in_place_success_spec,
+)
 from embodichain.gen_sim.action_agent_pipeline.generation.robot_profiles import (
     DEFAULT_ROBOT_PROFILE_ID,
     RobotProfile,
@@ -81,6 +84,10 @@ _RELATIVE_AXIS_TOLERANCE = float(_SUCCESS_DEFAULTS["relative_axis_tolerance"])
 _RELATIVE_ZERO_OFFSET_TOLERANCE = float(
     _SUCCESS_DEFAULTS["relative_zero_offset_tolerance"]
 )
+_UPRIGHT_IN_PLACE_XY_TOLERANCE = float(
+    _SUCCESS_DEFAULTS["upright_in_place_xy_tolerance"]
+)
+_UPRIGHT_MAX_TILT = float(_SUCCESS_DEFAULTS["upright_max_tilt"])
 
 
 def _object_in_container_success(object_uid: str, container_uid: str) -> dict[str, Any]:
@@ -382,24 +389,17 @@ def _make_relative_placement_success_spec(
             placement.reference_runtime_uid,
         )
     if placement.relation == "on" and placement.upright_in_place:
-        if placement.release_position is None:
-            raise ValueError(
-                "Upright-in-place success requires an absolute release position."
-            )
-        return {
-            "op": "all",
-            "terms": [
-                *_absolute_xy_success_terms(
-                    placement.moved_runtime_uid,
-                    placement.release_position,
-                ),
-                {
-                    "type": SuccessTerm.OBJECT_NOT_FALLEN,
-                    "object": placement.moved_runtime_uid,
-                    "max_tilt": _OBJECT_MAX_TILT,
-                },
-            ],
-        }
+        direction = placement.pickup_upright_direction or [0.0, 0.0, 1.0]
+        axis_index = max(
+            range(3),
+            key=lambda index: abs(float(direction[index])),
+        )
+        return upright_in_place_success_spec(
+            placement.moved_runtime_uid,
+            local_axis=("x", "y", "z")[axis_index],
+            xy_tolerance=_UPRIGHT_IN_PLACE_XY_TOLERANCE,
+            max_tilt=_UPRIGHT_MAX_TILT,
+        )
     if placement.relation == "on":
         return {
             "type": SuccessTerm.OBJECT_ON_OBJECT,
@@ -725,7 +725,12 @@ def _validate_success_uids(
             if uid not in rigid_uids:
                 raise ValueError(f"Invalid success uid reference object={uid!r}.")
         return
-    elif success_type in {"object_not_fallen", "not_fallen"}:
+    elif success_type in {
+        "object_not_fallen",
+        "not_fallen",
+        "object_upright",
+        "object_xy_near_initial",
+    }:
         required_keys = ("object",)
     elif success_type in {"object_lifted", "object_height_above_initial"}:
         required_keys = ("object",)

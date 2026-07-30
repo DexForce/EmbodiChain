@@ -399,7 +399,7 @@ def _validate_absolute_position(
         if not isinstance(position, list) or len(position) != 3:
             raise ValueError(f"absolute {target_name} position requires three entries.")
         return
-    if (
+    if position_by_env is not None and (
         not isinstance(position_by_env, list)
         or not position_by_env
         or any(not isinstance(item, list) or len(item) != 3 for item in position_by_env)

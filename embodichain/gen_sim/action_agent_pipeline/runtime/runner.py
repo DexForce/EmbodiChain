@@ -135,7 +135,9 @@ def run_action_agent(
     action_iterator: Callable[[Iterable[Any], int], Iterable[Any]] | None = None,
     runtime_graph_renderer: Callable[[Mapping[str, Any]], bytes] | None = None,
     final_reset: bool = False,
-) -> None:
+    seed: int | None = None,
+    strict_serial: bool = False,
+) -> list[bool]:
     """Execute every configured episode and flush its final recorder state."""
     reset_fn = reset or env.reset
     log_info("Start action-agent data generation.", color="green")
@@ -145,22 +147,28 @@ def run_action_agent(
         f"outputs/graph/{task_name}/runs/{runtime_run_id}",
         color="green",
     )
+    episode_results = []
     for episode_index in range(gym_config.get("max_episodes", 1)):
-        generate_action_agent_trajectory(
-            env=env,
-            episode_index=episode_index,
-            runtime_run_id=runtime_run_id,
-            regenerate=regenerate,
-            save_path=save_path,
-            save_video=save_video,
-            debug_mode=debug_mode,
-            reset=reset_fn,
-            action_iterator=action_iterator,
-            runtime_graph_renderer=runtime_graph_renderer,
+        episode_results.append(
+            generate_action_agent_trajectory(
+                env=env,
+                episode_index=episode_index,
+                runtime_run_id=runtime_run_id,
+                regenerate=regenerate,
+                save_path=save_path,
+                save_video=save_video,
+                debug_mode=debug_mode,
+                reset=reset_fn,
+                action_iterator=action_iterator,
+                runtime_graph_renderer=runtime_graph_renderer,
+                seed=None if seed is None else seed + episode_index,
+                strict_serial=strict_serial,
+            )
         )
     reset_fn()
     if final_reset:
         reset_fn(options={"final": True})
+    return episode_results
 
 
 def generate_action_agent_trajectory(
@@ -175,9 +183,15 @@ def generate_action_agent_trajectory(
     reset: Callable[..., tuple[Any, dict[str, Any]]] | None = None,
     action_iterator: Callable[[Iterable[Any], int], Iterable[Any]] | None = None,
     runtime_graph_renderer: Callable[[Mapping[str, Any]], bytes] | None = None,
+    seed: int | None = None,
+    strict_serial: bool = False,
 ) -> bool:
     """Execute one online or precomputed action-agent trajectory."""
-    (reset or env.reset)()
+    reset_fn = reset or env.reset
+    if seed is None:
+        reset_fn()
+    else:
+        reset_fn(seed=seed)
     action_list = env.get_wrapper_attr("create_demo_action_list")(
         action_sentence=str(episode_index),
         save_path=save_path,
@@ -187,6 +201,7 @@ def generate_action_agent_trajectory(
         runtime_run_id=runtime_run_id,
         episode_index=episode_index,
         runtime_graph_renderer=runtime_graph_renderer,
+        strict_serial=strict_serial,
     )
     if action_list is None or len(action_list) == 0:
         log_warning("Action is invalid. Skip to next generation.")
@@ -196,11 +211,11 @@ def generate_action_agent_trajectory(
         runtime_graph_dir = getattr(action_list, "runtime_graph_output_dir", None)
         if runtime_graph_dir:
             log_info(f"Runtime task graphs saved to: {runtime_graph_dir}")
-        log_task_success(
+        success = log_task_success(
             env,
             semantic_success=getattr(action_list, "runtime_success", None),
         )
-        return True
+        return bool(success)
 
     actions = (
         action_iterator(action_list, episode_index)
@@ -209,8 +224,7 @@ def generate_action_agent_trajectory(
     )
     for action in actions:
         env.step(action)
-    log_task_success(env)
-    return True
+    return bool(log_task_success(env))
 
 
 def log_task_success(
