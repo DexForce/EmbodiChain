@@ -66,21 +66,22 @@ control. `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, and
     "timeout_s": 120,
     "max_attempts": 3,
     "health_path": "/health",
-    "segment_single_object_path": "/segment_single_object"
+    "segment_single_object_path": "/predict"
   },
   "geometry_generation": {
     "base_url": "http://geometry-host:port",
     "timeout_s": 600,
     "max_attempts": 3,
     "health_path": "/health",
-    "generate_objects_path": "/generate_objects"
+    "generate_objects_path": "/generate_multiple_objects"
   }
 }
 ```
 
-The configured endpoint paths must match the deployed services. Geometry uses
-one ordered `generate_objects` request for all masks; a single-object scene
-uses the same request with one mask.
+The endpoint paths above match the packaged template, but remain
+service-specific placeholders: change them when the deployed services expose
+different routes. Geometry uses one ordered multi-object request for all masks;
+a single-object scene uses the same request with one mask.
 
 ## Output
 
