@@ -100,6 +100,7 @@ if TYPE_CHECKING:
         RuntimeHealth,
         RuntimeStats,
         SceneManifest,
+        SceneOverlays,
         VisualizationRuntime,
     )
 
@@ -329,6 +330,7 @@ class SimulationManager:
         self._lights: Dict[str, _Light] = dict()
 
         self._visualization_runtime = None
+        self._visualization_overlays: SceneOverlays | None = None
         self._visualization_topology_revision = 0
         self._visualization_manifest_topology_revision = -1
         self._visualization_sim_step = 0
@@ -509,6 +511,29 @@ class SimulationManager:
             return None
         return self._visualization_runtime.stats
 
+    @property
+    def visualization_overlays(self) -> SceneOverlays | None:
+        """Return the overlays included in every Viser scene frame."""
+        return self._visualization_overlays
+
+    def set_visualization_overlays(self, overlays: SceneOverlays | None) -> None:
+        """Set persistent overlays for automatic Viser captures.
+
+        The overlays remain active across :meth:`update` calls until replaced
+        or cleared with ``None``. When Viser is running, the new overlays are
+        published immediately.
+
+        Args:
+            overlays: Backend-neutral overlays to publish with every frame, or
+                ``None`` to clear all persistent overlays.
+        """
+        self._visualization_overlays = overlays
+        if (
+            self.sim_config.visualization.backend == "viser"
+            and self._visualization_runtime is not None
+        ):
+            self.capture_visualization_safely(force=True)
+
     def notify_visualization_topology_changed(self) -> int:
         """Mark scene topology dirty and return its new local revision."""
         self._visualization_topology_revision += 1
@@ -555,6 +580,7 @@ class SimulationManager:
         runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
+            overlays=self._visualization_overlays,
             force=True,
         )
         return runtime
@@ -600,6 +626,7 @@ class SimulationManager:
         return runtime.capture(
             sim_step=self._visualization_sim_step,
             sim_time=self._visualization_sim_time,
+            overlays=self._visualization_overlays,
             force=force,
             capture_camera_images=capture_camera_images,
         )

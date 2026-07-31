@@ -18,33 +18,66 @@
 
 from __future__ import annotations
 
-from .coordinated_pickment import CoordinatedPickment, CoordinatedPickmentCfg
-from .coordinated_placement import CoordinatedPlacement, CoordinatedPlacementCfg
+from .coordinated_pickment import (
+    CoordinatedPickTarget,
+    CoordinatedPickment,
+    CoordinatedPickmentCfg,
+    CoordinatedPickmentTarget,
+)
+from .coordinated_placement import (
+    CoordinatedPlacement,
+    CoordinatedPlacementCfg,
+    CoordinatedPlacementTarget,
+)
 from .hand_over import HandOver, HandOverCfg
-from .move_end_effector import MoveEndEffector, MoveEndEffectorCfg
-from .move_held_object import MoveHeldObject, MoveHeldObjectCfg
-from .move_joints import MoveJoints, MoveJointsCfg
-from .pick_up import PickUp, PickUpCfg
-from .place import Place, PlaceCfg
-from .press import Press, PressCfg
+from .move_end_effector import (
+    EndEffectorPoseTarget,
+    MoveEndEffector,
+    MoveEndEffectorCfg,
+)
+from .move_held_object import (
+    HeldObjectPoseTarget,
+    MoveHeldObject,
+    MoveHeldObjectCfg,
+)
+from .move_joints import (
+    JointPositionTarget,
+    MoveJoints,
+    MoveJointsCfg,
+    NamedJointPositionTarget,
+)
+from .pick_up import GraspTarget, PickUp, PickUpCfg
+from .place import AssembleTarget, Place, PlaceCfg, PlaceTarget
+from .press import Press, PressCfg, PressTarget
 
 __all__ = [
+    "AssembleTarget",
+    "CoordinatedPickTarget",
     "CoordinatedPickment",
     "CoordinatedPickmentCfg",
+    "CoordinatedPickmentTarget",
     "CoordinatedPlacement",
     "CoordinatedPlacementCfg",
+    "CoordinatedPlacementTarget",
+    "EndEffectorPoseTarget",
+    "GraspTarget",
     "HandOver",
     "HandOverCfg",
+    "HeldObjectPoseTarget",
+    "JointPositionTarget",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
     "MoveHeldObject",
     "MoveHeldObjectCfg",
     "MoveJoints",
     "MoveJointsCfg",
+    "NamedJointPositionTarget",
     "PickUp",
     "PickUpCfg",
     "Place",
     "PlaceCfg",
+    "PlaceTarget",
     "Press",
     "PressCfg",
+    "PressTarget",
 ]

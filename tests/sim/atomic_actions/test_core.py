@@ -14,51 +14,139 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for atomic_actions.core (typed targets, WorldState, ActionResult, ObjectSemantics)."""
+"""Tests for atomic-action target contracts and shared core state."""
 
 from __future__ import annotations
 
 import dataclasses
+from typing import get_args
 
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions.affordance import (
-    Affordance,
-    AssembleAffordance,
-)
-from embodichain.lab.sim.atomic_actions.core import (
-    ActionCfg,
-    ActionResult,
-    AssembleTarget,
-    CoordinatedHeldObjectState,
+import embodichain.lab.sim.atomic_actions.core as core_module
+from embodichain.lab.sim.atomic_actions.affordance import Affordance
+from embodichain.lab.sim.atomic_actions import (
+    BuiltinTarget,
+    CoordinatedPickTarget,
+    CoordinatedPickmentTarget,
     CoordinatedPlacementTarget,
+    EndEffectorPoseTarget,
     GraspTarget,
-    HeldObjectState,
     HeldObjectPoseTarget,
     JointPositionTarget,
     NamedJointPositionTarget,
+    ObjectActionTarget,
+    PlaceTarget,
+    PressTarget,
+)
+from embodichain.lab.sim.atomic_actions.core import (
+    ActionTarget,
+    ActionCfg,
+    ActionResult,
+    CoordinatedHeldObjectState,
+    HeldObjectState,
     ObjectSemantics,
-    EndEffectorPoseTarget,
     WorldState,
 )
 
 
 class TestTypedTargets:
+    def test_core_does_not_own_concrete_target_types(self):
+        assert not hasattr(core_module, "GraspTarget")
+
+    def test_builtin_target_contains_press_contract(self):
+        assert PressTarget in get_args(BuiltinTarget)
+
+    def test_object_action_target_owns_shared_semantics_contract(self):
+        semantics = ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            label="shared-object",
+        )
+        target = ObjectActionTarget(semantics=semantics)
+        assert target.semantics is semantics
+        assert not hasattr(target, "xpos")
+
+    def test_object_action_target_rejects_non_semantics_value(self):
+        with pytest.raises(TypeError, match="semantics"):
+            ObjectActionTarget(semantics=object())  # type: ignore[arg-type]
+
+    def test_object_action_target_lives_in_neutral_module(self):
+        assert (
+            ObjectActionTarget.__module__
+            == "embodichain.lab.sim.atomic_actions.targets"
+        )
+
+    def test_object_action_target_is_not_a_builtin_executable_contract(self):
+        assert ObjectActionTarget not in get_args(BuiltinTarget)
+
+    @pytest.mark.parametrize(
+        ("target_type", "owner_module"),
+        [
+            (
+                EndEffectorPoseTarget,
+                "embodichain.lab.sim.atomic_actions.primitives.move_end_effector",
+            ),
+            (
+                JointPositionTarget,
+                "embodichain.lab.sim.atomic_actions.primitives.move_joints",
+            ),
+            (
+                NamedJointPositionTarget,
+                "embodichain.lab.sim.atomic_actions.primitives.move_joints",
+            ),
+            (GraspTarget, "embodichain.lab.sim.atomic_actions.primitives.pick_up"),
+            (
+                HeldObjectPoseTarget,
+                "embodichain.lab.sim.atomic_actions.primitives.move_held_object",
+            ),
+            (PlaceTarget, "embodichain.lab.sim.atomic_actions.primitives.place"),
+            (PressTarget, "embodichain.lab.sim.atomic_actions.primitives.press"),
+            (
+                CoordinatedPickTarget,
+                "embodichain.lab.sim.atomic_actions.primitives.coordinated_pickment",
+            ),
+            (
+                CoordinatedPlacementTarget,
+                "embodichain.lab.sim.atomic_actions.primitives.coordinated_placement",
+            ),
+        ],
+    )
+    def test_target_is_defined_by_owning_primitive(
+        self,
+        target_type: type[ActionTarget],
+        owner_module: str,
+    ):
+        assert target_type.__module__ == owner_module
+
     def test_pose_target_holds_tensor(self):
         x = torch.eye(4)
         assert EndEffectorPoseTarget(xpos=x).xpos is x
-        assert EndEffectorPoseTarget(xpos=x).tcp_symmetry == "none"
 
-    def test_pose_target_can_declare_tcp_symmetry(self):
-        target = EndEffectorPoseTarget(xpos=torch.eye(4), tcp_symmetry="z_roll_180")
+    def test_place_target_can_declare_tcp_symmetry(self):
+        target = PlaceTarget(xpos=torch.eye(4), tcp_symmetry="z_roll_180")
         assert target.tcp_symmetry == "z_roll_180"
 
-    def test_pose_target_rejects_unknown_tcp_symmetry(self):
+    def test_place_target_rejects_unknown_tcp_symmetry(self):
         with pytest.raises(ValueError, match="tcp_symmetry"):
-            EndEffectorPoseTarget(
+            PlaceTarget(
                 xpos=torch.eye(4), tcp_symmetry="yaw_90"  # type: ignore[arg-type]
             )
+
+    def test_press_target_rejects_multiple_waypoints(self):
+        with pytest.raises(ValueError, match="xpos"):
+            PressTarget(xpos=torch.eye(4).reshape(1, 1, 4, 4))
+
+    def test_pose_target_rejects_invalid_shape(self):
+        with pytest.raises(ValueError, match="xpos"):
+            EndEffectorPoseTarget(xpos=torch.zeros(3, 3))
+
+    def test_pose_targets_use_identity_equality(self):
+        first = EndEffectorPoseTarget(xpos=torch.eye(4))
+        second = EndEffectorPoseTarget(xpos=torch.eye(4))
+        assert first == first
+        assert first != second
 
     def test_pose_target_is_frozen(self):
         t = EndEffectorPoseTarget(xpos=torch.eye(4))
@@ -84,7 +172,9 @@ class TestTypedTargets:
 
     def test_grasp_target_holds_semantics(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
-        assert GraspTarget(semantics=sem).semantics is sem
+        target = GraspTarget(semantics=sem)
+        assert target.semantics is sem
+        assert isinstance(target, ObjectActionTarget)
 
     def test_grasp_target_is_frozen(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="mug")
@@ -103,32 +193,27 @@ class TestTypedTargets:
         with pytest.raises(dataclasses.FrozenInstanceError):
             t.object_target_pose = torch.zeros(4, 4)  # type: ignore[misc]
 
-    def test_coordinated_placement_target_holds_both_held_objects(self):
-        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="block")
-        held = HeldObjectState(
+    def test_coordinated_pick_target_holds_object_offsets(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="pencil")
+        target = CoordinatedPickTarget(
             semantics=sem,
-            object_to_eef=torch.eye(4).unsqueeze(0),
-            grasp_xpos=torch.eye(4).unsqueeze(0),
+            object_target_pose=torch.eye(4),
+            left_object_to_eef=torch.eye(4),
+            right_object_to_eef=torch.eye(4),
         )
+        assert target.semantics is sem
+        assert isinstance(target, ObjectActionTarget)
+        assert target.left_object_to_eef.shape == (4, 4)
+        assert CoordinatedPickmentTarget is CoordinatedPickTarget
+
+    def test_coordinated_placement_target_only_holds_desired_state(self):
         target = CoordinatedPlacementTarget(
             placing_object_target_pose=torch.eye(4),
             support_object_target_pose=torch.eye(4),
-            placing_held_object=held,
-            support_held_object=held,
         )
-        assert target.placing_held_object is held
-        assert target.support_held_object is held
+        assert isinstance(target, ActionTarget)
+        assert not hasattr(target, "placing_held_object")
         assert target.support_object_target_pose.shape == (4, 4)
-
-    def test_assemble_target_holds_affordance(self):
-        affordance = AssembleAffordance(base_object_label="cube")
-        target = AssembleTarget(affordance=affordance)
-        assert target.affordance is affordance
-
-    def test_assemble_target_is_frozen(self):
-        t = AssembleTarget(affordance=AssembleAffordance())
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            t.affordance = AssembleAffordance()  # type: ignore[misc]
 
 
 class TestObjectSemantics:
@@ -186,7 +271,8 @@ class TestWorldState:
         qpos = torch.zeros(2, 6)
         ws = WorldState(last_qpos=qpos)
         assert ws.last_qpos is qpos
-        assert ws.held_object is None
+        assert ws.held_objects == {}
+        assert ws.coordinated_held_objects == {}
 
     def test_carries_held_object(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={})
@@ -195,8 +281,12 @@ class TestWorldState:
             object_to_eef=torch.eye(4).unsqueeze(0),
             grasp_xpos=torch.eye(4).unsqueeze(0),
         )
-        ws = WorldState(last_qpos=torch.zeros(1, 6), held_object=held)
-        assert ws.held_object is held
+        ws = WorldState(
+            last_qpos=torch.zeros(1, 6),
+            held_objects={"left_arm": held},
+        )
+        assert ws.get_held_object("left_arm") is held
+        assert ws.get_held_object("right_arm") is None
 
     def test_carries_coordinated_held_object(self):
         sem = ObjectSemantics(affordance=Affordance(), geometry={})
@@ -207,8 +297,21 @@ class TestWorldState:
             left_grasp_xpos=torch.eye(4).unsqueeze(0),
             right_grasp_xpos=torch.eye(4).unsqueeze(0),
         )
-        ws = WorldState(last_qpos=torch.zeros(1, 14), coordinated_held_object=held)
-        assert ws.coordinated_held_object is held
+        ws = WorldState(
+            last_qpos=torch.zeros(1, 14),
+            coordinated_held_objects={("left_arm", "right_arm"): held},
+        )
+        assert ws.get_coordinated_held_object("left_arm", "right_arm") is held
+
+    def test_with_updates_does_not_alias_held_state_dictionaries(self):
+        ws = WorldState(last_qpos=torch.zeros(1, 6))
+        successor = ws.with_updates(last_qpos=torch.ones(1, 6))
+        successor.held_objects["arm"] = HeldObjectState(
+            semantics=ObjectSemantics(affordance=Affordance(), geometry={}),
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        assert ws.held_objects == {}
 
 
 class TestActionResult:

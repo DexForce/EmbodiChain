@@ -30,11 +30,11 @@ from ..core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
-    GraspTarget,
     HeldObjectState,
     ObjectSemantics,
     WorldState,
 )
+from .pick_up import GraspTarget
 from ..trajectory import TrajectoryBuilder
 
 
@@ -110,7 +110,7 @@ class HandOverCfg(ActionCfg):
     """Number of waypoints used for the final deliver/retreat phase."""
 
 
-class HandOver(AtomicAction):
+class HandOver(AtomicAction[GraspTarget]):
     """Hand an object from one arm to the other.
 
     The transferring arm (already holding the object) moves it to a middle
@@ -362,13 +362,15 @@ class HandOver(AtomicAction):
             object_to_eef=receive_object_to_eef,
             grasp_xpos=receive_grasp_xpos,
         )
+        held_objects = dict(state.held_objects)
+        held_objects.pop(self.cfg.transfer_arm_control_part, None)
+        held_objects[self.cfg.receive_arm_control_part] = held_object
         return ActionResult(
             success=True,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=held_object,
-                coordinated_held_object=state.coordinated_held_object,
+                held_objects=held_objects,
             ),
         )
 
@@ -405,14 +407,14 @@ class HandOver(AtomicAction):
         return matrix
 
     def _resolve_transfer_object_to_eef(self, state: WorldState) -> torch.Tensor:
-        if state.held_object is None:
+        held = state.get_held_object(self.cfg.transfer_arm_control_part)
+        if held is None:
             logger.log_error(
-                "HandOver requires WorldState.held_object (run PickUp first).",
+                "HandOver requires an object held by transfer control part "
+                f"{self.cfg.transfer_arm_control_part!r} (run PickUp first).",
                 ValueError,
             )
-        return self._resolve_matrix(
-            state.held_object.object_to_eef, "held_object.object_to_eef"
-        )
+        return self._resolve_matrix(held.object_to_eef, "held_object.object_to_eef")
 
     def _resolve_receive_grasp(
         self,

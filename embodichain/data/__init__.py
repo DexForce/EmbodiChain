@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Dataset resolution, asset-download helpers, preset asset registries, and shared constants/enums used by simulation tasks and training pipelines."""
+
 import os
 
 from .constants import EMBODICHAIN_DEFAULT_DATABASE_ROOT

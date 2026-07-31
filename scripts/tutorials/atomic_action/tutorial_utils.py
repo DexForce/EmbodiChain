@@ -134,6 +134,29 @@ def create_tutorial_simulation(
     return sim
 
 
+def run_tutorial(main: Callable[[], None]) -> None:
+    """Run a tutorial entry point and release its simulation at top level.
+
+    ``SimulationManager.destroy`` defers native cleanup because action and
+    planner locals may still retain wrapped C++ objects. Calling it only after
+    ``main`` has unwound makes the cleanup deterministic and avoids native
+    teardown during Python interpreter finalization.
+
+    Args:
+        main: Zero-argument tutorial entry point.
+    """
+    try:
+        main()
+    finally:
+        if SimulationManager.is_instantiated():
+            sim = SimulationManager.get_instance()
+            if sim.is_window_recording():
+                sim.stop_window_record()
+            sim.wait_window_record_saves()
+            sim.destroy(exit_process=False)
+            SimulationManager.flush_cleanup_queue()
+
+
 def add_ur5_gripper_robot(
     sim: SimulationManager,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
@@ -707,6 +730,7 @@ __all__ = [
     "prepare_tutorial_scene",
     "publish_tutorial_scene",
     "replay_trajectory",
+    "run_tutorial",
     "serve_tutorial_scene",
     "should_open_tutorial_window",
     "should_wait_for_tutorial_input",

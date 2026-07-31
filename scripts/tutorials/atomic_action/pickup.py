@@ -50,6 +50,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     initialize_pre_pick_robot_pose,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 OBJECT_SIZE = (0.05, 0.05, 0.05)
@@ -188,4 +189,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

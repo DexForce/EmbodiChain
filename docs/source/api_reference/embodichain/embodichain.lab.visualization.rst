@@ -3,6 +3,22 @@ embodichain.lab.visualization
 
 .. automodule:: embodichain.lab.visualization
 
+Overview
+--------
+
+Browser-based visualization of simulation scenes. The
+:class:`SceneExporter` reads simulation assets on the simulation thread and
+produces detached, backend-neutral CPU snapshots (:class:`SceneManifest`,
+:class:`SceneFrame`, :class:`CameraImageFrame`). A background
+:class:`VisualizationRuntime` owns latest-frame queues, rate limiting, health,
+and telemetry, and pushes snapshots to a visualization backend - currently the
+Viser server (:class:`ViserServerCfg`) that publishes an interactive 3D view
+to the browser. The stack supports interactive gizmos (with optional command
+write-back to the simulation), scene overlays (targets, trajectories, point
+clouds), and live RGB camera preview. CLI helpers
+(:func:`add_viser_args_to_parser`, :func:`visualization_cfg_from_args`) wire
+the standard ``--viser*`` arguments into launchers.
+
 Configuration
 -------------
 

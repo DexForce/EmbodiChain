@@ -23,6 +23,7 @@ import pytest
 from embodichain import __main__ as cli
 
 EXPECTED_COMMANDS = {
+    "analyze-workspace",
     "annotate-grasp",
     "benchmark",
     "data",

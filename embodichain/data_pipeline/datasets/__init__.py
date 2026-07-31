@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Online datasets and samplers that stream trajectories from a running simulation for online RL/IL training."""
+
 from .online_data import OnlineDataset
 from .sampler import ChunkSizeSampler, UniformChunkSampler, GMMChunkSampler
 

@@ -87,6 +87,7 @@ def _ensure_runtime_imports() -> None:
             MoveEndEffectorCfg as move_end_effector_cfg_cls,
             Press as press_cls,
             PressCfg as press_cfg_cls,
+            PressTarget as press_target_cls,
         )
         from embodichain.lab.sim.cfg import (
             RigidBodyAttributesCfg as rigid_body_attributes_cfg_cls,
@@ -127,6 +128,7 @@ def _ensure_runtime_imports() -> None:
             "MoveEndEffectorCfg": move_end_effector_cfg_cls,
             "Press": press_cls,
             "PressCfg": press_cfg_cls,
+            "PressTarget": press_target_cls,
             "RigidBodyAttributesCfg": rigid_body_attributes_cfg_cls,
             "RigidObjectCfg": rigid_object_cfg_cls,
             "VisualMaterialCfg": visual_material_cfg_cls,
@@ -580,7 +582,7 @@ def _timed_atomic_run(
     is_success, traj, _ = atomic_engine.run(
         steps=[
             ("move_end_effector", EndEffectorPoseTarget(xpos=move_target)),
-            ("press", EndEffectorPoseTarget(xpos=press_target)),
+            ("press", PressTarget(xpos=press_target)),
         ]
     )
     _sync_cuda()
