@@ -176,7 +176,7 @@ def validate_scene_understanding(scene: Scene) -> None:
         raise ValueError("Scene understanding must identify a table.")
     if (
         scene.table.id != "table"
-    ):  # Currently it will always return true. For we hardcode the table id to "table".
+    ):  # Currently it will always return false. For we hardcode the table id to "table".
         raise ValueError("Scene table id must be 'table'.")
 
     asset_ids = [asset.id for asset in scene.assets]
