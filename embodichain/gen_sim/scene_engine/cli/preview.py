@@ -207,8 +207,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         description="Preview a Scene Engine scene export in EmbodiChain simulation.",
     )
     parser.add_argument(
-        "output_root",
+        "--output_root",
         type=Path,
+        required=True,
         help="Scene Engine output root containing scene_export/.",
     )
     parser.add_argument(

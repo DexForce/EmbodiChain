@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from embodichain.gen_sim.scene_engine.cli import start
+from embodichain.gen_sim.scene_engine.cli import preview, start
 
 
 def test_cli_scene_engine_creates_output_and_forwards_config(
@@ -94,3 +94,34 @@ def test_main_forwards_parsed_arguments(monkeypatch: pytest.MonkeyPatch) -> None
         "output_root": "output",
         "config_path": Path("services.json"),
     }
+
+
+def test_preview_main_forwards_output_root_and_viser_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: dict[str, object] = {}
+
+    def fake_preview_scene_export(**kwargs: object) -> None:
+        received.update(kwargs)
+
+    monkeypatch.setattr(preview, "preview_scene_export", fake_preview_scene_export)
+
+    preview.main(
+        [
+            "--output_root",
+            "output",
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            "9000",
+        ]
+    )
+
+    visualization = received["visualization"]
+    assert received["output_root"] == Path("output")
+    assert received["device"] == "cpu"
+    assert received["headless"] is False
+    assert visualization.backend == "viser"
+    assert visualization.viser_server.host == "0.0.0.0"
+    assert visualization.viser_server.port == 9000

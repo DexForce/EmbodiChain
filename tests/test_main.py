@@ -88,6 +88,19 @@ def test_subcommand_help_uses_complete_command_parser(
     assert "--category" in output
 
 
+def test_preview_scene_help_includes_output_and_viser_options(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Preview Scene should expose its required path and optional Viser settings."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["preview-scene", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "--output_root" in output
+    assert "--viser" in output
+
+
 def test_nested_benchmark_help_uses_suite_parser(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
