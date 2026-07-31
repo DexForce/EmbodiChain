@@ -40,9 +40,11 @@ sim_config = SimulationManagerCfg(
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
 | `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 | `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
 | `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
+| `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
 
 ### Physics Configuration
 
@@ -123,6 +125,68 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
+
+## Profiling simulation updates
+
+Configure {class}`ProfilerCfg` directly on the simulation manager when using
+the simulation without a Gym environment:
+
+```python
+from embodichain.lab.sim import ProfilerCfg, SimulationManager, SimulationManagerCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        profiler=ProfilerCfg(enable_time=True, warmup_steps=0),
+    )
+)
+sim.update(step=4)
+sim.profiler.report()
+```
+
+Each standalone {meth}`SimulationManager.update` call creates a `sim_update`
+root. The `manual_update` section contains one `gizmo_update` and one
+`world_update` sample per physics substep, plus optional
+`window_record_capture` and `visualization_capture` samples when those features
+are enabled. Consequently, `world_update.calls` is the total number of physics
+substeps, its mean is the mean cost of one substep, and its total is the
+aggregate physics-update time.
+
+When a Gym environment owns the manager, it reuses the same profiler instance.
+Simulation sections compose below `step.sim_update` without adding another
+`sim_update` path component, so existing environment reports remain compatible.
+
+## Browser visualization
+
+{class}`SimulationManager` owns the optional Viser runtime. Configure it through
+{attr}`SimulationManagerCfg.visualization`:
+
+```python
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import VisualizationCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        visualization=VisualizationCfg(
+            backend="viser",
+            env_ids=[0],
+        ),
+    )
+)
+print(sim.visualization_health.endpoint)
+```
+
+When `backend="viser"`, the manager starts the server during construction.
+Assets added or removed later are published automatically on the next
+{meth}`SimulationManager.update`. The runtime is stopped by
+{meth}`SimulationManager.destroy`, or explicitly with
+{meth}`SimulationManager.stop_visualization`.
+
+The browser supports rigid objects and groups, robot and articulation links,
+cloth, soft bodies, camera frustums, low-frequency RGB preview, overlays, and a
+1 m ground grid. For configuration, performance behavior, deformable-object
+limitations, remote access, and troubleshooting, see
+{doc}`viser_visualization`.
 
 ## Assets Management
 
@@ -206,6 +270,13 @@ In this mode, the physics simulation stepping is automatically handling by the p
 - **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
 - **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
+- **`SimulationManager.start_visualization()`**: Start or return the configured visualization runtime.
+- **`SimulationManager.refresh_visualization()`**: Immediately republish scene topology.
+- **`SimulationManager.capture_visualization(force=False)`**: Capture the current scene state.
+- **`SimulationManager.capture_visualization_safely(force=False)`**: Capture without allowing a visualization failure to interrupt simulation progress.
+- **`SimulationManager.stop_visualization()`**: Stop Viser and release its server port.
+- **`SimulationManager.visualization_health`**: Return endpoint, client count, revision, and worker status.
+- **`SimulationManager.visualization_stats`**: Return capture, queue, payload, and upload telemetry.
 
 
 ## Multiple instances
@@ -224,3 +295,4 @@ For more methods and details, refer to the [SimulationManager](https://dexforce.
 
 - [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
 - [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
+- {doc}`Viser browser visualization <viser_visualization>`

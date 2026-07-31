@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Policy-network registration and model construction (``ActorCritic``, ``ActorOnly``, ``MLP``, ``Policy``)."""
+
 from __future__ import annotations
 
 import inspect

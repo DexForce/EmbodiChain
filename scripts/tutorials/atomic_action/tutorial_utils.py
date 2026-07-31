@@ -26,6 +26,7 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     ObjectSemantics,
@@ -118,6 +119,7 @@ def create_tutorial_simulation(
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
+            visualization=visualization_cfg_from_args(args),
         )
     )
     sim.add_light(
@@ -129,6 +131,29 @@ def create_tutorial_simulation(
         )
     )
     return sim
+
+
+def run_tutorial(main: Callable[[], None]) -> None:
+    """Run a tutorial entry point and release its simulation at top level.
+
+    ``SimulationManager.destroy`` defers native cleanup because action and
+    planner locals may still retain wrapped C++ objects. Calling it only after
+    ``main`` has unwound makes the cleanup deterministic and avoids native
+    teardown during Python interpreter finalization.
+
+    Args:
+        main: Zero-argument tutorial entry point.
+    """
+    try:
+        main()
+    finally:
+        if SimulationManager.is_instantiated():
+            sim = SimulationManager.get_instance()
+            if sim.is_window_recording():
+                sim.stop_window_record()
+            sim.wait_window_record_saves()
+            sim.destroy(exit_process=False)
+            SimulationManager.flush_cleanup_queue()
 
 
 def add_ur5_gripper_robot(
@@ -418,6 +443,7 @@ def should_open_tutorial_window(args: argparse.Namespace) -> bool:
     """Return whether an interactive viewer window should be opened."""
     return not (
         getattr(args, "headless", False)
+        or getattr(args, "viser", False)
         or getattr(args, "diagnose_plan", False)
         or getattr(args, "headless_play", False)
     )
@@ -428,6 +454,7 @@ def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
     return not (
         getattr(args, "auto_play", False)
         or getattr(args, "headless", False)
+        or getattr(args, "viser", False)
         or getattr(args, "diagnose_plan", False)
         or getattr(args, "headless_play", False)
     )
@@ -653,6 +680,7 @@ __all__ = [
     "get_tutorial_window_size",
     "prepare_tutorial_scene",
     "replay_trajectory",
+    "run_tutorial",
     "should_open_tutorial_window",
     "should_wait_for_tutorial_input",
     "start_auto_play_recording",

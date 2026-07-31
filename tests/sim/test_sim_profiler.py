@@ -46,7 +46,13 @@ def _make_sim_update_probe(profiler: Profiler) -> SimulationManager:
     sim._is_initialized_gpu_physics = False
     sim._world = _WorldUpdateProbe()
     sim._window_record_state = None
-    sim.sim_config = types.SimpleNamespace(physics_dt=0.01)
+    sim._visualization_runtime = None
+    sim._visualization_sim_step = 0
+    sim._visualization_sim_time = 0.0
+    sim.sim_config = types.SimpleNamespace(
+        physics_dt=0.01,
+        visualization=types.SimpleNamespace(backend="none"),
+    )
     return sim
 
 
@@ -61,6 +67,7 @@ def test_standalone_sim_update_is_profile_root() -> None:
     assert "sim_update" in profiler._stats
     assert "sim_update.gpu_physics_check" in profiler._stats
     assert "sim_update.manual_update" in profiler._stats
+    assert profiler._stats["sim_update.manual_update.gizmo_update"].n == 2
     assert profiler._stats["sim_update.manual_update.world_update"].n == 2
 
 
@@ -75,6 +82,25 @@ def test_sim_update_composes_with_env_profile_hierarchy() -> None:
             sim.update(step=1)
 
     assert "step.sim_update.gpu_physics_check" in profiler._stats
+    assert "step.sim_update.manual_update.gizmo_update" in profiler._stats
     assert "step.sim_update.manual_update.world_update" in profiler._stats
     assert "step.sim_update.sim_update" not in profiler._stats
     assert "sim_update" not in profiler._stats
+
+
+def test_visualization_capture_is_profiled_per_sim_step() -> None:
+    profiler = Profiler(
+        ProfilerCfg(enable_time=True, warmup_steps=0), torch.device("cpu")
+    )
+    sim = _make_sim_update_probe(profiler)
+    sim.sim_config.visualization.backend = "viser"
+    camera_capture_flags: list[bool] = []
+    sim.capture_visualization_safely = lambda *, capture_camera_images: (
+        camera_capture_flags.append(capture_camera_images)
+    )
+
+    sim.update(step=2)
+
+    stats = profiler._stats["sim_update.manual_update.visualization_capture"]
+    assert stats.n == 2
+    assert camera_capture_flags == [False, True]

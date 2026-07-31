@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 import gymnasium as gym
@@ -169,6 +171,8 @@ class BaseEnv(gym.Env):
         self._detached_uids_for_reset: List[str] = []
 
         self._init_sim_state(**kwargs)
+
+        self.sim.capture_visualization_safely(force=True)
 
         self._init_raw_obs: Dict = self.get_obs(**kwargs)
 
@@ -633,6 +637,8 @@ class BaseEnv(gym.Env):
             with self._profiler.section("initialize_episode"):
                 self._initialize_episode(reset_ids, **options)
             self._elapsed_steps[reset_ids] = 0
+
+            self.sim.capture_visualization_safely(force=True)
 
             with self._profiler.section("get_obs"):
                 obs = self.get_obs(**options)

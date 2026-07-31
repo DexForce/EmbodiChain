@@ -21,8 +21,21 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+import torch
 
-from embodichain.lab.sim.sim_manager import SimulationManager, _WindowRecordState
+import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.profiler import Profiler
+from embodichain.lab.sim.sim_manager import (
+    SimulationManager,
+    SimulationManagerCfg,
+    _WindowRecordState,
+)
+from embodichain.lab.visualization import (
+    GizmoCommand,
+    PointCloudOverlay,
+    SceneOverlays,
+    VisualizationCfg,
+)
 
 DEFAULT_LOOK_AT = (
     (2.6, -2.2, 1.6),
@@ -74,9 +87,16 @@ class FakeWorld:
 
     def __init__(self) -> None:
         self.thread_runtime = FakeThreadRuntime()
+        self.physics_updates: list[float] = []
 
     def thread_rt(self) -> FakeThreadRuntime:
         return self.thread_runtime
+
+    def is_physics_manually_update(self) -> bool:
+        return True
+
+    def update(self, physics_dt: float) -> None:
+        self.physics_updates.append(physics_dt)
 
 
 class FakeEnv:
@@ -91,6 +111,54 @@ class FakeEnv:
         return camera
 
 
+class FakeVisualizationRuntime:
+    """Visualization runtime stub for lifecycle unit tests."""
+
+    def __init__(self) -> None:
+        self.is_running = True
+        self.capture_calls: list[dict[str, object]] = []
+        self.refresh_count = 0
+        self.stopped = False
+
+    def capture(self, **kwargs: object) -> bool:
+        self.capture_calls.append(kwargs)
+        return True
+
+    def refresh_scene(self) -> SimpleNamespace:
+        self.refresh_count += 1
+        return SimpleNamespace(scene_revision=self.refresh_count)
+
+    def stop(self) -> None:
+        self.is_running = False
+        self.stopped = True
+
+
+class FakeInteractiveGizmo:
+    """Minimal shared target controller for browser-command routing tests."""
+
+    def __init__(self) -> None:
+        self.owner: str | None = None
+        self.requested_poses: list[torch.Tensor] = []
+
+    def begin_interaction(self, source_id: str) -> bool:
+        if self.owner not in {None, source_id}:
+            return False
+        self.owner = source_id
+        return True
+
+    def request_local_pose(self, pose: torch.Tensor, *, source_id: str) -> bool:
+        if self.owner not in {None, source_id}:
+            return False
+        self.requested_poses.append(pose.clone())
+        return True
+
+    def end_interaction(self, source_id: str) -> bool:
+        if self.owner != source_id:
+            return False
+        self.owner = None
+        return True
+
+
 def _make_sim_manager(window: object | None = None) -> SimulationManager:
     """Create a minimally initialized simulation manager for recorder tests."""
     sim = object.__new__(SimulationManager)
@@ -103,6 +171,297 @@ def _make_sim_manager(window: object | None = None) -> SimulationManager:
     sim._env = FakeEnv()
     sim._world = FakeWorld()
     return sim
+
+
+def _make_visualization_sim_manager() -> (
+    tuple[SimulationManager, FakeVisualizationRuntime]
+):
+    """Create a manager with a running fake Viser runtime."""
+    sim = object.__new__(SimulationManager)
+    runtime = FakeVisualizationRuntime()
+    sim.sim_config = SimpleNamespace(
+        physics_dt=0.01,
+        visualization=SimpleNamespace(backend="viser"),
+    )
+    sim.device = SimpleNamespace(type="cpu")
+    sim.profiler = Profiler(None, torch.device("cpu"))
+    sim._is_initialized_gpu_physics = False
+    sim._world = FakeWorld()
+    sim._window_record_state = None
+    sim._visualization_runtime = runtime
+    sim._visualization_overlays = None
+    sim._visualization_topology_revision = 2
+    sim._visualization_manifest_topology_revision = 1
+    sim._visualization_sim_step = 0
+    sim._visualization_sim_time = 0.0
+    sim._visualization_error_reported = False
+    return sim, runtime
+
+
+def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+
+    sim.update(step=2)
+
+    assert runtime.refresh_count == 1
+    assert sim._visualization_manifest_topology_revision == 2
+    assert [call["sim_step"] for call in runtime.capture_calls] == [1, 2]
+    assert [call["sim_time"] for call in runtime.capture_calls] == [0.01, 0.02]
+    assert [call["capture_camera_images"] for call in runtime.capture_calls] == [
+        False,
+        True,
+    ]
+    assert all(call["overlays"] is None for call in runtime.capture_calls)
+
+
+def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    overlays = SceneOverlays(
+        point_clouds=(
+            PointCloudOverlay(
+                "workspace",
+                np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
+            ),
+        )
+    )
+
+    sim.set_visualization_overlays(overlays)
+    sim.update(step=1)
+
+    assert sim.visualization_overlays is overlays
+    assert runtime.capture_calls[-1]["overlays"] is overlays
+
+    sim.set_visualization_overlays(None)
+    assert sim.visualization_overlays is None
+    assert runtime.capture_calls[-1]["overlays"] is None
+
+
+def test_sim_manager_routes_viser_gizmo_commands_in_local_arena_frame() -> None:
+    sim = object.__new__(SimulationManager)
+    gizmo = FakeInteractiveGizmo()
+    commands = tuple(
+        GizmoCommand(
+            run_id="run",
+            scene_revision=2,
+            sequence=sequence,
+            gizmo_id="cube",
+            phase=phase,
+            client_id="client-a",
+            position=np.array([2.0 + sequence, 0.0, 0.5], dtype=np.float32),
+            wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        )
+        for sequence, phase in enumerate(("start", "update", "end"), start=1)
+    )
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(allow_commands=True),
+    )
+    sim.device = torch.device("cpu")
+    sim._gizmos = {"cube": gizmo}
+    sim.__dict__["arena_offsets"] = torch.tensor([[2.0, 0.0, 0.0]])
+    sim._visualization_runtime = SimpleNamespace(
+        exporter=SimpleNamespace(run_id="run", scene_revision=2),
+        drain_gizmo_commands=lambda: commands,
+    )
+
+    accepted = sim.process_visualization_commands()
+
+    assert accepted == 3
+    assert gizmo.owner is None
+    np.testing.assert_allclose(
+        gizmo.requested_poses[-1][0, :3, 3],
+        [3.0, 0.0, 0.5],
+    )
+
+
+def test_simulation_config_nests_viser_server_under_visualization() -> None:
+    cfg = SimulationManagerCfg()
+
+    assert cfg.visualization.viser_server.port == 8080
+    assert not hasattr(cfg, "viser_server")
+
+
+def test_simulation_config_forces_headless_mode_for_viser() -> None:
+    cfg = SimulationManagerCfg(
+        headless=False,
+        visualization=VisualizationCfg(backend="viser"),
+    )
+
+    assert cfg.headless
+
+
+def test_headless_simulation_does_not_enable_viser() -> None:
+    cfg = SimulationManagerCfg(headless=True)
+
+    assert cfg.visualization.backend == "none"
+
+
+@pytest.mark.parametrize(
+    ("backend", "runtime_active", "expected"),
+    [
+        ("none", False, True),
+        ("none", True, False),
+        ("viser", False, False),
+    ],
+)
+def test_native_window_availability_depends_on_visualization_backend(
+    backend: str,
+    runtime_active: bool,
+    expected: bool,
+) -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend=backend),
+    )
+    sim._visualization_runtime = object() if runtime_active else None
+
+    assert sim.can_open_native_window() is expected
+
+
+def test_open_window_skips_viser_backend() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="viser"),
+    )
+    sim._visualization_runtime = None
+    sim._world = MagicMock()
+
+    opened = sim.open_window()
+
+    assert not opened
+    sim._world.open_window.assert_not_called()
+
+
+def test_open_window_allows_native_backend() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="none"),
+    )
+    sim._visualization_runtime = None
+    sim._world = MagicMock()
+    sim._window_record_hotkey_cfg = None
+    sim._window_record_input_control = None
+    sim._window_camera_pose_hotkey_cfg = None
+    sim._window_camera_pose_input_control = None
+    sim.is_window_opened = False
+
+    opened = sim.open_window()
+
+    assert opened
+    sim._world.open_window.assert_called_once_with()
+    assert sim.is_window_opened
+
+
+def test_open_window_is_idempotent() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="none"),
+    )
+    sim._visualization_runtime = None
+    sim._world = MagicMock()
+    sim.is_window_opened = True
+
+    opened = sim.open_window()
+
+    assert opened
+    sim._world.open_window.assert_not_called()
+
+
+def test_start_visualization_rejects_open_native_window() -> None:
+    sim = SimulationManager.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(backend="viser"),
+    )
+    sim.is_window_opened = True
+    sim._visualization_runtime = None
+
+    with pytest.raises(RuntimeError, match="native DexSim window"):
+        sim.start_visualization()
+
+
+def test_constructor_starts_visualization_after_default_scene(monkeypatch) -> None:
+    lifecycle: list[str] = []
+    world = MagicMock()
+    world.get_physics_scene.return_value = MagicMock()
+    world.get_env.return_value = MagicMock()
+
+    monkeypatch.setattr(
+        sim_manager_module.os, "makedirs", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(sim_manager_module.wp, "init", lambda: None)
+    monkeypatch.setattr(sim_manager_module.dexsim, "World", lambda _cfg: world)
+    monkeypatch.setattr(
+        sim_manager_module.dexsim, "set_physics_config", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(
+        sim_manager_module.dexsim,
+        "set_physics_gpu_memory_config",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        SimulationManager, "_convert_sim_config", lambda _self, _cfg: object()
+    )
+    monkeypatch.setattr(
+        SimulationManager, "enable_physics", lambda _self, _enable: None
+    )
+    monkeypatch.setattr(
+        SimulationManager,
+        "_init_sim_resources",
+        lambda _self: lifecycle.append("resources"),
+    )
+    monkeypatch.setattr(
+        SimulationManager,
+        "_create_default_plane",
+        lambda _self: lifecycle.append("plane"),
+    )
+    monkeypatch.setattr(
+        SimulationManager,
+        "set_default_background",
+        lambda _self: lifecycle.append("background"),
+    )
+    monkeypatch.setattr(
+        SimulationManager,
+        "set_default_global_lighting",
+        lambda _self: lifecycle.append("lighting"),
+    )
+
+    def build_arenas(sim: SimulationManager, num: int) -> None:
+        lifecycle.append("arenas")
+        sim._arenas.extend([object() for _ in range(num)])
+
+    def start_visualization(sim: SimulationManager) -> None:
+        lifecycle.append(f"visualization:{sim.num_envs}")
+
+    monkeypatch.setattr(SimulationManager, "_build_multiple_arenas", build_arenas)
+    monkeypatch.setattr(
+        SimulationManager,
+        "start_visualization",
+        start_visualization,
+    )
+
+    sim = object.__new__(SimulationManager)
+    SimulationManager.__init__(sim, SimulationManagerCfg(num_envs=3))
+
+    assert lifecycle == [
+        "resources",
+        "plane",
+        "background",
+        "lighting",
+        "arenas",
+        "visualization:3",
+    ]
+
+
+def test_remove_asset_marks_visualization_topology_dirty() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    rigid_object = MagicMock()
+    sim._rigid_objects = {"cube": rigid_object}
+
+    assert sim.remove_asset("cube")
+
+    rigid_object.destroy.assert_called_once_with()
+    assert sim._visualization_topology_revision == 3
+    sim.stop_visualization()
+    assert runtime.stopped
 
 
 def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:

@@ -153,15 +153,12 @@ def action_smoothness_penalty(
     """Penalize large action changes between consecutive timesteps.
 
     Encourages smooth control commands by penalizing sudden changes in actions.
-    Gets previous action from env.episode_action_buffer.
+    Reads the previous action from the RL ``rollout_buffer`` (``action`` / ``done``).
+    Returns zeros when that buffer is unavailable (e.g. evaluation).
 
     Returns:
         Penalty tensor of shape (num_envs,). Zero on first step (no previous action),
         negative on subsequent steps (larger change = more negative).
-
-    Note:
-        This function reads from env.episode_action_buffer, which is automatically
-        cleared when the environment resets.
 
     Example:
         ```json
@@ -172,23 +169,25 @@ def action_smoothness_penalty(
         }
         ```
     """
-    # Extract current action tensor
     if isinstance(action, torch.Tensor):
         current_action = action
     else:
         current_action = action["qpos"]
 
-    # Get previous action from buffer for each environment
-    if env.current_rollout_step == 0:
-        penalty = torch.zeros(env.num_envs, device=env.device)
-    else:
-        dones = env.rollout_buffer["done"][: env.num_envs, env.current_rollout_step - 1]
-        pre_action = env.rollout_buffer["action"][
-            : env.num_envs, env.current_rollout_step - 1
-        ]
-        penalty = -torch.norm(current_action - pre_action, dim=-1)
-        penalty[dones] = 0.0
+    buffer = getattr(env, "rollout_buffer", None)
+    has_rl_prev_step = (
+        env.current_rollout_step > 0
+        and buffer is not None
+        and "done" in buffer.keys()
+        and "action" in buffer.keys()
+    )
+    if not has_rl_prev_step:
+        return torch.zeros(env.num_envs, device=env.device)
 
+    dones = buffer["done"][: env.num_envs, env.current_rollout_step - 1]
+    pre_action = buffer["action"][: env.num_envs, env.current_rollout_step - 1]
+    penalty = -torch.norm(current_action - pre_action, dim=-1)
+    penalty[dones] = 0.0
     return penalty
 
 

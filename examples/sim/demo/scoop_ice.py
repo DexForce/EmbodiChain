@@ -19,6 +19,8 @@ This script demonstrates the creation and simulation of a robot with dexterous h
 and performs a scoop ice task in a simulated environment.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
@@ -27,6 +29,7 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -60,6 +63,7 @@ def initialize_simulation(args):
         headless=True,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -540,7 +544,8 @@ def main():
     heave_ice = create_heave_ice(sim)
     ice_cubes = create_ice_cubes(sim)
 
-    sim.open_window()
+    if not args.headless:
+        sim.open_window()
 
     # Randomize ice positions
     randomize_ice_positions(sim, ice_cubes)

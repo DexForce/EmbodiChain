@@ -41,9 +41,15 @@ from embodichain.lab.sim.material import (
     _set_render_material,
     _wrap_first_render_material,
 )
+from ._mesh_utils import (
+    get_combined_triangles,
+    get_combined_vertices,
+)
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
+
+__all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
 
 
 @dataclass
@@ -1137,21 +1143,24 @@ class RigidObject(BatchEntity):
     def get_vertices(
         self, env_ids: Sequence[int] | None = None, scale: bool = False
     ) -> torch.Tensor:
-        """
-        Retrieve the vertices of the rigid objects.
+        """Retrieve the combined visual-mesh vertices of the rigid objects.
+
+        Assets such as GLB files can contain multiple render meshes. Their
+        vertices are concatenated in render-mesh order so the result represents
+        the complete object instead of only the first mesh.
 
         Args:
-            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve vertices.
-                                                If None, retrieves vertices for all instances.
-            scale (bool): Whether to multiply the vertices by the body scale. Defaults to False.
+            env_ids: Environment IDs for which to retrieve vertices. If ``None``,
+                retrieves vertices for all instances.
+            scale: Whether to multiply the vertices by the body scale.
 
         Returns:
-            torch.Tensor: A tensor containing the user IDs of the specified rigid objects with shape (N, num_verts, 3).
+            Combined vertices with shape ``(N, num_vertices, 3)``.
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         verts = torch.as_tensor(
             np.array(
-                [self._entities[id].get_vertices() for id in ids],
+                [get_combined_vertices(self._entities[id]) for id in ids],
             ),
             dtype=torch.float32,
             device=self.device,
@@ -1161,20 +1170,22 @@ class RigidObject(BatchEntity):
         return verts
 
     def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
-        """
-        Retrieve the triangle indices of the rigid objects.
+        """Retrieve triangle indices for the combined visual meshes.
+
+        Face indices from each render mesh are offset to reference the
+        concatenated vertex array returned by :meth:`get_vertices`.
 
         Args:
-            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve triangle indices.
-                                                If None, retrieves triangle indices for all instances.
+            env_ids: Environment IDs for which to retrieve triangle indices. If
+                ``None``, retrieves triangle indices for all instances.
 
         Returns:
-            torch.Tensor: A tensor containing the triangle indices of the specified rigid objects with shape (N, num_tris, 3).
+            Triangle indices with shape ``(N, num_triangles, 3)``.
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
             np.array(
-                [self._entities[id].get_triangles() for id in ids],
+                [get_combined_triangles(self._entities[id]) for id in ids],
             ),
             dtype=torch.int32,
             device=self.device,

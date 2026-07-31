@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -27,13 +28,32 @@ from embodichain.utils import configclass
 
 from ._helpers import arm_qpos_from_state
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    EndEffectorPoseTarget,
     WorldState,
+    _validate_pose_tensor,
 )
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class EndEffectorPoseTarget(ActionTarget):
+    """End-effector pose target used by :class:`MoveEndEffector`."""
+
+    xpos: torch.Tensor
+    """Target end-effector homogeneous transform.
+
+    Accepts:
+
+    - ``(4, 4)`` or ``(n_envs, 4, 4)`` — a single waypoint.
+    - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory whose
+      waypoints are visited in order.
+    """
+
+    def __post_init__(self) -> None:
+        _validate_pose_tensor(self.xpos, "xpos", allow_waypoints=True)
 
 
 @configclass
@@ -48,7 +68,7 @@ class MoveEndEffectorCfg(ActionCfg):
     """Optional planner-specific options copied for each motion-generator call."""
 
 
-class MoveEndEffector(AtomicAction):
+class MoveEndEffector(AtomicAction[EndEffectorPoseTarget]):
     """Plan a free-space end-effector move to a target pose.
 
     The :class:`EndEffectorPoseTarget` may carry either a single waypoint
@@ -94,10 +114,8 @@ class MoveEndEffector(AtomicAction):
         return ActionResult(
             success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -139,4 +157,4 @@ class MoveEndEffector(AtomicAction):
         )
 
 
-__all__ = ["MoveEndEffector", "MoveEndEffectorCfg"]
+__all__ = ["EndEffectorPoseTarget", "MoveEndEffector", "MoveEndEffectorCfg"]

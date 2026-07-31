@@ -20,7 +20,11 @@ import enum
 import numpy as np
 import pytest
 
-from embodichain.lab.sim.cfg import RobotCfg, JointDrivePropertiesCfg
+from embodichain.lab.sim.cfg import (
+    JointDrivePropertiesCfg,
+    RobotCfg,
+)
+from embodichain.lab.sim.workspace import RobotWorkspaceCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmKind,
@@ -125,6 +129,25 @@ def test_robotcfg_save_to_file(tmp_path):
     loaded = json.loads(fp.read_text())
     assert loaded["variant"] == "b"
     assert loaded["uid"] == "roundtrip"
+
+
+def test_robot_workspace_cfg_from_dict():
+    """RobotCfg deserializes per-control-part workspace settings."""
+    cfg = RobotCfg.from_dict(
+        {
+            "workspace_cfg": {
+                "arm": {
+                    "cache_path": "/tmp/workspace/results.npz",
+                    "strategy": "point_uniform",
+                    "voxel_size": 0.05,
+                }
+            }
+        }
+    )
+
+    assert isinstance(cfg.workspace_cfg["arm"], RobotWorkspaceCfg)
+    assert cfg.workspace_cfg["arm"].strategy == "point_uniform"
+    assert cfg.workspace_cfg["arm"].voxel_size == pytest.approx(0.05)
 
 
 # --------------------------------------------------------------------------- #
