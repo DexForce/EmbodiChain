@@ -29,6 +29,7 @@ shared configuration types and utilities that wire all of these together.
    solvers
    planners
    atomic_actions
+   workspace
    types
    utility
 
@@ -122,6 +123,15 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+
+Robot Workspace
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.workspace
+
 Shared Types
 ------------
 

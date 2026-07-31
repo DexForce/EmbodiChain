@@ -31,7 +31,7 @@ The caches module provides simple caching mechanisms for workspace analysis data
 Fast in-memory caching for medium-sized datasets:
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.caches import MemoryCache
+from embodichain.lab.sim.workspace.caches import MemoryCache
 
 # Create memory cache
 cache = MemoryCache()
@@ -49,7 +49,7 @@ all_data = cache.get_all()
 Persistent disk caching for large datasets:
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.caches import DiskCache
+from embodichain.lab.sim.workspace.caches import DiskCache
 
 # Create disk cache
 cache = DiskCache(save_dir="./my_cache")
@@ -68,7 +68,7 @@ all_data = cache.get_all()
 Simplified factory pattern for creating caches:
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.caches import CacheManager
+from embodichain.lab.sim.workspace.caches import CacheManager
 
 # Create memory cache
 memory_cache = CacheManager.create_cache("memory")
@@ -83,7 +83,7 @@ disk_cache = CacheManager.create_cache("disk", save_dir="./cache")
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.caches import MemoryCache, DiskCache
+from embodichain.lab.sim.workspace.caches import MemoryCache, DiskCache
 
 # Memory cache example
 memory_cache = MemoryCache()
@@ -196,7 +196,7 @@ cache = CacheManager.create_cache("memory")  # or "disk"
 
 ```python
 # Simplest usage
-from embodichain.lab.sim.utility.workspace_analyzer.caches import MemoryCache, DiskCache
+from embodichain.lab.sim.workspace.caches import MemoryCache, DiskCache
 
 # For small datasets
 cache = MemoryCache()
