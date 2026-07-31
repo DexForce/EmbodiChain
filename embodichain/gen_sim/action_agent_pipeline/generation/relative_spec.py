@@ -333,6 +333,10 @@ def _apply_relative_task_response(
         action_sketch = _default_relative_action_sketch(placements)
 
     primary = _relative_primary_placement(placements)
+    parallel_pickup_requested = _normalize_parallel_pickup_request(
+        response.get("parallel_pickup", False),
+        placement_count=len(placements),
+    )
 
     return RelativePlacementSpec(
         intent=primary.intent,
@@ -363,7 +367,25 @@ def _apply_relative_task_response(
         surface_clearance=primary.surface_clearance,
         coordinated_direction=coordinated_direction,
         coordinated_terminal_behavior=coordinated_terminal_behavior,
+        parallel_pickup_requested=parallel_pickup_requested,
     )
+
+
+def _normalize_parallel_pickup_request(
+    value: Any,
+    *,
+    placement_count: int,
+) -> bool:
+    """Validate the model's explicit concurrency request.
+
+    Parallel pickup is protocol metadata, not a fact that should be inferred
+    again from free-form task text while building the Seed graph.
+    """
+    if not isinstance(value, bool):
+        raise ValueError("parallel_pickup must be a JSON boolean.")
+    if value and placement_count != 2:
+        raise ValueError("parallel_pickup requires exactly two manipulation steps.")
+    return value
 
 
 def _relative_placement_entries(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:

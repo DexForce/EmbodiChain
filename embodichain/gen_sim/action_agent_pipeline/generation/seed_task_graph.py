@@ -91,7 +91,9 @@ def make_relative_seed_task_graph(
         previous_step_id = step_id
     allocation_groups = _relative_allocation_groups(
         semantic_steps,
-        task_description=str(getattr(spec, "task_description", "")),
+        parallel_pickup_requested=bool(
+            getattr(spec, "parallel_pickup_requested", False)
+        ),
     )
     return _build_executable_seed(
         task_name=task_name,
@@ -236,6 +238,9 @@ def _build_executable_seed(
 ) -> dict[str, Any]:
     if not semantic_steps:
         raise ValueError("Executable Seed v5 requires at least one semantic step.")
+    # Edge IDs belong to the generated protocol artifact. Work on a deep copy so
+    # callers can safely reuse their semantic input for diagnostics or retries.
+    semantic_steps = deepcopy(semantic_steps)
     nodes = [
         {
             "id": "v0_start",
@@ -437,9 +442,9 @@ def _can_prefetch_pickups(
 def _relative_allocation_groups(
     semantic_steps: list[dict[str, Any]],
     *,
-    task_description: str,
+    parallel_pickup_requested: bool,
 ) -> list[dict[str, Any]]:
-    """Preserve a dual-arm participation request without fixing arm identity."""
+    """Preserve structured dual-arm intent without fixing automatic arm identity."""
     if len(semantic_steps) != 2:
         return []
     first, second = semantic_steps
@@ -457,14 +462,7 @@ def _relative_allocation_groups(
         and second_actor.get("mode") == "required"
         and first_actor.get("arm") != second_actor.get("arm")
     )
-    dual_arm_requested = bool(
-        re.search(
-            r"双臂|两臂|左右(?:手|臂)|both\s+arms|two\s+arms|left\s+arm.*right\s+arm",
-            task_description,
-            flags=re.IGNORECASE,
-        )
-    )
-    if not explicitly_opposite and not dual_arm_requested:
+    if not explicitly_opposite and not parallel_pickup_requested:
         return []
     if first["object"] == second["object"]:
         return []
@@ -517,231 +515,252 @@ def _symbolic_edge_resources(
 def _symbolic_actions_for_step(
     step: Mapping[str, Any],
 ) -> list[tuple[str, str, list[dict[str, Any]]]]:
+    """Expand one semantic operator through small route-neutral action blocks."""
     actor = deepcopy(dict(step["actor"]))
-    object_uid = str(step["object"])
-    operator = str(step["operator"])
     if actor["mode"] == "coordinated":
-        actions = [
-            (
-                "coordinated_manipulation",
-                f"`{object_uid}` held by both arms at its semantic goal",
-                [
-                    _symbolic_action(
-                        "CoordinatedPickment",
-                        actor,
-                        "coordinated_goal",
-                        "default_transport",
-                        object=object_uid,
-                    )
-                ],
-            )
-        ]
-        if step["goal"].get("terminal_behavior") != "place":
-            return actions
-        actions.extend(
-            [
-                (
-                    "dual_release",
-                    f"`{object_uid}` released at its semantic goal",
-                    _dual_arm_symbolic_actions(
-                        "MoveJoints",
-                        binding_kind="joint_state",
-                        policy="default_release",
-                        source="gripper_open",
-                    ),
-                ),
-                (
-                    "dual_retreat",
-                    f"Both end effectors retreated after placing `{object_uid}`",
-                    _dual_arm_symbolic_actions(
-                        "MoveEndEffector",
-                        binding_kind="policy_pose",
-                        policy="default_retreat",
-                    ),
-                ),
-                (
-                    "dual_home",
-                    f"Step `{step['id']}` complete; both arms at initial state",
-                    _dual_arm_symbolic_actions(
-                        "MoveJoints",
-                        binding_kind="joint_state",
-                        policy="default_home",
-                        source="initial",
-                    ),
-                ),
-            ]
-        )
-        return actions
+        return _coordinated_symbolic_actions_for_step(step, actor)
 
+    actions = [_pickup_action_record(step, actor)]
+    actions.extend(_transport_action_records(step, actor))
+    if step["operator"] == "hold_hover":
+        actions.append(_hold_action_record(step, actor))
+        return actions
+    actions.extend(_release_action_records(step, actor))
+    return actions
+
+
+def _coordinated_symbolic_actions_for_step(
+    step: Mapping[str, Any],
+    actor: Mapping[str, Any],
+) -> list[tuple[str, str, list[dict[str, Any]]]]:
+    """Build the shared-object action sequence owned by both physical arms."""
+    object_uid = str(step["object"])
     actions = [
         (
-            "pick_up",
-            f"Holding `{object_uid}`",
+            "coordinated_manipulation",
+            f"`{object_uid}` held by both arms at its semantic goal",
             [
                 _symbolic_action(
-                    "PickUp",
+                    "CoordinatedPickment",
                     actor,
-                    "object",
-                    (
-                        "upright_in_place_pickup"
-                        if step["goal"].get("placement_mode") == "upright_in_place"
-                        else "default_pickup"
-                    ),
+                    "coordinated_goal",
+                    "default_transport",
                     object=object_uid,
-                    affordance="antipodal",
                 )
             ],
-        ),
+        )
     ]
-    if operator == "place_in_line":
-        actions.extend(
-            [
-                (
-                    "move_to_staging",
-                    f"`{object_uid}` held above its nominal line slot",
-                    [
-                        _symbolic_action(
-                            "MoveHeldObject",
-                            actor,
-                            "semantic_goal",
-                            "default_transport",
-                            semantic_step=str(step["id"]),
-                            phase="staging",
-                        )
-                    ],
-                ),
-                (
-                    "move_to_final",
-                    f"`{object_uid}` held at its nominal line slot",
-                    [
-                        _symbolic_action(
-                            "MoveHeldObject",
-                            actor,
-                            "semantic_goal",
-                            "default_transport",
-                            semantic_step=str(step["id"]),
-                            phase="final",
-                        )
-                    ],
-                ),
-            ]
-        )
-    elif step["goal"].get("placement_mode") == "upright_in_place":
-        actions.extend(
-            [
-                (
-                    "upright_at_staging",
-                    f"`{object_uid}` held upright above its initial position",
-                    [
-                        _symbolic_action(
-                            "MoveHeldObject",
-                            actor,
-                            "semantic_goal",
-                            "upright_in_place_transport",
-                            semantic_step=str(step["id"]),
-                            phase="staging",
-                        )
-                    ],
-                ),
-                (
-                    "move_to_semantic_goal",
-                    f"`{object_uid}` held upright at its initial XY",
-                    [
-                        _symbolic_action(
-                            "MoveHeldObject",
-                            actor,
-                            "semantic_goal",
-                            "upright_in_place_transport",
-                            semantic_step=str(step["id"]),
-                            phase="final",
-                        )
-                    ],
-                ),
-            ]
-        )
-    else:
-        actions.append(
+    if step["goal"].get("terminal_behavior") != "place":
+        return actions
+    actions.extend(
+        [
             (
-                "move_to_semantic_goal",
-                f"`{object_uid}` held at its semantic goal",
+                "dual_release",
+                f"`{object_uid}` released at its semantic goal",
+                _dual_arm_symbolic_actions(
+                    "MoveJoints",
+                    binding_kind="joint_state",
+                    policy="default_release",
+                    source="gripper_open",
+                ),
+            ),
+            (
+                "dual_retreat",
+                f"Both end effectors retreated after placing `{object_uid}`",
+                _dual_arm_symbolic_actions(
+                    "MoveEndEffector",
+                    binding_kind="policy_pose",
+                    policy="default_retreat",
+                ),
+            ),
+            (
+                "dual_home",
+                f"Step `{step['id']}` complete; both arms at initial state",
+                _dual_arm_symbolic_actions(
+                    "MoveJoints",
+                    binding_kind="joint_state",
+                    policy="default_home",
+                    source="initial",
+                ),
+            ),
+        ]
+    )
+    return actions
+
+
+def _pickup_action_record(
+    step: Mapping[str, Any],
+    actor: Mapping[str, Any],
+) -> tuple[str, str, list[dict[str, Any]]]:
+    object_uid = str(step["object"])
+    upright = step["goal"].get("placement_mode") == "upright_in_place"
+    return (
+        "pick_up",
+        f"Holding `{object_uid}`",
+        [
+            _symbolic_action(
+                "PickUp",
+                actor,
+                "object",
+                "upright_in_place_pickup" if upright else "default_pickup",
+                object=object_uid,
+                affordance="antipodal",
+            )
+        ],
+    )
+
+
+def _transport_action_records(
+    step: Mapping[str, Any],
+    actor: Mapping[str, Any],
+) -> list[tuple[str, str, list[dict[str, Any]]]]:
+    """Build route-specific transport while keeping terminal actions separate."""
+    object_uid = str(step["object"])
+    step_id = str(step["id"])
+    if step["operator"] == "place_in_line":
+        return [
+            (
+                "move_to_staging",
+                f"`{object_uid}` held above its nominal line slot",
                 [
                     _symbolic_action(
                         "MoveHeldObject",
                         actor,
                         "semantic_goal",
                         "default_transport",
-                        semantic_step=str(step["id"]),
-                    )
-                ],
-            )
-        )
-    if operator == "hold_hover":
-        actions.append(
-            (
-                "keep_holding",
-                f"`{object_uid}` remains held at its semantic goal",
-                [
-                    _symbolic_action(
-                        "MoveJoints",
-                        actor,
-                        "joint_state",
-                        "default_release",
-                        source="gripper_closed",
-                    )
-                ],
-            )
-        )
-        return actions
-    actions.extend(
-        [
-            (
-                "release",
-                f"`{object_uid}` released at its semantic goal",
-                [
-                    _symbolic_action(
-                        "Place",
-                        actor,
-                        "current_held_pose",
-                        (
-                            "upright_in_place_release"
-                            if step["goal"].get("placement_mode") == "upright_in_place"
-                            else "default_release"
-                        ),
+                        semantic_step=step_id,
+                        phase="staging",
                     )
                 ],
             ),
             (
-                "retreat",
-                f"End effector retreated after placing `{object_uid}`",
+                "move_to_final",
+                f"`{object_uid}` held at its nominal line slot",
                 [
                     _symbolic_action(
-                        "MoveEndEffector",
+                        "MoveHeldObject",
                         actor,
-                        "policy_pose",
-                        (
-                            "upright_in_place_retreat"
-                            if step["goal"].get("placement_mode") == "upright_in_place"
-                            else "default_retreat"
-                        ),
-                    )
-                ],
-            ),
-            (
-                "home",
-                f"Step `{step['id']}` complete; arm at initial state",
-                [
-                    _symbolic_action(
-                        "MoveJoints",
-                        actor,
-                        "joint_state",
-                        "default_home",
-                        source="initial",
+                        "semantic_goal",
+                        "default_transport",
+                        semantic_step=step_id,
+                        phase="final",
                     )
                 ],
             ),
         ]
+    if step["goal"].get("placement_mode") == "upright_in_place":
+        return [
+            (
+                "upright_at_staging",
+                f"`{object_uid}` held upright above its initial position",
+                [
+                    _symbolic_action(
+                        "MoveHeldObject",
+                        actor,
+                        "semantic_goal",
+                        "upright_in_place_transport",
+                        semantic_step=step_id,
+                        phase="staging",
+                    )
+                ],
+            ),
+            (
+                "move_to_semantic_goal",
+                f"`{object_uid}` held upright at its initial XY",
+                [
+                    _symbolic_action(
+                        "MoveHeldObject",
+                        actor,
+                        "semantic_goal",
+                        "upright_in_place_transport",
+                        semantic_step=step_id,
+                        phase="final",
+                    )
+                ],
+            ),
+        ]
+    return [
+        (
+            "move_to_semantic_goal",
+            f"`{object_uid}` held at its semantic goal",
+            [
+                _symbolic_action(
+                    "MoveHeldObject",
+                    actor,
+                    "semantic_goal",
+                    "default_transport",
+                    semantic_step=step_id,
+                )
+            ],
+        )
+    ]
+
+
+def _hold_action_record(
+    step: Mapping[str, Any],
+    actor: Mapping[str, Any],
+) -> tuple[str, str, list[dict[str, Any]]]:
+    object_uid = str(step["object"])
+    return (
+        "keep_holding",
+        f"`{object_uid}` remains held at its semantic goal",
+        [
+            _symbolic_action(
+                "MoveJoints",
+                actor,
+                "joint_state",
+                "default_release",
+                source="gripper_closed",
+            )
+        ],
     )
-    return actions
+
+
+def _release_action_records(
+    step: Mapping[str, Any],
+    actor: Mapping[str, Any],
+) -> list[tuple[str, str, list[dict[str, Any]]]]:
+    object_uid = str(step["object"])
+    upright = step["goal"].get("placement_mode") == "upright_in_place"
+    return [
+        (
+            "release",
+            f"`{object_uid}` released at its semantic goal",
+            [
+                _symbolic_action(
+                    "Place",
+                    actor,
+                    "current_held_pose",
+                    "upright_in_place_release" if upright else "default_release",
+                )
+            ],
+        ),
+        (
+            "retreat",
+            f"End effector retreated after placing `{object_uid}`",
+            [
+                _symbolic_action(
+                    "MoveEndEffector",
+                    actor,
+                    "policy_pose",
+                    "upright_in_place_retreat" if upright else "default_retreat",
+                )
+            ],
+        ),
+        (
+            "home",
+            f"Step `{step['id']}` complete; arm at initial state",
+            [
+                _symbolic_action(
+                    "MoveJoints",
+                    actor,
+                    "joint_state",
+                    "default_home",
+                    source="initial",
+                )
+            ],
+        ),
+    ]
 
 
 def _dual_arm_symbolic_actions(

@@ -356,6 +356,7 @@ def _parallel_seed_graph(task_name: str = "parallel_visualization") -> dict:
         SimpleNamespace(
             intent="place_relative",
             task_description="Use both arms to place the cube and cup in the basket.",
+            parallel_pickup_requested=True,
             placements=(
                 placement(first_step_id, "cube"),
                 placement(

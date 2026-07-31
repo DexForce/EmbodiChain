@@ -429,6 +429,10 @@ def validate_seed_task_graph(
     _validate_allocation_groups(allocation_groups, steps, edge_by_id)
     if graph_route == "arrangement_line":
         _validate_arrangement_steps(steps, edge_by_id)
+    elif graph_route == "stacking":
+        _validate_stacking_steps(steps, edge_by_id)
+    else:
+        _validate_object_manipulation_steps(steps, edge_by_id)
 
 
 def _validate_allocation_groups(
@@ -787,6 +791,274 @@ def _validate_arrangement_steps(
         )
     if len(constraints) != 1:
         raise ValueError("Arrangement steps must use one consistent slot constraint.")
+
+
+def _validate_stacking_steps(
+    steps: Sequence[Mapping[str, Any]],
+    edge_by_id: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Validate stacking relations, layer order, and the executable skeleton."""
+    expected_actions = [
+        ["PickUp"],
+        ["MoveHeldObject"],
+        ["Place"],
+        ["MoveEndEffector"],
+        ["MoveJoints"],
+    ]
+    stack_modes: set[str] = set()
+    for layer_index, step in enumerate(steps):
+        step_id = str(step["id"])
+        if step["operator"] != "place_on_stack":
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} must use place_on_stack."
+            )
+        goal = step["goal"]
+        required_goal_fields = {
+            "layer_index",
+            "orientation_axis",
+            "orientation_goal",
+            "reference_object",
+            "reference_state",
+            "relation",
+            "stack_mode",
+        }
+        if set(goal) != required_goal_fields:
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} has invalid goal fields."
+            )
+        if goal["relation"] != "on":
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} must use relation='on'."
+            )
+        if goal["reference_state"] not in {"live", "symbolic_anchor"}:
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} has invalid reference state."
+            )
+        if (
+            not isinstance(goal["layer_index"], int)
+            or isinstance(goal["layer_index"], bool)
+            or goal["layer_index"] != layer_index
+        ):
+            raise ValueError("Stacking layer indices must cover [0, count) in order.")
+        reference_object = goal["reference_object"]
+        expected_reference_state = (
+            "live" if reference_object is not None else "symbolic_anchor"
+        )
+        if goal["reference_state"] != expected_reference_state or (
+            reference_object is not None
+            and (not isinstance(reference_object, str) or not reference_object)
+        ):
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} has inconsistent reference."
+            )
+        if (
+            layer_index > 0
+            and goal["reference_object"] != steps[layer_index - 1]["object"]
+        ):
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} must reference the prior layer."
+            )
+        if goal["stack_mode"] not in {"nested", "on_top"}:
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} has invalid stack_mode."
+            )
+        stack_modes.add(str(goal["stack_mode"]))
+        postcondition = step["postcondition"]
+        if set(postcondition) != {"layer_index", "reference_object", "type"} or (
+            postcondition["type"] != "stack_layer_supported"
+            or postcondition["layer_index"] != layer_index
+            or postcondition["reference_object"] != goal["reference_object"]
+        ):
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} postcondition is inconsistent."
+            )
+        if _step_action_layout(step, edge_by_id) != expected_actions:
+            raise ValueError(
+                f"Stacking semantic step {step_id!r} must use the five-edge "
+                "pickup/transport/place/retreat/home topology."
+            )
+    if len(stack_modes) != 1:
+        raise ValueError("Stacking steps must use one consistent stack_mode.")
+
+
+def _validate_object_manipulation_steps(
+    steps: Sequence[Mapping[str, Any]],
+    edge_by_id: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Validate route-specific goals and action skeletons for manipulation."""
+    allowed_relations = {
+        "back_left_of",
+        "back_right_of",
+        "behind",
+        "front_left_of",
+        "front_of",
+        "front_right_of",
+        "held_above_initial",
+        "inside",
+        "left_of",
+        "on",
+        "right_of",
+    }
+    base_goal_fields = {
+        "orientation_axis",
+        "orientation_goal",
+        "reference_object",
+        "reference_state",
+        "relation",
+    }
+    optional_goal_fields = {
+        "direction",
+        "orientation_reference_object",
+        "placement_mode",
+        "terminal_behavior",
+        "upright_local_axis",
+    }
+    for step in steps:
+        step_id = str(step["id"])
+        operator = str(step["operator"])
+        if operator not in {
+            "coordinated_pickment",
+            "hold_hover",
+            "place_relative",
+        }:
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid operator."
+            )
+        goal = step["goal"]
+        if not base_goal_fields.issubset(goal) or set(goal) - (
+            base_goal_fields | optional_goal_fields
+        ):
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid goal fields."
+            )
+        if goal["relation"] not in allowed_relations:
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid relation."
+            )
+        if goal["reference_state"] not in {"initial", "live"}:
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid "
+                "reference state."
+            )
+        if (
+            not isinstance(goal["reference_object"], str)
+            or not goal["reference_object"]
+        ):
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} requires a reference."
+            )
+        if goal.get("placement_mode") not in {None, "upright_in_place"}:
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid "
+                "placement mode."
+            )
+        if "upright_local_axis" in goal and goal["upright_local_axis"] not in {
+            "x",
+            "y",
+            "z",
+        }:
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid "
+                "upright axis."
+            )
+        if operator == "hold_hover" and (
+            goal["relation"] != "held_above_initial"
+            or goal["reference_object"] != step["object"]
+            or goal["reference_state"] != "initial"
+        ):
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid "
+                "hold-hover semantics."
+            )
+        if operator == "place_relative" and goal["relation"] == "held_above_initial":
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid "
+                "placement semantics."
+            )
+        if operator == "coordinated_pickment" and (
+            goal.get("direction")
+            not in {
+                None,
+                "back",
+                "back_left",
+                "back_right",
+                "front",
+                "front_left",
+                "front_right",
+                "left",
+                "none",
+                "right",
+            }
+            or goal.get("terminal_behavior") not in {None, "hold", "place"}
+        ):
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has invalid "
+                "coordinated semantics."
+            )
+        postcondition = step["postcondition"]
+        if set(postcondition) != {"operator", "relation", "type"} or (
+            postcondition["type"] != "semantic_goal"
+            or postcondition["operator"] != operator
+            or postcondition["relation"] != goal["relation"]
+        ):
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} postcondition "
+                "is inconsistent."
+            )
+        expected_layout = _object_manipulation_action_layout(step)
+        if _step_action_layout(step, edge_by_id) != expected_layout:
+            raise ValueError(
+                f"Object-manipulation semantic step {step_id!r} has an invalid "
+                "action topology."
+            )
+
+
+def _object_manipulation_action_layout(
+    step: Mapping[str, Any],
+) -> list[list[str]]:
+    """Return the only action layout allowed for one normalized operator."""
+    operator = str(step["operator"])
+    if operator == "coordinated_pickment":
+        if step["goal"].get("terminal_behavior") != "place":
+            return [["CoordinatedPickment"]]
+        return [
+            ["CoordinatedPickment"],
+            ["MoveJoints", "MoveJoints"],
+            ["MoveEndEffector", "MoveEndEffector"],
+            ["MoveJoints", "MoveJoints"],
+        ]
+    if operator == "hold_hover":
+        return [["PickUp"], ["MoveHeldObject"], ["MoveJoints"]]
+    if step["goal"].get("placement_mode") == "upright_in_place":
+        return [
+            ["PickUp"],
+            ["MoveHeldObject"],
+            ["MoveHeldObject"],
+            ["Place"],
+            ["MoveEndEffector"],
+            ["MoveJoints"],
+        ]
+    return [
+        ["PickUp"],
+        ["MoveHeldObject"],
+        ["Place"],
+        ["MoveEndEffector"],
+        ["MoveJoints"],
+    ]
+
+
+def _step_action_layout(
+    step: Mapping[str, Any],
+    edge_by_id: Mapping[str, Mapping[str, Any]],
+) -> list[list[str]]:
+    """Collect action classes per assigned edge without flattening concurrency."""
+    return [
+        [
+            str(action["atomic_action_class"])
+            for action in edge_by_id[str(edge_id)]["actions"]
+        ]
+        for edge_id in step["edge_ids"]
+    ]
 
 
 def _reject_grounded_fields(value: Any, path: str = "seed_task_graph") -> None:

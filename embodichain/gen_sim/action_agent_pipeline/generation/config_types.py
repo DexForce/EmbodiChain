@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
     DEFAULT_SURFACE_RELEASE_CLEARANCE,
@@ -27,6 +27,7 @@ from embodichain.gen_sim.action_agent_pipeline.config.defaults import (
 __all__ = [
     "ArrangementLineSpec",
     "ArrangementLineStepSpec",
+    "GeneratedConfigBundle",
     "RelativePlacementSpec",
     "RelativePlacementStepSpec",
     "SceneObject",
@@ -62,6 +63,19 @@ class GeneratedActionAgentConfigPaths:
     seed_task_graph_png: Path | None = None
     basic_background: Path | None = None
     atom_actions: Path | None = None
+
+
+class GeneratedConfigBundle(TypedDict):
+    """Core artifacts produced by every route-specific config builder.
+
+    Builders may add optional diagnostic text artifacts, but these four entries
+    form the stable handoff contract consumed by finalization and config I/O.
+    """
+
+    gym_config: dict[str, Any]
+    agent_config: dict[str, Any]
+    seed_task_graph: dict[str, Any]
+    summary: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -135,6 +149,8 @@ class RelativePlacementSpec:
     surface_clearance: float = DEFAULT_SURFACE_RELEASE_CLEARANCE
     coordinated_direction: str | None = None
     coordinated_terminal_behavior: str | None = None
+    # This structured flag replaces task-text matching in Seed graph generation.
+    parallel_pickup_requested: bool = False
 
 
 @dataclass(frozen=True)

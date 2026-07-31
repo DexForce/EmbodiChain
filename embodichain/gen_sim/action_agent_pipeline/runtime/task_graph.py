@@ -241,6 +241,8 @@ class AgentTaskGraph:
         step_target_positions: dict[str, torch.Tensor] = {}
         step_motion_policies: dict[str, dict[str, Any]] = {}
         dependency_checked_steps: set[str] = set()
+        recorded_steps: set[str] = set()
+        step_active_masks: dict[str, torch.Tensor] = {}
         completed_edges: set[str] = set()
         remaining_edges = list(self.edges)
         transitions = 0
@@ -266,6 +268,7 @@ class AgentTaskGraph:
                     raise RuntimeError("Agent task graph exceeded max_transitions.")
 
                 if len(batch) == 2 and self._batch_has_distinct_arm_group(batch):
+                    eligible_for_group = ~failed
                     assignments_by_step, selection_failed = (
                         self._select_parallel_pickup_arms(
                             batch,
@@ -280,6 +283,7 @@ class AgentTaskGraph:
                     for step_id, assignments in assignments_by_step.items():
                         step_assignments[step_id] = assignments
                         step_selection_failures[step_id] = selection_failed
+                        step_active_masks[step_id] = eligible_for_group.clone()
 
                 for edge in batch:
                     step = self.semantic_step_by_edge[edge.id]
@@ -294,20 +298,24 @@ class AgentTaskGraph:
                             semantic_success=semantic_success,
                         )
                         dependency_checked_steps.add(step.id)
-                    if step.id in step_assignments:
+                    if step.id not in step_assignments:
+                        eligible_for_step = ~failed
+                        assignments, selection_failed = self._select_step_arms(
+                            step,
+                            env=env,
+                            world_states=world_states,
+                            failed=failed,
+                            runtime_kwargs=kwargs,
+                            arrangement_plan=arrangement_plan,
+                        )
+                        failed |= selection_failed
+                        step_assignments[step.id] = assignments
+                        step_selection_failures[step.id] = selection_failed
+                        step_active_masks[step.id] = eligible_for_step
+                    if step.id in recorded_steps:
                         continue
-                    eligible_for_step = ~failed
-                    assignments, selection_failed = self._select_step_arms(
-                        step,
-                        env=env,
-                        world_states=world_states,
-                        failed=failed,
-                        runtime_kwargs=kwargs,
-                        arrangement_plan=arrangement_plan,
-                    )
-                    failed |= selection_failed
-                    step_assignments[step.id] = assignments
-                    step_selection_failures[step.id] = selection_failed
+                    assignments = step_assignments[step.id]
+                    selection_failed = step_selection_failures[step.id]
                     preview = ground_symbolic_action(
                         edge.symbolic_actions[0],
                         step,
@@ -320,7 +328,7 @@ class AgentTaskGraph:
                         assignments=assignments,
                         object_pose=preview.object_pose,
                         reference_pose=preview.reference_pose,
-                        active_mask=eligible_for_step,
+                        active_mask=step_active_masks[step.id],
                         selection_failed_mask=selection_failed,
                         physical_control_parts=_physical_control_parts_for_assignments(
                             env,
@@ -345,6 +353,7 @@ class AgentTaskGraph:
                         f"object={step.object_uid}, semantic_arms={assignments}, "
                         f"physical_control_parts={physical_control_parts}."
                     )
+                    recorded_steps.add(step.id)
 
                 failed_before = failed.clone()
                 if len(batch) == 2:
@@ -1369,8 +1378,11 @@ class AgentTaskGraph:
         observed = env.sim.get_rigid_object(step.object_uid).get_local_pose(
             to_matrix=True
         )[:, :3, 3]
-        relation = str(step.goal.get("relation", ""))
-        reference_object = step.goal.get("reference_object")
+        # The validated postcondition is the runtime acceptance contract.
+        # Goal fields still provide geometry and orientation details.
+        postcondition_type = str(step.postcondition.get("type", ""))
+        relation = str(step.postcondition.get("relation", ""))
+        reference_object = step.postcondition.get("reference_object")
         if step.goal.get("placement_mode") == "upright_in_place":
             initial_pose = getattr(env, "agent_initial_object_poses", {}).get(
                 step.object_uid
@@ -1395,26 +1407,40 @@ class AgentTaskGraph:
                     max_tilt=_UPRIGHT_MAX_TILT,
                 ),
             )
-        elif relation == "inside" and isinstance(reference_object, str):
+        elif (
+            postcondition_type == "semantic_goal"
+            and relation == "inside"
+            and isinstance(step.goal.get("reference_object"), str)
+        ):
             postcondition_success = evaluate_configured_success(
                 env,
                 {
                     "type": "object_in_container",
                     "object": step.object_uid,
-                    "container": reference_object,
+                    "container": step.goal["reference_object"],
                 },
             )
             distance = None
             tolerance = None
-        elif relation in {"on", "on_top", "on_top_of"} and isinstance(
-            reference_object, str
+        elif (
+            postcondition_type == "stack_layer_supported"
+            and isinstance(reference_object, str)
+        ) or (
+            postcondition_type == "semantic_goal"
+            and relation in {"on", "on_top", "on_top_of"}
+            and isinstance(step.goal.get("reference_object"), str)
         ):
+            support = (
+                reference_object
+                if postcondition_type == "stack_layer_supported"
+                else step.goal["reference_object"]
+            )
             postcondition_success = evaluate_configured_success(
                 env,
                 {
                     "type": "object_on_object",
                     "object": step.object_uid,
-                    "support": reference_object,
+                    "support": support,
                 },
             )
             distance = None
@@ -1626,10 +1652,17 @@ def _representative_arm(
 
 
 def _execution_kwargs(kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove scheduler and artifact controls before invoking atomic actions."""
     internal = {
+        "action_module",
         "env",
         "episode_index",
+        "observations",
+        "regenerate",
+        "runtime_graph_renderer",
         "runtime_run_id",
+        "seed_task_graph",
         "semantic_step_settle_steps",
+        "strict_serial",
     }
     return {key: value for key, value in kwargs.items() if key not in internal}

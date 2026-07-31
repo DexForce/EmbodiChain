@@ -27,6 +27,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     GeneratedActionAgentConfigPaths,
+    GeneratedConfigBundle,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
     GlbGeometryNormalizer,
@@ -40,7 +41,7 @@ __all__ = ["_finalize_and_write_bundle", "_validate_acd_method"]
 
 
 def _finalize_and_write_bundle(
-    bundle: dict[str, Any],
+    bundle: GeneratedConfigBundle,
     *,
     output_dir: Path,
     mesh_normalizer: GlbGeometryNormalizer,

@@ -424,6 +424,12 @@ def _object_lifted(env, spec: Mapping[str, Any]) -> torch.Tensor:
     position = _position(env, object_name)
     initial_height = spec.get("initial_height")
     if initial_height is None:
+        initial_height = getattr(env, "agent_initial_object_heights", {}).get(
+            object_name
+        )
+    if initial_height is None:
+        # ``obj_info.height`` remains a compatibility fallback for adapters
+        # that have not adopted the explicit reset-time snapshot mapping.
         initial_height = getattr(env, "obj_info", {}).get(object_name, {}).get("height")
     if initial_height is None:
         raise ValueError(

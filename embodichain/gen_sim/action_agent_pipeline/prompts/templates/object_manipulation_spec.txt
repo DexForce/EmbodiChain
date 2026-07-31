@@ -18,6 +18,7 @@ Return exactly one JSON object with this schema:
       "terminal_behavior": "hold|place"
     }
   ],
+  "parallel_pickup": false,
   "task_prompt_summary": "<one or two sentences for task_prompt>",
   "basic_background_notes": "<short scene/task notes>",
   "action_sketch": ["<short deterministic action sketch>"]
@@ -33,6 +34,7 @@ Rules:
 - Return exactly two manipulations for a dual-arm task that moves two different objects. Treat the task as dual-arm when it explicitly says 双臂, 两臂, both arms, two arms, 一只机械臂...另一只机械臂, or separate work for left and right arms. If the dual-arm task moves one shared object, use exactly one coordinated_pickment manipulation instead.
 - Do not mix top-level hold_hover, place_relative, and coordinated_pickment manipulations. Payloads must be nested inside the single coordinated_pickment manipulation.
 - For dual-arm tasks with two objects, use two different moved_object values and one left arm plus one right arm. Use arm='auto' only when the user did not specify which arm handles that manipulation. For coordinated_pickment, set arm='auto'.
+- Set parallel_pickup=true only when two independent moved objects should be picked concurrently by distinct arms. Otherwise set it to false.
 - For place_relative, reference_object may be a rigid_object or a background object such as a pad, tray, basket, or container. For single-object directional tasks from the object's initial position, set reference_object to the moved object or 'self'.
 - If the task says to release an object above a basket/container so it falls into it, use goal_relation='inside'. If it says to place on a non-container support, use goal_relation='on'.
 - orientation_goal captures the held object's intended pose before release. Use 'upright' for 扶正/竖起来, 'lay_flat' for 平放/横放, 'axis_align' for 水平摆正/摆正/alignment, and 'preserve' otherwise.

@@ -16,15 +16,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+import json
 from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.protocol.artifacts import (
     SEED_TASK_GRAPH_FILENAME,
     TASK_GRAPH_FILENAME,
-)
-from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import (
-    extract_json_object,
 )
 from embodichain.utils.logger import log_info
 
@@ -35,7 +34,7 @@ __all__ = [
 
 
 class CompileAgent:
-    """Validate and execute immutable Seed Graph v3 specs in memory."""
+    """Validate and execute immutable Seed Graph v5 specs in memory."""
 
     def __init__(
         self,
@@ -64,7 +63,7 @@ class CompileAgent:
                 "CompileAgent requires seed_task_graph_v5. Regenerate the "
                 "action-agent config with --overwrite."
             )
-        seed_graph = extract_json_object(kwargs["seed_task_graph"])
+        seed_graph = _decode_seed_graph(kwargs["seed_task_graph"])
         validate_seed_task_graph(seed_graph, task_name=self.task_name)
         log_info("Validated executable Seed Graph v5 for runtime grounding.")
         return seed_graph, kwargs, None
@@ -75,7 +74,7 @@ class CompileAgent:
         )
 
         runtime_kwargs = _runtime_kwargs(kwargs)
-        graph = compile_agent_graph_spec(seed_graph)
+        graph = compile_agent_graph_spec(seed_graph, task_name=self.task_name)
         result = graph.run(**runtime_kwargs)
         log_info("Executable Seed Graph v5 completed runtime execution.")
         return result
@@ -131,5 +130,22 @@ def _runtime_kwargs(
         "seed_task_graph",
         "observations",
         "regenerate",
+        # This removed extension point may still be present in stale configs.
+        # Keep it away from the runtime rather than forwarding a dead object.
+        "action_module",
     }
     return {key: value for key, value in kwargs.items() if key not in prompt_only_keys}
+
+
+def _decode_seed_graph(seed_graph: Any) -> dict[str, Any]:
+    """Accept in-memory mappings and strict JSON, never LLM-style wrappers."""
+    if isinstance(seed_graph, Mapping):
+        return dict(seed_graph)
+    if not isinstance(seed_graph, str):
+        raise TypeError(
+            "CompileAgent seed_task_graph must be a mapping or JSON string."
+        )
+    decoded = json.loads(seed_graph)
+    if not isinstance(decoded, dict):
+        raise TypeError("CompileAgent seed_task_graph JSON must contain one object.")
+    return decoded

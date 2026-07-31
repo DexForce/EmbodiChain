@@ -51,8 +51,12 @@ from embodichain.gen_sim.action_agent_pipeline.generation.config_blocks import (
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.config_types import (
     ArrangementLineSpec,
+    GeneratedConfigBundle,
     RelativePlacementSpec,
     StackingSpec,
+)
+from embodichain.gen_sim.action_agent_pipeline.generation.config_io import (
+    validate_config_bundle,
 )
 from embodichain.gen_sim.action_agent_pipeline.generation.glb_geometry_baking import (
     GlbGeometryNormalizer,
@@ -143,7 +147,7 @@ def _build_arrangement_line_bundle(
     source_scene_z_rotation_degrees: float,
     arrangement_debug_visualization: bool,
     load_template_material: bool,
-) -> dict[str, Any]:
+) -> GeneratedConfigBundle:
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
     runtime_uids = _relative_scene_runtime_uid_mapping(
@@ -249,7 +253,7 @@ def _build_arrangement_line_bundle(
         dataset_spec,
         robot_profile=robot_profile,
     )
-    return {
+    bundle: GeneratedConfigBundle = {
         "gym_config": gym_config,
         "agent_config": make_runtime_agent_config(),
         "seed_task_graph": seed_task_graph,
@@ -258,6 +262,8 @@ def _build_arrangement_line_bundle(
             **_make_arrangement_summary(seed_task_graph),
         },
     }
+    validate_config_bundle(bundle)
+    return bundle
 
 
 def _make_arrangement_summary(seed_graph: Mapping[str, Any]) -> dict[str, Any]:
@@ -301,7 +307,7 @@ def _build_stacking_bundle(
     preserve_source_scene_geometry: bool,
     source_scene_z_rotation_degrees: float,
     load_template_material: bool,
-) -> dict[str, Any]:
+) -> GeneratedConfigBundle:
     seed_task_graph = make_stacking_seed_task_graph(task_name, spec)
     scene_objects = _collect_scene_objects(source_config)
     by_uid = {obj.source_uid: obj for obj in scene_objects}
@@ -405,15 +411,18 @@ def _build_stacking_bundle(
         spec,
         robot_profile=robot_profile,
     )
-    return {
+    bundle: GeneratedConfigBundle = {
         "gym_config": gym_config,
         "agent_config": make_runtime_agent_config(),
         "seed_task_graph": seed_task_graph,
         "summary": {
             "robot_profile": robot_profile.summary(),
             **_make_stacking_summary(spec),
+            "seed_graph_hash": seed_task_graph_hash(seed_task_graph),
         },
     }
+    validate_config_bundle(bundle)
+    return bundle
 
 
 def _make_stacking_dataset_config(
@@ -508,7 +517,7 @@ def _build_relative_placement_bundle(
     inside_container_slot_distance_scale: float,
     surface_release_clearance: float,
     load_template_material: bool,
-) -> dict[str, Any]:
+) -> GeneratedConfigBundle:
     spec = _with_relative_surface_release_clearance(
         spec,
         _validate_surface_release_clearance(surface_release_clearance),
@@ -645,12 +654,15 @@ def _build_relative_placement_bundle(
         robot_profile=robot_profile,
         relation_phrase=_relative_relation_phrase,
     )
-    return {
+    bundle: GeneratedConfigBundle = {
         "gym_config": gym_config,
         "agent_config": make_runtime_agent_config(),
         "seed_task_graph": seed_task_graph,
         "summary": {
             "robot_profile": robot_profile.summary(),
             **_make_relative_summary(spec),
+            "seed_graph_hash": seed_task_graph_hash(seed_task_graph),
         },
     }
+    validate_config_bundle(bundle)
+    return bundle

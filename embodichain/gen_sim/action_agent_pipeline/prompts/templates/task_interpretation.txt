@@ -87,6 +87,7 @@ When route is object_manipulation, use this spec:
       "terminal_behavior": "hold|place"
     }
   ],
+  "parallel_pickup": false,
   "task_prompt_summary": "<one or two sentence execution summary>",
   "basic_background_notes": "<short notes>",
   "action_sketch": ["<short deterministic action sketch>"]
@@ -106,6 +107,8 @@ Object-manipulation rules:
 - Use place_relative for placing, stacking onto, moving beside, inserting, releasing, or changing object orientation at a spatial target. Include reference_object and goal_relation.
 - A dual-arm task moving two separate objects normally has one step per moved
   object. Use auto only when the user did not choose the arm for that step.
+- Set parallel_pickup=true only when two independent moved objects should be
+  picked concurrently by distinct arms. Otherwise set it to false.
 - Do not mix top-level intent families. Payloads belong only inside the single coordinated_pickment.
 - A reference may be a rigid or background object. For movement relative to the object's initial position, use the moved object or self.
 - Use inside for release into a container and on for placement on a non-container support.

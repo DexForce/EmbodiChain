@@ -2038,6 +2038,7 @@ def _parallel_relative_spec(*, auto: bool = False):
     return SimpleNamespace(
         intent="place_relative",
         task_description="Use both arms to move the two objects into the basket.",
+        parallel_pickup_requested=True,
         placements=(
             placement("s01_cube_inside", "cube", "left"),
             placement(

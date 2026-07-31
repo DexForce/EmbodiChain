@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from typing import Any
 
 import torch
@@ -65,13 +66,14 @@ class AgenticGenSimEnv(EmbodiedEnv):
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Any, dict[str, Any]]:
+        reset_ids = _reset_env_ids(self, options)
         if self._agent_runtime_state_ready:
             # Preserve the completed episode result before reset invalidates runtime caches.
             self.episode_success_status |= self.is_task_success()
         self._agent_runtime_state_ready = False
         obs, info = super().reset(seed=seed, options=options)
         self._draw_arrangement_debug_markers()
-        self.get_states()
+        self.get_states(reset_ids=reset_ids)
         self._agent_runtime_state_ready = True
         return obs, info
 
@@ -198,13 +200,22 @@ class AgenticGenSimEnv(EmbodiedEnv):
                 f"{', '.join(sorted(reserved_keys))}."
             )
 
-    def get_states(self) -> None:
-        # store robot states in each env.reset; keep the leading env dimension
-        self.init_qpos = self.robot.get_qpos()
+    def get_states(self, *, reset_ids: torch.Tensor | None = None) -> None:
+        """Refresh runtime state while replacing snapshots only for reset envs."""
+        current_qpos = self.robot.get_qpos()
+        self.init_qpos = _merge_env_snapshot(
+            getattr(self, "init_qpos", None),
+            current_qpos,
+            reset_ids,
+        )
 
         self._agent_arm_slots = self._resolve_agent_arm_slots()
         for side in ("left", "right"):
-            self._initialize_agent_arm_slot(side, self._agent_arm_slots.get(side))
+            self._initialize_agent_arm_slot(
+                side,
+                self._agent_arm_slots.get(side),
+                current_qpos=current_qpos,
+            )
 
         self.open_state = torch.as_tensor(
             getattr(
@@ -224,15 +235,44 @@ class AgenticGenSimEnv(EmbodiedEnv):
             dtype=self.init_qpos.dtype,
             device=self.init_qpos.device,
         ).flatten()
-        self.left_arm_current_gripper_state = self._initial_gripper_state("left")
-        self.right_arm_current_gripper_state = self._initial_gripper_state("right")
+        for side in ("left", "right"):
+            reset_gripper_state = self._initial_gripper_state(side)
+            attribute = f"{side}_arm_current_gripper_state"
+            current_gripper_state = (
+                reset_gripper_state.clone()
+                if reset_gripper_state.ndim == 1
+                else _merge_env_snapshot(
+                    getattr(self, attribute, None),
+                    reset_gripper_state,
+                    reset_ids,
+                )
+            )
+            setattr(
+                self,
+                attribute,
+                current_gripper_state,
+            )
 
-        self.update_obj_info()
-        self.agent_initial_object_poses = {
-            uid: info["pose"].clone()
-            for uid, info in self.obj_info.items()
-            if isinstance(info, Mapping) and isinstance(info.get("pose"), torch.Tensor)
-        }
+        self.update_obj_info(reset_ids=reset_ids, capture_initial=True)
+        initial_poses = getattr(self, "agent_initial_object_poses", {})
+        initial_heights = getattr(self, "agent_initial_object_heights", {})
+        for uid, info in self.obj_info.items():
+            if not isinstance(info, Mapping) or not isinstance(
+                info.get("pose"), torch.Tensor
+            ):
+                continue
+            initial_poses[uid] = _merge_env_snapshot(
+                initial_poses.get(uid),
+                info["pose"],
+                reset_ids,
+            )
+            initial_heights[uid] = _merge_env_snapshot(
+                initial_heights.get(uid),
+                info["current_height"],
+                reset_ids,
+            )
+        self.agent_initial_object_poses = initial_poses
+        self.agent_initial_object_heights = initial_heights
 
     def _resolve_agent_arm_slots(self) -> dict[str, dict[str, str | None] | None]:
         configured_slots = getattr(self, "agent_arm_slots", None)
@@ -285,7 +325,11 @@ class AgenticGenSimEnv(EmbodiedEnv):
         return normalized
 
     def _initialize_agent_arm_slot(
-        self, side: str, slot_cfg: dict[str, str | None] | None
+        self,
+        side: str,
+        slot_cfg: dict[str, str | None] | None,
+        *,
+        current_qpos: torch.Tensor,
     ) -> None:
         arm_name = slot_cfg.get("arm") if slot_cfg else None
         eef_name = slot_cfg.get("eef") if slot_cfg else None
@@ -315,13 +359,19 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
         init_qpos = self.init_qpos[:, arm_joints]
         init_xpos = self.robot.compute_fk(init_qpos, name=arm_name, to_matrix=True)
+        current_arm_qpos = current_qpos[:, arm_joints]
+        current_xpos = self.robot.compute_fk(
+            current_arm_qpos,
+            name=arm_name,
+            to_matrix=True,
+        )
         base_pose = self.robot.get_control_part_base_pose(arm_name, to_matrix=True)
 
         setattr(self, f"{side}_arm_init_qpos", init_qpos)
         setattr(self, f"{side}_arm_init_xpos", init_xpos)
         setattr(self, f"{side}_arm_base_pose", base_pose)
-        setattr(self, f"{side}_arm_current_qpos", init_qpos.clone())
-        setattr(self, f"{side}_arm_current_xpos", init_xpos.clone())
+        setattr(self, f"{side}_arm_current_qpos", current_arm_qpos.clone())
+        setattr(self, f"{side}_arm_current_xpos", current_xpos.clone())
 
     def _get_control_part_joint_ids(self, control_part: str | None) -> list[int]:
         if control_part is None:
@@ -338,23 +388,38 @@ class AgenticGenSimEnv(EmbodiedEnv):
             return self.open_state
         return self.open_state.unsqueeze(0).repeat(num_envs, 1)
 
-    def update_obj_info(self):
-        # store some useful obj information; keep the leading env dimension
+    def update_obj_info(
+        self,
+        *,
+        reset_ids: torch.Tensor | None = None,
+        capture_initial: bool = False,
+    ) -> None:
+        """Refresh live object poses without overwriting reset-time heights."""
         obj_info = getattr(self, "obj_info", {})
         obj_uids = self.sim.get_rigid_object_uid_list()
         for obj_name in obj_uids:
             obj = self.sim.get_rigid_object(obj_name)
             obj_pose = obj.get_local_pose(to_matrix=True)
+            current_height = obj_pose[:, 2, 3]
 
             if obj_name not in obj_info:
-                obj_height = obj_pose[:, 2, 3]  # Extract the height per env
                 obj_info[obj_name] = {
-                    "pose": obj_pose,  # (n_envs, 4, 4)
-                    "height": obj_height,  # (n_envs,)
+                    "pose": obj_pose,
+                    # Keep the legacy key as the immutable reset-time baseline.
+                    "height": current_height.clone(),
+                    "current_height": current_height,
                 }
             else:
                 obj_info[obj_name]["pose"] = obj_pose
-                obj_info[obj_name]["height"] = obj_pose[:, 2, 3]
+                obj_info[obj_name]["current_height"] = current_height
+                if "height" not in obj_info[obj_name]:
+                    obj_info[obj_name]["height"] = current_height.clone()
+                elif capture_initial:
+                    obj_info[obj_name]["height"] = _merge_env_snapshot(
+                        obj_info[obj_name]["height"],
+                        current_height,
+                        reset_ids,
+                    )
 
         self.obj_info = obj_info
 
@@ -480,7 +545,12 @@ class AgenticGenSimEnv(EmbodiedEnv):
         return control_part
 
     # -------------------- get compiled graph for action list --------------------
-    def generate_graph_for_actions(self, regenerate=False, **kwargs):
+    def load_and_validate_seed_graph(self, regenerate=False, **kwargs):
+        """Load strict Seed JSON and validate it for the configured task."""
+        from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+            load_agent_graph_bundle,
+        )
+
         logger.log_info(
             "Load graph for creating action list for "
             f"{self.compile_agent.task_name}.",
@@ -488,16 +558,16 @@ class AgenticGenSimEnv(EmbodiedEnv):
         )
 
         logger.log_info(
-            f"Using executable Seed Graph v3: {self.seed_task_graph_path}",
+            f"Using executable Seed Graph v5: {self.seed_task_graph_path}",
             color="green",
         )
-        seed_task_graph = self.seed_task_graph_path.read_text(encoding="utf-8")
+        seed_task_graph = load_agent_graph_bundle(self.seed_task_graph_path)
         if not getattr(self, "_task_graph_logged", False):
             # The graph is immutable for this environment instance, so print
             # the full source once without flooding logs on later episodes.
             logger.log_info(
-                "Executable Seed Graph v3 input:\n"
-                f"```json\n{seed_task_graph.rstrip()}\n```",
+                "Executable Seed Graph v5 input:\n"
+                f"```json\n{json.dumps(seed_task_graph, ensure_ascii=False, indent=2)}\n```",
                 color="green",
             )
             self._task_graph_logged = True
@@ -509,11 +579,15 @@ class AgenticGenSimEnv(EmbodiedEnv):
             seed_task_graph=seed_task_graph,
             **kwargs,
         )
-        graph_file_path, compile_kwargs, graph_content = self.compile_agent.generate(
-            **compile_agent_input
+        validated_seed_graph, compile_kwargs, graph_content = (
+            self.compile_agent.generate(**compile_agent_input)
         )
 
-        return graph_file_path, compile_kwargs, graph_content
+        return validated_seed_graph, compile_kwargs, graph_content
+
+    def generate_graph_for_actions(self, regenerate=False, **kwargs):
+        """Compatibility wrapper for the historical demo-runner hook."""
+        return self.load_and_validate_seed_graph(regenerate=regenerate, **kwargs)
 
     # -------------------- get action list --------------------
     def create_demo_action_list(self, regenerate=False, *args, **kwargs):
@@ -528,7 +602,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
 
     def _execute_seed_task_graph(self, regenerate=False, *args, **kwargs):
         """Ground and execute the configured Seed graph against the live env."""
-        graph_file_path, compile_kwargs, _ = self.generate_graph_for_actions(
+        seed_graph, compile_kwargs, _ = self.load_and_validate_seed_graph(
             regenerate=regenerate,
             runtime_run_id=kwargs.get("runtime_run_id"),
             episode_index=kwargs.get("episode_index", 0),
@@ -548,7 +622,7 @@ class AgenticGenSimEnv(EmbodiedEnv):
         if isinstance(grasp_runtime_defaults, Mapping):
             for key, value in grasp_runtime_defaults.items():
                 compile_kwargs.setdefault(str(key), value)
-        return self.compile_agent.act(graph_file_path, **compile_kwargs)
+        return self.compile_agent.act(seed_graph, **compile_kwargs)
 
 
 def _split_env_and_agent_kwargs(
@@ -566,6 +640,32 @@ def _split_env_and_agent_kwargs(
     agent_kwargs = {key: kwargs[key] for key in _REQUIRED_AGENT_KWARGS}
     agent_kwargs["agent_config_path"] = kwargs.get("agent_config_path")
     return env_kwargs, agent_kwargs
+
+
+def _reset_env_ids(
+    env: AgenticGenSimEnv,
+    options: Mapping[str, Any] | None,
+) -> torch.Tensor:
+    """Resolve the exact vectorized environments affected by a reset."""
+    if options is not None and options.get("reset_ids") is not None:
+        return torch.as_tensor(options["reset_ids"], device=env.device).flatten()
+    return torch.arange(env.num_envs, dtype=torch.long, device=env.device)
+
+
+def _merge_env_snapshot(
+    previous: torch.Tensor | None,
+    current: torch.Tensor,
+    env_ids: torch.Tensor | None,
+) -> torch.Tensor:
+    """Replace selected environment rows while preserving all other snapshots."""
+    if previous is None or previous.shape != current.shape or env_ids is None:
+        return current.clone()
+    indices = torch.as_tensor(
+        env_ids, device=current.device, dtype=torch.long
+    ).flatten()
+    merged = previous.to(device=current.device, dtype=current.dtype).clone()
+    merged[indices] = current[indices]
+    return merged
 
 
 AtomicActionsAgentEnv = AgenticGenSimEnv

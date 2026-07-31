@@ -19,15 +19,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from copy import deepcopy
 import importlib
+import json
 from pathlib import Path
 from typing import Any
 
 from embodichain.gen_sim.action_agent_pipeline.domain.seed_task_graph import (
     validate_seed_task_graph,
 )
-from embodichain.gen_sim.action_agent_pipeline.utils.llm_json import extract_json_object
 
 __all__ = [
     "compile_agent_graph_from_file",
@@ -37,8 +36,10 @@ __all__ = [
 
 
 def load_agent_graph_bundle(path: str | Path) -> dict[str, Any]:
-    """Load a Seed graph from disk and reject removed compiled bundles."""
-    spec = extract_json_object(Path(path).read_text(encoding="utf-8"))
+    """Load one strict JSON Seed graph and reject removed compiled bundles."""
+    spec = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(spec, dict):
+        raise TypeError("Executable Seed graph JSON must contain one object.")
     if "task_graph" in spec or "metadata" in spec:
         raise ValueError(
             "Compiled/precomputed task graphs are no longer supported. Regenerate "
@@ -51,13 +52,13 @@ def compile_agent_graph_from_file(
     path: str | Path,
     *,
     graph_cls: type | None = None,
-    action_module: Any = None,
+    task_name: str | None = None,
 ) -> Any:
-    """Compile Seed v5 from disk into an executable runtime graph."""
+    """Instantiate Seed v5 from disk as an executable runtime graph."""
     return compile_agent_graph_spec(
         load_agent_graph_bundle(path),
         graph_cls=graph_cls,
-        action_module=action_module,
+        task_name=task_name,
     )
 
 
@@ -65,12 +66,11 @@ def compile_agent_graph_spec(
     seed_graph: str | Mapping[str, Any],
     *,
     graph_cls: type | None = None,
-    action_module: Any = None,
+    task_name: str | None = None,
 ) -> Any:
-    """Compile a validated Seed v5 mapping without grounding its actions."""
-    del action_module
-    seed_spec = extract_json_object(seed_graph)
-    validate_seed_task_graph(seed_spec)
+    """Instantiate a validated Seed v5 mapping without grounding its actions."""
+    seed_spec = _decode_seed_graph(seed_graph)
+    validate_seed_task_graph(seed_spec, task_name=task_name)
     if graph_cls is None:
         graph_cls = getattr(
             importlib.import_module(
@@ -107,3 +107,15 @@ def compile_agent_graph_spec(
             edge_ids=step["edge_ids"],
         )
     return graph
+
+
+def _decode_seed_graph(seed_graph: str | Mapping[str, Any]) -> dict[str, Any]:
+    """Decode strict JSON strings while preserving in-memory mapping callers."""
+    if isinstance(seed_graph, Mapping):
+        return dict(seed_graph)
+    if not isinstance(seed_graph, str):
+        raise TypeError("Executable Seed graph must be a mapping or JSON string.")
+    decoded = json.loads(seed_graph)
+    if not isinstance(decoded, dict):
+        raise TypeError("Executable Seed graph JSON must contain one object.")
+    return decoded

@@ -46,6 +46,7 @@ from embodichain.gen_sim.action_agent_pipeline.generation.seed_task_graph import
 __all__ = [
     "read_json",
     "raise_if_generated_files_exist",
+    "validate_config_bundle",
     "write_config_bundle",
     "write_json",
     "write_text",
@@ -99,7 +100,7 @@ def write_config_bundle(
         task_name=task_name if graph_renderer is not None else None,
         graph_output_root=graph_output_root,
     )
-    _validate_seed_bundle(bundle)
+    validate_config_bundle(bundle)
 
     serialized_files: list[tuple[Path, str | bytes]] = [
         (paths.gym_config, _serialize_json(bundle["gym_config"])),
@@ -189,8 +190,10 @@ def read_json(path: Path) -> dict[str, Any]:
         return json.load(file)
 
 
-def _validate_seed_bundle(bundle: Mapping[str, Any]) -> None:
-    """Require the executable Seed v5 that is the sole config-stage graph."""
+def validate_config_bundle(bundle: Mapping[str, Any]) -> None:
+    """Validate the route-builder handoff before finalization or publication."""
+    if not isinstance(bundle, Mapping):
+        raise TypeError("Generated config bundle must be a mapping.")
     for key in ("gym_config", "agent_config"):
         if not isinstance(bundle.get(key), Mapping):
             raise TypeError(f"{key} bundle entry must be a mapping.")
@@ -198,11 +201,18 @@ def _validate_seed_bundle(bundle: Mapping[str, Any]) -> None:
     if not isinstance(seed_graph, Mapping):
         raise TypeError("seed_task_graph bundle entry must be a mapping.")
     validate_seed_task_graph(seed_graph)
+    if not isinstance(bundle.get("summary"), Mapping):
+        raise TypeError("summary bundle entry must be a mapping.")
     if "task_graph" in bundle:
         raise ValueError(
             "Config generation must not publish task_graph.json. Runtime creates "
             "one grounded Task graph per environment and episode."
         )
+
+
+def _validate_seed_bundle(bundle: Mapping[str, Any]) -> None:
+    """Compatibility alias for callers that imported the former private helper."""
+    validate_config_bundle(bundle)
 
 
 def _serialize_json(data: Mapping[str, Any]) -> str:

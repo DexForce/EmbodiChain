@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility facade for executable Seed Graph v3 builders.
+"""Compatibility facade for executable Seed Graph v5 builders.
 
 Config generation no longer produces a grounded task graph. Historical builder
 names remain importable inside the package, but now return the immutable Seed

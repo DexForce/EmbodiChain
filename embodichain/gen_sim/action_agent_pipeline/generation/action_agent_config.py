@@ -128,7 +128,7 @@ def generate_action_agent_config_from_project(
     ``task_description`` is required: one LLM interpretation selects a supported
     route (stacking, arrangement line, object manipulation) and its semantic
     intent. The matching deterministic generator expands it into an executable
-    Seed Graph v3. Environment geometry remains in the simulator config and is
+    Seed Graph v5. Environment geometry remains in the simulator config and is
     grounded into per-environment Task graphs only by ``run_agent``.
 
     Args:
