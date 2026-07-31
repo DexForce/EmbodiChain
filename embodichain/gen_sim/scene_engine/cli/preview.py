@@ -152,6 +152,7 @@ def _add_objects(
     label: str,
 ) -> None:
     """Add exported meshes as static bodies so previewing does not re-simulate them."""
+    resolved_config_dir = config_dir.resolve()
     for entry in entries:
         uid = entry.get("uid")
         shape = entry.get("shape")
@@ -164,7 +165,17 @@ def _add_objects(
                 f"Scene {label} {uid!r} must use shape_type='Mesh' for preview."
             )
 
-        mesh_path = (config_dir / shape["fpath"]).resolve()
+        fpath = Path(shape["fpath"])
+        if fpath.is_absolute():
+            raise ValueError(
+                f"Scene {label} {uid!r} shape.fpath must be a relative path."
+            )
+        mesh_path = (resolved_config_dir / fpath).resolve()
+        if resolved_config_dir not in mesh_path.parents:
+            raise ValueError(
+                f"Scene {label} {uid!r} shape.fpath must stay within "
+                f"{resolved_config_dir}."
+            )
         if not mesh_path.is_file():
             raise FileNotFoundError(f"Gym mesh for {uid!r} not found: {mesh_path}")
         init_pos = _vector3(entry.get("init_pos"), field_name=f"{uid}.init_pos")
