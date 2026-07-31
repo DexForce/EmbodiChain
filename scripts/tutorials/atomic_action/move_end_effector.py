@@ -46,6 +46,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     make_top_down_eef_pose,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 MOVE_SAMPLE_INTERVAL = 80
@@ -125,4 +126,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

@@ -37,6 +37,21 @@ resulting trajectories along the time axis.
       CoordinatedPlacementCfg
       CoordinatedPlacement
 
+   .. rubric:: Built-in Target Contracts
+
+   .. autosummary::
+
+      EndEffectorPoseTarget
+      JointPositionTarget
+      NamedJointPositionTarget
+      GraspTarget
+      HeldObjectPoseTarget
+      PlaceTarget
+      PressTarget
+      CoordinatedPickTarget
+      CoordinatedPickmentTarget
+      CoordinatedPlacementTarget
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
 
 MoveEndEffector
