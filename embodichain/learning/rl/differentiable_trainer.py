@@ -43,6 +43,7 @@ class DifferentiableTrainerCfg:
     """Configuration for graph-preserving segmented training."""
 
     segment_length: int = 16
+    update_horizon: int | None = None
     deterministic_actions: bool = False
     checkpoint_dir: str = "outputs/checkpoints"
     experiment_name: str = "apg"
@@ -62,6 +63,13 @@ class DifferentiableTrainer:
     ) -> None:
         if cfg.segment_length <= 0:
             raise ValueError("segment_length must be positive.")
+        update_horizon = (
+            cfg.segment_length if cfg.update_horizon is None else cfg.update_horizon
+        )
+        if update_horizon < cfg.segment_length:
+            raise ValueError("update_horizon must be at least segment_length.")
+        if update_horizon % cfg.segment_length != 0:
+            raise ValueError("update_horizon must be divisible by segment_length.")
         if cfg.save_frequency_updates < 0:
             raise ValueError("save_frequency_updates cannot be negative.")
         if algorithm.policy is not policy:
@@ -70,6 +78,7 @@ class DifferentiableTrainer:
             raise ValueError("Environment and APG must use the same device.")
 
         self.cfg = cfg
+        self.update_horizon = update_horizon
         self.env = env
         self.policy = policy
         self.algorithm = algorithm
@@ -93,15 +102,28 @@ class DifferentiableTrainer:
             remaining_vector_steps = math.ceil(
                 (total_timesteps - self.global_step) / self.env.num_envs
             )
-            segment_steps = min(self.cfg.segment_length, remaining_vector_steps)
-            rollout = self.collector.collect(
-                segment_steps,
-                deterministic=self.cfg.deterministic_actions,
-            )
-            metrics = self.algorithm.update(rollout)
-            self.collector.detach_state()
+            update_steps = min(self.update_horizon, remaining_vector_steps)
+            collected_steps = 0
+            self.algorithm.begin_update()
+            try:
+                while collected_steps < update_steps:
+                    segment_steps = min(
+                        self.cfg.segment_length,
+                        update_steps - collected_steps,
+                    )
+                    rollout = self.collector.collect(
+                        segment_steps,
+                        deterministic=self.cfg.deterministic_actions,
+                    )
+                    self.algorithm.accumulate_segment(rollout)
+                    self.collector.detach_state()
+                    collected_steps += rollout.num_steps
+                metrics = self.algorithm.finish_update()
+            except Exception:
+                self.algorithm.cancel_update()
+                raise
 
-            self.global_step += rollout.num_steps * self.env.num_envs
+            self.global_step += collected_steps * self.env.num_envs
             self.num_updates += 1
             entry = {
                 "global_step": float(self.global_step),

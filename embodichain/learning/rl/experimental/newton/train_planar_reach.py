@@ -52,6 +52,7 @@ class NewtonPlanarReachTrainingCfg:
     num_envs: int = 128
     num_updates: int = 600
     horizon: int = 32
+    segment_length: int | None = None
     learning_rate: float = 3e-3
     action_scale: float = 0.25
     success_threshold: float = 0.05
@@ -77,6 +78,7 @@ def train_planar_reach(
         raise ValueError("num_updates cannot be negative.")
     if cfg.horizon <= 0:
         raise ValueError("horizon must be positive.")
+    segment_length = cfg.horizon if cfg.segment_length is None else cfg.segment_length
     torch.manual_seed(cfg.seed)
     device = torch.device(cfg.device)
     train_env = NewtonPlanarReachEnv(
@@ -121,7 +123,8 @@ def train_planar_reach(
     )
     trainer = DifferentiableTrainer(
         DifferentiableTrainerCfg(
-            segment_length=cfg.horizon,
+            segment_length=segment_length,
+            update_horizon=cfg.horizon,
             deterministic_actions=True,
         ),
         train_env,
@@ -149,6 +152,7 @@ def train_planar_reach(
         "num_updates": training_summary["num_updates"],
         "global_step": training_summary["global_step"],
         "horizon": cfg.horizon,
+        "segment_length": segment_length,
         "initial_return": initial_metrics["return"],
         "final_return": final_metrics["return"],
         "initial_mean_min_distance": initial_metrics["mean_min_distance"],
@@ -200,6 +204,7 @@ def _parse_args() -> NewtonPlanarReachTrainingCfg:
     parser.add_argument("--num-envs", type=int, default=128)
     parser.add_argument("--num-updates", type=int, default=600)
     parser.add_argument("--horizon", type=int, default=32)
+    parser.add_argument("--segment-length", type=int)
     args = parser.parse_args()
     return NewtonPlanarReachTrainingCfg(
         device=args.device,
@@ -208,6 +213,7 @@ def _parse_args() -> NewtonPlanarReachTrainingCfg:
         num_envs=args.num_envs,
         num_updates=args.num_updates,
         horizon=args.horizon,
+        segment_length=args.segment_length,
     )
 
 

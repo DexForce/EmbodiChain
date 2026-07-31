@@ -42,8 +42,12 @@ Standard PPO/GRPO rollout data flows as `TensorDict` objects (from the
   `rsample()`.
 - `APG` maximizes segmented discounted return with optional entropy, gradient
   clipping, and non-finite update protection.
-- `DifferentiableTrainer` runs collect → update → detach and stores policy,
-  optimizer, and counters in checkpoints.
+- `DifferentiableTrainer.segment_length` controls the TBPTT boundary, while
+  `update_horizon` independently controls environment steps per optimizer
+  update. Segment losses backpropagate immediately, state is detached after
+  each segment, and policy gradients accumulate until one update horizon is
+  complete.
+- Checkpoints store policy, optimizer, and trainer counters.
 
 The collector paths are intentionally separate:
 - PPO/GRPO use `SyncCollector` and `TensorDict`.

@@ -103,6 +103,58 @@ def test_trainer_updates_policy_and_detaches_each_segment() -> None:
     assert env.detach_calls == 2
 
 
+def test_update_horizon_keeps_optimizer_budget_fixed_across_segment_lengths() -> None:
+    short_env, short_policy, short_algorithm = _make_components()
+    short_trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            segment_length=2,
+            update_horizon=4,
+            deterministic_actions=True,
+        ),
+        short_env,
+        short_policy,
+        short_algorithm,
+    )
+    long_env, long_policy, long_algorithm = _make_components()
+    long_trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            segment_length=4,
+            update_horizon=4,
+            deterministic_actions=True,
+        ),
+        long_env,
+        long_policy,
+        long_algorithm,
+    )
+
+    short_summary = short_trainer.train(total_timesteps=8)
+    long_summary = long_trainer.train(total_timesteps=8)
+
+    assert short_summary["num_updates"] == long_summary["num_updates"] == 1
+    assert short_env.detach_calls == 2
+    assert long_env.detach_calls == 1
+    assert short_summary["last_train_metrics"]["train/objective"] == pytest.approx(
+        long_summary["last_train_metrics"]["train/objective"],
+        rel=1e-6,
+    )
+    assert torch.allclose(short_policy.actor.weight, long_policy.actor.weight)
+
+
+def test_update_horizon_must_be_divisible_by_segment_length() -> None:
+    env, policy, algorithm = _make_components()
+
+    with pytest.raises(ValueError, match="must be divisible"):
+        DifferentiableTrainer(
+            DifferentiableTrainerCfg(
+                segment_length=3,
+                update_horizon=4,
+            ),
+            env,
+            policy,
+            algorithm,
+        )
+
+
 def test_apg_training_converges_on_quadratic_action_objective() -> None:
     env, policy, algorithm = _make_components()
     trainer = DifferentiableTrainer(
