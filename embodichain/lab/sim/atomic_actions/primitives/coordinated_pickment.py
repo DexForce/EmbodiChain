@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -30,10 +31,56 @@ from ..core import (
     ActionResult,
     AtomicAction,
     CoordinatedHeldObjectState,
-    CoordinatedPickmentTarget,
     WorldState,
+    _validate_pose_tensor,
 )
+from ..targets import ObjectActionTarget
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class CoordinatedPickTarget(ObjectActionTarget):
+    """Object-centric target for picking and moving one object with two hands."""
+
+    object_target_pose: torch.Tensor
+    """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+
+    left_object_to_eef: torch.Tensor
+    """Transform from object frame to left end-effector frame."""
+
+    right_object_to_eef: torch.Tensor
+    """Transform from object frame to right end-effector frame."""
+
+    object_initial_pose: torch.Tensor | None = None
+    """Optional initial object pose. Defaults to ``semantics.entity`` pose."""
+
+    def __post_init__(self) -> None:
+        ObjectActionTarget.__post_init__(self)
+        _validate_pose_tensor(
+            self.object_target_pose,
+            "object_target_pose",
+            allow_waypoints=False,
+        )
+        _validate_pose_tensor(
+            self.left_object_to_eef,
+            "left_object_to_eef",
+            allow_waypoints=False,
+        )
+        _validate_pose_tensor(
+            self.right_object_to_eef,
+            "right_object_to_eef",
+            allow_waypoints=False,
+        )
+        if self.object_initial_pose is not None:
+            _validate_pose_tensor(
+                self.object_initial_pose,
+                "object_initial_pose",
+                allow_waypoints=False,
+            )
+
+
+# Backward-compatible spelling retained for the existing action class and users.
+CoordinatedPickmentTarget = CoordinatedPickTarget
 
 
 @configclass
@@ -384,10 +431,10 @@ class _DualArmHelpers:
         return poses
 
 
-class CoordinatedPickment(AtomicAction):
+class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
     """Pick and move a single object pinched by two hands."""
 
-    TargetType: ClassVar[type] = CoordinatedPickmentTarget
+    TargetType: ClassVar[type] = CoordinatedPickTarget
 
     _assemble_phase = _DualArmHelpers._assemble_phase
     _compose_dual_arm_trajectory = _DualArmHelpers._compose_dual_arm_trajectory
@@ -465,24 +512,24 @@ class CoordinatedPickment(AtomicAction):
                 )
 
     def _resolve_object_initial_pose(
-        self, target: CoordinatedPickmentTarget
+        self, target: CoordinatedPickTarget
     ) -> torch.Tensor:
         if target.object_initial_pose is not None:
             return self._resolve_pose(target.object_initial_pose, "object_initial_pose")
-        if target.object_semantics.entity is None:
+        if target.semantics.entity is None:
             logger.log_error(
-                "CoordinatedPickmentTarget requires object_initial_pose when "
-                "object_semantics.entity is not provided.",
+                "CoordinatedPickTarget requires object_initial_pose when "
+                "semantics.entity is not provided.",
                 ValueError,
             )
         return self._resolve_pose(
-            target.object_semantics.entity.get_local_pose(to_matrix=True),
+            target.semantics.entity.get_local_pose(to_matrix=True),
             "object_initial_pose",
         )
 
     def _resolve_target(
         self,
-        target: CoordinatedPickmentTarget,
+        target: CoordinatedPickTarget,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -508,7 +555,7 @@ class CoordinatedPickment(AtomicAction):
         left_target_xpos = torch.bmm(object_target_pose, left_object_to_eef)
         right_target_xpos = torch.bmm(object_target_pose, right_object_to_eef)
         held_state = CoordinatedHeldObjectState(
-            semantics=target.object_semantics,
+            semantics=target.semantics,
             left_object_to_eef=left_object_to_eef,
             right_object_to_eef=right_object_to_eef,
             left_grasp_xpos=left_grasp_xpos,
@@ -711,9 +758,7 @@ class CoordinatedPickment(AtomicAction):
             self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
         )
 
-    def execute(
-        self, target: CoordinatedPickmentTarget, state: WorldState
-    ) -> ActionResult:
+    def execute(self, target: CoordinatedPickTarget, state: WorldState) -> ActionResult:
         (
             object_initial_pose,
             object_target_pose,
@@ -867,15 +912,36 @@ class CoordinatedPickment(AtomicAction):
             left_grasp_xpos=left_target_xpos,
             right_grasp_xpos=right_target_xpos,
         )
+        involved_control_parts = {
+            self.cfg.left_arm_control_part,
+            self.cfg.right_arm_control_part,
+        }
+        held_objects = {
+            key: value
+            for key, value in state.held_objects.items()
+            if key not in involved_control_parts
+        }
+        coordinated_held_objects = dict(state.coordinated_held_objects)
+        coordinated_held_objects[
+            (
+                self.cfg.left_arm_control_part,
+                self.cfg.right_arm_control_part,
+            )
+        ] = coordinated_held_object
         return ActionResult(
             success=success_mask,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=None,
-                coordinated_held_object=coordinated_held_object,
+                held_objects=held_objects,
+                coordinated_held_objects=coordinated_held_objects,
             ),
         )
 
 
-__all__ = ["CoordinatedPickment", "CoordinatedPickmentCfg"]
+__all__ = [
+    "CoordinatedPickTarget",
+    "CoordinatedPickment",
+    "CoordinatedPickmentCfg",
+    "CoordinatedPickmentTarget",
+]

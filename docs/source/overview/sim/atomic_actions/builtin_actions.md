@@ -17,9 +17,9 @@ The built-in atomic actions currently support gripper-based manipulation only. D
 | `MoveJoints` | Single | `JointPositionTarget` or `NamedJointPositionTarget` — qpos | Interpolate control-part joints | <img src="../../../_static/atomic_actions/move_joints.gif" alt="MoveJoints" width="480" style="max-width: 100%;" /> |
 | `PickUp` | Single | `GraspTarget` — object semantics | Approach → close gripper → lift | <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp" width="480" style="max-width: 100%;" /> |
 | `MoveHeldObject` | Single | `HeldObjectPoseTarget` — held-object pose | Move held object while keeping gripper closed | <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject" width="480" style="max-width: 100%;" /> |
-| `Place` | Single | `EndEffectorPoseTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
-| `Press` | Single | `EndEffectorPoseTarget` — EEF press pose | Close gripper → press down → return | <img src="../../../_static/atomic_actions/press.gif" alt="Press" width="480" style="max-width: 100%;" /> |
-| `CoordinatedPickment` | Dual | `CoordinatedPickmentTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | <img src="../../../_static/atomic_actions/coordinated_pickment.gif" alt="CoordinatedPickment" width="480" style="max-width: 100%;" /> |
+| `Place` | Single | `PlaceTarget` — EEF release pose | Lower → open gripper → retract | <img src="../../../_static/atomic_actions/place.gif" alt="Place" width="480" style="max-width: 100%;" /> |
+| `Press` | Single | `PressTarget` — EEF contact pose | Close gripper → press down → return | <img src="../../../_static/atomic_actions/press.gif" alt="Press" width="480" style="max-width: 100%;" /> |
+| `CoordinatedPickment` | Dual | `CoordinatedPickTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | <img src="../../../_static/atomic_actions/coordinated_pickment.gif" alt="CoordinatedPickment" width="480" style="max-width: 100%;" /> |
 | `CoordinatedPlacement` | Dual | `CoordinatedPlacementTarget` — two held-object poses | Move support object → align placing object → release placing hand → retreat | <img src="../../../_static/atomic_actions/coordinated_placement.gif" alt="CoordinatedPlacement" width="480" style="max-width: 100%;" /> |
 
 ---
@@ -78,7 +78,9 @@ Three-phase grasp motion: *approach → close gripper → lift*.
 **Target:** `GraspTarget(semantics=...)` — an `ObjectSemantics` whose `affordance` is an
 `AntipodalAffordance`. The grasp pose is solved from the affordance and the entity's live
 pose at execute time. On success, the returned `WorldState` carries a populated
-`held_object` (`HeldObjectState`).
+`held_objects[control_part]` (`HeldObjectState`).
+`GraspTarget` inherits the shared `ObjectActionTarget(semantics)` contract and
+adds only its optional single-arm `grasp_xpos` override.
 
 ![PickUp demo](../../../_static/atomic_actions/pickup.gif)
 
@@ -87,7 +89,8 @@ pose at execute time. On success, the returned `WorldState` carries a populated
 ## `MoveHeldObject`
 
 Moves a held object to an object-centric target pose while preserving the grasp. It requires
-the `HeldObjectState` populated by a prior `PickUp` (read from `WorldState.held_object`)
+the `HeldObjectState` populated by a prior `PickUp` (read from
+`WorldState.held_objects[control_part]`)
 and preserves it in its successor state.
 
 `HeldObjectState` and `HeldObjectPoseTarget` are intentionally kept separate from
@@ -114,7 +117,8 @@ Three-phase release motion: *lower → open gripper → retract*. Mirrors `PickU
 
 `PlaceCfg` carries its own gripper fields directly (it inherits `ActionCfg`, not a
 shared grasp-cfg base). The `approach_direction` field is not used — the arm moves straight
-down to the target pose. On success, the returned `WorldState` clears `held_object` to `None`.
+down to the target pose. On success, the returned `WorldState` removes the
+entry for `PlaceCfg.control_part` from `held_objects`.
 
 | Config field | Default | Description |
 |---|---|---|
@@ -125,7 +129,7 @@ down to the target pose. On success, the returned `WorldState` clears `held_obje
 | `hand_interp_steps` | `5` | Waypoints for the gripper open phase |
 | `sample_interval` | `80` | Total waypoints across all three phases |
 
-**Target:** `EndEffectorPoseTarget(xpos=..., tcp_symmetry="none")` — the EEF pose at
+**Target:** `PlaceTarget(xpos=..., tcp_symmetry="none")` — the EEF pose at
 release, a `torch.Tensor` of shape `(4, 4)`, `(n_envs, 4, 4)` or
 `(n_envs, n_waypoint, 4, 4)`. Keep the default
 `tcp_symmetry="none"` when the TCP orientation is strict. Use
@@ -143,7 +147,7 @@ Three-phase contact motion: *close gripper → press down → return*. This is u
 for button-like or contact-based interactions where the end-effector should reach a
 target pose and then return to the pre-press arm pose.
 
-`Press` does not create or clear `WorldState.held_object`; it preserves the state
+`Press` does not create or clear `WorldState.held_objects`; it preserves the state
 threaded into it.
 
 | Config field | Default | Description |
@@ -153,7 +157,7 @@ threaded into it.
 | `hand_interp_steps` | `5` | Waypoints for the gripper close phase |
 | `sample_interval` | `80` | Total waypoints across all three phases |
 
-**Target:** `EndEffectorPoseTarget(xpos=...)` — the EEF pose to press, a `torch.Tensor`
+**Target:** `PressTarget(xpos=...)` — the EEF pose to press, a `torch.Tensor`
 of shape `(4, 4)` or `(n_envs, 4, 4)`.
 
 ![Press demo](../../../_static/atomic_actions/press.gif)
@@ -165,8 +169,8 @@ of shape `(4, 4)` or `(n_envs, 4, 4)`.
 Dual-arm grasp motion for one shared object. Both arms move to object-relative
 grasp poses, close both grippers, lift the object, and move it to an object pose
 while keeping both grippers closed. On success, the returned `WorldState` carries
-`coordinated_held_object` (`CoordinatedHeldObjectState`) and leaves
-`held_object` as `None`.
+an entry in `coordinated_held_objects[(left_arm, right_arm)]`
+(`CoordinatedHeldObjectState`) and removes individual held entries for those arms.
 
 | Config field | Default | Description |
 |---|---|---|
@@ -178,8 +182,12 @@ while keeping both grippers closed. On success, the returned `WorldState` carrie
 | `object_motion_keyframes` | `6` | Sparse object-pose IK keyframes for synchronized motion |
 | `sample_interval` | `120` | Total waypoints across all phases |
 
-**Target:** `CoordinatedPickmentTarget(...)` with a target object pose, object
+**Target:** `CoordinatedPickTarget(...)` with a target object pose, object
 semantics, and left/right object-to-EEF transforms.
+It inherits the same `ObjectActionTarget(semantics)` base as `GraspTarget`, but
+keeps the dual-arm pose fields in its own action-specific contract.
+
+`CoordinatedPickmentTarget` remains a compatibility alias.
 
 **Tutorial:** `scripts/tutorials/atomic_action/coordinated_pickment.py`
 
@@ -193,10 +201,10 @@ Dual-arm object-centric placement. The support arm moves its held object to a lo
 target pose and keeps its gripper closed. The placing arm moves its held object to
 the aligned upper target pose, optionally opens the placing hand, then lifts away.
 
-`CoordinatedPlacement` is intentionally explicit about dual-arm state: the target
-contains both `placing_held_object` and `support_held_object`. This avoids relying
-on the engine's single `WorldState.held_object` slot to infer two simultaneously
-held objects.
+`CoordinatedPlacement` reads both held objects from
+`WorldState.held_objects`, keyed by `placing_arm_control_part` and
+`support_arm_control_part`. The target contains desired poses and per-call
+overrides only.
 
 | Config field | Default | Description |
 |---|---|---|
@@ -218,8 +226,9 @@ held objects.
 | `sample_interval` | `100` | Total waypoints across all phases |
 
 **Target:** `CoordinatedPlacementTarget(...)` with placing/support object target
-poses plus the corresponding `HeldObjectState` values. On success, the returned
-`WorldState.held_object` is the support object's held state.
+poses and optional height/release overrides. On success, the support arm's
+entry remains in `WorldState.held_objects`; the placing arm's entry is removed
+when `release=True`.
 
 **Tutorial:** `scripts/tutorials/atomic_action/coordinated_placement.py`
 

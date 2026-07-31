@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -27,13 +28,25 @@ from embodichain.utils import configclass, logger
 
 from ._helpers import arm_qpos_from_state
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    EndEffectorPoseTarget,
     WorldState,
+    _validate_pose_tensor,
 )
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PressTarget(ActionTarget):
+    """Single end-effector contact pose used by :class:`Press`."""
+
+    xpos: torch.Tensor
+    """Contact pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+
+    def __post_init__(self) -> None:
+        _validate_pose_tensor(self.xpos, "xpos", allow_waypoints=False)
 
 
 @configclass
@@ -54,10 +67,10 @@ class PressCfg(ActionCfg):
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
 
 
-class Press(AtomicAction):
+class Press(AtomicAction[PressTarget]):
     """Close the gripper, press down to a target pose, then return."""
 
-    TargetType: ClassVar[type] = EndEffectorPoseTarget
+    TargetType: ClassVar[type] = PressTarget
 
     def __init__(
         self,
@@ -83,7 +96,7 @@ class Press(AtomicAction):
             hand_dof=self.hand_dof,
         )
 
-    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+    def execute(self, target: PressTarget, state: WorldState) -> ActionResult:
         press_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
         start_arm_qpos = self.builder.resolve_start_qpos(
             arm_qpos_from_state(state, self.arm_joint_ids),
@@ -149,10 +162,8 @@ class Press(AtomicAction):
         return ActionResult(
             success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -186,4 +197,4 @@ class Press(AtomicAction):
         )
 
 
-__all__ = ["Press", "PressCfg"]
+__all__ = ["Press", "PressCfg", "PressTarget"]

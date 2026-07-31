@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Collectors that step vectorized environments and assemble rollout data into a preallocated ``TensorDict`` layout."""
+
 from .base import BaseCollector
 from .differentiable import (
     DifferentiableCollector,

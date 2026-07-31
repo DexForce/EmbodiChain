@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from dataclasses import dataclass
+from typing import ClassVar, Literal
 
 import torch
 
@@ -28,13 +29,44 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from ._helpers import arm_qpos_from_state
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    EndEffectorPoseTarget,
     WorldState,
+    _validate_pose_tensor,
 )
 from ..trajectory import TrajectoryBuilder
+
+TcpSymmetry = Literal["none", "z_roll_180"]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PlaceTarget(ActionTarget):
+    """End-effector release-pose target used by :class:`Place`."""
+
+    xpos: torch.Tensor
+    """Target end-effector release pose.
+
+    Accepts ``(4, 4)``, ``(n_envs, 4, 4)``, or
+    ``(n_envs, n_waypoint, 4, 4)``.
+    """
+
+    tcp_symmetry: TcpSymmetry = "none"
+    """Optional TCP-frame symmetry allowed by the placement semantics.
+
+    ``"none"`` preserves the pose exactly. ``"z_roll_180"`` lets placement
+    choose between the pose and its TCP z-roll 180 equivalent, which flips TCP
+    x/y while preserving TCP z and translation.
+    """
+
+    def __post_init__(self) -> None:
+        _validate_pose_tensor(self.xpos, "xpos", allow_waypoints=True)
+        if self.tcp_symmetry not in ("none", "z_roll_180"):
+            raise ValueError(
+                "tcp_symmetry must be one of 'none' or 'z_roll_180', "
+                f"but got {self.tcp_symmetry!r}"
+            )
 
 
 @configclass
@@ -67,10 +99,10 @@ class PlaceCfg(ActionCfg):
     """Number of fixed-orientation Cartesian keyframes per translation segment."""
 
 
-class Place(AtomicAction):
+class Place(AtomicAction[PlaceTarget]):
     """Lower the held object to a place pose, open the gripper, retract.
 
-    The :class:`EndEffectorPoseTarget` may carry either a single waypoint
+    The :class:`PlaceTarget` may carry either a single waypoint
     ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
     trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
     down phase visits every waypoint in order; approaching from above the
@@ -79,7 +111,7 @@ class Place(AtomicAction):
     joint positions are inherited from ``WorldState.last_qpos``.
     """
 
-    TargetType: ClassVar[type] = EndEffectorPoseTarget
+    TargetType: ClassVar[type] = PlaceTarget
 
     def __init__(
         self,
@@ -105,7 +137,7 @@ class Place(AtomicAction):
         if self.cfg.cartesian_waypoint_count < 1:
             logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
 
-    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+    def execute(self, target: PlaceTarget, state: WorldState) -> ActionResult:
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
@@ -200,13 +232,20 @@ class Place(AtomicAction):
         full[:, n_down_actual + n_open :, self.arm_joint_ids] = back_arm
         full[:, n_down_actual + n_open :, self.hand_joint_ids] = self.hand_open_qpos
 
+        held_objects = dict(state.held_objects)
+        held_objects.pop(self.cfg.control_part, None)
+        coordinated_held_objects = {
+            key: value
+            for key, value in state.coordinated_held_objects.items()
+            if self.cfg.control_part not in key
+        }
         return ActionResult(
             success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=None,
-                coordinated_held_object=state.coordinated_held_object,
+                held_objects=held_objects,
+                coordinated_held_objects=coordinated_held_objects,
             ),
         )
 
@@ -296,4 +335,4 @@ class Place(AtomicAction):
         ]
 
 
-__all__ = ["Place", "PlaceCfg"]
+__all__ = ["Place", "PlaceCfg", "PlaceTarget"]

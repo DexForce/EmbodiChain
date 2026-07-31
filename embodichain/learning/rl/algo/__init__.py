@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Algorithm registry and construction helpers (``BaseAlgorithm``, ``PPO``, ``GRPO``, ``compute_gae``, ``build_algo``)."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Tuple, Type

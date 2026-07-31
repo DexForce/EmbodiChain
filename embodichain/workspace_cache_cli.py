@@ -59,7 +59,7 @@ Examples:
     )
     args = parser.parse_args(argv)
 
-    from embodichain.lab.sim.utility.workspace_analyzer.caches.cache_utils import (
+    from embodichain.lab.sim.workspace.caches.cache_utils import (
         clean_all_sessions,
         clean_session,
         list_sessions,
