@@ -47,6 +47,7 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+from .workspace.cfg import RobotWorkspaceCfg
 
 # Global default renderer settings for simulation.
 #
@@ -139,20 +140,8 @@ class PhysicsCfg:
     bounce_threshold: float = 2.0
     """The speed threshold below which collisions will not produce bounce effects."""
 
-    enable_pcm: bool = True
-    """Enable persistent contact manifold (PCM) for improved collision handling."""
-
-    enable_tgs: bool = True
-    """Enable temporal gauss-seidel (TGS) solver for better stability."""
-
     enable_ccd: bool = False
     """Enable continuous collision detection (CCD) for fast-moving objects."""
-
-    enable_enhanced_determinism: bool = False
-    """Enable enhanced determinism for consistent simulation results."""
-
-    enable_friction_every_iteration: bool = True
-    """Enable friction calculations at every solver iteration."""
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
@@ -166,15 +155,19 @@ class PhysicsCfg:
     """
 
     def to_dexsim_args(self) -> Dict[str, Any]:
-        """Convert to dexsim physics args dictionary."""
+        """Convert to DexSim physics arguments.
+
+        Solver implementation details that are not exposed by :class:`PhysicsCfg`
+        retain their established defaults here.
+        """
         args = {
             "gravity": self.gravity.tolist(),
             "bounce_threshold": self.bounce_threshold,
-            "enable_pcm": self.enable_pcm,
-            "enable_tgs": self.enable_tgs,
+            "enable_pcm": True,
+            "enable_tgs": True,
             "enable_ccd": self.enable_ccd,
-            "enable_enhanced_determinism": self.enable_enhanced_determinism,
-            "enable_friction_every_iteration": self.enable_friction_every_iteration,
+            "enable_enhanced_determinism": False,
+            "enable_friction_every_iteration": True,
         }
         return args
 
@@ -1752,6 +1745,9 @@ class RobotCfg(ArticulationCfg):
     """Solver is used to compute forward and inverse kinematics for the robot.
     """
 
+    workspace_cfg: Dict[str, RobotWorkspaceCfg] | None = None
+    """Runtime workspace cache configuration keyed by control-part name."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
@@ -1772,6 +1768,19 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "workspace_cfg" and isinstance(value, dict):
+                    setattr(
+                        cfg,
+                        key,
+                        {
+                            part: (
+                                part_cfg
+                                if isinstance(part_cfg, RobotWorkspaceCfg)
+                                else RobotWorkspaceCfg(**part_cfg)
+                            )
+                            for part, part_cfg in value.items()
+                        },
+                    )
                 elif key == "fpath":
                     setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):

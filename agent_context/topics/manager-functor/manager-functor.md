@@ -183,6 +183,17 @@ class compute_exteroception(Functor):
 1. `EventManager.apply("reset", env_ids)` — domain randomization etc.
 2. All managers' `.reset(env_ids)` — resets class-style functors via `functor.reset(env_ids)`.
 
+### Per-functor profiling
+
+Event and observation functors are timed individually and automatically:
+`EventManager.apply` / `ObservationManager.compute` invoke each functor through
+`ManagerBase._call_functor(name, cfg, *args)`, which opens an
+`env._profiler.section(name)` around `cfg.func(*args, **cfg.params)`. The
+section name is the functor's config attribute name and nests under the active
+call site (e.g. `step.update_sim_state.event_interval.record_camera`). No-op
+when env profiling is disabled. See the `env-framework` topic's *Profiling*
+section. Reward/action/dataset functors are not yet wired through the helper.
+
 ---
 
 ## Adding New Functors

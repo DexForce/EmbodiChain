@@ -19,6 +19,8 @@ This script demonstrates the creation and simulation of a robot with a soft obje
 and performs a pressing task in a simulated environment.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
@@ -27,6 +29,7 @@ import torch
 from dexsim.utility.path import get_resources_data_path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, SoftObject
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.lab.sim.shapes import MeshCfg
@@ -74,6 +77,7 @@ def initialize_simulation(args):
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -185,7 +189,8 @@ def main():
     robot = create_robot(sim)
     soft_cow = create_soft_cow(sim)
     sim.init_gpu_physics()
-    sim.open_window()
+    if not args.headless:
+        sim.open_window()
 
     press_cow(sim, robot)
 

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 from typing import List, Dict, Any
@@ -184,6 +186,7 @@ if __name__ == "__main__":
 
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+    from embodichain.lab.visualization import visualization_cfg_from_args
 
     parser = argparse.ArgumentParser()
     add_env_launcher_args_to_parser(parser)
@@ -194,6 +197,7 @@ if __name__ == "__main__":
             render_cfg=RenderCfg(renderer=args.renderer),
             headless=args.headless,
             sim_device=args.device,
+            visualization=visualization_cfg_from_args(args),
         ),
         num_envs=args.num_envs,
     )

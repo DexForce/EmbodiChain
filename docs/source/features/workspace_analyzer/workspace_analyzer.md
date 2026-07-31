@@ -2,6 +2,10 @@
 
 The Workspace Analyzer is a comprehensive tool in EmbodiChain for analyzing robot workspace characteristics, reachability, and performance metrics. It provides multiple analysis modes with advanced sampling strategies, caching mechanisms, and visualization capabilities.
 
+The analyzer and runtime sampling APIs are unified under
+`embodichain.lab.sim.workspace`. See [Runtime Workspace Sampling](runtime.md)
+for using cached results in task environments.
+
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
@@ -17,7 +21,7 @@ import torch
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
-from embodichain.lab.sim.utility.workspace_analyzer import (
+from embodichain.lab.sim.workspace import (
     WorkspaceAnalyzer,
     WorkspaceAnalyzerConfig,
     AnalysisMode
@@ -118,7 +122,7 @@ print(f"Reachable points: {results['num_reachable']}/{results['num_samples']}")
 ### Basic Configuration
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import VisualizationConfig
+from embodichain.lab.sim.workspace.configs import VisualizationConfig
 
 # Basic configuration with defaults
 config = WorkspaceAnalyzerConfig(
@@ -160,10 +164,10 @@ import torch
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
-from embodichain.lab.sim.utility.workspace_analyzer import (
+from embodichain.lab.sim.workspace import (
     WorkspaceAnalyzer, WorkspaceAnalyzerConfig, AnalysisMode
 )
-from embodichain.lab.sim.utility.workspace_analyzer.configs import VisualizationConfig
+from embodichain.lab.sim.workspace.configs import VisualizationConfig
 
 # Setup simulation
 sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))

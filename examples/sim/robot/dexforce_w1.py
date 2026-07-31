@@ -19,16 +19,24 @@ This script shows how to customize the end-effectors of the DexForce W1 robot by
 adding a pair of parallel grippers as the left and right hands.
 """
 
+from __future__ import annotations
+
+import argparse
 import numpy as np
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
-def main():
+def main(visualization: VisualizationCfg | None = None) -> None:
     np.set_printoptions(precision=5, suppress=True)
 
-    config = SimulationManagerCfg()
+    config = SimulationManagerCfg(visualization=visualization or VisualizationCfg())
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict(
@@ -71,4 +79,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
+    main(visualization=visualization_cfg_from_args(parser.parse_args()))
