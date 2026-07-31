@@ -52,7 +52,7 @@ This method allows fast setup using a dictionary, suitable for simple scenarios 
 **Parameters:**
 
 - `uid`: Unique robot identifier (string).
-- `version`: Robot version, e.g., `v021` or `v025`.
+- `version`: Robot version, e.g., `v021`, `v022`, or `v025`.
 
 ```python
 from embodichain.lab.sim.robots import DexforceW1Cfg
@@ -92,15 +92,15 @@ Choose `build_dexforce_w1_cfg` for maximum flexibility and hardware customizatio
 | Type                    | Options / Values                                      | Description                        |
 |-------------------------|-------------------------------------------------------|------------------------------------|
 | `DexforceW1HandBrand`   | `BRAINCO_HAND`, `DH_PGC_GRIPPER`, `DH_PGC_GRIPPER_M`  | Hand brand                         |
-| `DexforceW1Version`     | `V021`, `V025`                                        | Release version                    |
+| `DexforceW1Version`     | `V021`, `V022`, `V025`                                | Release version                    |
 | `DexforceW1ArmSide`     | `LEFT`, `RIGHT`                                       | Left/right hand identifier         |
 
-## V025 asset layout and version extension
+## Unified asset layout and version extension
 
-V025 uses one unified Hugging Face archive:
+V022 and V025 use one unified Hugging Face archive per release:
 
 ```text
-dexforce_w1/v025/w1.zip
+dexforce_w1/<version>/w1.zip
 └── w1/
     ├── robot.urdf
     ├── chassis.urdf
@@ -112,10 +112,10 @@ dexforce_w1/v025/w1.zip
     └── collision/
 ```
 
-The runtime downloads this archive once. Direct FK/IK uses `robot.urdf` or the
-arm URDFs, while configurable robot assembly reads all components from the same
-extracted directory. The V025 head already contains the `eyes` link and joint,
-so the assembly builder does not inject a duplicate eyes sensor.
+The runtime downloads each release archive once. Direct FK/IK uses `robot.urdf`
+or the arm URDFs, while configurable robot assembly reads all components from
+the same extracted directory. V022 and V025 assets are resolved through the
+registered Hugging Face dataset archives and the shared asset cache.
 
 ### Version-owned end-effector offset
 
@@ -130,6 +130,7 @@ revision offset:
 | Version | Left arm | Right arm |
 |---------|----------|-----------|
 | V021 | Identity | Identity |
+| V022 | Identity (provisional; calibration required) | Identity (provisional; calibration required) |
 | V025 | `+0.012 m` along the `ee` frame Z axis | `+0.012 m` along the `ee` frame Z axis |
 
 The final assembly transform and solver TCP are derived as follows:

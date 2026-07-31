@@ -28,6 +28,7 @@ class DexforceW1Version(enum.Enum):
     """Versioning for DexforceW1 components."""
 
     V021 = "v021"
+    V022 = "v022"
     V025 = "v025"
 
 

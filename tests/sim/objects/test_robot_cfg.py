@@ -25,6 +25,7 @@ from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
+    DexforceW1Type,
     DexforceW1Version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
@@ -82,6 +83,65 @@ def test_w1_v025_eef_offset_composes_with_custom_attach():
 
     np.testing.assert_allclose(result[:3, 3], [0.01, -0.02, 0.042])
     np.testing.assert_allclose(result[:3, :3], np.eye(3))
+
+
+def test_w1_v022_version_spec_is_registered():
+    spec = get_w1_version_spec("v022")
+
+    assert spec.version == DexforceW1Version.V022
+    assert spec.assembly_name == "DexforceW1V022"
+    assert spec.full_robot_urdf() == "DexforceW1V022/w1/robot.urdf"
+    assert (
+        spec.component_urdf(DexforceW1Type.LEFT_ARM)
+        == "DexforceW1V022/w1/left_arm.urdf"
+    )
+    assert (
+        spec.component_urdf(DexforceW1Type.RIGHT_ARM)
+        == "DexforceW1V022/w1/right_arm.urdf"
+    )
+
+
+def test_w1_v022_provisional_eef_baseline_is_composed_consistently():
+    v021 = get_w1_version_spec(DexforceW1Version.V021)
+    v022 = get_w1_version_spec(DexforceW1Version.V022)
+
+    for arm_side in DexforceW1ArmSide:
+        np.testing.assert_allclose(v022.eef_attach_xpos(arm_side), np.eye(4))
+        np.testing.assert_allclose(v022.tcp(arm_side), v021.tcp(arm_side))
+        np.testing.assert_allclose(
+            v022.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
+            v021.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
+        )
+
+
+def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
+    import embodichain.lab.sim.cfg as sim_cfg
+    from embodichain.lab.sim.robots.dexforce_w1 import utils as w1_utils
+
+    registered_paths = []
+
+    def resolve_registered_path(path):
+        registered_paths.append(path)
+        resolved = tmp_path / path
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text("<robot name='w1' />")
+        return str(resolved)
+
+    monkeypatch.setattr(w1_utils, "get_data_path", resolve_registered_path)
+    monkeypatch.setattr(sim_cfg, "get_data_path", resolve_registered_path)
+    cfg = DexforceW1Cfg.from_dict(
+        {
+            "uid": "dexforce_w1_v022",
+            "version": "v022",
+            "with_default_eef": False,
+        }
+    )
+
+    assert cfg.version == DexforceW1Version.V022
+    assert cfg.uid == "dexforce_w1_v022"
+    assert cfg.urdf_cfg.fname == "DexforceW1V022"
+    assert "DexforceW1V022/w1/left_arm.urdf" in registered_paths
+    assert "DexforceW1V022/w1/right_arm.urdf" in registered_paths
 
 
 class _RoundTripVariant(enum.Enum):

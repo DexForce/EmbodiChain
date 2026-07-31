@@ -18,9 +18,7 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -72,7 +70,6 @@ class W1VersionSpec:
     wrist_camera_rpy: tuple[float, float, float]
     wrist_camera_xyz: tuple[float, float, float]
     head_contains_eyes: bool = False
-    local_asset_root_env: str | None = None
 
     @property
     def assembly_name(self) -> str:
@@ -80,40 +77,15 @@ class W1VersionSpec:
 
     def component_urdf(self, component_type: DexforceW1Type) -> str:
         try:
-            urdf_path = self.component_urdfs[component_type]
+            return self.component_urdfs[component_type]
         except KeyError as exc:
             raise ValueError(
                 f"W1 {self.version.value} has no registered "
                 f"{component_type.value} component asset."
             ) from exc
-        return self._resolve_local_urdf(urdf_path)
 
     def full_robot_urdf(self) -> str:
-        return self._resolve_local_urdf(self.full_robot_urdf_path)
-
-    def _resolve_local_urdf(self, registered_path: str) -> str:
-        """Resolve a version-specific local asset override when configured."""
-        if not self.local_asset_root_env:
-            return registered_path
-        local_root_value = os.getenv(self.local_asset_root_env)
-        if not local_root_value:
-            return registered_path
-
-        local_root = Path(local_root_value).expanduser()
-        relative_path = registered_path.split("/w1/", maxsplit=1)[-1]
-        candidates = [
-            local_root / relative_path,
-            local_root / "w1" / relative_path,
-        ]
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate.resolve())
-
-        expected = " or ".join(str(candidate) for candidate in candidates)
-        raise FileNotFoundError(
-            f"{self.local_asset_root_env} is set to '{local_root}', but "
-            f"'{registered_path}' was not found. Expected {expected}."
-        )
+        return self.full_robot_urdf_path
 
     def eef_attach_xpos(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
         """Return the version-owned transform applied before every EEF."""
@@ -181,6 +153,13 @@ _V021_COMPONENT_URDFS = {
     DexforceW1Type.LEFT_ARM: "DexforceW1LeftArmV021/left_arm.urdf",
     DexforceW1Type.RIGHT_ARM: "DexforceW1RightArmV021/right_arm.urdf",
 }
+_V022_COMPONENT_URDFS = {
+    DexforceW1Type.CHASSIS: "DexforceW1V022/w1/chassis.urdf",
+    DexforceW1Type.TORSO: "DexforceW1V022/w1/torso.urdf",
+    DexforceW1Type.HEAD: "DexforceW1V022/w1/head.urdf",
+    DexforceW1Type.LEFT_ARM: "DexforceW1V022/w1/left_arm.urdf",
+    DexforceW1Type.RIGHT_ARM: "DexforceW1V022/w1/right_arm.urdf",
+}
 _V025_COMPONENT_URDFS = {
     DexforceW1Type.CHASSIS: "DexforceW1V025/w1/chassis.urdf",
     DexforceW1Type.TORSO: "DexforceW1V025/w1/torso.urdf",
@@ -188,6 +167,7 @@ _V025_COMPONENT_URDFS = {
     DexforceW1Type.LEFT_ARM: "DexforceW1V025/w1/left_arm.urdf",
     DexforceW1Type.RIGHT_ARM: "DexforceW1V025/w1/right_arm.urdf",
 }
+# Verified against the released V022 and V025 left/right arm URDF joint origins.
 _SHARED_D_LIST = (0.0, 0.0, 0.260, 0.0, 0.166, 0.098, 0.0)
 _EYES_ATTACH_XPOS = (
     (-0.0, 0.25959, -0.96572, 0.091),
@@ -204,6 +184,12 @@ _IDENTITY_XPOS = (
     (0.0, 0.0, 0.0, 1.0),
 )
 _V021_DEFAULT_EEF_ATTACH_XPOS = {
+    DexforceW1ArmSide.LEFT: _IDENTITY_XPOS,
+    DexforceW1ArmSide.RIGHT: _IDENTITY_XPOS,
+}
+# Provisional V022 baseline. Replace this with the measured arm-flange
+# transform before declaring the release calibrated.
+_V022_DEFAULT_EEF_ATTACH_XPOS = {
     DexforceW1ArmSide.LEFT: _IDENTITY_XPOS,
     DexforceW1ArmSide.RIGHT: _IDENTITY_XPOS,
 }
@@ -232,6 +218,21 @@ _W1_VERSION_SPECS = {
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
         wrist_camera_xyz=_WRIST_CAMERA_XYZ,
     ),
+    DexforceW1Version.V022: W1VersionSpec(
+        version=DexforceW1Version.V022,
+        component_urdfs=_V022_COMPONENT_URDFS,
+        full_robot_urdf_path="DexforceW1V022/w1/robot.urdf",
+        # Verified from the V022 left/right arm URDF joint origins.
+        arm_d_list=_SHARED_D_LIST,
+        arm_base_z=0.1025,
+        default_eef_attach_xpos=_V022_DEFAULT_EEF_ATTACH_XPOS,
+        solver_tcp=_DEFAULT_TCP,
+        eyes_attach_xpos=_EYES_ATTACH_XPOS,
+        wrist_camera_rpy=_WRIST_CAMERA_RPY,
+        wrist_camera_xyz=_WRIST_CAMERA_XYZ,
+        # Verified from V022 head.urdf: it contains the eyes link and EYES joint.
+        head_contains_eyes=True,
+    ),
     DexforceW1Version.V025: W1VersionSpec(
         version=DexforceW1Version.V025,
         component_urdfs=_V025_COMPONENT_URDFS,
@@ -245,7 +246,6 @@ _W1_VERSION_SPECS = {
         wrist_camera_rpy=_WRIST_CAMERA_RPY,
         wrist_camera_xyz=_WRIST_CAMERA_XYZ,
         head_contains_eyes=True,
-        local_asset_root_env="EMBODICHAIN_W1_V025_ROOT",
     ),
 }
 
