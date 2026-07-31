@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,13 @@ import requests
 _DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
 )
+_ENVIRONMENT_OVERRIDES = {
+    "base_url": "SCENE_ENGINE_IMAGE_SEGMENTATION_BASE_URL",
+    "timeout_s": "SCENE_ENGINE_IMAGE_SEGMENTATION_TIMEOUT_S",
+    "max_attempts": "SCENE_ENGINE_IMAGE_SEGMENTATION_MAX_ATTEMPTS",
+    "health_path": "SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH",
+    "segment_single_object_path": "SCENE_ENGINE_IMAGE_SEGMENTATION_PATH",
+}
 
 
 class ImageSegmentationClient:
@@ -150,6 +158,8 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     config = config_data.get("image_segmentation")
     if not isinstance(config, dict):
         raise ValueError("Config key image_segmentation must be an object.")
+    config = dict(config)
+    _apply_environment_overrides(config)
 
     required_keys = (
         "base_url",
@@ -198,6 +208,14 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         "health_path": config["health_path"].strip(),
         "segment_single_object_path": config["segment_single_object_path"].strip(),
     }
+
+
+def _apply_environment_overrides(config: dict[str, Any]) -> None:
+    """Apply optional deployment-specific service settings from the environment."""
+    for config_key, environment_name in _ENVIRONMENT_OVERRIDES.items():
+        value = os.getenv(environment_name)
+        if value is not None:
+            config[config_key] = value
 
 
 def _extract_rle_masks(response_data: dict[str, Any]) -> list[dict[str, Any]]:

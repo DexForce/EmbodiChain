@@ -93,3 +93,19 @@ def test_segment_single_object_rejects_empty_prompt(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="prompt"):
         client.segment_single_object(image_path=image_path, prompt="   ")
+
+
+def test_image_segmentation_environment_overrides_package_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "SCENE_ENGINE_IMAGE_SEGMENTATION_BASE_URL",
+        "http://segmentation.test",
+    )
+    monkeypatch.setenv("SCENE_ENGINE_IMAGE_SEGMENTATION_PATH", "/segment")
+
+    client = ImageSegmentationClient.from_config()
+
+    assert client._base_url == "http://segmentation.test"
+    assert client._segment_single_object_path == "/segment"
+    client.close()

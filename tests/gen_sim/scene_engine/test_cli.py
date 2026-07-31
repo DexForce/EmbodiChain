@@ -63,6 +63,28 @@ def test_cli_scene_engine_rejects_non_image_input(tmp_path: Path) -> None:
         start.cli_scene_engine(text_path, tmp_path / "output")
 
 
+def test_cli_scene_engine_uses_package_template_without_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    image_path.write_bytes(b"png")
+    received: dict[str, object] = {}
+
+    def fake_generate_scene_from_image(**kwargs: object) -> None:
+        received.update(kwargs)
+
+    monkeypatch.setattr(
+        start, "generate_scene_from_image", fake_generate_scene_from_image
+    )
+
+    start.cli_scene_engine(image_path, tmp_path / "output")
+
+    assert received["llm_config_path"] is None
+    assert received["image_segmentation_config_path"] is None
+    assert received["geometry_generation_config_path"] is None
+
+
 def test_main_forwards_parsed_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     received: dict[str, object] = {}
 

@@ -130,3 +130,19 @@ def test_parse_objects_response_rejects_mismatched_object_name() -> None:
 
     with pytest.raises(RuntimeError, match="does not match"):
         _parse_objects_response(payload, object_ids=["table"])
+
+
+def test_geometry_generation_environment_overrides_package_template(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL",
+        "http://geometry.test",
+    )
+    monkeypatch.setenv("SCENE_ENGINE_GEOMETRY_GENERATION_PATH", "/generate")
+
+    client = GeometryGenerationClient.from_config()
+
+    assert client._base_url == "http://geometry.test"
+    assert client._generate_objects_path == "/generate"
+    client.close()

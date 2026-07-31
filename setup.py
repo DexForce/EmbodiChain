@@ -120,6 +120,9 @@ def main():
         author="EmbodiChain Developers",
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
         packages=find_packages(exclude=["docs"]),
+        package_data={
+            "embodichain.gen_sim.scene_engine.configs": ["*.json"],
+        },
         data_files=data_files,
         cmdclass=cmdclass,
         include_package_data=True,

@@ -61,8 +61,9 @@ The generated output contains the canonical source mesh under ``asset_source/``,
 
 ## Scene Engine
 
-Generate a table-top scene from one image. The command requires a Scene Engine
-JSON config for the VLM, image-segmentation, and geometry-generation services.
+Generate a table-top scene from one image. Configure the VLM,
+image-segmentation, and geometry-generation services with either a Scene Engine
+JSON config or the documented environment variables.
 
 ```bash
 embodichain scene-engine \
@@ -98,7 +99,7 @@ embodichain preview-scene \
 |---|---|---|
 | ``--image`` | *(required)* | Input ``.jpg``, ``.jpeg``, or ``.png`` scene image |
 | ``--output_root`` | *(required)* | Directory that receives intermediate artifacts and ``scene_export/`` |
-| ``--config`` | packaged config | Scene Engine JSON config containing ``llm``, ``image_segmentation``, and ``geometry_generation`` settings |
+| ``--config`` | packaged template | Optional complete Scene Engine JSON override. Without it, supply the documented service environment variables; the packaged JSON is only a template. |
 
 ``preview-scene``:
 

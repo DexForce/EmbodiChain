@@ -49,8 +49,8 @@ def cli_scene_engine(
         image_path=resolved_image_path,
         output_root=resolved_output_root,
         # One Scene Engine config contains the LLM, segmentation, and geometry
-        # sections. Passing it through lets callers use their own service URLs
-        # instead of editing the package-installed default JSON.
+        # sections. When omitted, every client reads the package template and
+        # applies its documented environment-variable overrides.
         llm_config_path=config_path,
         image_segmentation_config_path=config_path,
         geometry_generation_config_path=config_path,
@@ -80,8 +80,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         type=Path,
         default=None,
         help=(
-            "Optional Scene Engine JSON config containing the llm, "
-            "image_segmentation, and geometry_generation service settings."
+            "Optional Scene Engine JSON override. Without it, clients read the "
+            "packaged template and apply service environment-variable overrides."
         ),
     )
     args = parser.parse_args(argv)

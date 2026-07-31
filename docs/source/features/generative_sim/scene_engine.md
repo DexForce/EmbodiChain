@@ -46,9 +46,36 @@ The input must be one `.jpg`, `.jpeg`, or `.png` image with one main table and
 visible, separate tabletop assets. The pipeline requires an OpenAI-compatible
 VLM, an image-segmentation service, and a geometry-generation service.
 
-Pass their settings through `--config`. Keep credentials outside version
-control. `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`, and
-`OPENAI_MAX_ATTEMPTS` override the corresponding LLM settings.
+Without `--config`, Scene Engine reads the official template at
+`embodichain/gen_sim/scene_engine/configs/scene_engine_config.json`. The
+checked-in template intentionally has empty service URLs and credentials.
+Provide a complete user-owned JSON file with `--config`, or provide the
+settings through environment variables. `--config` is an optional complete
+JSON override; do not add credentials to the checked-in template.
+
+Keep credentials outside version control. `OPENAI_API_KEY`, `OPENAI_MODEL`,
+`OPENAI_BASE_URL`, and `OPENAI_MAX_ATTEMPTS` override the corresponding LLM
+settings. For example:
+
+```bash
+export OPENAI_API_KEY="<api-key>"
+export OPENAI_MODEL="<vision-model>"
+export OPENAI_BASE_URL="https://example.com/v1"
+export OPENAI_MAX_ATTEMPTS="3"
+
+export SCENE_ENGINE_IMAGE_SEGMENTATION_BASE_URL="http://segmentation-host:port"
+export SCENE_ENGINE_IMAGE_SEGMENTATION_PATH="/predict"
+export SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL="http://geometry-host:port"
+export SCENE_ENGINE_GEOMETRY_GENERATION_PATH="/generate_multiple_objects"
+```
+
+`SCENE_ENGINE_IMAGE_SEGMENTATION_TIMEOUT_S`,
+`SCENE_ENGINE_IMAGE_SEGMENTATION_MAX_ATTEMPTS`,
+`SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH`,
+`SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S`,
+`SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS`, and
+`SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH` override the remaining service
+fields when needed.
 
 ```json
 {

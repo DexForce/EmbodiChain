@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import time
 from typing import Any
@@ -28,6 +29,13 @@ import requests
 _DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
 )
+_ENVIRONMENT_OVERRIDES = {
+    "base_url": "SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL",
+    "timeout_s": "SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S",
+    "max_attempts": "SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS",
+    "health_path": "SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH",
+    "generate_objects_path": "SCENE_ENGINE_GEOMETRY_GENERATION_PATH",
+}
 
 
 class GeometryGenerationClient:
@@ -404,6 +412,8 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
     config = config_data.get("geometry_generation")
     if not isinstance(config, dict):
         raise ValueError("Config key geometry_generation must be an object.")
+    config = dict(config)
+    _apply_environment_overrides(config)
 
     required_keys = (
         "base_url",
@@ -456,3 +466,11 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         "health_path": config["health_path"].strip(),
         "generate_objects_path": config["generate_objects_path"].strip(),
     }
+
+
+def _apply_environment_overrides(config: dict[str, Any]) -> None:
+    """Apply optional deployment-specific service settings from the environment."""
+    for config_key, environment_name in _ENVIRONMENT_OVERRIDES.items():
+        value = os.getenv(environment_name)
+        if value is not None:
+            config[config_key] = value
