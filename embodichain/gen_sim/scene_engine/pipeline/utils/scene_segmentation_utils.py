@@ -212,7 +212,7 @@ def render_numbered_mask_candidates(
             "RGBA", image.size, colors[(candidate.index - 1) % len(colors)]
         )
         transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        rendered_mask = (  # If we use outline, then need to do some another processings.
+        rendered_mask = (
             mask if mask_style == "fill" else _mask_outer_outline(mask, image.size)
         )
         overlay.alpha_composite(
