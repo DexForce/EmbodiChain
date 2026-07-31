@@ -10,8 +10,9 @@ The ``sim`` package is EmbodiChain's simulation core. It is organized around
 the :class:`SimulationManager` (the DexSim scene handle), the scene-object
 hierarchy (lights, rigid/soft/cloth bodies, articulations, robots, gizmos,
 constraints), the sensor suite (cameras, stereo cameras, contact sensors), IK
-solvers and motion planners, the atomic-action motion-primitive layer, and the
-shared configuration types and utilities that wire all of these together.
+solvers and motion planners, the atomic-action motion-primitive layer, a
+reusable workspace-analysis and sampling toolkit, and the shared configuration
+types and utilities that wire all of these together.
 
 .. rubric:: Submodules
 

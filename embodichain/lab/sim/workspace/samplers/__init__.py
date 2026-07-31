@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Workspace configuration samplers deriving from ``BaseSampler``.
+
+Built-in samplers: uniform, random, Halton, Sobol, and Latin-hypercube, plus a ``SamplerFactory`` and ``create_sampler`` helper.
+"""
+
 from embodichain.lab.sim.workspace.samplers.base_sampler import (
     BaseSampler,
     ISampler,

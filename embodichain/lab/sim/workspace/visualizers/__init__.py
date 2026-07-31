@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Workspace result visualizers deriving from ``BaseVisualizer``.
+
+Built-in visualizers: point-cloud, voxel, sphere, and axis, plus a ``VisualizerFactory`` and ``create_visualizer`` helper.
+"""
+
 from embodichain.lab.sim.workspace.visualizers.base_visualizer import (
     BaseVisualizer,
     IVisualizer,

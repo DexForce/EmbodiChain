@@ -38,6 +38,7 @@ bodies.
     ClothObjectCfg
     Robot
     RobotCfg
+    RobotWorkspaceCfg
     Gizmo
     GizmoCfg
     RigidConstraint
@@ -160,6 +161,12 @@ Robot
     :show-inheritance:
 
 .. autoclass:: RobotCfg
+    :members:
+    :inherited-members:
+    :show-inheritance:
+    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: RobotWorkspaceCfg
     :members:
     :inherited-members:
     :show-inheritance:

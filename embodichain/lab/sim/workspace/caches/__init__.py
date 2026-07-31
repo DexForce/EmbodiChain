@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Cache backends and a cache manager for persisting workspace-analysis results.
+
+Provides in-memory and disk caches (``MemoryCache``, ``DiskCache``), a ``CacheManager``, a ``ResultsCache``, and ``compute_cache_key``.
+"""
+
 from embodichain.lab.sim.workspace.caches.base_cache import BaseCache
 from embodichain.lab.sim.workspace.caches.memory_cache import (
     MemoryCache,

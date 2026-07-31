@@ -14,6 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Workspace evaluation metrics deriving from ``BaseMetric``.
+
+Built-in metrics: reachability, manipulability, and density."""
+
 from embodichain.lab.sim.workspace.metrics.base_metric import (
     BaseMetric,
 )

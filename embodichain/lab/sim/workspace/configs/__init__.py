@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Configuration objects for workspace analysis.
+
+Covers sampling (``SamplingConfig``), caching (``CacheConfig``), metrics (``MetricConfig`` and per-metric reachability / manipulability / density configs), visualization (``VisualizationConfig``), and dimension constraints (``DimensionConstraint``).
+"""
+
 from embodichain.lab.sim.workspace.configs.cache_config import (
     CacheConfig,
 )
