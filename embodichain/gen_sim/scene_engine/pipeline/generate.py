@@ -36,7 +36,7 @@ from embodichain.gen_sim.scene_engine.pipeline.scene_understanding import (
 from embodichain.gen_sim.scene_engine.pipeline.scene_segmentation import (
     segment_scene,
 )
-from embodichain.gen_sim.scene_engine.utils.logger import log_stage_end, log_stage_start
+from embodichain.utils.logger import log_info
 
 from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
     generate_scene_and_refine,
@@ -61,17 +61,17 @@ def generate_scene_from_image(
     scene = Scene()
 
     # 1. Scene Understanding
-    log_stage_start("Scene Understanding")
+    log_info("Starting Scene Understanding")
     scene = understand_scene(
         scene=scene,
         image_path=image_path,
         output_root=resolved_output_root,
         vlm_client=vlm_client,
     )
-    log_stage_end("Scene Understanding")
+    log_info("Completed Scene Understanding")
 
     # 2. Scene Segmentation
-    log_stage_start("Scene Segmentation")
+    log_info("Starting Scene Segmentation")
     # Load the config and fail if the Image Segmentation Server is unavailable.
     image_segmentation_client = ImageSegmentationClient.from_config(
         image_segmentation_config_path
@@ -87,10 +87,10 @@ def generate_scene_from_image(
         )
     finally:
         image_segmentation_client.close()  # Kill the session to avoid resource leaks.
-    log_stage_end("Scene Segmentation")
+    log_info("Completed Scene Segmentation")
 
     # 3. Objects + Coarse Layout Generation
-    log_stage_start("Objects + Coarse Layout Generation")
+    log_info("Starting Objects + Coarse Layout Generation")
     # Load the config and fail if the Geometry Generation Server is unavailable.
     geometry_generation_client = GeometryGenerationClient.from_config(
         geometry_generation_config_path
@@ -106,16 +106,16 @@ def generate_scene_from_image(
         )
     finally:
         geometry_generation_client.close()  # Kill the session to avoid resource leaks.
-    log_stage_end("Objects + Coarse Layout Generation")
+    log_info("Completed Objects + Coarse Layout Generation")
 
     # 4. Scene Export
-    log_stage_start("Scene Export")
+    log_info("Starting Scene Export")
     export_scene(
         scene=scene,
         output_root=resolved_output_root,
         table_max_convex_hull_num=16,
         asset_max_convex_hull_num=16,
     )
-    log_stage_end("Scene Export")
+    log_info("Completed Scene Export")
 
     return scene
