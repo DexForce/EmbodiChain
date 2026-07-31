@@ -59,6 +59,61 @@ The generated output contains the canonical source mesh under ``asset_source/``,
 
 ---
 
+## Scene Engine
+
+Generate a table-top scene from one image. The command requires a Scene Engine
+JSON config for the VLM, image-segmentation, and geometry-generation services.
+
+```bash
+embodichain scene-engine \
+    --image /path/to/scene.png \
+    --output_root /path/to/scene_output \
+    --config /path/to/scene_engine_config.json
+```
+
+The generated scene-only export is written to
+``<output_root>/scene_export/scene_config.json``. It is intended for
+``preview-scene`` and downstream scene consumers; it is not a complete
+``run-env`` configuration because it does not choose or configure a robot.
+
+Preview the gravity-settled table and assets:
+
+```bash
+embodichain preview-scene --output_root /path/to/scene_output
+```
+
+Use Viser for a browser-based preview:
+
+```bash
+embodichain preview-scene \
+    --output_root /path/to/scene_output \
+    --viser
+```
+
+### Arguments
+
+``scene-engine``:
+
+| Argument | Default | Description |
+|---|---|---|
+| ``--image`` | *(required)* | Input ``.jpg``, ``.jpeg``, or ``.png`` scene image |
+| ``--output_root`` | *(required)* | Directory that receives intermediate artifacts and ``scene_export/`` |
+| ``--config`` | packaged config | Scene Engine JSON config containing ``llm``, ``image_segmentation``, and ``geometry_generation`` settings |
+
+``preview-scene``:
+
+| Argument | Default | Description |
+|---|---|---|
+| ``--output_root`` | *(required)* | Scene Engine output root containing ``scene_export/`` |
+| ``--device`` | ``cpu`` | Simulation device, such as ``cpu`` or ``cuda`` |
+| ``--headless`` | ``False`` | Load and validate the export without a native window |
+| ``--viser`` | ``False`` | Publish the scene through Viser instead of a native window |
+
+For configuration, output layout, remote Viser access, and Python API usage,
+see [Scene Engine](../features/generative_sim/scene_engine.md).
+
+---
+
 ## Preview Asset
 
 Preview a USD or mesh asset in the simulation without writing code.
