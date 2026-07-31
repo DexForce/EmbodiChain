@@ -98,6 +98,7 @@ class DifferentiableTrainer:
         if total_timesteps < 0:
             raise ValueError("total_timesteps cannot be negative.")
 
+        self.policy.train()
         while self.global_step < total_timesteps:
             remaining_vector_steps = math.ceil(
                 (total_timesteps - self.global_step) / self.env.num_envs

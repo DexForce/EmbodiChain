@@ -94,9 +94,11 @@ def test_trainer_updates_policy_and_detaches_each_segment() -> None:
         algorithm,
     )
     initial_weight = policy.actor.weight.detach().abs().item()
+    policy.eval()
 
     summary = trainer.train(total_timesteps=8)
 
+    assert policy.training
     assert policy.actor.weight.detach().abs().item() < initial_weight
     assert summary["global_step"] == 8
     assert summary["num_updates"] == 2

@@ -136,7 +136,6 @@ class DifferentiableCollector:
         if self._observation is None:
             self.reset()
 
-        self.policy.train()
         initial_observation = self._flatten_observation(self._observation)
         transitions: list[DifferentiableTransition] = []
 

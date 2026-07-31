@@ -34,6 +34,7 @@ from embodichain.learning.rl.experimental.newton import (
 )
 from embodichain.learning.rl.experimental.newton.train_planar_reach import (
     NewtonPlanarReachTrainingCfg,
+    _evaluate,
     train_planar_reach,
 )
 from embodichain.learning.rl.models import ActorOnly
@@ -47,6 +48,17 @@ def _make_env() -> NewtonPlanarReachEnv:
             max_episode_steps=8,
         )
     )
+
+
+class _ModeRecordingActor(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = nn.Linear(8, 2)
+        self.observed_modes: list[bool] = []
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        self.observed_modes.append(self.training)
+        return self.linear(observation)
 
 
 def _reward_at(env: NewtonPlanarReachEnv, action: torch.Tensor) -> float:
@@ -312,6 +324,30 @@ def test_newton_rollout_drives_apg_policy_update() -> None:
     assert metrics["skipped_update"] == 0.0
     assert metrics["grad_norm"] > 0.0
     assert not torch.equal(actor.weight, initial_weight)
+
+
+@pytest.mark.parametrize("initial_training_mode", [True, False])
+def test_evaluation_uses_eval_mode_and_restores_policy_mode(
+    initial_training_mode: bool,
+) -> None:
+    env = _make_env()
+    actor = _ModeRecordingActor()
+    policy = ActorOnly(8, 2, env.device, actor=actor)
+    policy.train(initial_training_mode)
+    collector = DifferentiableCollector(env, policy, env.device)
+
+    _evaluate(
+        collector,
+        NewtonPlanarReachTrainingCfg(
+            num_envs=env.num_envs,
+            eval_batches=1,
+            horizon=2,
+        ),
+    )
+
+    assert actor.observed_modes
+    assert not any(actor.observed_modes)
+    assert policy.training is initial_training_mode
 
 
 def test_apg_training_generalizes_to_held_out_reaches() -> None:

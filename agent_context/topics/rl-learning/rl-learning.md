@@ -37,7 +37,8 @@ Standard PPO/GRPO rollout data flows as `TensorDict` objects (from the
   differentiable next state.
 - `detach_state()` creates the TBPTT boundary without resetting the environment.
 - `DifferentiableCollector` keeps graph-connected transitions outside the
-  standard preallocated buffer.
+  standard preallocated buffer and preserves the policy mode selected by its
+  caller.
 - Differentiable policy sampling uses `get_differentiable_action()` and
   `rsample()`.
 - `APG` maximizes segmented discounted return with optional entropy, gradient
@@ -48,6 +49,8 @@ Standard PPO/GRPO rollout data flows as `TensorDict` objects (from the
   each segment, and policy gradients accumulate until one update horizon is
   complete.
 - Checkpoints store policy, optimizer, and trainer counters.
+- Training selects `policy.train()`, while evaluation temporarily selects
+  `policy.eval()` and restores the previous mode afterward.
 
 The collector paths are intentionally separate:
 - PPO/GRPO use `SyncCollector` and `TensorDict`.

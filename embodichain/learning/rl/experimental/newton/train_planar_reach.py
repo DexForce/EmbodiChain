@@ -169,15 +169,20 @@ def _evaluate(
     collector: DifferentiableCollector,
     cfg: NewtonPlanarReachTrainingCfg,
 ) -> dict[str, float]:
-    batch_metrics = []
-    for batch in range(cfg.eval_batches):
-        collector.reset(seed=cfg.eval_seed + batch)
-        rollout = collector.collect(cfg.horizon, deterministic=True)
-        batch_metrics.append(_trajectory_metrics(rollout, cfg.success_threshold))
-    return {
-        key: sum(metrics[key] for metrics in batch_metrics) / cfg.eval_batches
-        for key in batch_metrics[0]
-    }
+    policy_was_training = collector.policy.training
+    collector.policy.eval()
+    try:
+        batch_metrics = []
+        for batch in range(cfg.eval_batches):
+            collector.reset(seed=cfg.eval_seed + batch)
+            rollout = collector.collect(cfg.horizon, deterministic=True)
+            batch_metrics.append(_trajectory_metrics(rollout, cfg.success_threshold))
+        return {
+            key: sum(metrics[key] for metrics in batch_metrics) / cfg.eval_batches
+            for key in batch_metrics[0]
+        }
+    finally:
+        collector.policy.train(policy_was_training)
 
 
 def _trajectory_metrics(

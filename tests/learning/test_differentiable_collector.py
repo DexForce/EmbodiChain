@@ -137,3 +137,15 @@ def test_collector_rejects_empty_rollout() -> None:
 
     with pytest.raises(ValueError, match="num_steps must be positive"):
         collector.collect(num_steps=0)
+
+
+@pytest.mark.parametrize("training", [True, False])
+def test_collector_preserves_caller_selected_policy_mode(training: bool) -> None:
+    env = _LinearDifferentiableEnv()
+    policy = _make_policy(env.device)
+    policy.train(training)
+    collector = DifferentiableCollector(env=env, policy=policy, device=env.device)
+
+    collector.collect(num_steps=1, deterministic=True)
+
+    assert policy.training is training
