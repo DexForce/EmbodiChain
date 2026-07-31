@@ -21,8 +21,7 @@ from pathlib import Path
 import re
 from typing import Sequence
 
-from embodichain.lab.sim import SimulationManager as _EmbodiSimManager
-from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.shapes import MeshCfg
 import matplotlib
@@ -446,7 +445,7 @@ def gravity_settle_assets_on_table(
             "z_up_scale": asset_z_up_scale,
         }
 
-    sim = _EmbodiSimManager(
+    sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
             physics_dt=physics_dt,
@@ -508,7 +507,7 @@ def gravity_settle_assets_on_table(
             )
     finally:
         sim.destroy(exit_process=False)
-        _EmbodiSimManager.flush_cleanup_queue()
+        SimulationManager.flush_cleanup_queue()
 
     settled_assets_layout = [
         settled_layout_by_id[str(asset_layout["id"])] for asset_layout in assets_layout
