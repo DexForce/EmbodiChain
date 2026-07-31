@@ -14,108 +14,166 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Analyze the DexForce W1 left-arm workspace on a Cartesian plane."""
+
 from __future__ import annotations
 
 import argparse
 
 import numpy as np
 import torch
-from IPython import embed
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import MarkerCfg, RenderCfg
+from embodichain.lab.sim.cfg import MarkerCfg
 from embodichain.lab.sim.robots import DexforceW1Cfg
-from embodichain.lab.sim.workspace.configs.visualization_config import (
-    VisualizationConfig,
-)
-from embodichain.lab.sim.workspace.analyzer import (
+from embodichain.lab.sim.workspace import (
     AnalysisMode,
     WorkspaceAnalyzer,
     WorkspaceAnalyzerConfig,
+)
+from embodichain.lab.sim.workspace.configs import (
+    SamplingConfig,
+    SamplingStrategy,
+    VisualizationConfig,
 )
 from embodichain.lab.visualization import (
     add_viser_args_to_parser,
     visualization_cfg_from_args,
 )
 
-if __name__ == "__main__":
+
+def _run_until_interrupted(sim: SimulationManager) -> None:
+    """Keep the native or Viser visualization alive until Ctrl+C.
+
+    Args:
+        sim: Simulation manager owning the visualization.
+    """
+    print("Workspace visualization is ready. Press Ctrl+C to exit.")
+    try:
+        while True:
+            sim.update(step=1)
+    except KeyboardInterrupt:
+        pass
+
+
+def main() -> None:
+    """Run the plane-sampling workspace analysis example."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_viser_args_to_parser(parser)
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=1_500,
+        help="Number of plane positions to sample (default: 1500).",
+    )
+    parser.add_argument(
+        "--sim-device",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help="Simulation and workspace-computation device (default: cpu).",
+    )
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Exit after analysis instead of keeping the visualization open.",
+    )
     args = parser.parse_args()
+    if args.num_samples <= 0:
+        parser.error("--num-samples must be greater than zero")
 
-    # Example usage
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
     config = SimulationManagerCfg(
         headless=False,
-        sim_device="cpu",
+        sim_device=args.sim_device,
         width=1080,
         height=1080,
         visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
-    sim.set_manual_update(False)
-
-    cfg = DexforceW1Cfg.from_dict(
-        {"uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"}
-    )
-    robot = sim.add_robot(cfg=cfg)
-    print("DexforceW1 robot added to the simulation.")
-
-    # Set left arm joint positions (mirrored)
-    left_qpos = torch.tensor([0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0])
-    right_qpos = -left_qpos
-    robot.set_qpos(
-        qpos=left_qpos,
-        joint_ids=robot.get_joint_ids("left_arm"),
-    )
-    # Set right arm joint positions (mirrored)
-    robot.set_qpos(
-        qpos=right_qpos,
-        joint_ids=robot.get_joint_ids("right_arm"),
-    )
-
-    left_arm_pose = robot.compute_fk(
-        qpos=left_qpos,
-        name="left_arm",
-        to_matrix=True,
-    )
-
-    sim.draw_marker(
-        cfg=MarkerCfg(
-            name=f"left_arm_pose_axis",
-            marker_type="axis",
-            axis_xpos=left_arm_pose,
-            axis_size=0.005,
-            axis_len=0.15,
-            arena_index=0,
+    try:
+        cfg = DexforceW1Cfg.from_dict(
+            {
+                "uid": "dexforce_w1",
+                "version": "v021",
+                "arm_kind": "industrial",
+                "with_default_eef": False,
+            }
         )
-    )
+        robot = sim.add_robot(cfg=cfg)
+        print("DexforceW1 robot added to the simulation.")
 
-    cartesian_config = WorkspaceAnalyzerConfig(
-        mode=AnalysisMode.PLANE_SAMPLING,
-        plane_normal=torch.tensor([0.0, 0.0, 1.0]),
-        plane_point=torch.tensor([0.0, 0.0, 1.2]),
-        # plane_bounds=torch.tensor([[-0.5, 0.5], [-0.5, 0.5]]),
-        reference_pose=left_arm_pose[0]
-        .cpu()
-        .numpy(),  # Use computed left arm pose as reference
-        visualization=VisualizationConfig(
-            show_unreachable_points=False, vis_type="axis"
-        ),
-        control_part_name="left_arm",
-    )
-    wa_cartesian = WorkspaceAnalyzer(
-        robot=robot, config=cartesian_config, sim_manager=sim
-    )
-    results_cartesian = wa_cartesian.analyze(num_samples=1500, visualize=True)
-    print(f"\nCartesian Space Results:")
-    print(
-        f"  Reachable points: {results_cartesian['num_reachable']} / {results_cartesian['num_samples']}"
-    )
-    print(f"  Analysis time: {results_cartesian['analysis_time']:.2f}s")
-    print(f"  Metrics: {results_cartesian['metrics']}")
+        left_qpos = torch.tensor(
+            [0, -np.pi / 4, 0.0, -np.pi / 2, -np.pi / 4, 0.0, 0.0],
+            dtype=torch.float32,
+            device=robot.device,
+        )
+        robot.set_qpos(
+            qpos=left_qpos,
+            joint_ids=robot.get_joint_ids("left_arm"),
+        )
+        robot.set_qpos(
+            qpos=-left_qpos,
+            joint_ids=robot.get_joint_ids("right_arm"),
+        )
 
-    sim.capture_visualization(force=True)
-    embed(header="Workspace Analyzer Test Environment")
+        left_arm_pose = robot.compute_fk(
+            qpos=left_qpos,
+            name="left_arm",
+            to_matrix=True,
+        )
+        sim.draw_marker(
+            cfg=MarkerCfg(
+                name="left_arm_pose_axis",
+                marker_type="axis",
+                axis_xpos=left_arm_pose,
+                axis_size=0.005,
+                axis_len=0.15,
+                arena_index=0,
+            )
+        )
+
+        analyzer = WorkspaceAnalyzer(
+            robot=robot,
+            config=WorkspaceAnalyzerConfig(
+                mode=AnalysisMode.PLANE_SAMPLING,
+                plane_normal=torch.tensor(
+                    [0.0, 0.0, 1.0],
+                    dtype=torch.float32,
+                    device=robot.device,
+                ),
+                plane_point=torch.tensor(
+                    [0.0, 0.0, 1.2],
+                    dtype=torch.float32,
+                    device=robot.device,
+                ),
+                reference_pose=left_arm_pose[0],
+                sampling=SamplingConfig(strategy=SamplingStrategy.RANDOM),
+                visualization=VisualizationConfig(
+                    show_unreachable_points=True,
+                    vis_type="axis",
+                ),
+                control_part_name="left_arm",
+            ),
+            sim_manager=sim,
+        )
+        results = analyzer.analyze(num_samples=args.num_samples, visualize=True)
+        print("\nPlane Sampling Results:")
+        print(
+            f"  Reachable points: {results['num_reachable']} / "
+            f"{results['num_samples']}"
+        )
+        print(f"  Analysis time: {results['analysis_time']:.2f}s")
+        print(f"  Metrics: {results['metrics']}")
+
+        sim.capture_visualization(force=True)
+        if not args.no_wait:
+            _run_until_interrupted(sim)
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+if __name__ == "__main__":
+    main()
