@@ -1,5 +1,5 @@
 Rigid object group tutorial
-==========================
+===========================
 
 .. currentmodule:: embodichain.lab.sim
 
@@ -50,3 +50,14 @@ To run the script from the repository root:
 
 You can pass flags such as ``--headless``, ``--num_envs <n>``, and
 ``--device <cpu|cuda>`` to customize the run.
+
+Use ``--viser`` to publish every constituent object in the group to the browser:
+
+.. code-block:: bash
+
+	python scripts/tutorials/sim/create_rigid_object_group.py --viser
+
+Each group member has its own pose and browser node. Shared geometry remains
+batched by the Viser backend. See
+:doc:`/overview/sim/viser_visualization` for server and environment-selection
+options.

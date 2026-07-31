@@ -27,6 +27,7 @@ from typing import List, Sequence, Union
 from dexsim.models import MeshObject
 from dexsim.engine import PhysicsScene, SoftBody
 from dexsim.types import SoftBodyGPUAPIReadWriteType
+from scipy.spatial import ConvexHull, QhullError
 from embodichain.lab.sim.common import (
     BatchEntity,
 )
@@ -45,6 +46,8 @@ from embodichain.lab.sim.cfg import (
     SoftObjectCfg,
 )
 from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+__all__ = ["SoftBodyData", "SoftObject", "SoftObjectCfg"]
 
 
 @dataclass
@@ -72,18 +75,18 @@ class SoftBodyData:
         self.ps = ps
         self.num_instances = len(entities)
 
-        self.softbodies: Sequence[SoftBody] = [
+        self.soft_bodies: Sequence[SoftBody] = [
             self.entities[i].get_physical_body() for i in range(self.num_instances)
         ]
-        self.n_collision_vertices = self.softbodies[0].get_num_vertices()
-        self.n_sim_vertices = self.softbodies[0].get_num_sim_vertices()
+        self.n_collision_vertices = self.soft_bodies[0].get_num_vertices()
+        self.n_sim_vertices = self.soft_bodies[0].get_num_sim_vertices()
 
         self._rest_position_buffer = torch.empty(
             (self.num_instances, self.n_collision_vertices, 4),
             device=self.device,
             dtype=torch.float32,
         )
-        for i, softbody in enumerate(self.softbodies):
+        for i, softbody in enumerate(self.soft_bodies):
             self._rest_position_buffer[i] = softbody.get_position_inv_mass_buffer()
 
         self._rest_sim_position_buffer = torch.empty(
@@ -92,7 +95,7 @@ class SoftBodyData:
             dtype=torch.float32,
         )
 
-        for i, softbody in enumerate(self.softbodies):
+        for i, softbody in enumerate(self.soft_bodies):
             self._rest_sim_position_buffer[i] = (
                 softbody.get_sim_position_inv_mass_buffer()
             )
@@ -143,10 +146,50 @@ class SoftBodyData:
     def sim_vertex_velocity(self):
         """Get the current vertex velocity buffer of the soft bodies."""
         for i, softbody in enumerate(self.soft_bodies):
-            self._sim_vertex_velocity[i] = softbody.get_sim_position_inv_mass_buffer()[
-                :, :3
-            ]
+            self._sim_vertex_velocity[i] = softbody.get_sim_velocity_buffer()[:, :3]
         return self._sim_vertex_velocity.clone()
+
+    @cached_property
+    def collision_surface_triangles(self) -> torch.Tensor:
+        """Build a stable surface approximation for collision vertices.
+
+        DexSim exposes live PhysX collision vertices but not their triangle
+        connectivity. The convex hull provides a stable topology whose indices
+        continue to reference the live collision-vertex buffer.
+
+        Returns:
+            Cached convex-hull triangle indices.
+        """
+        vertices = self.rest_collision_vertices[0].detach().cpu().numpy()
+        if vertices.shape[0] < 4:
+            logger.log_warning(
+                "Soft-body collision geometry has fewer than four vertices; "
+                "its visualization surface will be empty."
+            )
+            triangles = np.empty((0, 3), dtype=np.int32)
+        else:
+            try:
+                triangles = np.asarray(
+                    ConvexHull(vertices).simplices,
+                    dtype=np.int32,
+                )
+            except QhullError as error:
+                try:
+                    triangles = np.asarray(
+                        ConvexHull(vertices, qhull_options="QJ").simplices,
+                        dtype=np.int32,
+                    )
+                except QhullError:
+                    logger.log_warning(
+                        "Unable to build a soft-body visualization surface from "
+                        f"collision vertices: {error!r}"
+                    )
+                    triangles = np.empty((0, 3), dtype=np.int32)
+        return torch.as_tensor(
+            triangles,
+            dtype=torch.int32,
+            device=self.device,
+        )
 
 
 class SoftObject(BatchEntity):
@@ -390,7 +433,7 @@ class SoftObject(BatchEntity):
         Returns:
             torch.Tensor: The current collision vertices with shape (N, num_collision_vertices, 3).
         """
-        return self.body_data.collision_position_buffer
+        return self.body_data.collision_position
 
     def get_current_sim_vertices(self) -> torch.Tensor:
         """Get the current sim vertices of the soft object.
@@ -398,7 +441,7 @@ class SoftObject(BatchEntity):
         Returns:
             torch.Tensor: The current sim vertices with shape (N, num_sim_vertices, 3).
         """
-        return self.body_data.sim_vertex_position_buffer
+        return self.body_data.sim_vertex_position
 
     def get_current_sim_vertex_velocities(self) -> torch.Tensor:
         """Get the current sim vertex velocities of the soft object.
@@ -406,7 +449,41 @@ class SoftObject(BatchEntity):
         Returns:
             torch.Tensor: The current sim vertex velocities with shape (N, num_sim_vertices, 3).
         """
-        return self.body_data.sim_vertex_velocity_buffer
+        return self.body_data.sim_vertex_velocity
+
+    def get_collision_surface_triangles(
+        self, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        """Get approximate collision-surface triangles for selected instances.
+
+        DexSim currently exposes live soft-body collision vertices without
+        their topology. This method returns a cached convex-hull topology, so
+        it is suitable for low-frequency external visualization but does not
+        preserve concave details of the render mesh.
+
+        Args:
+            env_ids: Environment indices. If ``None``, returns all instances.
+
+        Returns:
+            Triangle indices with shape ``(N, num_triangles, 3)``.
+        """
+        ids = self._all_indices if env_ids is None else env_ids
+        return (
+            self.body_data.collision_surface_triangles.unsqueeze(0)
+            .expand(len(ids), -1, -1)
+            .clone()
+        )
+
+    def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get approximate surface triangles for generic mesh consumers.
+
+        Args:
+            env_ids: Environment indices. If ``None``, returns all instances.
+
+        Returns:
+            Triangle indices with shape ``(N, num_triangles, 3)``.
+        """
+        return self.get_collision_surface_triangles(env_ids=env_ids)
 
     def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
         """Get local pose of the soft object.

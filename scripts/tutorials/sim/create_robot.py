@@ -19,6 +19,8 @@ This script demonstrates how to create and simulate a robot using SimulationMana
 It shows how to load a robot from URDF, set up control parts, and run basic simulation.
 """
 
+from __future__ import annotations
+
 import argparse
 import numpy as np
 import time
@@ -29,6 +31,7 @@ torch.set_printoptions(precision=4, sci_mode=False)
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
@@ -62,6 +65,7 @@ def main():
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
