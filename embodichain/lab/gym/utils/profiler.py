@@ -282,7 +282,9 @@ class EnvProfiler:
             pct_parent=pct,
         )
 
-    def _build_tree_rows(self, sections: Dict[str, Dict[str, float]]) -> list[_ReportRow]:
+    def _build_tree_rows(
+        self, sections: Dict[str, Dict[str, float]]
+    ) -> list[_ReportRow]:
         rows: list[_ReportRow] = []
         for root in ("step", "reset"):
             if root in sections:
@@ -316,7 +318,9 @@ class EnvProfiler:
         self_total = s["total_s"]
         for c in children:
             child_sum += sections[c]["total_s"]
-            self._print_tree(rows, c, sections, parent_total=self_total, depth=depth + 1)
+            self._print_tree(
+                rows, c, sections, parent_total=self_total, depth=depth + 1
+            )
         other = self_total - child_sum
         if children and other > 1e-6:
             calls = s["calls"]
