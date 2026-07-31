@@ -22,6 +22,7 @@ import sys
 import queue
 import time
 import threading
+from contextlib import nullcontext
 import dexsim
 import torch
 import numpy as np
@@ -241,6 +242,7 @@ class SimulationManager:
 
         self.sim_config = sim_config
         self.device = torch.device("cpu")
+        self._env_profiler = None
 
         world_config = self._convert_sim_config(sim_config)
 
@@ -570,27 +572,41 @@ class SimulationManager:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
-        if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                f"Using GPU physics, but not initialized yet. Forcing initialization."
-            )
-            self.init_gpu_physics()
+        profiler = self._env_profiler
+
+        def _profile(section_name: str):
+            if profiler is not None and getattr(profiler, "enabled", False):
+                return profiler.section(section_name)
+            return nullcontext()
+
+        with _profile("gpu_physics_check"):
+            if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
+                logger.log_warning(
+                    f"Using GPU physics, but not initialized yet. Forcing initialization."
+                )
+                with _profile("gpu_physics_init"):
+                    self.init_gpu_physics()
 
         if self.is_physics_manually_update:
-            if physics_dt is None:
-                physics_dt = self.sim_config.physics_dt
-            for i in range(step):
-                self._world.update(physics_dt)
-                if (
-                    self._window_record_state is not None
-                    and self._window_record_state.capture_from_sim_update
-                ):
-                    self._step_window_record_from_sim_update(
-                        self._window_record_state, physics_dt
-                    )
+            with _profile("manual_update"):
+                if physics_dt is None:
+                    with _profile("resolve_physics_dt"):
+                        physics_dt = self.sim_config.physics_dt
+                for i in range(step):
+                    with _profile("world_update"):
+                        self._world.update(physics_dt)
+                    if (
+                        self._window_record_state is not None
+                        and self._window_record_state.capture_from_sim_update
+                    ):
+                        with _profile("window_record_capture"):
+                            self._step_window_record_from_sim_update(
+                                self._window_record_state, physics_dt
+                            )
 
         else:
-            logger.log_warning("Physics simulation is not manually updated.")
+            with _profile("manual_update_disabled"):
+                logger.log_warning("Physics simulation is not manually updated.")
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.

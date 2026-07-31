@@ -90,6 +90,22 @@ class _SectionStats:
     max_s: float = 0.0
 
 
+@dataclass
+class _ReportRow:
+    """One formatted row in the profiler report tree."""
+
+    path: str
+    depth: int
+    display_name: str
+    calls: int
+    mean_ms: float
+    min_ms: float
+    max_ms: float
+    std_ms: float
+    total_s: float
+    pct_parent: float
+
+
 class EnvProfiler:
     """Time profiler for env reset/step.
 
@@ -199,7 +215,8 @@ class EnvProfiler:
 
     def _build_report_data(self) -> Dict[str, object]:
         sections: Dict[str, Dict[str, float]] = {}
-        for name, s in self._stats.items():
+        for name in sorted(self._stats):
+            s = self._stats[name]
             mean = s.total_s / s.n if s.n else 0.0
             var = max(0.0, s.sq_s / s.n - mean * mean) if s.n else 0.0
             sections[name] = {
@@ -210,46 +227,97 @@ class EnvProfiler:
                 "std_ms": math.sqrt(var) * 1e3,
                 "total_s": s.total_s,
             }
-        return {"sections": sections}
+        rows = self._build_tree_rows(sections)
+        return {
+            "sections": sections,
+            "table": {
+                "columns": [
+                    "section",
+                    "calls",
+                    "mean_ms",
+                    "min_ms",
+                    "max_ms",
+                    "std_ms",
+                    "total_s",
+                    "pct_parent",
+                ],
+                "rows": [
+                    {
+                        "path": r.path,
+                        "depth": r.depth,
+                        "section": r.display_name,
+                        "calls": r.calls,
+                        "mean_ms": r.mean_ms,
+                        "min_ms": r.min_ms,
+                        "max_ms": r.max_ms,
+                        "std_ms": r.std_ms,
+                        "total_s": r.total_s,
+                        "pct_parent": r.pct_parent,
+                    }
+                    for r in rows
+                ],
+            },
+        }
 
-    def _emit_row(
+    def _to_row(
         self,
-        lines: list[str],
-        leaf: str,
+        section_path: str,
         s: Dict[str, float],
         parent_total: float,
         depth: int,
-    ) -> None:
+    ) -> _ReportRow:
         pct = (100.0 * s["total_s"] / parent_total) if parent_total > 0 else 0.0
-        pad = "  " * depth
-        lines.append(
-            f"  {pad}{leaf:<26} {s['calls']:>6} {s['mean_ms']:>10.3f} "
-            f"{s['min_ms']:>8.3f} {s['max_ms']:>8.3f} {s['std_ms']:>7.3f} "
-            f"{s['total_s']:>9.3f} {pct:>7.1f}%"
+        leaf = section_path if depth == 0 else section_path.split(".")[-1]
+        display_name = f"{'  ' * depth}{leaf}"
+        return _ReportRow(
+            path=section_path,
+            depth=depth,
+            display_name=display_name,
+            calls=int(s["calls"]),
+            mean_ms=s["mean_ms"],
+            min_ms=s["min_ms"],
+            max_ms=s["max_ms"],
+            std_ms=s["std_ms"],
+            total_s=s["total_s"],
+            pct_parent=pct,
         )
+
+    def _build_tree_rows(self, sections: Dict[str, Dict[str, float]]) -> list[_ReportRow]:
+        rows: list[_ReportRow] = []
+        for root in ("step", "reset"):
+            if root in sections:
+                self._print_tree(rows, root, sections, depth=0)
+        other_roots = sorted(
+            p for p in sections if "." not in p and p not in ("step", "reset")
+        )
+        for root in other_roots:
+            self._print_tree(rows, root, sections, depth=0)
+        return rows
 
     def _print_tree(
         self,
-        lines: list[str],
+        rows: list[_ReportRow],
         root_path: str,
         sections: Dict[str, Dict[str, float]],
+        parent_total: float | None = None,
         depth: int = 0,
     ) -> None:
         s = sections.get(root_path)
         if s is None:
             return
-        parent_total = s["total_s"]
-        self._emit_row(lines, root_path, s, parent_total, depth)
+        current_parent_total = s["total_s"] if parent_total is None else parent_total
+        rows.append(self._to_row(root_path, s, current_parent_total, depth))
         prefix = root_path + "."
         children = [
             p for p in sections if p.startswith(prefix) and "." not in p[len(prefix) :]
         ]
         children.sort(key=lambda p: -sections[p]["total_s"])
         child_sum = 0.0
+        self_total = s["total_s"]
         for c in children:
             child_sum += sections[c]["total_s"]
-            self._print_tree(lines, c, sections, depth + 1)
-        other = parent_total - child_sum
+            self._print_tree(rows, c, sections, parent_total=self_total, depth=depth + 1)
+        other = self_total - child_sum
         if children and other > 1e-6:
             calls = s["calls"]
             other_s = {
@@ -260,7 +328,19 @@ class EnvProfiler:
                 "std_ms": 0.0,
                 "total_s": other,
             }
-            self._emit_row(lines, "(other)", other_s, parent_total, depth + 1)
+            rows.append(self._to_row("(other)", other_s, self_total, depth + 1))
+
+    def _format_row(self, row: _ReportRow, section_w: int) -> str:
+        return (
+            f"  {row.display_name:<{section_w}} "
+            f"{row.calls:>8d} "
+            f"{row.mean_ms:>10.3f} "
+            f"{row.min_ms:>10.3f} "
+            f"{row.max_ms:>10.3f} "
+            f"{row.std_ms:>10.3f} "
+            f"{row.total_s:>10.3f} "
+            f"{row.pct_parent:>9.2f}%"
+        )
 
     def _log_table(self, data: Dict[str, object]) -> None:
         sections = data["sections"]  # type: ignore[assignment]
@@ -270,9 +350,15 @@ class EnvProfiler:
                 "(still in warmup, or step/reset never called)."
             )
             return
+        rows = self._build_tree_rows(sections)
+        other_roots = sorted(
+            p for p in sections if "." not in p and p not in ("step", "reset")
+        )
+
+        section_w = max(38, min(96, max(len(r.display_name) for r in rows) + 2))
         header = (
-            f"  {'section':<26} {'calls':>6} {'mean(ms)':>10} {'min':>8} "
-            f"{'max':>8} {'std':>7} {'total(s)':>9} {'%par':>8}"
+            f"  {'section':<{section_w}} {'calls':>8} {'mean(ms)':>10} {'min(ms)':>10} "
+            f"{'max(ms)':>10} {'std(ms)':>10} {'total(s)':>10} {'%parent':>9}"
         )
         sep = "-" * len(header)
         lines = [
@@ -283,15 +369,21 @@ class EnvProfiler:
             header,
             sep,
         ]
+
         for root in ("step", "reset"):
             if root in sections:
-                self._print_tree(lines, root, sections, depth=0)
+                root_rows: list[_ReportRow] = []
+                self._print_tree(root_rows, root, sections, depth=0)
+                for row in root_rows:
+                    lines.append(self._format_row(row, section_w))
                 lines.append("")
-        other_roots = sorted(
-            p for p in sections if "." not in p and p not in ("step", "reset")
-        )
+
         for root in other_roots:
-            self._print_tree(lines, root, sections, depth=0)
+            root_rows = []
+            self._print_tree(root_rows, root, sections, depth=0)
+            for row in root_rows:
+                lines.append(self._format_row(row, section_w))
             lines.append("")
-        lines.append("=" * 70)
+
+        lines.append("=" * len(header))
         logger.log_info("\n".join(lines))

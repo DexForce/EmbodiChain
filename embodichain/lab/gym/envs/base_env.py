@@ -138,6 +138,9 @@ class BaseEnv(gym.Env):
         # Profiler for reset/step time & memory breakdown. Created after the
         # scene so ``self.device`` is available. No-op when cfg.profiler is None.
         self._profiler = EnvProfiler(self.cfg.profiler, self.device)
+        # Expose the env profiler to SimulationManager so sim.update internals
+        # can be profiled as children under step.sim_update.
+        setattr(self.sim, "_env_profiler", self._profiler)
 
         # TODO: To be removed.
         if self.device.type == "cuda":
@@ -381,8 +384,10 @@ class BaseEnv(gym.Env):
 
         with self._profiler.section("sensor_fetch"):
             for sensor_name, sensor in self.sensors.items():
-                sensor.update(fetch_only=fetch_only)
-                obs[sensor_name] = sensor.get_data()
+                with self._profiler.section(f"sensor_update.{sensor_name}"):
+                    sensor.update(fetch_only=fetch_only)
+                with self._profiler.section(f"sensor_get_data.{sensor_name}"):
+                    obs[sensor_name] = sensor.get_data()
         return obs
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
