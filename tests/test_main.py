@@ -29,8 +29,10 @@ EXPECTED_COMMANDS = {
     "decompose-urdf",
     "preview-asset",
     "run-env",
+    "scene-engine",
     "simready",
     "train-rl",
+    "preview-scene",
     "workspace-cache",
 }
 
