@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Browser-based visualization of simulation scenes via Viser.
+
+``SceneExporter`` produces backend-neutral snapshots, ``VisualizationRuntime`` pushes them to a Viser backend, with gizmo overlays, camera preview, and CLI helpers.
+"""
+
 from __future__ import annotations
 
 from .cli import add_viser_args_to_parser, visualization_cfg_from_args

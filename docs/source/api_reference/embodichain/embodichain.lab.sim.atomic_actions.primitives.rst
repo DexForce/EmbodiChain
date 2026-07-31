@@ -3,6 +3,19 @@ embodichain.lab.sim.atomic_actions.primitives
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives
 
+Overview
+--------
+
+Concrete implementations of the built-in atomic-action primitives. Each
+primitive is an :class:`~embodichain.lab.sim.atomic_actions.AtomicAction` that
+accepts a typed target and a
+:class:`~embodichain.lab.sim.atomic_actions.WorldState`, plans a full-DoF
+trajectory for all parallel environments, and returns an
+:class:`~embodichain.lab.sim.atomic_actions.ActionResult`. The primitives are
+chained by :class:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine`,
+which threads ``WorldState`` from one action to the next and concatenates the
+resulting trajectories along the time axis.
+
    .. rubric:: Built-in Primitive Actions
 
    .. autosummary::

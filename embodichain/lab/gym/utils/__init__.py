@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Environment utilities: the registration system (``register_env``, ``make``), Gymnasium integration helpers, miscellaneous utilities, and ``EnvProfiler`` for step/reset timing."""
+
 from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
 
 __all__ = ["EnvProfiler", "EnvProfilerCfg"]

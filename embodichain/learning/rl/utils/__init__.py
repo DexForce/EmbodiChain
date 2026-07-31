@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""RL helper utilities: the ``AlgorithmCfg`` config and data-conversion helpers (``dict_to_tensordict``, ``flatten_dict_observation``)."""
+
 from .config import AlgorithmCfg
 from .helper import dict_to_tensordict, flatten_dict_observation
 

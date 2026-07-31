@@ -14,5 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Gymnasium-compatible robot learning environment framework.
+
+Extends the Gymnasium API with multi-environment parallel execution, custom observations, and robotic-specific functionality.
+"""
+
 from . import envs
 from . import utils

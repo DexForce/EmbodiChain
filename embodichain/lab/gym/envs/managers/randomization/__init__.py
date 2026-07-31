@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Domain-randomization event functors (physics, visual, spatial, geometry).
+
+Implemented as event functors registered via ``EventCfg`` and dispatched by ``EventManager`` at startup / reset / interval modes.
+"""
+
 from .physics import *  # noqa: F401, F403
 from .visual import *  # noqa: F401, F403
 from .spatial import *  # noqa: F401, F403

@@ -6,8 +6,23 @@ embodichain.learning.rl.buffer
 Overview
 --------
 
-The ``buffer`` package provides rollout and replay buffer structures used by
-RL algorithms.
+The ``buffer`` package provides the on-policy rollout buffer used by RL
+algorithms. :class:`RolloutBuffer` owns the preallocated ``TensorDict`` storage
+that collectors fill and algorithms consume; :func:`iterate_minibatches` and
+:func:`transition_view` are helpers for slicing minibatches out of a rollout.
+
+.. rubric:: Classes
+
+.. autosummary::
+
+   RolloutBuffer
+
+.. rubric:: Functions
+
+.. autosummary::
+
+   iterate_minibatches
+   transition_view
 
 .. rubric:: Submodules
 

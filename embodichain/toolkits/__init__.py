@@ -13,3 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+"""Standalone asset-preparation and manipulation utilities usable independently of the simulation loop.
+
+Includes parallel-gripper grasp sampling, URDF convex decomposition, and URDF assembly.
+"""

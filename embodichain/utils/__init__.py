@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Shared utilities used across EmbodiChain.
+
+The ``@configclass`` decorator, ``CfgNode`` configuration system, logging, math/tensor helpers, file/string/device/image utilities, non-maximum suppression, and high-performance ``warp`` kernels.
+"""
+
 from .configclass import configclass, is_configclass
 
 GLOBAL_SEED = 1024

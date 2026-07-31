@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""High-performance Warp kernels and helpers for image processing, 3D spatial computation, robotics kinematics/trajectories, and convex collision queries."""
+
 from .kernels import reshape_tiled_image
 from . import kinematics
 from .kinematics.opw_solver import opw_fk_kernel, opw_ik_kernel

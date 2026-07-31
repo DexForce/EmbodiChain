@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Preset configuration objects for scene assets (robots, end-effectors, objects, materials, sensors, planners, solvers, demo scenes) ready to reference from task configs."""
+
 from .materials import *
 from .demo_assets import *
 from .obj_assets import *

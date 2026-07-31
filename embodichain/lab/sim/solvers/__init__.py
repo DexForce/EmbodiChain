@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Inverse-kinematics solvers sharing the ``BaseSolver`` interface.
+
+Provides analytic (SRS, OPW, UR), numerical (Pinocchio, Pink, Differential), and learning-based (PyTorch, NeuralIK) solvers, one per robot control part.
+"""
+
 from .base_solver import SolverCfg, BaseSolver
 from .pytorch_solver import PytorchSolverCfg, PytorchSolver
 from .pinocchio_solver import PinocchioSolverCfg, PinocchioSolver

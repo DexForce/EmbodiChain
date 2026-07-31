@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+"""URDF builder utilities for assembling multi-component robot models (``URDFAssemblyManager``)."""
+
 from .urdf_assembly_manager import URDFAssemblyManager
 
 __all__ = ["URDFAssemblyManager"]

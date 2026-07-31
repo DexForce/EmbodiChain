@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Helper utilities for simulation state conversion, mesh/geometry handling, configuration transforms, keyboard interaction, and action/solver adaptation."""
+
 from .sim_utils import *
 from .mesh_utils import *
 from .gizmo_utils import *

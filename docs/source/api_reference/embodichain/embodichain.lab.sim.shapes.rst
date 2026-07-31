@@ -1,16 +1,54 @@
-﻿embodichain.lab.sim.shapes
+embodichain.lab.sim.shapes
 ======================================
 
 .. automodule:: embodichain.lab.sim.shapes
 
-   
-   .. rubric:: Classes
+Overview
+--------
 
-   .. autosummary::
-   
-      CubeCfg
-      LoadOption
-      MeshCfg
-      ShapeCfg
-      SphereCfg
-   
+Geometry configuration objects used to build the collision and visual shapes of
+rigid bodies. :class:`ShapeCfg` is the common base; :class:`MeshCfg`,
+:class:`CubeCfg`, and :class:`SphereCfg` describe triangle-mesh, box, and
+sphere primitives respectively, and :class:`LoadOption` controls how mesh
+assets are loaded and decomposed.
+
+.. rubric:: Classes
+
+.. autosummary::
+
+   CubeCfg
+   LoadOption
+   MeshCfg
+   ShapeCfg
+   SphereCfg
+
+.. currentmodule:: embodichain.lab.sim.shapes
+
+.. autoclass:: ShapeCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: MeshCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: CubeCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: SphereCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: LoadOption
+   :members:
+   :undoc-members:
+   :show-inheritance:

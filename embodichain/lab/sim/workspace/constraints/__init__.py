@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Workspace constraint checkers that validate sampled configurations against the robot's limits.
+
+Provides ``BaseConstraintChecker`` / ``IConstraintChecker`` and the concrete ``WorkspaceConstraintChecker``.
+"""
+
 from .base_constraint import BaseConstraintChecker, IConstraintChecker
 from .workspace_constraint import WorkspaceConstraintChecker
 

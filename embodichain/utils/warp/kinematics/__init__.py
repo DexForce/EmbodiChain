@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Warp kinematics kernels.
+
+``opw_solver`` provides OPW-based forward/inverse kinematics and ``warp_trajectory`` computes, interpolates, and applies trajectory offsets.
+"""
+
 from . import interpolate
 from . import opw_solver
 from . import ur_solver

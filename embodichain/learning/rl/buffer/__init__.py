@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""On-policy rollout buffer (``RolloutBuffer``) owning preallocated ``TensorDict`` storage, plus minibatch iteration helpers."""
+
 from .standard_buffer import RolloutBuffer
 from .utils import iterate_minibatches, transition_view
 

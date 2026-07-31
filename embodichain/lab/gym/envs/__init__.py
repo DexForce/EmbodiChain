@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Environment framework: ``BaseEnv`` / ``EmbodiedEnv`` class hierarchy, task registration, manager wiring, and the step/reset lifecycle."""
+
 from .base_env import *
 from .embodied_env import *
 from .wrapper import *

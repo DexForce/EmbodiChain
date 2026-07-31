@@ -14,6 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Learning systems.
+
+Currently exposes the ``rl`` subpackage for on-policy reinforcement learning."""
+
 from . import rl
 
 __all__ = ["rl"]

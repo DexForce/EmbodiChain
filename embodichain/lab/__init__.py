@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""EmbodiChain's simulation laboratory.
+
+Bundles the simulation core (``sim``), the Gymnasium environment framework (``gym``), real-device controllers (``devices``), and browser visualization (``visualization``).
+"""
+
 from __future__ import annotations
 
 from . import sim

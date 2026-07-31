@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Managers that orchestrate collections of functors (observation, reward, event, action, dataset) running at specific points in the environment step loop.
+
+Each manager owns a typed ``@configclass`` config whose attributes are ``FunctorCfg`` instances; the config attribute name becomes the functor's unique identifier.
+"""
+
 from .cfg import (
     FunctorCfg,
     SceneEntityCfg,
