@@ -44,6 +44,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 MOVE_JOINTS_SAMPLE_INTERVAL = 80
@@ -125,4 +126,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

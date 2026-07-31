@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -28,13 +29,29 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_r
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    HeldObjectPoseTarget,
     WorldState,
+    _validate_pose_tensor,
 )
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectPoseTarget(ActionTarget):
+    """Desired pose for the object held by this action's control part."""
+
+    object_target_pose: torch.Tensor
+    """Target object pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+
+    def __post_init__(self) -> None:
+        _validate_pose_tensor(
+            self.object_target_pose,
+            "object_target_pose",
+            allow_waypoints=False,
+        )
 
 
 @configclass
@@ -58,7 +75,7 @@ class MoveHeldObjectCfg(ActionCfg):
     """Optional rotation in radians used by the legacy upright transport mode."""
 
 
-class MoveHeldObject(AtomicAction):
+class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
     """Move the held object to a target object pose; keep the gripper closed."""
 
     TargetType: ClassVar[type] = HeldObjectPoseTarget
@@ -83,9 +100,11 @@ class MoveHeldObject(AtomicAction):
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
     def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
-        if state.held_object is None:
+        held_object = state.get_held_object(self.cfg.control_part)
+        if held_object is None:
             logger.log_error(
-                "MoveHeldObject requires WorldState.held_object - run PickUp first.",
+                "MoveHeldObject requires an object held by control part "
+                f"{self.cfg.control_part!r} - run PickUp first.",
                 ValueError,
             )
         object_target_pose = resolve_object_target(
@@ -104,9 +123,9 @@ class MoveHeldObject(AtomicAction):
             self._apply_configured_upright_rotation(
                 object_target_pose,
                 end_arm_xpos,
-                state.held_object.semantics.entity.get_local_pose(to_matrix=True),
+                held_object.semantics.entity.get_local_pose(to_matrix=True),
             )
-        object_to_eef = state.held_object.object_to_eef.to(
+        object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
         if object_to_eef.shape == (4, 4):
@@ -141,10 +160,8 @@ class MoveHeldObject(AtomicAction):
         return ActionResult(
             success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -239,4 +256,4 @@ class MoveHeldObject(AtomicAction):
         )
 
 
-__all__ = ["MoveHeldObject", "MoveHeldObjectCfg"]
+__all__ = ["HeldObjectPoseTarget", "MoveHeldObject", "MoveHeldObjectCfg"]

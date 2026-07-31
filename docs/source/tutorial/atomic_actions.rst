@@ -15,8 +15,12 @@ Key Features
 
 - **Typed targets** — every action accepts a small target dataclass such as
   ``EndEffectorPoseTarget``, ``JointPositionTarget``, ``NamedJointPositionTarget``,
-  ``GraspTarget`` (wrapping an ``ObjectSemantics``), or ``HeldObjectPoseTarget``. The
+  ``PlaceTarget``, ``PressTarget``, ``GraspTarget`` (wrapping an
+  ``ObjectSemantics``), or
+  ``HeldObjectPoseTarget``. The
   engine checks each step's target against the action's declared ``TargetType`` before running.
+  Object-centric targets may inherit ``ObjectActionTarget`` to share the
+  ``semantics`` contract without sharing action-specific pose fields.
 - **Built-in primitives** — ``MoveEndEffector``, ``MoveJoints``, ``PickUp``, ``MoveHeldObject``,
   ``Place``, ``Press``, ``CoordinatedPickment``, and ``CoordinatedPlacement``
   cover the most common tabletop manipulation workflows out of the box.
@@ -25,7 +29,7 @@ Key Features
   ``register_action``; action *instances* are registered per-engine under a name.
 - **Engine orchestration** — ``AtomicActionEngine.run(steps, state)`` sequences named
   ``(name, typed_target)`` steps, threads a ``WorldState`` (``last_qpos`` +
-  ``held_object`` / ``coordinated_held_object``)
+  ``held_objects`` / ``coordinated_held_objects``)
   from one action into the next, and returns a single concatenated full-DOF trajectory
   ready to replay in the simulator.
 
@@ -159,7 +163,11 @@ Executing a pick-place-end-effector sequence
 
 .. code-block:: python
 
-   from embodichain.lab.sim.atomic_actions import GraspTarget, EndEffectorPoseTarget
+   from embodichain.lab.sim.atomic_actions import (
+       GraspTarget,
+       EndEffectorPoseTarget,
+       PlaceTarget,
+   )
 
    place_xpos = ...  # torch.Tensor [4, 4] — target placement pose
    rest_xpos  = ...  # torch.Tensor [4, 4] — resting pose after placing
@@ -167,7 +175,7 @@ Executing a pick-place-end-effector sequence
    is_success, trajectory, _ = engine.run(
        steps=[
            ("pick_up", GraspTarget(semantics=semantics)),
-           ("place",   EndEffectorPoseTarget(xpos=place_xpos)),
+           ("place",   PlaceTarget(xpos=place_xpos)),
            ("move_end_effector", EndEffectorPoseTarget(xpos=rest_xpos)),
        ]
    )
@@ -204,7 +212,7 @@ Moving a held object
 ~~~~~~~~~~~~~~~~~~~~
 
 ``MoveHeldObject`` consumes the runtime ``HeldObjectState`` produced by a previous
-``PickUp`` (read from the threaded ``WorldState.held_object``). The target is
+``PickUp`` (read from ``WorldState.held_objects[control_part]``). The target is
 object-centric: the caller specifies where the held object should move, and the action
 converts that pose into an end-effector target via the stored object-to-EEF transform while
 keeping the gripper closed.
@@ -238,19 +246,25 @@ Registering custom actions
 
 .. code-block:: python
 
+   from dataclasses import dataclass
    from typing import ClassVar
+   import torch
    from embodichain.lab.sim.atomic_actions import (
-       AtomicAction, ActionResult, ActionCfg, EndEffectorPoseTarget, WorldState, TrajectoryBuilder,
+       ActionTarget, AtomicAction, ActionResult, WorldState, TrajectoryBuilder,
    )
 
-   class Push(AtomicAction):
-       TargetType: ClassVar[type] = EndEffectorPoseTarget
+   @dataclass(frozen=True, slots=True, eq=False)
+   class PushTarget(ActionTarget):
+       xpos: torch.Tensor
+
+   class Push(AtomicAction[PushTarget]):
+       TargetType: ClassVar[type] = PushTarget
 
        def __init__(self, motion_generator, cfg: PushCfg | None = None):
            super().__init__(motion_generator, cfg or PushCfg())
            self.builder = TrajectoryBuilder(motion_generator)
 
-       def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+       def execute(self, target: PushTarget, state: WorldState) -> ActionResult:
            # ... your planning logic, using self.builder ...
            return ActionResult(success=is_success, trajectory=full, next_state=...)
 
@@ -272,4 +286,8 @@ Notes & Best Practices
 - For static (non-physics) playback, iterate over ``trajectory[:, i]`` and call
   ``robot.set_qpos`` directly; for physics-enabled playback, feed waypoints through your
   controller or gym wrapper instead.
+- Define an action-specific target beside its action implementation. If multiple actions
+  genuinely share part of a target contract, extract only that minimal base into
+  ``atomic_actions/targets.py`` instead of importing from another primitive. Do not use a
+  generic ``xpos`` for object, single-arm EEF, and dual-arm EEF poses; name each pose role.
 - To add a new action type, see :doc:`/overview/sim/atomic_actions/index`.

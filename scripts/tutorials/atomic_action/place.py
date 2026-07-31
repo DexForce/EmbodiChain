@@ -31,12 +31,12 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
-    EndEffectorPoseTarget,
     GraspTarget,
     PickUp,
     PickUpCfg,
     Place,
     PlaceCfg,
+    PlaceTarget,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -55,6 +55,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     initialize_pre_pick_robot_pose,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 OBJECT_SIZE = (0.05, 0.05, 0.05)
@@ -179,7 +180,7 @@ def main() -> None:
             ("pick_up", GraspTarget(semantics)),
             (
                 "place",
-                EndEffectorPoseTarget(
+                PlaceTarget(
                     broadcast_waypoint_pose_batch(
                         place_poses, robot.get_qpos().shape[0]
                     )
@@ -218,4 +219,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

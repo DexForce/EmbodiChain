@@ -21,7 +21,7 @@ AtomicActionEngine          ← orchestrates a sequence of (name, typed_target) 
     │       └── MotionGenerator   ← low-level trajectory planner (IK + trajectory optimization)
     │
     └── WorldState           ← threaded action-to-action
-                               (last_qpos + held_object/coordinated_held_object)
+                               (last_qpos + per-control-part held-object maps)
 ```
 
 Each action receives a typed target and a `WorldState`, runs its planning pipeline, and
@@ -32,10 +32,12 @@ trajectories into one contiguous sequence:
 ```
 GraspTarget(semantics, grasp_xpos=None) ──► AtomicAction.execute(target, state)
 EndEffectorPoseTarget(xpos)                │
+PlaceTarget(xpos, tcp_symmetry)            │
+PressTarget(xpos)                          │
 JointPositionTarget(qpos)                  ├─ IK solve when pose-based
 NamedJointPositionTarget(name)             ├─ Motion plan / interpolation
 HeldObjectPoseTarget(pose)                 └─ Gripper interpolation when needed
-CoordinatedPickmentTarget(...)             │
+CoordinatedPickTarget(...)                 │
 CoordinatedPlacementTarget(...)            │
                                                    │
                                            ActionResult
@@ -58,21 +60,38 @@ the held object's semantics and object-to-end-effector transform so later action
 object without recomputing the grasp. It is intentionally separate from `ObjectSemantics`,
 which remains a reusable object description rather than per-execution robot state.
 
-**Typed targets** describe *where* an action should go. Each one is a small frozen dataclass,
-and every action declares the target type, or tuple of target types, it accepts via its
-`TargetType` class variable:
+**Typed targets** describe *where* an action should go. Each one is a small frozen,
+identity-equality dataclass inheriting the open `ActionTarget` marker. Every action
+declares the target type, or tuple of target types, it accepts via its `TargetType`
+class variable. Object-centric actions can share the semantic-object contract
+provided by `ObjectActionTarget`, while keeping their pose roles action-specific:
 
 | Target | Constructor | Used by |
 |---|---|---|
-| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | `MoveEndEffector`, `Place`, `Press` |
+| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos)` | `MoveEndEffector` |
+| `PlaceTarget` | `PlaceTarget(xpos, tcp_symmetry="none")` | `Place` |
+| `PressTarget` | `PressTarget(xpos)` | `Press` |
 | `JointPositionTarget` | `JointPositionTarget(qpos)` | `MoveJoints` |
 | `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
 | `GraspTarget` | `GraspTarget(semantics, grasp_xpos=None)` | `PickUp` |
 | `HeldObjectPoseTarget` | `HeldObjectPoseTarget(object_target_pose)` | `MoveHeldObject` |
-| `CoordinatedPickmentTarget` | `CoordinatedPickmentTarget(...)` | `CoordinatedPickment` |
+| `CoordinatedPickTarget` | `CoordinatedPickTarget(...)` | `CoordinatedPickment` |
 | `CoordinatedPlacementTarget` | `CoordinatedPlacementTarget(...)` | `CoordinatedPlacement` |
 
-`Target` is the union of these typed target dataclasses.
+`Target` is a compatibility alias of the open `ActionTarget` marker.
+`BuiltinTarget` is the closed union of target types shipped by EmbodiChain.
+`CoordinatedPickmentTarget` remains an alias of `CoordinatedPickTarget`.
+`GraspTarget` and `CoordinatedPickTarget` inherit
+`ObjectActionTarget(semantics)`, but only `GraspTarget` defines the optional
+single-arm `grasp_xpos`.
+
+Action-exclusive target classes live beside their owning primitive under
+`atomic_actions/primitives/`. They are re-exported from
+`embodichain.lab.sim.atomic_actions`, which remains the stable public import
+surface. Shared target contracts such as `ObjectActionTarget` live in the
+neutral `atomic_actions/targets.py` module instead of introducing dependencies
+between primitive implementations. The shared base deliberately has no generic
+`xpos`: object poses and single-/dual-arm EEF poses have different meanings.
 
 **`Affordance`** is a data class that encodes a specific interaction capability. The built-in affordance types are:
 
@@ -103,25 +122,32 @@ action's `TargetType` before calling `execute`:
 
 | Target | Holds | Accepted by |
 |---|---|---|
-| `EndEffectorPoseTarget(xpos, tcp_symmetry="none")` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)`; `Place` may opt into TCP z-roll 180 equivalence | `MoveEndEffector`, `Place`, `Press` |
+| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)` | `MoveEndEffector` |
+| `PlaceTarget(xpos, tcp_symmetry="none")` | Release EEF pose; placement may opt into TCP z-roll 180 equivalence | `Place` |
+| `PressTarget(xpos)` | One EEF contact pose `(4,4)` or `(n_envs,4,4)` | `Press` |
 | `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)` | `MoveJoints` |
 | `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
 | `GraspTarget(semantics, grasp_xpos=None)` | `ObjectSemantics` plus an optional preselected TCP grasp pose | `PickUp` |
 | `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
-| `CoordinatedPickmentTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
-| `CoordinatedPlacementTarget(...)` | Two held-object states plus object-centric placing/support target poses | `CoordinatedPlacement` |
+| `CoordinatedPickTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
+| `CoordinatedPlacementTarget(...)` | Object-centric placing/support target poses and per-call overrides | `CoordinatedPlacement` |
 
-`WorldState` is threaded between actions and carries the robot's `last_qpos` plus optional
-`held_object: HeldObjectState` and `coordinated_held_object: CoordinatedHeldObjectState`.
+Both object-grasp targets expose `semantics` through `ObjectActionTarget`.
+`CoordinatedPickTarget` names its object and dual-arm pose roles explicitly, so
+an unsupported single-arm `grasp_xpos` cannot be silently ignored.
+
+`WorldState` is threaded between actions and carries the robot's `last_qpos` plus
+`held_objects: dict[str, HeldObjectState]` and
+`coordinated_held_objects: dict[tuple[str, str], CoordinatedHeldObjectState]`.
 The built-in actions update it as follows:
 
-| Action | Effect on `held_object` |
+| Action | Effect on held-object maps |
 |---|---|
-| `PickUp` | Populates it (computed object-to-EEF transform) |
-| `MoveHeldObject` | Requires it; preserves it unchanged |
-| `Place` | Clears it to `None` |
-| `CoordinatedPickment` | Leaves `held_object` as `None` and populates `coordinated_held_object` |
-| `CoordinatedPlacement` | Returns the support arm's `HeldObjectState`; the placing object is released |
+| `PickUp` | Populates `held_objects[cfg.control_part]` |
+| `MoveHeldObject` | Requires and preserves `held_objects[cfg.control_part]` |
+| `Place` | Removes its `cfg.control_part` entry |
+| `CoordinatedPickment` | Removes both individual arm entries and populates their coordinated pair |
+| `CoordinatedPlacement` | Reads both individual arm entries; removes only the placing entry when releasing |
 | `MoveEndEffector` | Leaves it unchanged |
 | `MoveJoints` | Leaves it unchanged |
 | `Press` | Leaves it unchanged |
@@ -140,6 +166,7 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     GraspTarget,
     EndEffectorPoseTarget,
+    PlaceTarget,
     JointPositionTarget,
     NamedJointPositionTarget,
     HeldObjectPoseTarget,
@@ -213,7 +240,7 @@ is_success, traj, final_state = engine.run(
     steps=[
         ("pick_up", GraspTarget(semantics=semantics)),
         ("move_held_object", HeldObjectPoseTarget(object_target_pose=carry_pose)),
-        ("place", EndEffectorPoseTarget(xpos=place_pose)),
+        ("place", PlaceTarget(xpos=place_pose)),
         ("move_joints", NamedJointPositionTarget(name="home")),
     ]
 )
@@ -247,14 +274,23 @@ class PushCfg(ActionCfg):
 ### Step 2 — Implement the action
 
 ```python
+from dataclasses import dataclass
 import torch
 from typing import ClassVar
 from embodichain.lab.sim.atomic_actions import (
-    AtomicAction, ActionResult, EndEffectorPoseTarget, Target, WorldState, TrajectoryBuilder,
+    ActionTarget, AtomicAction, ActionResult, WorldState, TrajectoryBuilder,
 )
 
-class Push(AtomicAction):
-    TargetType: ClassVar[type] = EndEffectorPoseTarget
+@dataclass(frozen=True, slots=True, eq=False)
+class PushTarget(ActionTarget):
+    xpos: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if self.xpos.shape[-2:] != (4, 4) or self.xpos.dim() not in (2, 3):
+            raise ValueError("xpos must have shape (4, 4) or (n_envs, 4, 4)")
+
+class Push(AtomicAction[PushTarget]):
+    TargetType: ClassVar[type] = PushTarget
 
     def __init__(self, motion_generator, cfg: PushCfg | None = None):
         super().__init__(motion_generator, cfg or PushCfg())
@@ -263,15 +299,14 @@ class Push(AtomicAction):
         self.robot_dof = self.robot.dof
         self.n_envs = self.robot.get_qpos().shape[0]
 
-    def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
+    def execute(self, target: PushTarget, state: WorldState) -> ActionResult:
         # ... your planning logic, using self.builder for IK / interpolation ...
         # full must be shaped (n_envs, n_waypoints, robot.dof)
         return ActionResult(
             success=is_success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,  # push does not change what is held
             ),
         )
 ```
@@ -281,11 +316,9 @@ class Push(AtomicAction):
 Register an instance with the engine so it can be referenced by name in `run()`:
 
 ```python
-from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
-
 engine.register(Push(motion_gen, cfg=PushCfg(push_distance=0.08)))
 is_success, traj, final_state = engine.run(
-    steps=[("push", EndEffectorPoseTarget(xpos=target_pose))]
+    steps=[("push", PushTarget(xpos=target_pose))]
 )
 ```
 

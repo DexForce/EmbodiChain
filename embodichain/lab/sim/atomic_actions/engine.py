@@ -22,9 +22,9 @@ from typing import Iterable, TYPE_CHECKING
 from embodichain.utils import logger
 
 from .core import (
+    ActionTarget,
     ActionResult,
     AtomicAction,
-    Target,
     WorldState,
 )
 
@@ -83,12 +83,26 @@ class AtomicActionEngine:
 
     def register(self, action: AtomicAction, *, name: str | None = None) -> None:
         """Register an action instance under ``name`` or its ``cfg.name``."""
+        declared_target_type = getattr(action, "TargetType", None)
+        target_types = (
+            declared_target_type
+            if isinstance(declared_target_type, tuple)
+            else (declared_target_type,)
+        )
+        if not target_types or not all(
+            isinstance(target_type, type) and issubclass(target_type, ActionTarget)
+            for target_type in target_types
+        ):
+            logger.log_error(
+                "AtomicAction.TargetType must contain ActionTarget subclasses.",
+                TypeError,
+            )
         key = name if name is not None else action.cfg.name
         self._actions[key] = action
 
     def run(
         self,
-        steps: Iterable[tuple[str, Target]],
+        steps: Iterable[tuple[str, ActionTarget]],
         state: WorldState | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, WorldState]:
         """Run a sequence of named actions, threading WorldState through.
@@ -146,9 +160,10 @@ class AtomicActionEngine:
             held_rows = prev_last_qpos.unsqueeze(1).repeat(1, traj.shape[1], 1)
             traj = torch.where(alive[:, None, None], traj, held_rows)
             full_traj = torch.cat([full_traj, traj], dim=1)
-            state = result.next_state
-            state.last_qpos = torch.where(
-                alive[:, None], state.last_qpos, prev_last_qpos
+            state = result.next_state.with_updates(
+                last_qpos=torch.where(
+                    alive[:, None], result.next_state.last_qpos, prev_last_qpos
+                )
             )
 
         return alive, full_traj, state

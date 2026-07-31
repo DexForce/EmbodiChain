@@ -222,7 +222,9 @@ def _run_case(
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
-        held_created = bool(is_success and final_state.held_object is not None)
+        held_created = bool(
+            is_success and final_state.get_held_object("arm") is not None
+        )
         physical_pick_success = bool(
             held_created
             and object_lift_delta_m is not None

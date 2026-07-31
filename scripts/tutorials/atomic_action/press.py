@@ -36,6 +36,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveEndEffectorCfg,
     Press,
     PressCfg,
+    PressTarget,
 )
 from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
@@ -56,6 +57,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     make_top_down_eef_pose,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 MOVE_SAMPLE_INTERVAL = 60
@@ -192,7 +194,7 @@ def main() -> None:
     success, trajectory, _ = engine.run(
         [
             ("move_end_effector", EndEffectorPoseTarget(move_target)),
-            ("press", EndEffectorPoseTarget(press_target)),
+            ("press", PressTarget(press_target)),
         ]
     )
     if not success.all():
@@ -238,4 +240,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

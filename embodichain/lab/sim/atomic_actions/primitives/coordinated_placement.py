@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -27,14 +28,47 @@ from embodichain.utils import configclass, logger
 
 from ._helpers import resolve_object_target
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    CoordinatedPlacementTarget,
     HeldObjectState,
     WorldState,
+    _validate_pose_tensor,
 )
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class CoordinatedPlacementTarget(ActionTarget):
+    """Object-centric target for dual-arm coordinated placement."""
+
+    placing_object_target_pose: torch.Tensor
+    """Target pose for the object released by the placing arm."""
+
+    support_object_target_pose: torch.Tensor
+    """Target pose for the object held by the support arm."""
+
+    placing_height_offset: float | None = None
+    """World-Z offset above the placing object target pose."""
+
+    support_height_offset: float | None = None
+    """World-Z offset above the support object target pose."""
+
+    release: bool | None = None
+    """Whether the placing hand releases. ``None`` uses the action config."""
+
+    def __post_init__(self) -> None:
+        _validate_pose_tensor(
+            self.placing_object_target_pose,
+            "placing_object_target_pose",
+            allow_waypoints=False,
+        )
+        _validate_pose_tensor(
+            self.support_object_target_pose,
+            "support_object_target_pose",
+            allow_waypoints=False,
+        )
 
 
 @configclass
@@ -91,7 +125,7 @@ class CoordinatedPlacementCfg(ActionCfg):
     """Number of waypoints used for the placing-arm lift retreat."""
 
 
-class CoordinatedPlacement(AtomicAction):
+class CoordinatedPlacement(AtomicAction[CoordinatedPlacementTarget]):
     """Coordinate two held objects: support object below, placing object above."""
 
     TargetType: ClassVar[type] = CoordinatedPlacementTarget
@@ -159,9 +193,13 @@ class CoordinatedPlacement(AtomicAction):
     def execute(
         self, target: CoordinatedPlacementTarget, state: WorldState
     ) -> ActionResult:
-        placing_xpos, support_xpos, release, support_held_object = self._resolve_target(
-            target
-        )
+        (
+            placing_xpos,
+            support_xpos,
+            release,
+            placing_held_object,
+            support_held_object,
+        ) = self._resolve_target(target, state)
         placing_start_qpos, support_start_qpos = self._resolve_start_qpos(state)
         segments = self._compute_segment_lengths(release)
 
@@ -258,12 +296,28 @@ class CoordinatedPlacement(AtomicAction):
             ],
             dim=1,
         )
+        held_objects = dict(state.held_objects)
+        if release:
+            held_objects.pop(self.cfg.placing_arm_control_part, None)
+        else:
+            held_objects[self.cfg.placing_arm_control_part] = placing_held_object
+        held_objects[self.cfg.support_arm_control_part] = support_held_object
+        involved_control_parts = {
+            self.cfg.placing_arm_control_part,
+            self.cfg.support_arm_control_part,
+        }
+        coordinated_held_objects = {
+            key: value
+            for key, value in state.coordinated_held_objects.items()
+            if involved_control_parts.isdisjoint(key)
+        }
         return ActionResult(
             success=True,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=support_held_object,
+                held_objects=held_objects,
+                coordinated_held_objects=coordinated_held_objects,
             ),
         )
 
@@ -341,7 +395,28 @@ class CoordinatedPlacement(AtomicAction):
     def _resolve_target(
         self,
         target: CoordinatedPlacementTarget,
-    ) -> tuple[torch.Tensor, torch.Tensor, bool, HeldObjectState]:
+        state: WorldState,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        bool,
+        HeldObjectState,
+        HeldObjectState,
+    ]:
+        placing_held_object = state.get_held_object(self.cfg.placing_arm_control_part)
+        if placing_held_object is None:
+            logger.log_error(
+                "CoordinatedPlacement requires an object held by placing control "
+                f"part {self.cfg.placing_arm_control_part!r}.",
+                ValueError,
+            )
+        support_held_object = state.get_held_object(self.cfg.support_arm_control_part)
+        if support_held_object is None:
+            logger.log_error(
+                "CoordinatedPlacement requires an object held by support control "
+                f"part {self.cfg.support_arm_control_part!r}.",
+                ValueError,
+            )
         placing_height_offset = (
             self.cfg.placing_height_offset
             if target.placing_height_offset is None
@@ -363,11 +438,11 @@ class CoordinatedPlacement(AtomicAction):
             "support_object_target_pose",
         )
         placing_object_to_eef = self._resolve_object_to_eef(
-            target.placing_held_object,
+            placing_held_object,
             "placing_held_object",
         )
         support_object_to_eef = self._resolve_object_to_eef(
-            target.support_held_object,
+            support_held_object,
             "support_held_object",
         )
         placing_xpos = torch.bmm(placing_object_pose, placing_object_to_eef)
@@ -378,7 +453,12 @@ class CoordinatedPlacement(AtomicAction):
             support_xpos,
             release,
             self._resolve_held_state(
-                target.support_held_object,
+                placing_held_object,
+                "placing_held_object",
+                placing_object_to_eef,
+            ),
+            self._resolve_held_state(
+                support_held_object,
                 "support_held_object",
                 support_object_to_eef,
             ),
@@ -480,4 +560,8 @@ class CoordinatedPlacement(AtomicAction):
         )
 
 
-__all__ = ["CoordinatedPlacement", "CoordinatedPlacementCfg"]
+__all__ = [
+    "CoordinatedPlacement",
+    "CoordinatedPlacementCfg",
+    "CoordinatedPlacementTarget",
+]

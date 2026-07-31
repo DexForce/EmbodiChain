@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -38,12 +39,31 @@ from ..core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
-    GraspTarget,
     HeldObjectState,
     ObjectSemantics,
     WorldState,
+    _validate_pose_tensor,
 )
+from ..targets import ObjectActionTarget
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class GraspTarget(ObjectActionTarget):
+    """Pickup target with an affordance-selected or supplied grasp pose."""
+
+    grasp_xpos: torch.Tensor | None = None
+    """Optional end-effector grasp pose.
+
+    When omitted, :class:`PickUp` selects a grasp from the target affordance.
+    Supplying a pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)`` skips grasp
+    sampling.
+    """
+
+    def __post_init__(self) -> None:
+        ObjectActionTarget.__post_init__(self)
+        if self.grasp_xpos is not None:
+            _validate_pose_tensor(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
 
 
 @configclass
@@ -88,7 +108,7 @@ class PickUpCfg(ActionCfg):
     """Optional rotation (radians) about the grasp x-axis to apply after grasp selection."""
 
 
-class PickUp(AtomicAction):
+class PickUp(AtomicAction[GraspTarget]):
     """Approach a grasp pose, close the gripper, lift."""
 
     TargetType: ClassVar[type] = GraspTarget
@@ -241,13 +261,20 @@ class PickUp(AtomicAction):
         held = HeldObjectState(
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
+        held_objects = dict(state.held_objects)
+        held_objects[self.cfg.control_part] = held
+        coordinated_held_objects = {
+            key: value
+            for key, value in state.coordinated_held_objects.items()
+            if self.cfg.control_part not in key
+        }
         return ActionResult(
             success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=held,
-                coordinated_held_object=state.coordinated_held_object,
+                held_objects=held_objects,
+                coordinated_held_objects=coordinated_held_objects,
             ),
         )
 
@@ -483,4 +510,4 @@ class PickUp(AtomicAction):
         return adjusted_grasp_xpos
 
 
-__all__ = ["PickUp", "PickUpCfg"]
+__all__ = ["GraspTarget", "PickUp", "PickUpCfg"]

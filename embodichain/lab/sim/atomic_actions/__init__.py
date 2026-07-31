@@ -31,19 +31,13 @@ from .affordance import (
     InteractionPoints,
 )
 from .core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
     CoordinatedHeldObjectState,
-    CoordinatedPickmentTarget,
-    CoordinatedPlacementTarget,
-    GraspTarget,
     HeldObjectState,
-    HeldObjectPoseTarget,
-    JointPositionTarget,
-    NamedJointPositionTarget,
     ObjectSemantics,
-    EndEffectorPoseTarget,
     Target,
     WorldState,
 )
@@ -53,42 +47,75 @@ from .engine import (
     unregister_action,
     get_registered_actions,
 )
+from .targets import ObjectActionTarget
 from .primitives import (
+    CoordinatedPickTarget,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
+    CoordinatedPickmentTarget,
     CoordinatedPlacement,
     CoordinatedPlacementCfg,
+    CoordinatedPlacementTarget,
+    EndEffectorPoseTarget,
+    GraspTarget,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
     MoveEndEffector,
     MoveEndEffectorCfg,
     MoveHeldObject,
     MoveHeldObjectCfg,
     MoveJoints,
     MoveJointsCfg,
+    NamedJointPositionTarget,
     PickUp,
     PickUpCfg,
     Place,
     PlaceCfg,
+    PlaceTarget,
     Press,
     PressCfg,
+    PressTarget,
 )
 from .trajectory import TrajectoryBuilder
 
+BuiltinTarget = (
+    EndEffectorPoseTarget
+    | JointPositionTarget
+    | NamedJointPositionTarget
+    | GraspTarget
+    | HeldObjectPoseTarget
+    | PlaceTarget
+    | PressTarget
+    | CoordinatedPickTarget
+    | CoordinatedPlacementTarget
+)
+"""Union of target types shipped by EmbodiChain.
+
+Use :class:`ActionTarget` rather than this closed union at extension boundaries.
+"""
+
 __all__ = [
     # Core classes
+    "ActionTarget",
     "Affordance",
     "AntipodalAffordance",
     "InteractionPoints",
     "ObjectSemantics",
+    "ObjectActionTarget",
     "HeldObjectState",
     "CoordinatedHeldObjectState",
     "HeldObjectPoseTarget",
     "JointPositionTarget",
     "NamedJointPositionTarget",
     "EndEffectorPoseTarget",
+    "PlaceTarget",
+    "PressTarget",
+    "CoordinatedPickTarget",
     "CoordinatedPickmentTarget",
     "CoordinatedPlacementTarget",
     "GraspTarget",
     "Target",
+    "BuiltinTarget",
     "WorldState",
     "ActionResult",
     "ActionCfg",

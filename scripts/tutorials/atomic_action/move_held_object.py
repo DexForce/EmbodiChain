@@ -58,6 +58,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     make_eef_pose_at,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 OBJECT_MESH_PATH = "PaperCup/paper_cup.ply"
@@ -211,4 +212,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

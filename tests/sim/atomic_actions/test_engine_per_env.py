@@ -22,14 +22,14 @@ import torch
 import pytest
 from unittest.mock import Mock
 
-from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
 from embodichain.lab.sim.atomic_actions.core import (
+    ActionCfg,
     ActionResult,
     AtomicAction,
     WorldState,
-    EndEffectorPoseTarget,
-    ActionCfg,
 )
+from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
 
 
 class _StubAction(AtomicAction):
