@@ -46,6 +46,13 @@ def build_algo(
     distributed: bool = False,
 ):
     key = name.lower()
+    if key == "apg":
+        raise ValueError(
+            "APG uses differentiable rollouts and is not supported by the "
+            "standard build_algo()/train.py path. Construct APG with "
+            "DifferentiableTrainer directly, or use the experimental Newton "
+            "training entry point."
+        )
     if key not in _ALGO_REGISTRY:
         raise ValueError(
             f"Algorithm '{name}' not found. Available: {get_registered_algo_names()}"

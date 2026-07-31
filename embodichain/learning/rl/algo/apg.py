@@ -76,7 +76,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self._discount: torch.Tensor | None = None
         self._loss_total = 0.0
         self._objective_total = 0.0
-        self._entropy_weighted_total = 0.0
+        self._entropy_total = 0.0
         self._num_accumulated_steps = 0
 
     def update(self, rollout: DifferentiableRollout) -> Dict[str, float]:
@@ -106,7 +106,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self._discount = None
         self._loss_total = 0.0
         self._objective_total = 0.0
-        self._entropy_weighted_total = 0.0
+        self._entropy_total = 0.0
         self._num_accumulated_steps = 0
 
     def accumulate_segment(self, rollout: DifferentiableRollout) -> None:
@@ -120,16 +120,16 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         if rollout.num_steps == 0:
             raise ValueError("APG requires a non-empty differentiable rollout.")
 
-        returns, self._discount = self._discounted_return(
+        returns, entropy_returns, self._discount = self._discounted_terms(
             rollout,
             initial_discount=self._discount,
         )
         objective = returns.mean()
-        entropy = self._mean_entropy(rollout)
+        entropy = entropy_returns.mean()
         loss = -objective - self.cfg.ent_coef * entropy
         self._loss_total += float(loss.detach())
         self._objective_total += float(objective.detach())
-        self._entropy_weighted_total += float(entropy.detach()) * rollout.num_steps
+        self._entropy_total += float(entropy.detach())
         self._num_accumulated_steps += rollout.num_steps
 
         if not bool(torch.isfinite(loss)):
@@ -190,35 +190,30 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self.optimizer.zero_grad(set_to_none=True)
         self._update_active = False
 
-    def _discounted_return(
+    def _discounted_terms(
         self,
         rollout: DifferentiableRollout,
         initial_discount: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         discount = (
             torch.ones_like(rollout.transitions[0].reward)
             if initial_discount is None
             else initial_discount
         )
         returns = torch.zeros_like(discount)
+        entropy_returns = torch.zeros_like(discount)
         for transition in rollout.transitions:
             returns = returns + discount * transition.reward
+            if "entropy" in transition.policy_output.keys():
+                entropy_returns = (
+                    entropy_returns + discount * transition.policy_output["entropy"]
+                )
             discount = torch.where(
                 transition.done,
                 torch.ones_like(discount),
                 discount * self.cfg.gamma,
             )
-        return returns, discount
-
-    def _mean_entropy(self, rollout: DifferentiableRollout) -> torch.Tensor:
-        entropies = [
-            transition.policy_output["entropy"]
-            for transition in rollout.transitions
-            if "entropy" in transition.policy_output.keys()
-        ]
-        if not entropies:
-            return rollout.rewards.new_zeros(())
-        return torch.stack(entropies).mean()
+        return returns, entropy_returns, discount
 
     def _accumulated_metrics(
         self,
@@ -229,7 +224,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         return {
             "loss": self._loss_total,
             "objective": self._objective_total,
-            "entropy": self._entropy_weighted_total / self._num_accumulated_steps,
+            "entropy": self._entropy_total,
             "grad_norm": grad_norm,
             "skipped_update": skipped_update,
         }

@@ -70,13 +70,20 @@ class _QuadraticActionEnv:
         return self._state
 
 
-def _make_components() -> tuple[_QuadraticActionEnv, ActorOnly, APG]:
+def _make_components(
+    ent_coef: float = 0.0,
+) -> tuple[_QuadraticActionEnv, ActorOnly, APG]:
     env = _QuadraticActionEnv()
     actor = nn.Linear(1, 1, bias=False)
     nn.init.constant_(actor.weight, 0.5)
     policy = ActorOnly(1, 1, env.device, actor=actor)
     algorithm = APG(
-        APGCfg(device="cpu", learning_rate=0.05, max_grad_norm=10.0),
+        APGCfg(
+            device="cpu",
+            learning_rate=0.05,
+            max_grad_norm=10.0,
+            ent_coef=ent_coef,
+        ),
         policy,
     )
     return env, policy, algorithm
@@ -106,7 +113,7 @@ def test_trainer_updates_policy_and_detaches_each_segment() -> None:
 
 
 def test_update_horizon_keeps_optimizer_budget_fixed_across_segment_lengths() -> None:
-    short_env, short_policy, short_algorithm = _make_components()
+    short_env, short_policy, short_algorithm = _make_components(ent_coef=0.2)
     short_trainer = DifferentiableTrainer(
         DifferentiableTrainerCfg(
             segment_length=2,
@@ -117,7 +124,7 @@ def test_update_horizon_keeps_optimizer_budget_fixed_across_segment_lengths() ->
         short_policy,
         short_algorithm,
     )
-    long_env, long_policy, long_algorithm = _make_components()
+    long_env, long_policy, long_algorithm = _make_components(ent_coef=0.2)
     long_trainer = DifferentiableTrainer(
         DifferentiableTrainerCfg(
             segment_length=4,
@@ -139,7 +146,12 @@ def test_update_horizon_keeps_optimizer_budget_fixed_across_segment_lengths() ->
         long_summary["last_train_metrics"]["train/objective"],
         rel=1e-6,
     )
+    assert short_summary["last_train_metrics"]["train/entropy"] == pytest.approx(
+        long_summary["last_train_metrics"]["train/entropy"],
+        rel=1e-6,
+    )
     assert torch.allclose(short_policy.actor.weight, long_policy.actor.weight)
+    assert torch.allclose(short_policy.log_std, long_policy.log_std)
 
 
 def test_update_horizon_must_be_divisible_by_segment_length() -> None:

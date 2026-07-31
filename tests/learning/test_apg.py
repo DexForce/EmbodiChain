@@ -29,6 +29,7 @@ from tensordict import TensorDict
 from embodichain.learning.rl.algo import (
     APG,
     APGCfg,
+    build_algo,
     get_registered_algo_names,
     segmented_discounted_return,
 )
@@ -110,6 +111,13 @@ def _objective_at(weight: float) -> float:
 
 def test_apg_is_not_registered_with_standard_trainer() -> None:
     assert "apg" not in get_registered_algo_names()
+    with pytest.raises(ValueError, match="differentiable rollouts"):
+        build_algo(
+            "apg",
+            {},
+            _make_policy(),
+            torch.device("cpu"),
+        )
 
 
 def test_segmented_discounted_return_restarts_discount_after_done() -> None:
@@ -135,6 +143,39 @@ def test_segmented_discounted_return_restarts_discount_after_done() -> None:
     returns = segmented_discounted_return(rollout, gamma=0.5)
 
     assert torch.equal(returns, torch.tensor([5.0]))
+
+
+def test_apg_entropy_uses_reward_discount_and_done_reset_semantics() -> None:
+    policy = _make_policy()
+    observation = torch.zeros((1, 1))
+    transitions = []
+    for entropy, done in ((1.0, True), (2.0, False), (4.0, False)):
+        transitions.append(
+            DifferentiableTransition(
+                observation=observation,
+                policy_output=TensorDict(
+                    {
+                        "action": torch.zeros((1, 1)),
+                        "entropy": torch.tensor([entropy]) + policy.log_std[0],
+                    },
+                    batch_size=[1],
+                ),
+                reward=policy.actor.weight.sum().reshape(1) * 0.0,
+                terminated=torch.tensor([done]),
+                truncated=torch.tensor([False]),
+                next_observation=observation,
+                info={},
+            )
+        )
+    rollout = DifferentiableRollout(observation, tuple(transitions))
+    algorithm = APG(
+        APGCfg(device="cpu", gamma=0.5, ent_coef=0.1),
+        policy,
+    )
+
+    metrics = algorithm.update(rollout)
+
+    assert metrics["entropy"] == pytest.approx(5.0)
 
 
 def test_apg_gradient_matches_central_finite_difference() -> None:
