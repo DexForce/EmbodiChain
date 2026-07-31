@@ -27,7 +27,7 @@ from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera
 from embodichain.lab.gym.utils import gym_utils
-from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
+from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils import configclass
 from embodichain.utils import logger, set_seed
 
@@ -74,9 +74,9 @@ class EnvCfg:
     """
 
     profiler: EnvProfilerCfg | None = None
-    """Optional profiler for reset/step time & GPU-memory breakdown. ``None``
-    (default) disables profiling entirely. See :class:`EnvProfilerCfg` for the
-    independent time / memory toggles."""
+    """Optional profiler for reset/step wall-time breakdown. ``None`` keeps
+    the profiler disabled unless one is configured directly on ``sim_cfg``.
+    See :class:`EnvProfilerCfg` for the available options."""
 
 
 class BaseEnv(gym.Env):
@@ -125,6 +125,13 @@ class BaseEnv(gym.Env):
             self.sim_cfg = self.cfg.sim_cfg
             self.sim_cfg.num_envs = self._num_envs
 
+        # Preserve EnvCfg.profiler as the environment-facing configuration
+        # entry point while letting SimulationManager own the profiler. A
+        # profiler configured directly on sim_cfg is also supported when the
+        # legacy env-level field is left unset.
+        if self.cfg.profiler is not None:
+            self.sim_cfg.profiler = self.cfg.profiler
+
         if self.cfg.seed is not None:
             self.cfg.seed = set_seed(self.cfg.seed)
         else:
@@ -135,12 +142,9 @@ class BaseEnv(gym.Env):
 
         self._setup_scene(**kwargs)
 
-        # Profiler for reset/step time & memory breakdown. Created after the
-        # scene so ``self.device`` is available. No-op when cfg.profiler is None.
-        self._profiler = EnvProfiler(self.cfg.profiler, self.device)
-        # Expose the env profiler to SimulationManager so sim.update internals
-        # can be profiled as children under step.sim_update.
-        setattr(self.sim, "_env_profiler", self._profiler)
+        # Keep the established env._profiler API while sharing the single
+        # profiler instance owned by SimulationManager.
+        self._profiler = self.sim.profiler
 
         # TODO: To be removed.
         if self.device.type == "cuda":

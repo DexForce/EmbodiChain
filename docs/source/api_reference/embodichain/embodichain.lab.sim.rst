@@ -15,6 +15,7 @@ management, materials, sensors, planning/IK utilities, and action helpers.
    :toctree: .
 
    sim_manager
+   profiler
    cfg
    common
    material
@@ -39,6 +40,20 @@ Simulation Manager
    :show-inheritance:
 
 .. autoclass:: SimulationManagerCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+Profiler
+--------
+
+.. autoclass:: Profiler
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ProfilerCfg
    :members:
    :undoc-members:
    :show-inheritance:
