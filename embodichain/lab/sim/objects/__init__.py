@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Scene-object classes spawned into the ``SimulationManager``.
+
+Covers lights, rigid bodies (and groups), articulations, robots, deformables (soft/cloth), gizmos, and rigid constraints; every object derives from ``BatchEntity``.
+"""
+
 from ..common import BatchEntity
 from .rigid_object import RigidObject, RigidBodyData, RigidObjectCfg
 from .rigid_object_group import (

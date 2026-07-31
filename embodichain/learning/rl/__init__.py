@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""On-policy reinforcement learning pipeline.
+
+Algorithms (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the training entry point; rollout data flows as ``TensorDict`` objects.
+"""
+
 from . import algo
 from . import buffer
 from . import models
