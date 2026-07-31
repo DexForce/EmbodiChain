@@ -37,7 +37,7 @@ The configs module enables fine-grained control over:
 Controls how the robot's joint space is sampled for workspace analysis.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+from embodichain.lab.sim.workspace.configs import (
     SamplingConfig, SamplingStrategy
 )
 
@@ -103,7 +103,7 @@ importance_config = SamplingConfig(
 Manages caching of analysis results for improved performance.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import CacheConfig
+from embodichain.lab.sim.workspace.configs import CacheConfig
 from pathlib import Path
 
 # Basic caching configuration
@@ -139,7 +139,7 @@ performance_cache = CacheConfig(
 Defines which workspace metrics to compute and their parameters.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+from embodichain.lab.sim.workspace.configs import (
     MetricConfig, MetricType, ReachabilityConfig, 
     ManipulabilityConfig, DensityConfig
 )
@@ -216,7 +216,7 @@ density_config = DensityConfig(
 Controls the appearance and behavior of workspace visualizations.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import (
+from embodichain.lab.sim.workspace.configs import (
     VisualizationConfig, VisualizationType
 )
 
@@ -256,7 +256,7 @@ sphere_viz_config = VisualizationConfig(
 Defines workspace bounds, exclusion zones, and physical constraints.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import DimensionConstraint
+from embodichain.lab.sim.workspace.configs import DimensionConstraint
 import numpy as np
 
 # Basic workspace bounds
@@ -298,7 +298,7 @@ complex_constraints = DimensionConstraint(
 ### Basic Workspace Analysis Setup
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import *
+from embodichain.lab.sim.workspace.configs import *
 
 # Complete configuration for basic analysis
 sampling_config = SamplingConfig(
@@ -597,7 +597,7 @@ Configuration for workspace bounds and constraints.
 
 ```python
 # Simplest possible configuration
-from embodichain.lab.sim.utility.workspace_analyzer.configs import *
+from embodichain.lab.sim.workspace.configs import *
 
 config = SamplingConfig()  # Uses defaults
 # Result: uniform sampling, 1000 samples, grid resolution 10

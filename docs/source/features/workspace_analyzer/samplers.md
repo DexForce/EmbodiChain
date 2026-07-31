@@ -19,7 +19,7 @@ The samplers module provides various sampling strategies for workspace analysis,
 
 ```python
 import torch
-from embodichain.lab.devices.workspace_analyzer.samplers import UniformSampler
+from embodichain.lab.sim.workspace.samplers import UniformSampler
 
 # Define sampling bounds
 bounds = torch.tensor([[0.0, 1.0],    # x-axis range
@@ -43,7 +43,7 @@ Available sampling strategies:
 ```python
 import torch
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.samplers import (
+from embodichain.lab.sim.workspace.samplers import (
     UniformSampler, RandomSampler, GaussianSampler
 )
 
@@ -63,7 +63,7 @@ Grid-based sampling with regular spacing.
 
 ```python
 import torch
-from embodichain.lab.sim.utility.workspace_analyzer.samplers import UniformSampler
+from embodichain.lab.sim.workspace.samplers import UniformSampler
 
 bounds = torch.tensor([[-1, 1], [-1, 1], [0, 2]], dtype=torch.float32)
 # Create uniform sampler
@@ -78,7 +78,7 @@ samples = uniform_sampler.sample(1000, bounds)
 Pure random sampling with uniform distribution.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.samplers import RandomSampler
+from embodichain.lab.sim.workspace.samplers import RandomSampler
 
 random_sampler = RandomSampler(seed=42)
 samples = random_sampler.sample(1000, bounds)
@@ -91,7 +91,7 @@ samples = random_sampler.sample(1000, bounds)
 Gaussian distribution sampling around specified mean.
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.samplers import GaussianSampler
+from embodichain.lab.sim.workspace.samplers import GaussianSampler
 
 gaussian_sampler = GaussianSampler(seed=42, std=0.2)
 samples = gaussian_sampler.sample(1000, bounds)
@@ -104,8 +104,8 @@ samples = gaussian_sampler.sample(1000, bounds)
 Use the factory to create samplers by strategy (only implemented samplers):
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.samplers import create_sampler
-from embodichain.lab.sim.utility.workspace_analyzer.configs import SamplingStrategy
+from embodichain.lab.sim.workspace.samplers import create_sampler
+from embodichain.lab.sim.workspace.configs import SamplingStrategy
 
 # Create implemented samplers by strategy
 uniform_sampler = create_sampler(
@@ -129,7 +129,7 @@ gaussian_sampler = create_sampler(
 ## Integration with Workspace Analyzer
 
 ```python
-from embodichain.lab.sim.utility.workspace_analyzer.configs import SamplingConfig, SamplingStrategy
+from embodichain.lab.sim.workspace.configs import SamplingConfig, SamplingStrategy
 
 # Configure sampling in analyzer
 sampling_config = SamplingConfig(

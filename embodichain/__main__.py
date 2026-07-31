@@ -86,6 +86,11 @@ COMMANDS = (
         target="embodichain.workspace_cache_cli:main",
         help="Inspect and clean workspace analyzer caches.",
     ),
+    Command(
+        name="analyze-workspace",
+        target="embodichain.lab.scripts.analyze_workspace:cli",
+        help="Analyze a robot's reachable workspace from a URDF/USD asset.",
+    ),
 )
 
 

@@ -19,15 +19,19 @@ from __future__ import annotations
 import torch
 import numpy as np
 
-from typing import List, Dict, Tuple, Sequence
+from typing import Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
 
 from dexsim.engine import Articulation as _Articulation
-from embodichain.lab.sim.cfg import RobotCfg
+from embodichain.lab.sim.cfg import RobotCfg, RobotWorkspaceCfg
 from embodichain.lab.sim.solvers import SolverCfg, BaseSolver
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.sim.utility.tensor import to_tensor
+from embodichain.lab.sim.workspace.runtime import (
+    RobotWorkspace,
+    WorkspaceSample,
+)
 from embodichain.utils.math import quat_from_matrix, matrix_from_quat
 from embodichain.utils.string import (
     is_regular_expression,
@@ -83,6 +87,10 @@ class Robot(Articulation):
         # Robot.set_qpos_limits(), which synchronizes this registry.
         self._solvers: Dict[str, BaseSolver] = {}
 
+        # Workspaces are loaded lazily so constructing a robot does not perform
+        # cache I/O unless a task actually requests workspace sampling.
+        self._workspaces: Dict[str, RobotWorkspace] = {}
+
         if self.cfg.control_parts:
             self._init_control_parts(self.cfg.control_parts)
 
@@ -102,6 +110,226 @@ class Robot(Articulation):
     def control_parts(self) -> Dict[str, List[str]] | None:
         """Get the control parts of the robot."""
         return self.cfg.control_parts
+
+    def attach_workspace(
+        self, workspace: RobotWorkspace, name: str | None = None
+    ) -> None:
+        """Attach a runtime workspace to a control part.
+
+        Args:
+            workspace: Runtime workspace to attach.
+            name: Control-part name. Use ``None`` for the default solver.
+        """
+        key = name or "default"
+        if self.control_parts and name is not None and name not in self.control_parts:
+            raise ValueError(
+                f"The control part {name!r} does not exist in {self.control_parts}."
+            )
+        self._workspaces[key] = workspace.to(self.device)
+
+    def get_workspace(self, name: str | None = None) -> RobotWorkspace:
+        """Get or lazily load the workspace for a control part.
+
+        Args:
+            name: Control-part name. If omitted and exactly one workspace is
+                configured, that workspace is selected automatically.
+
+        Returns:
+            Runtime robot workspace.
+
+        Raises:
+            ValueError: If no unambiguous workspace configuration exists.
+        """
+        workspace_cfgs = self.cfg.workspace_cfg or {}
+        key = name or "default"
+        if name is None and key not in workspace_cfgs and key not in self._workspaces:
+            available = set(workspace_cfgs) | set(self._workspaces)
+            if len(available) == 1:
+                key = next(iter(available))
+            else:
+                raise ValueError(
+                    "A control-part name is required when the robot has zero or "
+                    f"multiple workspaces; available workspaces: {sorted(available)}."
+                )
+
+        if key not in self._workspaces:
+            workspace_cfg = workspace_cfgs.get(key)
+            if workspace_cfg is None:
+                raise ValueError(
+                    f"No workspace is configured for control part {key!r}."
+                )
+            self._workspaces[key] = RobotWorkspace.from_cache(
+                workspace_cfg.cache_path,
+                device=self.device,
+                voxel_size=workspace_cfg.voxel_size,
+            )
+        return self._workspaces[key]
+
+    def sample_reachable_pose(
+        self,
+        name: str | None = None,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        num_samples: int = 1,
+        strategy: Literal["point_uniform", "voxel_uniform"] | None = None,
+        position_bounds: (
+            torch.Tensor | tuple[Sequence[float], Sequence[float]] | None
+        ) = None,
+        min_score: float | None = None,
+        max_attempts: int = 64,
+        generator: torch.Generator | None = None,
+    ) -> WorkspaceSample:
+        """Sample kinematically reachable end-effector poses.
+
+        Cached joint configurations are sampled first and then evaluated with
+        runtime FK. This accounts for the current control-part base pose in
+        every target environment. A valid sample is kinematically reachable,
+        but is not guaranteed to have a collision-free trajectory from the
+        robot's current state.
+
+        Args:
+            name: Control-part name.
+            env_ids: Target environment IDs. Defaults to all environments.
+            num_samples: Number of samples per environment.
+            strategy: Sampling strategy. Defaults to the workspace config.
+            position_bounds: Optional arena-frame bounds ``((xmin, ymin, zmin),
+                (xmax, ymax, zmax))`` applied after FK.
+            min_score: Optional minimum cached reachability score.
+            max_attempts: Candidate count per environment when applying bounds.
+            generator: Optional torch random number generator.
+
+        Returns:
+            Batched workspace samples. Entries that could not satisfy bounds
+            have ``valid=False`` and ``indices=-1``.
+
+        Raises:
+            ValueError: If sampling arguments are invalid.
+        """
+        if num_samples <= 0:
+            raise ValueError(f"num_samples must be positive; got {num_samples}.")
+        if max_attempts < num_samples:
+            raise ValueError(
+                "max_attempts must be at least num_samples; "
+                f"got {max_attempts} and {num_samples}."
+            )
+
+        if env_ids is None:
+            local_env_ids = self._all_indices
+        elif isinstance(env_ids, slice):
+            local_env_ids = self._all_indices[env_ids]
+        else:
+            local_env_ids = env_ids
+        if not isinstance(local_env_ids, torch.Tensor):
+            local_env_ids = torch.as_tensor(
+                local_env_ids, dtype=torch.long, device=self.device
+            )
+        else:
+            local_env_ids = local_env_ids.to(device=self.device, dtype=torch.long)
+        batch_size = len(local_env_ids)
+
+        workspace = self.get_workspace(name)
+        workspace_cfgs = self.cfg.workspace_cfg or {}
+        workspace_key = name or "default"
+        if name is None and workspace_key not in workspace_cfgs:
+            configured_keys = set(workspace_cfgs) | set(self._workspaces)
+            if len(configured_keys) == 1:
+                workspace_key = next(iter(configured_keys))
+        fk_name = name
+        if fk_name is None and workspace_key != "default":
+            fk_name = workspace_key
+        workspace_cfg = workspace_cfgs.get(workspace_key)
+        selected_strategy = strategy or (
+            workspace_cfg.strategy if workspace_cfg is not None else "voxel_uniform"
+        )
+        selected_min_score = (
+            min_score
+            if min_score is not None
+            else (workspace_cfg.min_score if workspace_cfg is not None else None)
+        )
+
+        candidate_count = max_attempts if position_bounds is not None else num_samples
+        candidate_indices = workspace.sample_indices(
+            batch_size * candidate_count,
+            strategy=selected_strategy,
+            min_score=selected_min_score,
+            generator=generator,
+        ).reshape(batch_size, candidate_count)
+        candidate_qpos = workspace.qpos[candidate_indices]
+        candidate_poses = self.compute_batch_fk(
+            qpos=candidate_qpos,
+            name=fk_name,
+            env_ids=local_env_ids,
+            to_matrix=True,
+        )
+
+        candidate_valid = torch.ones(
+            (batch_size, candidate_count), dtype=torch.bool, device=self.device
+        )
+        if position_bounds is not None:
+            bounds = torch.as_tensor(
+                position_bounds, dtype=torch.float32, device=self.device
+            )
+            if bounds.shape != (2, 3):
+                raise ValueError(
+                    "position_bounds must have shape (2, 3); "
+                    f"got {tuple(bounds.shape)}."
+                )
+            positions = candidate_poses[:, :, :3, 3]
+            candidate_valid = torch.logical_and(
+                positions >= bounds[0], positions <= bounds[1]
+            ).all(dim=-1)
+
+        pose_result = (
+            torch.eye(4, dtype=candidate_poses.dtype, device=self.device)
+            .reshape(1, 1, 4, 4)
+            .repeat(batch_size, num_samples, 1, 1)
+        )
+        qpos_result = torch.zeros(
+            (batch_size, num_samples, workspace.qpos.shape[1]),
+            dtype=workspace.qpos.dtype,
+            device=self.device,
+        )
+        index_result = torch.full(
+            (batch_size, num_samples), -1, dtype=torch.long, device=self.device
+        )
+        valid_result = torch.zeros(
+            (batch_size, num_samples), dtype=torch.bool, device=self.device
+        )
+        score_result = (
+            torch.zeros(
+                (batch_size, num_samples),
+                dtype=workspace.scores.dtype,
+                device=self.device,
+            )
+            if workspace.scores is not None
+            else None
+        )
+
+        for batch_index in range(batch_size):
+            valid_candidates = torch.where(candidate_valid[batch_index])[0][
+                :num_samples
+            ]
+            count = len(valid_candidates)
+            if count == 0:
+                continue
+            pose_result[batch_index, :count] = candidate_poses[
+                batch_index, valid_candidates
+            ]
+            qpos_result[batch_index, :count] = candidate_qpos[
+                batch_index, valid_candidates
+            ]
+            selected_indices = candidate_indices[batch_index, valid_candidates]
+            index_result[batch_index, :count] = selected_indices
+            valid_result[batch_index, :count] = True
+            if score_result is not None:
+                score_result[batch_index, :count] = workspace.scores[selected_indices]
+
+        return WorkspaceSample(
+            eef_pose=pose_result,
+            qpos=qpos_result,
+            indices=index_result,
+            valid=valid_result,
+            score=score_result,
+        )
 
     def get_joint_ids(
         self, name: str | None = None, remove_mimic: bool = False

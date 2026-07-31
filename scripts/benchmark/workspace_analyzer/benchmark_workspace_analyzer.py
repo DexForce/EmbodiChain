@@ -151,7 +151,7 @@ def benchmark_halton_sampler() -> (
     tuple[list[dict[str, object]], list[dict[str, object]]]
 ):
     """Benchmark Halton sampler: vectorized vs loop-based."""
-    from embodichain.lab.sim.utility.workspace_analyzer.samplers.halton_sampler import (
+    from embodichain.lab.sim.workspace.samplers.halton_sampler import (
         HaltonSampler,
     )
 
@@ -215,10 +215,10 @@ def benchmark_density_metric() -> (
     tuple[list[dict[str, object]], list[dict[str, object]]]
 ):
     """Benchmark density metric: KDTree vs brute-force."""
-    from embodichain.lab.sim.utility.workspace_analyzer.metrics.density_metric import (
+    from embodichain.lab.sim.workspace.metrics.density_metric import (
         DensityMetric,
     )
-    from embodichain.lab.sim.utility.workspace_analyzer.configs.metric_config import (
+    from embodichain.lab.sim.workspace.configs.metric_config import (
         DensityConfig,
     )
 
@@ -272,10 +272,10 @@ def benchmark_density_metric() -> (
 
 def benchmark_voxelization() -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Benchmark voxelization: np.unique vs dict-based."""
-    from embodichain.lab.sim.utility.workspace_analyzer.metrics.reachability_metric import (
+    from embodichain.lab.sim.workspace.metrics.reachability_metric import (
         ReachabilityMetric,
     )
-    from embodichain.lab.sim.utility.workspace_analyzer.configs.metric_config import (
+    from embodichain.lab.sim.workspace.configs.metric_config import (
         ReachabilityConfig,
     )
 
@@ -335,10 +335,10 @@ def benchmark_manipulability() -> (
     tuple[list[dict[str, object]], list[dict[str, object]]]
 ):
     """Benchmark manipulability: batch vs per-sample."""
-    from embodichain.lab.sim.utility.workspace_analyzer.metrics.manipulability_metric import (
+    from embodichain.lab.sim.workspace.metrics.manipulability_metric import (
         ManipulabilityMetric,
     )
-    from embodichain.lab.sim.utility.workspace_analyzer.configs.metric_config import (
+    from embodichain.lab.sim.workspace.configs.metric_config import (
         ManipulabilityConfig,
     )
 

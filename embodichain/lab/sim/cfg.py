@@ -47,6 +47,7 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+from .workspace.cfg import RobotWorkspaceCfg
 
 # Global default renderer settings for simulation.
 #
@@ -1745,6 +1746,9 @@ class RobotCfg(ArticulationCfg):
     """Solver is used to compute forward and inverse kinematics for the robot.
     """
 
+    workspace_cfg: Dict[str, RobotWorkspaceCfg] | None = None
+    """Runtime workspace cache configuration keyed by control-part name."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
@@ -1765,6 +1769,19 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "workspace_cfg" and isinstance(value, dict):
+                    setattr(
+                        cfg,
+                        key,
+                        {
+                            part: (
+                                part_cfg
+                                if isinstance(part_cfg, RobotWorkspaceCfg)
+                                else RobotWorkspaceCfg(**part_cfg)
+                            )
+                            for part, part_cfg in value.items()
+                        },
+                    )
                 elif key == "fpath":
                     setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):
