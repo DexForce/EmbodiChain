@@ -149,7 +149,17 @@ class GeometryGenerationClient:
             resolved_object_masks,
             response_objects,
         ):
-            output_path = resolved_output_root / f"{object_id}.glb"
+            safe_object_id = Path(object_id).name
+            if (
+                safe_object_id != object_id
+                or "\\" in object_id
+                or object_id in {"", ".", ".."}
+            ):
+                raise ValueError(
+                    "Geometry generation object_id is not safe for a filename: "
+                    f"{object_id!r}"
+                )
+            output_path = resolved_output_root / f"{safe_object_id}.glb"
             self._download_glb(response_object["mesh"], output_path)
         return response_data, response_objects
 

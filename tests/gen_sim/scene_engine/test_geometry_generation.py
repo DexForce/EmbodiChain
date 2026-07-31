@@ -132,6 +132,41 @@ def test_parse_objects_response_rejects_mismatched_object_name() -> None:
         _parse_objects_response(payload, object_ids=["table"])
 
 
+@pytest.mark.parametrize("object_id", ["../outside", "nested/object", r"nested\object"])
+def test_generate_objects_rejects_unsafe_output_object_id(
+    tmp_path: Path,
+    object_id: str,
+) -> None:
+    image_path = tmp_path / "image.png"
+    mask_path = tmp_path / "mask.png"
+    image_path.write_bytes(b"image")
+    mask_path.write_bytes(b"mask")
+    session = _Session(
+        payload={
+            "ok": True,
+            "result": {"objects": [_object_response(object_id, "/assets/object.glb")]},
+        },
+        downloads={},
+    )
+    client = GeometryGenerationClient(
+        base_url="http://geometry.test",
+        timeout_s=1,
+        max_attempts=1,
+        health_path="/health",
+        generate_objects_path="/generate_objects",
+        session=session,
+    )
+
+    with pytest.raises(ValueError, match="not safe for a filename"):
+        client.generate_objects(
+            image_path=image_path,
+            object_masks=[(object_id, mask_path)],
+            output_root=tmp_path / "generated",
+        )
+
+    assert not (tmp_path / "outside.glb").exists()
+
+
 def test_geometry_generation_environment_overrides_package_template(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
