@@ -27,6 +27,11 @@ from typing import Any
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import LightCfg, MeshCfg, RigidObjectCfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
 def preview_scene_export(
@@ -34,8 +39,16 @@ def preview_scene_export(
     output_root: str | Path,
     device: str = "cpu",
     headless: bool = False,
+    visualization: VisualizationCfg | None = None,
 ) -> None:
-    """Load ``scene_export/scene_config.json`` and preview its table and assets."""
+    """Load ``scene_export/scene_config.json`` and preview its table and assets.
+
+    Args:
+        output_root: Scene Engine output root containing ``scene_export/``.
+        device: Simulation device, for example ``"cpu"`` or ``"cuda"``.
+        headless: Load and validate the scene without an interactive preview.
+        visualization: Optional live-visualization configuration.
+    """
     resolved_output_root = Path(output_root).expanduser().resolve()
     config_path = resolved_output_root / "scene_export" / "scene_config.json"
     if not config_path.is_file():
@@ -60,6 +73,9 @@ def preview_scene_export(
             headless=headless,
             physics_dt=1.0 / 100.0,
             sim_device=device,
+            visualization=(
+                VisualizationCfg() if visualization is None else visualization
+            ),
         )
     )
     try:
@@ -79,14 +95,19 @@ def preview_scene_export(
             label="asset",
         )
 
-        if headless:
+        is_viser = sim.sim_config.visualization.backend == "viser"
+        if headless and not is_viser:
             sim.update(step=1)
             print(f"Loaded scene export headlessly: {config_path}")
             return
 
-        print(f"Previewing: {config_path}")
+        if is_viser:
+            sim.update(step=1)
+            print(f"Previewing in Viser: {config_path}")
+        else:
+            print(f"Previewing: {config_path}")
+            sim.open_window()
         print("Close with Ctrl-C.")
-        sim.open_window()
         while True:
             time.sleep(0.1)
     except KeyboardInterrupt:
@@ -200,11 +221,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Load and validate the exported scene without opening a window.",
     )
+    add_viser_args_to_parser(parser)
     args = parser.parse_args(argv)
     preview_scene_export(
         output_root=args.output_root,
         device=args.device,
         headless=args.headless,
+        visualization=visualization_cfg_from_args(args),
     )
 
 
