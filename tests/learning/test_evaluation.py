@@ -57,7 +57,14 @@ class _AsyncAutoResetEnv:
         terminal_steps = self.steps.clone()
         info = {
             "success": done.clone(),
-            "metrics": {"terminal_step": terminal_steps.float()},
+            "metrics": {
+                "terminal_step": terminal_steps.float(),
+                # Non-scalar per-env metric must not be flattened into eval logs.
+                "final_position": torch.stack(
+                    (terminal_steps.float(), terminal_steps.float() + 10.0),
+                    dim=-1,
+                ),
+            },
         }
         self.steps[done] = 0
         return (
@@ -88,3 +95,4 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
     assert result["eval/avg_length"] == 1.25
     assert result["eval/success_rate"] == 1.0
     assert result["eval/metrics/terminal_step"] == 1.25
+    assert "eval/metrics/final_position" not in result

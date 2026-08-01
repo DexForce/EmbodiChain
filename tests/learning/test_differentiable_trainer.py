@@ -281,9 +281,10 @@ def test_checkpoint_restores_lr_scheduler_state(tmp_path: Path) -> None:
 
     assert restored_algorithm.lr_scheduler is not None
     assert restored_algorithm.current_learning_rate() == pytest.approx(lr_before)
-    assert restored_algorithm.lr_scheduler.state_dict()["last_epoch"] == scheduler_state[
-        "last_epoch"
-    ]
+    assert (
+        restored_algorithm.lr_scheduler.state_dict()["last_epoch"]
+        == scheduler_state["last_epoch"]
+    )
 
 
 def test_checkpoint_load_falls_back_for_older_torch(

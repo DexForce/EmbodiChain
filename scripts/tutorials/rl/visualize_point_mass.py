@@ -131,7 +131,11 @@ def rollout_episode(
         if bool(terminated[env_index] or truncated[env_index]):
             # Auto-reset replaces env.position; use the terminal snapshot in info.
             positions.append(
-                info["metrics"]["final_position"][env_index].detach().cpu().numpy().copy()
+                info["metrics"]["final_position"][env_index]
+                .detach()
+                .cpu()
+                .numpy()
+                .copy()
             )
             success = bool(info["success"][env_index])
             final_distance = float(info["metrics"]["final_distance"][env_index])

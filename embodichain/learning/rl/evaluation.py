@@ -58,6 +58,26 @@ def _selected_values(value: Any, indices: torch.Tensor) -> list[float]:
     return [float(array[index]) for index in indices.cpu().tolist()]
 
 
+def _is_per_env_scalar_metric(value: Any, num_envs: int) -> bool:
+    """Return True for metrics with one scalar per env (shape ``[N]`` / ``[N, 1]``)."""
+    if isinstance(value, torch.Tensor):
+        if value.numel() == 0:
+            return False
+        if value.ndim == 0:
+            return num_envs == 1
+        if value.shape[0] != num_envs:
+            return False
+        return value.ndim == 1 or value.shape[1:] in {(1,)}
+    array = np.asarray(value)
+    if array.size == 0:
+        return False
+    if array.ndim == 0:
+        return num_envs == 1
+    if array.shape[0] != num_envs:
+        return False
+    return array.ndim == 1 or array.shape[1:] in {(1,)}
+
+
 @torch.no_grad()
 def evaluate_episodes(
     *,
@@ -121,10 +141,12 @@ def evaluate_episodes(
                 metrics = info.get("metrics", {})
                 if isinstance(metrics, Mapping):
                     for name, value in metrics.items():
+                        # Skip vector/matrix metrics: reshape(-1) would break env indexing.
+                        if not _is_per_env_scalar_metric(value, num_envs):
+                            continue
                         metric_values.setdefault(str(name), []).extend(
                             _selected_values(value, selected)
                         )
-
 
             current_return[done_indices] = 0.0
             current_length[done_indices] = 0
