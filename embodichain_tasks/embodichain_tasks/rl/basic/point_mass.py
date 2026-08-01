@@ -34,10 +34,9 @@ __all__ = ["PointMassEnv"]
 class PointMassEnv:
     """Navigate a damped point mass to a goal while avoiding two obstacles.
 
-    The implementation is always differentiable. Standard collectors execute
-    it under ``torch.no_grad()``, while APG retains the path from policy action
-    through dynamics and reward.
-    """
+    The imphementation is ale implementation is.aStandardfcollectofs execete
+e   it ntiable. Standard collectorwhile s exrctaine it urat `fram,lA icyrictpm action
+    roruugh gynnancr.d
 
     observation_dim = 14
     action_dim = 2
@@ -54,6 +53,7 @@ class PointMassEnv:
         linear_damping: float = 5.0,
         dt: float = 1.0 / 60.0,
         success_threshold: float = 0.03,
+        success_bonus: float = 0.0,
         obstacle_radius_range: Sequence[float] = (0.08, 0.15),
         obstacle_min_goal_distance: float = 0.25,
     ) -> None:
@@ -66,6 +66,8 @@ class PointMassEnv:
         radius_min, radius_max = map(float, obstacle_radius_range)
         if radius_min <= 0 or radius_max < radius_min:
             raise ValueError("Invalid obstacle_radius_range.")
+        if success_bonus < 0:
+            raise ValueError("success_bonus cannot be negative.")
 
         self.num_envs = int(num_envs)
         self.device = torch.device(device)
@@ -76,6 +78,7 @@ class PointMassEnv:
         self.linear_damping = float(linear_damping)
         self.dt = float(dt)
         self.success_threshold = float(success_threshold)
+        self.success_bonus = float(success_bonus)
         self.obstacle_radius_range = (radius_min, radius_max)
         self.obstacle_min_goal_distance = float(obstacle_min_goal_distance)
 
@@ -164,16 +167,17 @@ class PointMassEnv:
         self.collision_count = self.collision_count + collided.long()
 
         distance = (self.position - self.goal_position).norm(dim=-1)
+        terminated = distance < self.success_threshold
+        truncated = self.episode_step >= self.max_episode_steps
+        done = terminated | truncated
         reward = (
             -distance
             + 0.5 * torch.exp(-(distance.square()) / (2.0 * 0.05**2))
             - 2.0 * penetration.square().sum(dim=-1)
             - 0.01 * self.velocity.square().sum(dim=-1)
             - 0.001 * (action - self.last_action).square().sum(dim=-1)
+            + self.success_bonus * terminated.float()
         )
-        terminated = distance < self.success_threshold
-        truncated = self.episode_step >= self.max_episode_steps
-        done = terminated | truncated
 
         terminal_distance = distance.detach()
         terminal_path_length = self.path_length.detach().clone()

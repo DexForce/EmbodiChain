@@ -85,6 +85,20 @@ def test_point_mass_auto_reset_keeps_terminal_metrics() -> None:
     assert next_observation.shape == (2, 14)
 
 
+def test_point_mass_success_bonus_applies_only_on_success() -> None:
+    env = PointMassEnv(num_envs=2, success_bonus=5.0)
+    env.reset(seed=5)
+    env.velocity.zero_()
+    env.goal_position[0] = env.position[0]
+    env.goal_position[1] = env.position[1] + 0.5
+
+    _, reward, terminated, _, _ = env.step(torch.zeros(2, 2))
+
+    assert bool(terminated[0])
+    assert not bool(terminated[1])
+    assert float(reward[0]) > float(reward[1]) + 4.0
+
+
 def test_point_mass_detach_state_keeps_values() -> None:
     env = PointMassEnv(num_envs=3)
     env.reset(seed=9)

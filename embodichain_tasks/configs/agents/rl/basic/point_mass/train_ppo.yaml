@@ -5,10 +5,11 @@ trainer:
     cfg:
       max_episode_steps: 100
       success_threshold: 0.03
+      success_bonus: 5.0
   seed: 42
   device: cuda:0
   num_envs: 64
-  iterations: 500
+  iterations: 550
   buffer_size: 256
   enable_eval: true
   eval_freq: 32768
@@ -44,6 +45,10 @@ algorithm:
     optimizer:
       name: adam
       learning_rate: 0.00025
+    lr_scheduler:
+      name: linear
+      kwargs:
+        end_factor: 0.4
     n_epochs: 10
     batch_size: 4096
     gamma: 0.99
