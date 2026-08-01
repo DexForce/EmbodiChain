@@ -32,6 +32,7 @@ from embodichain.learning.rl import (
 )
 from embodichain.learning.rl.algo import APG, APGCfg
 from embodichain.learning.rl.models import ActorOnly
+from embodichain.learning.rl.utils import LRSchedulerCfg, OptimizerCfg
 
 
 class _QuadraticActionEnv:
@@ -83,7 +84,7 @@ def _make_components(
     algorithm = APG(
         APGCfg(
             device="cpu",
-            learning_rate=0.05,
+            optimizer=OptimizerCfg(learning_rate=0.05),
             max_grad_norm=10.0,
             ent_coef=ent_coef,
         ),
@@ -226,6 +227,63 @@ def test_checkpoint_restores_policy_optimizer_and_counters(tmp_path: Path) -> No
     assert restored.global_step == trainer.global_step
     assert restored.num_updates == trainer.num_updates
     assert restored_algorithm.optimizer.state_dict()["state"]
+
+
+def test_checkpoint_restores_lr_scheduler_state(tmp_path: Path) -> None:
+    env = _QuadraticActionEnv()
+    actor = nn.Linear(1, 1, bias=False)
+    nn.init.constant_(actor.weight, 0.5)
+    policy = ActorOnly(1, 1, env.device, actor=actor)
+    algorithm = APG(
+        APGCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(learning_rate=0.1),
+            lr_scheduler=LRSchedulerCfg(name="linear"),
+            max_grad_norm=10.0,
+        ),
+        policy,
+    )
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(
+            segment_length=2,
+            update_horizon=2,
+            deterministic_actions=True,
+        ),
+        env,
+        policy,
+        algorithm,
+    )
+    trainer.train(total_timesteps=8)
+    lr_before = algorithm.current_learning_rate()
+    assert algorithm.lr_scheduler is not None
+    scheduler_state = algorithm.lr_scheduler.state_dict()
+    checkpoint_path = trainer.save_checkpoint(tmp_path / "apg_sched.pt")
+
+    restored_env = _QuadraticActionEnv()
+    restored_actor = nn.Linear(1, 1, bias=False)
+    restored_policy = ActorOnly(1, 1, restored_env.device, actor=restored_actor)
+    restored_algorithm = APG(
+        APGCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(learning_rate=0.1),
+            lr_scheduler=LRSchedulerCfg(name="linear"),
+            max_grad_norm=10.0,
+        ),
+        restored_policy,
+    )
+    restored = DifferentiableTrainer(
+        trainer.cfg,
+        restored_env,
+        restored_policy,
+        restored_algorithm,
+    )
+    restored.load_checkpoint(checkpoint_path)
+
+    assert restored_algorithm.lr_scheduler is not None
+    assert restored_algorithm.current_learning_rate() == pytest.approx(lr_before)
+    assert restored_algorithm.lr_scheduler.state_dict()["last_epoch"] == scheduler_state[
+        "last_epoch"
+    ]
 
 
 def test_checkpoint_load_falls_back_for_older_torch(

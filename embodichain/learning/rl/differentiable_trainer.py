@@ -32,6 +32,7 @@ from embodichain.learning.rl.collector import DifferentiableCollector
 from embodichain.learning.rl.env import DifferentiableVecEnv
 from embodichain.learning.rl.evaluation import evaluate_episodes
 from embodichain.learning.rl.models import Policy
+from embodichain.learning.rl.utils import LRSchedulerCfg, build_lr_scheduler
 from embodichain.utils import configclass
 
 if TYPE_CHECKING:
@@ -130,6 +131,11 @@ class DifferentiableTrainer:
         if total_timesteps < 0:
             raise ValueError("total_timesteps cannot be negative.")
 
+        steps_per_update = self.update_horizon * self.env.num_envs
+        if total_timesteps > 0 and steps_per_update > 0:
+            total_updates = math.ceil(total_timesteps / steps_per_update)
+            self.algorithm.bind_schedule(total_updates=total_updates)
+
         self.policy.train()
         while self.global_step < total_timesteps:
             remaining_vector_steps = math.ceil(
@@ -205,17 +211,21 @@ class DifferentiableTrainer:
             )
         checkpoint_path = Path(path)
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                "schema_version": _CHECKPOINT_SCHEMA_VERSION,
-                "global_step": self.global_step,
-                "num_updates": self.num_updates,
-                "policy": self.policy.state_dict(),
-                "optimizer": self.algorithm.optimizer.state_dict(),
-                "best_eval_value": self.best_eval_value,
-            },
-            checkpoint_path,
-        )
+        payload = {
+            "schema_version": _CHECKPOINT_SCHEMA_VERSION,
+            "global_step": self.global_step,
+            "num_updates": self.num_updates,
+            "policy": self.policy.state_dict(),
+            "optimizer": self.algorithm.optimizer.state_dict(),
+            "best_eval_value": self.best_eval_value,
+        }
+        if self.algorithm.lr_scheduler is not None:
+            payload["lr_scheduler"] = self.algorithm.lr_scheduler.state_dict()
+            payload["lr_scheduler_cfg"] = {
+                "name": self.algorithm._lr_scheduler_cfg.name,
+                "kwargs": dict(self.algorithm._lr_scheduler_cfg.kwargs),
+            }
+        torch.save(payload, checkpoint_path)
         self.latest_checkpoint_path = str(checkpoint_path)
         return self.latest_checkpoint_path
 
@@ -237,6 +247,15 @@ class DifferentiableTrainer:
             )
         self.policy.load_state_dict(checkpoint["policy"])
         self.algorithm.optimizer.load_state_dict(checkpoint["optimizer"])
+        sched_cfg_data = checkpoint.get("lr_scheduler_cfg")
+        if sched_cfg_data is not None and checkpoint.get("lr_scheduler") is not None:
+            bound_cfg = LRSchedulerCfg(**sched_cfg_data)
+            self.algorithm._lr_scheduler_cfg = bound_cfg
+            self.algorithm.lr_scheduler = build_lr_scheduler(
+                self.algorithm.optimizer,
+                bound_cfg,
+            )
+            self.algorithm.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
         self.global_step = int(checkpoint["global_step"])
         self.num_updates = int(checkpoint["num_updates"])
         self.best_eval_value = checkpoint.get("best_eval_value")

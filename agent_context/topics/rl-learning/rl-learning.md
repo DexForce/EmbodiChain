@@ -50,7 +50,7 @@ Standard PPO/GRPO rollout data flows as `TensorDict` objects (from the
   update. Segment losses backpropagate immediately, state is detached after
   each segment, and policy gradients accumulate until one update horizon is
   complete.
-- Checkpoints store policy, optimizer, trainer counters, and best-evaluation
+- Checkpoints store policy, optimizer, optional LR scheduler, trainer counters, and best-evaluation
   state.
 - Training selects `policy.train()`, while evaluation temporarily selects
   `policy.eval()` and restores the previous mode afterward.
@@ -125,7 +125,7 @@ Trainer(policy, env, algorithm, ...)
 **Source**: `embodichain/learning/rl/algo/ppo.py`
 
 - Config: `PPOCfg(AlgorithmCfg)` — `n_epochs=10`, `clip_coef=0.2`, `ent_coef=0.01`, `vf_coef=0.5`.
-- Inherits `AlgorithmCfg` defaults: `lr=3e-4`, `batch_size=64`, `gamma=0.99`, `gae_lambda=0.95`, `max_grad_norm=0.5`.
+- Inherits `AlgorithmCfg` defaults: nested `optimizer` (`adam`, `lr=3e-4`), optional `lr_scheduler`, `batch_size=64`, `gamma=0.99`, `gae_lambda=0.95`, `max_grad_norm=0.5`.
 - `update(rollout)` flow:
   1. `compute_gae(rollout, gamma, gae_lambda)` — writes `advantage` and `return` into the TensorDict.
   2. `transition_view(rollout, flatten=True)` — drops padded final slot, flattens to `[N*T]`.

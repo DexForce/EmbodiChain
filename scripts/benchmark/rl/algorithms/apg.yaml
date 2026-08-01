@@ -13,7 +13,9 @@ config:
   algorithm:
     name: apg
     cfg:
-      learning_rate: 0.00025
+      optimizer:
+        name: adam
+        learning_rate: 0.00025
       gamma: 0.99
       max_grad_norm: 0.5
       ent_coef: 0.0

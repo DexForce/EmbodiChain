@@ -41,7 +41,9 @@ policy:
 algorithm:
   name: ppo
   cfg:
-    learning_rate: 0.00025
+    optimizer:
+      name: adam
+      learning_rate: 0.00025
     n_epochs: 10
     batch_size: 4096
     gamma: 0.99

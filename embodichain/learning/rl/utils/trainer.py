@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections import deque
 from typing import Any
@@ -162,6 +163,11 @@ class Trainer:
     def train(self, total_timesteps: int) -> dict[str, Any]:
         if self.rank == 0:
             print(f"Start training, total steps: {total_timesteps}")
+        num_envs = int(self.env.num_envs)
+        steps_per_update = self.buffer_size * num_envs
+        if total_timesteps > 0 and steps_per_update > 0:
+            total_updates = math.ceil(total_timesteps / steps_per_update)
+            self.algorithm.bind_schedule(total_updates=total_updates)
         while self.global_step < total_timesteps:
             self._collect_rollout()
             losses = self.algorithm.update(self.buffer.get(flatten=False))
@@ -187,12 +193,9 @@ class Trainer:
     def _collect_rollout(self):
         """Collect a rollout with the synchronous collector."""
 
-        # Callback function for statistics and logging
         def on_step(tensordict: TensorDict, info: dict):
-            """Callback called at each step during rollout collection."""
             reward = tensordict["reward"]
             done = tensordict["done"]
-            # Episode stats
             self.curr_ret += reward
             self.curr_len += 1
             done_idx = torch.nonzero(done, as_tuple=False).squeeze(-1)
@@ -226,7 +229,6 @@ class Trainer:
         )
         self.buffer.add(rollout)
 
-        # Sync global_step and episode stats across ranks in distributed mode
         if self.distributed:
             if not torch.distributed.is_available():
                 raise RuntimeError(
@@ -419,6 +421,15 @@ class Trainer:
         optimizer = getattr(self.algorithm, "optimizer", None)
         if optimizer is not None:
             checkpoint["optimizer"] = optimizer.state_dict()
+        lr_scheduler = getattr(self.algorithm, "lr_scheduler", None)
+        if lr_scheduler is not None:
+            checkpoint["lr_scheduler"] = lr_scheduler.state_dict()
+            sched_cfg = getattr(self.algorithm, "_lr_scheduler_cfg", None)
+            if sched_cfg is not None:
+                checkpoint["lr_scheduler_cfg"] = {
+                    "name": sched_cfg.name,
+                    "kwargs": dict(sched_cfg.kwargs),
+                }
         torch.save(checkpoint, path)
         self.latest_checkpoint_path = path
         print(f"Checkpoint saved: {path}")

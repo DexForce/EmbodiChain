@@ -32,6 +32,7 @@ from embodichain.learning.rl.env import (
 )
 from embodichain.learning.rl.models import ActorCritic
 from embodichain.learning.rl.train import train_from_config
+from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain_tasks.rl.basic.point_mass import PointMassEnv
 
@@ -112,7 +113,7 @@ def test_unified_train_entry_runs_apg_and_ppo(
         },
     }
     algorithm_cfg = {
-        "learning_rate": 1e-3,
+        "optimizer": {"name": "adam", "learning_rate": 1e-3},
         "batch_size": 8,
         "gamma": 0.99,
         "max_grad_norm": 1.0,
@@ -188,7 +189,7 @@ def test_trainer_saves_best_checkpoint_from_eval(tmp_path: Path) -> None:
     algorithm = PPO(
         PPOCfg(
             device="cpu",
-            learning_rate=1e-3,
+            optimizer=OptimizerCfg(learning_rate=1e-3),
             n_epochs=1,
             batch_size=8,
             gamma=0.99,

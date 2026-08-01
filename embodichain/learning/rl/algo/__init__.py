@@ -23,6 +23,11 @@ from typing import Any, Dict, Tuple, Type
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from embodichain.learning.rl.utils import (
+    coerce_lr_scheduler_cfg,
+    coerce_optimizer_cfg,
+)
+
 from .apg import APG, APGCfg, segmented_discounted_return
 from .base import BaseAlgorithm, RolloutKind
 from .common import compute_gae
@@ -40,6 +45,16 @@ def get_registered_algo_names() -> list[str]:
     return list(_ALGO_REGISTRY.keys())
 
 
+def _normalize_algo_cfg_kwargs(cfg_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce nested optimizer/scheduler mappings from YAML/JSON."""
+    normalized = dict(cfg_kwargs)
+    if "optimizer" in normalized:
+        normalized["optimizer"] = coerce_optimizer_cfg(normalized["optimizer"])
+    if "lr_scheduler" in normalized:
+        normalized["lr_scheduler"] = coerce_lr_scheduler_cfg(normalized["lr_scheduler"])
+    return normalized
+
+
 def build_algo(
     name: str,
     cfg_kwargs: Dict[str, Any],
@@ -54,7 +69,7 @@ def build_algo(
             f"Algorithm '{name}' not found. Available: {get_registered_algo_names()}"
         )
     CfgCls, AlgoCls = _ALGO_REGISTRY[key]
-    cfg = CfgCls(device=str(device), **cfg_kwargs)
+    cfg = CfgCls(device=str(device), **_normalize_algo_cfg_kwargs(cfg_kwargs))
     if distributed:
         if AlgoCls.rollout_kind is RolloutKind.DIFFERENTIABLE:
             raise ValueError(
