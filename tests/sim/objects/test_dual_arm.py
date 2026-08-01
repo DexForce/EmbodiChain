@@ -145,7 +145,6 @@ def test_build_dual_arm_ur_solver_is_per_arm_and_arm_local():
             assert solver.end_link_name == "right_ee_link"
 
 
-
 def test_build_dual_arm_ur_urdf_components():
     cfg = _ur5_dual()
     assert set(cfg.urdf_cfg.components.keys()) == {"left_arm", "right_arm"}
