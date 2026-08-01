@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Robot-specific configuration presets (``RobotCfg`` subclasses) ready to drop into a simulation scene, plus the ``build_dual_arm_cfg`` dual-arm assembly helper."""
+
 from .dexforce_w1 import *
 from .cobotmagic import CobotMagicCfg
 from .franka_panda import FrankaPandaCfg

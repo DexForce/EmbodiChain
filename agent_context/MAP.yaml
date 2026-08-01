@@ -18,6 +18,8 @@ topics:
       - task registration
       - 环境框架
       - 任务环境
+      - env profiler
+      - env profiling
     keywords:
       - env
       - environment
@@ -31,6 +33,12 @@ topics:
       - step
       - reset
       - wrapper
+      - profiler
+      - profiling
+      - profile
+      - EnvProfiler
+      - EnvProfilerCfg
+      - time profiling
     paths:
       - topics/env-framework/env-framework.md
     source_of_truth:
@@ -40,6 +48,7 @@ topics:
       - embodichain/lab/gym/utils/
     related_topics:
       - manager-functor
+      - sim-visualization
     status: active
 
   - id: manager-functor
@@ -173,6 +182,7 @@ topics:
       - ik-solvers
       - motion-planning
       - sensor-system
+      - sim-visualization
     status: active
 
   - id: sensor-system
@@ -207,6 +217,59 @@ topics:
     related_topics:
       - robot-system
       - env-framework
+      - sim-visualization
+    status: active
+
+  - id: sim-visualization
+    title: Simulation Visualization
+    aliases:
+      - simulation visualization
+      - browser visualization
+      - viser
+      - viser visualization
+      - scene visualization
+      - visualization runtime
+      - visualization backend
+      - 仿真可视化
+      - 浏览器可视化
+      - 可视化
+    keywords:
+      - visualization
+      - viser
+      - SimulationManager
+      - VisualizationCfg
+      - ViserServerCfg
+      - VisualizationRuntime
+      - SceneExporter
+      - ViserBackend
+      - SceneManifest
+      - SceneFrame
+      - start_visualization
+      - refresh_visualization
+      - camera frustum
+      - RGB preview
+      - headless
+      - topology
+      - deformable
+      - soft body
+      - cloth
+    paths:
+      - topics/sim-visualization/sim-visualization.md
+    source_of_truth:
+      - embodichain/lab/sim/sim_manager.py
+      - embodichain/lab/visualization/
+      - embodichain/lab/gym/utils/gym_utils.py
+      - embodichain/lab/gym/envs/base_env.py
+      - embodichain/lab/scripts/preview_asset.py
+      - embodichain/lab/sim/objects/rigid_object.py
+      - embodichain/lab/sim/objects/rigid_object_group.py
+      - embodichain/lab/sim/objects/soft_object.py
+      - embodichain/lab/sim/objects/cloth_object.py
+    related_topics:
+      - env-framework
+      - sensor-system
+      - robot-system
+      - configclass-pattern
     status: active
 
   - id: motion-planning
@@ -308,6 +371,7 @@ topics:
       - env-framework
       - manager-functor
       - robot-system
+      - sim-visualization
     status: active
 
   - id: randomization
@@ -350,6 +414,7 @@ topics:
       - motion primitive
       - action primitive
       - AtomicAction
+      - ActionTarget
       - AtomicActionEngine
       - TrajectoryBuilder
       - 原子动作
@@ -361,6 +426,11 @@ topics:
       - TrajectoryBuilder
       - ActionResult
       - WorldState
+      - held_objects
+      - ObjectActionTarget
+      - PlaceTarget
+      - PressTarget
+      - target ownership
       - ActionCfg
       - motion_source
       - plan_arm_traj
@@ -369,6 +439,7 @@ topics:
       - topics/atomic-actions/atomic-actions.md
     source_of_truth:
       - embodichain/lab/sim/atomic_actions/core.py
+      - embodichain/lab/sim/atomic_actions/targets.py
       - embodichain/lab/sim/atomic_actions/engine.py
       - embodichain/lab/sim/atomic_actions/trajectory.py
       - embodichain/lab/sim/atomic_actions/primitives/

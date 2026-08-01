@@ -1,5 +1,5 @@
 Creating a simulation scene
-==========================
+===========================
 
 .. currentmodule:: embodichain.lab.sim
 
@@ -26,7 +26,7 @@ Configuring the simulation
 
 The first step is to configure the simulation environment. This is done using the :class:`SimulationManagerCfg` data class, which allows you to specify various parameters like window dimensions, headless mode, physics timestep, simulation device (CPU/GPU), and rendering options like ray tracing.
 
-Command-line arguments are parsed using ``argparse`` to allow for easy customization of the simulation from the terminal. In addition to the common launcher flags, this tutorial adds ``--record-steps``, ``--record-fps``, and ``--record-save-path`` for headless recording.
+Command-line arguments are parsed using ``argparse`` to allow for easy customization of the simulation from the terminal. In addition to the common launcher flags, including ``--viser`` and its update-rate/server options, this tutorial adds ``--record-steps``, ``--record-fps``, and ``--record-save-path`` for headless recording.
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_scene.py
    :language: python
@@ -51,14 +51,42 @@ With the simulation context created, we can add objects. This tutorial demonstra
 Headless recording
 ------------------
 
-When the script runs with ``--headless``, it uses :meth:`SimulationManager.start_window_record` with a fixed ``look_at`` camera pose. This is the same public recorder API used for viewer recording, but it now also supports headless execution without depending on a live window.
+When the script runs with ``--headless`` without ``--viser``, it uses :meth:`SimulationManager.start_window_record` with a fixed ``look_at`` camera pose. This is the same public recorder API used for viewer recording, but it now also supports headless execution without depending on a live window.
 
 The example starts recording before the simulation loop, runs for ``--record-steps`` physics steps, then stops the recorder and waits for the video export to finish before destroying the simulation.
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_scene.py
    :language: python
-   :start-at: if args.headless:
+   :start-at: if args.headless and not args.viser:
    :end-at:         print(f"[INFO]: Running {args.record_steps} steps before exporting the video")
+
+Browser visualization
+---------------------
+
+Pass ``--viser`` to run headlessly and inspect the live scene in a browser:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/create_scene.py --viser
+
+The endpoint is printed in the terminal and defaults to
+``http://127.0.0.1:8080``. The browser contains the rigid cube, the chair's
+complete multi-segment mesh, and a ground grid with 1 m cells. Assets added or
+removed after the server starts are refreshed on the next simulation update.
+
+Use ``--viser-env-ids`` for selected parallel environments and
+``--viser-fps`` to limit pose updates:
+
+.. code-block:: bash
+
+   python scripts/tutorials/sim/create_scene.py \
+       --num_envs 4 \
+       --viser \
+       --viser-env-ids 0 2 \
+       --viser-fps 15
+
+See :doc:`/overview/sim/viser_visualization` for the complete object support
+matrix, server settings, telemetry, and remote-access guidance.
 
 Running the simulation
 ----------------------
@@ -80,7 +108,7 @@ Upon exiting the simulation loop (e.g., by a ``KeyboardInterrupt``), it's import
 .. literalinclude:: ../../../scripts/tutorials/sim/create_scene.py
    :language: python
    :start-at: except KeyboardInterrupt:
-   :end-at:         print("[INFO]: Simulation terminated successfully")
+   :end-at:         sim.destroy()
 
 
 The Code Execution
@@ -118,5 +146,6 @@ Next Steps
 - :doc:`create_softbody` — Add deformable bodies to your scene
 - :doc:`robot` — Load and control a robot
 - :doc:`sensor` — Add cameras and capture sensor data
+- :doc:`/overview/sim/viser_visualization` — Configure browser visualization
 - :doc:`basic_env` — Create your first Gymnasium environment
 - :doc:`/overview/sim/sim_manager` — Full SimulationManager API reference

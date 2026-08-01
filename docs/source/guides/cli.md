@@ -137,6 +137,17 @@ embodichain run-env --gym_config config.yaml --preview
 # Headless execution
 embodichain run-env --gym_config config.yaml --headless
 
+# Headless browser visualization
+embodichain run-env --gym_config config.yaml --viser
+
+# Publish selected environments at controlled rates
+embodichain run-env --gym_config config.yaml \
+    --viser \
+    --viser-env-ids 0 2 \
+    --viser-fps 15 \
+    --viser-image-fps 2 \
+    --viser-soft-body-fps 5
+
 # Generate data AND record trajectories for later replay
 embodichain run-env --gym_config config.yaml --record_trajectory
 # trajectories auto-save to ~/.cache/embodichain_data/trajectories/<run_id>/
@@ -175,6 +186,20 @@ embodichain run-env --gym_config config.yaml \
 | ``--replay`` | ``False`` | Replay a recorded trajectory (``--replay_trajectory`` required; mutually exclusive with ``--preview``) |
 | ``--replay_trajectory`` | ``None`` | Path to the ``.pt`` trajectory file to replay |
 | ``--replay_mode`` | ``kinematic`` | Replay mode: ``kinematic`` (exact, physics off), ``dynamic`` (feed recorded actions, physics on), ``control`` (interactive scrubber) |
+| ``--profile`` | ``False`` | Enable per-section wall-time profiling of reset/step; prints a breakdown report on ``env.close()`` |
+| ``--profile_output`` | ``None`` | Dump the profiling report as JSON to this path on ``env.close()`` |
+| ``--viser`` | ``False`` | Enable headless Viser and allow trusted clients to drag configured Gizmos |
+| ``--viser-host`` | ``127.0.0.1`` | Viser bind interface |
+| ``--viser-port`` | ``8080`` | Viser HTTP/WebSocket port |
+| ``--viser-fps`` | ``15.0`` | Maximum rigid pose and overlay update rate |
+| ``--viser-image-fps`` | every environment step | Maximum camera RGB preview rate when explicitly supplied; otherwise `run-env` captures after every environment step |
+| ``--viser-soft-body-fps`` | ``5.0`` | Maximum cloth and soft-body vertex rate |
+| ``--viser-env-ids`` | ``0`` | Space-separated environment IDs published to Viser, or ``all`` |
+
+The Viser panel supports environment visibility, camera-frustum selection, RGB
+preview, and overlay visibility. For supported object types, programmatic
+configuration, remote access, and performance details, see
+:doc:`../overview/sim/viser_visualization`.
 
 ### Preview Mode
 
@@ -206,6 +231,67 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
   Dataset saving is disabled automatically in this mode.
 
 ``--replay`` and ``--preview`` are mutually exclusive.
+
+### Profiling
+
+Pass ``--profile`` to record per-section wall time of the reset/step pipeline
+and print a breakdown on ``env.close()``. Add ``--profile_output prof.json`` to
+also dump the report as JSON.
+
+```bash
+embodichain run-env --gym_config config.yaml --headless --device cuda \
+    --profile --profile_output prof.json --max_episodes 2
+```
+
+The profiler instruments the full step/reset chain with hierarchical, nested
+section names (a parent's time includes its children). Example report:
+
+```
+section                     calls   mean(ms)      min      max     std  total(s)     %par
+-------------------------------------------------------------------------------------------
+step                          196     33.214    30.012   45.330   2.841     6.510   100.0%
+  step.sim_update              196     12.410    11.802   18.321   0.902     2.432    37.3%
+  step.get_obs                 196      8.230     7.510   10.612   0.512     1.613    24.8%
+    step.get_obs.sensor          196      7.510     6.800    9.401   0.480     1.472    91.3%
+      step.get_obs.sensor.render_camera_group   196   7.388  ...   100.0%
+      step.get_obs.sensor.sensor_fetch          196   0.121  ...     1.6%
+    step.get_obs.proprio        196      0.538     0.429    0.966   0.082     0.105     6.5%
+    step.get_obs.extend         196      0.535     0.342    5.475   0.396     0.105     6.5%
+  step.update_sim_state        196      1.342     0.736    4.256   0.808     0.263     4.0%
+  ...
+reset                           1   1075.858  ...   100.0%
+  reset.initialize_episode      1    999.485  ...    92.9%
+    reset.initialize_episode.event_reset      1   682.162  ...
+    reset.initialize_episode.record_camera_save  1 315.435 ...
+```
+
+Notes:
+
+- Only **wall time** is profiled. GPU-memory profiling is not available in this
+  release.
+- Every registered **event** and **observation** functor is timed individually
+  and automatically (via ``ManagerBase._call_functor``), nesting under its
+  manager call site -- e.g. ``step.update_sim_state.event_interval.record_camera``
+  or ``step.get_obs.extend.obs_compute.norm_robot_eef_joint``. ``calls``
+  reflects the firing count (interval event functors fire every
+  ``interval_step``).
+- For GPU workloads run with ``--device cuda``. The default
+  ``sync_cuda=False`` keeps overhead low and reflects CPU-side cost (including
+  any syncs the sim performs internally); set ``sync_cuda=True`` on
+  ``EnvProfilerCfg`` for accurate absolute GPU timings (it forces
+  ``torch.cuda.synchronize()`` at section boundaries).
+- The first ``warmup_steps`` (default 5) step/reset samples are discarded so
+  JIT/cuDNN autotune setup does not skew the averages.
+- ``%par`` is the share of the immediate parent section's total; ``(other)``
+  is the parent total minus its measured children (inter-section overhead).
+- Set ``nvtx=True`` on ``EnvProfilerCfg`` to also emit NVTX ranges, which show
+  up named in an Nsight Systems timeline when running under ``nsys profile``.
+
+In code, set ``cfg.profiler = EnvProfilerCfg(enable_time=True, ...)``
+(``cfg.profiler is None`` disables profiling entirely at zero overhead). The
+profiler lives on the env as ``env._profiler``; call ``env._profiler.report()``
+to print mid-run. The report is flushed in ``close()`` **before**
+``sim.destroy()`` (which exits the process).
 
 ---
 

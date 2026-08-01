@@ -31,10 +31,32 @@ from tensordict import TensorDict
 from embodichain.utils import logger
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATASET_ROOT
 from embodichain.data.enum import LeRobotKey
-from embodichain.lab.gym.utils.misc import is_stereocam
+from embodichain.data_pipeline.depth_video import (
+    DepthSidecarManager,
+    DepthVideoCfg,
+    detect_depth_encoder,
+)
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
+
+CAMERA_IMAGE_FRAMES = {
+    "color": "",
+    "color_right": "_right",
+}
+# Depth and mask share the ``observation.<modality>.<sensor>[_right]`` key
+# layout (see ``_camera_feature_key``), but are stored differently: depth can
+# be offloaded to compressed sidecar videos (issue #424, Path A), while mask is
+# always kept as an exact numeric LeRobot feature.
+CAMERA_DEPTH_FRAMES = {
+    "depth",
+    "depth_right",
+}
+CAMERA_MASK_FRAMES = {
+    "mask",
+    "mask_right",
+}
+CAMERA_AUXILIARY_FRAMES = CAMERA_DEPTH_FRAMES | CAMERA_MASK_FRAMES
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -103,6 +125,19 @@ class LeRobotRecorder(Functor):
         # processes add isolation at a higher spawn cost.
         self.image_writer_threads = int(params.get("image_writer_threads", 0))
         self.image_writer_processes = int(params.get("image_writer_processes", 0))
+
+        # Compressed depth sidecar videos (issue #424, Path A). When enabled and
+        # an HEVC encoder is available, camera depth is written as gray12le/HEVC
+        # MP4s alongside the LeRobot dataset instead of (or, with
+        # ``keep_numeric_fallback``, in addition to) numeric Parquet features.
+        self.depth_video_cfg = self._parse_depth_video_cfg(params)
+        self._depth_video_enabled = self._resolve_depth_video_enabled(
+            self.depth_video_cfg
+        )
+        # Per-sensor depth specs collected in _build_features: {sensor_key: shape}.
+        self._depth_sensor_specs: Dict[str, tuple] = {}
+        # Sidecar manager, created in _initialize_dataset once the root is known.
+        self._depth_manager: Optional[DepthSidecarManager] = None
 
         # LeRobot dataset instance
         self.dataset: Optional[LeRobotDataset] = None
@@ -223,16 +258,33 @@ class LeRobotRecorder(Functor):
         self.total_time += current_episode_time
         episode_extra_info["total_time"] = self.total_time
 
+        depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
         try:
+            if self._depth_manager is not None:
+                self._depth_manager.start_episode(
+                    self.curr_episode, list(self._depth_sensor_specs.keys())
+                )
             for obs, action in tqdm.tqdm(
                 zip(obs_list, action_list),
                 total=len(obs_list),
                 desc=f"Converting env {env_id} episode to LeRobot format",
             ):
                 frame = self._convert_frame_to_lerobot(obs, action, task)
+                # Offload depth to the sidecar writer and drop it from the frame
+                # so LeRobot's RGB-only image/video path never sees it. With
+                # ``keep_numeric_fallback`` the numeric feature is retained too.
+                if self._depth_manager is not None:
+                    for key in list(frame.keys()):
+                        if key.startswith(depth_prefix):
+                            sensor_key = key[len(depth_prefix) :]
+                            self._depth_manager.add_frame(sensor_key, frame[key])
+                            if not self.depth_video_cfg.keep_numeric_fallback:
+                                del frame[key]
                 self.dataset.add_frame(frame)
 
             self.dataset.save_episode()
+            if self._depth_manager is not None:
+                self._depth_manager.end_episode(self.curr_episode)
 
             logger.log_info(
                 f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
@@ -243,6 +295,8 @@ class LeRobotRecorder(Functor):
             return True
         except Exception as e:
             logger.log_error(f"Failed to save episode {env_id}: {e}")
+            if self._depth_manager is not None:
+                self._depth_manager.abort_episode()
             return False
 
     def finalize(self) -> Optional[str]:
@@ -259,6 +313,10 @@ class LeRobotRecorder(Functor):
                 if self.dataset.image_writer is not None:
                     self.dataset.stop_image_writer()
                 self.dataset.finalize()
+                # Finalize the depth sidecar metadata (depth videos are already
+                # written per episode; this flushes depth_meta.json).
+                if self._depth_manager is not None:
+                    self._depth_manager.finalize()
                 logger.log_info(
                     f"[LeRobotRecorder] Dataset finalized successfully\n"
                     f"  Path: {self.dataset_path}\n"
@@ -270,6 +328,59 @@ class LeRobotRecorder(Functor):
             logger.log_error(f"[LeRobotRecorder] Failed to finalize dataset: {e}")
 
         return None
+
+    def _parse_depth_video_cfg(self, params: Dict) -> DepthVideoCfg:
+        """Parse the optional ``depth_video`` parameter into a config.
+
+        Args:
+            params: Functor parameter dict.
+
+        Returns:
+            A :class:`DepthVideoCfg`. ``enable`` defaults to ``False`` when no
+            ``depth_video`` entry is present.
+        """
+        dv = params.get("depth_video", None)
+        if dv is None:
+            return DepthVideoCfg(enable=False)
+        if isinstance(dv, DepthVideoCfg):
+            return dv
+        if isinstance(dv, dict):
+            try:
+                return DepthVideoCfg(**dv)
+            except TypeError as e:
+                logger.log_warning(
+                    f"Invalid depth_video config: {e}; disabling depth video."
+                )
+                return DepthVideoCfg(enable=False)
+        logger.log_warning(
+            f"Ignoring depth_video config of unexpected type "
+            f"{type(dv).__name__}; expected DepthVideoCfg or dict."
+        )
+        return DepthVideoCfg(enable=False)
+
+    @staticmethod
+    def _resolve_depth_video_enabled(cfg: DepthVideoCfg) -> bool:
+        """Return whether compressed depth video can actually be written.
+
+        Depth video is only enabled when the user opts in *and* an HEVC encoder
+        is available; otherwise we silently fall back to numeric depth features
+        (PR #422) so recording never fails on hosts without libx265.
+
+        Args:
+            cfg: Parsed depth video config.
+
+        Returns:
+            True if the sidecar writer should be active.
+        """
+        if not cfg.enable:
+            return False
+        if detect_depth_encoder(cfg.vcodec) is None:
+            logger.log_warning(
+                f"No HEVC encoder (libx265/hevc) available for depth video; "
+                f"falling back to numeric depth features (PR #422)."
+            )
+            return False
+        return True
 
     def _initialize_dataset(self) -> None:
         """Initialize the LeRobot dataset."""
@@ -321,6 +432,29 @@ class LeRobotRecorder(Functor):
         )
         logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 
+        # Set up the depth sidecar manager now that the dataset root and fps are
+        # known. Sensors were registered into _depth_sensor_specs by
+        # _build_features() above.
+        if self._depth_video_enabled and self._depth_sensor_specs:
+            self._depth_manager = DepthSidecarManager(
+                dataset_root=self.dataset_full_path,
+                fps=fps,
+                cfg=self.depth_video_cfg,
+            )
+            for sensor_key, shape in self._depth_sensor_specs.items():
+                self._depth_manager.register_sensor(sensor_key, shape)
+            logger.log_info(
+                f"[LeRobotRecorder] Depth sidecar video enabled for sensors: "
+                f"{list(self._depth_sensor_specs.keys())} "
+                f"(codec={self.depth_video_cfg.vcodec}, "
+                f"lossless={self.depth_video_cfg.lossless})"
+            )
+        elif self.depth_video_cfg.enable and not self._depth_video_enabled:
+            logger.log_info(
+                "[LeRobotRecorder] depth_video requested but unavailable; "
+                "depth will be stored as numeric features."
+            )
+
     def _build_features(self) -> Dict:
         """Build LeRobot features dict."""
         features = {}
@@ -363,29 +497,57 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
-
                     for frame_name, space in value.items():
-                        # TODO: Support depth (uint16) and mask (also uint16 or uint8)
-                        if frame_name not in ["color", "color_right"]:
-                            logger.log_error(
-                                f"Only support 'color' frame for vision sensors, but got '{frame_name}' in sensor '{sensor_name}'"
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
                             )
-
-                        features[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = {
-                            "dtype": "video" if self.use_videos else "image",
-                            "shape": (sensor.cfg.height, sensor.cfg.width, 3),
-                            "names": ["height", "width", "channel"],
-                        }
-
-                        if is_stereo:
-                            features[
-                                f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"
-                            ] = {
+                            features[feature_key] = {
                                 "dtype": "video" if self.use_videos else "image",
                                 "shape": (sensor.cfg.height, sensor.cfg.width, 3),
                                 "names": ["height", "width", "channel"],
                             }
+                        elif frame_name in CAMERA_DEPTH_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
+                            )
+                            if self._depth_video_enabled:
+                                # Record the sidecar sensor spec; only register a
+                                # numeric feature when an exact raw fallback is
+                                # requested.
+                                _, _, side = frame_name.partition("_")
+                                suffix = f"_{side}" if side else ""
+                                self._depth_sensor_specs[f"{sensor_name}{suffix}"] = (
+                                    tuple(space.shape)
+                                )
+                                if not self.depth_video_cfg.keep_numeric_fallback:
+                                    continue
+                            features[feature_key] = {
+                                "dtype": str(space.dtype),
+                                "shape": space.shape,
+                                "names": (
+                                    ["height", "width"]
+                                    if len(space.shape) == 2
+                                    else ["height", "width", "channel"]
+                                ),
+                            }
+                        elif frame_name in CAMERA_MASK_FRAMES:
+                            feature_key = self._camera_feature_key(
+                                sensor_name, frame_name
+                            )
+                            features[feature_key] = {
+                                "dtype": str(space.dtype),
+                                "shape": space.shape,
+                                "names": (
+                                    ["height", "width"]
+                                    if len(space.shape) == 2
+                                    else ["height", "width", "channel"]
+                                ),
+                            }
+                        else:
+                            logger.log_warning(
+                                f"Unsupported camera frame '{frame_name}' in sensor '{sensor_name}'"
+                            )
                 elif isinstance(sensor, ContactSensor):
                     for frame_name, space in value.items():
                         features[f"{sensor_name}.{frame_name}"] = {
@@ -412,6 +574,31 @@ class LeRobotRecorder(Functor):
 
         self._modify_feature_names(features)
         return features
+
+    @staticmethod
+    def _camera_feature_key(sensor_name: str, frame_name: str) -> str:
+        """Return the LeRobot feature key for a camera frame.
+
+        Args:
+            sensor_name: Camera sensor identifier.
+            frame_name: Camera frame name from the observation space.
+
+        Returns:
+            A LeRobot-compatible feature key.
+
+        Raises:
+            ValueError: If the frame is not a supported image, depth, or mask frame.
+        """
+        if frame_name in CAMERA_IMAGE_FRAMES:
+            suffix = CAMERA_IMAGE_FRAMES[frame_name]
+            return f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}{suffix}"
+
+        if frame_name in CAMERA_AUXILIARY_FRAMES:
+            modality, _, side = frame_name.partition("_")
+            suffix = f"_{side}" if side else ""
+            return f"{LeRobotKey.OBS_PREFIX.value}{modality}.{sensor_name}{suffix}"
+
+        raise ValueError(f"Unsupported camera frame: {frame_name}")
 
     def _add_nested_features(
         self, features: Dict, key: str, space: gym.spaces.Dict
@@ -517,18 +704,18 @@ class LeRobotRecorder(Functor):
                 sensor = self._env.get_sensor(sensor_name)
 
                 if isinstance(sensor, Camera):
-                    is_stereo = is_stereocam(sensor)
+                    for frame_name in value:
+                        if (
+                            frame_name not in CAMERA_IMAGE_FRAMES
+                            and frame_name not in CAMERA_AUXILIARY_FRAMES
+                        ):
+                            continue
 
-                    color_data = obs["sensor"][sensor_name]["color"]
-                    color_img = color_data[:, :, :3].cpu()
-                    frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}"] = color_img
-
-                    if is_stereo:
-                        color_right_data = obs["sensor"][sensor_name]["color_right"]
-                        color_right_img = color_right_data[:, :, :3].cpu()
-                        frame[f"{LeRobotKey.OBS_IMAGES.value}.{sensor_name}_right"] = (
-                            color_right_img
-                        )
+                        feature_key = self._camera_feature_key(sensor_name, frame_name)
+                        frame_data = obs["sensor"][sensor_name][frame_name]
+                        if frame_name in CAMERA_IMAGE_FRAMES:
+                            frame_data = frame_data[:, :, :3]
+                        frame[feature_key] = frame_data.cpu()
                 elif isinstance(sensor, ContactSensor):
                     for frame_name in value.keys():
                         frame[f"{sensor_name}.{frame_name}"] = obs["sensor"][
