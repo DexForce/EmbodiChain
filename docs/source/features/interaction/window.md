@@ -97,6 +97,11 @@ This controller is distinct from the target-specific Robot TCP IK gizmo. When
 both are active, **G** controls entity roots and **I** shows or hides the Robot
 TCP IK gizmo.
 
+The entity gizmo is native-window only. The Viser backend offers an analogous
+**click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the
+**G** hotkey, since browsers do not expose keyboard events); see
+:doc:`tutorial/gizmo` for details.
+
 ## Customizing Window Events
 
 Users can create their own custom window interaction controls by subclassing the `ObjectManipulator` class (provided by `dexsim`). This allows for the implementation of specific behaviors and responses to user inputs.

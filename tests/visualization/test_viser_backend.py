@@ -180,6 +180,17 @@ class _Scene:
         self.transform_controls.append(handle)
         return handle
 
+    def on_pointer_event(self, event_type: str):
+        """Register a pointer callback like viser's scene API (test-only)."""
+
+        def decorator(callback: object) -> object:
+            if not hasattr(self, "pointer_callbacks"):
+                self.pointer_callbacks = []
+            self.pointer_callbacks.append((event_type, callback))
+            return callback
+
+        return decorator
+
 
 class _Server:
     def __init__(self, **kwargs: object) -> None:
@@ -560,6 +571,169 @@ def test_viser_backend_emits_owned_gizmo_drag_commands() -> None:
     backend.poll()
     assert commands[-1].phase == "end"
     np.testing.assert_allclose(commands[-1].position, [0.4, 0.0, 1.0])
+    backend.stop()
+
+
+def _unit_cube_geometry() -> MeshGeometry:
+    vertices = np.array(
+        [
+            [-0.5, -0.5, -0.5],
+            [0.5, -0.5, -0.5],
+            [0.5, 0.5, -0.5],
+            [-0.5, 0.5, -0.5],
+            [-0.5, -0.5, 0.5],
+            [0.5, -0.5, 0.5],
+            [0.5, 0.5, 0.5],
+            [-0.5, 0.5, 0.5],
+        ],
+        dtype=np.float32,
+    )
+    faces = np.array(
+        [
+            [0, 1, 2],
+            [0, 2, 3],
+            [4, 6, 5],
+            [4, 7, 6],
+            [0, 4, 5],
+            [0, 5, 1],
+            [2, 6, 7],
+            [2, 7, 3],
+            [1, 5, 6],
+            [1, 6, 2],
+            [0, 3, 7],
+            [0, 7, 4],
+        ],
+        dtype=np.uint32,
+    )
+    return MeshGeometry(geometry_id="cube", vertices=vertices, faces=faces)
+
+
+def _make_pickable_scene() -> tuple[SceneManifest, SceneFrame]:
+    node = SceneNode(
+        node_id="env:0/rigid:cube",
+        path="/envs/0/rigid_objects/cube",
+        parent_id=None,
+        env_id=0,
+        kind="rigid_object",
+        geometry_id="cube",
+    )
+    manifest = SceneManifest("run", 1, (node,), (_unit_cube_geometry(),))
+    frame = SceneFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=1,
+        sim_step=1,
+        sim_time=0.01,
+        node_ids=("env:0/rigid:cube",),
+        positions=np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
+        wxyz=np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+        visible=np.array([True], dtype=np.bool_),
+    )
+    return manifest, frame
+
+
+def _make_pick_backend() -> tuple[object, object, list]:
+    server = _Server()
+    pick_commands: list = []
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    backend.set_pick_command_sink(pick_commands.append)
+    return backend, server, pick_commands
+
+
+def test_viser_backend_pick_enqueues_command_when_enabled() -> None:
+    backend, server, pick_commands = _make_pick_backend()
+    manifest, frame = _make_pickable_scene()
+
+    backend.start()
+    backend.publish_manifest(manifest)
+    assert backend.publish_frame(frame)
+
+    # The click handler is registered but inactive until the checkbox is on.
+    click_callback = server.scene.pointer_callbacks[0][1]
+    click_callback(
+        SimpleNamespace(
+            client_id="client-a",
+            ray_origin=np.array([0.0, 0.0, 5.0], dtype=np.float32),
+            ray_direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+    )
+    assert pick_commands == []
+
+    server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=True))
+    )
+    backend.poll()
+
+    click_callback(
+        SimpleNamespace(
+            client_id="client-a",
+            ray_origin=np.array([0.0, 0.0, 5.0], dtype=np.float32),
+            ray_direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+    )
+
+    assert len(pick_commands) == 1
+    command = pick_commands[0]
+    assert command.node_id == "env:0/rigid:cube"
+    assert command.client_id == "client-a"
+    backend.stop()
+
+
+def test_viser_backend_pick_miss_enqueues_empty_command() -> None:
+    backend, server, pick_commands = _make_pick_backend()
+    manifest, frame = _make_pickable_scene()
+
+    backend.start()
+    backend.publish_manifest(manifest)
+    assert backend.publish_frame(frame)
+
+    server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=True))
+    )
+    backend.poll()
+
+    click_callback = server.scene.pointer_callbacks[0][1]
+    # Ray off to the side misses the cube.
+    click_callback(
+        SimpleNamespace(
+            client_id="client-a",
+            ray_origin=np.array([5.0, 5.0, 5.0], dtype=np.float32),
+            ray_direction=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        )
+    )
+
+    assert len(pick_commands) == 1
+    assert pick_commands[0].node_id is None
+    backend.stop()
+
+
+def test_viser_backend_disabling_pick_clears_picker_gizmo() -> None:
+    backend, server, pick_commands = _make_pick_backend()
+    manifest, frame = _make_pickable_scene()
+
+    backend.start()
+    backend.publish_manifest(manifest)
+    assert backend.publish_frame(frame)
+
+    server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=True))
+    )
+    backend.poll()
+    assert backend._pick_enabled is True
+
+    server.gui.checkboxes["Enable click-to-pick Gizmo"].callback(
+        SimpleNamespace(target=SimpleNamespace(value=False))
+    )
+    backend.poll()
+
+    assert backend._pick_enabled is False
+    # Disabling emits an empty pick so the simulation releases the gizmo.
+    assert len(pick_commands) == 1
+    assert pick_commands[0].node_id is None
     backend.stop()
 
 

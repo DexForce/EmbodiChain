@@ -320,6 +320,10 @@ class SimulationManager:
 
         # gizmo management
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
+        # ``(uid, control_part)`` of the Gizmo currently owned by the Viser
+        # click-to-pick feature, or ``None``. Only one picker Gizmo is kept at a
+        # time and user-created Gizmos are never touched.
+        self._picker_gizmo: tuple[str, str | None] | None = None
 
         # marker management
         self._markers: Dict[str, MeshObject] = dict()
@@ -2165,6 +2169,8 @@ class SimulationManager:
 
         try:
             gizmo = self._gizmos.pop(gizmo_key)
+            if self._picker_gizmo == (uid, control_part):
+                self._picker_gizmo = None
             try:
                 if gizmo is not None:
                     gizmo.destroy()
@@ -2282,6 +2288,7 @@ class SimulationManager:
 
     def update_gizmos(self) -> None:
         """Apply Viser commands and update all active Gizmos."""
+        self.process_pick_commands()
         self.process_visualization_commands()
         for gizmo_key, gizmo in list(
             getattr(self, "_gizmos", {}).items()
@@ -2291,6 +2298,63 @@ class SimulationManager:
                     gizmo.update()
                 except Exception as error:
                     logger.log_error(f"Error updating gizmo '{gizmo_key}': {error}")
+
+    def process_pick_commands(self) -> int:
+        """Apply queued Viser click-pick commands on the simulation thread.
+
+        A non-empty pick attaches a picker-owned Gizmo to the clicked node;
+        an empty pick (clicking empty space) clears it. Only one picker-owned
+        Gizmo is kept at a time and user-created Gizmos are never touched.
+
+        Returns:
+            Number of pick commands drained from the visualization runtime.
+        """
+        runtime = self._visualization_runtime
+        if runtime is None or not getattr(
+            self.sim_config.visualization, "allow_commands", False
+        ):
+            return 0
+        processed = 0
+        for command in runtime.drain_pick_commands():
+            processed += 1
+            if (
+                command.run_id != runtime.exporter.run_id
+                or command.scene_revision != runtime.exporter.scene_revision
+            ):
+                continue
+            if command.node_id is None:
+                # Clicking empty space detaches the picker-owned Gizmo.
+                self._release_picker_gizmo()
+                continue
+            resolved = runtime.exporter.resolve_node_target(command.node_id)
+            if resolved is None:
+                continue
+            uid, kind = resolved
+            if kind not in {"robot", "rigid"}:
+                logger.log_warning(
+                    f"Pick target kind {kind!r} (uid {uid!r}) is not gizmo-able; "
+                    "only rigid objects and robots can be picked."
+                )
+                self._release_picker_gizmo()
+                continue
+            # Re-clicking the already-picked target is a no-op (avoids flicker
+            # from recreating the same Gizmo, e.g. clicking near its handle).
+            if self._picker_gizmo is not None and self._picker_gizmo[0] == uid:
+                continue
+            self._release_picker_gizmo()
+            gizmo = self.enable_gizmo(uid=uid)
+            if gizmo is not None:
+                self._picker_gizmo = (uid, None)
+        return processed
+
+    def _release_picker_gizmo(self) -> None:
+        """Detach the picker-owned Gizmo if one is currently attached."""
+        if self._picker_gizmo is None:
+            return
+        uid, control_part = self._picker_gizmo
+        self._picker_gizmo = None
+        if self.has_gizmo(uid, control_part=control_part):
+            self.disable_gizmo(uid, control_part=control_part)
 
     def toggle_gizmo_visibility(
         self, uid: str, control_part: str | None = None

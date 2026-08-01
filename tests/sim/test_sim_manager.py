@@ -32,6 +32,7 @@ from embodichain.lab.sim.sim_manager import (
 )
 from embodichain.lab.visualization import (
     GizmoCommand,
+    PickCommand,
     PointCloudOverlay,
     SceneOverlays,
     VisualizationCfg,
@@ -329,6 +330,167 @@ def test_sim_manager_routes_viser_gizmo_commands_in_local_arena_frame() -> None:
         gizmo.requested_poses[-1][0, :3, 3],
         [3.0, 0.0, 0.5],
     )
+
+
+def _make_pick_sim_manager(pick_commands, resolve):
+    """Build a minimally initialized manager with stubbed gizmo lifecycle."""
+    sim = object.__new__(SimulationManager)
+    sim._gizmos = {}
+    sim._picker_gizmo = None
+    enabled: list = []
+    disabled: list = []
+
+    def fake_enable(uid, control_part=None, gizmo_cfg=None, *, enable_native=None):
+        enabled.append((uid, control_part))
+        return SimpleNamespace(control_part=control_part)
+
+    def fake_disable(uid, control_part=None):
+        disabled.append((uid, control_part))
+
+    sim.enable_gizmo = fake_enable
+    sim.disable_gizmo = fake_disable
+    sim.has_gizmo = lambda uid, control_part=None: True
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(allow_commands=True),
+    )
+    sim._visualization_runtime = SimpleNamespace(
+        exporter=SimpleNamespace(
+            run_id="run",
+            scene_revision=2,
+            resolve_node_target=resolve,
+        ),
+        drain_pick_commands=lambda: pick_commands,
+    )
+    return sim, enabled, disabled
+
+
+def test_process_pick_commands_attaches_single_picker_gizmo() -> None:
+    pick_commands = (
+        PickCommand(
+            run_id="run",
+            scene_revision=2,
+            client_id="client-a",
+            node_id="env:0/rigid:cube",
+        ),
+        PickCommand(
+            run_id="run",
+            scene_revision=2,
+            client_id="client-a",
+            node_id="env:0/robot:ur10",
+        ),
+        PickCommand(
+            run_id="run",
+            scene_revision=2,
+            client_id="client-a",
+            node_id=None,
+        ),
+    )
+
+    def resolve(node_id: str):
+        if node_id == "env:0/rigid:cube":
+            return ("cube", "rigid")
+        if node_id == "env:0/robot:ur10":
+            return ("ur10", "robot")
+        return None
+
+    sim, enabled, disabled = _make_pick_sim_manager(pick_commands, resolve)
+
+    processed = sim.process_pick_commands()
+
+    assert processed == 3
+    # cube attached, then swapped to ur10 (disabling cube), then ur10 cleared.
+    assert enabled == [("cube", None), ("ur10", None)]
+    assert disabled == [("cube", None), ("ur10", None)]
+    assert sim._picker_gizmo is None
+
+
+def test_process_pick_commands_skips_non_gizmo_targets() -> None:
+    pick_commands = (
+        PickCommand(
+            run_id="run",
+            scene_revision=2,
+            client_id="client-a",
+            node_id="env:0/soft:cloth",
+        ),
+    )
+    sim, enabled, disabled = _make_pick_sim_manager(
+        pick_commands, lambda node_id: ("cloth", "soft")
+    )
+
+    processed = sim.process_pick_commands()
+
+    assert processed == 1
+    assert enabled == []  # soft bodies are not gizmo-able
+    assert disabled == []
+    assert sim._picker_gizmo is None
+
+
+def test_process_pick_commands_is_noop_for_already_picked_target() -> None:
+    pick_commands = (
+        PickCommand(
+            run_id="run",
+            scene_revision=2,
+            client_id="client-a",
+            node_id="env:0/rigid:cube",
+        ),
+        PickCommand(
+            run_id="run",
+            scene_revision=2,
+            client_id="client-a",
+            node_id="env:0/rigid:cube",  # same target again
+        ),
+    )
+    sim, enabled, disabled = _make_pick_sim_manager(
+        pick_commands, lambda node_id: ("cube", "rigid")
+    )
+
+    processed = sim.process_pick_commands()
+
+    assert processed == 2
+    # The second pick is a no-op: no flicker from disable+re-enable.
+    assert enabled == [("cube", None)]
+    assert disabled == []
+    assert sim._picker_gizmo == ("cube", None)
+
+
+def test_process_pick_commands_ignores_stale_scene_revision() -> None:
+    pick_commands = (
+        PickCommand(
+            run_id="run",
+            scene_revision=99,  # stale
+            client_id="client-a",
+            node_id="env:0/rigid:cube",
+        ),
+    )
+    sim, enabled, disabled = _make_pick_sim_manager(
+        pick_commands, lambda node_id: ("cube", "rigid")
+    )
+
+    processed = sim.process_pick_commands()
+
+    assert processed == 1
+    assert enabled == []
+    assert sim._picker_gizmo is None
+
+
+def test_process_pick_commands_noop_without_command_permission() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.sim_config = SimpleNamespace(
+        visualization=SimpleNamespace(allow_commands=False),
+    )
+    sim._visualization_runtime = SimpleNamespace(
+        exporter=SimpleNamespace(run_id="run", scene_revision=2),
+        drain_pick_commands=lambda: (
+            PickCommand(
+                run_id="run",
+                scene_revision=2,
+                client_id="client-a",
+                node_id="env:0/rigid:cube",
+            ),
+        ),
+    )
+
+    assert sim.process_pick_commands() == 0
 
 
 def test_simulation_config_nests_viser_server_under_visualization() -> None:

@@ -212,39 +212,6 @@ class _Camera(_RigidObject):
     pass
 
 
-class _Robot:
-    def __init__(self) -> None:
-        self.device = torch.device("cpu")
-        self.cfg = SimpleNamespace(uid="robot", solver_cfg={"arm": object()})
-        self.control_parts = {"arm": ["joint"]}
-        self.set_calls: list[tuple[torch.Tensor, list[int], list[int]]] = []
-
-    def get_proprioception(self) -> dict[str, torch.Tensor]:
-        return {"qpos": torch.zeros((1, 2), dtype=torch.float32)}
-
-    def get_joint_ids(self, name: str) -> list[int]:
-        assert name == "arm"
-        return [0, 1]
-
-    def compute_fk(self, *args: object, **kwargs: object) -> torch.Tensor:
-        return torch.eye(4, dtype=torch.float32).unsqueeze(0)
-
-    def compute_ik(
-        self,
-        *args: object,
-        **kwargs: object,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        return torch.tensor([True]), torch.tensor([[0.4, -0.2]])
-
-    def set_qpos(
-        self,
-        qpos: torch.Tensor,
-        joint_ids: list[int],
-        env_ids: list[int],
-    ) -> None:
-        self.set_calls.append((qpos.clone(), joint_ids, env_ids))
-
-
 def _patch_headless_dexsim(monkeypatch) -> None:
     monkeypatch.setattr(gizmo_module.dexsim, "get_world_num", lambda: 1)
     monkeypatch.setattr(
@@ -289,19 +256,63 @@ def test_headless_camera_gizmo_uses_shared_pose_path(monkeypatch) -> None:
     torch.testing.assert_close(target.pose, pose)
 
 
-def test_headless_robot_gizmo_preserves_native_fk_ik_behavior(monkeypatch) -> None:
-    monkeypatch.setattr(gizmo_module, "Robot", _Robot)
+def test_headless_robot_gizmo_uses_dexsim_newton_ik(monkeypatch) -> None:
+    """Headless (Viser) robot Gizmo solves IK with DexSim Newton IK.
+
+    The queued Viser target is converted to the robot base-local frame and
+    driven through the Newton solver; the solved qpos is written back as a
+    joint drive target, mirroring the native ``IKApplyMode.DRIVE_TARGET`` path
+    instead of calling the EmbodiChain ``compute_ik`` solver.
+    """
+    monkeypatch.setattr(gizmo_module, "Robot", _FakeAdapterRobot)
     _patch_headless_dexsim(monkeypatch)
-    target = _Robot()
+    target = _FakeAdapterRobot()
+
+    solved_qpos = np.array([0.4, -0.2], dtype=np.float32)
+
+    class _FakeNewtonSolver:
+        def __init__(self) -> None:
+            self.set_target_calls: list[tuple[np.ndarray, np.ndarray]] = []
+            self.solve_iterations: list[int | None] = []
+
+        def set_target_pose(self, position, rotation) -> None:
+            self.set_target_calls.append(
+                (np.array(position, copy=True), np.array(rotation, copy=True))
+            )
+
+        def solve(self, joint_names, current_qpos, iterations=None) -> None:
+            self.solve_iterations.append(iterations)
+
+        def qpos_for_joint_names(self, joint_names, fallback_qpos):
+            return solved_qpos
+
+    fake_solver = _FakeNewtonSolver()
+
+    def _inject_solver(self) -> None:
+        self._robot_adapter = _RobotGizmoAdapter(target, "arm")
+        self._ik_solver = fake_solver
+        self._native_robot_end_link = "tool_link"
+        self._native_robot_tcp_pose = np.eye(4, dtype=np.float32)
+
+    monkeypatch.setattr(Gizmo, "_setup_robot_ik_solver", _inject_solver)
+
     gizmo = Gizmo(target, control_part="arm", enable_native=False)
     pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
     pose[0, 0, 3] = 0.5
 
+    assert not gizmo.native_enabled
     assert gizmo.request_local_pose(pose, source_id="viser:client-a")
     gizmo.update()
 
-    assert target.set_calls[-1][1:] == ([0, 1], [0])
+    # The Newton solver received a base-local target and was asked to solve
+    # with the configured iteration count.
+    assert fake_solver.set_target_calls
+    assert fake_solver.solve_iterations == [gizmo.cfg.ik_iterations]
+    # The solved qpos is written back as a drive target through the adapter.
+    write = target.write_calls[-1]
+    assert write["target"] is True
+    assert write["joint_ids"] == [0, 2]
     torch.testing.assert_close(
-        target.set_calls[-1][0],
-        torch.tensor([[0.4, -0.2]]),
+        write["qpos"],
+        torch.tensor([[0.4, -0.2]], dtype=torch.float32),
     )

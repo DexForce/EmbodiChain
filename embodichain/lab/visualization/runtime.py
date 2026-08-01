@@ -28,6 +28,7 @@ from .cfg import VisualizationCfg
 from .protocol import (
     CameraImageFrame,
     GizmoCommand,
+    PickCommand,
     SceneFrame,
     SceneManifest,
     SceneOverlays,
@@ -138,6 +139,44 @@ class GizmoCommandQueue:
             self._commands.clear()
 
 
+class PickCommandQueue:
+    """Bounded queue for low-frequency browser click-pick commands.
+
+    Only the latest pick per client is retained, so a rapid sequence of clicks
+    from one browser cannot pile up ahead of the simulation thread.
+    """
+
+    def __init__(self, maxsize: int = 64) -> None:
+        if maxsize <= 0:
+            raise ValueError("maxsize must be greater than zero.")
+        self._maxsize = maxsize
+        self._commands: deque[PickCommand] = deque()
+        self._lock = threading.Lock()
+
+    def put(self, command: PickCommand) -> None:
+        """Enqueue a pick command without blocking the Viser callback thread."""
+        with self._lock:
+            for index in range(len(self._commands) - 1, -1, -1):
+                if self._commands[index].client_id == command.client_id:
+                    self._commands[index] = command
+                    return
+            if len(self._commands) >= self._maxsize:
+                self._commands.popleft()
+            self._commands.append(command)
+
+    def drain(self) -> tuple[PickCommand, ...]:
+        """Return and clear all queued commands in arrival order."""
+        with self._lock:
+            commands = tuple(self._commands)
+            self._commands.clear()
+        return commands
+
+    def clear(self) -> None:
+        """Discard all queued commands."""
+        with self._lock:
+            self._commands.clear()
+
+
 @dataclass(frozen=True)
 class RuntimeStats:
     """Snapshot of scene and camera-image capture/upload telemetry."""
@@ -204,6 +243,8 @@ class VisualizationRuntime:
         self._backend = backend
         self._gizmo_commands = GizmoCommandQueue()
         self._backend.set_gizmo_command_sink(self._enqueue_gizmo_command)
+        self._pick_commands = PickCommandQueue()
+        self._backend.set_pick_command_sink(self._enqueue_pick_command)
         self._frames: LatestFrameQueue[SceneFrame] = LatestFrameQueue()
         self._camera_images: LatestFrameQueue[CameraImageFrame] = LatestFrameQueue()
         self._manifests: queue.Queue[SceneManifest] = queue.Queue()
@@ -227,6 +268,16 @@ class VisualizationRuntime:
         if not self.cfg.allow_commands:
             return ()
         return self._gizmo_commands.drain()
+
+    def _enqueue_pick_command(self, command: PickCommand) -> None:
+        if self.cfg.allow_commands:
+            self._pick_commands.put(command)
+
+    def drain_pick_commands(self) -> tuple[PickCommand, ...]:
+        """Drain browser click-pick commands for simulation-thread processing."""
+        if not self.cfg.allow_commands:
+            return ()
+        return self._pick_commands.drain()
 
     @property
     def endpoint(self) -> str | None:
@@ -480,6 +531,7 @@ class VisualizationRuntime:
         self._frames.clear()
         self._camera_images.clear()
         self._gizmo_commands.clear()
+        self._pick_commands.clear()
         self._raise_worker_error()
 
     def __enter__(self) -> VisualizationRuntime:
