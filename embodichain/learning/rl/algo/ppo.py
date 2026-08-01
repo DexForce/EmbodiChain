@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from typing import Dict
 
 import torch
@@ -24,6 +26,8 @@ from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .common import compute_gae
 from .base import BaseAlgorithm
+
+__all__ = ["PPO", "PPOCfg"]
 
 
 @configclass
@@ -36,7 +40,7 @@ class PPOCfg(AlgorithmCfg):
     vf_coef: float = 0.5
 
 
-class PPO(BaseAlgorithm):
+class PPO(BaseAlgorithm[TensorDict]):
     """PPO algorithm consuming TensorDict rollouts."""
 
     def __init__(self, cfg: PPOCfg, policy):
@@ -44,7 +48,6 @@ class PPO(BaseAlgorithm):
         self.policy = policy
         self.device = torch.device(cfg.device)
         self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
-        # no per-rollout aggregation for dense logging
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""

@@ -23,3 +23,19 @@ from . import algo
 from . import buffer
 from . import models
 from . import utils
+from .differentiable_trainer import (
+    DifferentiableTrainer,
+    DifferentiableTrainerCfg,
+)
+from .env import DifferentiableObservation, DifferentiableVecEnv
+
+__all__ = [
+    "DifferentiableObservation",
+    "DifferentiableTrainer",
+    "DifferentiableTrainerCfg",
+    "DifferentiableVecEnv",
+    "algo",
+    "buffer",
+    "models",
+    "utils",
+]

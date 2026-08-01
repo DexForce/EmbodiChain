@@ -29,6 +29,8 @@ import torch.nn as nn
 import torch
 from tensordict import TensorDict
 
+__all__ = ["Policy"]
+
 
 class Policy(nn.Module, ABC):
     """Abstract base class that all RL policies must implement.
@@ -59,6 +61,32 @@ class Policy(nn.Module, ABC):
         """
         with torch.no_grad():
             return self.forward(tensordict, deterministic=deterministic)
+
+    def get_differentiable_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Sample actions while preserving gradients to policy parameters.
+
+        Stochastic implementations must use a reparameterized sample such as
+        :meth:`torch.distributions.Distribution.rsample`. The base
+        implementation fails explicitly to prevent a non-reparameterized
+        ``sample()`` call from silently producing zero pathwise gradients.
+
+        Args:
+            tensordict: Input TensorDict containing ``obs``.
+            deterministic: If True, return a differentiable deterministic
+                action.
+
+        Returns:
+            TensorDict with differentiable policy outputs populated.
+
+        Raises:
+            NotImplementedError: If the policy has no differentiable sampling
+                implementation.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement differentiable action sampling."
+        )
 
     @abstractmethod
     def forward(

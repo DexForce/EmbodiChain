@@ -25,7 +25,61 @@ The RL subsystem implements on-policy reinforcement learning with a modular pipe
 6. **Algorithm** — Consumes the rollout, computes losses, and updates policy weights.
 7. **Trainer** — Orchestrates the collect → update → log → eval → checkpoint loop.
 
-All rollout data flows as `TensorDict` objects (from the `tensordict` library).
+Standard PPO/GRPO rollout data flows as `TensorDict` objects (from the
+`tensordict` library).
+
+## Differentiable RL
+
+**Sources**: `env.py`, `collector/differentiable.py`, `algo/apg.py`,
+`differentiable_trainer.py`
+
+- `DifferentiableVecEnv.step()` preserves gradients through rewards and the
+  differentiable next state.
+- `detach_state()` creates the TBPTT boundary without resetting the environment.
+- `DifferentiableCollector` keeps graph-connected transitions outside the
+  standard preallocated buffer and preserves the policy mode selected by its
+  caller.
+- Differentiable policy sampling uses `get_differentiable_action()` and
+  `rsample()`.
+- `APG` maximizes segmented discounted return with optional entropy, gradient
+  clipping, and non-finite update protection.
+- `DifferentiableTrainer.segment_length` controls the TBPTT boundary, while
+  `update_horizon` independently controls environment steps per optimizer
+  update. Segment losses backpropagate immediately, state is detached after
+  each segment, and policy gradients accumulate until one update horizon is
+  complete.
+- Checkpoints store policy, optimizer, and trainer counters.
+- Training selects `policy.train()`, while evaluation temporarily selects
+  `policy.eval()` and restores the previous mode afterward.
+
+The collector paths are intentionally separate:
+- PPO/GRPO use `SyncCollector` and `TensorDict`.
+- APG uses `DifferentiableCollector` and `DifferentiableRollout`.
+
+APG is exported but intentionally absent from `_ALGO_REGISTRY`; the standard
+`train.py` and `Trainer` cannot consume differentiable rollouts yet. Construct
+APG directly with `DifferentiableTrainer`.
+
+### Newton Reference
+
+`experimental/newton/planar_reach.py` is an FK-only two-link test environment.
+It bridges reward, joint-state, and end-effector gradients from
+`newton.eval_fk` and a Warp tape into PyTorch. It is not a dynamics simulator
+or a task implementation for NMG.
+
+The training demo runs APG through `DifferentiableTrainer`, samples new initial
+joints and FK-reachable targets for every update, then evaluates the learned
+policy on held-out random seeds:
+
+```bash
+python -m embodichain.learning.rl.experimental.newton.train_planar_reach \
+  --device cuda:0
+```
+
+With the default seeds, 600 updates improve the mean minimum distance from
+`1.85` to `0.039` and reach an `86.7%` success rate across 512 held-out samples
+at the `0.05` threshold. Tests also cover analytical FK, finite-difference
+gradients, TBPTT, APG updates, and held-out improvement.
 
 ## Architecture
 
@@ -103,6 +157,8 @@ When `distributed=True`, wraps the policy in `DistributedDataParallel` before pa
 ### Policy ABC (`policy.py`)
 - `Policy(nn.Module, ABC)` — requires `forward()`, `get_value()`, `evaluate_actions()`.
 - `get_action()` — convenience wrapper calling `forward()` under `torch.no_grad()`.
+- `get_differentiable_action()` — explicit graph-preserving action API;
+  implementations must provide reparameterized stochastic sampling.
 - All methods consume and return `TensorDict`.
 
 ### ActorCritic (`actor_critic.py`)
@@ -148,6 +204,14 @@ Distributed training:
 - `collect(num_steps, rollout, on_step_callback)` — steps env synchronously, writing obs/action/reward/done into the preallocated rollout TensorDict.
 - Observations are flattened via `flatten_dict_observation()` before storage.
 - Requires a preallocated rollout (`rollout=None` raises `ValueError`).
+
+`DifferentiableCollector(env, policy, device)`:
+- Collects short segments without `torch.no_grad()` or preallocated copies.
+- Returns `DifferentiableRollout` with immutable transition records.
+- `rollout.rewards` stacks rewards as `[time, num_envs]` while retaining their
+  autograd history.
+- `detach_state()` updates the collector to the environment's detached boundary
+  observation before the next segment.
 
 ### Helper Utilities
 

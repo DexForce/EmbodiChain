@@ -27,6 +27,8 @@ from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .base import BaseAlgorithm
 
+__all__ = ["GRPO", "GRPOCfg"]
+
 
 @configclass
 class GRPOCfg(AlgorithmCfg):
@@ -42,7 +44,7 @@ class GRPOCfg(AlgorithmCfg):
     truncate_at_first_done: bool = True
 
 
-class GRPO(BaseAlgorithm):
+class GRPO(BaseAlgorithm[TensorDict]):
     """Group Relative Policy Optimization on top of TensorDict rollouts."""
 
     def __init__(self, cfg: GRPOCfg, policy):

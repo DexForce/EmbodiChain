@@ -24,6 +24,8 @@ from tensordict import TensorDict
 from .mlp import MLP
 from .policy import Policy
 
+__all__ = ["ActorCritic"]
+
 
 class ActorCritic(Policy):
     """Actor-Critic with learnable log_std for Gaussian policy.
@@ -53,13 +55,11 @@ class ActorCritic(Policy):
         self.action_dim = action_dim
         self.device = device
 
-        # Require external injection of actor and critic
         self.actor = actor
         self.critic = critic
         self.actor.to(self.device)
         self.critic.to(self.device)
 
-        # learnable log_std per action dim
         self.log_std = nn.Parameter(torch.zeros(self.action_dim, device=self.device))
         self.log_std_min = -5.0
         self.log_std_max = 2.0
@@ -73,12 +73,42 @@ class ActorCritic(Policy):
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
     ) -> TensorDict:
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=False,
+        )
+
+    def get_differentiable_action(
+        self, tensordict: TensorDict, deterministic: bool = False
+    ) -> TensorDict:
+        """Sample an action with pathwise gradients."""
+        return self._sample_action(
+            tensordict,
+            deterministic=deterministic,
+            reparameterized=True,
+        )
+
+    def _sample_action(
+        self,
+        tensordict: TensorDict,
+        *,
+        deterministic: bool,
+        reparameterized: bool,
+    ) -> TensorDict:
         obs = tensordict["obs"]
         dist = self._distribution(obs)
         mean = dist.mean
-        action = mean if deterministic else dist.sample()
+        if deterministic:
+            action = mean
+        elif reparameterized:
+            action = dist.rsample()
+        else:
+            action = dist.sample()
         tensordict["action"] = action
         tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+        if reparameterized:
+            tensordict["entropy"] = dist.entropy().sum(dim=-1)
         tensordict["value"] = self.critic(obs).squeeze(-1)
         return tensordict
 
