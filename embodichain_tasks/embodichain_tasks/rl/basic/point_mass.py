@@ -100,7 +100,7 @@ class PointMassEnv:
         self.action_space = self.single_action_space
 
         self._generator = torch.Generator(device=self.device)
-        self._generator.manual_seed(torch.seed())
+        self._generator.manual_seed(torch.initial_seed())
         self.position = torch.zeros(self.num_envs, 2, device=self.device)
         self.velocity = torch.zeros_like(self.position)
         self.goal_position = torch.zeros_like(self.position)
@@ -181,12 +181,15 @@ class PointMassEnv:
             + self.success_bonus * terminated.float()
         )
 
+        # Capture terminal state before auto-reset replaces done rows.
+        terminal_position = self.position.detach().clone()
         terminal_distance = distance.detach()
         terminal_path_length = self.path_length.detach().clone()
         terminal_collisions = self.collision_count.detach().clone()
         info = {
             "success": terminated.detach(),
             "metrics": {
+                "final_position": terminal_position,
                 "final_distance": terminal_distance,
                 "path_length": terminal_path_length,
                 "collision_count": terminal_collisions,

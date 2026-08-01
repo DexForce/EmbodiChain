@@ -75,12 +75,23 @@ def test_point_mass_auto_reset_keeps_terminal_metrics() -> None:
     env.reset(seed=5)
     env.velocity.zero_()
     env.goal_position[0] = env.position[0]
+    terminal_goal = env.goal_position[0].clone()
 
     next_observation, _, terminated, truncated, info = env.step(torch.zeros(2, 2))
 
     assert bool(terminated[0])
     assert not bool(truncated[0])
     assert float(info["metrics"]["final_distance"][0]) < env.success_threshold
+    torch.testing.assert_close(
+        info["metrics"]["final_position"][0],
+        terminal_goal,
+        atol=env.success_threshold,
+        rtol=0.0,
+    )
+    # Auto-reset replaced the live state; terminal metrics stay pre-reset.
+    assert not torch.allclose(
+        env.position[0], info["metrics"]["final_position"][0], atol=1e-6
+    )
     assert env.episode_step[0] == 0
     assert next_observation.shape == (2, 14)
 

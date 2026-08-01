@@ -128,13 +128,15 @@ def rollout_episode(
         )
         action = policy.get_action(policy_input, deterministic=True)["action"]
         observation, _, terminated, truncated, info = env.step(action)
-        positions.append(env.position[env_index].detach().cpu().numpy().copy())
         if bool(terminated[env_index] or truncated[env_index]):
+            # Auto-reset replaces env.position; use the terminal snapshot in info.
+            positions.append(
+                info["metrics"]["final_position"][env_index].detach().cpu().numpy().copy()
+            )
             success = bool(info["success"][env_index])
             final_distance = float(info["metrics"]["final_distance"][env_index])
-            # Auto-reset already replaced state; drop the next-episode sample.
-            positions.pop()
             break
+        positions.append(env.position[env_index].detach().cpu().numpy().copy())
 
     return EpisodeTrajectory(
         positions=np.asarray(positions, dtype=np.float32),

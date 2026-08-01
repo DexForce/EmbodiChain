@@ -263,9 +263,12 @@ class DifferentiableTrainer:
 
     def get_summary(self) -> dict[str, Any]:
         """Return the current in-memory training summary."""
+        elapsed = max(1e-6, time.time() - self.start_time)
         return {
             "global_step": self.global_step,
             "num_updates": self.num_updates,
+            "elapsed_time_sec": float(elapsed),
+            "training_fps": float(self.global_step / elapsed),
             "last_train_metrics": (
                 dict(self.train_history[-1]) if self.train_history else {}
             ),

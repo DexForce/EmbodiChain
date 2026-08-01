@@ -193,7 +193,7 @@ def _train_learning_env(
     use_wandb = bool(trainer_cfg.get("use_wandb", False))
     if use_wandb:
         wandb.init(
-            project=trainer_cfg.get("wandb_project_name", "embodichain-point-mass"),
+            project=trainer_cfg.get("wandb_project_name", "embodichain-generic"),
             name=exp_name,
             config=cfg_data,
         )

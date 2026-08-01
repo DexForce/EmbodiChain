@@ -48,7 +48,7 @@ class LRSchedulerCfg:
 class AlgorithmCfg:
     """Shared fields for RL algorithm configs."""
 
-    device: str = "cuda"
+    device: str = "cpu"
     optimizer: OptimizerCfg = OptimizerCfg()
     lr_scheduler: LRSchedulerCfg = LRSchedulerCfg()
     batch_size: int = 64

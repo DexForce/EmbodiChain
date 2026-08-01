@@ -489,7 +489,14 @@ def evaluate_checkpoint(
             eval_rollout_buffer = _allocate_eval_rollout_buffer(env, policy, device)
             env.set_rollout_buffer(eval_rollout_buffer)
 
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        try:
+            checkpoint = torch.load(
+                checkpoint_path,
+                map_location=device,
+                weights_only=True,
+            )
+        except TypeError:
+            checkpoint = torch.load(checkpoint_path, map_location=device)
         policy.load_state_dict(checkpoint["policy"])
         policy.eval()
 
