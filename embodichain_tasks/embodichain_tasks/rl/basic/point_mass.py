@@ -34,9 +34,11 @@ __all__ = ["PointMassEnv"]
 class PointMassEnv:
     """Navigate a damped point mass to a goal while avoiding two obstacles.
 
-    The imphementation is ale implementation is.aStandardfcollectofs execete
-e   it ntiable. Standard collectorwhile s exrctaine it urat `fram,lA icyrictpm action
-    roruugh gynnancr.d
+    Always differentiable: PPO/GRPO run under ``torch.no_grad()``, APG keeps
+    the graph. ``success_bonus`` is optional reward shaping for on-policy
+    methods that optimize dense distance rewards but are evaluated on strict
+    success; leave it at ``0`` for APG.
+    """
 
     observation_dim = 14
     action_dim = 2
