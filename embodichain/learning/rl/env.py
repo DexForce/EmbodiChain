@@ -88,6 +88,23 @@ class DifferentiableVecEnv(LearningVecEnv, Protocol):
         ...
 
 
+def _is_nested_package_shadow(existing: Any, candidate: Any) -> bool:
+    """Return True when ``candidate`` is an editable-install nested duplicate.
+
+    Editable installs can expose both ``embodichain_tasks.rl...`` and
+    ``embodichain_tasks.embodichain_tasks.rl...``. Prefer the shorter canonical
+    module path already registered.
+    """
+    existing_module = getattr(existing, "__module__", "") or ""
+    candidate_module = getattr(candidate, "__module__", "") or ""
+    if not existing_module or not candidate_module:
+        return False
+    nested_prefix = existing_module.partition(".")[0] + "." + existing_module
+    return candidate_module == nested_prefix or candidate_module.startswith(
+        nested_prefix + "."
+    )
+
+
 def register_learning_env(
     name: str,
     factory: LearningEnvFactory | None = None,
@@ -102,8 +119,14 @@ def register_learning_env(
 
     def decorator(env_factory: LearningEnvFactory) -> LearningEnvFactory:
         key = name.lower()
-        if key in _LEARNING_ENV_REGISTRY and not override:
-            raise ValueError(f"Learning environment '{name}' is already registered.")
+        if key in _LEARNING_ENV_REGISTRY:
+            existing = _LEARNING_ENV_REGISTRY[key]
+            if _is_nested_package_shadow(existing, env_factory):
+                return env_factory
+            if not override:
+                raise ValueError(
+                    f"Learning environment '{name}' is already registered."
+                )
         _LEARNING_ENV_REGISTRY[key] = env_factory
         return env_factory
 
