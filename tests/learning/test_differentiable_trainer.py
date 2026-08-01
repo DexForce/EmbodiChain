@@ -69,6 +69,9 @@ class _QuadraticActionEnv:
         self._state = self._state.detach()
         return self._state
 
+    def close(self) -> None:
+        return None
+
 
 def _make_components(
     ent_coef: float = 0.0,

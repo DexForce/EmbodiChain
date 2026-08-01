@@ -30,7 +30,17 @@ from copy import deepcopy
 
 from embodichain.learning.rl.models import build_policy, get_registered_policy_names
 from embodichain.learning.rl.models import build_mlp_from_cfg
-from embodichain.learning.rl.algo import build_algo, get_registered_algo_names
+from embodichain.learning.rl.algo import (
+    RolloutKind,
+    build_algo,
+    get_registered_algo_names,
+)
+from embodichain.learning.rl.differentiable_trainer import (
+    DifferentiableTrainer,
+    DifferentiableTrainerCfg,
+)
+from embodichain.learning.rl.env import build_learning_env
+from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
@@ -76,6 +86,188 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _build_learning_policy(
+    policy_block: dict,
+    env,
+    device: torch.device,
+):
+    obs_dim = int(env.single_observation_space.shape[-1])
+    action_dim = int(env.single_action_space.shape[-1])
+    policy_name = policy_block["name"].lower()
+    actor_cfg = policy_block.get("actor")
+    critic_cfg = policy_block.get("critic")
+    actor = (
+        build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
+        if actor_cfg is not None
+        else None
+    )
+    critic = (
+        build_mlp_from_cfg(critic_cfg, obs_dim, 1) if critic_cfg is not None else None
+    )
+    policy = build_policy(
+        policy_block,
+        env.single_observation_space,
+        env.single_action_space,
+        device,
+        actor=actor,
+        critic=critic,
+    )
+    if "initial_log_std" in policy_block and hasattr(policy, "log_std"):
+        with torch.no_grad():
+            policy.log_std.fill_(float(policy_block["initial_log_std"]))
+    return policy
+
+
+def _train_learning_env(
+    cfg_data: dict,
+    *,
+    distributed: bool | None,
+):
+    """Train a lightweight registered environment through the unified CLI."""
+    trainer_cfg = cfg_data["trainer"]
+    policy_block = cfg_data["policy"]
+    algorithm_block = cfg_data["algorithm"]
+    distributed = (
+        bool(trainer_cfg.get("distributed", False))
+        if distributed is None
+        else distributed
+    )
+    if distributed:
+        raise ValueError(
+            "Learning environments do not yet support distributed training."
+        )
+
+    discover_task_packages()
+    execute_init_hooks()
+    seed = int(trainer_cfg.get("seed", 1))
+    device = torch.device(trainer_cfg.get("device", "cpu"))
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA was requested but is not available.")
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+        torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    env_block = trainer_cfg["learning_env"]
+    if isinstance(env_block, str):
+        env_name = env_block
+        env_cfg = {}
+    else:
+        env_name = env_block["name"]
+        env_cfg = dict(env_block.get("cfg", {}))
+    num_envs = int(trainer_cfg.get("num_envs", 64))
+    env = build_learning_env(
+        env_name,
+        num_envs=num_envs,
+        device=device,
+        **env_cfg,
+    )
+
+    enable_eval = bool(trainer_cfg.get("enable_eval", False))
+    eval_env = None
+    if enable_eval:
+        eval_env = build_learning_env(
+            env_name,
+            num_envs=int(trainer_cfg.get("num_eval_envs", 16)),
+            device=device,
+            **env_cfg,
+        )
+
+    policy = _build_learning_policy(policy_block, env, device)
+    algorithm = build_algo(
+        algorithm_block["name"],
+        dict(algorithm_block.get("cfg", {})),
+        policy,
+        device,
+    )
+    trainer_class = get_trainer_class(algorithm)
+
+    exp_name = trainer_cfg.get("exp_name", f"{env_name}_{algorithm_block['name']}")
+    run_stamp = time.strftime("%Y%m%d_%H%M%S")
+    run_base = Path("outputs") / f"{exp_name}_{run_stamp}"
+    log_dir = run_base / "logs" / exp_name
+    checkpoint_dir = run_base / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(str(log_dir))
+    use_wandb = bool(trainer_cfg.get("use_wandb", False))
+    if use_wandb:
+        wandb.init(
+            project=trainer_cfg.get("wandb_project_name", "embodichain-point-mass"),
+            name=exp_name,
+            config=cfg_data,
+        )
+
+    eval_freq = int(trainer_cfg.get("eval_freq", 0)) if enable_eval else 0
+    eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
+    iterations = int(trainer_cfg.get("iterations", 250))
+    try:
+        if trainer_class is DifferentiableTrainer:
+            segment_length = int(trainer_cfg.get("segment_length", 16))
+            update_horizon = int(trainer_cfg.get("update_horizon", segment_length))
+            diff_cfg = DifferentiableTrainerCfg(
+                segment_length=segment_length,
+                update_horizon=update_horizon,
+                deterministic_actions=bool(
+                    trainer_cfg.get("deterministic_actions", False)
+                ),
+                checkpoint_dir=str(checkpoint_dir),
+                experiment_name=exp_name,
+                save_frequency_updates=int(
+                    trainer_cfg.get("save_frequency_updates", 0)
+                ),
+                eval_frequency_steps=eval_freq,
+                num_eval_episodes=int(trainer_cfg.get("num_eval_episodes", 5)),
+                eval_seed=eval_seed,
+                use_wandb=use_wandb,
+                best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
+                best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
+            )
+            trainer = DifferentiableTrainer(
+                cfg=diff_cfg,
+                env=env,
+                policy=policy,
+                algorithm=algorithm,
+                writer=writer,
+                eval_env=eval_env,
+            )
+            default_steps = iterations * update_horizon * num_envs
+        else:
+            buffer_size = int(
+                trainer_cfg.get("buffer_size", trainer_cfg.get("rollout_steps", 256))
+            )
+            trainer = Trainer(
+                policy=policy,
+                env=env,
+                algorithm=algorithm,
+                buffer_size=buffer_size,
+                batch_size=int(algorithm.cfg.batch_size),
+                writer=writer,
+                eval_freq=eval_freq,
+                save_freq=int(trainer_cfg.get("save_freq", 0)),
+                checkpoint_dir=str(checkpoint_dir),
+                exp_name=exp_name,
+                use_wandb=use_wandb,
+                eval_env=eval_env,
+                num_eval_episodes=int(trainer_cfg.get("num_eval_episodes", 5)),
+                eval_seed=eval_seed,
+                best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
+                best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
+            )
+            default_steps = iterations * buffer_size * num_envs
+        total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
+        trainer.train(total_timesteps)
+        trainer.save_checkpoint()
+        return trainer.get_summary()
+    finally:
+        writer.close()
+        if use_wandb:
+            wandb.finish()
+        env.close()
+        if eval_env is not None:
+            eval_env.close()
+
+
 def train_from_config(config_path: str, distributed: bool | None = None):
     """Run training from a config file path.
 
@@ -87,14 +279,14 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     cfg_data = load_config(config_path)
 
     trainer_cfg = cfg_data["trainer"]
+    if "learning_env" in trainer_cfg:
+        return _train_learning_env(cfg_data, distributed=distributed)
     policy_block = cfg_data["policy"]
     algo_block = cfg_data["algorithm"]
 
-    # Resolve distributed flag
     if distributed is None:
         distributed = bool(trainer_cfg.get("distributed", False))
 
-    # Distributed setup
     rank = 0
     world_size = 1
     local_rank = 0
@@ -120,7 +312,6 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
 
-    # Runtime
     exp_name = trainer_cfg.get("exp_name", "generic_exp")
     seed = int(trainer_cfg.get("seed", 1))
     device_str = trainer_cfg.get("device", "cpu")
@@ -140,7 +331,6 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     num_envs = trainer_cfg.get("num_envs", None)
     wandb_project_name = trainer_cfg.get("wandb_project_name", "embodichain-generic")
 
-    # Device
     if not isinstance(device_str, str):
         raise ValueError(
             f"runtime.device must be a string such as 'cpu' or 'cuda:0'. Got: {device_str!r}"
@@ -313,6 +503,11 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         device,
         distributed=distributed,
     )
+    if algo.rollout_kind is RolloutKind.DIFFERENTIABLE:
+        raise ValueError(
+            "Differentiable algorithms require trainer.learning_env; "
+            "simulator gym_config environments use standard rollouts."
+        )
 
     # Build Trainer
     event_modules = [
@@ -373,6 +568,9 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         distributed=distributed,
         rank=rank,
         world_size=world_size,
+        eval_seed=int(trainer_cfg.get("eval_seed", seed + 10_000)),
+        best_eval_metric=trainer_cfg.get("best_eval_metric", "eval/avg_reward"),
+        best_eval_mode=trainer_cfg.get("best_eval_mode", "max"),
     )
 
     if rank == 0:

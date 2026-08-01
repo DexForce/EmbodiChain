@@ -7,8 +7,11 @@ This module provides the RL training entry script, responsible for parsing confi
 ### train.py
 - Main training script, supports command-line arguments (such as --config), automatically loads JSON or YAML config.
 - Initializes device, random seed, output directory, and logging (TensorBoard/WandB).
-- Loads environment config, supports multi-environment parallelism and evaluation environments.
-- Builds policy (e.g., actor-critic), algorithm (e.g., PPO), and Trainer.
+- Loads either a simulator `gym_config` or a lightweight registered
+  `learning_env`, with independent vectorized evaluation environments.
+- Builds the policy and algorithm, then routes standard rollouts
+  (PPO/GRPO) to `Trainer` and differentiable rollouts (APG) to
+  `DifferentiableTrainer`.
 - Supports event management (e.g., environment randomization, data logging, evaluation events).
 - Automatically saves model checkpoints and performs periodic evaluation.
 
@@ -35,7 +38,18 @@ This module provides the RL training entry script, responsible for parsing confi
 ## Usage Example
 ```bash
 embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
+embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
+embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
 ```
+
+PointMass intentionally uses one differentiable PyTorch environment for both
+algorithms. The standard collector runs it under `torch.no_grad()`, whereas
+APG retains the dynamics graph and detaches it only at configured TBPTT
+segment boundaries.
+
+Evaluation always uses a separate environment and deterministic actions.
+Metrics are logged under `eval/*`; `num_eval_episodes` is the exact number of
+completed episodes rather than episodes per parallel environment.
 
 ## Extension and Customization
 - Supports custom event modules for flexible training flow extension.

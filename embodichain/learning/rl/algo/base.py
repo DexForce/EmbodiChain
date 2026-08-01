@@ -17,13 +17,21 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Dict, Generic, TypeVar
 
 import torch
 
-__all__ = ["BaseAlgorithm"]
+__all__ = ["BaseAlgorithm", "RolloutKind"]
 
 RolloutT = TypeVar("RolloutT")
+
+
+class RolloutKind(str, Enum):
+    """Rollout semantics required by an algorithm."""
+
+    STANDARD = "standard"
+    DIFFERENTIABLE = "differentiable"
 
 
 class BaseAlgorithm(ABC, Generic[RolloutT]):
@@ -33,6 +41,7 @@ class BaseAlgorithm(ABC, Generic[RolloutT]):
     """
 
     device: torch.device
+    rollout_kind = RolloutKind.STANDARD
 
     @abstractmethod
     def update(self, rollout: RolloutT) -> Dict[str, float]:

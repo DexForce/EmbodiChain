@@ -1,0 +1,19 @@
+name: apg
+config:
+  policy:
+    name: actor_only
+    initial_log_std: -2.0
+    actor:
+      type: mlp
+      network_cfg:
+        hidden_sizes: [64, 64]
+        activation: tanh
+        last_activation: tanh
+        orthogonal_init: [1.414, 1.414, 0.01]
+  algorithm:
+    name: apg
+    cfg:
+      learning_rate: 0.00025
+      gamma: 0.99
+      max_grad_norm: 0.5
+      ent_coef: 0.0

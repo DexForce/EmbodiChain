@@ -109,14 +109,17 @@ def _objective_at(weight: float) -> float:
     return segmented_discounted_return(rollout, gamma=0.9).mean().detach().item()
 
 
-def test_apg_is_not_registered_with_standard_trainer() -> None:
-    assert "apg" not in get_registered_algo_names()
-    with pytest.raises(ValueError, match="differentiable rollouts"):
+def test_apg_is_registered_with_differentiable_rollout_kind() -> None:
+    assert "apg" in get_registered_algo_names()
+    algorithm = build_algo("apg", {}, _make_policy(), torch.device("cpu"))
+    assert algorithm.rollout_kind.value == "differentiable"
+    with pytest.raises(ValueError, match="do not support distributed"):
         build_algo(
             "apg",
             {},
             _make_policy(),
             torch.device("cpu"),
+            distributed=True,
         )
 
 

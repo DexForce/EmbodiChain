@@ -137,9 +137,19 @@ def build_mlp_from_cfg(module_cfg: Dict, in_dim: int, out_dim: int) -> MLP:
     if module_cfg.get("type", "").lower() != "mlp":
         raise ValueError("Only 'mlp' type is supported for actor/critic in this setup.")
 
-    hidden_sizes = module_cfg["network_cfg"]["hidden_sizes"]
-    activation = module_cfg["network_cfg"]["activation"]
-    return MLP(in_dim, out_dim, hidden_sizes, activation)
+    network_cfg = module_cfg["network_cfg"]
+    model = MLP(
+        in_dim,
+        out_dim,
+        network_cfg["hidden_sizes"],
+        network_cfg.get("activation", "elu"),
+        last_activation=network_cfg.get("last_activation"),
+        use_layernorm=bool(network_cfg.get("use_layernorm", False)),
+        dropout_p=float(network_cfg.get("dropout_p", 0.0)),
+    )
+    if "orthogonal_init" in network_cfg:
+        model.init_orthogonal(network_cfg["orthogonal_init"])
+    return model
 
 
 # default registrations

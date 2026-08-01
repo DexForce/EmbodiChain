@@ -18,7 +18,9 @@ python -m embodichain.learning.rl.train --config <path-to-yaml-or-json> [--distr
 The RL subsystem implements on-policy reinforcement learning with a modular pipeline:
 
 1. **Config** — JSON/YAML file defines `trainer`, `policy`, and `algorithm` blocks.
-2. **Environment** — Built via `build_env()` from `embodichain.lab.gym.envs.tasks.rl`.
+2. **Environment** — Simulator tasks use `build_env()`; lightweight tensor
+   tasks use the `learning_env` registry. Official tasks live in
+   `embodichain_tasks`.
 3. **Policy** — Neural-network module (`Policy` ABC) producing actions from observations.
 4. **Collector** — Steps the env, writes transitions into a preallocated `TensorDict`.
 5. **Buffer** — `RolloutBuffer` owns the preallocated storage; marks it full after collection.
@@ -48,7 +50,8 @@ Standard PPO/GRPO rollout data flows as `TensorDict` objects (from the
   update. Segment losses backpropagate immediately, state is detached after
   each segment, and policy gradients accumulate until one update horizon is
   complete.
-- Checkpoints store policy, optimizer, and trainer counters.
+- Checkpoints store policy, optimizer, trainer counters, and best-evaluation
+  state.
 - Training selects `policy.train()`, while evaluation temporarily selects
   `policy.eval()` and restores the previous mode afterward.
 
@@ -56,9 +59,16 @@ The collector paths are intentionally separate:
 - PPO/GRPO use `SyncCollector` and `TensorDict`.
 - APG uses `DifferentiableCollector` and `DifferentiableRollout`.
 
-APG is exported but intentionally absent from `_ALGO_REGISTRY`; the standard
-`train.py` and `Trainer` cannot consume differentiable rollouts yet. Construct
-APG directly with `DifferentiableTrainer`.
+APG is registered with `RolloutKind.DIFFERENTIABLE`. The shared `train.py`
+entry point routes it to `DifferentiableTrainer`; PPO/GRPO declare
+`RolloutKind.STANDARD` and continue to use `Trainer`. Collectors and rollout
+types remain separate even though environment construction, policy building,
+evaluation, logging, and checkpoint conventions are shared.
+
+`PointMassRL` in
+`embodichain_tasks/embodichain_tasks/rl/basic/point_mass.py` is the canonical
+dual-path task. The same differentiable PyTorch dynamics run under
+`torch.no_grad()` for PPO and preserve the action-to-reward graph for APG.
 
 ### Newton Reference
 
@@ -85,10 +95,20 @@ gradients, TBPTT, APG updates, and held-out improvement.
 
 ```
 train_from_config()
-  ├─ build_env()                     → Gym env
+  ├─ build_env() | build_learning_env()
   ├─ build_policy(policy_block, ...) → Policy (ActorCritic | ActorOnly | custom)
-  ├─ build_algo(name, cfg, policy)   → Algorithm (PPO | GRPO)
-  └─ Trainer(policy, env, algorithm, ...)
+  ├─ build_algo(name, cfg, policy)   → Algorithm (PPO | GRPO | APG)
+  └─ route by RolloutKind
+       ├─ STANDARD       → Trainer + SyncCollector + RolloutBuffer
+       └─ DIFFERENTIABLE → DifferentiableTrainer + DifferentiableCollector
+```
+
+Both trainers call `evaluation.evaluate_episodes()` with an independent
+evaluation environment. It counts actual completed episodes under asynchronous
+auto-reset and logs terminal-only metrics as `eval/*`.
+
+```text
+Trainer(policy, env, algorithm, ...)
        ├─ RolloutBuffer  [buffer/standard_buffer.py]
        ├─ SyncCollector  [collector/sync_collector.py]
        └─ .train(total_timesteps)
@@ -127,11 +147,18 @@ train_from_config()
 **Source**: `embodichain/learning/rl/algo/__init__.py`
 
 ```python
-_ALGO_REGISTRY = {"ppo": (PPOCfg, PPO), "grpo": (GRPOCfg, GRPO)}
+_ALGO_REGISTRY = {
+    "apg": (APGCfg, APG),
+    "ppo": (PPOCfg, PPO),
+    "grpo": (GRPOCfg, GRPO),
+}
 build_algo(name, cfg_kwargs, policy, device, distributed=False)
 ```
 
-When `distributed=True`, wraps the policy in `DistributedDataParallel` before passing to the algorithm.
+`APG.rollout_kind` is `RolloutKind.DIFFERENTIABLE`; PPO/GRPO use
+`RolloutKind.STANDARD`. When `distributed=True`, wraps the policy in
+`DistributedDataParallel` before passing to the algorithm and rejects
+differentiable algorithms.
 
 ## Rollout Buffer
 
@@ -233,3 +260,6 @@ Distributed training:
 | `GRPO: group_size >= 2` | GRPO requires at least 2 environments per group for normalization. |
 | NaN losses | Check `log_std` bounds, gradient clipping, and reward scale. `max_grad_norm` defaults to 0.5. |
 | Stale observations after reset | `SyncCollector` resets obs via `_reset_env()` on init; set `reset_every_rollout=True` if episodes must fully reset between rollouts. |
+| `Learning environment 'X' is not registered` | Task package was not imported. Call `discover_task_packages()` / `execute_init_hooks()`, or import the task module that uses `@register_learning_env`. |
+| `Differentiable algorithms require trainer.learning_env` | APG cannot train simulator `gym_config` envs; use a registered `learning_env` such as `PointMassRL`. |
+| Eval success rate stuck near zero | Confirm `evaluate_episodes` reads terminal-only `success`/`metrics`, and that the eval env uses a held-out `eval_seed`. |

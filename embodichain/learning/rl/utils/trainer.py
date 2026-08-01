@@ -16,22 +16,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
 import time
+from collections import deque
+from typing import Any
+
 import numpy as np
 import torch
 import wandb
-from embodichain.utils import logger
-from torch.utils.tensorboard import SummaryWriter
-from collections import deque
 from tensordict import TensorDict
-from typing import Dict
+from torch.utils.tensorboard import SummaryWriter
 
-from embodichain.lab.gym.envs.managers.action_manager import ActionManager
+from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from embodichain.learning.rl.buffer import RolloutBuffer
 from embodichain.learning.rl.collector import SyncCollector
-from embodichain.lab.gym.envs.managers.event_manager import EventManager
-from .helper import flatten_dict_observation
+from embodichain.learning.rl.evaluation import evaluate_episodes
 
 
 class Trainer:
@@ -57,7 +55,12 @@ class Trainer:
         distributed: bool = False,
         rank: int = 0,
         world_size: int = 1,
+        eval_seed: int | None = None,
+        best_eval_metric: str = "eval/avg_reward",
+        best_eval_mode: str = "max",
     ):
+        if best_eval_mode not in {"min", "max"}:
+            raise ValueError("best_eval_mode must be 'min' or 'max'.")
         self.policy = policy
         self.distributed = distributed
         self.rank = rank
@@ -74,13 +77,17 @@ class Trainer:
         self.exp_name = exp_name
         self.use_wandb = use_wandb
         self.num_eval_episodes = num_eval_episodes
+        self.eval_seed = eval_seed
+        self.best_eval_metric = best_eval_metric
+        self.best_eval_mode = best_eval_mode
+        self.best_eval_value: float | None = None
+        self.best_checkpoint_path: str | None = None
 
         if event_cfg is not None:
             self.event_manager = EventManager(event_cfg, env=self.env)
         if eval_event_cfg is not None:
             self.eval_event_manager = EventManager(eval_event_cfg, env=self.eval_env)
 
-        # Get device from algorithm
         self.device = self.algorithm.device
         self.global_step = 0
         self.start_time = time.time()
@@ -91,6 +98,8 @@ class Trainer:
         self.last_eval_metrics: dict[str, float] = {}
         self.last_train_metrics: dict[str, float] = {}
         self.latest_checkpoint_path: str | None = None
+        self._next_eval_step = eval_freq if eval_freq > 0 else None
+        self._next_save_step = save_freq if save_freq > 0 else None
         num_envs = getattr(self.env, "num_envs", None)
         if num_envs is None:
             raise RuntimeError("Env must expose num_envs for trainer statistics.")
@@ -117,11 +126,9 @@ class Trainer:
             ),
         )
 
-        # episode stats tracked on device to avoid repeated CPU round-trips
         self.curr_ret = torch.zeros(num_envs, dtype=torch.float32, device=self.device)
         self.curr_len = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
 
-    # ---- lightweight helpers for dense logging ----
     @staticmethod
     def _mean_scalar(x) -> float:
         if hasattr(x, "detach"):
@@ -152,7 +159,7 @@ class Trainer:
                 continue
         return out
 
-    def train(self, total_timesteps: int) -> Dict[str, Any]:
+    def train(self, total_timesteps: int) -> dict[str, Any]:
         if self.rank == 0:
             print(f"Start training, total steps: {total_timesteps}")
         while self.global_step < total_timesteps:
@@ -160,13 +167,20 @@ class Trainer:
             losses = self.algorithm.update(self.buffer.get(flatten=False))
             self._log_train(losses)
             if (
-                self.eval_freq > 0
+                self._next_eval_step is not None
                 and self.eval_env is not None
-                and self.global_step % self.eval_freq == 0
+                and self.global_step >= self._next_eval_step
             ):
                 self._eval_once(num_episodes=self.num_eval_episodes)
-            if self.global_step % self.save_freq == 0:
+                while self._next_eval_step <= self.global_step:
+                    self._next_eval_step += self.eval_freq
+            if (
+                self._next_save_step is not None
+                and self.global_step >= self._next_save_step
+            ):
                 self.save_checkpoint()
+                while self._next_save_step <= self.global_step:
+                    self._next_save_step += self.save_freq
         return self.get_summary()
 
     @torch.no_grad()
@@ -285,7 +299,7 @@ class Trainer:
             self.ret_window.extend(all_ret[start:])
             self.len_window.extend(all_len[start:])
 
-    def _log_train(self, losses: Dict[str, float]):
+    def _log_train(self, losses: dict[str, float]):
         elapsed = max(1e-6, time.time() - self.start_time)
         sps = self.global_step / elapsed
         avgR = np.mean(self.ret_window) if len(self.ret_window) > 0 else float("nan")
@@ -316,13 +330,10 @@ class Trainer:
                     float(np.mean(self.len_window)),
                     self.global_step,
                 )
-        # console and external logging are rank-0 only in distributed mode.
         if self.rank == 0:
             print(
                 f"[train] step={self.global_step} sps={sps:.0f} avgReward(100)={avgR:.3f} avgLength(100)={avgL:.1f}"
             )
-
-            # wandb (mirror TB logs)
             if self.use_wandb:
                 log_dict = {f"train/{k}": v for k, v in losses.items()}
                 log_dict["charts/SPS"] = sps
@@ -333,163 +344,87 @@ class Trainer:
                 wandb.log(log_dict, step=self.global_step)
 
     @torch.no_grad()
-    def _eval_once(self, num_episodes: int = 5) -> Dict[str, float]:
-        """Run evaluation for specified number of episodes.
+    def _eval_once(self, num_episodes: int = 5) -> dict[str, float]:
+        """Evaluate ``num_episodes`` completed asynchronous episodes."""
 
-        Each episode runs all parallel environments until completion, allowing
-        environments to finish at different times.
+        def on_step(_: dict[str, Any]) -> None:
+            if hasattr(self, "eval_event_manager"):
+                if "interval" in self.eval_event_manager.available_modes:
+                    self.eval_event_manager.apply(mode="interval")
 
-        Args:
-            num_episodes: Number of episodes to evaluate
-        """
-        self.policy.eval()
-        episode_returns = []
-        episode_lengths = []
-        episode_successes = []
-        metric_values: dict[str, list[float]] = {}
-
-        # Evaluation does not consume the training rollout buffer; binding it here can
-        # overflow the shared RL buffer when eval episodes are longer than buffer_size.
-        for _ in range(num_episodes):
-            # Reset and initialize episode tracking
-            obs, _ = self.eval_env.reset()
-            obs = flatten_dict_observation(obs)
-            num_envs = obs.shape[0] if obs.ndim == 2 else 1
-
-            done_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
-            cumulative_reward = torch.zeros(
-                num_envs, dtype=torch.float32, device=self.device
-            )
-            step_count = torch.zeros(num_envs, dtype=torch.int32, device=self.device)
-
-            # Run episode until all environments complete
-            while not done_mask.all():
-                # Get deterministic actions from policy
-                action_td = TensorDict(
-                    {"obs": obs},
-                    batch_size=[num_envs],
-                    device=self.device,
-                )
-                action_td = self.policy.get_action(action_td, deterministic=True)
-                actions = action_td["action"]
-                am: ActionManager = getattr(self.eval_env, "action_manager", None)
-                if am is None:
-                    action_in = actions
-                else:
-                    action_in = am.convert_policy_action_to_env_action(actions)
-
-                # Environment step
-                obs, reward, terminated, truncated, info = self.eval_env.step(action_in)
-                obs = (
-                    flatten_dict_observation(obs)
-                    if isinstance(obs, TensorDict)
-                    else obs
-                )
-
-                # Update statistics only for still-running environments
-                done = terminated | truncated
-                still_running = ~done_mask
-                cumulative_reward[still_running] += reward[still_running].float()
-                step_count[still_running] += 1
-                newly_done = done & (~done_mask)
-                if newly_done.any():
-                    if isinstance(info, dict) and "success" in info:
-                        successes = info["success"][newly_done].detach().cpu().tolist()
-                        episode_successes.extend([float(v) for v in successes])
-                    if isinstance(info, dict) and "metrics" in info:
-                        for key, value in info["metrics"].items():
-                            values = value[newly_done].detach().cpu().tolist()
-                            metric_values.setdefault(key, []).extend(
-                                [float(v) for v in values]
-                            )
-                done_mask |= done
-
-                # Trigger evaluation events (e.g., video recording)
-                if hasattr(self, "eval_event_manager"):
-                    if "interval" in self.eval_event_manager.available_modes:
-                        self.eval_event_manager.apply(mode="interval")
-
-            # Collect episode statistics
-            episode_returns.extend(cumulative_reward.cpu().tolist())
-            episode_lengths.extend(step_count.cpu().tolist())
-
-        # Finalize evaluation functors (e.g., video recording)
-        if hasattr(self, "eval_event_manager"):
-            for functor_cfg in self.eval_event_manager._mode_functor_cfgs.get(
-                "interval", []
-            ):
-                functor = functor_cfg.func
-                save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
-
-                if hasattr(functor, "flush"):
-                    functor.flush(save_path)
-                if hasattr(functor, "finalize"):
-                    functor.finalize(save_path)
-
-        # Log evaluation metrics
-        if self.writer and episode_returns:
-            self.writer.add_scalar(
-                "eval/avg_reward", float(np.mean(episode_returns)), self.global_step
-            )
-            self.writer.add_scalar(
-                "eval/avg_length", float(np.mean(episode_lengths)), self.global_step
-            )
-            if episode_successes:
-                self.writer.add_scalar(
-                    "eval/success_rate",
-                    float(np.mean(episode_successes)),
-                    self.global_step,
-                )
-
-        summary = {
-            "global_step": float(self.global_step),
-            "eval/avg_reward": (
-                float(np.mean(episode_returns)) if episode_returns else float("nan")
-            ),
-            "eval/avg_length": (
-                float(np.mean(episode_lengths)) if episode_lengths else float("nan")
-            ),
-            "eval/success_rate": (
-                float(np.mean(episode_successes)) if episode_successes else float("nan")
-            ),
-        }
-        for key, values in metric_values.items():
-            if values:
-                summary[f"eval/metrics/{key}"] = float(np.mean(values))
+        metrics = evaluate_episodes(
+            policy=self.policy,
+            env=self.eval_env,
+            num_episodes=num_episodes,
+            device=self.device,
+            seed=self.eval_seed,
+            on_step=on_step,
+        )
+        summary = {"global_step": float(self.global_step), **metrics}
         self.eval_history.append(summary)
         self.last_eval_metrics = summary
+        if self.writer:
+            for key, value in metrics.items():
+                if np.isfinite(value):
+                    self.writer.add_scalar(key, value, self.global_step)
         if self.rank == 0 and self.use_wandb:
-            log_dict = {
-                key: value
-                for key, value in summary.items()
-                if key != "global_step" and not np.isnan(value)
-            }
-            if log_dict:
-                wandb.log(log_dict, step=self.global_step)
+            wandb.log(
+                {key: value for key, value in metrics.items() if np.isfinite(value)},
+                step=self.global_step,
+            )
+        candidate = metrics.get(self.best_eval_metric)
+        if candidate is not None and np.isfinite(candidate):
+            improved = self.best_eval_value is None or (
+                candidate > self.best_eval_value
+                if self.best_eval_mode == "max"
+                else candidate < self.best_eval_value
+            )
+            if improved:
+                self.best_eval_value = candidate
+                best_path = f"{self.checkpoint_dir}/{self.exp_name}_best.pt"
+                self.best_checkpoint_path = self.save_checkpoint(best_path)
+        self._finalize_eval_events()
         return summary
 
-    def save_checkpoint(self) -> str | None:
-        # minimal model-only checkpoint; trainer/algorithm states can be added
+    def _finalize_eval_events(self) -> None:
+        """Flush evaluation event functors such as video recorders."""
+        if not hasattr(self, "eval_event_manager"):
+            return
+        for functor_cfg in self.eval_event_manager._mode_functor_cfgs.get(
+            "interval", []
+        ):
+            functor = functor_cfg.func
+            save_path = functor_cfg.params.get("save_path", "./outputs/videos/eval")
+            if hasattr(functor, "flush"):
+                functor.flush(save_path)
+            if hasattr(functor, "finalize"):
+                functor.finalize(save_path)
+
+    def save_checkpoint(self, path: str | None = None) -> str | None:
+        """Save policy, optimizer (when available), and trainer counters."""
         if self.rank != 0:
             return None
-        path = f"{self.checkpoint_dir}/{self.exp_name}_step_{self.global_step}.pt"
+        if path is None:
+            path = f"{self.checkpoint_dir}/{self.exp_name}_step_{self.global_step}.pt"
         policy_state = (
             self.policy.module.state_dict()
             if hasattr(self.policy, "module")
             else self.policy.state_dict()
         )
-        torch.save(
-            {
-                "global_step": self.global_step,
-                "policy": policy_state,
-            },
-            path,
-        )
+        checkpoint = {
+            "global_step": self.global_step,
+            "policy": policy_state,
+            "best_eval_value": self.best_eval_value,
+        }
+        optimizer = getattr(self.algorithm, "optimizer", None)
+        if optimizer is not None:
+            checkpoint["optimizer"] = optimizer.state_dict()
+        torch.save(checkpoint, path)
         self.latest_checkpoint_path = path
         print(f"Checkpoint saved: {path}")
         return path
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         elapsed = max(1e-6, time.time() - self.start_time)
         return {
             "global_step": int(self.global_step),
@@ -500,4 +435,5 @@ class Trainer:
             "train_history": list(self.train_history),
             "eval_history": list(self.eval_history),
             "latest_checkpoint_path": self.latest_checkpoint_path,
+            "best_checkpoint_path": self.best_checkpoint_path,
         }

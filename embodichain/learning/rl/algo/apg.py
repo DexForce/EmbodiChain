@@ -26,7 +26,7 @@ from embodichain.learning.rl.collector import DifferentiableRollout
 from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 
-from .base import BaseAlgorithm
+from .base import BaseAlgorithm, RolloutKind
 
 __all__ = ["APG", "APGCfg", "segmented_discounted_return"]
 
@@ -65,6 +65,8 @@ class APGCfg(AlgorithmCfg):
 
 class APG(BaseAlgorithm[DifferentiableRollout]):
     """Optimize policy parameters through differentiable rollout rewards."""
+
+    rollout_kind = RolloutKind.DIFFERENTIABLE
 
     def __init__(self, cfg: APGCfg, policy: torch.nn.Module) -> None:
         self.cfg = cfg
