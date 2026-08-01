@@ -287,11 +287,38 @@ Notes:
 - Set ``nvtx=True`` on ``EnvProfilerCfg`` to also emit NVTX ranges, which show
   up named in an Nsight Systems timeline when running under ``nsys profile``.
 
-In code, set ``cfg.profiler = EnvProfilerCfg(enable_time=True, ...)``
-(``cfg.profiler is None`` disables profiling entirely at zero overhead). The
-profiler lives on the env as ``env._profiler``; call ``env._profiler.report()``
-to print mid-run. The report is flushed in ``close()`` **before**
-``sim.destroy()`` (which exits the process).
+In environment code, set
+``cfg.profiler = EnvProfilerCfg(enable_time=True, ...)``
+(``cfg.profiler is None`` leaves profiling disabled unless
+``cfg.sim_cfg.profiler`` is configured directly). The profiler remains
+available as ``env._profiler``; call
+``env._profiler.report()`` to print mid-run. The report is flushed in
+``close()`` **before** ``sim.destroy()`` (which exits the process).
+
+The profiler is owned by the simulation layer and can also be used without a
+Gym environment:
+
+```python
+from embodichain.lab.sim import ProfilerCfg, SimulationManager, SimulationManagerCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        headless=True,
+        profiler=ProfilerCfg(enable_time=True, warmup_steps=0),
+    )
+)
+sim.update(step=10)
+sim.profiler.report()
+```
+
+Standalone updates are reported below ``sim_update``. When an environment owns
+the manager, it reuses the same instance and simulation sections stay below the
+existing ``step.sim_update`` path. The legacy ``EnvProfiler`` and
+``EnvProfilerCfg`` imports remain aliases of ``Profiler`` and ``ProfilerCfg``.
+Within ``manual_update``, ``gizmo_update`` and ``world_update`` are sampled once
+per physics substep. Optional window recording and Viser publication are
+reported separately as ``window_record_capture`` and
+``visualization_capture``, so they are not attributed to physics time.
 
 ---
 

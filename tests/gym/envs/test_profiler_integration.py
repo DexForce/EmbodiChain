@@ -73,6 +73,7 @@ class TestProfilerIntegration:
     def test_records_step_reset_sections(self):
         env = _ProfilerProbeEnv(device="cpu")
         try:
+            assert env._profiler is env.sim.profiler
             obs, info = env.reset()
             action = torch.as_tensor(
                 env.action_space.sample(),

@@ -24,6 +24,7 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.profiler import Profiler
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
     SimulationManagerCfg,
@@ -183,6 +184,7 @@ def _make_visualization_sim_manager() -> (
         visualization=SimpleNamespace(backend="viser"),
     )
     sim.device = SimpleNamespace(type="cpu")
+    sim.profiler = Profiler(None, torch.device("cpu"))
     sim._is_initialized_gpu_physics = False
     sim._world = FakeWorld()
     sim._window_record_state = None

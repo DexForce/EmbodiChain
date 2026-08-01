@@ -22,6 +22,7 @@ import types
 import pytest
 import torch
 
+import embodichain.lab.gym.utils.profiler as profiler_module
 from embodichain.lab.gym.envs.managers.cfg import EventCfg, FunctorCfg
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
 from embodichain.lab.gym.envs.managers.manager_base import ManagerBase
@@ -171,6 +172,43 @@ class TestEnvProfilerReport:
         _step(prof)  # consumed by warmup, nothing recorded
         data = prof.report()
         assert data["sections"] == {}
+
+    def test_report_colors_rows_by_logical_module(self, monkeypatch):
+        prof = EnvProfiler(
+            EnvProfilerCfg(enable_time=True, warmup_steps=0), torch.device("cpu")
+        )
+        _step(prof)
+        messages: list[str] = []
+        monkeypatch.setattr(profiler_module.logger, "log_info", messages.append)
+
+        prof.report()
+
+        lines = messages[-1].splitlines()
+        get_obs_line = next(
+            line for line in lines if line.startswith("\033[") and "get_obs" in line
+        )
+        proprio_line = next(line for line in lines if "proprio" in line)
+        sim_update_line = next(
+            line for line in lines if line.startswith("\033[") and "sim_update" in line
+        )
+        get_obs_color = get_obs_line.split("m", 1)[0]
+        assert proprio_line.startswith(get_obs_color)
+        assert not sim_update_line.startswith(get_obs_color)
+
+    def test_report_explains_percent_of_parent(self, monkeypatch):
+        prof = EnvProfiler(
+            EnvProfilerCfg(enable_time=True, warmup_steps=0), torch.device("cpu")
+        )
+        _step(prof)
+        messages: list[str] = []
+        monkeypatch.setattr(profiler_module.logger, "log_info", messages.append)
+
+        prof.report()
+
+        report = messages[-1]
+        assert "% of parent" in report
+        assert "this row's total time / its direct parent's total time" in report
+        assert "(other) is time in the parent outside named children" in report
 
 
 def _make_manager(profiler) -> ManagerBase:

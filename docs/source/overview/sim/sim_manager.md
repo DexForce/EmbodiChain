@@ -40,6 +40,7 @@ sim_config = SimulationManagerCfg(
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
 | `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
 | `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
 | `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
 | `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
@@ -124,6 +125,35 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
+
+## Profiling simulation updates
+
+Configure {class}`ProfilerCfg` directly on the simulation manager when using
+the simulation without a Gym environment:
+
+```python
+from embodichain.lab.sim import ProfilerCfg, SimulationManager, SimulationManagerCfg
+
+sim = SimulationManager(
+    SimulationManagerCfg(
+        profiler=ProfilerCfg(enable_time=True, warmup_steps=0),
+    )
+)
+sim.update(step=4)
+sim.profiler.report()
+```
+
+Each standalone {meth}`SimulationManager.update` call creates a `sim_update`
+root. The `manual_update` section contains one `gizmo_update` and one
+`world_update` sample per physics substep, plus optional
+`window_record_capture` and `visualization_capture` samples when those features
+are enabled. Consequently, `world_update.calls` is the total number of physics
+substeps, its mean is the mean cost of one substep, and its total is the
+aggregate physics-update time.
+
+When a Gym environment owns the manager, it reuses the same profiler instance.
+Simulation sections compose below `step.sim_update` without adding another
+`sim_update` path component, so existing environment reports remain compatible.
 
 ## Browser visualization
 
