@@ -175,6 +175,34 @@ def test_scene_entity_pose_enforces_confidence() -> None:
         )
 
 
+def test_scene_snapshot_expands_global_collision_world_revision() -> None:
+    pose = torch.eye(4).repeat(2, 1, 1)
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"obstacle": EntityState(pose)},
+        collision_world_revision=3,
+        collision_entity_ids=("obstacle",),
+    )
+
+    assert snapshot.collision_world_revisions(2) == (3, 3)
+    obstacle_poses = snapshot.collision_obstacle_poses(
+        batch_size=2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    assert torch.equal(obstacle_poses["obstacle"], pose)
+
+
+def test_scene_snapshot_rejects_unknown_collision_entity() -> None:
+    with pytest.raises(ValueError, match="missing scene entities"):
+        SceneSnapshot(
+            timestamp=0.0,
+            version=0,
+            collision_entity_ids=("missing",),
+        )
+
+
 def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
     positions = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
     trajectory = TimedTrajectory.from_positions(

@@ -62,6 +62,7 @@ must be resolved from the latest scene snapshot:
    from embodichain.lab.sim.atomic_actions import (
        EndEffectorPoseGoal,
        RecoveryPolicy,
+       RigidObjectSceneProvider,
        SceneEntityPose,
    )
 
@@ -84,7 +85,12 @@ must be resolved from the latest scene snapshot:
        TaskState,
    )
 
-   adapter = SimulationExecutionAdapter(sim, robot, scene_supplier=read_scene)
+   scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
+   adapter = SimulationExecutionAdapter(
+       sim,
+       robot,
+       scene_provider=scene_provider,
+   )
    task = TaskState.empty(robot.get_qpos().shape[0], robot.device)
    initial_context = adapter.observe(task)
    session = engine.start((invocation,), initial_context)
@@ -109,6 +115,22 @@ trajectory:
 .. code-block:: bash
 
    python scripts/tutorials/atomic_action/tracking_error_recovery.py --headless
+
+The moving-goal counterpart changes a rigid object's pose while an
+``EndEffectorPoseGoal(SceneEntityPose(...))`` is executing:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/moving_target_recovery.py --headless
+
+For collision-aware execution, declare tracked rigid objects as collision
+entities. The provider advances a per-environment collision-world revision when
+an obstacle moves; the active phase is invalidated and a supporting planner,
+such as cuRobo, receives the latest obstacle poses during replanning:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless
 
 Task-state effects
 ------------------
@@ -137,7 +159,9 @@ Adding an action
 ----------------
 
 Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-implement ``plan(invocation, context)`` and declare the stable skill metadata:
+implement the protected ``_plan(invocation, context)`` hook and declare the
+stable skill metadata. The inherited public ``plan()`` method must not be
+overridden because it binds the latest collision scene first:
 
 .. code-block:: python
 
@@ -154,7 +178,7 @@ implement ``plan(invocation, context)`` and declare the stable skill metadata:
        GoalType: ClassVar[type] = PushGoal
        manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-       def plan(
+       def _plan(
            self,
            invocation: ActionInvocation[PushGoal],
            context: PlanningContext,

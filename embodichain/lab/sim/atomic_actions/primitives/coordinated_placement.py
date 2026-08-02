@@ -183,7 +183,7 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
             hand_dof=self.support_hand_dof,
         )
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[CoordinatedPlacementGoal],
         context: PlanningContext,

@@ -193,7 +193,7 @@ class HandOver(AtomicAction[GraspGoal]):
     # Public contract
     # ------------------------------------------------------------------
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[GraspGoal],
         context: PlanningContext,

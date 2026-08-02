@@ -18,26 +18,209 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Mapping, Sequence
 import math
 from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.utils import configclass
 
 from .execution import JointCommand
 from .runner import (
     CommandAcknowledgement,
     CommandAckStatus,
 )
-from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
+from .scene import SceneProvider
+from .state import (
+    EntityState,
+    PlanningContext,
+    RobotObservation,
+    SceneSnapshot,
+    TaskState,
+)
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.objects import RigidObject, Robot
     from embodichain.lab.sim.sim_manager import SimulationManager
 
 
-SceneSnapshotSupplier = Callable[[float], SceneSnapshot]
-"""Callback that returns the latest scene snapshot for a simulation timestamp."""
+@configclass
+class RigidObjectSceneProviderCfg:
+    """Material-pose thresholds used to advance scene revisions."""
+
+    translation_threshold: float = 1.0e-4
+    """Minimum translation in metres considered a scene change."""
+
+    rotation_threshold: float = 1.0e-3
+    """Minimum rotation in radians considered a scene change."""
+
+    def __post_init__(self) -> None:
+        if self.translation_threshold < 0.0:
+            raise ValueError("translation_threshold must be non-negative.")
+        if self.rotation_threshold < 0.0:
+            raise ValueError("rotation_threshold must be non-negative.")
+
+
+class RigidObjectSceneProvider:
+    """Observe simulation rigid objects and maintain scene revisions.
+
+    The provider increments the general scene version when any tracked entity
+    moves materially. For IDs declared as collision entities it additionally
+    increments a per-environment collision-world revision, allowing one batch
+    row to invalidate its trajectory without failing unrelated rows.
+
+    Args:
+        entities: Stable entity IDs mapped to live simulation rigid objects.
+        collision_entity_ids: Tracked IDs consumed as dynamic planner obstacles.
+        cfg: Optional material-change thresholds.
+    """
+
+    def __init__(
+        self,
+        entities: Mapping[str, RigidObject],
+        *,
+        collision_entity_ids: Sequence[str] = (),
+        cfg: RigidObjectSceneProviderCfg | None = None,
+    ) -> None:
+        normalized = dict(entities)
+        if not normalized:
+            raise ValueError("entities must contain at least one rigid object.")
+        if not all(
+            isinstance(entity_id, str) and entity_id for entity_id in normalized
+        ):
+            raise ValueError("Scene entity IDs must be non-empty strings.")
+        collision_ids = tuple(collision_entity_ids)
+        if len(set(collision_ids)) != len(collision_ids):
+            raise ValueError("collision_entity_ids must be unique.")
+        missing = set(collision_ids).difference(normalized)
+        if missing:
+            raise ValueError(
+                "collision_entity_ids reference untracked objects: "
+                f"{sorted(missing)}."
+            )
+        self.entities = normalized
+        self.collision_entity_ids = collision_ids
+        self.cfg = cfg if cfg is not None else RigidObjectSceneProviderCfg()
+        self._last_timestamp: float | None = None
+        self._env_ids: torch.Tensor | None = None
+        self._last_poses: dict[str, torch.Tensor] = {}
+        self._scene_version = 0
+        self._collision_revisions: list[int] = []
+
+    def snapshot(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> SceneSnapshot:
+        """Capture object poses and advance material-change revisions.
+
+        Args:
+            timestamp: Current simulation observation time.
+            env_ids: Stable correlation IDs whose order matches object rows.
+
+        Returns:
+            Versioned scene snapshot with per-environment collision revisions.
+        """
+        if not math.isfinite(timestamp) or timestamp < 0.0:
+            raise ValueError("timestamp must be finite and non-negative.")
+        if self._last_timestamp is not None and timestamp < self._last_timestamp:
+            raise ValueError("Scene provider timestamps must be monotonic.")
+        if (
+            not isinstance(env_ids, torch.Tensor)
+            or env_ids.dtype != torch.long
+            or env_ids.dim() != 1
+            or env_ids.numel() == 0
+        ):
+            raise ValueError("env_ids must be a non-empty 1D int64 tensor.")
+        stable_ids = env_ids.detach().to("cpu")
+        if self._env_ids is None:
+            self._env_ids = stable_ids.clone()
+            self._collision_revisions = [0] * int(env_ids.numel())
+        elif not torch.equal(stable_ids, self._env_ids):
+            raise ValueError("Scene provider env_ids must remain stable and ordered.")
+
+        poses = {
+            entity_id: self._read_pose(entity_id, entity, int(env_ids.numel()))
+            for entity_id, entity in self.entities.items()
+        }
+        if self._last_poses:
+            changed_by_entity = {
+                entity_id: self._pose_change_mask(
+                    self._last_poses[entity_id], current_pose
+                )
+                for entity_id, current_pose in poses.items()
+            }
+            if any(mask.any().item() for mask in changed_by_entity.values()):
+                self._scene_version += 1
+            collision_changed = torch.zeros(env_ids.numel(), dtype=torch.bool)
+            for entity_id in self.collision_entity_ids:
+                collision_changed |= changed_by_entity[entity_id]
+            for row in collision_changed.nonzero(as_tuple=False).flatten().tolist():
+                self._collision_revisions[row] += 1
+
+        self._last_timestamp = timestamp
+        self._last_poses = {
+            entity_id: pose.clone() for entity_id, pose in poses.items()
+        }
+        return SceneSnapshot(
+            timestamp=timestamp,
+            version=self._scene_version,
+            entities={
+                entity_id: EntityState(pose) for entity_id, pose in poses.items()
+            },
+            collision_world_revision=tuple(self._collision_revisions),
+            collision_entity_ids=self.collision_entity_ids,
+        )
+
+    @staticmethod
+    def _read_pose(
+        entity_id: str,
+        entity: RigidObject,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Read and validate one rigid-object pose batch."""
+        pose = entity.get_local_pose(to_matrix=True)
+        if not isinstance(pose, torch.Tensor):
+            raise TypeError(
+                f"Scene entity {entity_id!r} get_local_pose() must return a tensor."
+            )
+        if pose.shape == (4, 4):
+            return pose.unsqueeze(0).expand(batch_size, -1, -1).clone()
+        if pose.shape != (batch_size, 4, 4):
+            raise ValueError(
+                f"Scene entity {entity_id!r} pose must have shape "
+                f"({batch_size}, 4, 4)."
+            )
+        return pose.clone()
+
+    def _pose_change_mask(
+        self,
+        previous: torch.Tensor,
+        current: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return a CPU mask of rows with material pose changes."""
+        current = current.to(device=previous.device, dtype=previous.dtype)
+        translation = torch.linalg.vector_norm(
+            current[:, :3, 3] - previous[:, :3, 3], dim=1
+        )
+        relative_rotation = torch.bmm(
+            previous[:, :3, :3].transpose(1, 2),
+            current[:, :3, :3],
+        )
+        cosine = (
+            (relative_rotation.diagonal(dim1=1, dim2=2).sum(dim=1) - 1.0) / 2.0
+        ).clamp(-1.0, 1.0)
+        rotation = torch.acos(cosine)
+        return (
+            (
+                (translation > self.cfg.translation_threshold)
+                | (rotation > self.cfg.rotation_threshold)
+            )
+            .detach()
+            .to("cpu")
+        )
 
 
 class SimulationExecutionAdapter:
@@ -54,7 +237,7 @@ class SimulationExecutionAdapter:
         physics_dt: Optional physics period. Defaults to the simulation config.
         env_ids: Optional stable correlation IDs matching every robot row. They
             are not used as simulator indices; row order maps to robot instances.
-        scene_supplier: Optional callback for versioned scene observations.
+        scene_provider: Optional provider for versioned scene observations.
         initial_time: Initial elapsed simulation time in seconds.
     """
 
@@ -65,7 +248,7 @@ class SimulationExecutionAdapter:
         *,
         physics_dt: float | None = None,
         env_ids: torch.Tensor | None = None,
-        scene_supplier: SceneSnapshotSupplier | None = None,
+        scene_provider: SceneProvider | None = None,
         initial_time: float = 0.0,
     ) -> None:
         if not math.isfinite(initial_time) or initial_time < 0.0:
@@ -98,7 +281,9 @@ class SimulationExecutionAdapter:
         self.physics_dt = resolved_physics_dt
         self.env_ids = env_ids.clone()
         self._robot_env_indices = list(range(qpos.shape[0]))
-        self.scene_supplier = scene_supplier
+        if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
+        self.scene_provider = scene_provider
         self._elapsed_time = float(initial_time)
 
     def now(self) -> float:
@@ -139,11 +324,14 @@ class SimulationExecutionAdapter:
         qeffort = self._read_optional_tensor("get_qf")
         scene = (
             SceneSnapshot(timestamp=self._elapsed_time, version=0)
-            if self.scene_supplier is None
-            else self.scene_supplier(self._elapsed_time)
+            if self.scene_provider is None
+            else self.scene_provider.snapshot(
+                timestamp=self._elapsed_time,
+                env_ids=self.env_ids,
+            )
         )
         if not isinstance(scene, SceneSnapshot):
-            raise TypeError("scene_supplier must return a SceneSnapshot.")
+            raise TypeError("scene_provider must return a SceneSnapshot.")
         return PlanningContext(
             robot=RobotObservation(
                 timestamp=self._elapsed_time,
@@ -276,4 +464,8 @@ class SimulationExecutionAdapter:
             raise ValueError("timeout must be finite and greater than zero.")
 
 
-__all__ = ["SceneSnapshotSupplier", "SimulationExecutionAdapter"]
+__all__ = [
+    "RigidObjectSceneProvider",
+    "RigidObjectSceneProviderCfg",
+    "SimulationExecutionAdapter",
+]

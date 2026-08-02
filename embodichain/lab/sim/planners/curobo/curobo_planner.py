@@ -33,7 +33,7 @@ import importlib
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
@@ -708,6 +708,7 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_collision_world_updates = True
 
     @property
     def preserve_plan_samples(self) -> bool:
@@ -797,6 +798,32 @@ class CuroboPlanner(BasePlanner):
             options.start_qpos = start_qpos
         if options.control_part is None:
             options.control_part = control_part
+        return options
+
+    def with_collision_world(
+        self,
+        options: PlanOptions,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> CuroboPlanOptions:
+        """Bind snapshot obstacle poses to one cuRobo planning attempt.
+
+        Args:
+            options: Reusable caller options copied by the atomic-action layer.
+            obstacle_poses: Batched simulator-world poses keyed by configured
+                dynamic obstacle name.
+
+        Returns:
+            cuRobo options containing an owned obstacle-pose mapping.
+        """
+        if not isinstance(options, CuroboPlanOptions):
+            logger.log_error("CuroboPlanner requires CuroboPlanOptions", TypeError)
+        merged = {
+            name: pose.clone()
+            for name, pose in (options.dynamic_obstacle_poses or {}).items()
+        }
+        merged.update({name: pose.clone() for name, pose in obstacle_poses.items()})
+        options.dynamic_obstacle_poses = merged or None
         return options
 
     @validate_plan_options(options_cls=CuroboPlanOptions)

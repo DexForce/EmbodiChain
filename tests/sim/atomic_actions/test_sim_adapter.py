@@ -26,6 +26,8 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     CommandAckStatus,
     JointCommand,
+    RigidObjectSceneProvider,
+    RigidObjectSceneProviderCfg,
     SceneSnapshot,
     SimulationExecutionAdapter,
     TaskState,
@@ -134,25 +136,83 @@ def test_simulation_adapter_sleep_advances_integral_physics_steps() -> None:
     assert adapter.now() == pytest.approx(0.03)
 
 
-def test_simulation_adapter_supplies_elapsed_time_to_scene_callback() -> None:
+def test_simulation_adapter_supplies_time_and_ids_to_scene_provider() -> None:
     simulation, robot = _simulation_and_robot()
     timestamps: list[float] = []
+    observed_env_ids: list[torch.Tensor] = []
 
-    def scene_supplier(timestamp: float) -> SceneSnapshot:
-        timestamps.append(timestamp)
-        return SceneSnapshot(timestamp=timestamp, version=3)
+    class RecordingSceneProvider:
+        """Record adapter correlation arguments for this test."""
+
+        def snapshot(
+            self,
+            *,
+            timestamp: float,
+            env_ids: torch.Tensor,
+        ) -> SceneSnapshot:
+            timestamps.append(timestamp)
+            observed_env_ids.append(env_ids.clone())
+            return SceneSnapshot(timestamp=timestamp, version=3)
 
     adapter = SimulationExecutionAdapter(
         simulation,
         robot,
-        scene_supplier=scene_supplier,
+        scene_provider=RecordingSceneProvider(),
     )
     adapter.sleep(PHYSICS_DT)
 
     context = adapter.observe(TaskState.empty(BATCH_SIZE, "cpu"))
 
     assert timestamps == pytest.approx([PHYSICS_DT])
+    assert torch.equal(observed_env_ids[0], torch.arange(BATCH_SIZE))
     assert context.scene.version == 3
+
+
+def test_rigid_object_scene_provider_tracks_per_environment_collision_revision() -> (
+    None
+):
+    obstacle = Mock()
+    initial_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    obstacle.get_local_pose.return_value = initial_pose
+    provider = RigidObjectSceneProvider(
+        {"obstacle": obstacle},
+        collision_entity_ids=("obstacle",),
+    )
+    env_ids = torch.arange(BATCH_SIZE, dtype=torch.long)
+
+    initial = provider.snapshot(timestamp=0.0, env_ids=env_ids)
+    moved_pose = initial_pose.clone()
+    moved_pose[1, 0, 3] = 0.01
+    obstacle.get_local_pose.return_value = moved_pose
+    changed = provider.snapshot(timestamp=PHYSICS_DT, env_ids=env_ids)
+
+    assert initial.version == 0
+    assert initial.collision_world_revisions(BATCH_SIZE) == (0, 0)
+    assert changed.version == 1
+    assert changed.collision_world_revisions(BATCH_SIZE) == (0, 1)
+    assert changed.collision_entity_ids == ("obstacle",)
+    assert torch.equal(changed.entities["obstacle"].pose, moved_pose)
+
+
+def test_rigid_object_scene_provider_filters_subthreshold_pose_noise() -> None:
+    obstacle = Mock()
+    initial_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    obstacle.get_local_pose.return_value = initial_pose
+    provider = RigidObjectSceneProvider(
+        {"obstacle": obstacle},
+        collision_entity_ids=("obstacle",),
+        cfg=RigidObjectSceneProviderCfg(translation_threshold=0.01),
+    )
+    env_ids = torch.arange(BATCH_SIZE, dtype=torch.long)
+    provider.snapshot(timestamp=0.0, env_ids=env_ids)
+    noisy_pose = initial_pose.clone()
+    noisy_pose[:, 0, 3] = 0.001
+    obstacle.get_local_pose.return_value = noisy_pose
+
+    unchanged = provider.snapshot(timestamp=PHYSICS_DT, env_ids=env_ids)
+
+    assert unchanged.version == 0
+    assert unchanged.collision_world_revisions(BATCH_SIZE) == (0, 0)
 
 
 def test_simulation_adapter_rejects_changed_environment_identity() -> None:

@@ -46,6 +46,9 @@ AtomicActionEngine.compile          ExecutionSession
   and phase timeout.
 - `PlanningContext`: measured `RobotObservation`, verified `TaskState`, versioned
   `SceneSnapshot`, and stable environment IDs.
+- `SceneProvider`: captures ordered scene entities plus global or per-environment
+  collision-world revisions. `RigidObjectSceneProvider` supplies this contract
+  for live simulation objects.
 - `ActionPlan`: one or more scene-bound phases, timed trajectories, completion
   conditions, diagnostics, and uncommitted `StateDelta` effects.
 - `ObservationProvider`: captures a fresh `PlanningContext` for each due
@@ -61,11 +64,17 @@ AtomicActionEngine.compile          ExecutionSession
 `CompiledTrajectory`. It projects terminal qpos and expected task effects only
 inside the returned context; it never changes simulator state.
 
+The public `AtomicAction.plan()` template method binds collision entity poses
+into copied backend options, then calls the skill-specific `_plan()` hook.
+Individual skills therefore do not own dynamic-obstacle parameters.
+
 `AtomicActionEngine.start()` creates an `ExecutionSession`. Each `tick()` takes
 the latest context and emits at most one `JointCommand`. The session detects
-tracking error, phase timeout, and movement of entities referenced by
-`SceneEntityPose`, then replans from the latest observation within the configured
-budget. Non-empty symbolic effects require external verification before commit.
+tracking error, phase timeout, movement of entities referenced by
+`SceneEntityPose`, and newer collision-world revisions, then replans from the
+latest observation within the configured budget. Collision revisions are
+per-environment when the provider can identify affected rows. Non-empty symbolic
+effects require external verification before commit.
 
 `ExecutionRunner` owns the outer execution lifecycle. Its non-blocking `step()`
 observes only when the next waypoint is due, dispatches commands using the
@@ -106,4 +115,4 @@ result = runner.run_until_blocked()
 
 See [Built-in actions](builtin_actions.md) for the shipped skill catalog and
 [the tutorial](../../../tutorial/atomic_actions.rst) for closed-loop usage and
-the runnable tracking-error recovery example.
+the runnable tracking-error and dynamic-obstacle recovery examples.

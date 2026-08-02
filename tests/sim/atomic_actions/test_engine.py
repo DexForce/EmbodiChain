@@ -48,7 +48,7 @@ class StubAction(AtomicAction[JointPositionGoal]):
     GoalType: ClassVar[type] = JointPositionGoal
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[JointPositionGoal],
         context: PlanningContext,
@@ -102,6 +102,28 @@ def test_global_registry_uses_stable_skill_id() -> None:
         register_action(StubAction)
     finally:
         unregister_action("stub")
+
+
+def test_action_subclass_cannot_override_framework_plan() -> None:
+    with pytest.raises(TypeError, match="must implement _plan"):
+
+        class InvalidAction(AtomicAction[JointPositionGoal]):
+            skill_id: ClassVar[str] = "invalid"
+            GoalType: ClassVar[type] = JointPositionGoal
+
+            def plan(
+                self,
+                invocation: ActionInvocation[JointPositionGoal],
+                context: PlanningContext,
+            ) -> ActionPlan:
+                raise NotImplementedError
+
+            def _plan(
+                self,
+                invocation: ActionInvocation[JointPositionGoal],
+                context: PlanningContext,
+            ) -> ActionPlan:
+                raise NotImplementedError
 
 
 def test_engine_compile_projects_terminal_state_between_actions() -> None:

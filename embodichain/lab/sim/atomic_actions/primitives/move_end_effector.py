@@ -69,7 +69,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal]):
         super().__init__(motion_generator, cfg or MoveEndEffectorCfg())
         self.builder = TrajectoryBuilder(motion_generator)
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[EndEffectorPoseGoal],
         context: PlanningContext,

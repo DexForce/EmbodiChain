@@ -109,7 +109,12 @@ from .runner import (
     RunnerStep,
     RunnerStepCallback,
 )
-from .sim_adapter import SceneSnapshotSupplier, SimulationExecutionAdapter
+from .scene import SceneProvider
+from .sim_adapter import (
+    RigidObjectSceneProvider,
+    RigidObjectSceneProviderCfg,
+    SimulationExecutionAdapter,
+)
 from .state import (
     CoordinatedHeldObjectState,
     EntityState,
@@ -193,12 +198,14 @@ __all__ = [
     "PressCfg",
     "PressGoal",
     "RecoveryPolicy",
+    "RigidObjectSceneProvider",
+    "RigidObjectSceneProviderCfg",
     "RobotObservation",
     "RunnerStatus",
     "RunnerStep",
     "RunnerStepCallback",
+    "SceneProvider",
     "SceneSnapshot",
-    "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
     "StateDelta",

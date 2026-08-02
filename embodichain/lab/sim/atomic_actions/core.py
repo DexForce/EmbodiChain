@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -149,6 +150,15 @@ class AtomicAction(Generic[GoalT], ABC):
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Reject skill classes that bypass framework-owned scene binding."""
+        super().__init_subclass__(**kwargs)
+        if "plan" in cls.__dict__:
+            raise TypeError(
+                "AtomicAction subclasses must implement _plan(); the public "
+                "plan() method is framework-owned."
+            )
+
     def __init__(
         self,
         motion_generator: MotionGenerator,
@@ -168,6 +178,69 @@ class AtomicAction(Generic[GoalT], ABC):
             manipulator_roles=cls.manipulator_roles,
             end_effector_roles=cls.end_effector_roles,
             agent_visible=cls.agent_visible,
+        )
+
+    def plan(
+        self,
+        invocation: ActionInvocation[GoalT],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan one invocation against an immutable observed context.
+
+        The public entry point binds collision entities from the scene snapshot
+        into a copied motion policy before delegating to :meth:`_plan`. This
+        keeps dynamic obstacle plumbing out of individual skill parameters and
+        guarantees replanning consumes the latest collision-world snapshot.
+
+        Args:
+            invocation: Fully typed and embodiment-bound action request.
+            context: Latest observed robot, task, and scene state.
+
+        Returns:
+            Scene-bound action plan with expected, uncommitted effects.
+        """
+        self.require_goal(invocation)
+        prepared = self._prepare_invocation(invocation, context)
+        return self._plan(prepared, context)
+
+    def _prepare_invocation(
+        self,
+        invocation: ActionInvocation[GoalT],
+        context: PlanningContext,
+    ) -> ActionInvocation[GoalT]:
+        """Bind the current collision snapshot without mutating caller policy."""
+        if not self._uses_collision_world(invocation, context):
+            return invocation
+        planner = self.motion_generator.planner
+        policy = deepcopy(invocation.motion_policy)
+        options = (
+            deepcopy(policy.plan_opts)
+            if policy.plan_opts is not None
+            else planner.default_plan_options()
+        )
+        poses = context.scene.collision_obstacle_poses(
+            batch_size=context.batch_size,
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        policy.plan_opts = planner.with_collision_world(
+            options,
+            obstacle_poses=poses,
+        )
+        return replace(invocation, motion_policy=policy)
+
+    def _uses_collision_world(
+        self,
+        invocation: ActionInvocation[GoalT],
+        context: PlanningContext,
+    ) -> bool:
+        """Return whether this planning attempt consumes collision revisions."""
+        planner = getattr(self.motion_generator, "planner", None)
+        return (
+            invocation.motion_policy.motion_source == "motion_gen"
+            and invocation.motion_policy.collision_check
+            and bool(context.scene.collision_entity_ids)
+            and getattr(planner, "supports_collision_world_updates", False) is True
         )
 
     def require_goal(self, invocation: ActionInvocation[GoalT]) -> GoalT:
@@ -304,9 +377,15 @@ class AtomicAction(Generic[GoalT], ABC):
                 ),
                 recovery_policy=invocation.recovery_policy,
                 scene_dependencies=collect_scene_dependencies(invocation.goal),
+                collision_world_sensitive=self._uses_collision_world(
+                    invocation, context
+                ),
             ),
             trajectory=timed,
             planned_scene_version=context.scene.version,
+            planned_collision_world_revision=(
+                context.scene.collision_world_revisions(context.batch_size)
+            ),
             diagnostics=diagnostics,
         )
         return ActionPlan(
@@ -358,15 +437,15 @@ class AtomicAction(Generic[GoalT], ABC):
         )
 
     @abstractmethod
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[GoalT],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan one invocation without stepping simulation or committing state.
+        """Implement skill-specific side-effect-free planning.
 
         Args:
-            invocation: Fully typed and embodiment-bound action request.
+            invocation: Request with context-bound motion planner options.
             context: Latest observed robot, task, and scene state.
 
         Returns:
