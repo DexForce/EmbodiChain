@@ -8,13 +8,10 @@ Overview
 
 Concrete implementations of the built-in atomic-action primitives. Each
 primitive is an :class:`~embodichain.lab.sim.atomic_actions.AtomicAction` that
-accepts a typed target and a
-:class:`~embodichain.lab.sim.atomic_actions.WorldState`, plans a full-DoF
-trajectory for all parallel environments, and returns an
-:class:`~embodichain.lab.sim.atomic_actions.ActionResult`. The primitives are
-chained by :class:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine`,
-which threads ``WorldState`` from one action to the next and concatenates the
-resulting trajectories along the time axis.
+accepts an :class:`~embodichain.lab.sim.atomic_actions.ActionInvocation` and a
+:class:`~embodichain.lab.sim.atomic_actions.PlanningContext`. Planning returns a
+side-effect-free :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` with a
+full-robot timed trajectory and uncommitted expected effects.
 
    .. rubric:: Built-in Primitive Actions
 
@@ -36,21 +33,23 @@ resulting trajectories along the time axis.
       CoordinatedPickment
       CoordinatedPlacementCfg
       CoordinatedPlacement
+      HandOverCfg
+      HandOver
 
-   .. rubric:: Built-in Target Contracts
+   .. rubric:: Built-in Goal Contracts
 
    .. autosummary::
 
-      EndEffectorPoseTarget
-      JointPositionTarget
-      NamedJointPositionTarget
-      GraspTarget
-      HeldObjectPoseTarget
-      PlaceTarget
-      PressTarget
-      CoordinatedPickTarget
-      CoordinatedPickmentTarget
-      CoordinatedPlacementTarget
+      EndEffectorPoseGoal
+      JointPositionGoal
+      NamedJointPositionGoal
+      GraspGoal
+      HeldObjectPoseGoal
+      PlaceGoal
+      AssembleGoal
+      PressGoal
+      CoordinatedPickGoal
+      CoordinatedPlacementGoal
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.primitives
 
@@ -114,6 +113,14 @@ CoordinatedPlacement
 --------------------
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.coordinated_placement
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+HandOver
+--------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.hand_over
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict

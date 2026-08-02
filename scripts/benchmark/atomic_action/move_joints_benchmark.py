@@ -109,22 +109,30 @@ def _qpos(values, device):
 def _targets_for_sequence(sequence_case: JointSequenceCase, device):
     """Build typed MoveJoints targets for a sequence case."""
     from embodichain.lab.sim.atomic_actions import (
-        JointPositionTarget,
-        NamedJointPositionTarget,
+        ActionBinding,
+        ActionInvocation,
+        JointPositionGoal,
+        MotionPolicy,
+        NamedJointPositionGoal,
     )
 
     targets = []
+    binding = ActionBinding(manipulators={"primary": "arm"})
+    policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
     for index, name in enumerate(sequence_case.sequence):
         if index == 0 and name == "ready":
-            targets.append(("move_joints", NamedJointPositionTarget(name="ready")))
+            goal = NamedJointPositionGoal(name="ready")
         else:
-            targets.append(
-                (
-                    "move_joints",
-                    JointPositionTarget(qpos=_qpos(JOINT_TARGETS[name], device)),
-                )
+            goal = JointPositionGoal(qpos=_qpos(JOINT_TARGETS[name], device))
+        targets.append(
+            ActionInvocation(
+                skill_id="move_joints",
+                goal=goal,
+                binding=binding,
+                motion_policy=policy,
             )
-    return targets
+        )
+    return tuple(targets)
 
 
 def _run_case(
@@ -141,8 +149,11 @@ def _run_case(
     torch = ensure_torch()
     reset_robot(robot, initial_qpos)
     steps = _targets_for_sequence(case, sim.device)
-    elapsed, mem_delta, peak_gpu, result = timed_call(lambda: atomic_engine.run(steps))
-    is_success, traj, _ = result
+    elapsed, mem_delta, peak_gpu, result = timed_call(
+        lambda: atomic_engine.compile(steps)
+    )
+    is_success = result.plan_success
+    traj = result.trajectory.positions
     video_path = None
     if should_record_case(args, recorded_count, bool(is_success)):
         reset_robot(robot, initial_qpos)
@@ -266,8 +277,6 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         MoveJoints(
             motion_gen,
             cfg=MoveJointsCfg(
-                control_part="arm",
-                sample_interval=MOVE_JOINTS_SAMPLE_INTERVAL,
                 named_joint_positions={"ready": ready_qpos},
             ),
         )

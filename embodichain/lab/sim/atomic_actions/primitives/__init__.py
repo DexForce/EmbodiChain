@@ -19,65 +19,63 @@
 from __future__ import annotations
 
 from .coordinated_pickment import (
-    CoordinatedPickTarget,
+    CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
-    CoordinatedPickmentTarget,
 )
 from .coordinated_placement import (
     CoordinatedPlacement,
     CoordinatedPlacementCfg,
-    CoordinatedPlacementTarget,
+    CoordinatedPlacementGoal,
 )
 from .hand_over import HandOver, HandOverCfg
 from .move_end_effector import (
-    EndEffectorPoseTarget,
+    EndEffectorPoseGoal,
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
 from .move_held_object import (
-    HeldObjectPoseTarget,
+    HeldObjectPoseGoal,
     MoveHeldObject,
     MoveHeldObjectCfg,
 )
 from .move_joints import (
-    JointPositionTarget,
+    JointPositionGoal,
     MoveJoints,
     MoveJointsCfg,
-    NamedJointPositionTarget,
+    NamedJointPositionGoal,
 )
-from .pick_up import GraspTarget, PickUp, PickUpCfg
-from .place import AssembleTarget, Place, PlaceCfg, PlaceTarget
-from .press import Press, PressCfg, PressTarget
+from .pick_up import GraspGoal, PickUp, PickUpCfg
+from .place import AssembleGoal, Place, PlaceCfg, PlaceGoal
+from .press import Press, PressCfg, PressGoal
 
 __all__ = [
-    "AssembleTarget",
-    "CoordinatedPickTarget",
+    "AssembleGoal",
+    "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentCfg",
-    "CoordinatedPickmentTarget",
     "CoordinatedPlacement",
     "CoordinatedPlacementCfg",
-    "CoordinatedPlacementTarget",
-    "EndEffectorPoseTarget",
-    "GraspTarget",
+    "CoordinatedPlacementGoal",
+    "EndEffectorPoseGoal",
+    "GraspGoal",
     "HandOver",
     "HandOverCfg",
-    "HeldObjectPoseTarget",
-    "JointPositionTarget",
+    "HeldObjectPoseGoal",
+    "JointPositionGoal",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
     "MoveHeldObject",
     "MoveHeldObjectCfg",
     "MoveJoints",
     "MoveJointsCfg",
-    "NamedJointPositionTarget",
+    "NamedJointPositionGoal",
     "PickUp",
     "PickUpCfg",
     "Place",
     "PlaceCfg",
-    "PlaceTarget",
+    "PlaceGoal",
     "Press",
     "PressCfg",
-    "PressTarget",
+    "PressGoal",
 ]

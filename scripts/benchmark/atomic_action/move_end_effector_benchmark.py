@@ -120,17 +120,30 @@ def _run_case(
 ):
     """Run one MoveEndEffector case."""
     torch = ensure_torch()
-    from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
+    from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
+        EndEffectorPoseGoal,
+        MotionPolicy,
+    )
 
     reset_robot(robot, initial_qpos)
     target_pose = _make_pose(sim.device, pose_case.xyz)
 
     elapsed, mem_delta, peak_gpu, result = timed_call(
-        lambda: atomic_engine.run(
-            steps=[("move_end_effector", EndEffectorPoseTarget(xpos=target_pose))]
+        lambda: atomic_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="move_end_effector",
+                    goal=EndEffectorPoseGoal(xpos=target_pose),
+                    binding=ActionBinding(manipulators={"primary": "arm"}),
+                    motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+                ),
+            )
         )
     )
-    is_success, traj, _ = result
+    is_success = result.plan_success
+    traj = result.trajectory.positions
     video_path = None
     if should_record_case(args, recorded_count, bool(is_success)):
         reset_robot(robot, initial_qpos)
@@ -251,14 +264,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(
-                control_part="arm", sample_interval=MOVE_SAMPLE_INTERVAL
-            ),
-        )
-    )
+    atomic_engine.register(MoveEndEffector(motion_gen, cfg=MoveEndEffectorCfg()))
 
     results: list[dict[str, object]] = []
     video_paths: list[str] = []

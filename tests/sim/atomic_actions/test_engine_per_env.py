@@ -14,129 +14,311 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Per-environment failure propagation tests for AtomicActionEngine.run()."""
+"""Tests for dynamic goals and closed-loop execution recovery."""
 
 from __future__ import annotations
 
-import torch
-import pytest
+from typing import ClassVar
 from unittest.mock import Mock
 
-from embodichain.lab.sim.atomic_actions.affordance import Affordance
-from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
-from embodichain.lab.sim.atomic_actions.core import (
+import pytest
+import torch
+
+from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
     ActionCfg,
-    ActionResult,
+    ActionInvocation,
+    ActionPlan,
+    Affordance,
     AtomicAction,
+    AtomicActionEngine,
+    EndEffectorPoseGoal,
+    EntityState,
+    ExecutionEventKind,
+    ExecutionStatus,
     HeldObjectState,
+    MotionPolicy,
     ObjectSemantics,
-    WorldState,
+    PlanningContext,
+    RecoveryPolicy,
+    RobotObservation,
+    SceneEntityPose,
+    SceneSnapshot,
+    StateDelta,
+    TaskState,
 )
-from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 
 
-class _StubAction(AtomicAction):
-    TargetType = EndEffectorPoseTarget
+class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
+    """Test action whose terminal joint command follows a scene entity x pose."""
 
-    def __init__(self, mg, success_vec, traj_len=4, dof=3):
-        super().__init__(mg, ActionCfg())
-        self._success = torch.tensor(success_vec)
-        self._traj_len = traj_len
-        self._dof = dof
+    skill_id: ClassVar[str] = "dynamic"
+    GoalType: ClassVar[type] = EndEffectorPoseGoal
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def execute(self, target, state):
-        n = state.last_qpos.shape[0]
-        traj = torch.zeros(n, self._traj_len, self._dof)
-        traj[:] = state.last_qpos.unsqueeze(1)
-        return ActionResult(
-            success=self._success.clone(),
-            trajectory=traj,
-            next_state=WorldState(last_qpos=traj[:, -1, :].clone()),
+    def __init__(self, motion_generator) -> None:
+        super().__init__(motion_generator, ActionCfg(name="dynamic"))
+        self.plan_count = 0
+
+    def plan(
+        self,
+        invocation: ActionInvocation[EndEffectorPoseGoal],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(invocation)
+        self.plan_count += 1
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        return self.build_plan(
+            invocation,
+            context,
+            success=True,
+            trajectory=torch.stack([context.robot.qpos, target], dim=1),
         )
 
 
-class _HeldStateAction(_StubAction):
-    def __init__(self, mg, success_vec, *, set_held):
-        super().__init__(mg, success_vec)
-        self._set_held = set_held
+class EffectAction(DynamicAction):
+    """Dynamic test action that declares an attachment effect."""
 
-    def execute(self, target, state):
-        result = super().execute(target, state)
-        held_objects = {}
-        if self._set_held:
-            batch_size = state.batch_size
-            held_objects["arm"] = HeldObjectState(
-                semantics=ObjectSemantics(
-                    affordance=Affordance(), geometry={}, label="test-object"
-                ),
-                object_to_eef=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
-                grasp_xpos=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
-            )
-        return ActionResult(
-            success=result.success,
-            trajectory=result.trajectory,
-            next_state=result.next_state.with_updates(held_objects=held_objects),
-        )
+    skill_id: ClassVar[str] = "effect"
 
-
-class TestRunPerEnv:
-    def test_failed_env_holds(self):
-        mg = Mock()
-        mg.robot.get_qpos = lambda: torch.zeros(3, 3)
-        mg.robot.dof = 3
-        mg.device = torch.device("cpu")
-        eng = AtomicActionEngine(mg)
-        # env 1 fails step 2
-        eng.register(_StubAction(mg, [True, True, True]), name="a")
-        eng.register(_StubAction(mg, [True, False, True]), name="b")
-        eng.register(_StubAction(mg, [True, True, True]), name="c")
-        success, traj, state = eng.run(
-            steps=[
-                ("a", EndEffectorPoseTarget(xpos=torch.eye(4))),
-                ("b", EndEffectorPoseTarget(xpos=torch.eye(4))),
-                ("c", EndEffectorPoseTarget(xpos=torch.eye(4))),
-            ]
-        )
-        assert success.tolist() == [True, False, True]
-        assert traj.shape[1] == 12  # 3 steps * 4 waypoints
-        # env 1's rows after its failure should equal its pre-failure qpos (held)
-        # all zeros here, so just check shape and that env 0/2 advanced
-        assert state.last_qpos.shape == (3, 3)
-
-    def test_failed_env_does_not_acquire_successful_env_held_state(self):
-        mg = Mock()
-        mg.robot.get_qpos = lambda: torch.zeros(3, 3)
-        mg.robot.dof = 3
-        mg.device = torch.device("cpu")
-        engine = AtomicActionEngine(mg)
-        engine.register(
-            _HeldStateAction(mg, [True, False, True], set_held=True), name="pick"
-        )
-
-        _, _, state = engine.run([("pick", EndEffectorPoseTarget(xpos=torch.eye(4)))])
-
-        assert state.get_held_object("arm").env_mask.tolist() == [True, False, True]
-
-    def test_failed_env_preserves_held_state_when_successful_envs_release(self):
-        mg = Mock()
-        mg.robot.get_qpos = lambda: torch.zeros(3, 3)
-        mg.robot.dof = 3
-        mg.device = torch.device("cpu")
-        engine = AtomicActionEngine(mg)
-        engine.register(
-            _HeldStateAction(mg, [True, False, True], set_held=False), name="place"
+    def plan(
+        self,
+        invocation: ActionInvocation[EndEffectorPoseGoal],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(invocation)
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        semantics = ObjectSemantics(
+            affordance=Affordance(), geometry={}, label="object"
         )
         held = HeldObjectState(
-            semantics=ObjectSemantics(
-                affordance=Affordance(), geometry={}, label="test-object"
+            semantics=semantics,
+            object_to_eef=torch.eye(4),
+            grasp_xpos=torch.eye(4),
+        )
+        return self.build_plan(
+            invocation,
+            context,
+            success=True,
+            trajectory=torch.stack([context.robot.qpos, target], dim=1),
+            expected_effects=StateDelta(held_object_updates={"arm": held}),
+        )
+
+
+def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 2
+    robot.get_qpos.return_value = torch.zeros(1, 2)
+    robot.get_qvel.return_value = torch.zeros(1, 2)
+    generator = Mock()
+    generator.robot = robot
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "stub"
+    engine = AtomicActionEngine(generator)
+    action = DynamicAction(generator)
+    engine.register(action)
+    return engine, action
+
+
+def _context(
+    timestamp: float, qpos: float, entity_x: float, version: int
+) -> PlanningContext:
+    positions = torch.full((1, 2), qpos)
+    pose = torch.eye(4).unsqueeze(0)
+    pose[:, 0, 3] = entity_x
+    return PlanningContext(
+        robot=RobotObservation(
+            timestamp=timestamp,
+            qpos=positions,
+            qvel=torch.zeros_like(positions),
+        ),
+        task=TaskState.empty(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=timestamp,
+            version=version,
+            entities={"target": EntityState(pose)},
+        ),
+        env_ids=torch.tensor([0], dtype=torch.long),
+    )
+
+
+def _invocation(
+    *,
+    max_replans: int = 2,
+    max_phase_retries: int = 2,
+    phase_timeout: float = 30.0,
+) -> ActionInvocation[EndEffectorPoseGoal]:
+    return ActionInvocation(
+        skill_id="dynamic",
+        goal=EndEffectorPoseGoal(SceneEntityPose("target")),
+        binding=ActionBinding(manipulators={"primary": "arm"}),
+        motion_policy=MotionPolicy(sample_count=2),
+        recovery_policy=RecoveryPolicy(
+            max_replans=max_replans,
+            max_phase_retries=max_phase_retries,
+            tracking_error_threshold=0.05,
+            goal_translation_threshold=0.02,
+            phase_timeout=phase_timeout,
+        ),
+        invocation_id="dynamic-call",
+    )
+
+
+def test_session_completes_incremental_command_sequence() -> None:
+    engine, _ = _engine()
+    session = engine.start((_invocation(),), _context(0.0, 0.0, 0.2, 0))
+
+    first = session.tick(_context(0.0, 0.0, 0.2, 0))
+    second = session.tick(_context(0.1, 0.0, 0.2, 0))
+    final = session.tick(_context(0.2, 0.2, 0.2, 0))
+
+    assert first.command is not None and torch.all(first.command.positions == 0.0)
+    assert all(event.invocation_id == "dynamic-call" for event in first.events)
+    assert second.command is not None and torch.all(second.command.positions == 0.2)
+    assert final.status is ExecutionStatus.COMPLETED
+    assert final.eligible_mask.tolist() == [True]
+
+
+def test_scene_motion_replans_late_bound_goal() -> None:
+    engine, action = _engine()
+    session = engine.start((_invocation(),), _context(0.0, 0.0, 0.1, 0))
+    session.tick(_context(0.0, 0.0, 0.1, 0))
+
+    tick = session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    kinds = {event.kind for event in tick.events}
+    assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in kinds
+    assert ExecutionEventKind.REPLANNED in kinds
+    assert action.plan_count == 2
+    assert tick.command is not None
+
+
+def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
+    engine, _ = _engine()
+    session = engine.start(
+        (_invocation(max_replans=0),),
+        _context(0.0, 0.0, 0.2, 0),
+    )
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+
+    tick = session.tick(_context(0.1, 1.0, 0.2, 0))
+
+    kinds = {event.kind for event in tick.events}
+    assert ExecutionEventKind.TRACKING_ERROR in kinds
+    assert ExecutionEventKind.RECOVERY_EXHAUSTED in kinds
+    assert tick.status is ExecutionStatus.FAILED
+    assert tick.eligible_mask.tolist() == [False]
+
+
+def test_phase_timeout_retry_budget_is_bounded() -> None:
+    engine, action = _engine()
+    session = engine.start(
+        (
+            _invocation(
+                max_phase_retries=1,
+                phase_timeout=0.05,
             ),
-            object_to_eef=torch.eye(4).unsqueeze(0).repeat(3, 1, 1),
-            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(3, 1, 1),
-        )
-        initial = WorldState(last_qpos=torch.zeros(3, 3), held_objects={"arm": held})
+        ),
+        _context(0.0, 0.0, 0.2, 0),
+    )
+    session.tick(_context(0.0, 0.0, 0.2, 0))
 
-        _, _, state = engine.run(
-            [("place", EndEffectorPoseTarget(xpos=torch.eye(4)))], state=initial
-        )
+    retry = session.tick(_context(0.1, 0.0, 0.2, 0))
+    exhausted = session.tick(_context(0.2, 0.0, 0.2, 0))
 
-        assert state.get_held_object("arm").env_mask.tolist() == [False, True, False]
+    retry_kinds = {event.kind for event in retry.events}
+    assert ExecutionEventKind.PHASE_TIMEOUT in retry_kinds
+    assert ExecutionEventKind.ACTION_RETRY in retry_kinds
+    assert ExecutionEventKind.REPLANNED in retry_kinds
+    assert action.plan_count == 2
+    exhausted_kinds = {event.kind for event in exhausted.events}
+    assert ExecutionEventKind.PHASE_TIMEOUT in exhausted_kinds
+    assert ExecutionEventKind.RECOVERY_EXHAUSTED in exhausted_kinds
+    assert exhausted.status is ExecutionStatus.FAILED
+    assert exhausted.eligible_mask.tolist() == [False]
+
+
+def test_session_rejects_changed_environment_identity() -> None:
+    engine, _ = _engine()
+    initial = _context(0.0, 0.0, 0.2, 0)
+    session = engine.start((_invocation(),), initial)
+    changed = PlanningContext(
+        robot=initial.robot,
+        task=initial.task,
+        scene=initial.scene,
+        env_ids=torch.tensor([7], dtype=torch.long),
+    )
+
+    with pytest.raises(ValueError, match="env_ids must remain stable"):
+        session.tick(changed)
+
+
+def test_session_rejects_regressing_scene_snapshot() -> None:
+    engine, _ = _engine()
+    session = engine.start((_invocation(),), _context(1.0, 0.0, 0.2, 2))
+
+    with pytest.raises(ValueError, match="versions must be monotonic"):
+        session.tick(_context(1.0, 0.0, 0.2, 1))
+
+
+def test_nonempty_effect_is_committed_only_after_external_verification() -> None:
+    engine, _ = _engine()
+    effect = EffectAction(engine.motion_generator)
+    engine.register(effect)
+    invocation = _invocation()
+    invocation = ActionInvocation(
+        skill_id="effect",
+        goal=invocation.goal,
+        binding=invocation.binding,
+        motion_policy=invocation.motion_policy,
+        recovery_policy=invocation.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.1, 0.0, 0.2, 0))
+
+    waiting = session.tick(_context(0.2, 0.2, 0.2, 0))
+    completed = session.tick(
+        _context(0.3, 0.2, 0.2, 0),
+        effect_success=torch.tensor([True]),
+    )
+
+    assert waiting.status is ExecutionStatus.RUNNING
+    assert waiting.task_state.get_held_object("arm") is None
+    assert any(
+        event.kind is ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED
+        for event in waiting.events
+    )
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.task_state.get_held_object("arm") is not None
+
+
+def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
+    engine, _ = _engine()
+    engine.register(EffectAction(engine.motion_generator))
+    base = _invocation(max_phase_retries=0)
+    invocation = ActionInvocation(
+        skill_id="effect",
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.1, 0.0, 0.2, 0))
+
+    failed = session.tick(
+        _context(0.2, 0.2, 0.2, 0),
+        effect_success=torch.tensor([False]),
+    )
+
+    assert failed.status is ExecutionStatus.FAILED
+    assert failed.task_state.get_held_object("arm") is None
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED for event in failed.events
+    )

@@ -41,17 +41,20 @@ from scipy.spatial.transform import Rotation as SciRotation
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     Affordance,
     AtomicActionEngine,
     CoordinatedPlacement,
     CoordinatedPlacementCfg,
-    CoordinatedPlacementTarget,
-    GraspTarget,
+    CoordinatedPlacementGoal,
+    GraspGoal,
     HeldObjectState,
     ObjectSemantics,
     PickUp,
     PickUpCfg,
-    WorldState,
+    MotionPolicy,
+    TaskState,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -801,7 +804,6 @@ def run_coordinated_placement_demo(
             hand_close_qpos=left_close,
             pre_grasp_distance=PICK_APPROACH_DISTANCE,
             lift_height=0.12,
-            sample_interval=PICK_SAMPLE_INTERVAL,
             hand_interp_steps=10,
         ),
     )
@@ -814,7 +816,6 @@ def run_coordinated_placement_demo(
             hand_close_qpos=right_close,
             pre_grasp_distance=PICK_APPROACH_DISTANCE,
             lift_height=0.10,
-            sample_interval=PAN_PICK_SAMPLE_INTERVAL,
             hand_interp_steps=PAN_PICK_HAND_INTERP_STEPS,
         ),
     )
@@ -833,7 +834,6 @@ def run_coordinated_placement_demo(
             placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
             support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
             lift_height=PLACE_LIFT_HEIGHT,
-            sample_interval=COORDINATED_SAMPLE_INTERVAL,
             hand_interp_steps=10,
             hold_steps=6,
             retreat_steps=18,
@@ -842,7 +842,7 @@ def run_coordinated_placement_demo(
     engine = AtomicActionEngine(motion_generator=motion_gen)
     engine.register(coordinated_action)
     full_joint_ids = list(range(robot.dof))
-    state = WorldState(last_qpos=robot.get_qpos().clone())
+    state = engine.initial_context()
 
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to plan left pick-up..."
@@ -857,21 +857,34 @@ def run_coordinated_placement_demo(
         z_clearance=BREAD_GRASP_Z_CLEARANCE,
     )
     start_time = time.time()
-    left_pick_result = left_pick_action.execute(
-        GraspTarget(
-            semantics=bread_semantics,
-            grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
+    left_pick_result = left_pick_action.plan(
+        ActionInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(
+                semantics=bread_semantics,
+                grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
+            ),
+            binding=ActionBinding(
+                manipulators={"primary": "left_arm"},
+                end_effectors={"primary": "left_hand"},
+            ),
+            motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
         ),
         state,
     )
     logger.log_info(
         f"Plan left bread pick-up cost time: {time.time() - start_time:.2f} seconds"
     )
-    if not left_pick_result.success.all():
+    if not left_pick_result.plan_success.all():
         logger.log_warning("Failed to plan left bread pick-up trajectory.")
         return
-    left_pick_traj = left_pick_result.trajectory
-    state = left_pick_result.next_state
+    left_pick_traj = left_pick_result.trajectory.positions
+    state = state.project(
+        qpos=left_pick_traj[:, -1],
+        task=left_pick_result.expected_effects.apply(
+            state.task, left_pick_result.plan_success
+        ),
+    )
     bread_held_state = state.get_held_object("left_arm")
     if bread_held_state is None:
         raise RuntimeError("PickUp did not produce a held state for the bread.")
@@ -884,21 +897,34 @@ def run_coordinated_placement_demo(
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
     start_time = time.time()
-    right_pick_result = right_pick_action.execute(
-        GraspTarget(
-            semantics=pan_semantics,
-            grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
+    right_pick_result = right_pick_action.plan(
+        ActionInvocation(
+            skill_id="pick_up",
+            goal=GraspGoal(
+                semantics=pan_semantics,
+                grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
+            ),
+            binding=ActionBinding(
+                manipulators={"primary": "right_arm"},
+                end_effectors={"primary": "right_hand"},
+            ),
+            motion_policy=MotionPolicy(sample_count=PAN_PICK_SAMPLE_INTERVAL),
         ),
         state,
     )
     logger.log_info(
         f"Plan right pan pick-up cost time: {time.time() - start_time:.2f} seconds"
     )
-    if not right_pick_result.success.all():
+    if not right_pick_result.plan_success.all():
         logger.log_warning("Failed to plan right pan pick-up trajectory.")
         return
-    right_pick_traj = right_pick_result.trajectory
-    state = right_pick_result.next_state
+    right_pick_traj = right_pick_result.trajectory.positions
+    state = state.project(
+        qpos=right_pick_traj[:, -1],
+        task=right_pick_result.expected_effects.apply(
+            state.task, right_pick_result.plan_success
+        ),
+    )
     pan_held_state = state.get_held_object("right_arm")
     if pan_held_state is None:
         raise RuntimeError("PickUp did not produce a held state for the pan.")
@@ -966,10 +992,18 @@ def run_coordinated_placement_demo(
             "right_arm",
             sim.device,
         )
-        held_objects = dict(state.held_objects)
+        held_objects = dict(state.task.held_objects)
         held_objects["left_arm"] = bread_held_state
         held_objects["right_arm"] = pan_held_state
-        state = state.with_updates(held_objects=held_objects)
+        state = state.project(
+            qpos=robot.get_qpos().clone(),
+            task=TaskState(
+                batch_size=state.batch_size,
+                device=state.robot.qpos.device,
+                held_objects=held_objects,
+                coordinated_held_objects=state.task.coordinated_held_objects,
+            ),
+        )
 
     support_target_pose = build_support_object_target_pose(pan_pose, sim.device)
     placing_target_pose = build_placing_object_target_pose(
@@ -992,7 +1026,7 @@ def run_coordinated_placement_demo(
             placing_target_pose,
             num_envs=n_envs,
         )
-    coordinated_target = CoordinatedPlacementTarget(
+    coordinated_target = CoordinatedPlacementGoal(
         placing_object_target_pose=broadcast_pose_batch(
             placing_target_pose, num_envs=n_envs
         ),
@@ -1004,9 +1038,29 @@ def run_coordinated_placement_demo(
         release=True,
     )
     start_time = time.time()
-    coordinated_success, coordinated_traj, state = engine.run(
-        [("coordinated_placement", coordinated_target)], state
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                skill_id="coordinated_placement",
+                goal=coordinated_target,
+                binding=ActionBinding(
+                    manipulators={
+                        "placing": "left_arm",
+                        "support": "right_arm",
+                    },
+                    end_effectors={
+                        "placing": "left_hand",
+                        "support": "right_hand",
+                    },
+                ),
+                motion_policy=MotionPolicy(sample_count=COORDINATED_SAMPLE_INTERVAL),
+            ),
+        ),
+        state,
     )
+    coordinated_success = compiled.plan_success
+    coordinated_traj = compiled.trajectory.positions
+    state = compiled.projected_context
     logger.log_info(
         "Plan coordinated placement cost time: "
         f"{time.time() - start_time:.2f} seconds"
@@ -1019,7 +1073,10 @@ def run_coordinated_placement_demo(
         "coordinated_placement",
         coordinated_traj,
         full_joint_ids,
-        coordinated_action._compute_segment_lengths(coordinated_action.cfg.release),
+        coordinated_action._compute_segment_lengths(
+            coordinated_action.cfg.release,
+            COORDINATED_SAMPLE_INTERVAL,
+        ),
     )
 
     if args.diagnose_plan:

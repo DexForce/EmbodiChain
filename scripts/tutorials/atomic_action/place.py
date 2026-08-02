@@ -30,13 +30,16 @@ import torch
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    GraspTarget,
+    GraspGoal,
     PickUp,
     PickUpCfg,
     Place,
     PlaceCfg,
-    PlaceTarget,
+    PlaceGoal,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -140,7 +143,6 @@ def main() -> None:
                 hand_close_qpos=hand_close,
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
@@ -152,7 +154,6 @@ def main() -> None:
                 hand_open_qpos=hand_open,
                 hand_close_qpos=hand_close,
                 lift_height=PLACE_LIFT_HEIGHT,
-                sample_interval=PLACE_SAMPLE_INTERVAL,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
@@ -175,20 +176,31 @@ def main() -> None:
         sim, args, "Inspect the cube, then press Enter to plan PickUp -> Place..."
     )
 
-    success, trajectory, _ = engine.run(
-        [
-            ("pick_up", GraspTarget(semantics)),
-            (
+    binding = ActionBinding(
+        manipulators={"primary": "arm"},
+        end_effectors={"primary": "hand"},
+    )
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(semantics),
+                binding,
+                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
                 "place",
-                PlaceTarget(
+                PlaceGoal(
                     broadcast_waypoint_pose_batch(
                         place_poses, robot.get_qpos().shape[0]
                     )
                 ),
+                binding,
+                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
             ),
-        ]
+        )
     )
-    if not success.all():
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 
@@ -208,7 +220,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory.positions,
         args,
         video_prefix="place_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

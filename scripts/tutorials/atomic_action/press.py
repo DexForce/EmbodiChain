@@ -30,13 +30,16 @@ import torch
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    EndEffectorPoseTarget,
+    EndEffectorPoseGoal,
     MoveEndEffector,
     MoveEndEffectorCfg,
     Press,
     PressCfg,
-    PressTarget,
+    PressGoal,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
     RigidBodyAttributesCfg,
@@ -161,17 +164,12 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
     hand_close = get_hand_open_close_qpos(robot)[1]
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        MoveEndEffector(
-            motion_gen, MoveEndEffectorCfg(sample_interval=MOVE_SAMPLE_INTERVAL)
-        )
-    )
+    engine.register(MoveEndEffector(motion_gen, MoveEndEffectorCfg()))
     engine.register(
         Press(
             motion_gen,
             PressCfg(
                 hand_close_qpos=hand_close,
-                sample_interval=PRESS_SAMPLE_INTERVAL,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
@@ -191,15 +189,30 @@ def main() -> None:
         sim, args, "Inspect the wooden block, then press Enter to plan..."
     )
 
-    success, trajectory, _ = engine.run(
-        [
-            ("move_end_effector", EndEffectorPoseTarget(move_target)),
-            ("press", PressTarget(press_target)),
-        ]
+    binding = ActionBinding(
+        manipulators={"primary": "arm"},
+        end_effectors={"primary": "hand"},
     )
-    if not success.all():
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "move_end_effector",
+                EndEffectorPoseGoal(move_target),
+                binding,
+                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "press",
+                PressGoal(press_target),
+                binding,
+                MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+            ),
+        )
+    )
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan Press demo trajectory.")
         return
+    trajectory = compiled.trajectory.positions
     is_center_hit, center_error, hit_step, hit_pos, expected_pos = (
         compute_press_center_check(robot, trajectory, block, args.press_tolerance)
     )

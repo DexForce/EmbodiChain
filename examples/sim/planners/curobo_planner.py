@@ -59,10 +59,13 @@ from embodichain.lab.visualization import (
     visualization_cfg_from_args,
 )
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    EndEffectorPoseTarget,
+    EndEffectorPoseGoal,
     MoveEndEffector,
     MoveEndEffectorCfg,
+    MotionPolicy,
 )
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import RenderCfg, RigidBodyAttributesCfg
@@ -747,26 +750,17 @@ def main() -> None:
             )
         )
         engine = AtomicActionEngine(motion_generator)
-        engine.register(
-            MoveEndEffector(
-                motion_generator,
-                MoveEndEffectorCfg(
-                    motion_source="motion_gen",
-                    control_part=control_part,
-                    plan_opts=CuroboPlanOptions(
-                        dynamic_obstacle_poses=(
-                            obstacle_poses if use_independent_worlds else None
-                        ),
-                        max_attempts=args.max_attempts,
-                    ),
-                    # sample_interval sets the returned trajectory's waypoint count.
-                    # cuRobo's own collision-checked samples are arc-length resampled
-                    # to this count; set CuroboPlannerCfg.preserve_plan_samples=True
-                    # above to keep cuRobo's raw samples (count from interpolation_dt).
-                    sample_interval=30,
+        engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
+        binding = ActionBinding(manipulators={"primary": control_part})
+        motion_policy = MotionPolicy(
+            motion_source="motion_gen",
+            plan_opts=CuroboPlanOptions(
+                dynamic_obstacle_poses=(
+                    obstacle_poses if use_independent_worlds else None
                 ),
+                max_attempts=args.max_attempts,
             ),
-            name="move_end_effector",
+            sample_count=30,
         )
 
         initial_qpos = robot.get_qpos(name=control_part)
@@ -776,9 +770,18 @@ def main() -> None:
             to_matrix=True,
         )
         plan_start = time.perf_counter()
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target_xpos))]
+        compiled = engine.compile(
+            (
+                ActionInvocation(
+                    "move_end_effector",
+                    EndEffectorPoseGoal(xpos=target_xpos),
+                    binding,
+                    motion_policy,
+                ),
+            )
         )
+        success = compiled.plan_success
+        trajectory = compiled.trajectory.positions
         planning_duration = time.perf_counter() - plan_start
 
         print(f"cuRobo atomic-action success by environment: {success.tolist()}")
@@ -805,9 +808,18 @@ def main() -> None:
         print(f"maximum final TCP position error: {final_errors.max().item():.4f} m")
 
         plan_start = time.perf_counter()
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=initial_xpos))]
+        compiled = engine.compile(
+            (
+                ActionInvocation(
+                    "move_end_effector",
+                    EndEffectorPoseGoal(xpos=initial_xpos),
+                    binding,
+                    motion_policy,
+                ),
+            )
         )
+        success = compiled.plan_success
+        trajectory = compiled.trajectory.positions
         planning_duration = time.perf_counter() - plan_start
         print(f"cuRobo return-action success by environment: {success.tolist()}")
         print(f"full-DoF trajectory shape: {tuple(trajectory.shape)}")

@@ -38,12 +38,15 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    GraspTarget,
+    ActionBinding,
+    ActionInvocation,
+    GraspGoal,
     AtomicActionEngine,
     HandOver,
     HandOverCfg,
     PickUp,
     PickUpCfg,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -353,7 +356,6 @@ def run_handover_demo(
             pick_object_part="top",
             pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
             lift_height=PICKUP_LIFT_HEIGHT,
-            sample_interval=PICKUP_SAMPLE_INTERVAL,
             hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
             approach_direction=torch.as_tensor(
                 [0.0, -707106781, -707106781], dtype=torch.float32
@@ -379,7 +381,6 @@ def run_handover_demo(
             final_object_pose=final_pose,
             pre_grasp_distance=HANDOVER_PRE_GRASP_DISTANCE,
             lift_height=HANDOVER_LIFT_HEIGHT,
-            sample_interval=HANDOVER_SAMPLE_INTERVAL,
             hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
             hold_steps=HANDOVER_HOLD_STEPS,
             retreat_steps=HANDOVER_RETREAT_STEPS,
@@ -398,12 +399,36 @@ def run_handover_demo(
     # wait for object to drop
     for _ in range(20):
         sim.update(step=10)
-    success, traj, _ = engine.run(
-        [
-            ("pick_up", GraspTarget(object_semantics)),
-            ("hand_over", GraspTarget(object_semantics)),
-        ]
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(object_semantics),
+                ActionBinding(
+                    manipulators={"primary": "left_arm"},
+                    end_effectors={"primary": "left_hand"},
+                ),
+                MotionPolicy(sample_count=PICKUP_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "hand_over",
+                GraspGoal(object_semantics),
+                ActionBinding(
+                    manipulators={
+                        "source": "left_arm",
+                        "destination": "right_arm",
+                    },
+                    end_effectors={
+                        "source": "left_hand",
+                        "destination": "right_hand",
+                    },
+                ),
+                MotionPolicy(sample_count=HANDOVER_SAMPLE_INTERVAL),
+            ),
+        )
     )
+    success = compiled.plan_success
+    traj = compiled.trajectory.positions
 
     if not success.all():
         logger.log_warning("Failed to plan the full pick-up + handover trajectory.")
