@@ -86,6 +86,8 @@ class JointCommand:
     velocities: torch.Tensor | None
     active_mask: torch.Tensor
     env_ids: torch.Tensor
+    hold_duration: torch.Tensor
+    """Per-environment time to hold this command before the next observation."""
 
     def __post_init__(self) -> None:
         if self.positions.dim() != 2:
@@ -103,15 +105,29 @@ class JointCommand:
             self.positions.shape[0],
         ):
             raise ValueError("JointCommand.env_ids must be int64 with shape (B,).")
+        if not isinstance(self.hold_duration, torch.Tensor):
+            raise TypeError("JointCommand.hold_duration must be a torch.Tensor.")
+        if self.hold_duration.shape != (self.positions.shape[0],):
+            raise ValueError("JointCommand.hold_duration must have shape (B,).")
+        if (
+            not torch.isfinite(self.hold_duration).all()
+            or (self.hold_duration < 0.0).any()
+        ):
+            raise ValueError(
+                "JointCommand.hold_duration must contain finite non-negative values."
+            )
         if self.active_mask.device != self.positions.device:
             raise ValueError("JointCommand tensors must share a device.")
         if self.env_ids.device != self.positions.device:
+            raise ValueError("JointCommand tensors must share a device.")
+        if self.hold_duration.device != self.positions.device:
             raise ValueError("JointCommand tensors must share a device.")
         object.__setattr__(self, "positions", self.positions.clone())
         if self.velocities is not None:
             object.__setattr__(self, "velocities", self.velocities.clone())
         object.__setattr__(self, "active_mask", self.active_mask.clone())
         object.__setattr__(self, "env_ids", self.env_ids.clone())
+        object.__setattr__(self, "hold_duration", self.hold_duration.clone())
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -193,6 +209,11 @@ class ExecutionSession:
     def task_state(self) -> TaskState:
         """Verified symbolic task state accumulated by this session."""
         return self._task_state
+
+    @property
+    def latest_context(self) -> PlanningContext:
+        """Latest validated context with the session's verified task state."""
+        return self._context
 
     def tick(
         self,
@@ -542,11 +563,14 @@ class ExecutionSession:
             )
         self._last_command = positions.clone()
         self._last_command_mask = active_mask.clone()
+        next_index = min(waypoint_index + 1, phase.trajectory.waypoint_count - 1)
+        hold_duration = phase.trajectory.dt[:, next_index]
         return JointCommand(
             positions=positions,
             velocities=velocities,
             active_mask=active_mask,
             env_ids=phase.trajectory.env_ids,
+            hold_duration=hold_duration,
         )
 
     def _hold_command(self) -> JointCommand:
@@ -556,6 +580,11 @@ class ExecutionSession:
             velocities=torch.zeros_like(self._context.robot.qpos),
             active_mask=torch.zeros_like(self._eligible),
             env_ids=self._context.env_ids,
+            hold_duration=torch.zeros(
+                self._context.batch_size,
+                dtype=torch.float32,
+                device=self._context.robot.qpos.device,
+            ),
         )
 
     def _terminal_error(self, phase: PlannedPhase) -> torch.Tensor:

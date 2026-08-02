@@ -24,6 +24,7 @@ Inspect only the files relevant to the requested skill:
 | Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory.py` |
 | Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
 | Static compiler and execution session | `engine.py`, `execution.py` |
+| Controller-facing execution ports | `runner.py`, `sim_adapter.py` |
 
 The public contract is:
 
@@ -186,8 +187,10 @@ invocation = ActionInvocation(
 compiled = engine.compile((invocation,))
 ```
 
-Use `engine.start(...).tick(...)` instead when dynamic scene updates or online
-error recovery are required.
+For dynamic scene updates or online error recovery, create a session with
+`engine.start(...)`, then connect it to observation, command, and clock ports
+through `ExecutionRunner`. Use non-blocking `runner.step()` in an existing event
+loop or `runner.run_until_blocked()` in a simple application.
 
 ## 5. Export and document
 
@@ -229,4 +232,4 @@ then use the `pre-commit-check` skill before committing.
 | Return an arm-only tensor | Embed into full robot DoF. |
 | Mutate held state after planning | Declare a `StateDelta`. |
 | Treat `plan_success` as physical success | Verify effects during execution. |
-| Step the simulator from the action | Emit plans; let the caller own execution. |
+| Step the simulator from the action | Emit plans; connect execution through `ExecutionRunner`. |

@@ -20,7 +20,9 @@ An action consumes an :class:`ActionInvocation` and a :class:`PlanningContext`
 through :meth:`AtomicAction.plan`. Planning is side-effect free: it returns an
 :class:`ActionPlan` with timed motion, completion criteria, diagnostics, and
 uncommitted expected task-state effects. :class:`AtomicActionEngine` can compile
-a static sequence; closed-loop execution belongs to an execution session.
+a static sequence. For closed-loop use, :class:`ExecutionSession` owns recovery
+state while :class:`ExecutionRunner` connects it to observations, commands, and
+time.
 """
 
 from __future__ import annotations
@@ -91,6 +93,23 @@ from .primitives import (
     PressCfg,
     PressGoal,
 )
+from .runner import (
+    CommandAcknowledgement,
+    CommandAckStatus,
+    CommandDispatch,
+    CommandOperation,
+    CommandSink,
+    EffectVerifier,
+    ExecutionClock,
+    ExecutionRunner,
+    ExecutionRunnerCfg,
+    MonotonicExecutionClock,
+    ObservationProvider,
+    RunnerStatus,
+    RunnerStep,
+    RunnerStepCallback,
+)
+from .sim_adapter import SceneSnapshotSupplier, SimulationExecutionAdapter
 from .state import (
     CoordinatedHeldObjectState,
     EntityState,
@@ -115,6 +134,11 @@ __all__ = [
     "AtomicAction",
     "AtomicActionEngine",
     "CompiledTrajectory",
+    "CommandAcknowledgement",
+    "CommandAckStatus",
+    "CommandDispatch",
+    "CommandOperation",
+    "CommandSink",
     "CompletionCondition",
     "CompletionConditionKind",
     "CoordinatedHeldObjectState",
@@ -126,8 +150,12 @@ __all__ = [
     "CoordinatedPlacementGoal",
     "EndEffectorPoseGoal",
     "EntityState",
+    "EffectVerifier",
+    "ExecutionClock",
     "ExecutionEvent",
     "ExecutionEventKind",
+    "ExecutionRunner",
+    "ExecutionRunnerCfg",
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
@@ -140,6 +168,7 @@ __all__ = [
     "JointPositionGoal",
     "JointCommand",
     "MotionPolicy",
+    "MonotonicExecutionClock",
     "MoveEndEffector",
     "MoveEndEffectorCfg",
     "MoveHeldObject",
@@ -149,6 +178,7 @@ __all__ = [
     "NamedJointPositionGoal",
     "ObjectActionGoal",
     "ObjectSemantics",
+    "ObservationProvider",
     "PhaseSpec",
     "PickUp",
     "PickUpCfg",
@@ -164,10 +194,15 @@ __all__ = [
     "PressGoal",
     "RecoveryPolicy",
     "RobotObservation",
+    "RunnerStatus",
+    "RunnerStep",
+    "RunnerStepCallback",
     "SceneSnapshot",
+    "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
     "StateDelta",
+    "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
     "TrajectoryBuilder",
