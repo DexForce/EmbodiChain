@@ -610,6 +610,7 @@ class GraspGenerator:
         self,
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
+        object_part: str = "center",
         visualize_collision: bool = False,
     ):
         if self._hit_point_pairs is None:
@@ -627,12 +628,140 @@ class GraspGenerator:
         hit_points = self._hit_point_pairs[:, 1, :]
         origin_points_ = self._apply_transform(origin_points, object_pose)
         hit_points_ = self._apply_transform(hit_points, object_pose)
-        centers = (origin_points_ + hit_points_) / 2
+        mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
+
+        if object_part == "bottom":
+            z_max = mesh_vert_transformed[:, 2].max()
+            z_min = mesh_vert_transformed[:, 2].min()
+            z_threshold = z_min + (z_max - z_min) * 0.45
+            z_mask = (origin_points_[:, 2] < z_threshold) | (
+                hit_points_[:, 2] < z_threshold
+            )
+            origin_points_masked = origin_points_[z_mask]
+            hit_points_masked = hit_points_[z_mask]
+        elif object_part == "top":
+            z_max = mesh_vert_transformed[:, 2].max()
+            z_min = mesh_vert_transformed[:, 2].min()
+            z_threshold = z_min + (z_max - z_min) * 0.6
+            z_mask = (origin_points_[:, 2] > z_threshold) | (
+                hit_points_[:, 2] > z_threshold
+            )
+            origin_points_masked = origin_points_[z_mask]
+            hit_points_masked = hit_points_[z_mask]
+        else:
+            origin_points_masked = origin_points_
+            hit_points_masked = hit_points_
+        return self._filter_valid_grasp_poses(
+            origin_points_=origin_points_masked,
+            hit_points_=hit_points_masked,
+            object_pose=object_pose,
+            approach_direction=approach_direction,
+            mesh_vert_transformed=mesh_vert_transformed,
+            visualize_collision=visualize_collision,
+        )
+
+    def get_dual_arm_valid_grasp_poses(
+        self,
+        object_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        left_to_right_arm_direction: torch.Tensor,
+        middle_empty_ratio: float = 0.4,
+        visualize_collision: bool = False,
+    ) -> dict | None:
+        if self._hit_point_pairs is None:
+            logger.log_warning(
+                "No antipodal point pairs available. "
+                "Call generate() or annotate() first."
+            )
+            return None
+        origin_points = self._hit_point_pairs[:, 0, :]
+        hit_points = self._hit_point_pairs[:, 1, :]
+        origin_points_ = self._apply_transform(origin_points, object_pose)
+        hit_points_ = self._apply_transform(hit_points, object_pose)
 
         mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
-        mesh_center = mesh_vert_transformed.mean(dim=0)
 
-        # filter perpendicular antipodal point
+        # project mesh_vert_transformed to left_to_right_arm_direction and get the min and max value
+        n_vert = mesh_vert_transformed.shape[0]
+        projected = (
+            mesh_vert_transformed * left_to_right_arm_direction.repeat(n_vert, 1)
+        ).sum(dim=-1)
+        min_proj, max_proj = projected.min(), projected.max()
+        left_threshold = min_proj + (max_proj - min_proj) * (
+            0.5 - middle_empty_ratio / 2
+        )
+        right_threshold = max_proj - (max_proj - min_proj) * (
+            0.5 - middle_empty_ratio / 2
+        )
+
+        origin_projected = (
+            origin_points_
+            * left_to_right_arm_direction.repeat(origin_points_.shape[0], 1)
+        ).sum(dim=-1)
+        hit_projected = (
+            hit_points_ * left_to_right_arm_direction.repeat(hit_points_.shape[0], 1)
+        ).sum(dim=-1)
+        left_mask = (origin_projected < left_threshold) | (
+            hit_projected < left_threshold
+        )
+        right_mask = (origin_projected > right_threshold) | (
+            hit_projected > right_threshold
+        )
+
+        origin_left = origin_points_[left_mask]
+        hit_left = hit_points_[left_mask]
+        origin_right = origin_points_[right_mask]
+        hit_right = hit_points_[right_mask]
+        is_succes_left, grasp_poses_left, open_lengths_left, total_cost_left = (
+            self._filter_valid_grasp_poses(
+                hit_points_=hit_left,
+                origin_points_=origin_left,
+                object_pose=object_pose,
+                approach_direction=approach_direction,
+                mesh_vert_transformed=mesh_vert_transformed,
+                visualize_collision=visualize_collision,
+            )
+        )
+        is_succes_right, grasp_poses_right, open_lengths_right, total_cost_right = (
+            self._filter_valid_grasp_poses(
+                hit_points_=hit_right,
+                origin_points_=origin_right,
+                object_pose=object_pose,
+                approach_direction=approach_direction,
+                mesh_vert_transformed=mesh_vert_transformed,
+                visualize_collision=visualize_collision,
+            )
+        )
+        result = {
+            "left": {
+                "is_success": is_succes_left,
+                "grasp_poses": grasp_poses_left,
+                "open_lengths": open_lengths_left,
+                "total_cost": total_cost_left,
+            },
+            "right": {
+                "is_success": is_succes_right,
+                "grasp_poses": grasp_poses_right,
+                "open_lengths": open_lengths_right,
+                "total_cost": total_cost_right,
+            },
+        }
+        # self.visualize_grasp_poses(
+        #     obj_pose=object_pose,
+        #     grasp_poses=torch.vstack([grasp_poses_left, grasp_poses_right]),
+        #     open_lengths=torch.cat([open_lengths_left, open_lengths_right]),
+        # )
+        return result
+
+    def _filter_valid_grasp_poses(
+        self,
+        origin_points_: torch.Tensor,
+        hit_points_: torch.Tensor,
+        approach_direction: torch.Tensor,
+        mesh_vert_transformed: torch.Tensor,
+        object_pose: torch.Tensor,
+        visualize_collision: bool = False,
+    ):
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
         cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
         positive_angle = torch.abs(torch.acos(cos_angle))
@@ -647,6 +776,9 @@ class GraspGenerator:
                 0.0,
                 torch.zeros(1, device=self.device),
             )
+
+        centers = (origin_points_ + hit_points_) / 2
+        mesh_center = mesh_vert_transformed.mean(dim=0)
 
         valid_grasp_x = grasp_x[valid_mask]
         valid_centers = centers[valid_mask]
@@ -685,7 +817,6 @@ class GraspGenerator:
         # valid_open_lengths = valid_open_lengths[nms_indices]
         # valid_centers = valid_centers[nms_indices]
 
-        # select non-collide grasp poses
         is_colliding, max_penetration = self._collision_checker.query(
             object_pose,
             valid_grasp_poses,
@@ -735,7 +866,11 @@ class GraspGenerator:
             top_grasp_poses = valid_grasp_poses
             top_open_lengths = valid_open_lengths
             top_total_cost = total_cost
-
+        # self.visualize_grasp_poses(
+        #     obj_pose=object_pose,
+        #     grasp_poses=top_grasp_poses,
+        #     open_lengths=top_open_lengths,
+        # )
         return True, top_grasp_poses, top_open_lengths, top_total_cost
 
     def get_grasp_poses(
@@ -877,6 +1012,77 @@ class GraspGenerator:
         grasp_visual.transform(grasp_pose.to("cpu").numpy())
         o3d.visualization.draw_geometries(
             [grasp_visual, mesh, groud_plane],
+            window_name="Grasp Pose Visualization",
+            mesh_show_back_face=True,
+        )
+
+    def visualize_grasp_poses(
+        self,
+        obj_pose: torch.Tensor,
+        grasp_poses: torch.Tensor,
+        open_lengths: torch.Tensor,
+    ):
+        mesh = o3d.geometry.TriangleMesh(
+            vertices=o3d.utility.Vector3dVector(self.vertices.to("cpu").numpy()),
+            triangles=o3d.utility.Vector3iVector(self.triangles.to("cpu").numpy()),
+        )
+        mesh.compute_vertex_normals()
+        mesh.paint_uniform_color([0.3, 0.6, 0.3])
+        mesh.transform(obj_pose.to("cpu").numpy())
+        vertices_ = torch.tensor(
+            np.asarray(mesh.vertices),
+            device=self.vertices.device,
+            dtype=self.vertices.dtype,
+        )
+        mesh_scale = (vertices_.max(dim=0)[0] - vertices_.min(dim=0)[0]).max().item()
+        groud_plane = o3d.geometry.TriangleMesh.create_cylinder(
+            radius=mesh_scale, height=0.01 * mesh_scale
+        )
+        groud_plane.compute_vertex_normals()
+        center = vertices_.mean(dim=0)
+        z_sim = vertices_.min(dim=0)[0][2].item()
+        groud_plane.translate(
+            (center[0].item(), center[1].item(), z_sim - 0.005 * mesh_scale)
+        )
+        draw_thickness = 0.02 * mesh_scale
+        draw_length = 0.3 * mesh_scale
+        visual_mesh_list = [mesh, groud_plane]
+        for i in range(grasp_poses.shape[0]):
+            grasp_finger1 = o3d.geometry.TriangleMesh.create_box(
+                draw_thickness, draw_thickness, draw_length
+            )
+            grasp_finger1.translate(
+                (-0.5 * draw_thickness, -0.5 * draw_thickness, -0.5 * draw_length)
+            )
+            grasp_finger2 = o3d.geometry.TriangleMesh.create_box(
+                draw_thickness, draw_thickness, draw_length
+            )
+            grasp_finger2.translate(
+                (-0.5 * draw_thickness, -0.5 * draw_thickness, -0.5 * draw_length)
+            )
+            grasp_finger1.translate((-open_lengths[i] / 2, 0, -0.25 * draw_length))
+            grasp_finger2.translate((open_lengths[i] / 2, 0, -0.25 * draw_length))
+            grasp_root1 = o3d.geometry.TriangleMesh.create_box(
+                open_lengths[i], draw_thickness, draw_thickness
+            )
+            grasp_root1.translate(
+                (-open_lengths[i] / 2, -0.5 * draw_thickness, -0.5 * draw_thickness)
+            )
+            grasp_root1.translate((0, 0, -0.75 * draw_length))
+            grasp_root2 = o3d.geometry.TriangleMesh.create_box(
+                draw_thickness, draw_thickness, draw_length
+            )
+            grasp_root2.translate(
+                (-0.5 * draw_thickness, -0.5 * draw_thickness, -0.5 * draw_length)
+            )
+            grasp_root2.translate((0, 0, -1.25 * draw_length))
+
+            grasp_visual = grasp_finger1 + grasp_finger2 + grasp_root1 + grasp_root2
+            grasp_visual.paint_uniform_color([0.8, 0.2, 0.8])
+            grasp_visual.transform(grasp_poses[i].to("cpu").numpy())
+            visual_mesh_list.append(grasp_visual)
+        o3d.visualization.draw_geometries(
+            visual_mesh_list,
             window_name="Grasp Pose Visualization",
             mesh_show_back_face=True,
         )

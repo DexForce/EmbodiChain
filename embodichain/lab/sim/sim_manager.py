@@ -362,7 +362,6 @@ class SimulationManager:
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
-
         self._build_multiple_arenas(sim_config.num_envs)
         self.start_visualization()
 

@@ -29,6 +29,7 @@ from .coordinated_placement import (
     CoordinatedPlacementCfg,
     CoordinatedPlacementTarget,
 )
+from .hand_over import HandOver, HandOverCfg
 from .move_end_effector import (
     EndEffectorPoseTarget,
     MoveEndEffector,
@@ -46,10 +47,11 @@ from .move_joints import (
     NamedJointPositionTarget,
 )
 from .pick_up import GraspTarget, PickUp, PickUpCfg
-from .place import Place, PlaceCfg, PlaceTarget
+from .place import AssembleTarget, Place, PlaceCfg, PlaceTarget
 from .press import Press, PressCfg, PressTarget
 
 __all__ = [
+    "AssembleTarget",
     "CoordinatedPickTarget",
     "CoordinatedPickment",
     "CoordinatedPickmentCfg",
@@ -59,6 +61,8 @@ __all__ = [
     "CoordinatedPlacementTarget",
     "EndEffectorPoseTarget",
     "GraspTarget",
+    "HandOver",
+    "HandOverCfg",
     "HeldObjectPoseTarget",
     "JointPositionTarget",
     "MoveEndEffector",
