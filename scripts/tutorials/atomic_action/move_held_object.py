@@ -31,16 +31,19 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    EndEffectorPoseTarget,
-    GraspTarget,
-    HeldObjectPoseTarget,
+    EndEffectorPoseGoal,
+    GraspGoal,
+    HeldObjectPoseGoal,
     MoveEndEffector,
     MoveEndEffectorCfg,
     MoveHeldObject,
     MoveHeldObjectCfg,
     PickUp,
     PickUpCfg,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -127,11 +130,7 @@ def main() -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        MoveEndEffector(
-            motion_gen, MoveEndEffectorCfg(sample_interval=MOVE_SAMPLE_INTERVAL)
-        )
-    )
+    engine.register(MoveEndEffector(motion_gen, MoveEndEffectorCfg()))
     engine.register(
         PickUp(
             motion_gen,
@@ -140,7 +139,6 @@ def main() -> None:
                 hand_close_qpos=hand_close,
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
@@ -150,7 +148,6 @@ def main() -> None:
             motion_gen,
             MoveHeldObjectCfg(
                 hand_close_qpos=hand_close,
-                sample_interval=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
             ),
         )
     )
@@ -172,14 +169,33 @@ def main() -> None:
         sim, args, "Inspect the paper cup, then press Enter to plan..."
     )
 
-    success, trajectory, _ = engine.run(
-        [
-            ("move_end_effector", EndEffectorPoseTarget(move_target)),
-            ("pick_up", GraspTarget(semantics)),
-            ("move_held_object", HeldObjectPoseTarget(object_target)),
-        ]
+    binding = ActionBinding(
+        manipulators={"primary": "arm"},
+        end_effectors={"primary": "hand"},
     )
-    if not success.all():
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "move_end_effector",
+                EndEffectorPoseGoal(move_target),
+                binding,
+                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(semantics),
+                binding,
+                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "move_held_object",
+                HeldObjectPoseGoal(object_target),
+                binding,
+                MotionPolicy(sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL),
+            ),
+        )
+    )
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveHeldObject demo trajectory.")
         return
 
@@ -201,7 +217,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory.positions,
         args,
         video_prefix="move_held_object_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

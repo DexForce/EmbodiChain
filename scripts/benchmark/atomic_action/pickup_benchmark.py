@@ -123,10 +123,13 @@ def _run_case(
 ):
     """Run one PickUp benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
         AtomicActionEngine,
-        GraspTarget,
+        GraspGoal,
         PickUp,
         PickUpCfg,
+        MotionPolicy,
     )
     from scripts.tutorials.atomic_action.pickup import (
         build_grasp_generator_cfg,
@@ -168,7 +171,6 @@ def _run_case(
                     approach_direction=approach_direction,
                     pre_grasp_distance=0.15,
                     lift_height=0.16,
-                    sample_interval=PICK_SAMPLE_INTERVAL,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             )
@@ -181,11 +183,23 @@ def _run_case(
             build_grasp_generator_cfg=build_grasp_generator_cfg,
         )
         elapsed, mem_delta, peak_gpu, result = timed_call(
-            lambda: atomic_engine.run(
-                steps=[("pick_up", GraspTarget(semantics=semantics))]
+            lambda: atomic_engine.compile(
+                (
+                    ActionInvocation(
+                        skill_id="pick_up",
+                        goal=GraspGoal(semantics=semantics),
+                        binding=ActionBinding(
+                            manipulators={"primary": "arm"},
+                            end_effectors={"primary": "hand"},
+                        ),
+                        motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                    ),
+                )
             )
         )
-        is_success, traj, final_state = result
+        is_success = result.plan_success
+        traj = result.trajectory.positions
+        final_state = result.projected_context
         final_obj_position = None
         object_lift_delta_m = None
         object_xy_drift_m = None

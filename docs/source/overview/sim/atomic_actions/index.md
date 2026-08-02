@@ -1,369 +1,74 @@
-# Atomic Actions
-
-```{currentmodule} embodichain.lab.sim.atomic_actions
-```
-
-Atomic actions are the building blocks for automated robot motion generation. Each action encapsulates a complete, self-contained motion primitive — such as picking up an object or moving to a pose — that can be chained together to form complex manipulation workflows.
-
-```{note}
-Atomic actions currently support gripper-based manipulation only. Dexterous-hand manipulation is not supported yet.
-```
-
-## Design Overview
-
-The module is organized into three layers:
-
-```
-AtomicActionEngine          ← orchestrates a sequence of (name, typed_target) steps
-    │
-    ├── AtomicAction(s)     ← each action plans one motion primitive
-    │       │
-    │       └── MotionGenerator   ← low-level trajectory planner (IK + trajectory optimization)
-    │
-    └── WorldState           ← threaded action-to-action
-                               (last_qpos + per-control-part held-object maps)
-```
-
-Each action receives a typed target and a `WorldState`, runs its planning pipeline, and
-returns an `ActionResult` whose trajectory covers the full robot DOF.  The engine threads
-the `next_state` of each action as the input state of the next, then concatenates all
-trajectories into one contiguous sequence:
-
-```
-GraspTarget(semantics, grasp_xpos=None) ──► AtomicAction.execute(target, state)
-EndEffectorPoseTarget(xpos)                │
-PlaceTarget(xpos, tcp_symmetry)            │
-PressTarget(xpos)                          │
-JointPositionTarget(qpos)                  ├─ IK solve when pose-based
-NamedJointPositionTarget(name)             ├─ Motion plan / interpolation
-HeldObjectPoseTarget(pose)                 └─ Gripper interpolation when needed
-CoordinatedPickTarget(...)                 │
-CoordinatedPlacementTarget(...)            │
-                                                   │
-                                           ActionResult
-                                           (success, full-DoF traj, next_state)
-                                                   │
-AtomicActionEngine ◄───────────────────┘
-(run(steps, state) → (is_success, traj, final_state))
-```
-
-### Core Concepts
-
-**`ObjectSemantics`** describes an interaction target. It bundles:
-- `affordance` — *how* to interact with the object (e.g. an `AntipodalAffordance` carrying mesh data and grasp-generation config)
-- `geometry` — plain geometric metadata (e.g. a bounding box). Mesh tensors live on the affordance, not here
-- `label` — object category string (also bound onto the affordance for convenience)
-- `entity` — a live reference to the simulation object, so actions can read its current pose
-
-**`HeldObjectState`** is runtime state produced after a successful `PickUp`. It stores
-the held object's semantics and object-to-end-effector transform so later actions can move the
-object without recomputing the grasp. It is intentionally separate from `ObjectSemantics`,
-which remains a reusable object description rather than per-execution robot state.
-
-**Typed targets** describe *where* an action should go. Each one is a small frozen,
-identity-equality dataclass inheriting the open `ActionTarget` marker. Every action
-declares the target type, or tuple of target types, it accepts via its `TargetType`
-class variable. Object-centric actions can share the semantic-object contract
-provided by `ObjectActionTarget`, while keeping their pose roles action-specific:
-
-| Target | Constructor | Used by |
-|---|---|---|
-| `EndEffectorPoseTarget` | `EndEffectorPoseTarget(xpos)` | `MoveEndEffector` |
-| `PlaceTarget` | `PlaceTarget(xpos, tcp_symmetry="none")` | `Place` |
-| `PressTarget` | `PressTarget(xpos)` | `Press` |
-| `JointPositionTarget` | `JointPositionTarget(qpos)` | `MoveJoints` |
-| `NamedJointPositionTarget` | `NamedJointPositionTarget(name)` | `MoveJoints` |
-| `GraspTarget` | `GraspTarget(semantics, grasp_xpos=None)` | `PickUp` |
-| `HeldObjectPoseTarget` | `HeldObjectPoseTarget(object_target_pose)` | `MoveHeldObject` |
-| `CoordinatedPickTarget` | `CoordinatedPickTarget(...)` | `CoordinatedPickment` |
-| `CoordinatedPlacementTarget` | `CoordinatedPlacementTarget(...)` | `CoordinatedPlacement` |
-
-`Target` is a compatibility alias of the open `ActionTarget` marker.
-`BuiltinTarget` is the closed union of target types shipped by EmbodiChain.
-`CoordinatedPickmentTarget` remains an alias of `CoordinatedPickTarget`.
-`GraspTarget` and `CoordinatedPickTarget` inherit
-`ObjectActionTarget(semantics)`, but only `GraspTarget` defines the optional
-single-arm `grasp_xpos`.
-
-Action-exclusive target classes live beside their owning primitive under
-`atomic_actions/primitives/`. They are re-exported from
-`embodichain.lab.sim.atomic_actions`, which remains the stable public import
-surface. Shared target contracts such as `ObjectActionTarget` live in the
-neutral `atomic_actions/targets.py` module instead of introducing dependencies
-between primitive implementations. The shared base deliberately has no generic
-`xpos`: object poses and single-/dual-arm EEF poses have different meanings.
-
-**`Affordance`** is a data class that encodes a specific interaction capability. The built-in affordance types are:
-
-| Class | Use case |
-|---|---|
-| `AntipodalAffordance` | Parallel-jaw grasping via antipodal point pairs |
-| `InteractionPoints` | Contact-based interactions (push, poke, touch) |
-
-`AntipodalAffordance` takes its inputs as direct fields — `mesh_vertices`, `mesh_triangles`,
-`gripper_collision_cfg`, `generator_cfg`, and `force_reannotate` — rather than a nested config dict.
-
-**`AtomicAction`** is the abstract base class for all motion primitives. Subclasses declare a
-`TargetType` class variable and implement a single method:
-- `execute(target, state) -> ActionResult` — plan and return a full-DOF trajectory plus the
-  successor `WorldState`
-
-**`AtomicActionEngine`** holds a name-keyed registry of action instances and runs a sequence of
-`(name, typed_target)` steps via `run(steps, state)`, threading `WorldState` from one action into
-the next.
-
----
-
-## Typed Targets & State Threading
-
-The engine takes a sequence of `(name, typed_target)` steps. Each target is a small
-frozen dataclass, and the engine checks that each step's target matches the registered
-action's `TargetType` before calling `execute`:
-
-| Target | Holds | Accepted by |
-|---|---|---|
-| `EndEffectorPoseTarget(xpos)` | EEF pose tensor `(4,4)`, `(n_envs,4,4)` or `(n_envs, n_waypoint, 4, 4)` | `MoveEndEffector` |
-| `PlaceTarget(xpos, tcp_symmetry="none")` | Release EEF pose; placement may opt into TCP z-roll 180 equivalence | `Place` |
-| `PressTarget(xpos)` | One EEF contact pose `(4,4)` or `(n_envs,4,4)` | `Press` |
-| `JointPositionTarget(qpos)` | Control-part qpos tensor `(control_dof,)`, `(n_envs, control_dof)` or `(n_envs, n_waypoint, control_dof)` | `MoveJoints` |
-| `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
-| `GraspTarget(semantics, grasp_xpos=None)` | `ObjectSemantics` plus an optional preselected TCP grasp pose | `PickUp` |
-| `HeldObjectPoseTarget(object_target_pose)` | Desired held-object pose tensor | `MoveHeldObject` |
-| `CoordinatedPickTarget(...)` | Shared object semantics plus left/right grasp transforms and target object pose | `CoordinatedPickment` |
-| `CoordinatedPlacementTarget(...)` | Object-centric placing/support target poses and per-call overrides | `CoordinatedPlacement` |
-
-Both object-grasp targets expose `semantics` through `ObjectActionTarget`.
-`CoordinatedPickTarget` names its object and dual-arm pose roles explicitly, so
-an unsupported single-arm `grasp_xpos` cannot be silently ignored.
-
-`WorldState` is threaded between actions and carries the robot's `last_qpos` plus
-`held_objects: dict[str, HeldObjectState]` and
-`coordinated_held_objects: dict[tuple[str, str], CoordinatedHeldObjectState]`.
-The built-in actions update it as follows:
-
-| Action | Effect on held-object maps |
-|---|---|
-| `PickUp` | Populates `held_objects[cfg.control_part]` |
-| `MoveHeldObject` | Requires and preserves `held_objects[cfg.control_part]` |
-| `Place` | Removes its `cfg.control_part` entry |
-| `CoordinatedPickment` | Removes both individual arm entries and populates their coordinated pair |
-| `CoordinatedPlacement` | Reads both individual arm entries; removes only the placing entry when releasing |
-| `MoveEndEffector` | Leaves it unchanged |
-| `MoveJoints` | Leaves it unchanged |
-| `Press` | Leaves it unchanged |
-
-If a step fails, `run()` returns `success=False` with the partial trajectory concatenated up
-to (but not including) the failed step, and the `WorldState` going into that step.
-
----
-
-## Typical Workflow
-
-```python
-from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
-    ObjectSemantics,
-    AntipodalAffordance,
-    GraspTarget,
-    EndEffectorPoseTarget,
-    PlaceTarget,
-    JointPositionTarget,
-    NamedJointPositionTarget,
-    HeldObjectPoseTarget,
-    PickUp,
-    PickUpCfg,
-    MoveJoints,
-    MoveJointsCfg,
-    MoveHeldObject,
-    MoveHeldObjectCfg,
-    Place,
-    PlaceCfg,
-    Press,
-    PressCfg,
-    MoveEndEffector,
-    MoveEndEffectorCfg,
-)
-
-# 1. Configure each action
-pickup_cfg = PickUpCfg(
-    control_part="arm",
-    hand_control_part="hand",
-    hand_open_qpos=torch.tensor([0.0, 0.0]),
-    hand_close_qpos=torch.tensor([0.025, 0.025]),
-)
-place_cfg = PlaceCfg(
-    control_part="arm",
-    hand_control_part="hand",
-    hand_open_qpos=torch.tensor([0.0, 0.0]),
-    hand_close_qpos=torch.tensor([0.025, 0.025]),
-)
-move_held_object_cfg = MoveHeldObjectCfg(
-    control_part="arm",
-    hand_control_part="hand",
-    hand_close_qpos=torch.tensor([0.025, 0.025]),
-)
-move_cfg = MoveEndEffectorCfg(control_part="arm")
-press_cfg = PressCfg(
-    control_part="arm",
-    hand_control_part="hand",
-    hand_close_qpos=torch.tensor([0.025, 0.025]),
-)
-move_joints_cfg = MoveJointsCfg(
-    control_part="arm",
-    named_joint_positions={"home": torch.zeros(6)},
-)
-
-# 2. Build the engine and register each action instance by name
-engine = AtomicActionEngine(motion_generator=motion_gen)
-engine.register(PickUp(motion_gen, cfg=pickup_cfg))
-engine.register(MoveHeldObject(motion_gen, cfg=move_held_object_cfg))
-engine.register(Place(motion_gen, cfg=place_cfg))
-engine.register(MoveEndEffector(motion_gen, cfg=move_cfg))
-engine.register(Press(motion_gen, cfg=press_cfg))
-engine.register(MoveJoints(motion_gen, cfg=move_joints_cfg))
-
-# 3. Describe the object to pick
-semantics = ObjectSemantics(
-    affordance=AntipodalAffordance(
-        mesh_vertices=obj.get_vertices(env_ids=[0], scale=True)[0],
-        mesh_triangles=obj.get_triangles(env_ids=[0])[0],
-        gripper_collision_cfg=gripper_cfg,
-        generator_cfg=generator_cfg,
-    ),
-    geometry={},
-    label="mug",
-    entity=obj,
-)
-
-# 4. Plan the full sequence — steps are (name, typed_target) pairs
-is_success, traj, final_state = engine.run(
-    steps=[
-        ("pick_up", GraspTarget(semantics=semantics)),
-        ("move_held_object", HeldObjectPoseTarget(object_target_pose=carry_pose)),
-        ("place", PlaceTarget(xpos=place_pose)),
-        ("move_joints", NamedJointPositionTarget(name="home")),
-    ]
-)
-# traj: (n_envs, n_waypoints, robot.dof)
-```
-
----
-
-## How to Extend: Adding a Custom Action
-
-You can add any motion primitive by subclassing `AtomicAction`, composing a
-`TrajectoryBuilder` for the shared planning math, and registering an instance with the engine.
-Built-in primitives live one action per module under
-`embodichain/lab/sim/atomic_actions/primitives/`, while
-`embodichain.lab.sim.atomic_actions` remains the public import surface and
-`embodichain.lab.sim.atomic_actions.actions` stays as a compatibility re-export.
-
-### Step 1 — Define the config
-
-```python
-from embodichain.utils import configclass
-from embodichain.lab.sim.atomic_actions import ActionCfg
-
-@configclass
-class PushCfg(ActionCfg):
-    name: str = "push"
-    push_distance: float = 0.05  # metres to push forward
-    push_speed: int = 30          # waypoints for the push phase
-```
-
-### Step 2 — Implement the action
-
-```python
-from dataclasses import dataclass
-import torch
-from typing import ClassVar
-from embodichain.lab.sim.atomic_actions import (
-    ActionTarget, AtomicAction, ActionResult, WorldState, TrajectoryBuilder,
-)
-
-@dataclass(frozen=True, slots=True, eq=False)
-class PushTarget(ActionTarget):
-    xpos: torch.Tensor
-
-    def __post_init__(self) -> None:
-        if self.xpos.shape[-2:] != (4, 4) or self.xpos.dim() not in (2, 3):
-            raise ValueError("xpos must have shape (4, 4) or (n_envs, 4, 4)")
-
-class Push(AtomicAction[PushTarget]):
-    TargetType: ClassVar[type] = PushTarget
-
-    def __init__(self, motion_generator, cfg: PushCfg | None = None):
-        super().__init__(motion_generator, cfg or PushCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.robot_dof = self.robot.dof
-        self.n_envs = self.robot.get_qpos().shape[0]
-
-    def execute(self, target: PushTarget, state: WorldState) -> ActionResult:
-        # ... your planning logic, using self.builder for IK / interpolation ...
-        # full must be shaped (n_envs, n_waypoints, robot.dof)
-        return ActionResult(
-            success=is_success,
-            trajectory=full,
-            next_state=state.with_updates(
-                last_qpos=full[:, -1, :].clone(),
-            ),
-        )
-```
-
-### Step 3 — Register and use
-
-Register an instance with the engine so it can be referenced by name in `run()`:
-
-```python
-engine.register(Push(motion_gen, cfg=PushCfg(push_distance=0.08)))
-is_success, traj, final_state = engine.run(
-    steps=[("push", PushTarget(xpos=target_pose))]
-)
-```
-
-To publish an action class for third-party discovery (independent of any engine instance),
-use the global registry:
-
-```python
-from embodichain.lab.sim.atomic_actions import register_action, unregister_action, get_registered_actions
-
-register_action("push", Push)          # registers the class under "push"
-unregister_action("push")                    # removes it
-all_actions = get_registered_actions()       # dict[str, type[AtomicAction]]
-```
-
-> **Tip:** `execute()` always returns an `ActionResult`. Its `trajectory` is full-robot-DOF
-> shaped `(n_envs, n_waypoints, robot.dof)`, and `next_state` carries the `WorldState` the
-> engine will feed into the following step. Use `TrajectoryBuilder` for pose broadcasting,
-> three-phase splitting, IK/FK, and hand-qpos interpolation so your action matches the
-> built-ins.
-
----
+# Atomic actions
 
 ```{toctree}
-:maxdepth: 1
+:hidden:
 
 builtin_actions
 ```
 
-## Further Reading
+Atomic actions turn typed, grounded skill requests into full-robot timed motion.
+Planning is side-effect free and execution is incremental.
 
-- {doc}`../planners/motion_generator` — the trajectory planner used by every action
-- {doc}`../sim_robot` — how control parts and IK solvers are configured
-- Focused primitive demos:
-  - `scripts/tutorials/atomic_action/move_end_effector.py`
-  - `scripts/tutorials/atomic_action/move_joints.py`
-  - `scripts/tutorials/atomic_action/pickup.py`
-  - `scripts/tutorials/atomic_action/move_held_object.py`
-  - `scripts/tutorials/atomic_action/place.py`
-  - `scripts/tutorials/atomic_action/press.py`
-  - `scripts/tutorials/atomic_action/coordinated_pickment.py`
-  - `scripts/tutorials/atomic_action/coordinated_placement.py`
-
-Run a demo in headless CPU mode with `--auto_play --headless --device cpu` to record
-an MP4 under `outputs/videos`. For example:
-
-```bash
-python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
+```text
+Action Agent / task graph
+        |
+        | semantic skill call
+        v
+grounder + capability binder
+        |
+        | ActionInvocation
+        v
+AtomicAction.plan(invocation, PlanningContext)
+        |
+        | ActionPlan + StateDelta
+        +------------------------------+
+        |                              |
+        v                              v
+AtomicActionEngine.compile       ExecutionSession.tick
+(fixed-scene/offline)            (dynamic/closed-loop)
 ```
+
+## Contracts
+
+- `ActionGoal`: structural protocol implemented by action-owned frozen goal
+  dataclasses. There is no common target object or closed union.
+- `ActionBinding`: semantic role to robot-resource mapping. Goals do not carry
+  arm or hand names.
+- `MotionPolicy`: planner, interpolation, sample count, timing, and limits.
+- `RecoveryPolicy`: replan/retry budgets, tracking and dynamic-goal thresholds,
+  and phase timeout.
+- `PlanningContext`: measured `RobotObservation`, verified `TaskState`, versioned
+  `SceneSnapshot`, and stable environment IDs.
+- `ActionPlan`: one or more scene-bound phases, timed trajectories, completion
+  conditions, diagnostics, and uncommitted `StateDelta` effects.
+
+## Static and dynamic use
+
+`AtomicActionEngine.compile()` plans a fixed sequence and returns a
+`CompiledTrajectory`. It projects terminal qpos and expected task effects only
+inside the returned context; it never changes simulator state.
+
+`AtomicActionEngine.start()` creates an `ExecutionSession`. Each `tick()` takes
+the latest context and emits at most one `JointCommand`. The session detects
+tracking error, phase timeout, and movement of entities referenced by
+`SceneEntityPose`, then replans from the latest observation within the configured
+budget. Non-empty symbolic effects require external verification before commit.
+
+## Example
+
+```python
+binding = ActionBinding(manipulators={"primary": "left_arm"})
+invocation = ActionInvocation(
+    skill_id="move_end_effector",
+    goal=EndEffectorPoseGoal(target_pose),
+    binding=binding,
+    motion_policy=MotionPolicy(sample_count=80),
+)
+
+engine = AtomicActionEngine(motion_generator)
+engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
+compiled = engine.compile((invocation,))
+```
+
+See [Built-in actions](builtin_actions.md) for the shipped skill catalog and
+[the tutorial](../../../tutorial/atomic_actions.rst) for closed-loop usage.

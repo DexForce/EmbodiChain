@@ -29,25 +29,27 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_r
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..core import (
-    ActionTarget,
     ActionCfg,
-    ActionResult,
     AtomicAction,
-    WorldState,
-    _validate_pose_tensor,
 )
+from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
+from ..invocation import ActionInvocation
+from ..plans import ActionPlan
+from ..state import PlanningContext
 from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class HeldObjectPoseTarget(ActionTarget):
+class HeldObjectPoseGoal:
     """Desired pose for the object held by this action's control part."""
 
-    object_target_pose: torch.Tensor
+    goal_kind: ClassVar[str] = "held_object_pose"
+
+    object_target_pose: PoseGoalValue
     """Target object pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
 
     def __post_init__(self) -> None:
-        _validate_pose_tensor(
+        validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
             allow_waypoints=False,
@@ -59,8 +61,8 @@ class MoveHeldObjectCfg(ActionCfg):
     name: str = "move_held_object"
     """Name of the action, used for identification and logging."""
 
-    sample_interval: int = 50
-    """Number of waypoints in the planned trajectory."""
+    control_part: str = "arm"
+    """Manipulator resource used by this configured action instance."""
 
     hand_control_part: str = "hand"
     """Name of the robot part that controls the hand joints."""
@@ -75,10 +77,13 @@ class MoveHeldObjectCfg(ActionCfg):
     """Optional rotation in radians used by the legacy upright transport mode."""
 
 
-class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
+class MoveHeldObject(AtomicAction[HeldObjectPoseGoal]):
     """Move the held object to a target object pose; keep the gripper closed."""
 
-    TargetType: ClassVar[type] = HeldObjectPoseTarget
+    skill_id: ClassVar[str] = "move_held_object"
+    GoalType: ClassVar[type] = HeldObjectPoseGoal
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self,
@@ -99,7 +104,22 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
             )
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
-    def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
+    def plan(
+        self,
+        invocation: ActionInvocation[HeldObjectPoseGoal],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan held-object transport without changing the attachment relation."""
+        target = self.require_goal(invocation)
+        if invocation.binding.manipulator() != self.cfg.control_part:
+            raise ValueError(
+                "MoveHeldObject manipulator binding does not match its config."
+            )
+        if invocation.binding.end_effector() != self.cfg.hand_control_part:
+            raise ValueError(
+                "MoveHeldObject end-effector binding does not match its config."
+            )
+        state = context
         held_object = state.get_held_object(self.cfg.control_part)
         if held_object is None:
             logger.log_error(
@@ -108,7 +128,13 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
                 ValueError,
             )
         object_target_pose = resolve_object_target(
-            target.object_target_pose, n_envs=self.n_envs, device=self.device
+            resolve_pose_goal(
+                target.object_target_pose,
+                context,
+                name="object_target_pose",
+            ),
+            n_envs=self.n_envs,
+            device=self.device,
         )
         start_arm_qpos = self.builder.resolve_start_qpos(
             arm_qpos_from_state(state, self.arm_joint_ids),
@@ -142,10 +168,10 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
         success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
-            self.cfg.sample_interval,
+            invocation.motion_policy.sample_count,
             control_part=self.cfg.control_part,
             arm_dof=self.arm_dof,
-            cfg=self.cfg,
+            cfg=invocation.motion_policy,
         )
 
         full = torch.empty(
@@ -157,12 +183,12 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
         full[:, :, self.arm_joint_ids] = arm_traj
         full[:, :, self.hand_joint_ids] = self.hand_close_qpos
 
-        return ActionResult(
+        return self.build_plan(
+            invocation,
+            context,
             success=success,
             trajectory=full,
-            next_state=state.with_updates(
-                last_qpos=full[:, -1, :].clone(),
-            ),
+            phase_name="transport",
         )
 
     def _apply_configured_upright_rotation(
@@ -244,16 +270,5 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
             move_eef_xpos[:, :3, :3],
         )
 
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            next_state=state,
-        )
 
-
-__all__ = ["HeldObjectPoseTarget", "MoveHeldObject", "MoveHeldObjectCfg"]
+__all__ = ["HeldObjectPoseGoal", "MoveHeldObject", "MoveHeldObjectCfg"]

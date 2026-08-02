@@ -14,182 +14,273 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Registry and offline compiler for side-effect-free atomic actions."""
+
 from __future__ import annotations
 
-import torch
 from typing import Iterable, TYPE_CHECKING
 
-from embodichain.utils import logger
+import torch
 
-from .core import (
-    ActionTarget,
-    ActionResult,
-    AtomicAction,
-    WorldState,
-    _resolve_runtime_device,
-)
+from .core import AtomicAction, resolve_runtime_device
+from .invocation import ActionInvocation
+from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
 
-
-# =============================================================================
-# Global action registry (kept for third-party extensions)
-# =============================================================================
+    from .execution import ExecutionSession
 
 
 _global_action_registry: dict[str, type[AtomicAction]] = {}
 
 
-def _target_type_name(target_type: type | tuple[type, ...]) -> str:
-    """Return a readable name for one accepted target type or a tuple of them."""
-    if isinstance(target_type, tuple):
-        return " | ".join(t.__name__ for t in target_type)
-    return target_type.__name__
+def register_action(action_class: type[AtomicAction]) -> None:
+    """Register an atomic action class under its stable skill identifier.
+
+    Args:
+        action_class: Concrete :class:`AtomicAction` subclass.
+
+    Raises:
+        TypeError: If ``action_class`` is not an AtomicAction subclass.
+        ValueError: If another class already owns the same skill identifier.
+    """
+    if not isinstance(action_class, type) or not issubclass(action_class, AtomicAction):
+        raise TypeError("action_class must be an AtomicAction subclass.")
+    descriptor = action_class.descriptor()
+    existing = _global_action_registry.get(descriptor.skill_id)
+    if existing is not None and existing is not action_class:
+        raise ValueError(
+            f"Skill id {descriptor.skill_id!r} is already registered by "
+            f"{existing.__name__}."
+        )
+    _global_action_registry[descriptor.skill_id] = action_class
 
 
-def register_action(name: str, action_class: type[AtomicAction]) -> None:
-    """Register a custom AtomicAction subclass globally under ``name``."""
-    _global_action_registry[name] = action_class
+def unregister_action(skill_id: str) -> None:
+    """Remove a globally registered skill class if present.
 
-
-def unregister_action(name: str) -> None:
-    """Remove a previously-registered action class. No-op if absent."""
-    _global_action_registry.pop(name, None)
+    Args:
+        skill_id: Stable registered skill identifier.
+    """
+    _global_action_registry.pop(skill_id, None)
 
 
 def get_registered_actions() -> dict[str, type[AtomicAction]]:
-    """Return a copy of the global action-class registry."""
-    return _global_action_registry.copy()
-
-
-# =============================================================================
-# AtomicActionEngine
-# =============================================================================
+    """Return a copy of the global skill-class registry."""
+    return dict(_global_action_registry)
 
 
 class AtomicActionEngine:
-    """Sequences typed atomic actions while threading WorldState through them."""
+    """Compile grounded atomic invocations without stepping the environment."""
 
     def __init__(self, motion_generator: MotionGenerator) -> None:
         self.motion_generator = motion_generator
         self.robot = motion_generator.robot
-        self.device = _resolve_runtime_device(motion_generator.device)
+        self.device = resolve_runtime_device(motion_generator.device)
         self._actions: dict[str, AtomicAction] = {}
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
-        """Registered actions keyed by name (read-only copy)."""
+        """Registered action instances keyed by stable skill identifier."""
         return dict(self._actions)
 
-    def register(self, action: AtomicAction, *, name: str | None = None) -> None:
-        """Register an action instance under ``name`` or its ``cfg.name``."""
-        declared_target_type = getattr(action, "TargetType", None)
-        target_types = (
-            declared_target_type
-            if isinstance(declared_target_type, tuple)
-            else (declared_target_type,)
-        )
-        if not target_types or not all(
-            isinstance(target_type, type) and issubclass(target_type, ActionTarget)
-            for target_type in target_types
-        ):
-            logger.log_error(
-                "AtomicAction.TargetType must contain ActionTarget subclasses.",
-                TypeError,
-            )
-        key = name if name is not None else action.cfg.name
-        self._actions[key] = action
-
-    def run(
-        self,
-        steps: Iterable[tuple[str, ActionTarget]],
-        state: WorldState | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, WorldState]:
-        """Run a sequence of named actions, threading WorldState through.
+    def register(self, action: AtomicAction) -> None:
+        """Register one action instance using its descriptor.
 
         Args:
-            steps: Iterable of ``(action_name, typed_target)`` pairs.
-            state: Initial world state. If None, seeded from ``robot.get_qpos()``.
+            action: Configured action instance.
+
+        Raises:
+            TypeError: If ``action`` is not an AtomicAction.
+            ValueError: If its robot or skill identifier is incompatible.
+        """
+        if not isinstance(action, AtomicAction):
+            raise TypeError("action must be an AtomicAction instance.")
+        if action.robot is not self.robot:
+            raise ValueError("Registered actions must use the engine robot.")
+        descriptor = action.descriptor()
+        existing = self._actions.get(descriptor.skill_id)
+        if existing is not None and existing is not action:
+            raise ValueError(
+                f"Skill id {descriptor.skill_id!r} is already registered in this engine."
+            )
+        self._actions[descriptor.skill_id] = action
+
+    def initial_context(
+        self,
+        *,
+        task: TaskState | None = None,
+        scene: SceneSnapshot | None = None,
+        timestamp: float = 0.0,
+    ) -> PlanningContext:
+        """Capture the robot state needed to start offline compilation.
+
+        Args:
+            task: Optional symbolic task state; an empty state is used otherwise.
+            scene: Optional scene snapshot; an empty snapshot is used otherwise.
+            timestamp: Timestamp assigned to the captured robot observation.
 
         Returns:
-            ``(success, concatenated_full_dof_trajectory, final_state)``.
-
-            ``success`` is a ``(B,)`` boolean tensor indicating which
-            environments completed every step. Failed environments hold their
-            last successful joint position in both ``full_traj`` and
-            ``final_state.last_qpos`` for the remainder of the sequence.
-
-            An empty ``steps`` iterable is a successful no-op returning an
-            empty trajectory and the seed state.
+            Planning context containing owned robot tensors.
         """
-        if state is None:
-            state = WorldState(last_qpos=self.robot.get_qpos().clone())
-
-        if state.robot_dof != self.robot.dof:
-            raise ValueError(
-                "Initial WorldState DoF must match the engine robot, "
-                f"got {state.robot_dof} and {self.robot.dof}."
-            )
-        robot_batch_size = int(self.robot.get_qpos().shape[0])
-        if state.batch_size != robot_batch_size:
-            raise ValueError(
-                "Initial WorldState batch size must match the engine robot, "
-                f"got {state.batch_size} and {robot_batch_size}."
-            )
-        if state.last_qpos.device != self.device:
-            raise ValueError(
-                "Initial WorldState and AtomicActionEngine must use the same device."
-            )
-
-        b = state.batch_size
-        full_traj = torch.empty(
-            (b, 0, self.robot.dof),
-            dtype=torch.float32,
-            device=self.device,
+        qpos = self.robot.get_qpos().to(self.device).clone()
+        qvel_value = None
+        get_qvel = getattr(self.robot, "get_qvel", None)
+        if callable(get_qvel):
+            candidate = get_qvel()
+            if isinstance(candidate, torch.Tensor):
+                qvel_value = candidate.to(self.device)
+        qvel = torch.zeros_like(qpos) if qvel_value is None else qvel_value
+        batch_size = int(qpos.shape[0])
+        if task is None:
+            task = TaskState.empty(batch_size=batch_size, device=self.device)
+        if scene is None:
+            scene = SceneSnapshot.empty()
+        return PlanningContext(
+            robot=RobotObservation(timestamp=timestamp, qpos=qpos, qvel=qvel),
+            task=task,
+            scene=scene,
+            env_ids=torch.arange(batch_size, dtype=torch.long, device=self.device),
         )
-        alive = torch.ones(b, dtype=torch.bool, device=self.device)
 
-        for name, target in steps:
-            if name not in self._actions:
-                logger.log_error(f"No action registered under name '{name}'", KeyError)
-            action = self._actions[name]
-            if not isinstance(target, action.TargetType):
-                logger.log_error(
-                    f"Action '{name}' expects target of type "
-                    f"{_target_type_name(action.TargetType)}, got {type(target).__name__}",
-                    TypeError,
+    def compile(
+        self,
+        invocations: Iterable[ActionInvocation],
+        context: PlanningContext | None = None,
+    ) -> CompiledTrajectory:
+        """Compile a static sequence of grounded invocations.
+
+        Planning is side-effect free. Expected effects are applied only to the
+        returned hypothetical ``projected_context`` so following actions can be
+        checked against the expected state. No simulator or observed task state
+        is mutated.
+
+        Args:
+            invocations: Grounded action requests in execution order.
+            context: Optional initial planning context captured by the caller.
+
+        Returns:
+            Concatenated timed trajectory, individual plans, and projected state.
+
+        Raises:
+            KeyError: If an invocation references an unregistered skill.
+            ValueError: If context, plan, or trajectory dimensions are incompatible.
+        """
+        if context is None:
+            context = self.initial_context()
+        self._validate_context(context)
+
+        alive = torch.ones(context.batch_size, dtype=torch.bool, device=self.device)
+        plans: list[ActionPlan] = []
+        trajectories: list[TimedTrajectory] = []
+        projected = context
+
+        for invocation in invocations:
+            action = self._actions.get(invocation.skill_id)
+            if action is None:
+                raise KeyError(
+                    f"No atomic action registered for skill {invocation.skill_id!r}."
                 )
             if not alive.any():
-                # All envs dead: no further motion to plan.
                 break
-            prev_last_qpos = state.last_qpos.clone()
-            result: ActionResult = action.execute(target, state)
-            if result.trajectory.shape[0] != b:
-                raise ValueError(
-                    f"Action '{name}' returned batch {result.trajectory.shape[0]}, "
-                    f"but the engine state batch is {b}."
-                )
-            if result.trajectory.shape[2] != self.robot.dof:
-                raise ValueError(
-                    f"Action '{name}' returned {result.trajectory.shape[2]} DoF, "
-                    f"but the engine robot has {self.robot.dof}."
-                )
-            if result.trajectory.device != self.device:
-                raise ValueError(
-                    f"Action '{name}' returned a trajectory on "
-                    f"{result.trajectory.device}, expected {self.device}."
-                )
-            step_success = result.success.to(self.device)
-            alive = alive & step_success
-            # Failed envs freeze at their last successful qpos for this step's trajectory.
-            traj = result.trajectory
-            held_rows = prev_last_qpos.unsqueeze(1).repeat(1, traj.shape[1], 1)
-            traj = torch.where(alive[:, None, None], traj, held_rows)
-            full_traj = torch.cat([full_traj, traj], dim=1)
-            state = state.masked_merge(result.next_state, alive)
+            previous_qpos = projected.robot.qpos
+            plan = action.plan(invocation, projected)
+            self._validate_plan(plan, projected, invocation)
+            step_success = alive & plan.plan_success.to(self.device)
+            trajectory = plan.trajectory.hold_rows(step_success, previous_qpos)
+            plans.append(plan)
+            trajectories.append(trajectory)
 
-        return alive, full_traj, state
+            candidate_qpos = (
+                trajectory.positions[:, -1]
+                if trajectory.waypoint_count > 0
+                else previous_qpos
+            )
+            next_qpos = torch.where(
+                step_success[:, None], candidate_qpos, previous_qpos
+            )
+            next_task = plan.expected_effects.apply(projected.task, step_success)
+            projected = projected.project(qpos=next_qpos, task=next_task)
+            alive = step_success
+
+        compiled = TimedTrajectory.concatenate(trajectories, empty_like=context)
+        return CompiledTrajectory(
+            plan_success=alive,
+            trajectory=compiled,
+            action_plans=tuple(plans),
+            projected_context=projected,
+        )
+
+    def start(
+        self,
+        invocations: Iterable[ActionInvocation],
+        context: PlanningContext | None = None,
+    ) -> ExecutionSession:
+        """Start closed-loop execution for a grounded invocation sequence.
+
+        Args:
+            invocations: Grounded action requests in execution order.
+            context: Initial measured state and scene snapshot. The engine
+                captures one when omitted.
+
+        Returns:
+            Stateful execution session advanced by ``session.tick(...)``.
+        """
+        from .execution import ExecutionSession
+
+        initial = self.initial_context() if context is None else context
+        return ExecutionSession(self, tuple(invocations), initial)
+
+    def _validate_context(self, context: PlanningContext) -> None:
+        """Validate an externally supplied planning context."""
+        if context.robot.robot_dof != self.robot.dof:
+            raise ValueError(
+                "PlanningContext robot_dof must match the engine robot, "
+                f"got {context.robot.robot_dof} and {self.robot.dof}."
+            )
+        robot_qpos = self.robot.get_qpos()
+        if context.batch_size != int(robot_qpos.shape[0]):
+            raise ValueError(
+                "PlanningContext batch size must match the engine robot, "
+                f"got {context.batch_size} and {robot_qpos.shape[0]}."
+            )
+        if context.robot.qpos.device != self.device:
+            raise ValueError("PlanningContext and engine must share a device.")
+
+    def _validate_plan(
+        self,
+        plan: ActionPlan,
+        context: PlanningContext,
+        invocation: ActionInvocation,
+    ) -> None:
+        """Validate one action result before it is composed."""
+        if plan.skill_id != invocation.skill_id:
+            raise ValueError(
+                "ActionPlan.skill_id must match its invocation, "
+                f"got {plan.skill_id!r} and {invocation.skill_id!r}."
+            )
+        if plan.invocation_id != invocation.invocation_id:
+            raise ValueError(
+                "ActionPlan.invocation_id must preserve the invocation correlation id."
+            )
+        trajectory = plan.trajectory
+        if trajectory.batch_size != context.batch_size:
+            raise ValueError("Action plan batch size does not match the context.")
+        if trajectory.robot_dof != self.robot.dof:
+            raise ValueError("Action plan robot_dof does not match the engine robot.")
+        if trajectory.positions.device != self.device:
+            raise ValueError("Action plan and engine must share a device.")
+        if not torch.equal(trajectory.env_ids, context.env_ids):
+            raise ValueError("Action plan and context must share ordered env_ids.")
+        if any(
+            phase.planned_scene_version != context.scene.version
+            for phase in plan.phases
+        ):
+            raise ValueError(
+                "Every action phase must record the planning scene version."
+            )
 
 
 __all__ = [

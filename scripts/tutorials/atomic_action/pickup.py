@@ -30,10 +30,13 @@ import torch
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    GraspTarget,
+    GraspGoal,
     PickUp,
     PickUpCfg,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -140,7 +143,6 @@ def main() -> None:
                 approach_direction=resolve_approach_direction(args, sim.device),
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
@@ -157,8 +159,20 @@ def main() -> None:
         sim, args, "Inspect the cube, then press Enter to plan PickUp..."
     )
 
-    success, trajectory, _ = engine.run([("pick_up", GraspTarget(semantics))])
-    if not success.all():
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                skill_id="pick_up",
+                goal=GraspGoal(semantics),
+                binding=ActionBinding(
+                    manipulators={"primary": "arm"},
+                    end_effectors={"primary": "hand"},
+                ),
+                motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+            ),
+        )
+    )
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan PickUp demo trajectory.")
         return
 
@@ -178,7 +192,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory.positions,
         args,
         video_prefix="pickup_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

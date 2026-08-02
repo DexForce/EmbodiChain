@@ -30,10 +30,13 @@ import torch
 
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    EndEffectorPoseTarget,
+    EndEffectorPoseGoal,
     MoveEndEffector,
     MoveEndEffectorCfg,
+    MotionPolicy,
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -72,12 +75,7 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(sample_interval=MOVE_SAMPLE_INTERVAL),
-        )
-    )
+    engine.register(MoveEndEffector(motion_gen, cfg=MoveEndEffectorCfg()))
 
     poses = torch.stack(
         [
@@ -99,15 +97,17 @@ def main() -> None:
         sim, args, "Inspect the robot, then press Enter to plan MoveEndEffector..."
     )
 
-    success, trajectory, _ = engine.run(
-        [
-            (
-                "move_end_effector",
-                EndEffectorPoseTarget(broadcast_waypoint_pose_batch(poses, n_envs)),
-            )
-        ]
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                skill_id="move_end_effector",
+                goal=EndEffectorPoseGoal(broadcast_waypoint_pose_batch(poses, n_envs)),
+                binding=ActionBinding(manipulators={"primary": "arm"}),
+                motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+            ),
+        )
     )
-    if not success.all():
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")
         return
 
@@ -116,7 +116,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory.positions,
         args,
         video_prefix="move_end_effector_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

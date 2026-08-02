@@ -40,12 +40,15 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     Affordance,
     AtomicActionEngine,
-    CoordinatedPickTarget,
+    CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
     ObjectSemantics,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -679,7 +682,6 @@ def run_coordinated_pickment_demo(
             right_hand_close_qpos=right_close,
             pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,
             lift_height=PICKMENT_LIFT_HEIGHT,
-            sample_interval=PICKMENT_SAMPLE_INTERVAL,
             hand_interp_steps=PICKMENT_HAND_INTERP_STEPS,
             hold_steps=PICKMENT_HOLD_STEPS,
             object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
@@ -724,7 +726,7 @@ def run_coordinated_pickment_demo(
         broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
         broadcast_pose_batch(right_grasp_pose, num_envs=n_envs),
     )
-    pickment_target = CoordinatedPickTarget(
+    pickment_target = CoordinatedPickGoal(
         semantics=object_semantics,
         object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
         left_object_to_eef=left_object_to_eef,
@@ -737,7 +739,21 @@ def run_coordinated_pickment_demo(
     )
 
     start_time = time.time()
-    success, traj, _ = engine.run([("coordinated_pickment", pickment_target)])
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "coordinated_pickment",
+                pickment_target,
+                ActionBinding(
+                    manipulators={"left": "left_arm", "right": "right_arm"},
+                    end_effectors={"left": "left_hand", "right": "right_hand"},
+                ),
+                MotionPolicy(sample_count=PICKMENT_SAMPLE_INTERVAL),
+            ),
+        )
+    )
+    success = compiled.plan_success
+    traj = compiled.trajectory.positions
     logger.log_info(
         f"Plan coordinated pickment cost time: {time.time() - start_time:.2f} seconds"
     )
@@ -750,7 +766,7 @@ def run_coordinated_pickment_demo(
         "coordinated_pickment",
         traj,
         joint_ids,
-        pickment_action.get_segment_lengths(),
+        pickment_action.get_segment_lengths(PICKMENT_SAMPLE_INTERVAL),
     )
 
     if args.diagnose_plan:

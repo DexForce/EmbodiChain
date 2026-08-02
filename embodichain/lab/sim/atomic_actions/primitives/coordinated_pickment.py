@@ -28,21 +28,29 @@ from embodichain.utils.math import matrix_from_quat, quat_from_matrix
 
 from ..core import (
     ActionCfg,
-    ActionResult,
     AtomicAction,
-    CoordinatedHeldObjectState,
-    WorldState,
-    _validate_pose_tensor,
 )
-from ..targets import ObjectActionTarget
+from ..effects import StateDelta
+from ..goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+    validate_pose_tensor,
+)
+from ..invocation import ActionInvocation
+from ..plans import ActionPlan
+from ..state import CoordinatedHeldObjectState, PlanningContext
 from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class CoordinatedPickTarget(ObjectActionTarget):
+class CoordinatedPickGoal(ObjectActionGoal):
     """Object-centric target for picking and moving one object with two hands."""
 
-    object_target_pose: torch.Tensor
+    goal_kind: ClassVar[str] = "coordinated_pick"
+
+    object_target_pose: PoseGoalValue
     """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
 
     left_object_to_eef: torch.Tensor
@@ -51,36 +59,32 @@ class CoordinatedPickTarget(ObjectActionTarget):
     right_object_to_eef: torch.Tensor
     """Transform from object frame to right end-effector frame."""
 
-    object_initial_pose: torch.Tensor | None = None
+    object_initial_pose: PoseGoalValue | None = None
     """Optional initial object pose. Defaults to ``semantics.entity`` pose."""
 
     def __post_init__(self) -> None:
-        ObjectActionTarget.__post_init__(self)
-        _validate_pose_tensor(
+        ObjectActionGoal.__post_init__(self)
+        validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
             allow_waypoints=False,
         )
-        _validate_pose_tensor(
+        validate_pose_tensor(
             self.left_object_to_eef,
             "left_object_to_eef",
             allow_waypoints=False,
         )
-        _validate_pose_tensor(
+        validate_pose_tensor(
             self.right_object_to_eef,
             "right_object_to_eef",
             allow_waypoints=False,
         )
         if self.object_initial_pose is not None:
-            _validate_pose_tensor(
+            validate_pose_goal(
                 self.object_initial_pose,
                 "object_initial_pose",
                 allow_waypoints=False,
             )
-
-
-# Backward-compatible spelling retained for the existing action class and users.
-CoordinatedPickmentTarget = CoordinatedPickTarget
 
 
 @configclass
@@ -123,9 +127,6 @@ class CoordinatedPickmentCfg(ActionCfg):
 
     lift_height: float = 0.08
     """World-Z lift distance before moving to the object target pose."""
-
-    sample_interval: int = 120
-    """Number of waypoints for the full coordinated pickment trajectory."""
 
     hand_interp_steps: int = 10
     """Number of waypoints used for the simultaneous hand close phase."""
@@ -195,17 +196,6 @@ class _DualArmHelpers:
             )
         return [joint_id_to_col[joint_id] for joint_id in joint_ids]
 
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=False,
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            next_state=state,
-        )
-
     def _expand_qpos(self, qpos: torch.Tensor, dof: int, name: str) -> torch.Tensor:
         qpos = qpos.to(device=self.device, dtype=torch.float32)
         if qpos.shape == (dof,):
@@ -233,7 +223,7 @@ class _DualArmHelpers:
 
     def _resolve_dual_arm_start(
         self,
-        state: WorldState,
+        state: PlanningContext,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         dual_start = state.last_qpos[:, self.dual_arm_joint_ids].to(
             device=self.device, dtype=torch.float32
@@ -300,7 +290,7 @@ class _DualArmHelpers:
 
     def _assemble_phase(
         self,
-        state: WorldState,
+        state: PlanningContext,
         first_arm_traj: torch.Tensor,
         second_arm_traj: torch.Tensor,
         first_hand_traj: torch.Tensor,
@@ -431,15 +421,17 @@ class _DualArmHelpers:
         return poses
 
 
-class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
+class CoordinatedPickment(AtomicAction[CoordinatedPickGoal]):
     """Pick and move a single object pinched by two hands."""
 
-    TargetType: ClassVar[type] = CoordinatedPickTarget
+    skill_id: ClassVar[str] = "coordinated_pickment"
+    GoalType: ClassVar[type] = CoordinatedPickGoal
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("left", "right")
+    end_effector_roles: ClassVar[tuple[str, ...]] = ("left", "right")
 
     _assemble_phase = _DualArmHelpers._assemble_phase
     _compose_dual_arm_trajectory = _DualArmHelpers._compose_dual_arm_trajectory
     _expand_qpos = _DualArmHelpers._expand_qpos
-    _fail = _DualArmHelpers._fail
     _init_dual_arm_parts = _DualArmHelpers._init_dual_arm_parts
     _interpolate_keyframe_qpos = _DualArmHelpers._interpolate_keyframe_qpos
     _interpolate_object_pose = _DualArmHelpers._interpolate_object_pose
@@ -457,16 +449,6 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
         cfg: CoordinatedPickmentCfg | None = None,
     ) -> None:
         super().__init__(motion_generator, cfg or CoordinatedPickmentCfg())
-        if (
-            self.cfg.motion_source == "motion_gen"
-            and self.motion_generator.planner.cfg.planner_type == "curobo"
-        ):
-            logger.log_error(
-                "Coordinated dual-arm planning is not supported by the cuRobo "
-                "backend. Use a single-arm action or a dedicated multi-arm "
-                "planner.",
-                ValueError,
-            )
         self._init_dual_arm_parts(
             first_arm_control_part=self.cfg.left_arm_control_part,
             second_arm_control_part=self.cfg.right_arm_control_part,
@@ -512,13 +494,22 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
                 )
 
     def _resolve_object_initial_pose(
-        self, target: CoordinatedPickTarget
+        self,
+        target: CoordinatedPickGoal,
+        context: PlanningContext,
     ) -> torch.Tensor:
         if target.object_initial_pose is not None:
-            return self._resolve_pose(target.object_initial_pose, "object_initial_pose")
+            return self._resolve_pose(
+                resolve_pose_goal(
+                    target.object_initial_pose,
+                    context,
+                    name="object_initial_pose",
+                ),
+                "object_initial_pose",
+            )
         if target.semantics.entity is None:
             logger.log_error(
-                "CoordinatedPickTarget requires object_initial_pose when "
+                "CoordinatedPickGoal requires object_initial_pose when "
                 "semantics.entity is not provided.",
                 ValueError,
             )
@@ -529,7 +520,8 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
 
     def _resolve_target(
         self,
-        target: CoordinatedPickTarget,
+        target: CoordinatedPickGoal,
+        context: PlanningContext,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -539,9 +531,14 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
         torch.Tensor,
         CoordinatedHeldObjectState,
     ]:
-        object_initial_pose = self._resolve_object_initial_pose(target)
+        object_initial_pose = self._resolve_object_initial_pose(target, context)
         object_target_pose = self._resolve_pose(
-            target.object_target_pose, "object_target_pose"
+            resolve_pose_goal(
+                target.object_target_pose,
+                context,
+                name="object_target_pose",
+            ),
+            "object_target_pose",
         )
         left_object_to_eef = self._resolve_pose(
             target.left_object_to_eef, "left_object_to_eef"
@@ -571,17 +568,18 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
             held_state,
         )
 
-    def _compute_segment_lengths(self) -> dict[str, int]:
+    def _compute_segment_lengths(self, sample_count: int) -> dict[str, int]:
+        """Split the invocation sample budget across coordinated-pick phases."""
         n_close = max(2, self.cfg.hand_interp_steps)
         n_hold = max(0, self.cfg.hold_steps)
-        n_motion = self.cfg.sample_interval - n_close - n_hold
+        n_motion = sample_count - n_close - n_hold
         n_approach = n_motion // 3
         n_lift = n_motion // 3
         n_move = n_motion - n_approach - n_lift
         if min(n_approach, n_lift, n_move) < 2:
             logger.log_error(
                 "Not enough waypoints for coordinated pickment. Please increase "
-                "sample_interval or decrease hand_interp_steps/hold_steps.",
+                "sample_count or decrease hand_interp_steps/hold_steps.",
                 ValueError,
             )
         return {
@@ -592,8 +590,9 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
             "hold": n_hold,
         }
 
-    def get_segment_lengths(self) -> dict[str, int]:
-        return self._compute_segment_lengths()
+    def get_segment_lengths(self, sample_count: int) -> dict[str, int]:
+        """Return phase lengths for an explicit invocation sample budget."""
+        return self._compute_segment_lengths(sample_count)
 
     def _compute_pre_grasp_xpos(self, grasp_xpos: torch.Tensor) -> torch.Tensor:
         grasp_z = grasp_xpos[:, :3, 2]
@@ -758,7 +757,40 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
             self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
         )
 
-    def execute(self, target: CoordinatedPickTarget, state: WorldState) -> ActionResult:
+    def plan(
+        self,
+        invocation: ActionInvocation[CoordinatedPickGoal],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan a coordinated pick without committing the dual attachment."""
+        target = self.require_goal(invocation)
+        bindings = (
+            (invocation.binding.manipulator("left"), self.cfg.left_arm_control_part),
+            (
+                invocation.binding.manipulator("right"),
+                self.cfg.right_arm_control_part,
+            ),
+            (
+                invocation.binding.end_effector("left"),
+                self.cfg.left_hand_control_part,
+            ),
+            (
+                invocation.binding.end_effector("right"),
+                self.cfg.right_hand_control_part,
+            ),
+        )
+        if any(actual != expected for actual, expected in bindings):
+            raise ValueError(
+                "CoordinatedPickment bindings do not match its configured resources."
+            )
+        if (
+            invocation.motion_policy.motion_source == "motion_gen"
+            and self.motion_generator.planner.cfg.planner_type == "curobo"
+        ):
+            raise ValueError(
+                "Coordinated dual-arm planning is not supported by the cuRobo backend."
+            )
+        state = context
         (
             object_initial_pose,
             object_target_pose,
@@ -767,9 +799,9 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
             left_target_xpos,
             right_target_xpos,
             held_state,
-        ) = self._resolve_target(target)
+        ) = self._resolve_target(target, context)
         left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(state)
-        segments = self._compute_segment_lengths()
+        segments = self._compute_segment_lengths(invocation.motion_policy.sample_count)
         left_pre_grasp_xpos = self._compute_pre_grasp_xpos(left_grasp_xpos)
         right_pre_grasp_xpos = self._compute_pre_grasp_xpos(right_grasp_xpos)
         left_approach_targets = torch.stack(
@@ -912,36 +944,28 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickTarget]):
             left_grasp_xpos=left_target_xpos,
             right_grasp_xpos=right_target_xpos,
         )
-        involved_control_parts = {
-            self.cfg.left_arm_control_part,
-            self.cfg.right_arm_control_part,
-        }
-        held_objects = {
-            key: value
-            for key, value in state.held_objects.items()
-            if key not in involved_control_parts
-        }
-        coordinated_held_objects = dict(state.coordinated_held_objects)
-        coordinated_held_objects[
-            (
-                self.cfg.left_arm_control_part,
-                self.cfg.right_arm_control_part,
-            )
-        ] = coordinated_held_object
-        return ActionResult(
+        return self.build_plan(
+            invocation,
+            context,
             success=success_mask,
             trajectory=full,
-            next_state=state.with_updates(
-                last_qpos=full[:, -1, :].clone(),
-                held_objects=held_objects,
-                coordinated_held_objects=coordinated_held_objects,
+            expected_effects=StateDelta(
+                held_object_updates={
+                    self.cfg.left_arm_control_part: None,
+                    self.cfg.right_arm_control_part: None,
+                },
+                coordinated_held_object_updates={
+                    (
+                        self.cfg.left_arm_control_part,
+                        self.cfg.right_arm_control_part,
+                    ): coordinated_held_object,
+                },
             ),
         )
 
 
 __all__ = [
-    "CoordinatedPickTarget",
+    "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentCfg",
-    "CoordinatedPickmentTarget",
 ]

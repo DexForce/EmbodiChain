@@ -174,10 +174,13 @@ def _prepare_held_state(
 ):
     """Run PickUp precondition outside the timed Place block."""
     from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
         AtomicActionEngine,
-        GraspTarget,
+        GraspGoal,
         PickUp,
         PickUpCfg,
+        MotionPolicy,
     )
     from scripts.tutorials.atomic_action.place import (
         build_grasp_generator_cfg,
@@ -202,7 +205,6 @@ def _prepare_held_state(
                 ),
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
@@ -214,9 +216,22 @@ def _prepare_held_state(
         build_gripper_collision_cfg=build_gripper_collision_cfg,
         build_grasp_generator_cfg=build_grasp_generator_cfg,
     )
-    is_success, traj, state = atomic_engine.run(
-        steps=[("pick_up", GraspTarget(semantics=semantics))]
+    result = atomic_engine.compile(
+        (
+            ActionInvocation(
+                skill_id="pick_up",
+                goal=GraspGoal(semantics=semantics),
+                binding=ActionBinding(
+                    manipulators={"primary": "arm"},
+                    end_effectors={"primary": "hand"},
+                ),
+                motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+            ),
+        )
     )
+    is_success = result.plan_success
+    traj = result.trajectory.positions
+    state = result.projected_context
     if not is_success or state.get_held_object("arm") is None:
         raise RuntimeError("Failed to prepare held-object state for Place benchmark.")
     robot.set_qpos(state.last_qpos)
@@ -241,10 +256,13 @@ def _run_case(
 ):
     """Run one Place benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
         AtomicActionEngine,
+        MotionPolicy,
         Place,
         PlaceCfg,
-        PlaceTarget,
+        PlaceGoal,
     )
     from scripts.tutorials.atomic_action.place import (
         compute_pick_close_end_step,
@@ -291,19 +309,30 @@ def _run_case(
                     hand_open_qpos=hand_open,
                     hand_close_qpos=hand_close,
                     lift_height=PLACE_LIFT_HEIGHT,
-                    sample_interval=PLACE_SAMPLE_INTERVAL,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             )
         )
         place_pose = _make_place_pose(sim.device, case.xyz)
         elapsed, mem_delta, peak_gpu, result = timed_call(
-            lambda: atomic_engine.run(
-                steps=[("place", PlaceTarget(xpos=place_pose))],
-                state=state,
+            lambda: atomic_engine.compile(
+                (
+                    ActionInvocation(
+                        skill_id="place",
+                        goal=PlaceGoal(xpos=place_pose),
+                        binding=ActionBinding(
+                            manipulators={"primary": "arm"},
+                            end_effectors={"primary": "hand"},
+                        ),
+                        motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                    ),
+                ),
+                context=state,
             )
         )
-        is_success, traj, final_state = result
+        is_success = result.plan_success
+        traj = result.trajectory.positions
+        final_state = result.projected_context
         torch = ensure_torch()
         precondition_obj_position = None
         final_obj_position = None

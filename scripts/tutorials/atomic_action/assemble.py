@@ -20,7 +20,7 @@ The left arm picks up a soda can (object A) and places it directly above a cube
 (object B). The relative pose of the can with respect to the cube is declared on
 an :class:`~embodichain.lab.sim.atomic_actions.AssembleAffordance` and consumed
 by the :class:`~embodichain.lab.sim.atomic_actions.Place` action through an
-:class:`~embodichain.lab.sim.atomic_actions.AssembleTarget`.
+:class:`~embodichain.lab.sim.atomic_actions.AssembleGoal`.
 """
 
 from __future__ import annotations
@@ -40,14 +40,17 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AssembleAffordance,
-    AssembleTarget,
+    AssembleGoal,
     AtomicActionEngine,
-    GraspTarget,
+    GraspGoal,
     PickUp,
     PickUpCfg,
     Place,
     PlaceCfg,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
@@ -416,7 +419,6 @@ def run_assemble_demo(
             pick_object_part="top",
             pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
             lift_height=PICKUP_LIFT_HEIGHT,
-            sample_interval=PICKUP_SAMPLE_INTERVAL,
             hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
             approach_direction=torch.as_tensor(
                 [0.0, -math.sqrt(0.5), -math.sqrt(0.5)], dtype=torch.float32
@@ -434,7 +436,6 @@ def run_assemble_demo(
             hand_open_qpos=left_open,
             hand_close_qpos=left_close,
             lift_height=PLACE_LIFT_HEIGHT,
-            sample_interval=PLACE_SAMPLE_INTERVAL,
             hand_interp_steps=PLACE_HAND_INTERP_STEPS,
         ),
     )
@@ -456,12 +457,28 @@ def run_assemble_demo(
         assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
     )
-    success, traj, _ = engine.run(
-        [
-            ("pick_up", GraspTarget(can_semantics)),
-            ("place", AssembleTarget(affordance=assemble_affordance)),
-        ]
+    binding = ActionBinding(
+        manipulators={"primary": "left_arm"},
+        end_effectors={"primary": "left_hand"},
     )
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(can_semantics),
+                binding,
+                MotionPolicy(sample_count=PICKUP_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "place",
+                AssembleGoal(affordance=assemble_affordance),
+                binding,
+                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+            ),
+        )
+    )
+    success = compiled.plan_success
+    traj = compiled.trajectory.positions
 
     if not success.all():
         logger.log_warning("Failed to plan the assemble demo trajectory.")
