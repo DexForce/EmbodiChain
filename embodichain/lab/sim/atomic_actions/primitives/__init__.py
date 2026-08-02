@@ -43,7 +43,6 @@ from .move_joints import (
     JointPositionGoal,
     MoveJoints,
     MoveJointsCfg,
-    NamedJointPositionGoal,
 )
 from .pick_up import GraspGoal, PickUp, PickUpCfg
 from .place import AssembleGoal, Place, PlaceCfg, PlaceGoal
@@ -69,7 +68,6 @@ __all__ = [
     "MoveHeldObjectCfg",
     "MoveJoints",
     "MoveJointsCfg",
-    "NamedJointPositionGoal",
     "PickUp",
     "PickUpCfg",
     "Place",

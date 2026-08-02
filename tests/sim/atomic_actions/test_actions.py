@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from typing import TypeVar
 from unittest.mock import Mock
 
 import pytest
@@ -29,6 +30,8 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
     AssembleGoal,
+    AtomicAction,
+    AtomicActionEngine,
     CoordinatedHeldObjectState,
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -50,7 +53,6 @@ from embodichain.lab.sim.atomic_actions import (
     MoveHeldObjectCfg,
     MoveJoints,
     MoveJointsCfg,
-    NamedJointPositionGoal,
     ObjectSemantics,
     PickUp,
     PickUpCfg,
@@ -73,6 +75,8 @@ HAND_DOF = 2
 ROBOT_DOF = ARM_DOF + HAND_DOF
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
+
+ActionT = TypeVar("ActionT", bound=AtomicAction)
 
 
 @pytest.fixture(autouse=True)
@@ -152,6 +156,13 @@ def _motion_generator() -> Mock:
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
     return generator
+
+
+def _bind_action(generator: Mock, action: ActionT) -> ActionT:
+    """Bind one configured action to an engine-owned test backend."""
+    engine = AtomicActionEngine(generator)
+    engine.register(action)
+    return action
 
 
 def _context(task: TaskState | None = None) -> PlanningContext:
@@ -294,7 +305,7 @@ def _dual_binding(
 
 def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert MoveEndEffector.GoalType is EndEffectorPoseGoal
-    assert MoveJoints.GoalType == (JointPositionGoal, NamedJointPositionGoal)
+    assert MoveJoints.GoalType is JointPositionGoal
     assert PickUp.GoalType is GraspGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
@@ -304,8 +315,34 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert HandOver.GoalType is GraspGoal
 
 
+def test_joint_position_goal_rejects_unsupported_target_type() -> None:
+    with pytest.raises(TypeError, match="torch.Tensor or str"):
+        JointPositionGoal(target=1.0)  # type: ignore[arg-type]
+
+
+def test_joint_position_goal_rejects_empty_named_target() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        JointPositionGoal(target="   ")
+
+
+@pytest.mark.parametrize(
+    "target",
+    (
+        torch.tensor(1.0),
+        torch.empty(0),
+        torch.zeros(1, 1, 1, 1),
+    ),
+)
+def test_joint_position_goal_rejects_invalid_tensor_shape(
+    target: torch.Tensor,
+) -> None:
+    with pytest.raises(ValueError, match="Tensor target must have shape"):
+        JointPositionGoal(target=target)
+
+
 def test_move_end_effector_returns_full_robot_timed_plan() -> None:
-    action = MoveEndEffector(_motion_generator(), MoveEndEffectorCfg())
+    generator = _motion_generator()
+    action = _bind_action(generator, MoveEndEffector(MoveEndEffectorCfg()))
     context = _context()
 
     plan = action.plan(
@@ -326,7 +363,10 @@ def test_move_end_effector_returns_full_robot_timed_plan() -> None:
 def test_move_joints_uses_binding_and_preserves_uncontrolled_joints() -> None:
     generator = _motion_generator()
     named = {"ready": torch.full((ARM_DOF,), 0.4)}
-    action = MoveJoints(generator, MoveJointsCfg(named_joint_positions=named))
+    action = _bind_action(
+        generator,
+        MoveJoints(MoveJointsCfg(named_joint_positions=named)),
+    )
     qpos = torch.zeros(NUM_ENVS, ROBOT_DOF)
     qpos[:, ARM_DOF:] = 0.7
     context = PlanningContext(
@@ -337,7 +377,7 @@ def test_move_joints_uses_binding_and_preserves_uncontrolled_joints() -> None:
     )
 
     plan = action.plan(
-        _invocation("move_joints", NamedJointPositionGoal("ready"), sample_count=8),
+        _invocation("move_joints", JointPositionGoal("ready"), sample_count=8),
         context,
     )
 
@@ -349,9 +389,9 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
     generator = _motion_generator()
     hand_open = torch.zeros(HAND_DOF)
     hand_close = torch.ones(HAND_DOF)
-    pick = PickUp(
+    pick = _bind_action(
         generator,
-        PickUpCfg(hand_open_qpos=hand_open, hand_close_qpos=hand_close),
+        PickUp(PickUpCfg(hand_open_qpos=hand_open, hand_close_qpos=hand_close)),
     )
     initial = _context()
     semantics = _semantics()
@@ -366,9 +406,9 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
     assert initial.task.get_held_object("arm") is None
     assert picked_task.get_held_object("arm") is not None
 
-    place = Place(
+    place = _bind_action(
         generator,
-        PlaceCfg(hand_open_qpos=hand_open, hand_close_qpos=hand_close),
+        Place(PlaceCfg(hand_open_qpos=hand_open, hand_close_qpos=hand_close)),
     )
     picked_context = PlanningContext(
         robot=initial.robot,
@@ -390,9 +430,9 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
 
 def test_move_held_object_requires_projected_attachment() -> None:
     generator = _motion_generator()
-    action = MoveHeldObject(
+    action = _bind_action(
         generator,
-        MoveHeldObjectCfg(hand_close_qpos=torch.ones(HAND_DOF)),
+        MoveHeldObject(MoveHeldObjectCfg(hand_close_qpos=torch.ones(HAND_DOF))),
     )
     invocation = _invocation(
         "move_held_object",
@@ -416,7 +456,10 @@ def test_move_held_object_requires_projected_attachment() -> None:
 
 def test_press_uses_invocation_sample_budget() -> None:
     generator = _motion_generator()
-    action = Press(generator, PressCfg(hand_close_qpos=torch.ones(HAND_DOF)))
+    action = _bind_action(
+        generator,
+        Press(PressCfg(hand_close_qpos=torch.ones(HAND_DOF))),
+    )
 
     plan = action.plan(
         _invocation("press", PressGoal(torch.eye(4)), sample_count=12),
@@ -436,7 +479,8 @@ def test_motion_source_and_sample_count_are_not_action_config_fields() -> None:
 
 
 def test_move_joints_rejects_binding_with_wrong_goal_skill() -> None:
-    action = MoveJoints(_motion_generator(), MoveJointsCfg())
+    generator = _motion_generator()
+    action = _bind_action(generator, MoveJoints(MoveJointsCfg()))
     invocation = ActionInvocation(
         skill_id="move_end_effector",
         goal=JointPositionGoal(torch.zeros(ARM_DOF)),
@@ -460,7 +504,7 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
         NUM_ENVS, 1
     )
     generator.generate.return_value.duration = torch.full((NUM_ENVS,), 0.3)
-    action = MoveJoints(generator, MoveJointsCfg())
+    action = _bind_action(generator, MoveJoints(MoveJointsCfg()))
     invocation = ActionInvocation(
         skill_id="move_joints",
         goal=JointPositionGoal(torch.ones(ARM_DOF)),
@@ -494,7 +538,8 @@ def test_move_end_effector_visits_batched_waypoints_in_order() -> None:
     waypoints[:, 0, 0, 3] = 0.1
     waypoints[:, 1, 0, 3] = 0.3
 
-    plan = MoveEndEffector(generator).plan(
+    action = _bind_action(generator, MoveEndEffector())
+    plan = action.plan(
         _invocation(
             "move_end_effector",
             EndEffectorPoseGoal(waypoints),
@@ -510,9 +555,12 @@ def test_move_end_effector_visits_batched_waypoints_in_order() -> None:
 
 
 def test_move_joints_visits_waypoints_and_rejects_unknown_names() -> None:
-    action = MoveJoints(
-        _motion_generator(),
-        MoveJointsCfg(named_joint_positions={"ready": torch.zeros(ARM_DOF)}),
+    generator = _motion_generator()
+    action = _bind_action(
+        generator,
+        MoveJoints(
+            MoveJointsCfg(named_joint_positions={"ready": torch.zeros(ARM_DOF)})
+        ),
     )
     waypoints = torch.stack(
         [
@@ -535,7 +583,7 @@ def test_move_joints_visits_waypoints_and_rejects_unknown_names() -> None:
     assert torch.allclose(plan.trajectory.positions[:, -1, :ARM_DOF], waypoints[:, 1])
     with pytest.raises(KeyError, match="Unknown named joint-position goal"):
         action.plan(
-            _invocation("move_joints", NamedJointPositionGoal("missing")),
+            _invocation("move_joints", JointPositionGoal("missing")),
             _context(),
         )
 
@@ -554,11 +602,13 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     )
     grasp = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     grasp[:, 0, 3] = torch.tensor([0.1, 0.2])
-    action = PickUp(
+    action = _bind_action(
         generator,
-        PickUpCfg(
-            hand_open_qpos=torch.zeros(HAND_DOF),
-            hand_close_qpos=torch.ones(HAND_DOF),
+        PickUp(
+            PickUpCfg(
+                hand_open_qpos=torch.zeros(HAND_DOF),
+                hand_close_qpos=torch.ones(HAND_DOF),
+            )
         ),
     )
 
@@ -585,9 +635,10 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
         device="cpu",
         held_objects={"arm": held},
     )
-    action = Press(
-        _motion_generator(),
-        PressCfg(hand_close_qpos=torch.ones(HAND_DOF), hand_interp_steps=4),
+    generator = _motion_generator()
+    action = _bind_action(
+        generator,
+        Press(PressCfg(hand_close_qpos=torch.ones(HAND_DOF), hand_interp_steps=4)),
     )
 
     plan = action.plan(
@@ -605,18 +656,20 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
 
 def test_handover_does_not_mutate_cached_final_pose() -> None:
     generator = _dual_motion_generator()
-    action = HandOver(
+    action = _bind_action(
         generator,
-        HandOverCfg(
-            transfer_hand_open_qpos=torch.zeros(HAND_DOF),
-            transfer_hand_close_qpos=torch.ones(HAND_DOF),
-            receive_hand_open_qpos=torch.zeros(HAND_DOF),
-            receive_hand_close_qpos=torch.ones(HAND_DOF),
-            middle_object_pose=torch.eye(4),
-            final_object_pose=torch.eye(4),
-            hand_interp_steps=4,
-            hold_steps=2,
-            retreat_steps=5,
+        HandOver(
+            HandOverCfg(
+                transfer_hand_open_qpos=torch.zeros(HAND_DOF),
+                transfer_hand_close_qpos=torch.ones(HAND_DOF),
+                receive_hand_open_qpos=torch.zeros(HAND_DOF),
+                receive_hand_close_qpos=torch.ones(HAND_DOF),
+                middle_object_pose=torch.eye(4),
+                final_object_pose=torch.eye(4),
+                hand_interp_steps=4,
+                hold_steps=2,
+                retreat_steps=5,
+            )
         ),
     )
     original_final_pose = action.final_object_pose.clone()
@@ -658,16 +711,19 @@ def test_handover_does_not_mutate_cached_final_pose() -> None:
 
 
 def test_coordinated_pick_returns_full_dof_plan_and_projected_relation() -> None:
-    action = CoordinatedPickment(
-        _dual_motion_generator(),
-        CoordinatedPickmentCfg(
-            left_hand_open_qpos=torch.zeros(HAND_DOF),
-            left_hand_close_qpos=torch.ones(HAND_DOF),
-            right_hand_open_qpos=torch.zeros(HAND_DOF),
-            right_hand_close_qpos=torch.ones(HAND_DOF),
-            hand_interp_steps=4,
-            hold_steps=2,
-            object_motion_keyframes=3,
+    generator = _dual_motion_generator()
+    action = _bind_action(
+        generator,
+        CoordinatedPickment(
+            CoordinatedPickmentCfg(
+                left_hand_open_qpos=torch.zeros(HAND_DOF),
+                left_hand_close_qpos=torch.ones(HAND_DOF),
+                right_hand_open_qpos=torch.zeros(HAND_DOF),
+                right_hand_close_qpos=torch.ones(HAND_DOF),
+                hand_interp_steps=4,
+                hold_steps=2,
+                object_motion_keyframes=3,
+            )
         ),
     )
     semantics = ObjectSemantics(
@@ -722,16 +778,18 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
         return success, qpos
 
     generator.robot.compute_ik.side_effect = fail_second_environment
-    action = CoordinatedPickment(
+    action = _bind_action(
         generator,
-        CoordinatedPickmentCfg(
-            left_hand_open_qpos=torch.zeros(HAND_DOF),
-            left_hand_close_qpos=torch.ones(HAND_DOF),
-            right_hand_open_qpos=torch.zeros(HAND_DOF),
-            right_hand_close_qpos=torch.ones(HAND_DOF),
-            hand_interp_steps=4,
-            hold_steps=2,
-            object_motion_keyframes=3,
+        CoordinatedPickment(
+            CoordinatedPickmentCfg(
+                left_hand_open_qpos=torch.zeros(HAND_DOF),
+                left_hand_close_qpos=torch.ones(HAND_DOF),
+                right_hand_open_qpos=torch.zeros(HAND_DOF),
+                right_hand_close_qpos=torch.ones(HAND_DOF),
+                hand_interp_steps=4,
+                hold_steps=2,
+                object_motion_keyframes=3,
+            )
         ),
     )
     target_pose = torch.eye(4)
@@ -768,15 +826,17 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
 
 def test_coordinated_placement_projects_release_and_support_attachment() -> None:
     generator = _dual_motion_generator()
-    action = CoordinatedPlacement(
+    action = _bind_action(
         generator,
-        CoordinatedPlacementCfg(
-            placing_hand_open_qpos=torch.zeros(HAND_DOF),
-            placing_hand_close_qpos=torch.ones(HAND_DOF),
-            support_hand_close_qpos=torch.ones(HAND_DOF),
-            hand_interp_steps=4,
-            hold_steps=3,
-            retreat_steps=5,
+        CoordinatedPlacement(
+            CoordinatedPlacementCfg(
+                placing_hand_open_qpos=torch.zeros(HAND_DOF),
+                placing_hand_close_qpos=torch.ones(HAND_DOF),
+                support_hand_close_qpos=torch.ones(HAND_DOF),
+                hand_interp_steps=4,
+                hold_steps=3,
+                retreat_steps=5,
+            )
         ),
     )
     placing = _held(
@@ -815,13 +875,15 @@ def test_coordinated_actions_reject_curobo_motion_generation() -> None:
     generator = _dual_motion_generator()
     generator.planner.cfg.planner_type = "curobo"
     policy = MotionPolicy(motion_source="motion_gen", sample_count=30)
-    pick = CoordinatedPickment(
+    pick = _bind_action(
         generator,
-        CoordinatedPickmentCfg(
-            left_hand_open_qpos=torch.zeros(HAND_DOF),
-            left_hand_close_qpos=torch.ones(HAND_DOF),
-            right_hand_open_qpos=torch.zeros(HAND_DOF),
-            right_hand_close_qpos=torch.ones(HAND_DOF),
+        CoordinatedPickment(
+            CoordinatedPickmentCfg(
+                left_hand_open_qpos=torch.zeros(HAND_DOF),
+                left_hand_close_qpos=torch.ones(HAND_DOF),
+                right_hand_open_qpos=torch.zeros(HAND_DOF),
+                right_hand_close_qpos=torch.ones(HAND_DOF),
+            )
         ),
     )
     pick_invocation = ActionInvocation(
@@ -842,12 +904,14 @@ def test_coordinated_actions_reject_curobo_motion_generation() -> None:
     with pytest.raises(ValueError, match="not supported"):
         pick.plan(pick_invocation, _dual_context())
 
-    placement = CoordinatedPlacement(
+    placement = _bind_action(
         generator,
-        CoordinatedPlacementCfg(
-            placing_hand_open_qpos=torch.zeros(HAND_DOF),
-            placing_hand_close_qpos=torch.ones(HAND_DOF),
-            support_hand_close_qpos=torch.ones(HAND_DOF),
+        CoordinatedPlacement(
+            CoordinatedPlacementCfg(
+                placing_hand_open_qpos=torch.zeros(HAND_DOF),
+                placing_hand_close_qpos=torch.ones(HAND_DOF),
+                support_hand_close_qpos=torch.ones(HAND_DOF),
+            )
         ),
     )
     placement_invocation = ActionInvocation(

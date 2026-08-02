@@ -38,7 +38,6 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionInvocation
 from ..plans import ActionPlan
 from ..state import PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 TcpSymmetry = Literal["none", "z_roll_180"]
 
@@ -147,27 +146,29 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: PlaceCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or PlaceCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.arm_dof = len(self.arm_joint_ids)
-        self.robot_dof = self.robot.dof
-
+        super().__init__(cfg or PlaceCfg())
         if self.cfg.hand_open_qpos is None:
             logger.log_error("hand_open_qpos must be specified in PlaceCfg", ValueError)
         if self.cfg.hand_close_qpos is None:
             logger.log_error(
                 "hand_close_qpos must be specified in PlaceCfg", ValueError
             )
-        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
-        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
         if self.cfg.cartesian_waypoint_count < 1:
             logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
+
+    def _on_bind(self) -> None:
+        """Resolve robot-dependent resources from the owning engine."""
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.arm_dof = len(self.arm_joint_ids)
+        self.robot_dof = self.robot.dof
+        assert self.cfg.hand_open_qpos is not None
+        assert self.cfg.hand_close_qpos is not None
+        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
+        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
     def plan(
         self,

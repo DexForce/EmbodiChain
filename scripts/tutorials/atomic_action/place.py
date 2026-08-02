@@ -137,7 +137,6 @@ def main() -> None:
     engine = AtomicActionEngine(motion_generator=motion_gen)
     engine.register(
         PickUp(
-            motion_gen,
             cfg=PickUpCfg(
                 hand_open_qpos=hand_open,
                 hand_close_qpos=hand_close,
@@ -149,7 +148,6 @@ def main() -> None:
     )
     engine.register(
         Place(
-            motion_gen,
             cfg=PlaceCfg(
                 hand_open_qpos=hand_open,
                 hand_close_qpos=hand_close,

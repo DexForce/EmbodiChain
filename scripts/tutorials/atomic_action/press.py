@@ -164,10 +164,9 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
     hand_close = get_hand_open_close_qpos(robot)[1]
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(motion_gen, MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
     engine.register(
         Press(
-            motion_gen,
             PressCfg(
                 hand_close_qpos=hand_close,
                 hand_interp_steps=HAND_INTERP_STEPS,

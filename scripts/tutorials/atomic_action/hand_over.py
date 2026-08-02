@@ -346,7 +346,6 @@ def run_handover_demo(
 
     # Step 1 - the left arm picks the object up by its top part.
     pick_up_action = PickUp(
-        motion_generator=motion_gen,
         cfg=PickUpCfg(
             name="pick_up",
             control_part="left_arm",
@@ -364,7 +363,6 @@ def run_handover_demo(
     )
     # Step 2 - hand the object from the left arm to the right arm.
     handover_action = HandOver(
-        motion_generator=motion_gen,
         cfg=HandOverCfg(
             name="hand_over",
             control_part="dual_arm",

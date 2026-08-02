@@ -54,7 +54,8 @@ class StubAction(AtomicAction[JointPositionGoal]):
         context: PlanningContext,
     ) -> ActionPlan:
         goal = self.require_goal(invocation)
-        target = goal.qpos.to(context.robot.qpos)
+        assert isinstance(goal.target, torch.Tensor)
+        target = goal.target.to(context.robot.qpos)
         if target.dim() == 1:
             target = target.unsqueeze(0).expand(context.batch_size, -1)
         success = torch.ones(
@@ -70,6 +71,12 @@ class StubAction(AtomicAction[JointPositionGoal]):
             success=success,
             trajectory=trajectory,
         )
+
+
+class OtherStubAction(StubAction):
+    """Second configured skill used to verify shared engine resources."""
+
+    skill_id: ClassVar[str] = "other_stub"
 
 
 def _engine(batch_size: int = 2, robot_dof: int = 3) -> AtomicActionEngine:
@@ -106,7 +113,7 @@ def test_global_registry_uses_stable_skill_id() -> None:
 
 def test_engine_compile_projects_terminal_state_between_actions() -> None:
     engine = _engine()
-    engine.register(StubAction(engine.motion_generator, ActionCfg(name="stub")))
+    engine.register(StubAction(ActionCfg(name="stub")))
     first = torch.ones(2, 3)
     second = torch.full((2, 3), 2.0)
 
@@ -121,7 +128,7 @@ def test_engine_compile_projects_terminal_state_between_actions() -> None:
 
 def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
     engine = _engine()
-    engine.register(StubAction(engine.motion_generator, ActionCfg(name="stub")))
+    engine.register(StubAction(ActionCfg(name="stub")))
     first = torch.tensor([[1.0, 1.0, 1.0], [float("nan"), 2.0, 2.0]])
     second = torch.full((2, 3), 4.0)
 
@@ -152,16 +159,70 @@ def test_engine_rejects_unknown_skill() -> None:
 
 def test_engine_rejects_duplicate_instance_registration() -> None:
     engine = _engine()
-    first = StubAction(engine.motion_generator, ActionCfg(name="first"))
-    second = StubAction(engine.motion_generator, ActionCfg(name="second"))
+    first = StubAction(ActionCfg(name="first"))
+    second = StubAction(ActionCfg(name="second"))
     engine.register(first)
     with pytest.raises(ValueError, match="already registered"):
         engine.register(second)
 
 
+def test_engine_binds_one_planning_service_to_every_action() -> None:
+    engine = _engine()
+    first = StubAction(ActionCfg(name="first"))
+    second = OtherStubAction(ActionCfg(name="second"))
+
+    engine.register(first)
+    engine.register(second)
+
+    assert first.motion_generator is engine.motion_generator
+    assert second.motion_generator is engine.motion_generator
+    assert first.builder is engine.planning_services.trajectory_builder
+    assert second.builder is first.builder
+
+
+def test_engine_motion_generator_is_read_only() -> None:
+    engine = _engine()
+
+    with pytest.raises(AttributeError):
+        engine.motion_generator = Mock()  # type: ignore[misc]
+
+
+def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
+    engine = _engine()
+    action = StubAction(ActionCfg(name="temporary"))
+
+    plan = engine.plan_action(
+        action,
+        _invocation(torch.ones(2, 3)),
+        engine.initial_context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert action.is_bound
+    assert engine.actions == {}
+
+
+def test_action_cannot_be_rebound_to_another_engine() -> None:
+    action = StubAction(ActionCfg(name="stub"))
+    _engine().register(action)
+
+    with pytest.raises(ValueError, match="another AtomicActionEngine"):
+        _engine().register(action)
+
+
+def test_unbound_action_rejects_direct_planning() -> None:
+    action = StubAction(ActionCfg(name="stub"))
+
+    with pytest.raises(RuntimeError, match="not bound"):
+        action.plan(
+            _invocation(torch.ones(2, 3)),
+            _engine().initial_context(),
+        )
+
+
 def test_engine_rejects_plan_for_a_different_skill() -> None:
     engine = _engine()
-    action = StubAction(engine.motion_generator, ActionCfg(name="stub"))
+    action = StubAction(ActionCfg(name="stub"))
     original_plan = action.plan
 
     def wrong_skill_plan(

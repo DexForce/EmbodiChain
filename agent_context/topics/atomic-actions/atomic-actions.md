@@ -5,7 +5,7 @@
 Atomic actions are side-effect-free, environment-batched planners:
 
 ```python
-plan = action.plan(invocation: ActionInvocation, context: PlanningContext)
+plan = engine.plan(invocation: ActionInvocation, context: PlanningContext)
 ```
 
 There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
@@ -24,6 +24,13 @@ contains per-environment planning success, one or more `PlannedPhase` objects,
 full-robot `TimedTrajectory` data, diagnostics, completion conditions, and an
 uncommitted `StateDelta`.
 
+Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
+instance, which contains its robot, motion generator, planner backend, and
+shared `TrajectoryBuilder`. Actions accept only implementation configuration
+and borrow those services after `engine.register(action)` or
+`engine.plan_action(action, invocation, context)`. A bound action cannot be
+reused by another engine.
+
 ## Static compilation
 
 Register configured action instances by their class-level stable `skill_id`,
@@ -37,6 +44,10 @@ Compilation does not step simulation. It concatenates timed trajectories and
 applies successful expected effects only to `compiled.projected_context`, so a
 following action can be checked against hypothetical state. Failed rows hold
 their last successful qpos.
+
+Use `engine.plan_action(...)` for an unregistered configured instance when an
+application needs multiple variants with the same stable `skill_id`; the action
+still uses the engine's single motion generator.
 
 ## Dynamic execution and recovery
 
@@ -77,7 +88,7 @@ lift distances, and grasp constraints.
 | Skill ID | Goal type | Roles |
 |---|---|---|
 | `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` |
-| `move_joints` | `JointPositionGoal`, `NamedJointPositionGoal` | manipulator `primary` |
+| `move_joints` | `JointPositionGoal` (`target` is explicit qpos or a configured name) | manipulator `primary` |
 | `pick_up` | `GraspGoal` | manipulator/end effector `primary` |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator/end effector `primary` |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator/end effector `primary` |

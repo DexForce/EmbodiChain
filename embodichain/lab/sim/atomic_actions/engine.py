@@ -22,12 +22,14 @@ from typing import Iterable, TYPE_CHECKING
 
 import torch
 
-from .core import AtomicAction, resolve_runtime_device
+from .core import AtomicAction
 from .invocation import ActionInvocation
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
 
     from .execution import ExecutionSession
@@ -73,13 +75,31 @@ def get_registered_actions() -> dict[str, type[AtomicAction]]:
 
 
 class AtomicActionEngine:
-    """Compile grounded atomic invocations without stepping the environment."""
+    """Own planning resources and coordinate side-effect-free atomic actions."""
 
     def __init__(self, motion_generator: MotionGenerator) -> None:
-        self.motion_generator = motion_generator
-        self.robot = motion_generator.robot
-        self.device = resolve_runtime_device(motion_generator.device)
+        self._planning_services = ActionPlanningServices(motion_generator)
         self._actions: dict[str, AtomicAction] = {}
+
+    @property
+    def motion_generator(self) -> MotionGenerator:
+        """Return the single motion generator owned by this engine."""
+        return self._planning_services.motion_generator
+
+    @property
+    def robot(self) -> Robot:
+        """Return the robot controlled by this engine."""
+        return self._planning_services.robot
+
+    @property
+    def device(self) -> torch.device:
+        """Return the concrete planning device used by this engine."""
+        return self._planning_services.device
+
+    @property
+    def planning_services(self) -> ActionPlanningServices:
+        """Engine-owned resources shared by every bound atomic action."""
+        return self._planning_services
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
@@ -94,19 +114,77 @@ class AtomicActionEngine:
 
         Raises:
             TypeError: If ``action`` is not an AtomicAction.
-            ValueError: If its robot or skill identifier is incompatible.
+            ValueError: If it belongs to another engine or its skill identifier
+                conflicts with an existing action.
         """
         if not isinstance(action, AtomicAction):
             raise TypeError("action must be an AtomicAction instance.")
-        if action.robot is not self.robot:
-            raise ValueError("Registered actions must use the engine robot.")
         descriptor = action.descriptor()
         existing = self._actions.get(descriptor.skill_id)
         if existing is not None and existing is not action:
             raise ValueError(
                 f"Skill id {descriptor.skill_id!r} is already registered in this engine."
             )
+        action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
+
+    def plan_action(
+        self,
+        action: AtomicAction,
+        invocation: ActionInvocation,
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan with a configured action using this engine's resources.
+
+        Unlike :meth:`plan`, the supplied action does not need to be in the
+        skill registry. This supports multiple configured instances with the
+        same stable skill identifier while preserving one engine-owned motion
+        generator.
+
+        Args:
+            action: Configured action implementation to invoke.
+            invocation: Grounded request matching the action's skill identifier.
+            context: Latest measured planning state.
+
+        Returns:
+            Validated side-effect-free action plan.
+
+        Raises:
+            TypeError: If ``action`` is not an :class:`AtomicAction`.
+            ValueError: If the action, invocation, context, or plan is invalid.
+        """
+        if not isinstance(action, AtomicAction):
+            raise TypeError("action must be an AtomicAction instance.")
+        self._validate_context(context)
+        action._bind(self._planning_services)
+        plan = action.plan(invocation, context)
+        self._validate_plan(plan, context, invocation)
+        return plan
+
+    def plan(
+        self,
+        invocation: ActionInvocation,
+        context: PlanningContext | None = None,
+    ) -> ActionPlan:
+        """Plan one registered invocation through the engine-owned backend.
+
+        Args:
+            invocation: Grounded request for a registered skill.
+            context: Optional latest planning state; captured when omitted.
+
+        Returns:
+            Validated action plan.
+
+        Raises:
+            KeyError: If the invocation references an unregistered skill.
+        """
+        action = self._actions.get(invocation.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {invocation.skill_id!r}."
+            )
+        current = self.initial_context() if context is None else context
+        return self.plan_action(action, invocation, current)
 
     def initial_context(
         self,
@@ -178,16 +256,10 @@ class AtomicActionEngine:
         projected = context
 
         for invocation in invocations:
-            action = self._actions.get(invocation.skill_id)
-            if action is None:
-                raise KeyError(
-                    f"No atomic action registered for skill {invocation.skill_id!r}."
-                )
             if not alive.any():
                 break
             previous_qpos = projected.robot.qpos
-            plan = action.plan(invocation, projected)
-            self._validate_plan(plan, projected, invocation)
+            plan = self.plan(invocation, projected)
             step_success = alive & plan.plan_success.to(self.device)
             trajectory = plan.trajectory.hold_rows(step_success, previous_qpos)
             plans.append(plan)

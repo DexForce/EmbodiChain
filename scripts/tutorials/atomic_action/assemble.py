@@ -409,7 +409,6 @@ def run_assemble_demo(
 
     # Step 1 - the left arm picks the soda can up by its top part.
     pick_up_action = PickUp(
-        motion_generator=motion_gen,
         cfg=PickUpCfg(
             name="pick_up",
             control_part="left_arm",
@@ -428,7 +427,6 @@ def run_assemble_demo(
     )
     # Step 2 - the left arm places the can directly above the cube.
     place_action = Place(
-        motion_generator=motion_gen,
         cfg=PlaceCfg(
             name="place",
             control_part="left_arm",

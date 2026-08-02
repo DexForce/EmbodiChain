@@ -36,7 +36,6 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionInvocation
 from ..plans import ActionPlan
 from ..state import PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -87,21 +86,22 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: MoveHeldObjectCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveHeldObjectCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(cfg or MoveHeldObjectCfg())
+        if self.cfg.hand_close_qpos is None:
+            logger.log_error(
+                "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
+            )
+
+    def _on_bind(self) -> None:
+        """Resolve robot-dependent resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
         self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
         self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
         self.arm_dof = len(self.arm_joint_ids)
         self.robot_dof = self.robot.dof
-
-        if self.cfg.hand_close_qpos is None:
-            logger.log_error(
-                "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
-            )
+        assert self.cfg.hand_close_qpos is not None
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
     def plan(

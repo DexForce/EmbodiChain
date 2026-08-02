@@ -29,45 +29,34 @@ from ..core import ActionCfg, AtomicAction
 from ..invocation import ActionInvocation
 from ..plans import ActionPlan, CompletionConditionKind
 from ..state import PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class JointPositionGoal:
-    """Joint-space goal for a bound robot control resource."""
+    """Explicit or named joint-space goal for a bound robot resource."""
 
     goal_kind: ClassVar[str] = "joint_position"
 
-    qpos: torch.Tensor
-    """One joint waypoint or a batched sequence of joint waypoints."""
+    target: torch.Tensor | str
+    """Joint qpos/waypoints or a name in ``MoveJointsCfg.named_joint_positions``."""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.qpos, torch.Tensor):
+        if isinstance(self.target, str):
+            if not self.target.strip():
+                raise ValueError("Named joint-position target must not be empty.")
+            return
+        if not isinstance(self.target, torch.Tensor):
             raise TypeError(
-                f"qpos must be a torch.Tensor, got {type(self.qpos).__name__}."
+                "target must be a torch.Tensor or str, "
+                f"got {type(self.target).__name__}."
             )
-        if self.qpos.dim() not in (1, 2, 3) or self.qpos.shape[-1] == 0:
+        if self.target.dim() not in (1, 2, 3) or self.target.shape[-1] == 0:
             raise ValueError(
-                "qpos must have shape (control_dof,), (n_envs, control_dof), "
+                "Tensor target must have shape (control_dof,), "
+                "(n_envs, control_dof), "
                 "or (n_envs, n_waypoint, control_dof), "
-                f"got {tuple(self.qpos.shape)}."
+                f"got {tuple(self.target.shape)}."
             )
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class NamedJointPositionGoal:
-    """Named joint-space goal resolved from :class:`MoveJointsCfg`."""
-
-    goal_kind: ClassVar[str] = "named_joint_position"
-
-    name: str
-    """Name in ``MoveJointsCfg.named_joint_positions``."""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.name, str):
-            raise TypeError(f"name must be a str, got {type(self.name).__name__}.")
-        if not self.name.strip():
-            raise ValueError("name must not be empty.")
 
 
 @configclass
@@ -76,32 +65,27 @@ class MoveJointsCfg(ActionCfg):
 
     name: str = "move_joints"
     named_joint_positions: dict[str, torch.Tensor] | None = None
-    """Optional named goals. Motion settings belong to ``MotionPolicy``."""
+    """Optional named joint-position targets. Motion settings belong to ``MotionPolicy``."""
 
 
-class MoveJoints(AtomicAction[JointPositionGoal | NamedJointPositionGoal]):
+class MoveJoints(AtomicAction[JointPositionGoal]):
     """Plan joint motion from the observed state to one or more waypoints."""
 
     skill_id: ClassVar[str] = "move_joints"
-    GoalType: ClassVar[tuple[type, ...]] = (
-        JointPositionGoal,
-        NamedJointPositionGoal,
-    )
+    GoalType: ClassVar[type] = JointPositionGoal
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
 
     def __init__(
         self,
-        motion_generator,
         cfg: MoveJointsCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveJointsCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(cfg or MoveJointsCfg())
         self.named_joint_positions = self.cfg.named_joint_positions or {}
 
     def plan(
         self,
-        invocation: ActionInvocation[JointPositionGoal | NamedJointPositionGoal],
+        invocation: ActionInvocation[JointPositionGoal],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
@@ -146,23 +130,22 @@ class MoveJoints(AtomicAction[JointPositionGoal | NamedJointPositionGoal]):
 
     def _resolve_target_qpos(
         self,
-        goal: JointPositionGoal | NamedJointPositionGoal,
+        goal: JointPositionGoal,
     ) -> torch.Tensor:
         """Resolve an explicit or named joint goal to a tensor."""
-        if isinstance(goal, JointPositionGoal):
-            return goal.qpos
-        if goal.name not in self.named_joint_positions:
+        if isinstance(goal.target, torch.Tensor):
+            return goal.target
+        if goal.target not in self.named_joint_positions:
             logger.log_error(
-                f"Unknown named joint-position goal {goal.name!r}. Available "
+                f"Unknown named joint-position goal {goal.target!r}. Available "
                 f"goals: {sorted(self.named_joint_positions)}",
                 KeyError,
             )
-        return self.named_joint_positions[goal.name]
+        return self.named_joint_positions[goal.target]
 
 
 __all__ = [
     "JointPositionGoal",
     "MoveJoints",
     "MoveJointsCfg",
-    "NamedJointPositionGoal",
 ]

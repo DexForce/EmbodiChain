@@ -194,7 +194,6 @@ def _prepare_held_state(
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
     atomic_engine.register(
         PickUp(
-            motion_gen,
             cfg=PickUpCfg(
                 control_part="arm",
                 hand_control_part="hand",
@@ -302,7 +301,6 @@ def _run_case(
         atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
         atomic_engine.register(
             Place(
-                motion_gen,
                 cfg=PlaceCfg(
                     control_part="arm",
                     hand_control_part="hand",

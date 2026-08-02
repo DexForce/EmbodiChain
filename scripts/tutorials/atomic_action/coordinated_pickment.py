@@ -669,7 +669,6 @@ def run_coordinated_pickment_demo(
         robot, "right_hand", sim.device, preset.hand_close_qpos
     )
     pickment_action = CoordinatedPickment(
-        motion_generator=motion_gen,
         cfg=CoordinatedPickmentCfg(
             control_part="dual_arm",
             left_arm_control_part="left_arm",

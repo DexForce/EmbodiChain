@@ -6,8 +6,10 @@ description: Add a new simulation atomic action or motion primitive to EmbodiCha
 # Add Atomic Action
 
 Add an action-owned goal and a side-effect-free `AtomicAction.plan()`
-implementation. Keep task-graph/MLLM logic, simulator stepping, controller I/O,
-and physical-effect commits outside the action.
+implementation. The engine owns all motion-planning resources; action
+constructors accept only implementation configuration. Keep task-graph/MLLM
+logic, simulator stepping, controller I/O, and physical-effect commits outside
+the action.
 
 ## Read the current contracts
 
@@ -22,14 +24,19 @@ Inspect only the files relevant to the requested skill:
 | Robot/task/scene state | `embodichain/lab/sim/atomic_actions/state.py` |
 | Effects and plans | `embodichain/lab/sim/atomic_actions/effects.py`, `plans.py` |
 | Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory.py` |
+| Engine-owned planning resources | `embodichain/lab/sim/atomic_actions/runtime.py` |
 | Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
 | Static compiler and execution session | `engine.py`, `execution.py` |
 
 The public contract is:
 
 ```python
-plan = action.plan(invocation: ActionInvocation[Goal], context: PlanningContext)
+plan = engine.plan(invocation: ActionInvocation[Goal], context: PlanningContext)
 ```
+
+Use `engine.plan_action(action, invocation, context)` for a configured action
+that is intentionally not in the stable skill registry. Never pass a motion
+generator to an action constructor.
 
 Do not add compatibility code for `ActionTarget`, `WorldState`, `ActionResult`,
 `execute()`, or `AtomicActionEngine.run()`.
@@ -94,7 +101,6 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicAction,
     PlanningContext,
     StateDelta,
-    TrajectoryBuilder,
 )
 
 
@@ -103,9 +109,8 @@ class Push(AtomicAction[PushGoal]):
     GoalType: ClassVar[type] = PushGoal
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(self, motion_generator, cfg: PushCfg | None = None) -> None:
-        super().__init__(motion_generator, cfg or PushCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+    def __init__(self, cfg: PushCfg | None = None) -> None:
+        super().__init__(cfg or PushCfg())
 
     def plan(
         self,
@@ -145,6 +150,8 @@ class Push(AtomicAction[PushGoal]):
 
 Follow these invariants:
 
+- Let the engine supply `self.robot`, `self.motion_generator`, and the shared
+  `self.builder`; use `_on_bind()` only for robot/device-dependent setup.
 - Call `require_goal()` before planning.
 - Plan from `context.robot.qpos`, never an implicit live robot start state.
 - Return full-robot `(B, N, robot.dof)` motion as a tensor or
@@ -164,7 +171,7 @@ Follow these invariants:
 Register an instance by its class-level `skill_id`:
 
 ```python
-engine.register(Push(motion_generator, PushCfg()))
+engine.register(Push(PushCfg()))
 ```
 
 Use the global registry only for discoverable third-party classes:
@@ -225,6 +232,7 @@ then use the `pre-commit-check` skill before committing.
 | Add one generic target with many optional fields | Define a narrow action-owned goal. |
 | Put hardware names in the goal | Bind semantic roles through `ActionBinding`. |
 | Put planner/recovery knobs in action config | Move them to invocation policies. |
+| Pass a motion generator to each action | Pass it once to `AtomicActionEngine`; construct actions from config only. |
 | Read `robot.get_qpos()` inside `plan()` | Use `context.robot.qpos`. |
 | Return an arm-only tensor | Embed into full robot DoF. |
 | Mutate held state after planning | Declare a `StateDelta`. |

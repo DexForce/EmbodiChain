@@ -31,7 +31,6 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionInvocation
 from ..plans import ActionPlan, CompletionConditionKind
 from ..state import PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -63,11 +62,9 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: MoveEndEffectorCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveEndEffectorCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(cfg or MoveEndEffectorCfg())
 
     def plan(
         self,

@@ -37,7 +37,6 @@ from ..invocation import ActionInvocation
 from ..plans import ActionPlan
 from ..policies import MotionPolicy
 from ..state import HeldObjectState, PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -135,11 +134,13 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: CoordinatedPlacementCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or CoordinatedPlacementCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(cfg or CoordinatedPlacementCfg())
+        self._validate_hand_qpos_cfg()
+
+    def _on_bind(self) -> None:
+        """Resolve robot-dependent resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
@@ -166,7 +167,9 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
         self.placing_hand_dof = len(self.placing_hand_joint_ids)
         self.support_hand_dof = len(self.support_hand_joint_ids)
 
-        self._validate_hand_qpos_cfg()
+        assert self.cfg.placing_hand_open_qpos is not None
+        assert self.cfg.placing_hand_close_qpos is not None
+        assert self.cfg.support_hand_close_qpos is not None
         self.placing_hand_open_qpos = self.builder.expand_hand_qpos(
             self.cfg.placing_hand_open_qpos,
             n_envs=self.n_envs,

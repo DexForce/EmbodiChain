@@ -113,7 +113,6 @@ def _targets_for_sequence(sequence_case: JointSequenceCase, device):
         ActionInvocation,
         JointPositionGoal,
         MotionPolicy,
-        NamedJointPositionGoal,
     )
 
     targets = []
@@ -121,9 +120,9 @@ def _targets_for_sequence(sequence_case: JointSequenceCase, device):
     policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
     for index, name in enumerate(sequence_case.sequence):
         if index == 0 and name == "ready":
-            goal = NamedJointPositionGoal(name="ready")
+            goal = JointPositionGoal(target="ready")
         else:
-            goal = JointPositionGoal(qpos=_qpos(JOINT_TARGETS[name], device))
+            goal = JointPositionGoal(target=_qpos(JOINT_TARGETS[name], device))
         targets.append(
             ActionInvocation(
                 skill_id="move_joints",
@@ -275,7 +274,6 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
     atomic_engine.register(
         MoveJoints(
-            motion_gen,
             cfg=MoveJointsCfg(
                 named_joint_positions={"ready": ready_qpos},
             ),

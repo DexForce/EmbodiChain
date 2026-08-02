@@ -796,7 +796,6 @@ def run_coordinated_placement_demo(
     )
     left_open, left_close = get_hand_open_close_qpos(robot, "left_hand", sim.device)
     left_pick_action = PickUp(
-        motion_generator=motion_gen,
         cfg=PickUpCfg(
             control_part="left_arm",
             hand_control_part="left_hand",
@@ -808,7 +807,6 @@ def run_coordinated_placement_demo(
         ),
     )
     right_pick_action = PickUp(
-        motion_generator=motion_gen,
         cfg=PickUpCfg(
             control_part="right_arm",
             hand_control_part="right_hand",
@@ -820,7 +818,6 @@ def run_coordinated_placement_demo(
         ),
     )
     coordinated_action = CoordinatedPlacement(
-        motion_generator=motion_gen,
         cfg=CoordinatedPlacementCfg(
             control_part="dual_arm",
             placing_arm_control_part="left_arm",
@@ -857,7 +854,8 @@ def run_coordinated_placement_demo(
         z_clearance=BREAD_GRASP_Z_CLEARANCE,
     )
     start_time = time.time()
-    left_pick_result = left_pick_action.plan(
+    left_pick_result = engine.plan_action(
+        left_pick_action,
         ActionInvocation(
             skill_id="pick_up",
             goal=GraspGoal(
@@ -897,7 +895,8 @@ def run_coordinated_placement_demo(
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
     start_time = time.time()
-    right_pick_result = right_pick_action.plan(
+    right_pick_result = engine.plan_action(
+        right_pick_action,
         ActionInvocation(
             skill_id="pick_up",
             goal=GraspGoal(

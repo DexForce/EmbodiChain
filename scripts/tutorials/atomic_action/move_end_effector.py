@@ -75,7 +75,7 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(motion_gen, cfg=MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
 
     poses = torch.stack(
         [
