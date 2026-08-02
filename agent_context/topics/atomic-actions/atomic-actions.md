@@ -8,6 +8,11 @@ Atomic actions are side-effect-free, environment-batched planners:
 plan = action.plan(invocation: ActionInvocation, context: PlanningContext)
 ```
 
+`plan()` is the framework-owned public template method. It binds collision
+entities from the current scene into a copied planner policy, then delegates to
+the skill-specific `_plan()` hook. New actions must implement `_plan()` and
+must not override `plan()`.
+
 There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
 `AtomicActionEngine.run()` compatibility surface.
 
@@ -60,6 +65,8 @@ emits at most one `JointCommand` per tick and monitors:
 
 - joint tracking error against the previous command;
 - translation/rotation drift of referenced scene entities;
+- per-environment collision-world revision changes for collision-sensitive
+  phases;
 - phase timeout;
 - planner and semantic-effect failure.
 
@@ -97,9 +104,30 @@ to simulation robot indices rather than using those IDs as array indices.
 Real-device adapters should implement the same protocols and enforce the passed
 acknowledgement timeout in their transport/controller layer.
 
+`SceneProvider.snapshot(timestamp=..., env_ids=...)` is the scene-observation
+boundary used by execution adapters. `SceneSnapshot.collision_entity_ids`
+identifies obstacle poses consumed by a planner, while
+`collision_world_revision` is either global or per environment. A newer
+revision invalidates only affected batch rows. `RigidObjectSceneProvider`
+tracks live simulation objects, filters sub-threshold pose noise, advances the
+general scene version, and maintains per-environment collision revisions.
+
+The public `AtomicAction.plan()` copies `MotionPolicy` and forwards collision
+entity poses through `BasePlanner.with_collision_world()`. Backends opt in via
+`supports_collision_world_updates`; cuRobo implements this bridge using
+`CuroboPlanOptions.dynamic_obstacle_poses`. Thus replanning uses the same scene
+snapshot that triggered invalidation without adding obstacle parameters to each
+skill. Add/remove/geometry mutations are not yet supported by this pose-update
+path; providers should revision only pose-updatable registered obstacles.
+
 The latest validated session context is retained for safe hold if the first
 live observation fails. Environment IDs must remain stable and ordered for the
 entire session; robot and scene timestamps and scene versions must be monotonic.
+
+Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
+`tracking_error_recovery.py`, `moving_target_recovery.py`, and
+`dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
+structured invalidation/replan events, and requires terminal completion.
 
 ## Parameter ownership
 
@@ -130,11 +158,12 @@ lift distances, and grasp constraints.
 
 1. Define a frozen action-owned goal dataclass with `goal_kind`.
 2. Declare `skill_id`, `GoalType`, and required semantic roles on the action.
-3. Validate with `require_goal(invocation)`.
-4. Plan from `context.robot.qpos`; never read an implicit live start state.
-5. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
-6. Declare symbolic changes with `StateDelta`; do not mutate context or commit
+3. Implement `_plan()`; do not override the framework-owned `plan()` method.
+4. Validate with `require_goal(invocation)`.
+5. Plan from `context.robot.qpos`; never read an implicit live start state.
+6. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
+7. Declare symbolic changes with `StateDelta`; do not mutate context or commit
    physical effects during planning.
-7. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
+8. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
    atomic action. Put execution-loop I/O behind the runner protocols rather than
    calling a simulator or device from `plan()` or `ExecutionSession`.

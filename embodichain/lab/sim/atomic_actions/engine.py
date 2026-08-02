@@ -281,6 +281,15 @@ class AtomicActionEngine:
             raise ValueError(
                 "Every action phase must record the planning scene version."
             )
+        collision_revision = context.scene.collision_world_revisions(context.batch_size)
+        if any(
+            phase.planned_collision_world_revision != collision_revision
+            for phase in plan.phases
+        ):
+            raise ValueError(
+                "Every action phase must record the planning collision-world "
+                "revision."
+            )
 
 
 __all__ = [

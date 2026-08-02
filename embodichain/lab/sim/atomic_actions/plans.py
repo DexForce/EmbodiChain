@@ -361,6 +361,9 @@ class PhaseSpec:
     scene_dependencies: tuple[str, ...] = ()
     """Scene entities whose motion can invalidate this phase plan."""
 
+    collision_world_sensitive: bool = False
+    """Whether collision-world revision changes invalidate this phase."""
+
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
             raise ValueError("PhaseSpec.name must be non-empty.")
@@ -372,6 +375,8 @@ class PhaseSpec:
                 "scene_dependencies must contain unique non-empty entity ids."
             )
         object.__setattr__(self, "scene_dependencies", dependencies)
+        if not isinstance(self.collision_world_sensitive, bool):
+            raise TypeError("collision_world_sensitive must be a bool.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,11 +386,27 @@ class PlannedPhase:
     spec: PhaseSpec
     trajectory: TimedTrajectory
     planned_scene_version: int
+    planned_collision_world_revision: tuple[int, ...]
     diagnostics: PlannerDiagnostics
 
     def __post_init__(self) -> None:
         if self.planned_scene_version < 0:
             raise ValueError("planned_scene_version must be non-negative.")
+        revisions = tuple(self.planned_collision_world_revision)
+        if len(revisions) != self.trajectory.batch_size:
+            raise ValueError(
+                "planned_collision_world_revision must contain one value per "
+                "trajectory environment."
+            )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in revisions
+        ):
+            raise ValueError(
+                "planned_collision_world_revision must contain non-negative "
+                "integers."
+            )
+        object.__setattr__(self, "planned_collision_world_revision", revisions)
 
 
 @dataclass(frozen=True, slots=True, eq=False)

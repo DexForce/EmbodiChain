@@ -104,7 +104,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal]):
             )
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[HeldObjectPoseGoal],
         context: PlanningContext,

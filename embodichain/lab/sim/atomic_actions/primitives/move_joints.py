@@ -99,7 +99,7 @@ class MoveJoints(AtomicAction[JointPositionGoal | NamedJointPositionGoal]):
         self.builder = TrajectoryBuilder(motion_generator)
         self.named_joint_positions = self.cfg.named_joint_positions or {}
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[JointPositionGoal | NamedJointPositionGoal],
         context: PlanningContext,

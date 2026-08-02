@@ -169,7 +169,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         if self.cfg.cartesian_waypoint_count < 1:
             logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[PlaceGoal | AssembleGoal],
         context: PlanningContext,

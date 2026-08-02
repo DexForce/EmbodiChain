@@ -48,6 +48,7 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
 )
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+from embodichain.lab.sim.planners import PlanOptions
 
 
 class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
@@ -61,7 +62,7 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
         super().__init__(motion_generator, ActionCfg(name="dynamic"))
         self.plan_count = 0
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[EndEffectorPoseGoal],
         context: PlanningContext,
@@ -83,7 +84,7 @@ class EffectAction(DynamicAction):
 
     skill_id: ClassVar[str] = "effect"
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[EndEffectorPoseGoal],
         context: PlanningContext,
@@ -108,12 +109,12 @@ class EffectAction(DynamicAction):
         )
 
 
-def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
+def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 2
-    robot.get_qpos.return_value = torch.zeros(1, 2)
-    robot.get_qvel.return_value = torch.zeros(1, 2)
+    robot.get_qpos.return_value = torch.zeros(batch_size, 2)
+    robot.get_qvel.return_value = torch.zeros(batch_size, 2)
     generator = Mock()
     generator.robot = robot
     generator.device = torch.device("cpu")
@@ -146,17 +147,51 @@ def _context(
     )
 
 
+def _collision_context(
+    timestamp: float,
+    qpos: torch.Tensor,
+    obstacle_x: torch.Tensor,
+    collision_revision: int | tuple[int, ...],
+) -> PlanningContext:
+    """Build a scene whose obstacle is independent from the action goal."""
+    batch_size = int(qpos.shape[0])
+    target_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    target_pose[:, 0, 3] = 0.2
+    obstacle_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    obstacle_pose[:, 0, 3] = obstacle_x
+    return PlanningContext(
+        robot=RobotObservation(
+            timestamp=timestamp,
+            qpos=qpos,
+            qvel=torch.zeros_like(qpos),
+        ),
+        task=TaskState.empty(batch_size=batch_size, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=timestamp,
+            version=int(timestamp > 0.0),
+            entities={
+                "target": EntityState(target_pose),
+                "obstacle": EntityState(obstacle_pose),
+            },
+            collision_world_revision=collision_revision,
+            collision_entity_ids=("obstacle",),
+        ),
+        env_ids=torch.arange(batch_size, dtype=torch.long),
+    )
+
+
 def _invocation(
     *,
     max_replans: int = 2,
     max_phase_retries: int = 2,
     phase_timeout: float = 30.0,
+    motion_source: str = "ik_interp",
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     return ActionInvocation(
         skill_id="dynamic",
         goal=EndEffectorPoseGoal(SceneEntityPose("target")),
         binding=ActionBinding(manipulators={"primary": "arm"}),
-        motion_policy=MotionPolicy(sample_count=2),
+        motion_policy=MotionPolicy(sample_count=2, motion_source=motion_source),
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
             max_phase_retries=max_phase_retries,
@@ -195,6 +230,96 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert ExecutionEventKind.REPLANNED in kinds
     assert action.plan_count == 2
     assert tick.command is not None
+
+
+def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
+    engine, action = _engine()
+    planner = engine.motion_generator.planner
+    planner.supports_collision_world_updates = True
+    planner.default_plan_options.return_value = PlanOptions()
+    planner.with_collision_world.side_effect = (
+        lambda options, *, obstacle_poses: options
+    )
+    initial_qpos = torch.zeros(1, 2)
+    initial = _collision_context(
+        0.0,
+        initial_qpos,
+        torch.tensor([0.4]),
+        (0,),
+    )
+    session = engine.start(
+        (_invocation(motion_source="motion_gen"),),
+        initial,
+    )
+    session.tick(initial)
+
+    changed = _collision_context(
+        0.1,
+        initial_qpos,
+        torch.tensor([0.6]),
+        (1,),
+    )
+    tick = session.tick(changed)
+
+    kinds = {event.kind for event in tick.events}
+    assert ExecutionEventKind.COLLISION_WORLD_CHANGED in kinds
+    assert ExecutionEventKind.REPLANNED in kinds
+    assert action.plan_count == 2
+    latest_obstacles = planner.with_collision_world.call_args.kwargs["obstacle_poses"]
+    assert latest_obstacles["obstacle"][0, 0, 3] == pytest.approx(0.6)
+    assert tick.command is not None
+
+
+def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
+    engine, _ = _engine(batch_size=2)
+    planner = engine.motion_generator.planner
+    planner.supports_collision_world_updates = True
+    planner.default_plan_options.return_value = PlanOptions()
+    planner.with_collision_world.side_effect = (
+        lambda options, *, obstacle_poses: options
+    )
+    qpos = torch.zeros(2, 2)
+    initial = _collision_context(
+        0.0,
+        qpos,
+        torch.tensor([0.4, 0.4]),
+        (0, 0),
+    )
+    session = engine.start(
+        (
+            _invocation(
+                max_replans=0,
+                motion_source="motion_gen",
+            ),
+        ),
+        initial,
+    )
+    session.tick(initial)
+
+    changed = _collision_context(
+        0.1,
+        qpos,
+        torch.tensor([0.4, 0.6]),
+        (0, 1),
+    )
+    tick = session.tick(changed)
+
+    collision_event = next(
+        event
+        for event in tick.events
+        if event.kind is ExecutionEventKind.COLLISION_WORLD_CHANGED
+    )
+    exhausted_event = next(
+        event
+        for event in tick.events
+        if event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED
+    )
+    assert collision_event.env_mask.tolist() == [False, True]
+    assert exhausted_event.env_mask.tolist() == [False, True]
+    assert tick.status is ExecutionStatus.RUNNING
+    assert tick.eligible_mask.tolist() == [True, False]
+    assert tick.command is not None
+    assert tick.command.active_mask.tolist() == [True, False]
 
 
 def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
@@ -263,6 +388,20 @@ def test_session_rejects_regressing_scene_snapshot() -> None:
 
     with pytest.raises(ValueError, match="versions must be monotonic"):
         session.tick(_context(1.0, 0.0, 0.2, 1))
+
+
+def test_session_rejects_regressing_collision_world_revision() -> None:
+    engine, _ = _engine()
+    qpos = torch.zeros(1, 2)
+    initial = _collision_context(0.0, qpos, torch.tensor([0.4]), (2,))
+    session = engine.start(
+        (_invocation(motion_source="motion_gen"),),
+        initial,
+    )
+    regressed = _collision_context(0.1, qpos, torch.tensor([0.4]), (1,))
+
+    with pytest.raises(ValueError, match="Collision-world revisions"):
+        session.tick(regressed)
 
 
 def test_nonempty_effect_is_committed_only_after_external_verification() -> None:

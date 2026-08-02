@@ -164,7 +164,7 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal]):
         self.with_effect = with_effect
         self.plan_count = 0
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[EndEffectorPoseGoal],
         context: PlanningContext,

@@ -5,9 +5,11 @@ description: Add a new simulation atomic action or motion primitive to EmbodiCha
 
 # Add Atomic Action
 
-Add an action-owned goal and a side-effect-free `AtomicAction.plan()`
-implementation. Keep task-graph/MLLM logic, simulator stepping, controller I/O,
-and physical-effect commits outside the action.
+Add an action-owned goal and a side-effect-free `AtomicAction._plan()`
+implementation. The inherited public `plan()` entry point binds the current
+collision scene before calling the skill hook. Keep task-graph/MLLM logic,
+simulator stepping, controller I/O, and physical-effect commits outside the
+action.
 
 ## Read the current contracts
 
@@ -20,6 +22,7 @@ Inspect only the files relevant to the requested skill:
 | Role-to-resource binding | `embodichain/lab/sim/atomic_actions/bindings.py` |
 | Invocation policies | `embodichain/lab/sim/atomic_actions/policies.py` |
 | Robot/task/scene state | `embodichain/lab/sim/atomic_actions/state.py` |
+| Dynamic scene provider contract | `embodichain/lab/sim/atomic_actions/scene.py` |
 | Effects and plans | `embodichain/lab/sim/atomic_actions/effects.py`, `plans.py` |
 | Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory.py` |
 | Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
@@ -108,7 +111,7 @@ class Push(AtomicAction[PushGoal]):
         super().__init__(motion_generator, cfg or PushCfg())
         self.builder = TrajectoryBuilder(motion_generator)
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[PushGoal],
         context: PlanningContext,
@@ -147,6 +150,9 @@ class Push(AtomicAction[PushGoal]):
 Follow these invariants:
 
 - Call `require_goal()` before planning.
+- Implement `_plan()` rather than overriding the framework-owned public
+  `plan()` method; the latter injects the latest dynamic obstacle poses into a
+  copied planner policy.
 - Plan from `context.robot.qpos`, never an implicit live robot start state.
 - Return full-robot `(B, N, robot.dof)` motion as a tensor or
   `TimedTrajectory` with matching `env_ids`.
@@ -159,6 +165,9 @@ Follow these invariants:
   applies them only after verification.
 - Set `scene_dependencies` indirectly by using `SceneEntityPose` in the goal;
   `build_plan()` records them for dynamic invalidation.
+- Do not add dynamic-obstacle arguments to a skill. A `SceneProvider` declares
+  `collision_entity_ids`; supported planners receive those entity poses through
+  the framework-owned `plan()` entry point.
 
 ## 4. Register and invoke
 
@@ -215,6 +224,8 @@ Add pure pytest tests under `tests/sim/atomic_actions/`. Cover:
 - side-effect-free context handling;
 - masked `StateDelta` application for task effects;
 - `SceneEntityPose` replanning when the action accepts a dynamic goal;
+- collision-world revision replanning when the action uses a dynamic-world
+  planner;
 - effect verification when the action declares a non-empty delta.
 
 Run focused tests, format changed Python files with the pinned Black version,
@@ -233,3 +244,4 @@ then use the `pre-commit-check` skill before committing.
 | Mutate held state after planning | Declare a `StateDelta`. |
 | Treat `plan_success` as physical success | Verify effects during execution. |
 | Step the simulator from the action | Emit plans; connect execution through `ExecutionRunner`. |
+| Override public `plan()` | Implement `_plan()` so scene binding cannot be bypassed. |

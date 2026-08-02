@@ -101,7 +101,7 @@ class Press(AtomicAction[PressGoal]):
             hand_dof=self.hand_dof,
         )
 
-    def plan(
+    def _plan(
         self,
         invocation: ActionInvocation[PressGoal],
         context: PlanningContext,

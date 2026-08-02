@@ -47,6 +47,7 @@ class ExecutionEventKind(str, Enum):
     REPLANNED = "replanned"
     TRACKING_ERROR = "tracking_error"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
+    COLLISION_WORLD_CHANGED = "collision_world_changed"
     PHASE_TIMEOUT = "phase_timeout"
     PHASE_COMPLETED = "phase_completed"
     EFFECT_VERIFICATION_REQUIRED = "effect_verification_required"
@@ -239,6 +240,18 @@ class ExecutionSession:
             raise ValueError("Scene snapshot timestamps must be monotonic.")
         if context.scene.version < self._context.scene.version:
             raise ValueError("Scene snapshot versions must be monotonic.")
+        previous_collision_revision = torch.tensor(
+            self._context.scene.collision_world_revisions(context.batch_size),
+            dtype=torch.long,
+            device=context.robot.qpos.device,
+        )
+        current_collision_revision = torch.tensor(
+            context.scene.collision_world_revisions(context.batch_size),
+            dtype=torch.long,
+            device=context.robot.qpos.device,
+        )
+        if (current_collision_revision < previous_collision_revision).any():
+            raise ValueError("Collision-world revisions must be monotonic.")
         if not torch.equal(context.env_ids, self._context.env_ids):
             raise ValueError("Execution tick env_ids must remain stable and ordered.")
         self._context = PlanningContext(
@@ -367,6 +380,13 @@ class ExecutionSession:
                 execution_mask,
                 ExecutionEventKind.PHASE_TIMEOUT,
                 "Phase timeout exceeded.",
+            )
+        collision_mask = execution_mask & self._collision_world_change_mask(phase)
+        if collision_mask.any():
+            return self._attempt_replan(
+                collision_mask,
+                ExecutionEventKind.COLLISION_WORLD_CHANGED,
+                "The collision world changed after this trajectory was planned.",
             )
         if self._last_command is not None:
             tracking_error = torch.amax(
@@ -629,6 +649,22 @@ class ExecutionSession:
                 rotation > policy.goal_rotation_threshold
             )
         return changed
+
+    def _collision_world_change_mask(self, phase: PlannedPhase) -> torch.Tensor:
+        """Detect collision-world revisions newer than the active phase plan."""
+        if not phase.spec.collision_world_sensitive:
+            return torch.zeros_like(self._eligible)
+        current = torch.tensor(
+            self._context.scene.collision_world_revisions(self._context.batch_size),
+            dtype=torch.long,
+            device=self._eligible.device,
+        )
+        planned = torch.tensor(
+            phase.planned_collision_world_revision,
+            dtype=torch.long,
+            device=self._eligible.device,
+        )
+        return current > planned
 
     def _batched_entity_pose(self, state: EntityState) -> torch.Tensor:
         """Broadcast an entity pose to the session batch."""
