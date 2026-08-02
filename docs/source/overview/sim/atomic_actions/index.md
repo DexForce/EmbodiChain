@@ -60,6 +60,13 @@ and whole-body control are not implemented by this module yet.
                                |             |
                                v             v
                       CompiledTrajectory  JointCommand + events
+                                               |
+                                               v
+                                      ExecutionRunner
+                               observe / schedule / dispatch
+                                               |
+                                               v
+                          ObservationProvider + CommandSink + Clock
 ```
 
 The boundary is deliberate:
@@ -71,8 +78,18 @@ The boundary is deliberate:
 | Perception and grounding | Agent adapter or user application | Builds scene snapshots and resource bindings, or supplies already-grounded values directly |
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
-| Robot/simulator stepping | Application control loop | Consumes `JointCommand`; the session never steps the simulator itself |
+| Recovery state | `ExecutionSession` | Consumes fresh contexts, emits at most one `JointCommand` per tick, and owns bounded recovery/revision state |
+| Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
+| Robot/simulator I/O | `ObservationProvider`, `CommandSink`, and `ExecutionClock` adapters | Isolates observation, command transport, and time/physics advancement from planning and session state |
 | Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
+
+`ExecutionRunner.step()` is non-blocking. Its convenience
+`run_until_blocked()` loop waits or advances simulation through an injected
+clock. Observation errors, rejected or timed-out commands, session failures,
+and explicit cancellation trigger a best-effort cancel-then-hold sequence.
+`SimulationExecutionAdapter` implements all three ports for a simulation robot;
+real hardware integrations implement the same protocols without changing
+action planning or recovery state.
 
 ### Caller entry points
 
@@ -154,6 +171,7 @@ from leaking into an Action Agent schema.
 | `ActionControlOverrides` | Optional role-scoped command replacements for one invocation revision | Persistent robot configuration |
 | `MotionPolicy` | Motion source, sample count, timing, limits, collision option, typed planner options | Skill semantics or robot-resource names |
 | `RecoveryPolicy` | Replan/retry budgets, tracking and dynamic-goal thresholds, phase timeout | Controller state or mutable counters |
+| `ExecutionRunnerCfg` | Runner-level acknowledgement deadlines, minimum feedback cadence, and completion hold policy | Skill behavior, planning resources, or invocation revision data |
 | `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs | Hypothetical simulator mutation |
 | `ActionPlan` | Per-environment planning result, scene-bound phases, timed trajectories, diagnostics, expected `StateDelta` | Proof that a grasp/release/contact physically succeeded |
 
@@ -344,6 +362,9 @@ by the engine after resolving an invocation:
 | `AtomicAction.plan(request, context)` | Atomic-action implementer | Consumes an immutable `ResolvedActionRequest` and returns an `ActionPlan` |
 | `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
 | `session.revise_current(invocation)` | Runtime orchestrator or Action Agent | Replaces the active logical call with a newer revision and replans from the latest observed context |
+| `runner.step(effect_success=...)` | Non-blocking controller integration | Observes and dispatches only when the next timed command is due |
+| `runner.run_until_blocked(...)` | Simple blocking application or tutorial | Advances the injected clock until terminal or external effect verification is required |
+| `runner.cancel(reason)` | Explicit safe stop | Requests controller cancellation followed by an observed-position hold |
 
 Application code should start with `engine.plan()`, `engine.compile()`, or
 `engine.start()` unless it specifically needs one of these extension points.
@@ -462,6 +483,34 @@ while session.status is ExecutionStatus.RUNNING:
         send_joint_command(tick.command)
     latest_context = observe_context()
 ```
+
+For most applications, use `ExecutionRunner` to keep scheduling and controller
+acknowledgement handling outside the session:
+
+```python
+adapter = SimulationExecutionAdapter(sim, robot, scene_supplier=read_scene)
+initial_context = adapter.observe(
+    TaskState.empty(robot.get_qpos().shape[0], robot.device)
+)
+session = engine.start((moving_goal,), initial_context)
+runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
+result = runner.run_until_blocked()
+```
+
+`ExecutionRunner.step()` is the non-blocking entry point for an application
+that already owns its event loop. It observes only when the previous command's
+`hold_duration` has elapsed, dispatches active commands through `CommandSink`,
+and records accepted, rejected, or timed-out acknowledgements. Cancellation,
+observation/session exceptions, and negative acknowledgements enter a
+best-effort cancel-then-hold path.
+
+`TimedTrajectory.dt[:, i]` is the interval leading to sample `i`; the final
+sample's interval is also its settling window before terminal validation. A
+batched runner uses the longest active row interval as its synchronized
+barrier. `SimulationExecutionAdapter.sleep()` converts that interval to an
+integral number of physics steps instead of using wall-clock sleep. Stable
+`env_ids` remain correlation identifiers and are not used as simulator array
+indices.
 
 On each tick, the session can detect:
 
@@ -604,4 +653,6 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
-- `scripts/tutorials/atomic_action/` — focused examples for every built-in skill
+- {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
+- `scripts/tutorials/atomic_action/tracking_error_recovery.py` — runnable runner
+  example with an injected tracking disturbance

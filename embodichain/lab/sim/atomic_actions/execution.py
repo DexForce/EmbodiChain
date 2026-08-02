@@ -276,6 +276,11 @@ class ExecutionSession:
             ExecutionEventKind.INVOCATION_REVISED,
         )
 
+    @property
+    def latest_context(self) -> PlanningContext:
+        """Latest validated context with the session's verified task state."""
+        return self._context
+
     def tick(
         self,
         context: PlanningContext,

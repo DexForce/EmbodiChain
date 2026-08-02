@@ -21,8 +21,9 @@ The engine resolves an :class:`ActionInvocation` into a
 :class:`PlanningContext` through :meth:`AtomicAction.plan`. Planning is
 side-effect free: it returns an :class:`ActionPlan` with timed motion,
 completion criteria, diagnostics, and uncommitted expected task-state effects.
-:class:`AtomicActionEngine` can compile a static sequence; closed-loop execution
-belongs to an execution session.
+:class:`AtomicActionEngine` can compile a static sequence. For closed-loop use,
+:class:`ExecutionSession` owns recovery and invocation-revision state while
+:class:`ExecutionRunner` connects it to observations, commands, and time.
 """
 
 from __future__ import annotations
@@ -102,6 +103,23 @@ from .primitives import (
     PressGoal,
     PressOptions,
 )
+from .runner import (
+    CommandAcknowledgement,
+    CommandAckStatus,
+    CommandDispatch,
+    CommandOperation,
+    CommandSink,
+    EffectVerifier,
+    ExecutionClock,
+    ExecutionRunner,
+    ExecutionRunnerCfg,
+    MonotonicExecutionClock,
+    ObservationProvider,
+    RunnerStatus,
+    RunnerStep,
+    RunnerStepCallback,
+)
+from .sim_adapter import SceneSnapshotSupplier, SimulationExecutionAdapter
 from .state import (
     CoordinatedHeldObjectState,
     EntityState,
@@ -129,6 +147,11 @@ __all__ = [
     "AtomicActionEngine",
     "BUILTIN_ACTION_TYPES",
     "CompiledTrajectory",
+    "CommandAcknowledgement",
+    "CommandAckStatus",
+    "CommandDispatch",
+    "CommandOperation",
+    "CommandSink",
     "CompletionCondition",
     "CompletionConditionKind",
     "ControlCommand",
@@ -142,8 +165,12 @@ __all__ = [
     "CoordinatedPlacementOptions",
     "EndEffectorPoseGoal",
     "EntityState",
+    "EffectVerifier",
+    "ExecutionClock",
     "ExecutionEvent",
     "ExecutionEventKind",
+    "ExecutionRunner",
+    "ExecutionRunnerCfg",
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
@@ -158,6 +185,7 @@ __all__ = [
     "JointCommand",
     "JointPositionCommand",
     "MotionPolicy",
+    "MonotonicExecutionClock",
     "MoveEndEffector",
     "MoveEndEffectorOptions",
     "MoveHeldObject",
@@ -167,6 +195,7 @@ __all__ = [
     "ObjectActionGoal",
     "ObjectSemantics",
     "OPEN_COMMAND",
+    "ObservationProvider",
     "PhaseSpec",
     "PickUp",
     "PickUpOptions",
@@ -185,10 +214,15 @@ __all__ = [
     "ResolvedActionBinding",
     "ResolvedControlPart",
     "RobotObservation",
+    "RunnerStatus",
+    "RunnerStep",
+    "RunnerStepCallback",
     "SceneSnapshot",
+    "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
     "StateDelta",
+    "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
     "TrajectoryBuilder",

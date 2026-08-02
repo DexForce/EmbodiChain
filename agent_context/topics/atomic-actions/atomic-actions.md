@@ -78,13 +78,20 @@ snapshot every time the action plans. Its entity ID is recorded in
 
 ```python
 session = engine.start(invocations, initial_context)
-tick = session.tick(latest_context, effect_success=None)
+runner = ExecutionRunner(
+    session,
+    observation_provider,
+    command_sink,
+    clock=execution_clock,
+)
+result = runner.step(effect_success=None)
 ```
 
-An `ExecutionSession` emits at most one `JointCommand` per tick. The command's
-per-environment `hold_duration` preserves `TimedTrajectory.dt` for the caller's
-control loop: command `i` carries the arrival interval `dt[:, i]`, which is
-normally zero for the initial waypoint. The session monitors:
+`ExecutionSession` owns deterministic planning progress and recovery state. It
+emits at most one `JointCommand` per tick. The command's per-environment
+`hold_duration` preserves `TimedTrajectory.dt` for the caller's control loop:
+command `i` carries the arrival interval `dt[:, i]`, which is normally zero for
+the initial waypoint. The session monitors:
 
 - joint tracking error against the previous command;
 - translation/rotation drift of referenced scene entities;
@@ -113,6 +120,39 @@ The replacement must keep the active `skill_id` and `invocation_id`. The
 session resolves a new snapshot, resets that revision's recovery budgets, and
 replans from the latest context.
 
+`ExecutionRunner` owns the controller-facing lifecycle around a session:
+
+- `ObservationProvider.observe(task_state)` supplies a fresh, monotonically
+  timestamped `PlanningContext` when a feedback cycle is due;
+- `CommandSink.send/hold/cancel` returns a `CommandAcknowledgement` with
+  `accepted`, `rejected`, or `timed_out` status;
+- `ExecutionClock` supplies monotonic time and backend waiting;
+- non-blocking `step()` dispatches only when the current command's
+  `hold_duration` has elapsed;
+- `run_until_blocked()` is a convenience loop that waits through the clock and
+  stops at a terminal state or an unhandled effect-verification boundary; the
+  runner remembers that boundary so a later verifier call can resume it;
+- cancellation, observation/session exceptions, and negative acknowledgements
+  enter a best-effort cancel-then-hold path.
+
+`TimedTrajectory.dt[:, i]` is the interval leading to sample `i`.
+`ExecutionSession` maps this to `JointCommand.hold_duration`; the final sample
+uses its own interval as a settling window before terminal validation. Batched
+execution currently advances at a synchronized barrier using the longest active
+row interval.
+
+`SimulationExecutionAdapter` implements observation, command, and clock ports
+for a `SimulationManager`/`Robot` pair. Its `sleep()` advances an integral
+number of physics steps, so simulation execution does not depend on wall time.
+Stable context IDs are correlation identifiers; the adapter maps command rows
+to simulation robot indices rather than using those IDs as array indices.
+Real-device adapters should implement the same protocols and enforce the passed
+acknowledgement timeout in their transport/controller layer.
+
+The latest validated session context is retained for safe hold if the first
+live observation fails. Environment IDs must remain stable and ordered for the
+entire session; robot and scene timestamps and scene versions must be monotonic.
+
 ## Parameter ownership
 
 Goal dataclasses carry only semantic task intent. They do not carry robot part
@@ -134,6 +174,11 @@ adapters must filter registered descriptors before exposing skills to an Agent.
 The module-level `register_action()` API is a process-wide extension-type
 discovery catalog only; it neither binds actions nor changes an engine's
 default built-in set.
+
+`ExecutionRunnerCfg` is intentionally separate from action options. It
+configures controller acknowledgement deadlines, scheduler cadence, and final
+safe-hold behavior for one runner instance; it does not change skill planning
+semantics and does not belong in `ActionInvocation` or an invocation revision.
 
 Every `ActionBinding` value is a `RobotCfg.control_parts` key. It is not a link,
 TCP-frame, joint, or scene-object name. Planning services validate those names
@@ -188,4 +233,5 @@ tutorial may derive a simple profile from limits explicitly.
 7. Declare symbolic changes with `StateDelta`; do not mutate context or commit
    physical effects during planning.
 8. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
-   atomic action.
+   atomic action. Put execution-loop I/O behind the runner protocols rather than
+   calling a simulator or device from `plan()` or `ExecutionSession`.
