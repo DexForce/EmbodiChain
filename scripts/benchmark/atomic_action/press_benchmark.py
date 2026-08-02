@@ -487,10 +487,9 @@ def _build_atomic_engine(
     """Build a Press benchmark engine with MoveEndEffector pre-positioning."""
     hand_close = get_hand_close_qpos(robot, device)
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveEndEffector(motion_gen, cfg=MoveEndEffectorCfg()))
+    atomic_engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
     atomic_engine.register(
         Press(
-            motion_gen,
             cfg=PressCfg(
                 control_part="arm",
                 hand_control_part="hand",

@@ -41,7 +41,6 @@ embodichain.lab.sim.atomic_actions
 
       EndEffectorPoseGoal
       JointPositionGoal
-      NamedJointPositionGoal
       GraspGoal
       HeldObjectPoseGoal
       PlaceGoal

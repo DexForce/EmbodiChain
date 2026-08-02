@@ -41,7 +41,6 @@ from ..goals import (
 from ..invocation import ActionInvocation
 from ..plans import ActionPlan
 from ..state import CoordinatedHeldObjectState, PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -146,7 +145,6 @@ class _DualArmHelpers:
         first_hand_control_part: str,
         second_hand_control_part: str,
     ) -> None:
-        self.builder = TrajectoryBuilder(self.motion_generator)
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
         self.dual_arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
@@ -445,10 +443,13 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: CoordinatedPickmentCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or CoordinatedPickmentCfg())
+        super().__init__(cfg or CoordinatedPickmentCfg())
+        self._validate_hand_qpos_cfg()
+
+    def _on_bind(self) -> None:
+        """Resolve robot-dependent resources from the owning engine."""
         self._init_dual_arm_parts(
             first_arm_control_part=self.cfg.left_arm_control_part,
             second_arm_control_part=self.cfg.right_arm_control_part,
@@ -464,7 +465,10 @@ class CoordinatedPickment(AtomicAction[CoordinatedPickGoal]):
         self.left_hand_dof = self.first_hand_dof
         self.right_hand_dof = self.second_hand_dof
 
-        self._validate_hand_qpos_cfg()
+        assert self.cfg.left_hand_open_qpos is not None
+        assert self.cfg.left_hand_close_qpos is not None
+        assert self.cfg.right_hand_open_qpos is not None
+        assert self.cfg.right_hand_close_qpos is not None
         self.left_hand_open_qpos = self._expand_qpos(
             self.cfg.left_hand_open_qpos, self.left_hand_dof, "left_hand_open_qpos"
         )

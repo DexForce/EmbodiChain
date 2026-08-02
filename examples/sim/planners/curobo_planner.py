@@ -750,7 +750,7 @@ def main() -> None:
             )
         )
         engine = AtomicActionEngine(motion_generator)
-        engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
+        engine.register(MoveEndEffector(MoveEndEffectorCfg()))
         binding = ActionBinding(manipulators={"primary": control_part})
         motion_policy = MotionPolicy(
             motion_source="motion_gen",

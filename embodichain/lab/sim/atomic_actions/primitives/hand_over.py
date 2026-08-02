@@ -37,7 +37,6 @@ from ..plans import ActionPlan
 from ..policies import MotionPolicy
 from ..state import HeldObjectState, PlanningContext
 from .pick_up import GraspGoal
-from ..trajectory import TrajectoryBuilder
 
 
 @configclass
@@ -125,15 +124,18 @@ class HandOver(AtomicAction[GraspGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: HandOverCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or HandOverCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(cfg or HandOverCfg())
+        self._validate_pose_cfg()
+        self._validate_hand_qpos_cfg()
+
+    def _on_bind(self) -> None:
+        """Resolve robot-dependent resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
-
-        self._validate_pose_cfg()
+        assert self.cfg.middle_object_pose is not None
+        assert self.cfg.final_object_pose is not None
         self.middle_object_pose = self._resolve_matrix(
             self.cfg.middle_object_pose, "middle_object_pose"
         )
@@ -159,7 +161,10 @@ class HandOver(AtomicAction[GraspGoal]):
         self.transfer_hand_dof = len(self.transfer_hand_joint_ids)
         self.receive_hand_dof = len(self.receive_hand_joint_ids)
 
-        self._validate_hand_qpos_cfg()
+        assert self.cfg.transfer_hand_open_qpos is not None
+        assert self.cfg.transfer_hand_close_qpos is not None
+        assert self.cfg.receive_hand_open_qpos is not None
+        assert self.cfg.receive_hand_close_qpos is not None
         self.transfer_hand_open_qpos = self.builder.expand_hand_qpos(
             self.cfg.transfer_hand_open_qpos,
             n_envs=self.n_envs,

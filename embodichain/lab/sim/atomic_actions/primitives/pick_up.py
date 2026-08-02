@@ -46,7 +46,6 @@ from ..invocation import ActionInvocation
 from ..plans import ActionPlan
 from ..policies import MotionPolicy
 from ..state import HeldObjectState, PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -124,17 +123,9 @@ class PickUp(AtomicAction[GraspGoal]):
 
     def __init__(
         self,
-        motion_generator,
         cfg: PickUpCfg | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or PickUpCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.arm_dof = len(self.arm_joint_ids)
-        self.robot_dof = self.robot.dof
-
+        super().__init__(cfg or PickUpCfg())
         if self.cfg.hand_open_qpos is None:
             logger.log_error(
                 "hand_open_qpos must be specified in PickUpCfg", ValueError
@@ -143,6 +134,23 @@ class PickUp(AtomicAction[GraspGoal]):
             logger.log_error(
                 "hand_close_qpos must be specified in PickUpCfg", ValueError
             )
+        if self.cfg.approach_alignment_max_angle is not None and not (
+            0.0 <= self.cfg.approach_alignment_max_angle <= math.pi / 2
+        ):
+            logger.log_error(
+                "approach_alignment_max_angle must be in [0, pi / 2].",
+                ValueError,
+            )
+
+    def _on_bind(self) -> None:
+        """Resolve robot-dependent resources from the owning engine."""
+        self.n_envs = self.robot.get_qpos().shape[0]
+        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
+        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
+        self.arm_dof = len(self.arm_joint_ids)
+        self.robot_dof = self.robot.dof
+        assert self.cfg.hand_open_qpos is not None
+        assert self.cfg.hand_close_qpos is not None
         self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
         self.approach_direction = self.cfg.approach_direction.to(
@@ -152,13 +160,6 @@ class PickUp(AtomicAction[GraspGoal]):
         if approach_norm <= 1.0e-6:
             logger.log_error("approach_direction must be non-zero.", ValueError)
         self.approach_direction = self.approach_direction / approach_norm
-        if self.cfg.approach_alignment_max_angle is not None and not (
-            0.0 <= self.cfg.approach_alignment_max_angle <= math.pi / 2
-        ):
-            logger.log_error(
-                "approach_alignment_max_angle must be in [0, pi / 2].",
-                ValueError,
-            )
 
     def _get_full_pickup_trajectory(
         self,

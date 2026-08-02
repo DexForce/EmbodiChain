@@ -130,10 +130,9 @@ def main() -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(motion_gen, MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
     engine.register(
         PickUp(
-            motion_gen,
             PickUpCfg(
                 hand_open_qpos=hand_open,
                 hand_close_qpos=hand_close,
@@ -145,7 +144,6 @@ def main() -> None:
     )
     engine.register(
         MoveHeldObject(
-            motion_gen,
             MoveHeldObjectCfg(
                 hand_close_qpos=hand_close,
             ),

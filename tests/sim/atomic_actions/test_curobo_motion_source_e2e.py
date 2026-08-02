@@ -89,7 +89,7 @@ def _make_franka_curobo_engine():
         )
     )
     engine = AtomicActionEngine(mg)
-    engine.register(MoveEndEffector(mg, MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
     return sim, robot, engine
 
 

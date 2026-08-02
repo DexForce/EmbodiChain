@@ -43,9 +43,11 @@ if TYPE_CHECKING:
 class TrajectoryBuilder:
     """Stateless trajectory utilities shared by every atomic action.
 
-    Holds a reference to the motion generator (and through it, the robot and
-    device) so callers don't have to thread those through each helper call.
-    All methods are pure: no per-call state is kept on the builder.
+    :class:`~embodichain.lab.sim.atomic_actions.runtime.ActionPlanningServices`
+    creates one builder per engine. It holds a reference to the engine's motion
+    generator (and through it, the robot and device) so actions do not thread
+    those through each helper call. All methods are pure: no per-call state is
+    kept on the builder.
     """
 
     def __init__(self, motion_generator: MotionGenerator) -> None:

@@ -42,9 +42,12 @@ from .plans import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
 
+    from .runtime import ActionPlanningServices
     from .state import PlanningContext
+    from .trajectory import TrajectoryBuilder
 
 
 def resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -132,7 +135,12 @@ class ActionCfg:
 
 
 class AtomicAction(Generic[GoalT], ABC):
-    """Side-effect-free planner for one semantically meaningful robot skill."""
+    """Side-effect-free planner for one semantically meaningful robot skill.
+
+    Actions own only skill configuration. An
+    :class:`~embodichain.lab.sim.atomic_actions.engine.AtomicActionEngine` binds
+    its shared planning services before an action is invoked.
+    """
 
     skill_id: ClassVar[str]
     """Stable registry identifier for this skill."""
@@ -151,13 +159,70 @@ class AtomicAction(Generic[GoalT], ABC):
 
     def __init__(
         self,
-        motion_generator: MotionGenerator,
         cfg: ActionCfg | None = None,
     ) -> None:
-        self.motion_generator = motion_generator
         self.cfg = cfg if cfg is not None else ActionCfg()
-        self.robot = motion_generator.robot
-        self.device = resolve_runtime_device(self.robot.device)
+        self._planning_services: ActionPlanningServices | None = None
+
+    @property
+    def is_bound(self) -> bool:
+        """Whether an engine has supplied this action's planning resources."""
+        return self._planning_services is not None
+
+    @property
+    def planning_services(self) -> ActionPlanningServices:
+        """Return the engine-owned services borrowed by this action.
+
+        Raises:
+            RuntimeError: If the action has not been registered or planned by
+                an
+                :class:`~embodichain.lab.sim.atomic_actions.engine.AtomicActionEngine`.
+        """
+        if self._planning_services is None:
+            raise RuntimeError(
+                f"Atomic action {self.skill_id!r} is not bound to an "
+                "AtomicActionEngine. Register it or call engine.plan_action()."
+            )
+        return self._planning_services
+
+    @property
+    def motion_generator(self) -> MotionGenerator:
+        """Return the engine-owned motion generator borrowed by this action."""
+        return self.planning_services.motion_generator
+
+    @property
+    def robot(self) -> Robot:
+        """Return the robot associated with the owning engine."""
+        return self.planning_services.robot
+
+    @property
+    def device(self) -> torch.device:
+        """Return the concrete runtime device associated with the engine."""
+        return self.planning_services.device
+
+    @property
+    def builder(self) -> TrajectoryBuilder:
+        """Return the engine-owned shared trajectory builder."""
+        return self.planning_services.trajectory_builder
+
+    def _bind(self, services: ActionPlanningServices) -> None:
+        """Bind engine-owned planning services exactly once."""
+        if self._planning_services is services:
+            return
+        if self._planning_services is not None:
+            raise ValueError(
+                f"Atomic action {self.skill_id!r} is already bound to another "
+                "AtomicActionEngine."
+            )
+        self._planning_services = services
+        try:
+            self._on_bind()
+        except Exception:
+            self._planning_services = None
+            raise
+
+    def _on_bind(self) -> None:
+        """Initialize implementation state that depends on engine resources."""
 
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
@@ -204,10 +269,7 @@ class AtomicAction(Generic[GoalT], ABC):
         for role in self.end_effector_roles:
             invocation.binding.end_effector(role)
         required_planner = invocation.motion_policy.planner
-        configured_planner = getattr(
-            getattr(self.motion_generator, "planner", None), "cfg", None
-        )
-        configured_planner_name = getattr(configured_planner, "planner_type", None)
+        configured_planner_name = self.planning_services.planner_name
         if required_planner is not None and required_planner != configured_planner_name:
             raise ValueError(
                 f"Motion policy requires planner {required_planner!r}, but this "
@@ -287,12 +349,9 @@ class AtomicAction(Generic[GoalT], ABC):
             raise ValueError("Trajectory robot_dof must match the planning context.")
 
         if diagnostics is None:
-            backend = getattr(
-                getattr(getattr(self.motion_generator, "planner", None), "cfg", None),
-                "planner_type",
-                invocation.motion_policy.motion_source,
+            diagnostics = PlannerDiagnostics(
+                backend=self.planning_services.planner_name
             )
-            diagnostics = PlannerDiagnostics(backend=str(backend))
         phase = PlannedPhase(
             spec=PhaseSpec(
                 name=phase_name or self.cfg.name,
@@ -334,11 +393,6 @@ class AtomicAction(Generic[GoalT], ABC):
         Returns:
             Failed action plan with an empty phase trajectory.
         """
-        backend = getattr(
-            getattr(getattr(self.motion_generator, "planner", None), "cfg", None),
-            "planner_type",
-            invocation.motion_policy.motion_source,
-        )
         return self.build_plan(
             invocation,
             context,
@@ -353,7 +407,8 @@ class AtomicAction(Generic[GoalT], ABC):
             ),
             replannable=True,
             diagnostics=PlannerDiagnostics(
-                backend=str(backend), messages=(() if message is None else (message,))
+                backend=self.planning_services.planner_name,
+                messages=(() if message is None else (message,)),
             ),
         )
 

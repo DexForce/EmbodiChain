@@ -162,7 +162,6 @@ def _run_case(
         atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
         atomic_engine.register(
             PickUp(
-                motion_gen,
                 cfg=PickUpCfg(
                     control_part="arm",
                     hand_control_part="hand",

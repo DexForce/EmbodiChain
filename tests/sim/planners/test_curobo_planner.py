@@ -645,7 +645,7 @@ def _make_curobo_engine(
         )
     )
     engine = AtomicActionEngine(motion_generator)
-    engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
     return engine
 
 

@@ -61,6 +61,7 @@ from .plans import (
     TimedTrajectory,
 )
 from .policies import MotionPolicy, RecoveryPolicy
+from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
     CoordinatedPickGoal,
@@ -81,7 +82,6 @@ from .primitives import (
     MoveHeldObjectCfg,
     MoveJoints,
     MoveJointsCfg,
-    NamedJointPositionGoal,
     PickUp,
     PickUpCfg,
     Place,
@@ -108,6 +108,7 @@ __all__ = [
     "ActionGoal",
     "ActionInvocation",
     "ActionPlan",
+    "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
     "AssembleAffordance",
@@ -146,7 +147,6 @@ __all__ = [
     "MoveHeldObjectCfg",
     "MoveJoints",
     "MoveJointsCfg",
-    "NamedJointPositionGoal",
     "ObjectActionGoal",
     "ObjectSemantics",
     "PhaseSpec",

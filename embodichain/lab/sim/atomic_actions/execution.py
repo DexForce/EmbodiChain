@@ -304,13 +304,7 @@ class ExecutionSession:
     ) -> None:
         """Plan the current invocation from the latest observation."""
         invocation = self._invocations[self._invocation_index]
-        action = self._engine.actions.get(invocation.skill_id)
-        if action is None:
-            raise KeyError(
-                f"No atomic action registered for skill {invocation.skill_id!r}."
-            )
-        plan = action.plan(invocation, context)
-        self._engine._validate_plan(plan, context, invocation)
+        plan = self._engine.plan(invocation, context)
         self._plan = plan
         self._phase_index = min(self._phase_index, len(plan.phases) - 1)
         self._waypoint_index = 0

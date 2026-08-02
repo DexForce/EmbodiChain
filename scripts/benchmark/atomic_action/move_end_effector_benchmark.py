@@ -264,7 +264,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveEndEffector(motion_gen, cfg=MoveEndEffectorCfg()))
+    atomic_engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
 
     results: list[dict[str, object]] = []
     video_paths: list[str] = []

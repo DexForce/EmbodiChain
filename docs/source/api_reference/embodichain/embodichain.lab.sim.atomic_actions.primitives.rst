@@ -42,7 +42,6 @@ full-robot timed trajectory and uncommitted expected effects.
 
       EndEffectorPoseGoal
       JointPositionGoal
-      NamedJointPositionGoal
       GraspGoal
       HeldObjectPoseGoal
       PlaceGoal

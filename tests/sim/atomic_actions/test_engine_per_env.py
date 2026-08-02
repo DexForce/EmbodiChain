@@ -57,8 +57,8 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
     GoalType: ClassVar[type] = EndEffectorPoseGoal
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(self, motion_generator) -> None:
-        super().__init__(motion_generator, ActionCfg(name="dynamic"))
+    def __init__(self) -> None:
+        super().__init__(ActionCfg(name="dynamic"))
         self.plan_count = 0
 
     def plan(
@@ -119,7 +119,7 @@ def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
     engine = AtomicActionEngine(generator)
-    action = DynamicAction(generator)
+    action = DynamicAction()
     engine.register(action)
     return engine, action
 
@@ -267,7 +267,7 @@ def test_session_rejects_regressing_scene_snapshot() -> None:
 
 def test_nonempty_effect_is_committed_only_after_external_verification() -> None:
     engine, _ = _engine()
-    effect = EffectAction(engine.motion_generator)
+    effect = EffectAction()
     engine.register(effect)
     invocation = _invocation()
     invocation = ActionInvocation(
@@ -299,7 +299,7 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
 
 def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
     engine, _ = _engine()
-    engine.register(EffectAction(engine.motion_generator))
+    engine.register(EffectAction())
     base = _invocation(max_phase_retries=0)
     invocation = ActionInvocation(
         skill_id="effect",
