@@ -1,0 +1,312 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Gym environment that executes Action Engine programs against live state."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import torch
+
+from embodichain.gen_sim.action_engine.protocol import ACTION_ENGINE_ENV_ID
+from embodichain.gen_sim.action_engine.runtime import (
+    ExecutionResult,
+    ProgramExecutor,
+    evaluate_predicate,
+    load_agent_execution_program,
+)
+from embodichain.gen_sim.action_engine.runtime.solver_compat import (
+    install_pytorch_solver_tcp_compat,
+)
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.utils.registration import register_env
+
+__all__ = ["ACTION_ENGINE_ENV_ID", "ActionEngineEnv"]
+
+_MAX_EPISODE_STEPS = 2000
+
+
+@register_env(ACTION_ENGINE_ENV_ID, max_episode_steps=_MAX_EPISODE_STEPS)
+class ActionEngineEnv(EmbodiedEnv):
+    """EmbodiedEnv adapter for in-memory compiled execution programs."""
+
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
+        agent_config = kwargs.pop("agent_config", None)
+        task_name = kwargs.pop("task_name", None)
+        agent_config_path = kwargs.pop("agent_config_path", None)
+        if not isinstance(agent_config, Mapping):
+            raise ValueError("ActionEngineEnv requires an agent_config mapping.")
+        if not isinstance(task_name, str) or not task_name:
+            raise ValueError("ActionEngineEnv requires a non-empty task_name.")
+        if not isinstance(agent_config_path, str) or not agent_config_path:
+            raise ValueError("ActionEngineEnv requires agent_config_path.")
+        self.agent_config = dict(agent_config)
+        self.agent_config_path = agent_config_path
+        self.task_name = task_name
+        self.last_execution: ExecutionResult | None = None
+        self._runtime_state_ready = False
+        super().__init__(cfg, **kwargs)
+        install_pytorch_solver_tcp_compat(self.robot)
+        if bool(getattr(self, "ignore_terminations_during_agent", False)):
+            # Atomic trajectories execute online through env.step(). Prevent a
+            # transient task signal from resetting an environment mid-program.
+            self.cfg.ignore_terminations = True
+        self._capture_runtime_state()
+
+    def reset(
+        self,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
+        self._runtime_state_ready = False
+        observation, info = super().reset(seed=seed, options=options)
+        self.last_execution = None
+        self._capture_runtime_state()
+        return observation, info
+
+    def _capture_runtime_state(self) -> None:
+        """Capture reset-relative robot and object state used by symbolic bindings."""
+        self.init_qpos = self.robot.get_qpos().clone()
+        self._agent_arm_slots = self._resolve_arm_slots()
+        for side in ("left", "right"):
+            self._initialize_arm(side, self._agent_arm_slots.get(side))
+
+        default_open = getattr(self, "gripper_open_state", (0.04, 0.04))
+        default_close = getattr(self, "gripper_close_state", (0.0, 0.0))
+        self.open_state = torch.as_tensor(
+            getattr(self, "agent_open_state", default_open),
+            dtype=self.init_qpos.dtype,
+            device=self.init_qpos.device,
+        ).flatten()
+        self.close_state = torch.as_tensor(
+            getattr(self, "agent_close_state", default_close),
+            dtype=self.init_qpos.dtype,
+            device=self.init_qpos.device,
+        ).flatten()
+        self.left_arm_current_gripper_state = self._hand_qpos("left")
+        self.right_arm_current_gripper_state = self._hand_qpos("right")
+        self.update_obj_info()
+        self.agent_initial_object_poses = {
+            uid: item["pose"].clone() for uid, item in self.obj_info.items()
+        }
+        self._runtime_state_ready = True
+
+    def _resolve_arm_slots(self) -> dict[str, dict[str, str | None] | None]:
+        configured = getattr(self, "agent_arm_slots", None)
+        if isinstance(configured, Mapping):
+            result: dict[str, dict[str, str | None] | None] = {
+                "left": None,
+                "right": None,
+            }
+            for side in result:
+                value = configured.get(side)
+                if isinstance(value, str):
+                    result[side] = {"arm": value, "eef": None}
+                elif isinstance(value, Mapping):
+                    result[side] = {
+                        "arm": value.get("arm", value.get("arm_control_part")),
+                        "eef": value.get(
+                            "eef",
+                            value.get("hand", value.get("eef_control_part")),
+                        ),
+                    }
+            return result
+        parts = getattr(self.robot, "control_parts", {}) or {}
+        if "left_arm" in parts or "right_arm" in parts:
+            return {
+                "left": {"arm": "left_arm", "eef": "left_eef"},
+                "right": {"arm": "right_arm", "eef": "right_eef"},
+            }
+        if "arm" in parts:
+            side = str(getattr(self, "agent_single_arm_slot", "right"))
+            result = {"left": None, "right": None}
+            result[side] = {"arm": "arm", "eef": "hand"}
+            return result
+        raise ValueError("Robot exposes no arm control part for Action Engine.")
+
+    def _initialize_arm(
+        self,
+        side: str,
+        slot: dict[str, str | None] | None,
+    ) -> None:
+        arm = None if slot is None else slot.get("arm")
+        eef = None if slot is None else slot.get("eef")
+        arm_ids = self._control_part_ids(arm)
+        eef_ids = self._control_part_ids(eef)
+        setattr(self, f"{side}_arm_joints", arm_ids)
+        setattr(self, f"{side}_eef_joints", eef_ids)
+        arm_qpos = self.init_qpos[:, arm_ids]
+        setattr(self, f"{side}_arm_init_qpos", arm_qpos.clone())
+        setattr(self, f"{side}_arm_current_qpos", arm_qpos.clone())
+        if arm is None or not arm_ids:
+            setattr(self, f"{side}_arm_init_xpos", None)
+            setattr(self, f"{side}_arm_current_xpos", None)
+            return
+        xpos = self.robot.compute_fk(arm_qpos, name=arm, to_matrix=True)
+        setattr(self, f"{side}_arm_init_xpos", xpos.clone())
+        setattr(self, f"{side}_arm_current_xpos", xpos.clone())
+
+    def _control_part_ids(self, name: str | None) -> list[int]:
+        if name is None:
+            return []
+        parts = getattr(self.robot, "control_parts", {}) or {}
+        if name not in parts:
+            return []
+        return list(self.robot.get_joint_ids(name=name))
+
+    def _hand_qpos(self, side: str) -> torch.Tensor:
+        ids = list(getattr(self, f"{side}_eef_joints", ()))
+        return self.init_qpos[:, ids].clone()
+
+    def get_agent_arm_control_part(self, is_left: bool) -> str:
+        value = self._agent_arm_slots["left" if is_left else "right"]
+        arm = None if value is None else value.get("arm")
+        if not isinstance(arm, str) or not arm:
+            raise ValueError(f"{'left' if is_left else 'right'} arm is not configured.")
+        return arm
+
+    def get_agent_eef_control_part(self, is_left: bool) -> str | None:
+        value = self._agent_arm_slots["left" if is_left else "right"]
+        eef = None if value is None else value.get("eef")
+        return str(eef) if eef else None
+
+    def get_current_qpos_agent(self) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.left_arm_current_qpos, self.right_arm_current_qpos
+
+    def get_current_xpos_agent(
+        self,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        return self.left_arm_current_xpos, self.right_arm_current_xpos
+
+    def get_current_gripper_state_agent(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return (
+            self.left_arm_current_gripper_state,
+            self.right_arm_current_gripper_state,
+        )
+
+    def sync_agent_state_from_qpos(self, qpos: torch.Tensor) -> None:
+        """Keep arm-selection seeds synchronized with the command sent to sim."""
+        qpos = torch.as_tensor(
+            qpos,
+            dtype=self.init_qpos.dtype,
+            device=self.init_qpos.device,
+        )
+        for side in ("left", "right"):
+            arm_ids = list(getattr(self, f"{side}_arm_joints", ()))
+            hand_ids = list(getattr(self, f"{side}_eef_joints", ()))
+            arm_qpos = qpos[:, arm_ids]
+            setattr(self, f"{side}_arm_current_qpos", arm_qpos.clone())
+            slot = self._agent_arm_slots.get(side)
+            arm = None if slot is None else slot.get("arm")
+            if arm and arm_ids:
+                xpos = self.robot.compute_fk(arm_qpos, name=arm, to_matrix=True)
+                setattr(self, f"{side}_arm_current_xpos", xpos)
+            setattr(
+                self,
+                f"{side}_arm_current_gripper_state",
+                qpos[:, hand_ids].clone(),
+            )
+
+    def get_arm_ik(
+        self,
+        target_xpos: torch.Tensor,
+        is_left: bool,
+        qpos_seed: torch.Tensor | None = None,
+        env_ids: list[int] | None = None,
+    ) -> tuple[bool, torch.Tensor]:
+        success, qpos = self.robot.compute_ik(
+            name=self.get_agent_arm_control_part(is_left),
+            pose=target_xpos,
+            joint_seed=qpos_seed,
+            env_ids=env_ids,
+        )
+        success_value = (
+            bool(torch.as_tensor(success).all().item())
+            if isinstance(success, torch.Tensor)
+            else bool(success)
+        )
+        return success_value, qpos
+
+    def update_obj_info(self) -> None:
+        info = getattr(self, "obj_info", {})
+        for uid in self.sim.get_rigid_object_uid_list():
+            entity = self.sim.get_rigid_object(uid)
+            if entity is None:
+                continue
+            pose = entity.get_local_pose(to_matrix=True)
+            info[uid] = {"pose": pose, "height": pose[:, 2, 3]}
+        self.obj_info = info
+
+    def create_demo_action_list(
+        self,
+        regenerate: bool = False,
+        **kwargs: Any,
+    ) -> ExecutionResult:
+        """Compile in memory when requested, then execute the program online."""
+        program = load_agent_execution_program(
+            self.agent_config,
+            agent_config_path=self.agent_config_path,
+            regenerate=regenerate,
+        )
+        executor = ProgramExecutor(
+            program,
+            self,
+            max_transitions=int(getattr(self, "action_engine_max_transitions", 1000)),
+            settle_steps=int(getattr(self, "action_engine_settle_steps", 10)),
+            record_runtime=bool(getattr(self, "action_engine_record_runtime", True)),
+            record_root=getattr(self, "action_engine_record_root", None),
+        )
+        self.last_execution = executor.run(
+            run_id=kwargs.get("runtime_run_id"),
+            episode_index=int(kwargs.get("episode_index", 0)),
+        )
+        return self.last_execution
+
+    def _normalize_demo_action_list(self, action_list: Any) -> Any:
+        """Preserve metadata on action streams that already ran online.
+
+        ``EmbodiedEnv`` normally rebuilds returned sequences after validating
+        their action width. Rebuilding an ``ExecutionResult`` would discard its
+        success masks and runtime-record location, and its commands have
+        already been sent to the simulator, so no replay normalization is
+        needed.
+        """
+        if isinstance(action_list, ExecutionResult) and action_list.already_executed:
+            return action_list
+        return super()._normalize_demo_action_list(action_list)
+
+    def is_task_success(self, **_: Any) -> torch.Tensor:
+        configured = getattr(self, "agent_success", None)
+        if isinstance(configured, Mapping):
+            return evaluate_predicate(self, configured)
+        if self.last_execution is not None:
+            return self.last_execution.success
+        return torch.zeros(
+            int(self.num_envs),
+            dtype=torch.bool,
+            device=self.device,
+        )
+
+    def compute_task_state(
+        self,
+        **_: Any,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
+        success = self.is_task_success()
+        return success, torch.zeros_like(success), {}

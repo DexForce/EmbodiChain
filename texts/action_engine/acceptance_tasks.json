@@ -1,0 +1,113 @@
+{
+  "schema_version": "action_engine_acceptance_tasks_v1",
+  "tasks": [
+    {
+      "task_name": "task0_0",
+      "description": "用双臂把两侧的罐头和瓶子放到篮子里",
+      "expected_skills": ["place_relative", "place_relative"]
+    },
+    {
+      "task_name": "task0_1",
+      "description": "用双臂把两侧的方块放到篮子里",
+      "expected_skills": ["place_relative", "place_relative"]
+    },
+    {
+      "task_name": "task0_2",
+      "description": "用双臂把两侧的方块和纸杯放到篮子里",
+      "expected_skills": ["place_relative", "place_relative"]
+    },
+    {
+      "task_name": "task0_3",
+      "description": "用双臂把两侧的方块和苹果放到篮子里",
+      "expected_skills": ["place_relative", "place_relative"]
+    },
+    {
+      "task_name": "task1_0",
+      "description": "用双臂把塑料水桶往前移动",
+      "expected_skills": ["coordinated_transport"]
+    },
+    {
+      "task_name": "task1_1",
+      "description": "用双臂把长方体往前移动",
+      "expected_skills": ["coordinated_transport"]
+    },
+    {
+      "task_name": "task1_2",
+      "description": "用双臂把苹果和魔方放入盘子，然后用双臂端起盘子",
+      "expected_skills": [
+        "place_relative",
+        "place_relative",
+        "coordinated_transport"
+      ]
+    },
+    {
+      "task_name": "task1_3",
+      "description": "用双臂把托盘往前移动",
+      "expected_skills": ["coordinated_transport"]
+    },
+    {
+      "task_name": "task2_0",
+      "description": "用双臂把两侧的香蕉放到盘子里，然后用双臂端起盘子",
+      "expected_skills": [
+        "place_relative",
+        "place_relative",
+        "coordinated_transport"
+      ]
+    },
+    {
+      "task_name": "task2_1",
+      "description": "用双臂把两侧的罐头扶正",
+      "expected_skills": ["orient_object", "orient_object"]
+    },
+    {
+      "task_name": "task2_2",
+      "description": "用双臂把两侧的瓶子和罐头扶正",
+      "expected_skills": ["orient_object", "orient_object"]
+    },
+    {
+      "task_name": "task2_3",
+      "description": "用双臂把两侧的罐头扶正",
+      "expected_skills": ["orient_object", "orient_object"]
+    },
+    {
+      "task_name": "task3_0",
+      "description": "把桌面上的物体按照方块按照从左往右的顺序叠起来",
+      "expected_skills": ["build_stack"]
+    },
+    {
+      "task_name": "task3_1",
+      "description": "把桌面上的物体按照右边的方块，左边的方块，纸杯的顺序叠起来",
+      "expected_skills": ["build_stack"]
+    },
+    {
+      "task_name": "task3_2",
+      "description": "把纸杯叠放到爆米花桶上，把蓝色耳机叠放到爆米花桶上",
+      "expected_skills": ["build_stack"]
+    },
+    {
+      "task_name": "task3_3",
+      "description": "把纸杯叠放到爆米花桶上，把固体胶叠放到爆米花桶上",
+      "expected_skills": ["build_stack"]
+    },
+    {
+      "task_name": "task4_0",
+      "description": "把桌面上的方块摆成一排",
+      "expected_skills": ["arrange_line"]
+    },
+    {
+      "task_name": "task4_1",
+      "description": "把桌面上的物体按照瓶子，方块排成一排",
+      "expected_skills": ["arrange_line"]
+    },
+    {
+      "task_name": "task4_2",
+      "description": "把桌面上的罐头摆成一排",
+      "expected_skills": ["arrange_line"]
+    },
+    {
+      "task_name": "task4_3",
+      "description": "把桌面上的物体按照瓶子，罐头，方块的顺序摆成一排",
+      "expected_skills": ["arrange_line"]
+    }
+  ]
+}

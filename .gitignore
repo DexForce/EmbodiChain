@@ -123,6 +123,8 @@ celerybeat.pid
 .env
 .venv
 env/
+!embodichain/gen_sim/action_engine/env/
+!embodichain/gen_sim/action_engine/env/*.py
 venv/
 ENV/
 env.bak/
