@@ -33,11 +33,11 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     EndEffectorPoseGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
     Press,
-    PressCfg,
+    PressOptions,
     PressGoal,
     MotionPolicy,
 )
@@ -162,13 +162,20 @@ def main() -> None:
     block.clear_dynamics()
 
     motion_gen = create_toppra_motion_generator(robot)
-    hand_close = get_hand_open_close_qpos(robot)[1]
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
+    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+    )
+    engine.register(MoveEndEffector())
     engine.register(
         Press(
-            PressCfg(
-                hand_close_qpos=hand_close,
+            default_options=PressOptions(
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )

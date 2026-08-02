@@ -14,9 +14,12 @@ There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
 `ActionInvocation` separates:
 
 - an action-owned typed goal (`goal_kind` is its stable discriminator);
-- `ActionBinding`, which maps semantic roles to concrete robot resources;
+- `ActionBinding`, which maps semantic roles to names from the engine robot's
+  `control_parts` mapping;
 - reusable `MotionPolicy` planner/timing choices;
-- bounded `RecoveryPolicy` thresholds and retry budgets.
+- bounded `RecoveryPolicy` thresholds and retry budgets;
+- optional typed `skill_options` and role-scoped `control_overrides` for one
+  invocation revision.
 
 `PlanningContext` separates measured `RobotObservation`, verified symbolic
 `TaskState`, versioned `SceneSnapshot`, and environment IDs. An `ActionPlan`
@@ -25,9 +28,10 @@ full-robot `TimedTrajectory` data, diagnostics, completion conditions, and an
 uncommitted `StateDelta`.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
-instance, which contains its robot, motion generator, planner backend, and
-shared `TrajectoryBuilder`. Actions accept only implementation configuration
-and borrow those services after `engine.register(action)` or
+instance, which contains its robot, motion generator, planner backend, shared
+`TrajectoryBuilder`, and control-part command profiles. Actions retain only an
+owned copy of typed default options and borrow engine services after
+`engine.register(action)` or
 `engine.plan_action(action, invocation, context)`. A bound action cannot be
 reused by another engine.
 
@@ -72,6 +76,18 @@ or exhausted failures are reported as structured `ExecutionEvent` objects. A
 non-empty `StateDelta` is not committed until the caller supplies an external
 `effect_success` mask.
 
+Recovery replans reuse the current immutable `ResolvedActionRequest`. To change
+a goal, option, policy, binding, or control command during execution, submit a
+strictly newer revision explicitly:
+
+```python
+session.revise_current(revised_invocation)
+```
+
+The replacement must keep the active `skill_id` and `invocation_id`. The
+session resolves a new snapshot, resets that revision's recovery budgets, and
+replans from the latest context.
+
 ## Parameter ownership
 
 Goal dataclasses carry only semantic task intent. They do not carry robot part
@@ -79,16 +95,46 @@ names, planner configuration, retry policy, or runtime state.
 
 `MotionPolicy` owns planner selection, motion source, sample count, fallback
 control period, limits, and typed planner options. `RecoveryPolicy` owns
-tracking/dynamic-goal thresholds, timeouts, and budgets. Action configs retain
-only implementation-specific behavior such as gripper poses, phase splits,
-lift distances, and grasp constraints.
+tracking/dynamic-goal thresholds, timeouts, and budgets. Each built-in has a
+frozen `*Options` value for invocation-varying phase counts, offsets, and grasp
+selection behavior. An action constructor may accept `default_options`; an
+invocation's `skill_options` replaces them for that call. There is no
+`ActionCfg` or built-in `*Cfg` layer.
+
+Every `ActionBinding` value is a `RobotCfg.control_parts` key. It is not a link,
+TCP-frame, joint, or scene-object name. Planning services validate those names
+and resolve immutable `ResolvedControlPart` values containing full-robot joint
+indices. Built-ins use the binding as the only source for participating arm and
+hand names; attachment state and `StateDelta` keys use the bound manipulator.
+
+Embodiment-specific joint commands do not belong to Action options. Register
+them once by actual control-part name:
+
+```python
+engine = AtomicActionEngine(
+    motion_generator,
+    control_profiles={
+        "left_hand": ControlPartCommandProfile.joint_positions(
+            open=left_open_qpos,
+            grasp=left_grasp_qpos,
+        ),
+        "left_arm": ControlPartCommandProfile.joint_positions(ready=ready_qpos),
+    },
+)
+```
+
+Actions request semantic commands (`open`, `grasp`, or a named joint target)
+from the `ResolvedControlPart`. `ActionControlOverrides` may replace commands
+by semantic binding role for one invocation revision. Joint limits constrain
+commands but do not define semantic open/grasp states; a robot integration or
+tutorial may derive a simple profile from limits explicitly.
 
 ## Built-ins
 
 | Skill ID | Goal type | Roles |
 |---|---|---|
 | `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` |
-| `move_joints` | `JointPositionGoal` (`target` is explicit qpos or a configured name) | manipulator `primary` |
+| `move_joints` | `JointPositionGoal` (`target` is explicit qpos or a profile command name) | manipulator `primary` |
 | `pick_up` | `GraspGoal` | manipulator/end effector `primary` |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator/end effector `primary` |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator/end effector `primary` |
@@ -100,11 +146,12 @@ lift distances, and grasp constraints.
 ## Extension rules
 
 1. Define a frozen action-owned goal dataclass with `goal_kind`.
-2. Declare `skill_id`, `GoalType`, and required semantic roles on the action.
-3. Validate with `require_goal(invocation)`.
-4. Plan from `context.robot.qpos`; never read an implicit live start state.
-5. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
-6. Declare symbolic changes with `StateDelta`; do not mutate context or commit
+2. Define a frozen `ActionOptions` subclass only when runtime behavior exists.
+3. Declare `skill_id`, `GoalType`, `OptionsType`, and required semantic roles.
+4. Validate with `require_goal(request)` and consume only the resolved binding.
+5. Plan from `context.robot.qpos`; never read an implicit live start state.
+6. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
+7. Declare symbolic changes with `StateDelta`; do not mutate context or commit
    physical effects during planning.
-7. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
+8. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
    atomic action.

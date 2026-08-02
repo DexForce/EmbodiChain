@@ -34,15 +34,14 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectPoseGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
     MoveHeldObject,
-    MoveHeldObjectCfg,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
@@ -129,26 +128,26 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+    )
+    engine.register(MoveEndEffector())
     engine.register(
         PickUp(
-            PickUpCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
+            default_options=PickUpOptions(
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )
     )
-    engine.register(
-        MoveHeldObject(
-            MoveHeldObjectCfg(
-                hand_close_qpos=hand_close,
-            ),
-        )
-    )
+    engine.register(MoveHeldObject())
 
     semantics = create_antipodal_semantics(
         obj,

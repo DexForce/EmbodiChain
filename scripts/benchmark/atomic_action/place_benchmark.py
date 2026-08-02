@@ -177,9 +177,10 @@ def _prepare_held_state(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         GraspGoal,
         PickUp,
-        PickUpCfg,
+        PickUpOptions,
         MotionPolicy,
     )
     from scripts.tutorials.atomic_action.place import (
@@ -191,14 +192,18 @@ def _prepare_held_state(
 
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+    )
     atomic_engine.register(
         PickUp(
-            cfg=PickUpCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
+            default_options=PickUpOptions(
                 approach_direction=resolve_pickup_approach_direction(
                     pickup_approach, position_case, sim.device
                 ),
@@ -258,10 +263,11 @@ def _run_case(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         MotionPolicy,
         Place,
-        PlaceCfg,
         PlaceGoal,
+        PlaceOptions,
     )
     from scripts.tutorials.atomic_action.place import (
         compute_pick_close_end_step,
@@ -298,14 +304,18 @@ def _run_case(
             pickup_approach_direction_tuple(pickup_approach, position_case)
         )
         precondition_waypoints = int(precondition_traj.shape[1])
-        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+        atomic_engine = AtomicActionEngine(
+            motion_generator=motion_gen,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    open=hand_open,
+                    grasp=hand_close,
+                )
+            },
+        )
         atomic_engine.register(
             Place(
-                cfg=PlaceCfg(
-                    control_part="arm",
-                    hand_control_part="hand",
-                    hand_open_qpos=hand_open,
-                    hand_close_qpos=hand_close,
+                default_options=PlaceOptions(
                     lift_height=PLACE_LIFT_HEIGHT,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),

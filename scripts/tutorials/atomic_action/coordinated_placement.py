@@ -45,14 +45,15 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     Affordance,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     CoordinatedPlacement,
-    CoordinatedPlacementCfg,
+    CoordinatedPlacementOptions,
     CoordinatedPlacementGoal,
     GraspGoal,
     HeldObjectState,
     ObjectSemantics,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     MotionPolicy,
     TaskState,
 )
@@ -796,37 +797,21 @@ def run_coordinated_placement_demo(
     )
     left_open, left_close = get_hand_open_close_qpos(robot, "left_hand", sim.device)
     left_pick_action = PickUp(
-        cfg=PickUpCfg(
-            control_part="left_arm",
-            hand_control_part="left_hand",
-            hand_open_qpos=left_open,
-            hand_close_qpos=left_close,
+        default_options=PickUpOptions(
             pre_grasp_distance=PICK_APPROACH_DISTANCE,
             lift_height=0.12,
             hand_interp_steps=10,
         ),
     )
     right_pick_action = PickUp(
-        cfg=PickUpCfg(
-            control_part="right_arm",
-            hand_control_part="right_hand",
-            hand_open_qpos=right_open,
-            hand_close_qpos=right_close,
+        default_options=PickUpOptions(
             pre_grasp_distance=PICK_APPROACH_DISTANCE,
             lift_height=0.10,
             hand_interp_steps=PAN_PICK_HAND_INTERP_STEPS,
         ),
     )
     coordinated_action = CoordinatedPlacement(
-        cfg=CoordinatedPlacementCfg(
-            control_part="dual_arm",
-            placing_arm_control_part="left_arm",
-            support_arm_control_part="right_arm",
-            placing_hand_control_part="left_hand",
-            support_hand_control_part="right_hand",
-            placing_hand_open_qpos=left_open,
-            placing_hand_close_qpos=left_close,
-            support_hand_close_qpos=right_close,
+        default_options=CoordinatedPlacementOptions(
             release=True,
             placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
             support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
@@ -836,7 +821,19 @@ def run_coordinated_placement_demo(
             retreat_steps=18,
         ),
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "left_hand": ControlPartCommandProfile.joint_positions(
+                open=left_open,
+                grasp=left_close,
+            ),
+            "right_hand": ControlPartCommandProfile.joint_positions(
+                open=right_open,
+                grasp=right_close,
+            ),
+        },
+    )
     engine.register(coordinated_action)
     full_joint_ids = list(range(robot.dof))
     state = engine.initial_context()

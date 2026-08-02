@@ -11,16 +11,19 @@ applications register the configured instances they need with an engine.
 release primitive instead of introducing a tenth skill ID.
 
 All built-ins implement
-`plan(invocation, context) -> ActionPlan`. Their constructors accept only
-action configuration; the owning `AtomicActionEngine` supplies one shared
-motion generator and trajectory builder during `register()` or
-`plan_action()`. Generic motion and recovery choices belong to the invocation,
-not the action config.
+`plan(request, context) -> ActionPlan`, where `request` is the engine-resolved
+snapshot of an invocation revision. Constructors accept only optional typed
+default `*Options`; the owning `AtomicActionEngine` supplies the shared motion
+generator, trajectory builder, and control-part command profiles during
+`register()` or `plan_action()`. Generic motion and recovery choices belong to
+the invocation.
 
 ```{note}
-The current manipulation primitives use gripper open/close joint positions.
-Replacing a gripper with a dexterous hand requires a hand-command abstraction
-or new hand-specific phases; it is not yet a drop-in config change.
+The current manipulation primitives consume semantic `open` and `grasp`
+commands through the control-part command abstraction. The shipped command
+implementation is `JointPositionCommand`. A dexterous hand may register
+calibrated joint-position commands immediately; non-position hand policies or
+multi-stage in-hand manipulation require additional command types and phases.
 ```
 
 ## Visual catalog
@@ -125,17 +128,39 @@ The animations below are the focused simulator demos under
 
 ## Capability matrix
 
-| Skill ID | Accepted goal | Required binding roles | Required task state | Expected task effect |
-|---|---|---|---|---|
-| `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` | none | none |
-| `move_joints` | `JointPositionGoal` | manipulator `primary` | none | none |
-| `pick_up` | `GraspGoal` | manipulator + end effector `primary` | semantic object/entity | attach object to `primary` manipulator |
-| `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | object held by `primary` | preserve attachment |
-| `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
-| `press` | `PressGoal` | manipulator + end effector `primary` | none | none |
-| `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | semantic object/entity | create coordinated attachment; clear individual attachments |
-| `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | one individually held object per arm | optionally detach placing object; preserve support attachment |
-| `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | object held by source arm | transfer attachment to destination arm |
+| Skill ID | Accepted goal | Required binding roles | Required profile commands | Required task state | Expected task effect |
+|---|---|---|---|---|---|
+| `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` | none | none | none |
+| `move_joints` | `JointPositionGoal` | manipulator `primary` | named target only: command matching `target` | none | none |
+| `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
+| `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
+| `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
+| `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
+| `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
+| `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
+| `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held by source arm | transfer attachment to destination arm |
+
+### Binding role meanings
+
+Roles are action-local semantic participant slots. They are keys declared by an
+action, while the corresponding `ActionBinding` values are concrete
+`Robot.control_parts` keys. A role that appears in both binding maps identifies
+the manipulator and actuated hand/tool serving the same functional participant;
+it does not make the two maps interchangeable.
+
+| Role | Used by | Meaning |
+|---|---|---|
+| `primary` | Single-participant skills | Principal participant for this invocation; it has no inherent left/right or default-robot meaning |
+| `source` | `hand_over` | Participant that initially holds and transfers the object |
+| `destination` | `hand_over` | Participant that receives the object |
+| `left`, `right` | `coordinated_pickment` | Participants associated with the goal's left/right grasp transforms |
+| `placing` | `coordinated_placement` | Participant that aligns and optionally releases the placing object |
+| `support` | `coordinated_placement` | Participant that keeps holding and positioning the support object |
+
+The action's `manipulator_roles` and `end_effector_roles` declarations determine
+which entries are required. The engine checks that those entries exist and that
+every value resolves through `Robot.control_parts`; the caller or capability
+binder must select a physically compatible arm and hand/tool combination.
 
 `MoveJoints` is intentionally `agent_visible=False`: it is useful for home,
 recovery, calibration, and scripted postures, but is not exposed to an Action
@@ -177,16 +202,22 @@ entity as a recovery dependency.
 Use this rule when configuring a built-in or adding a new one:
 
 - the **goal** carries only the requested outcome;
-- the **binding** carries concrete robot resources selected for this call;
-- the **action config** carries hardware constants and phase-specific behavior;
+- the **binding** carries semantic-role mappings to control-part names selected
+  for this call; every value must be a key in the engine robot's
+  `control_parts` mapping;
+- typed **skill options** carry phase-specific behavior that may vary by
+  invocation; an action may provide defaults;
+- the engine's **control-part profiles** carry embodiment-specific semantic
+  commands such as `open`, `grasp`, and named postures;
 - `MotionPolicy` carries sample count, timing, motion source, limits,
   collision choice, and planner options;
 - `RecoveryPolicy` carries all replan/retry thresholds and budgets.
 
-Complex manipulation actions currently validate that their semantic bindings
-match concrete resources configured for their hand qpos and multi-part phase
-assembly. `MoveEndEffector` and `MoveJoints` resolve the manipulator entirely
-from `ActionBinding`.
+All built-ins resolve participating arm and hand names exclusively from
+`ActionBinding`. The engine then resolves the selected control part's profile
+and checks each joint-position command against its DoF. Invocation-level
+`ActionControlOverrides` may replace a command by binding role for one explicit
+revision.
 
 ### Planning and effect semantics
 
@@ -211,7 +242,7 @@ ordered set of pose waypoints.
 | Motion | EEF planning from observed arm qpos; output expanded to full robot DoF |
 | Completion | `EEF_GOAL_REACHED` |
 | Effect | none |
-| Action config | only the inherited action name; reusable motion choices are in `MotionPolicy` |
+| Skill options | none; reusable motion choices are in `MotionPolicy` |
 
 Use an explicit pose for a fixed target, `SceneEntityPose` for a tracked target,
 or `(B, N, 4, 4)` for intermediate waypoints. The action does not command an end
@@ -239,14 +270,17 @@ than an EEF pose.
 
 `target` accepts an explicit qpos tensor with shape `(control_dof,)`,
 `(B, control_dof)`, or `(B, N, control_dof)`, or a non-empty string resolved
-from `MoveJointsCfg.named_joint_positions`. Named poses are
-implementation/hardware knowledge and remain in the action config rather than
-becoming separate goal types:
+from the bound manipulator's `ControlPartCommandProfile`. Named poses remain
+embodiment knowledge without becoming separate goal types:
 
 ```python
-move_joints = MoveJoints(
-    MoveJointsCfg(named_joint_positions={"home": home_qpos})
+engine = AtomicActionEngine(
+    motion_generator,
+    control_profiles={
+        "left_arm": ControlPartCommandProfile.joint_positions(home=home_qpos),
+    },
 )
+engine.register(MoveJoints())
 
 explicit_goal = JointPositionGoal(target=home_qpos)
 named_goal = JointPositionGoal(target="home")
@@ -267,7 +301,7 @@ bound manipulator.
 | Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
 | Binding | manipulator + end effector role `primary` |
 | Precondition | `ObjectSemantics.entity` is set; an `AntipodalAffordance` is required when no explicit grasp pose is supplied |
-| Effect | write `HeldObjectState` for the configured manipulator and clear overlapping coordinated attachment state |
+| Effect | write `HeldObjectState` for the bound manipulator and clear overlapping coordinated attachment state |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
 `grasp_xpos` may be `(4, 4)` or `(B, 4, 4)`. When omitted, the action samples
@@ -275,12 +309,11 @@ valid affordance grasps, evaluates reachability, and stores the selected
 `object_to_eef` transform in the expected held-object state. Later
 object-centric skills reuse that transform.
 
-Important `PickUpCfg` fields:
+`PickUp` requires `open` and `grasp` commands on the bound end-effector profile.
+Important `PickUpOptions` fields:
 
 | Field | Purpose |
 |---|---|
-| `control_part`, `hand_control_part` | Concrete resources that the `primary` binding must match |
-| `hand_open_qpos`, `hand_close_qpos` | Required hardware-specific hand states |
 | `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and approach direction |
 | `lift_height`, `hand_interp_steps` | Lift distance and close-phase discretization |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |
@@ -307,14 +340,15 @@ the action derives `target_object_pose @ object_to_eef` from verified task state
 | Skill ID | `move_held_object` |
 | Goal | `HeldObjectPoseGoal(object_target_pose=...)` |
 | Binding | manipulator + end effector role `primary` |
-| Precondition | a `HeldObjectState` exists for the configured manipulator, normally from `PickUp` |
+| Precondition | a `HeldObjectState` exists for the bound manipulator, normally from `PickUp` |
 | Motion | single object-centric transport phase with closed-hand qpos |
 | Effect | none; the existing attachment is preserved |
 | Dynamic target | explicit pose or `SceneEntityPose` |
 
-`MoveHeldObjectCfg` holds the concrete arm/hand names, required
-`hand_close_qpos`, and optional upright-transport settings. Generic timing and
-trajectory sampling remain in `MotionPolicy`.
+The bound end-effector profile must provide `grasp`; optional upright-transport
+settings belong to `MoveHeldObjectOptions`. The arm and hand are selected by
+`ActionBinding`; generic timing and trajectory sampling remain in
+`MotionPolicy`.
 
 **Example:** `scripts/tutorials/atomic_action/move_held_object.py`
 
@@ -331,7 +365,7 @@ one.
 | Skill ID | `place` |
 | Goal | `PlaceGoal(xpos=..., tcp_symmetry="none")` |
 | Binding | manipulator + end effector role `primary` |
-| State | consumes the configured manipulator's attachment when present |
+| State | consumes the bound manipulator's attachment when present |
 | Effect | detach the object and clear overlapping coordinated attachment state |
 | Verification | release must be verified during closed-loop execution |
 | Dynamic target | explicit pose/waypoints or `SceneEntityPose` |
@@ -341,12 +375,11 @@ translation remain physically equivalent. The action selects the closer
 orientation variant from the observed starting state and uses it consistently
 across all waypoints.
 
-Important `PlaceCfg` fields:
+The bound end-effector profile must provide `open` and `grasp`. Important
+`PlaceOptions` fields:
 
 | Field | Purpose |
 |---|---|
-| `control_part`, `hand_control_part` | Concrete resources that the `primary` binding must match |
-| `hand_open_qpos`, `hand_close_qpos` | Required release/holding hand states |
 | `lift_height` | Approach and retract height |
 | `hand_interp_steps` | Open-phase discretization |
 | `max_approach_retract_z` | Optional world-Z ceiling for approach/retract poses |
@@ -396,10 +429,11 @@ arm should retreat along its planned path after reaching the target.
 | Effect | none; existing attachment state is unchanged |
 | Dynamic target | explicit pose or `SceneEntityPose` |
 
-`PressCfg` pins the concrete arm/hand resources, required `hand_close_qpos`, and
-`hand_interp_steps`. Contact detection is not itself a symbolic effect in the
-current action; applications that require force/contact confirmation should
-verify it externally.
+The bound end-effector profile must provide `grasp`, while
+`PressOptions.hand_interp_steps` controls the close interpolation. The arm and
+hand control parts come from `ActionBinding`. Contact detection is not itself a
+symbolic effect in the current action; applications that require force/contact
+confirmation should verify it externally.
 
 **Example:** `scripts/tutorials/atomic_action/press.py`
 
@@ -423,16 +457,16 @@ The object target and optional initial pose may use `SceneEntityPose`. When no
 initial pose is supplied, `ObjectSemantics.entity` provides the object's current
 pose.
 
-Important `CoordinatedPickmentCfg` fields group into:
+Both bound end-effector profiles must provide `open` and `grasp`. Important
+`CoordinatedPickmentOptions` fields group into:
 
-- combined, left/right arm, and left/right hand control-part names;
-- required open/close qpos for both hands;
 - `pre_grasp_distance` and `lift_height`;
 - `object_motion_keyframes`, `hand_interp_steps`, and `hold_steps`.
 
-The semantic binding must match those configured resources. Coordinated
-dual-arm planning with `motion_source="motion_gen"` is not supported by the
-cuRobo backend; use the supported IK/interpolation path for this primitive.
+The left/right arms and hands come exclusively from the corresponding binding
+roles. Coordinated dual-arm planning with `motion_source="motion_gen"` is not
+supported by the cuRobo backend; use the supported IK/interpolation path for
+this primitive.
 
 **Example:** `scripts/tutorials/atomic_action/coordinated_pickment.py`
 
@@ -448,23 +482,22 @@ hold -> optionally release the placing hand -> retreat the placing arm**.
 | Skill ID | `coordinated_placement` |
 | Goal | `CoordinatedPlacementGoal` |
 | Binding | manipulator + end effector roles `placing` and `support` |
-| Precondition | separate `HeldObjectState` entries exist for both configured arms |
+| Precondition | separate `HeldObjectState` entries exist for both bound arms |
 | Goal geometry | placing/support object target poses, optional height offsets, optional release override |
 | Effect | preserve support attachment; remove or preserve placing attachment according to `release`; clear overlapping coordinated state |
 
 Both object targets may use `SceneEntityPose`, so either can participate in
-dynamic-goal invalidation. Goal-level height/release values override defaults in
-the action config for that invocation.
+dynamic-goal invalidation. Goal-level height/release values override
+`CoordinatedPlacementOptions` for that invocation.
 
-Important `CoordinatedPlacementCfg` fields group into:
+The placing profile must provide `open` and `grasp`; the support profile must
+provide `grasp`. Important `CoordinatedPlacementOptions` fields group into:
 
-- combined, placing/support arm, and placing/support hand control-part names;
-- required placing-hand open/close and support-hand close qpos;
 - default `release`, placing/support height offsets, and `lift_height`;
 - `hand_interp_steps`, `hold_steps`, and `retreat_steps`.
 
-The semantic binding must match those configured resources. The same cuRobo
-restriction as coordinated pickment applies to dual-arm
+The placing/support arms and hands come exclusively from the corresponding
+binding roles. The same cuRobo restriction as coordinated pickment applies to dual-arm
 `motion_source="motion_gen"` planning.
 
 **Example:** `scripts/tutorials/atomic_action/coordinated_placement.py`
@@ -486,16 +519,18 @@ retreats -> destination delivers**.
 | Effect | remove source attachment and create destination `HeldObjectState` |
 | Verification | attachment transfer must be externally verified |
 
-`HandOverCfg` currently owns the concrete source/destination arm and hand names,
-all four open/close hand qpos values, destination grasp region and approach
-direction, middle/final object poses, and phase distances/counts. The semantic
-binding must match these configured resources.
+Both source and destination end-effector profiles must provide `open` and
+`grasp`. `HandOverOptions` owns the destination grasp region and approach
+direction, middle/final object poses, and phase distances/counts. The
+source/destination arm and hand control parts come exclusively from the
+corresponding `ActionBinding` roles.
 
-The middle and final poses are currently fixed configuration tensors rather
-than `SceneEntityPose` goal fields. Consequently, handover supports tracking-
-error and timeout recovery, but does not yet provide automatic moving-handover-
-point invalidation. The action queries the semantic object's live orientation
-when replanning and preserves that orientation at the configured middle/final
+The middle and final poses are currently option tensors rather than
+`SceneEntityPose` goal fields. Consequently, handover supports tracking-error
+and timeout recovery, but does not automatically invalidate a moving handover
+point. An application can submit a newer invocation revision with updated
+`HandOverOptions`; the action also queries the semantic object's live
+orientation when replanning and preserves it at the supplied middle/final
 positions.
 
 As with the other coordinated primitive, cuRobo does not currently support its

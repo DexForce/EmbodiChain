@@ -18,12 +18,13 @@
 
 from __future__ import annotations
 
-from typing import Iterable, TYPE_CHECKING
+from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
 from .core import AtomicAction
-from .invocation import ActionInvocation
+from .control import ControlPartCommandProfile
+from .invocation import ActionInvocation, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
 from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
@@ -77,8 +78,15 @@ def get_registered_actions() -> dict[str, type[AtomicAction]]:
 class AtomicActionEngine:
     """Own planning resources and coordinate side-effect-free atomic actions."""
 
-    def __init__(self, motion_generator: MotionGenerator) -> None:
-        self._planning_services = ActionPlanningServices(motion_generator)
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+    ) -> None:
+        self._planning_services = ActionPlanningServices(
+            motion_generator,
+            control_profiles=control_profiles,
+        )
         self._actions: dict[str, AtomicAction] = {}
 
     @property
@@ -100,6 +108,11 @@ class AtomicActionEngine:
     def planning_services(self) -> ActionPlanningServices:
         """Engine-owned resources shared by every bound atomic action."""
         return self._planning_services
+
+    @property
+    def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
+        """Semantic command profiles registered for robot control parts."""
+        return self._planning_services.control_profiles
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
@@ -157,8 +170,66 @@ class AtomicActionEngine:
             raise TypeError("action must be an AtomicAction instance.")
         self._validate_context(context)
         action._bind(self._planning_services)
-        plan = action.plan(invocation, context)
-        self._validate_plan(plan, context, invocation)
+        request = action.resolve_request(invocation)
+        plan = action.plan(request, context)
+        self._validate_plan(plan, context, request)
+        return plan
+
+    def resolve(
+        self,
+        invocation: ActionInvocation,
+    ) -> ResolvedActionRequest:
+        """Resolve one registered invocation into an engine-owned snapshot.
+
+        The returned request owns its policy and skill-option values. Closed-loop
+        recovery reuses the same request so a replan cannot observe later
+        mutations of caller-owned configuration objects.
+
+        Args:
+            invocation: Grounded request for a registered skill.
+
+        Returns:
+            Validated and embodiment-resolved request snapshot.
+
+        Raises:
+            KeyError: If the invocation references an unregistered skill.
+        """
+        action = self._actions.get(invocation.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {invocation.skill_id!r}."
+            )
+        return action.resolve_request(invocation)
+
+    def plan_request(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+    ) -> ActionPlan:
+        """Plan an already-resolved request without rebuilding its snapshot.
+
+        This is the planning entry point used by execution recovery. Callers
+        normally use :meth:`plan`, while an execution session resolves once and
+        calls this method for every replan.
+
+        Args:
+            request: Immutable request previously returned by :meth:`resolve`.
+            context: Optional latest planning state; captured when omitted.
+
+        Returns:
+            Validated side-effect-free action plan.
+        """
+        if not isinstance(request, ResolvedActionRequest):
+            raise TypeError("request must be a ResolvedActionRequest.")
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        current = self.initial_context() if context is None else context
+        self._validate_context(current)
+        plan = action.plan(request, current)
+        self._validate_plan(plan, current, request)
         return plan
 
     def plan(
@@ -178,13 +249,9 @@ class AtomicActionEngine:
         Raises:
             KeyError: If the invocation references an unregistered skill.
         """
-        action = self._actions.get(invocation.skill_id)
-        if action is None:
-            raise KeyError(
-                f"No atomic action registered for skill {invocation.skill_id!r}."
-            )
         current = self.initial_context() if context is None else context
-        return self.plan_action(action, invocation, current)
+        request = self.resolve(invocation)
+        return self.plan_request(request, current)
 
     def initial_context(
         self,
@@ -325,17 +392,21 @@ class AtomicActionEngine:
         self,
         plan: ActionPlan,
         context: PlanningContext,
-        invocation: ActionInvocation,
+        request: ResolvedActionRequest,
     ) -> None:
         """Validate one action result before it is composed."""
-        if plan.skill_id != invocation.skill_id:
+        if plan.skill_id != request.skill_id:
             raise ValueError(
-                "ActionPlan.skill_id must match its invocation, "
-                f"got {plan.skill_id!r} and {invocation.skill_id!r}."
+                "ActionPlan.skill_id must match its request, "
+                f"got {plan.skill_id!r} and {request.skill_id!r}."
             )
-        if plan.invocation_id != invocation.invocation_id:
+        if plan.invocation_id != request.invocation_id:
             raise ValueError(
                 "ActionPlan.invocation_id must preserve the invocation correlation id."
+            )
+        if plan.invocation_revision != request.revision:
+            raise ValueError(
+                "ActionPlan.invocation_revision must preserve the request revision."
             )
         trajectory = plan.trajectory
         if trajectory.batch_size != context.batch_size:

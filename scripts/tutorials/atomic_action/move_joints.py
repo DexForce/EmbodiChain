@@ -33,9 +33,9 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     JointPositionGoal,
     MoveJoints,
-    MoveJointsCfg,
     MotionPolicy,
 )
 from embodichain.utils import logger
@@ -79,14 +79,13 @@ def main() -> None:
             [0.0, -1.57, 1.57, -1.57, -1.57, 0.0],
         )
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        MoveJoints(
-            cfg=MoveJointsCfg(
-                named_joint_positions={"ready": ready},
-            ),
-        )
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "arm": ControlPartCommandProfile.joint_positions(ready=ready),
+        },
     )
+    engine.register(MoveJoints())
 
     if not args.no_vis_eef_axis:
         draw_axis_marker(

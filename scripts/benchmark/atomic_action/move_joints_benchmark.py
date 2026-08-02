@@ -240,8 +240,8 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     ensure_torch()
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
+        ControlPartCommandProfile,
         MoveJoints,
-        MoveJointsCfg,
     )
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
     from embodichain.lab.sim.planners import ToppraPlannerCfg
@@ -271,14 +271,13 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     ready_qpos = _qpos(READY_QPOS, sim.device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveJoints(
-            cfg=MoveJointsCfg(
-                named_joint_positions={"ready": ready_qpos},
-            ),
-        )
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "arm": ControlPartCommandProfile.joint_positions(ready=ready_qpos),
+        },
     )
+    atomic_engine.register(MoveJoints())
 
     results: list[dict[str, object]] = []
     video_paths: list[str] = []

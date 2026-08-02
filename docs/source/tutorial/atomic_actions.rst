@@ -1,31 +1,50 @@
 Atomic actions
 ==============
 
-Atomic actions are typed, side-effect-free motion planners. An action receives a
-grounded :class:`~embodichain.lab.sim.atomic_actions.ActionInvocation` and the
-latest :class:`~embodichain.lab.sim.atomic_actions.PlanningContext`, then returns
-an :class:`~embodichain.lab.sim.atomic_actions.ActionPlan`.
+Atomic actions are typed, side-effect-free motion planners. The engine resolves
+a grounded :class:`~embodichain.lab.sim.atomic_actions.ActionInvocation` into a
+:class:`~embodichain.lab.sim.atomic_actions.ResolvedActionRequest`; an action
+combines that snapshot with the latest
+:class:`~embodichain.lab.sim.atomic_actions.PlanningContext` and returns an
+:class:`~embodichain.lab.sim.atomic_actions.ActionPlan`.
 
 For the complete architecture and ownership model, see
 :doc:`/overview/sim/atomic_actions/index`. For the capability matrix and visual
 demonstrations of every built-in skill, see
 :doc:`/overview/sim/atomic_actions/builtin_actions`.
 
-The contracts deliberately separate four concerns:
+The contracts deliberately separate six concerns:
 
 * a **goal** describes what should happen;
 * an **ActionBinding** maps semantic roles such as ``primary`` or ``source`` to
-  robot control resources;
+  names declared in the engine robot's ``control_parts`` mapping;
+* a **ControlPartCommandProfile** maps embodiment-specific meanings such as
+  ``open``, ``grasp``, or ``ready`` to typed commands;
+* typed **ActionOptions** contain behavior that may vary for one skill call;
 * a **MotionPolicy** and **RecoveryPolicy** describe reusable planning and
   bounded-recovery choices;
 * a **PlanningContext** contains measured robot state, verified task state, and
   a versioned scene snapshot.
 
-The engine exclusively owns the ``MotionGenerator`` and a shared trajectory
-builder. Atomic action constructors accept only implementation configuration;
-``register()`` binds each action to the engine resources. Use
+Binding values are keys from ``RobotCfg.control_parts``. They are not joint,
+link, TCP-frame, or scene-object names. The engine validates them and resolves
+their full-robot joint indices before planning. The ``end_effectors`` map names
+an actuated hand/tool control part rather than an IK end frame.
+
+A role is an action-defined semantic participant slot, not a control part. In
+``{"primary": "left_arm"}``, ``primary`` means the principal participant of
+that single-participant action, while ``left_arm`` is the concrete control-part
+key. It has no inherent left/right or default-arm meaning. Actions publish their
+required slots through ``manipulator_roles`` and ``end_effector_roles``. When a
+role such as ``primary`` occurs in both maps, the entries select the arm and
+hand/tool serving the same functional participant, but the caller is still
+responsible for choosing a physically compatible pair.
+
+The engine exclusively owns the ``MotionGenerator``, shared trajectory builder,
+and control-part profiles. Atomic action constructors accept only optional
+typed default options; ``register()`` binds each action to the engine resources. Use
 ``engine.plan_action(action, invocation, context)`` for an unregistered,
-configuration-specific action instance.
+default-option-specific action instance.
 
 Runnable examples
 -----------------
@@ -58,6 +77,38 @@ The ``motion_generator`` variable in the snippets below is a configured
 :class:`~embodichain.lab.sim.planners.MotionGenerator`; its robot, planner,
 device, cache, and collision world become the resources owned by the engine.
 
+Control-part commands
+---------------------
+
+Hand qpos and named robot postures are robot knowledge rather than action
+configuration. Register them by concrete ``Robot.control_parts`` key when the
+engine is built:
+
+.. code-block:: python
+
+   from embodichain.lab.sim.atomic_actions import (
+       AtomicActionEngine,
+       ControlPartCommandProfile,
+   )
+
+   engine = AtomicActionEngine(
+       motion_generator,
+       control_profiles={
+           "left_hand": ControlPartCommandProfile.joint_positions(
+               open=left_open_qpos,
+               grasp=left_grasp_qpos,
+           ),
+           "left_arm": ControlPartCommandProfile.joint_positions(
+               ready=left_ready_qpos,
+           ),
+       },
+   )
+
+``PickUp``, ``Place``, and the other manipulation skills resolve ``open`` and
+``grasp`` from their bound end effector. ``MoveJoints`` resolves a string target
+from its bound manipulator. Joint limits validate possible commands, but do not
+define their semantic meaning; supply calibrated robot commands in production.
+
 Static compilation
 ------------------
 
@@ -73,11 +124,10 @@ the scene is treated as fixed during planning:
        EndEffectorPoseGoal,
        MotionPolicy,
        MoveEndEffector,
-       MoveEndEffectorCfg,
    )
 
    engine = AtomicActionEngine(motion_generator)
-   engine.register(MoveEndEffector(MoveEndEffectorCfg()))
+   engine.register(MoveEndEffector())
 
    invocation = ActionInvocation(
        skill_id="move_end_effector",
@@ -133,6 +183,29 @@ command, detects material motion of referenced scene entities, enforces phase
 timeouts, and replans from the latest observation within the recovery budget.
 It does not own the simulator or controller loop.
 
+Recovery replans reuse one immutable invocation-revision snapshot. If an
+application intentionally changes the goal, options, policy, binding, or a
+control command while the action is active, submit a strictly newer revision:
+
+.. code-block:: python
+
+   revised = ActionInvocation(
+       skill_id=invocation.skill_id,
+       goal=updated_goal,
+       binding=invocation.binding,
+       motion_policy=invocation.motion_policy,
+       recovery_policy=invocation.recovery_policy,
+       skill_options=updated_options,
+       control_overrides=updated_control_commands,
+       invocation_id=invocation.invocation_id,
+       revision=invocation.revision + 1,
+   )
+   session.revise_current(revised)
+
+The session replans from its latest context and emits an
+``invocation_revised`` event. ``skill_id`` and ``invocation_id`` must still
+identify the active logical call.
+
 Only entities referenced through ``SceneEntityPose`` become automatic
 scene-motion dependencies. A skill may query a simulation entity's live pose
 when it plans, but that query alone does not cause an executing session to
@@ -160,7 +233,8 @@ Adding an action
 ----------------
 
 Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-implement ``plan(invocation, context)`` and declare the stable skill metadata:
+define typed runtime options when needed, implement ``plan(request, context)``,
+and declare the stable skill metadata:
 
 .. code-block:: python
 
@@ -172,24 +246,30 @@ implement ``plan(invocation, context)`` and declare the stable skill metadata:
        goal_kind: ClassVar[str] = "push"
        contact_pose: torch.Tensor
 
-   class Push(AtomicAction[PushGoal]):
+   @dataclass(frozen=True, slots=True)
+   class PushOptions(ActionOptions):
+       retreat_distance: float = 0.1
+
+   class Push(AtomicAction[PushGoal, PushOptions]):
        skill_id: ClassVar[str] = "push"
        GoalType: ClassVar[type] = PushGoal
+       OptionsType: ClassVar[type] = PushOptions
        manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-       def __init__(self, cfg: PushCfg | None = None) -> None:
-           super().__init__(cfg or PushCfg())
+       def __init__(self, default_options: PushOptions | None = None) -> None:
+           super().__init__(default_options)
 
        def plan(
            self,
-           invocation: ActionInvocation[PushGoal],
+           request: ResolvedActionRequest[PushGoal, PushOptions],
            context: PlanningContext,
        ) -> ActionPlan:
-           goal = self.require_goal(invocation)
+           goal = self.require_goal(request)
+           options = request.skill_options
            # Resolve the bound resource, plan from context.robot.qpos, and
            # return a full-robot TimedTrajectory or position tensor.
            return self.build_plan(
-               invocation,
+               request,
                context,
                success=success_mask,
                trajectory=full_robot_positions,

@@ -178,13 +178,13 @@ def _prepare_held_state(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         EndEffectorPoseGoal,
         GraspGoal,
         MoveEndEffector,
-        MoveEndEffectorCfg,
         MotionPolicy,
         PickUp,
-        PickUpCfg,
+        PickUpOptions,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
         build_grasp_generator_cfg,
@@ -194,15 +194,19 @@ def _prepare_held_state(
     )
 
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+    )
+    atomic_engine.register(MoveEndEffector())
     atomic_engine.register(
         PickUp(
-            cfg=PickUpCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
+            default_options=PickUpOptions(
                 approach_direction=resolve_pickup_approach_direction(
                     pickup_approach, position_case, sim.device
                 ),
@@ -275,9 +279,9 @@ def _run_case(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         HeldObjectPoseGoal,
         MoveHeldObject,
-        MoveHeldObjectCfg,
         MotionPolicy,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
@@ -314,16 +318,15 @@ def _run_case(
             pickup_approach_direction_tuple(pickup_approach, position_case)
         )
         precondition_waypoints = int(precondition_traj.shape[1])
-        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-        atomic_engine.register(
-            MoveHeldObject(
-                cfg=MoveHeldObjectCfg(
-                    control_part="arm",
-                    hand_control_part="hand",
-                    hand_close_qpos=hand_close,
-                ),
-            )
+        atomic_engine = AtomicActionEngine(
+            motion_generator=motion_gen,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    grasp=hand_close,
+                )
+            },
         )
+        atomic_engine.register(MoveHeldObject())
         target_pose = _make_object_target_pose(sim.device, case.xyz)
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(

@@ -7,7 +7,7 @@ description: Add a new simulation atomic action or motion primitive to EmbodiCha
 
 Add an action-owned goal and a side-effect-free `AtomicAction.plan()`
 implementation. The engine owns all motion-planning resources; action
-constructors accept only implementation configuration. Keep task-graph/MLLM
+constructors accept only optional typed default options. Keep task-graph/MLLM
 logic, simulator stepping, controller I/O, and physical-effect commits outside
 the action.
 
@@ -20,6 +20,8 @@ Inspect only the files relevant to the requested skill:
 | Base action and descriptors | `embodichain/lab/sim/atomic_actions/core.py` |
 | Goals and dynamic pose references | `embodichain/lab/sim/atomic_actions/goals.py` |
 | Role-to-resource binding | `embodichain/lab/sim/atomic_actions/bindings.py` |
+| Invocation, options, and resolved request | `embodichain/lab/sim/atomic_actions/invocation.py` |
+| Control-part semantic commands | `embodichain/lab/sim/atomic_actions/control.py` |
 | Invocation policies | `embodichain/lab/sim/atomic_actions/policies.py` |
 | Robot/task/scene state | `embodichain/lab/sim/atomic_actions/state.py` |
 | Effects and plans | `embodichain/lab/sim/atomic_actions/effects.py`, `plans.py` |
@@ -66,37 +68,42 @@ options, retry counts, live state, or a generic optional field bag. Use
 Use `ObjectActionGoal` only when the shared `semantics` field is genuinely
 required.
 
-## 2. Define implementation configuration
+## 2. Define runtime options and control commands
 
-Extend `ActionCfg` directly with `@configclass`. Keep only implementation-owned
-behavior such as distances, gripper positions, grasp constraints, and phase
-split counts.
+Define a frozen `ActionOptions` subclass only when skill behavior may vary by
+invocation. Examples include distances, grasp constraints, and phase split
+counts. If no such behavior exists, use the base `ActionOptions`.
 
 Do not put `motion_source`, planner choice, sample count, control period,
-velocity limits, collision policy, or recovery thresholds in the action config;
-those belong to `MotionPolicy` or `RecoveryPolicy` on the invocation.
+velocity limits, collision policy, or recovery thresholds in skill options;
+those belong to `MotionPolicy` or `RecoveryPolicy`.
 
 ```python
-from embodichain.lab.sim.atomic_actions import ActionCfg
-from embodichain.utils import configclass
+from dataclasses import dataclass
+
+from embodichain.lab.sim.atomic_actions import ActionOptions
 
 
-@configclass
-class PushCfg(ActionCfg):
-    name: str = "push"
+@dataclass(frozen=True, slots=True, eq=False)
+class PushOptions(ActionOptions):
     push_distance: float = 0.05
 ```
 
+Do not put arm/hand names, hand qpos, or named robot postures in options. Bind
+participants with `ActionBinding`. Register embodiment-specific commands such
+as `open`, `grasp`, or `ready` on `ControlPartCommandProfile`; use
+`ActionControlOverrides` only for one invocation revision.
+
 ## 3. Implement the planner
 
-Inherit `AtomicAction[PushGoal]` directly. Declare stable metadata and resolve
+Inherit `AtomicAction[PushGoal, PushOptions]` directly. Declare stable metadata and resolve
 resources from semantic binding roles.
 
 ```python
 from typing import ClassVar
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
+    ResolvedActionRequest,
     ActionPlan,
     AtomicAction,
     PlanningContext,
@@ -104,43 +111,46 @@ from embodichain.lab.sim.atomic_actions import (
 )
 
 
-class Push(AtomicAction[PushGoal]):
+class Push(AtomicAction[PushGoal, PushOptions]):
     skill_id: ClassVar[str] = "push"
     GoalType: ClassVar[type] = PushGoal
+    OptionsType: ClassVar[type] = PushOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(self, cfg: PushCfg | None = None) -> None:
-        super().__init__(cfg or PushCfg())
+    def __init__(self, default_options: PushOptions | None = None) -> None:
+        super().__init__(default_options)
 
     def plan(
         self,
-        invocation: ActionInvocation[PushGoal],
+        request: ResolvedActionRequest[PushGoal, PushOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        goal = self.require_goal(invocation)
-        control_part = invocation.binding.manipulator("primary")
-        joint_ids = self.robot.get_joint_ids(name=control_part)
+        goal = self.require_goal(request)
+        options = request.skill_options
+        manipulator = request.binding.manipulator("primary")
+        control_part = manipulator.name
+        joint_ids = list(manipulator.joint_ids)
         start_qpos = context.robot.qpos[:, joint_ids]
 
         # Build planner states and generate controlled-joint motion using
-        # invocation.motion_policy. Embed it into full robot DoF.
+        # request.motion_policy. Embed it into full robot DoF.
         result = self.builder.generate_arm_plan(
             target_states,
             start_qpos,
-            invocation.motion_policy.sample_count,
+            request.motion_policy.sample_count,
             control_part=control_part,
-            arm_dof=len(joint_ids),
-            cfg=invocation.motion_policy,
+            arm_dof=manipulator.dof,
+            cfg=request.motion_policy,
         )
         success, trajectory = self.builder.to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=invocation.motion_policy.control_dt,
+            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=success,
             trajectory=trajectory,
@@ -157,7 +167,7 @@ Follow these invariants:
 - Return full-robot `(B, N, robot.dof)` motion as a tensor or
   `TimedTrajectory` with matching `env_ids`.
 - Preserve backend timing/derivatives when available.
-- Return `failed_plan(invocation, context, message=...)` for an expected soft
+- Return `failed_plan(request, context, message=...)` for an expected soft
   planning failure.
 - Never mutate the context, step simulation, send commands, or claim a physical
   effect occurred.
@@ -171,7 +181,7 @@ Follow these invariants:
 Register an instance by its class-level `skill_id`:
 
 ```python
-engine.register(Push(PushCfg()))
+engine.register(Push())
 ```
 
 Use the global registry only for discoverable third-party classes:
@@ -198,7 +208,7 @@ error recovery are required.
 
 ## 5. Export and document
 
-Export the goal, config, and action from:
+Export the goal, options, and action from:
 
 1. `embodichain/lab/sim/atomic_actions/primitives/__init__.py`
 2. `embodichain/lab/sim/atomic_actions/__init__.py`
@@ -231,8 +241,11 @@ then use the `pre-commit-check` skill before committing.
 | Inherit another action | Inherit `AtomicAction` directly; compose helpers. |
 | Add one generic target with many optional fields | Define a narrow action-owned goal. |
 | Put hardware names in the goal | Bind semantic roles through `ActionBinding`. |
-| Put planner/recovery knobs in action config | Move them to invocation policies. |
-| Pass a motion generator to each action | Pass it once to `AtomicActionEngine`; construct actions from config only. |
+| Put arm/hand control-part names in skill options | Use `ActionBinding` as their only source. |
+| Bind a joint, link, TCP frame, or arbitrary name | Every binding value must be a key in `RobotCfg.control_parts`. |
+| Put hand qpos or named robot postures in skill options | Register semantic commands on the concrete control-part profile. |
+| Put planner/recovery knobs in skill options | Move them to invocation policies. |
+| Pass a motion generator to each action | Pass it once to `AtomicActionEngine`; construct actions from default options only. |
 | Read `robot.get_qpos()` inside `plan()` | Use `context.robot.qpos`. |
 | Return an arm-only tensor | Embed into full robot DoF. |
 | Mutate held state after planning | Declare a `StateDelta`. |

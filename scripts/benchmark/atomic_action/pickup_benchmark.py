@@ -126,9 +126,10 @@ def _run_case(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         GraspGoal,
         PickUp,
-        PickUpCfg,
+        PickUpOptions,
         MotionPolicy,
     )
     from scripts.tutorials.atomic_action.pickup import (
@@ -159,14 +160,18 @@ def _run_case(
         approach_direction_text = format_vector3(
             pickup_approach_direction_tuple(approach, position_case)
         )
-        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
+        atomic_engine = AtomicActionEngine(
+            motion_generator=motion_gen,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    open=hand_open,
+                    grasp=hand_close,
+                )
+            },
+        )
         atomic_engine.register(
             PickUp(
-                cfg=PickUpCfg(
-                    control_part="arm",
-                    hand_control_part="hand",
-                    hand_open_qpos=hand_open,
-                    hand_close_qpos=hand_close,
+                default_options=PickUpOptions(
                     approach_direction=approach_direction,
                     pre_grasp_distance=0.15,
                     lift_height=0.16,

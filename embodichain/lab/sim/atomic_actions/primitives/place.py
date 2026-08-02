@@ -24,18 +24,16 @@ from typing import ClassVar, Literal
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass, logger
+from embodichain.utils import logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..affordance import AssembleAffordance
-from ..core import (
-    ActionCfg,
-    AtomicAction,
-)
+from ..control import GRASP_COMMAND, OPEN_COMMAND
+from ..core import AtomicAction
 from ..effects import StateDelta
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionInvocation
+from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..state import PlanningContext
 
@@ -89,25 +87,12 @@ class AssembleGoal:
     """Assembly affordance anchoring the assemble object to the base object."""
 
 
-@configclass
-class PlaceCfg(ActionCfg):
-    name: str = "place"
-    """Name of the action, used for identification and logging."""
-
-    control_part: str = "arm"
-    """Manipulator resource used by this configured action instance."""
+@dataclass(frozen=True, slots=True, eq=False)
+class PlaceOptions(ActionOptions):
+    """Per-invocation placement behavior."""
 
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper open interpolation phase."""
-
-    hand_control_part: str = "hand"
-    """Name of the robot part that controls the hand joints."""
-
-    hand_open_qpos: torch.Tensor | None = None
-    """Joint positions for the open hand state, shape ``[hand_dof,]``."""
-
-    hand_close_qpos: torch.Tensor | None = None
-    """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
 
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
@@ -118,8 +103,16 @@ class PlaceCfg(ActionCfg):
     cartesian_waypoint_count: int = 1
     """Number of fixed-orientation Cartesian keyframes per translation segment."""
 
+    def __post_init__(self) -> None:
+        if self.hand_interp_steps < 1:
+            raise ValueError("hand_interp_steps must be at least 1.")
+        if self.lift_height < 0.0:
+            raise ValueError("lift_height must be non-negative.")
+        if self.cartesian_waypoint_count < 1:
+            raise ValueError("cartesian_waypoint_count must be at least 1.")
 
-class Place(AtomicAction[PlaceGoal | AssembleGoal]):
+
+class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     """Lower the held object to a place pose, open the gripper, retract.
 
     The :class:`PlaceGoal` may carry either a single waypoint
@@ -141,78 +134,79 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         PlaceGoal,
         AssembleGoal,
     )
+    OptionsType: ClassVar[type] = PlaceOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self,
-        cfg: PlaceCfg | None = None,
+        default_options: PlaceOptions | None = None,
     ) -> None:
-        super().__init__(cfg or PlaceCfg())
-        if self.cfg.hand_open_qpos is None:
-            logger.log_error("hand_open_qpos must be specified in PlaceCfg", ValueError)
-        if self.cfg.hand_close_qpos is None:
-            logger.log_error(
-                "hand_close_qpos must be specified in PlaceCfg", ValueError
-            )
-        if self.cfg.cartesian_waypoint_count < 1:
-            logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
+        super().__init__(default_options)
 
     def _on_bind(self) -> None:
-        """Resolve robot-dependent resources from the owning engine."""
+        """Resolve engine-wide resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.arm_dof = len(self.arm_joint_ids)
         self.robot_dof = self.robot.dof
-        assert self.cfg.hand_open_qpos is not None
-        assert self.cfg.hand_close_qpos is not None
-        self.hand_open_qpos = self.cfg.hand_open_qpos.to(self.device)
-        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
     def plan(
         self,
-        invocation: ActionInvocation[PlaceGoal | AssembleGoal],
+        request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan approach, release, and retract without committing detachment."""
-        target = self.require_goal(invocation)
-        if invocation.binding.manipulator() != self.cfg.control_part:
-            raise ValueError("Place manipulator binding does not match its config.")
-        if invocation.binding.end_effector() != self.cfg.hand_control_part:
-            raise ValueError("Place end-effector binding does not match its config.")
+        target = self.require_goal(request)
+        options = request.skill_options
+        binding = request.binding
+        manipulator = binding.manipulator()
+        end_effector = binding.end_effector()
+        control_part = manipulator.name
+        arm_joint_ids = list(manipulator.joint_ids)
+        hand_joint_ids = list(end_effector.joint_ids)
+        hand_open_qpos = end_effector.joint_positions(
+            OPEN_COMMAND,
+            n_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        hand_grasp_qpos = end_effector.joint_positions(
+            GRASP_COMMAND,
+            n_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
         state = context
-        place_xpos = self._resolve_place_xpos(target, state)
+        place_xpos = self._resolve_place_xpos(target, state, control_part)
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
 
         start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
+            arm_qpos_from_state(state, arm_joint_ids),
             n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
+            arm_dof=manipulator.dof,
+            control_part=control_part,
         )
         if isinstance(target, PlaceGoal) and target.tcp_symmetry == "z_roll_180":
             place_xpos = self._select_tcp_symmetric_place_variant(
-                place_xpos, start_arm_qpos
+                place_xpos, start_arm_qpos, control_part
             )
         n_down, n_open, n_back = self.builder.split_three_phase(
-            invocation.motion_policy.sample_count,
-            self.cfg.hand_interp_steps,
+            request.motion_policy.sample_count,
+            options.hand_interp_steps,
             first_phase_name="approach",
             third_phase_name="back",
         )
 
-        approach_xpos = self._lifted_pose(place_xpos[:, 0])
-        retract_xpos = self._lifted_pose(place_xpos[:, -1])
+        approach_xpos = self._lifted_pose(place_xpos[:, 0], options)
+        retract_xpos = self._lifted_pose(place_xpos[:, -1], options)
 
         start_xpos = self.robot.compute_fk(
             qpos=start_arm_qpos,
-            name=self.cfg.control_part,
+            name=control_part,
             to_matrix=True,
         )
         down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
-        down_xpos = self._translation_keyframes(start_xpos, down_xpos)
+        down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
 
         target_states_list = [
             [
@@ -225,14 +219,14 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
             target_states_list,
             start_arm_qpos,
             n_down,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=invocation.motion_policy,
+            control_part=control_part,
+            arm_dof=manipulator.dof,
+            cfg=request.motion_policy,
         )
         reach_arm_qpos = down_arm[:, -1, :]
 
         back_xpos = self._translation_keyframes(
-            place_xpos[:, -1], retract_xpos.unsqueeze(1)
+            place_xpos[:, -1], retract_xpos.unsqueeze(1), options
         )
         target_states_list = [
             [
@@ -245,14 +239,14 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
             target_states_list,
             reach_arm_qpos,
             n_back,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=invocation.motion_policy,
+            control_part=control_part,
+            arm_dof=manipulator.dof,
+            cfg=request.motion_policy,
         )
         success = down_success & back_success
 
         hand_open_path = self.builder.interpolate_hand_qpos(
-            self.hand_close_qpos, self.hand_open_qpos, n_waypoints=n_open
+            hand_grasp_qpos, hand_open_qpos, n_waypoints=n_open
         )
 
         # Allocate from the actually-returned phase lengths so collision-aware
@@ -265,36 +259,35 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :n_down_actual, self.arm_joint_ids] = down_arm
-        full[:, :n_down_actual, self.hand_joint_ids] = self.hand_close_qpos
-        full[:, n_down_actual : n_down_actual + n_open, self.arm_joint_ids] = (
+        full[:, :n_down_actual, arm_joint_ids] = down_arm
+        full[:, :n_down_actual, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        full[:, n_down_actual : n_down_actual + n_open, arm_joint_ids] = (
             reach_arm_qpos.unsqueeze(1)
         )
-        full[:, n_down_actual : n_down_actual + n_open, self.hand_joint_ids] = (
-            hand_open_path
-        )
-        full[:, n_down_actual + n_open :, self.arm_joint_ids] = back_arm
-        full[:, n_down_actual + n_open :, self.hand_joint_ids] = self.hand_open_qpos
+        full[:, n_down_actual : n_down_actual + n_open, hand_joint_ids] = hand_open_path
+        full[:, n_down_actual + n_open :, arm_joint_ids] = back_arm
+        full[:, n_down_actual + n_open :, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
         coordinated_updates = {
-            key: None
-            for key in state.coordinated_held_objects
-            if self.cfg.control_part in key
+            key: None for key in state.coordinated_held_objects if control_part in key
         }
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=success,
             trajectory=full,
             expected_effects=StateDelta(
-                held_object_updates={self.cfg.control_part: None},
+                held_object_updates={control_part: None},
                 coordinated_held_object_updates=coordinated_updates,
             ),
             phase_name="place",
         )
 
     def _resolve_place_xpos(
-        self, target: PlaceGoal | AssembleGoal, state: PlanningContext
+        self,
+        target: PlaceGoal | AssembleGoal,
+        state: PlanningContext,
+        control_part: str,
     ) -> torch.Tensor:
         """Resolve the place EEF poses from a typed target.
 
@@ -311,10 +304,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
                 resolve_pose_goal(target.xpos, state, name="xpos"),
                 n_envs=self.n_envs,
             )
-        return self._resolve_assemble_place_xpos(target, state)
+        return self._resolve_assemble_place_xpos(target, state, control_part)
 
     def _resolve_assemble_place_xpos(
-        self, target: AssembleGoal, state: PlanningContext
+        self,
+        target: AssembleGoal,
+        state: PlanningContext,
+        control_part: str,
     ) -> torch.Tensor:
         """Derive the place EEF pose from an assembly affordance.
 
@@ -332,11 +328,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         Raises:
             ValueError: If no held object or no base object entity is available.
         """
-        held = state.get_held_object(self.cfg.control_part)
+        held = state.get_held_object(control_part)
         if held is None:
             logger.log_error(
                 "Place with AssembleGoal requires an object held by control "
-                f"part {self.cfg.control_part!r} (run PickUp first).",
+                f"part {control_part!r} (run PickUp first).",
                 ValueError,
             )
         affordance = target.affordance
@@ -358,13 +354,15 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         )
         return torch.bmm(assemble_object_pose, object_to_eef)
 
-    def _lifted_pose(self, release_xpos: torch.Tensor) -> torch.Tensor:
+    def _lifted_pose(
+        self, release_xpos: torch.Tensor, options: PlaceOptions
+    ) -> torch.Tensor:
         """Build an above-release pose while respecting the optional TCP z cap."""
         lifted_xpos = release_xpos.clone()
-        lifted_z = release_xpos[:, 2, 3] + self.cfg.lift_height
-        if self.cfg.max_approach_retract_z is not None:
+        lifted_z = release_xpos[:, 2, 3] + options.lift_height
+        if options.max_approach_retract_z is not None:
             max_z = torch.as_tensor(
-                self.cfg.max_approach_retract_z,
+                options.max_approach_retract_z,
                 dtype=release_xpos.dtype,
                 device=release_xpos.device,
             )
@@ -376,10 +374,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         return lifted_xpos
 
     def _translation_keyframes(
-        self, start_xpos: torch.Tensor, target_xpos: torch.Tensor
+        self,
+        start_xpos: torch.Tensor,
+        target_xpos: torch.Tensor,
+        options: PlaceOptions,
     ) -> torch.Tensor:
         """Interpolate translations while holding each segment's target rotation."""
-        count = self.cfg.cartesian_waypoint_count
+        count = options.cartesian_waypoint_count
         if count == 1:
             return target_xpos
 
@@ -402,7 +403,10 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         return keyframes.flatten(1, 2)
 
     def _select_tcp_symmetric_place_variant(
-        self, place_xpos: torch.Tensor, start_qpos: torch.Tensor
+        self,
+        place_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
     ) -> torch.Tensor:
         """Choose the closest TCP z-roll variant for an opt-in place target."""
         mirrored_place_xpos = place_xpos.clone()
@@ -412,7 +416,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
 
         start_xpos = self.robot.compute_fk(
             qpos=start_qpos,
-            name=self.cfg.control_part,
+            name=control_part,
             to_matrix=True,
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
@@ -433,4 +437,4 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal]):
         ]
 
 
-__all__ = ["AssembleGoal", "Place", "PlaceCfg", "PlaceGoal"]
+__all__ = ["AssembleGoal", "Place", "PlaceGoal", "PlaceOptions"]
