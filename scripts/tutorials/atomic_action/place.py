@@ -33,12 +33,13 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     GraspGoal,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     Place,
-    PlaceCfg,
     PlaceGoal,
+    PlaceOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
@@ -134,12 +135,18 @@ def main() -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
-    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
+    )
     engine.register(
         PickUp(
-            cfg=PickUpCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
+            default_options=PickUpOptions(
                 pre_grasp_distance=0.15,
                 lift_height=0.16,
                 hand_interp_steps=HAND_INTERP_STEPS,
@@ -148,9 +155,7 @@ def main() -> None:
     )
     engine.register(
         Place(
-            cfg=PlaceCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
+            default_options=PlaceOptions(
                 lift_height=PLACE_LIFT_HEIGHT,
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),

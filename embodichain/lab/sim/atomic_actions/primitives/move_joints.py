@@ -23,10 +23,8 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils import configclass, logger
-
-from ..core import ActionCfg, AtomicAction
-from ..invocation import ActionInvocation
+from ..core import AtomicAction
+from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, CompletionConditionKind
 from ..state import PlanningContext
 
@@ -38,7 +36,7 @@ class JointPositionGoal:
     goal_kind: ClassVar[str] = "joint_position"
 
     target: torch.Tensor | str
-    """Joint qpos/waypoints or a name in ``MoveJointsCfg.named_joint_positions``."""
+    """Joint qpos/waypoints or a named control-part profile command."""
 
     def __post_init__(self) -> None:
         if isinstance(self.target, str):
@@ -59,42 +57,43 @@ class JointPositionGoal:
             )
 
 
-@configclass
-class MoveJointsCfg(ActionCfg):
-    """Skill-specific MoveJoints configuration."""
-
-    name: str = "move_joints"
-    named_joint_positions: dict[str, torch.Tensor] | None = None
-    """Optional named joint-position targets. Motion settings belong to ``MotionPolicy``."""
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveJointsOptions(ActionOptions):
+    """Per-invocation behavior for :class:`MoveJoints`."""
 
 
-class MoveJoints(AtomicAction[JointPositionGoal]):
+class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     """Plan joint motion from the observed state to one or more waypoints."""
 
     skill_id: ClassVar[str] = "move_joints"
     GoalType: ClassVar[type] = JointPositionGoal
+    OptionsType: ClassVar[type] = MoveJointsOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
 
     def __init__(
         self,
-        cfg: MoveJointsCfg | None = None,
+        default_options: MoveJointsOptions | None = None,
     ) -> None:
-        super().__init__(cfg or MoveJointsCfg())
-        self.named_joint_positions = self.cfg.named_joint_positions or {}
+        super().__init__(default_options)
 
     def plan(
         self,
-        invocation: ActionInvocation[JointPositionGoal],
+        request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
-        goal = self.require_goal(invocation)
-        control_part = invocation.binding.manipulator("primary")
-        joint_ids = self.robot.get_joint_ids(name=control_part)
-        joint_dof = len(joint_ids)
+        goal = self.require_goal(request)
+        manipulator = request.binding.manipulator("primary")
+        control_part = manipulator.name
+        joint_ids = list(manipulator.joint_ids)
+        joint_dof = manipulator.dof
         target_qpos = self.builder.resolve_joint_target(
-            self._resolve_target_qpos(goal),
+            self._resolve_target_qpos(
+                goal,
+                request=request,
+                context=context,
+            ),
             n_envs=context.batch_size,
             joint_dof=joint_dof,
             control_part=control_part,
@@ -108,20 +107,20 @@ class MoveJoints(AtomicAction[JointPositionGoal]):
         result = self.builder.generate_joint_plan(
             start_qpos,
             target_qpos,
-            invocation.motion_policy.sample_count,
+            request.motion_policy.sample_count,
             control_part=control_part,
             arm_dof=joint_dof,
-            cfg=invocation.motion_policy,
+            cfg=request.motion_policy,
         )
         success, trajectory = self.builder.to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=invocation.motion_policy.control_dt,
+            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=success,
             trajectory=trajectory,
@@ -131,21 +130,23 @@ class MoveJoints(AtomicAction[JointPositionGoal]):
     def _resolve_target_qpos(
         self,
         goal: JointPositionGoal,
+        *,
+        request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
     ) -> torch.Tensor:
         """Resolve an explicit or named joint goal to a tensor."""
         if isinstance(goal.target, torch.Tensor):
             return goal.target
-        if goal.target not in self.named_joint_positions:
-            logger.log_error(
-                f"Unknown named joint-position goal {goal.target!r}. Available "
-                f"goals: {sorted(self.named_joint_positions)}",
-                KeyError,
-            )
-        return self.named_joint_positions[goal.target]
+        return request.binding.manipulator("primary").joint_positions(
+            goal.target,
+            n_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
 
 
 __all__ = [
     "JointPositionGoal",
     "MoveJoints",
-    "MoveJointsCfg",
+    "MoveJointsOptions",
 ]

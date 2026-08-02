@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .invocation import ActionInvocation
+from .invocation import ActionInvocation, ResolvedActionRequest
 from .plans import ActionPlan, PlannedPhase
 from .state import EntityState, PlanningContext, SceneSnapshot, TaskState
 
@@ -44,6 +44,7 @@ class ExecutionEventKind(str, Enum):
     """Structured event categories emitted by :meth:`ExecutionSession.tick`."""
 
     ACTION_PLANNED = "action_planned"
+    INVOCATION_REVISED = "invocation_revised"
     REPLANNED = "replanned"
     TRACKING_ERROR = "tracking_error"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
@@ -64,6 +65,7 @@ class ExecutionEvent:
     timestamp: float
     skill_id: str | None
     invocation_id: str | None
+    invocation_revision: int
     invocation_index: int
     env_mask: torch.Tensor
     message: str = ""
@@ -73,6 +75,8 @@ class ExecutionEvent:
             raise ValueError("ExecutionEvent.timestamp must be non-negative.")
         if self.invocation_index < 0:
             raise ValueError("invocation_index must be non-negative.")
+        if self.invocation_revision < 0:
+            raise ValueError("invocation_revision must be non-negative.")
         if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
             raise ValueError("ExecutionEvent.env_mask must be a 1D bool tensor.")
         object.__setattr__(self, "env_mask", self.env_mask.clone())
@@ -150,7 +154,9 @@ class ExecutionSession:
             raise ValueError("ExecutionSession requires at least one invocation.")
         engine._validate_context(context)
         self._engine = engine
-        self._invocations = invocations
+        self._requests: tuple[ResolvedActionRequest, ...] = tuple(
+            engine.resolve(invocation) for invocation in invocations
+        )
         self._task_state = context.task
         self._context = context
         self._invocation_index = 0
@@ -193,6 +199,62 @@ class ExecutionSession:
     def task_state(self) -> TaskState:
         """Verified symbolic task state accumulated by this session."""
         return self._task_state
+
+    def revise_current(self, invocation: ActionInvocation) -> None:
+        """Replace and replan the current invocation with a newer revision.
+
+        The replacement is resolved into a new immutable request snapshot from
+        the latest observation. Retry and replan budgets restart for the new
+        revision, while verified task state, the current batch barrier, and
+        per-environment eligibility are preserved. Ordinary recovery replans
+        continue to reuse this snapshot until another explicit revision.
+
+        Args:
+            invocation: Grounded replacement for the currently active skill.
+                Its ``revision`` must be strictly greater than the active one,
+                and its ``skill_id`` and ``invocation_id`` must identify the
+                same logical call.
+
+        Raises:
+            TypeError: If ``invocation`` is not an ActionInvocation.
+            RuntimeError: If the session is no longer running.
+            ValueError: If the replacement identifies another invocation or
+                does not advance the revision.
+        """
+        if not isinstance(invocation, ActionInvocation):
+            raise TypeError("invocation must be an ActionInvocation.")
+        if self._status is not ExecutionStatus.RUNNING:
+            raise RuntimeError("Only a running execution session can be revised.")
+        current = self._requests[self._invocation_index]
+        if invocation.skill_id != current.skill_id:
+            raise ValueError(
+                f"Revision skill_id {invocation.skill_id!r} does not match "
+                f"the active skill {current.skill_id!r}."
+            )
+        if invocation.invocation_id != current.invocation_id:
+            raise ValueError(
+                "Revision invocation_id must match the active invocation_id."
+            )
+        if invocation.revision <= current.revision:
+            raise ValueError(
+                f"Revision must advance beyond {current.revision}, got "
+                f"{invocation.revision}."
+            )
+
+        replacement = self._engine.resolve(invocation)
+        replacement_plan = self._engine.plan_request(replacement, self._context)
+        requests = list(self._requests)
+        requests[self._invocation_index] = replacement
+        self._requests = tuple(requests)
+        self._phase_index = 0
+        self._waypoint_index = 0
+        self._action_retries.zero_()
+        self._replans.zero_()
+        self._install_plan(
+            replacement_plan,
+            self._context,
+            ExecutionEventKind.INVOCATION_REVISED,
+        )
 
     def tick(
         self,
@@ -303,8 +365,17 @@ class ExecutionSession:
         event_kind: ExecutionEventKind,
     ) -> None:
         """Plan the current invocation from the latest observation."""
-        invocation = self._invocations[self._invocation_index]
-        plan = self._engine.plan(invocation, context)
+        request = self._requests[self._invocation_index]
+        plan = self._engine.plan_request(request, context)
+        self._install_plan(plan, context, event_kind)
+
+    def _install_plan(
+        self,
+        plan: ActionPlan,
+        context: PlanningContext,
+        event_kind: ExecutionEventKind,
+    ) -> None:
+        """Install an already validated plan as the current execution plan."""
         self._plan = plan
         self._phase_index = min(self._phase_index, len(plan.phases) - 1)
         self._waypoint_index = 0
@@ -495,7 +566,7 @@ class ExecutionSession:
             )
         )
         self._invocation_index += 1
-        if self._invocation_index >= len(self._invocations):
+        if self._invocation_index >= len(self._requests):
             self._status = (
                 ExecutionStatus.COMPLETED
                 if self._eligible.any()
@@ -623,21 +694,27 @@ class ExecutionSession:
     ) -> ExecutionEvent:
         """Create an event correlated with the current invocation."""
         skill_id = (
-            self._invocations[self._invocation_index].skill_id
-            if self._invocation_index < len(self._invocations)
+            self._requests[self._invocation_index].skill_id
+            if self._invocation_index < len(self._requests)
             else None
         )
         invocation_id = (
-            self._invocations[self._invocation_index].invocation_id
-            if self._invocation_index < len(self._invocations)
+            self._requests[self._invocation_index].invocation_id
+            if self._invocation_index < len(self._requests)
             else None
+        )
+        invocation_revision = (
+            self._requests[self._invocation_index].revision
+            if self._invocation_index < len(self._requests)
+            else 0
         )
         return ExecutionEvent(
             kind=kind,
             timestamp=self._context.robot.timestamp,
             skill_id=skill_id,
             invocation_id=invocation_id,
-            invocation_index=min(self._invocation_index, len(self._invocations) - 1),
+            invocation_revision=invocation_revision,
+            invocation_index=min(self._invocation_index, len(self._requests) - 1),
             env_mask=env_mask,
             message=message,
         )

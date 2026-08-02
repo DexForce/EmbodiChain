@@ -45,11 +45,12 @@ from embodichain.lab.sim.atomic_actions import (
     AssembleAffordance,
     AssembleGoal,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     GraspGoal,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     Place,
-    PlaceCfg,
+    PlaceOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
@@ -409,12 +410,7 @@ def run_assemble_demo(
 
     # Step 1 - the left arm picks the soda can up by its top part.
     pick_up_action = PickUp(
-        cfg=PickUpCfg(
-            name="pick_up",
-            control_part="left_arm",
-            hand_control_part="left_hand",
-            hand_open_qpos=left_open,
-            hand_close_qpos=left_close,
+        default_options=PickUpOptions(
             pick_object_part="top",
             pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
             lift_height=PICKUP_LIFT_HEIGHT,
@@ -427,17 +423,20 @@ def run_assemble_demo(
     )
     # Step 2 - the left arm places the can directly above the cube.
     place_action = Place(
-        cfg=PlaceCfg(
-            name="place",
-            control_part="left_arm",
-            hand_control_part="left_hand",
-            hand_open_qpos=left_open,
-            hand_close_qpos=left_close,
+        default_options=PlaceOptions(
             lift_height=PLACE_LIFT_HEIGHT,
             hand_interp_steps=PLACE_HAND_INTERP_STEPS,
         ),
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "left_hand": ControlPartCommandProfile.joint_positions(
+                open=left_open,
+                grasp=left_close,
+            )
+        },
+    )
     engine.register(pick_up_action)
     engine.register(place_action)
 

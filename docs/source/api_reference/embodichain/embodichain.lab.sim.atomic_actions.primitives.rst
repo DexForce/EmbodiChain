@@ -1,5 +1,5 @@
 embodichain.lab.sim.atomic_actions.primitives
-============================================
+=============================================
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives
 
@@ -8,7 +8,7 @@ Overview
 
 Concrete implementations of the built-in atomic-action primitives. Each
 primitive is an :class:`~embodichain.lab.sim.atomic_actions.AtomicAction` that
-accepts an :class:`~embodichain.lab.sim.atomic_actions.ActionInvocation` and a
+accepts a :class:`~embodichain.lab.sim.atomic_actions.ResolvedActionRequest` and a
 :class:`~embodichain.lab.sim.atomic_actions.PlanningContext`. Planning returns a
 side-effect-free :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` with a
 full-robot timed trajectory and uncommitted expected effects.
@@ -17,24 +17,24 @@ full-robot timed trajectory and uncommitted expected effects.
 
    .. autosummary::
 
-      MoveEndEffectorCfg
       MoveEndEffector
-      MoveJointsCfg
+      MoveEndEffectorOptions
       MoveJoints
-      PickUpCfg
+      MoveJointsOptions
       PickUp
-      MoveHeldObjectCfg
+      PickUpOptions
       MoveHeldObject
-      PlaceCfg
+      MoveHeldObjectOptions
       Place
-      PressCfg
+      PlaceOptions
       Press
-      CoordinatedPickmentCfg
+      PressOptions
       CoordinatedPickment
-      CoordinatedPlacementCfg
+      CoordinatedPickmentOptions
       CoordinatedPlacement
-      HandOverCfg
+      CoordinatedPlacementOptions
       HandOver
+      HandOverOptions
 
    .. rubric:: Built-in Goal Contracts
 

@@ -24,16 +24,15 @@ from typing import ClassVar
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass, logger
+from embodichain.utils import logger
 
 from ._helpers import resolve_object_target
-from ..core import (
-    ActionCfg,
-    AtomicAction,
-)
+from ..bindings import ResolvedControlPart
+from ..control import GRASP_COMMAND, OPEN_COMMAND
+from ..core import AtomicAction
 from ..effects import StateDelta
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionInvocation
+from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..policies import MotionPolicy
 from ..state import HeldObjectState, PlanningContext
@@ -58,7 +57,7 @@ class CoordinatedPlacementGoal:
     """World-Z offset above the support object target pose."""
 
     release: bool | None = None
-    """Whether the placing hand releases. ``None`` uses the action config."""
+    """Whether the placing hand releases. ``None`` uses invocation options."""
 
     def __post_init__(self) -> None:
         validate_pose_goal(
@@ -73,34 +72,9 @@ class CoordinatedPlacementGoal:
         )
 
 
-@configclass
-class CoordinatedPlacementCfg(ActionCfg):
-    name: str = "coordinated_placement"
-    """Name of the action, used for identification and logging."""
-
-    control_part: str = "dual_arm"
-    """Robot control part containing both placing and support arms."""
-
-    placing_arm_control_part: str = "left_arm"
-    """Arm that places and releases its held object."""
-
-    support_arm_control_part: str = "right_arm"
-    """Arm that moves the support object and keeps holding it."""
-
-    placing_hand_control_part: str = "left_hand"
-    """Hand attached to the placing arm."""
-
-    support_hand_control_part: str = "right_hand"
-    """Hand attached to the support arm."""
-
-    placing_hand_open_qpos: torch.Tensor | None = None
-    """Placing-hand qpos for the open state, shape ``[hand_dof,]``."""
-
-    placing_hand_close_qpos: torch.Tensor | None = None
-    """Placing-hand qpos for the closed state, shape ``[hand_dof,]``."""
-
-    support_hand_close_qpos: torch.Tensor | None = None
-    """Support-hand qpos for the closed state, shape ``[hand_dof,]``."""
+@dataclass(frozen=True, slots=True, eq=False)
+class CoordinatedPlacementOptions(ActionOptions):
+    """Per-invocation coordinated placement behavior."""
 
     release: bool = True
     """Whether to open the placing hand at the aligned placement pose."""
@@ -123,100 +97,109 @@ class CoordinatedPlacementCfg(ActionCfg):
     retreat_steps: int = 16
     """Number of waypoints used for the placing-arm lift retreat."""
 
+    def __post_init__(self) -> None:
+        if self.lift_height < 0.0:
+            raise ValueError("lift_height must be non-negative.")
+        for name in ("hand_interp_steps", "hold_steps", "retreat_steps"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative.")
 
-class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _CoordinatedPlacementResources:
+    """Invocation-bound control parts and compatible hand commands."""
+
+    placing_arm: ResolvedControlPart
+    support_arm: ResolvedControlPart
+    placing_hand: ResolvedControlPart
+    support_hand: ResolvedControlPart
+    placing_hand_open_qpos: torch.Tensor
+    placing_hand_close_qpos: torch.Tensor
+    support_hand_close_qpos: torch.Tensor
+
+
+class CoordinatedPlacement(
+    AtomicAction[CoordinatedPlacementGoal, CoordinatedPlacementOptions]
+):
     """Coordinate two held objects: support object below, placing object above."""
 
     skill_id: ClassVar[str] = "coordinated_placement"
     GoalType: ClassVar[type] = CoordinatedPlacementGoal
+    OptionsType: ClassVar[type] = CoordinatedPlacementOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
 
     def __init__(
         self,
-        cfg: CoordinatedPlacementCfg | None = None,
+        default_options: CoordinatedPlacementOptions | None = None,
     ) -> None:
-        super().__init__(cfg or CoordinatedPlacementCfg())
-        self._validate_hand_qpos_cfg()
+        super().__init__(default_options)
 
     def _on_bind(self) -> None:
-        """Resolve robot-dependent resources from the owning engine."""
+        """Resolve engine-wide resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-        self.dual_arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.placing_arm_joint_ids = self.robot.get_joint_ids(
-            name=self.cfg.placing_arm_control_part
-        )
-        self.support_arm_joint_ids = self.robot.get_joint_ids(
-            name=self.cfg.support_arm_control_part
-        )
-        self.placing_hand_joint_ids = self.robot.get_joint_ids(
-            name=self.cfg.placing_hand_control_part
-        )
-        self.support_hand_joint_ids = self.robot.get_joint_ids(
-            name=self.cfg.support_hand_control_part
-        )
-        self.joint_ids = (
-            self.dual_arm_joint_ids
-            + self.placing_hand_joint_ids
-            + self.support_hand_joint_ids
-        )
-        self.placing_arm_dof = len(self.placing_arm_joint_ids)
-        self.support_arm_dof = len(self.support_arm_joint_ids)
-        self.placing_hand_dof = len(self.placing_hand_joint_ids)
-        self.support_hand_dof = len(self.support_hand_joint_ids)
-
-        assert self.cfg.placing_hand_open_qpos is not None
-        assert self.cfg.placing_hand_close_qpos is not None
-        assert self.cfg.support_hand_close_qpos is not None
-        self.placing_hand_open_qpos = self.builder.expand_hand_qpos(
-            self.cfg.placing_hand_open_qpos,
-            n_envs=self.n_envs,
-            hand_dof=self.placing_hand_dof,
-        )
-        self.placing_hand_close_qpos = self.builder.expand_hand_qpos(
-            self.cfg.placing_hand_close_qpos,
-            n_envs=self.n_envs,
-            hand_dof=self.placing_hand_dof,
-        )
-        self.support_hand_close_qpos = self.builder.expand_hand_qpos(
-            self.cfg.support_hand_close_qpos,
-            n_envs=self.n_envs,
-            hand_dof=self.support_hand_dof,
+    def _resolve_resources(
+        self,
+        request: ResolvedActionRequest[
+            CoordinatedPlacementGoal, CoordinatedPlacementOptions
+        ],
+    ) -> _CoordinatedPlacementResources:
+        """Resolve placing/support roles from robot control parts."""
+        binding = request.binding
+        placing_arm = binding.manipulator("placing")
+        support_arm = binding.manipulator("support")
+        placing_hand = binding.end_effector("placing")
+        support_hand = binding.end_effector("support")
+        if placing_arm.name == support_arm.name:
+            raise ValueError(
+                "CoordinatedPlacement placing and support roles must use "
+                "different manipulator control parts."
+            )
+        if placing_hand.name == support_hand.name:
+            raise ValueError(
+                "CoordinatedPlacement placing and support roles must use "
+                "different end-effector control parts."
+            )
+        return _CoordinatedPlacementResources(
+            placing_arm=placing_arm,
+            support_arm=support_arm,
+            placing_hand=placing_hand,
+            support_hand=support_hand,
+            placing_hand_open_qpos=placing_hand.joint_positions(
+                OPEN_COMMAND,
+                n_envs=self.n_envs,
+                device=self.device,
+                dtype=torch.float32,
+            ),
+            placing_hand_close_qpos=placing_hand.joint_positions(
+                GRASP_COMMAND,
+                n_envs=self.n_envs,
+                device=self.device,
+                dtype=torch.float32,
+            ),
+            support_hand_close_qpos=support_hand.joint_positions(
+                GRASP_COMMAND,
+                n_envs=self.n_envs,
+                device=self.device,
+                dtype=torch.float32,
+            ),
         )
 
     def plan(
         self,
-        invocation: ActionInvocation[CoordinatedPlacementGoal],
+        request: ResolvedActionRequest[
+            CoordinatedPlacementGoal, CoordinatedPlacementOptions
+        ],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan coordinated placement without committing attachment changes."""
-        target = self.require_goal(invocation)
-        bindings = (
-            (
-                invocation.binding.manipulator("placing"),
-                self.cfg.placing_arm_control_part,
-            ),
-            (
-                invocation.binding.manipulator("support"),
-                self.cfg.support_arm_control_part,
-            ),
-            (
-                invocation.binding.end_effector("placing"),
-                self.cfg.placing_hand_control_part,
-            ),
-            (
-                invocation.binding.end_effector("support"),
-                self.cfg.support_hand_control_part,
-            ),
-        )
-        if any(actual != expected for actual, expected in bindings):
-            raise ValueError(
-                "CoordinatedPlacement bindings do not match its configured resources."
-            )
+        target = self.require_goal(request)
+        options = request.skill_options
+        resources = self._resolve_resources(request)
         if (
-            invocation.motion_policy.motion_source == "motion_gen"
+            request.motion_policy.motion_source == "motion_gen"
             and self.motion_generator.planner.cfg.planner_type == "curobo"
         ):
             raise ValueError(
@@ -229,45 +212,47 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
             release,
             placing_held_object,
             support_held_object,
-        ) = self._resolve_target(target, state)
-        placing_start_qpos, support_start_qpos = self._resolve_start_qpos(state)
+        ) = self._resolve_target(target, state, resources, options)
+        placing_start_qpos, support_start_qpos = self._resolve_start_qpos(
+            state, resources
+        )
         segments = self._compute_segment_lengths(
-            release, invocation.motion_policy.sample_count
+            release, request.motion_policy.sample_count, options
         )
 
         placing_lift_xpos = self.builder.apply_local_offset(
             placing_xpos,
             torch.tensor(
-                [0.0, 0.0, self.cfg.lift_height],
+                [0.0, 0.0, options.lift_height],
                 dtype=torch.float32,
                 device=self.device,
             ),
         )
 
         ok, placing_approach_traj = self._plan_named_arm_trajectory(
-            self.cfg.placing_arm_control_part,
+            resources.placing_arm.name,
             placing_start_qpos,
             torch.stack([placing_lift_xpos, placing_xpos], dim=1),
             segments["approach"],
-            invocation.motion_policy,
+            request.motion_policy,
         )
         if not ok:
             logger.log_warning("CoordinatedPlacement failed to plan placing approach.")
             return self.failed_plan(
-                invocation, context, message="Placing approach failed."
+                request, context, message="Placing approach failed."
             )
 
         ok, support_approach_traj = self._plan_named_arm_trajectory(
-            self.cfg.support_arm_control_part,
+            resources.support_arm.name,
             support_start_qpos,
             support_xpos.unsqueeze(1),
             segments["approach"],
-            invocation.motion_policy,
+            request.motion_policy,
         )
         if not ok:
             logger.log_warning("CoordinatedPlacement failed to plan support approach.")
             return self.failed_plan(
-                invocation, context, message="Support approach failed."
+                request, context, message="Support approach failed."
             )
 
         placing_place_qpos = placing_approach_traj[:, -1]
@@ -276,8 +261,9 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
             state.last_qpos,
             placing_approach_traj,
             support_approach_traj,
-            self._repeat_qpos(self.placing_hand_close_qpos, segments["approach"]),
-            self._repeat_qpos(self.support_hand_close_qpos, segments["approach"]),
+            self._repeat_qpos(resources.placing_hand_close_qpos, segments["approach"]),
+            self._repeat_qpos(resources.support_hand_close_qpos, segments["approach"]),
+            resources=resources,
         )
 
         hold_trajectory = self._empty_phase()
@@ -286,8 +272,9 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
                 state.last_qpos,
                 self._repeat_qpos(placing_place_qpos, segments["hold"]),
                 self._repeat_qpos(support_place_qpos, segments["hold"]),
-                self._repeat_qpos(self.placing_hand_close_qpos, segments["hold"]),
-                self._repeat_qpos(self.support_hand_close_qpos, segments["hold"]),
+                self._repeat_qpos(resources.placing_hand_close_qpos, segments["hold"]),
+                self._repeat_qpos(resources.support_hand_close_qpos, segments["hold"]),
+                resources=resources,
             )
 
         release_trajectory = self._empty_phase()
@@ -297,35 +284,39 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
                 self._repeat_qpos(placing_place_qpos, segments["release"]),
                 self._repeat_qpos(support_place_qpos, segments["release"]),
                 self.builder.interpolate_hand_qpos(
-                    self.placing_hand_close_qpos,
-                    self.placing_hand_open_qpos,
+                    resources.placing_hand_close_qpos,
+                    resources.placing_hand_open_qpos,
                     n_waypoints=segments["release"],
                 ),
-                self._repeat_qpos(self.support_hand_close_qpos, segments["release"]),
+                self._repeat_qpos(
+                    resources.support_hand_close_qpos, segments["release"]
+                ),
+                resources=resources,
             )
 
         ok, placing_retreat_traj = self._plan_named_arm_trajectory(
-            self.cfg.placing_arm_control_part,
+            resources.placing_arm.name,
             placing_place_qpos,
             placing_lift_xpos.unsqueeze(1),
             segments["retreat"],
-            invocation.motion_policy,
+            request.motion_policy,
         )
         if not ok:
             logger.log_warning("CoordinatedPlacement failed to plan placing retreat.")
-            return self.failed_plan(
-                invocation, context, message="Placing retreat failed."
-            )
+            return self.failed_plan(request, context, message="Placing retreat failed.")
 
         placing_hand_retreat_qpos = (
-            self.placing_hand_open_qpos if release else self.placing_hand_close_qpos
+            resources.placing_hand_open_qpos
+            if release
+            else resources.placing_hand_close_qpos
         )
         retreat_trajectory = self._assemble_phase(
             state.last_qpos,
             placing_retreat_traj,
             self._repeat_qpos(support_place_qpos, segments["retreat"]),
             self._repeat_qpos(placing_hand_retreat_qpos, segments["retreat"]),
-            self._repeat_qpos(self.support_hand_close_qpos, segments["retreat"]),
+            self._repeat_qpos(resources.support_hand_close_qpos, segments["retreat"]),
+            resources=resources,
         )
 
         full = torch.cat(
@@ -338,8 +329,8 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
             dim=1,
         )
         involved_control_parts = {
-            self.cfg.placing_arm_control_part,
-            self.cfg.support_arm_control_part,
+            resources.placing_arm.name,
+            resources.support_arm.name,
         }
         coordinated_removals = {
             key: None
@@ -347,33 +338,20 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
             if not involved_control_parts.isdisjoint(key)
         }
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=True,
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={
-                    self.cfg.placing_arm_control_part: (
+                    resources.placing_arm.name: (
                         None if release else placing_held_object
                     ),
-                    self.cfg.support_arm_control_part: support_held_object,
+                    resources.support_arm.name: support_held_object,
                 },
                 coordinated_held_object_updates=coordinated_removals,
             ),
         )
-
-    def _validate_hand_qpos_cfg(self) -> None:
-        required_names = (
-            "placing_hand_open_qpos",
-            "placing_hand_close_qpos",
-            "support_hand_close_qpos",
-        )
-        for name in required_names:
-            if getattr(self.cfg, name) is None:
-                logger.log_error(
-                    f"{name} must be specified in CoordinatedPlacementCfg",
-                    ValueError,
-                )
 
     def _resolve_object_pose(
         self,
@@ -438,6 +416,8 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
         self,
         target: CoordinatedPlacementGoal,
         state: PlanningContext,
+        resources: _CoordinatedPlacementResources,
+        options: CoordinatedPlacementOptions,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -445,27 +425,29 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
         HeldObjectState,
         HeldObjectState,
     ]:
-        placing_held_object = state.get_held_object(self.cfg.placing_arm_control_part)
+        placing_control_part = resources.placing_arm.name
+        support_control_part = resources.support_arm.name
+        placing_held_object = state.get_held_object(placing_control_part)
         if placing_held_object is None:
             logger.log_error(
                 "CoordinatedPlacement requires an object held by placing control "
-                f"part {self.cfg.placing_arm_control_part!r}.",
+                f"part {placing_control_part!r}.",
                 ValueError,
             )
-        support_held_object = state.get_held_object(self.cfg.support_arm_control_part)
+        support_held_object = state.get_held_object(support_control_part)
         if support_held_object is None:
             logger.log_error(
                 "CoordinatedPlacement requires an object held by support control "
-                f"part {self.cfg.support_arm_control_part!r}.",
+                f"part {support_control_part!r}.",
                 ValueError,
             )
         placing_height_offset = (
-            self.cfg.placing_height_offset
+            options.placing_height_offset
             if target.placing_height_offset is None
             else target.placing_height_offset
         )
         support_height_offset = (
-            self.cfg.support_height_offset
+            options.support_height_offset
             if target.support_height_offset is None
             else target.support_height_offset
         )
@@ -491,7 +473,7 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
         )
         placing_xpos = torch.bmm(placing_object_pose, placing_object_to_eef)
         support_xpos = torch.bmm(support_object_pose, support_object_to_eef)
-        release = self.cfg.release if target.release is None else target.release
+        release = options.release if target.release is None else target.release
         return (
             placing_xpos,
             support_xpos,
@@ -509,7 +491,9 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
         )
 
     def _resolve_start_qpos(
-        self, state: PlanningContext
+        self,
+        state: PlanningContext,
+        resources: _CoordinatedPlacementResources,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if state.last_qpos.shape != (self.n_envs, self.robot_dof):
             logger.log_error(
@@ -520,19 +504,20 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
             )
         start_qpos = state.last_qpos.to(device=self.device, dtype=torch.float32)
         return (
-            start_qpos[:, self.placing_arm_joint_ids],
-            start_qpos[:, self.support_arm_joint_ids],
+            start_qpos[:, list(resources.placing_arm.joint_ids)],
+            start_qpos[:, list(resources.support_arm.joint_ids)],
         )
 
     def _compute_segment_lengths(
         self,
         release: bool,
         sample_count: int,
+        options: CoordinatedPlacementOptions,
     ) -> dict[str, int]:
         """Split the invocation sample budget across placement phases."""
-        n_release = max(2, self.cfg.hand_interp_steps) if release else 0
-        n_hold = max(0, self.cfg.hold_steps)
-        n_retreat = max(2, self.cfg.retreat_steps)
+        n_release = max(2, options.hand_interp_steps) if release else 0
+        n_hold = max(0, options.hold_steps)
+        n_retreat = max(2, options.retreat_steps)
         n_approach = sample_count - n_hold - n_release - n_retreat
         if n_approach < 2:
             logger.log_error(
@@ -590,19 +575,21 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementGoal]):
         support_arm_traj: torch.Tensor,
         placing_hand_traj: torch.Tensor,
         support_hand_traj: torch.Tensor,
+        *,
+        resources: _CoordinatedPlacementResources,
     ) -> torch.Tensor:
         n_waypoints = placing_arm_traj.shape[1]
         full = base_full_qpos.to(device=self.device, dtype=torch.float32)
         full = full.unsqueeze(1).repeat(1, n_waypoints, 1).clone()
-        full[:, :, self.placing_arm_joint_ids] = placing_arm_traj
-        full[:, :, self.support_arm_joint_ids] = support_arm_traj
-        full[:, :, self.placing_hand_joint_ids] = placing_hand_traj
-        full[:, :, self.support_hand_joint_ids] = support_hand_traj
+        full[:, :, list(resources.placing_arm.joint_ids)] = placing_arm_traj
+        full[:, :, list(resources.support_arm.joint_ids)] = support_arm_traj
+        full[:, :, list(resources.placing_hand.joint_ids)] = placing_hand_traj
+        full[:, :, list(resources.support_hand.joint_ids)] = support_hand_traj
         return full
 
 
 __all__ = [
     "CoordinatedPlacement",
-    "CoordinatedPlacementCfg",
     "CoordinatedPlacementGoal",
+    "CoordinatedPlacementOptions",
 ]

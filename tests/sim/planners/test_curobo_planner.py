@@ -631,7 +631,6 @@ def _make_curobo_engine(
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
         MoveEndEffector,
-        MoveEndEffectorCfg,
     )
     from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 
@@ -645,7 +644,7 @@ def _make_curobo_engine(
         )
     )
     engine = AtomicActionEngine(motion_generator)
-    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector())
     return engine
 
 

@@ -231,9 +231,9 @@ Panda) so planning stays fast; raise it for tighter collision coverage.
 MotionGenerator passes start_qpos and control_part to the cuRobo backend. For
 Cartesian goals, leave EmbodiChain pre-interpolation disabled: cuRobo must
 receive the original pose. By default the returned collision-checked samples are
-arc-length resampled to the action's `sample_interval` waypoint count (so
-`MoveEndEffectorCfg.sample_interval` controls the trajectory length, as for the
-other planners); set `CuroboPlannerCfg.preserve_plan_samples=True` to keep
+arc-length resampled to the invocation's `MotionPolicy.sample_count` waypoint
+count (so the same runtime policy controls trajectory length across planners);
+set `CuroboPlannerCfg.preserve_plan_samples=True` to keep
 cuRobo's own samples (whose count is derived from `interpolation_dt` and the
 trajectory duration).
 

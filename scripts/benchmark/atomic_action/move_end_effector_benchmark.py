@@ -234,7 +234,6 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
         MoveEndEffector,
-        MoveEndEffectorCfg,
     )
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
     from embodichain.lab.sim.planners import ToppraPlannerCfg
@@ -264,7 +263,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
+    atomic_engine.register(MoveEndEffector())
 
     results: list[dict[str, object]] = []
     video_paths: list[str] = []

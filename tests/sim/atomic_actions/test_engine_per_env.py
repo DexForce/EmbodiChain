@@ -26,8 +26,8 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
-    ActionCfg,
     ActionInvocation,
+    ActionOptions,
     ActionPlan,
     Affordance,
     AtomicAction,
@@ -41,6 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
+    ResolvedActionRequest,
     RobotObservation,
     SceneEntityPose,
     SceneSnapshot,
@@ -50,7 +51,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 
 
-class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
+class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
     """Test action whose terminal joint command follows a scene entity x pose."""
 
     skill_id: ClassVar[str] = "dynamic"
@@ -58,20 +59,22 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(self) -> None:
-        super().__init__(ActionCfg(name="dynamic"))
+        super().__init__()
         self.plan_count = 0
+        self.requests: list[ResolvedActionRequest] = []
 
     def plan(
         self,
-        invocation: ActionInvocation[EndEffectorPoseGoal],
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        goal = self.require_goal(invocation)
+        goal = self.require_goal(request)
         self.plan_count += 1
+        self.requests.append(request)
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=True,
             trajectory=torch.stack([context.robot.qpos, target], dim=1),
@@ -85,10 +88,10 @@ class EffectAction(DynamicAction):
 
     def plan(
         self,
-        invocation: ActionInvocation[EndEffectorPoseGoal],
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        goal = self.require_goal(invocation)
+        goal = self.require_goal(request)
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
         semantics = ObjectSemantics(
@@ -100,7 +103,7 @@ class EffectAction(DynamicAction):
             grasp_xpos=torch.eye(4),
         )
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=True,
             trajectory=torch.stack([context.robot.qpos, target], dim=1),
@@ -112,8 +115,10 @@ def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 2
+    robot.control_parts = {"arm": object()}
     robot.get_qpos.return_value = torch.zeros(1, 2)
     robot.get_qvel.return_value = torch.zeros(1, 2)
+    robot.get_joint_ids.return_value = [0, 1]
     generator = Mock()
     generator.robot = robot
     generator.device = torch.device("cpu")
@@ -194,7 +199,62 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in kinds
     assert ExecutionEventKind.REPLANNED in kinds
     assert action.plan_count == 2
+    assert action.requests[0] is action.requests[1]
     assert tick.command is not None
+
+
+def test_session_revision_replans_from_latest_context() -> None:
+    engine, action = _engine()
+    original = _invocation()
+    session = engine.start((original,), _context(0.0, 0.0, 0.1, 0))
+    revised_pose = torch.eye(4).unsqueeze(0)
+    revised_pose[:, 0, 3] = 0.8
+    revised = ActionInvocation(
+        skill_id=original.skill_id,
+        goal=EndEffectorPoseGoal(revised_pose),
+        binding=original.binding,
+        motion_policy=original.motion_policy,
+        recovery_policy=original.recovery_policy,
+        invocation_id=original.invocation_id,
+        revision=1,
+    )
+
+    session.revise_current(revised)
+    first = session.tick(_context(0.0, 0.0, 0.1, 0))
+    second = session.tick(_context(0.1, 0.0, 0.1, 0))
+
+    assert action.plan_count == 2
+    assert action.requests[0] is not action.requests[1]
+    assert [request.revision for request in action.requests] == [0, 1]
+    assert any(
+        event.kind is ExecutionEventKind.INVOCATION_REVISED
+        and event.invocation_revision == 1
+        for event in first.events
+    )
+    assert second.command is not None
+    assert torch.all(second.command.positions == 0.8)
+
+
+def test_session_revision_must_advance_same_invocation() -> None:
+    engine, _ = _engine()
+    original = _invocation()
+    session = engine.start((original,), _context(0.0, 0.0, 0.1, 0))
+
+    with pytest.raises(ValueError, match="must advance"):
+        session.revise_current(original)
+
+    with pytest.raises(ValueError, match="invocation_id"):
+        session.revise_current(
+            ActionInvocation(
+                skill_id=original.skill_id,
+                goal=original.goal,
+                binding=original.binding,
+                motion_policy=original.motion_policy,
+                recovery_policy=original.recovery_policy,
+                invocation_id="another-call",
+                revision=1,
+            )
+        )
 
 
 def test_tracking_error_fails_when_replan_budget_is_zero() -> None:

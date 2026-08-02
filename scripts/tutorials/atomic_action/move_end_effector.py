@@ -35,7 +35,6 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     EndEffectorPoseGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
     MotionPolicy,
 )
 from embodichain.utils import logger
@@ -75,7 +74,7 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector())
 
     poses = torch.stack(
         [

@@ -31,7 +31,6 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     MotionPolicy,
     MoveEndEffector,
-    MoveEndEffectorCfg,
 )
 
 
@@ -60,7 +59,7 @@ class TestMotionSourceReachEquivalence:
             MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.ROBOT_UID))
         )
         engine = AtomicActionEngine(mg)
-        engine.register(MoveEndEffector(MoveEndEffectorCfg()))
+        engine.register(MoveEndEffector())
         return sim, robot, engine
 
     def _teardown(self, sim):

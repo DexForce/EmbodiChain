@@ -27,21 +27,25 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
-    ActionCfg,
+    ActionControlOverrides,
     ActionInvocation,
+    ActionOptions,
     ActionPlan,
     AtomicAction,
     AtomicActionEngine,
+    ControlPartCommandProfile,
+    JointPositionCommand,
     JointPositionGoal,
     MotionPolicy,
     PlanningContext,
+    ResolvedActionRequest,
     register_action,
     get_registered_actions,
     unregister_action,
 )
 
 
-class StubAction(AtomicAction[JointPositionGoal]):
+class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
     """Deterministic test action that commands every robot joint."""
 
     skill_id: ClassVar[str] = "stub"
@@ -50,10 +54,10 @@ class StubAction(AtomicAction[JointPositionGoal]):
 
     def plan(
         self,
-        invocation: ActionInvocation[JointPositionGoal],
+        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        goal = self.require_goal(invocation)
+        goal = self.require_goal(request)
         assert isinstance(goal.target, torch.Tensor)
         target = goal.target.to(context.robot.qpos)
         if target.dim() == 1:
@@ -66,7 +70,7 @@ class StubAction(AtomicAction[JointPositionGoal]):
             target = torch.nan_to_num(target)
         trajectory = torch.stack([context.robot.qpos, target], dim=1)
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=success,
             trajectory=trajectory,
@@ -79,20 +83,28 @@ class OtherStubAction(StubAction):
     skill_id: ClassVar[str] = "other_stub"
 
 
-def _engine(batch_size: int = 2, robot_dof: int = 3) -> AtomicActionEngine:
+def _engine(
+    batch_size: int = 2,
+    robot_dof: int = 3,
+    control_profiles: dict[str, ControlPartCommandProfile] | None = None,
+) -> AtomicActionEngine:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = robot_dof
+    robot.control_parts = {"all": object()}
     robot.get_qpos.return_value = torch.zeros(batch_size, robot_dof)
     robot.get_qvel.return_value = torch.zeros(batch_size, robot_dof)
+    robot.get_joint_ids.return_value = list(range(robot_dof))
     generator = Mock()
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
-    return AtomicActionEngine(generator)
+    return AtomicActionEngine(generator, control_profiles=control_profiles)
 
 
-def _invocation(qpos: torch.Tensor) -> ActionInvocation[JointPositionGoal]:
+def _invocation(
+    qpos: torch.Tensor,
+) -> ActionInvocation[JointPositionGoal, ActionOptions]:
     return ActionInvocation(
         skill_id="stub",
         goal=JointPositionGoal(qpos),
@@ -113,7 +125,7 @@ def test_global_registry_uses_stable_skill_id() -> None:
 
 def test_engine_compile_projects_terminal_state_between_actions() -> None:
     engine = _engine()
-    engine.register(StubAction(ActionCfg(name="stub")))
+    engine.register(StubAction())
     first = torch.ones(2, 3)
     second = torch.full((2, 3), 2.0)
 
@@ -128,7 +140,7 @@ def test_engine_compile_projects_terminal_state_between_actions() -> None:
 
 def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
     engine = _engine()
-    engine.register(StubAction(ActionCfg(name="stub")))
+    engine.register(StubAction())
     first = torch.tensor([[1.0, 1.0, 1.0], [float("nan"), 2.0, 2.0]])
     second = torch.full((2, 3), 4.0)
 
@@ -159,8 +171,8 @@ def test_engine_rejects_unknown_skill() -> None:
 
 def test_engine_rejects_duplicate_instance_registration() -> None:
     engine = _engine()
-    first = StubAction(ActionCfg(name="first"))
-    second = StubAction(ActionCfg(name="second"))
+    first = StubAction()
+    second = StubAction()
     engine.register(first)
     with pytest.raises(ValueError, match="already registered"):
         engine.register(second)
@@ -168,8 +180,8 @@ def test_engine_rejects_duplicate_instance_registration() -> None:
 
 def test_engine_binds_one_planning_service_to_every_action() -> None:
     engine = _engine()
-    first = StubAction(ActionCfg(name="first"))
-    second = OtherStubAction(ActionCfg(name="second"))
+    first = StubAction()
+    second = OtherStubAction()
 
     engine.register(first)
     engine.register(second)
@@ -178,6 +190,59 @@ def test_engine_binds_one_planning_service_to_every_action() -> None:
     assert second.motion_generator is engine.motion_generator
     assert first.builder is engine.planning_services.trajectory_builder
     assert second.builder is first.builder
+
+
+def test_engine_resolves_action_binding_from_robot_control_parts() -> None:
+    engine = _engine(robot_dof=3)
+
+    resolved = engine.planning_services.resolve_binding(
+        ActionBinding(manipulators={"primary": "all"})
+    )
+
+    assert resolved.manipulator().name == "all"
+    assert resolved.manipulator().joint_ids == (0, 1, 2)
+    assert resolved.manipulator().dof == 3
+
+
+def test_engine_resolves_invocation_control_override_into_request() -> None:
+    engine = _engine(
+        robot_dof=3,
+        control_profiles={
+            "all": ControlPartCommandProfile.joint_positions(ready=torch.zeros(3))
+        },
+    )
+    engine.register(StubAction())
+    invocation = replace(
+        _invocation(torch.ones(2, 3)),
+        control_overrides=ActionControlOverrides(
+            manipulators={
+                "primary": {"ready": JointPositionCommand(torch.full((3,), 0.4))}
+            }
+        ),
+        revision=2,
+    )
+
+    request = engine.resolve(invocation)
+
+    assert request.revision == 2
+    assert torch.allclose(
+        request.binding.manipulator().joint_positions("ready", n_envs=2, device="cpu"),
+        torch.full((2, 3), 0.4),
+    )
+
+
+def test_engine_rejects_binding_outside_robot_control_parts() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+    invocation = ActionInvocation(
+        skill_id="stub",
+        goal=JointPositionGoal(torch.zeros(2, 3)),
+        binding=ActionBinding(manipulators={"primary": "missing_arm"}),
+        motion_policy=MotionPolicy(sample_count=2),
+    )
+
+    with pytest.raises(ValueError, match="Robot.control_parts"):
+        engine.plan(invocation)
 
 
 def test_engine_motion_generator_is_read_only() -> None:
@@ -189,7 +254,7 @@ def test_engine_motion_generator_is_read_only() -> None:
 
 def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
     engine = _engine()
-    action = StubAction(ActionCfg(name="temporary"))
+    action = StubAction()
 
     plan = engine.plan_action(
         action,
@@ -203,7 +268,7 @@ def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
 
 
 def test_action_cannot_be_rebound_to_another_engine() -> None:
-    action = StubAction(ActionCfg(name="stub"))
+    action = StubAction()
     _engine().register(action)
 
     with pytest.raises(ValueError, match="another AtomicActionEngine"):
@@ -211,28 +276,25 @@ def test_action_cannot_be_rebound_to_another_engine() -> None:
 
 
 def test_unbound_action_rejects_direct_planning() -> None:
-    action = StubAction(ActionCfg(name="stub"))
+    action = StubAction()
 
     with pytest.raises(RuntimeError, match="not bound"):
-        action.plan(
-            _invocation(torch.ones(2, 3)),
-            _engine().initial_context(),
-        )
+        action.resolve_request(_invocation(torch.ones(2, 3)))
 
 
 def test_engine_rejects_plan_for_a_different_skill() -> None:
     engine = _engine()
-    action = StubAction(ActionCfg(name="stub"))
+    action = StubAction()
     original_plan = action.plan
 
     def wrong_skill_plan(
-        invocation: ActionInvocation[JointPositionGoal],
+        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        return replace(original_plan(invocation, context), skill_id="other")
+        return replace(original_plan(request, context), skill_id="other")
 
     action.plan = wrong_skill_plan  # type: ignore[method-assign]
     engine.register(action)
 
-    with pytest.raises(ValueError, match="must match its invocation"):
+    with pytest.raises(ValueError, match="must match its request"):
         engine.compile((_invocation(torch.zeros(2, 3)),))

@@ -42,10 +42,11 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     GraspGoal,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     HandOver,
-    HandOverCfg,
+    HandOverOptions,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
@@ -346,12 +347,7 @@ def run_handover_demo(
 
     # Step 1 - the left arm picks the object up by its top part.
     pick_up_action = PickUp(
-        cfg=PickUpCfg(
-            name="pick_up",
-            control_part="left_arm",
-            hand_control_part="left_hand",
-            hand_open_qpos=left_open,
-            hand_close_qpos=left_close,
+        default_options=PickUpOptions(
             pick_object_part="top",
             pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
             lift_height=PICKUP_LIFT_HEIGHT,
@@ -363,17 +359,7 @@ def run_handover_demo(
     )
     # Step 2 - hand the object from the left arm to the right arm.
     handover_action = HandOver(
-        cfg=HandOverCfg(
-            name="hand_over",
-            control_part="dual_arm",
-            transfer_arm_control_part="left_arm",
-            receive_arm_control_part="right_arm",
-            transfer_hand_control_part="left_hand",
-            receive_hand_control_part="right_hand",
-            transfer_hand_open_qpos=left_open,
-            transfer_hand_close_qpos=left_close,
-            receive_hand_open_qpos=right_open,
-            receive_hand_close_qpos=right_close,
+        default_options=HandOverOptions(
             receive_pick_object_part="bottom",
             middle_object_pose=middle_pose,
             final_object_pose=final_pose,
@@ -387,7 +373,19 @@ def run_handover_demo(
             ),
         ),
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "left_hand": ControlPartCommandProfile.joint_positions(
+                open=left_open,
+                grasp=left_close,
+            ),
+            "right_hand": ControlPartCommandProfile.joint_positions(
+                open=right_open,
+                grasp=right_close,
+            ),
+        },
+    )
     engine.register(pick_up_action)
     engine.register(handover_action)
 

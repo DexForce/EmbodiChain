@@ -369,7 +369,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
     resamples the returned trajectory to the atomic action's ``sample_interval``
     waypoint count - matching the documented contract of
-    :class:`~embodichain.lab.sim.atomic_actions.primitives.move_end_effector.MoveEndEffectorCfg.sample_interval`
+    :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
     sample density changes (cuRobo's own count is derived from

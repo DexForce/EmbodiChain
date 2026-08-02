@@ -44,9 +44,10 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     Affordance,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickment,
-    CoordinatedPickmentCfg,
+    CoordinatedPickmentOptions,
     ObjectSemantics,
     MotionPolicy,
 )
@@ -669,16 +670,7 @@ def run_coordinated_pickment_demo(
         robot, "right_hand", sim.device, preset.hand_close_qpos
     )
     pickment_action = CoordinatedPickment(
-        cfg=CoordinatedPickmentCfg(
-            control_part="dual_arm",
-            left_arm_control_part="left_arm",
-            right_arm_control_part="right_arm",
-            left_hand_control_part="left_hand",
-            right_hand_control_part="right_hand",
-            left_hand_open_qpos=left_open,
-            left_hand_close_qpos=left_close,
-            right_hand_open_qpos=right_open,
-            right_hand_close_qpos=right_close,
+        default_options=CoordinatedPickmentOptions(
             pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,
             lift_height=PICKMENT_LIFT_HEIGHT,
             hand_interp_steps=PICKMENT_HAND_INTERP_STEPS,
@@ -686,7 +678,19 @@ def run_coordinated_pickment_demo(
             object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
         ),
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "left_hand": ControlPartCommandProfile.joint_positions(
+                open=left_open,
+                grasp=left_close,
+            ),
+            "right_hand": ControlPartCommandProfile.joint_positions(
+                open=right_open,
+                grasp=right_close,
+            ),
+        },
+    )
     engine.register(pickment_action)
 
     left_grasp_pose, right_grasp_pose = build_object_grasp_poses(

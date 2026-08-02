@@ -84,13 +84,13 @@ def _ensure_runtime_imports() -> None:
             ActionBinding as action_binding_cls,
             ActionInvocation as action_invocation_cls,
             AtomicActionEngine as atomic_action_engine_cls,
+            ControlPartCommandProfile as control_part_command_profile_cls,
             EndEffectorPoseGoal as end_effector_pose_target_cls,
             MoveEndEffector as move_end_effector_cls,
-            MoveEndEffectorCfg as move_end_effector_cfg_cls,
             MotionPolicy as motion_policy_cls,
             Press as press_cls,
-            PressCfg as press_cfg_cls,
             PressGoal as press_target_cls,
+            PressOptions as press_options_cls,
         )
         from embodichain.lab.sim.cfg import (
             RigidBodyAttributesCfg as rigid_body_attributes_cfg_cls,
@@ -126,15 +126,15 @@ def _ensure_runtime_imports() -> None:
             "torch": torch_module,
             "SimulationManager": simulation_manager_cls,
             "AtomicActionEngine": atomic_action_engine_cls,
+            "ControlPartCommandProfile": control_part_command_profile_cls,
             "ActionBinding": action_binding_cls,
             "ActionInvocation": action_invocation_cls,
             "EndEffectorPoseGoal": end_effector_pose_target_cls,
             "MoveEndEffector": move_end_effector_cls,
-            "MoveEndEffectorCfg": move_end_effector_cfg_cls,
             "MotionPolicy": motion_policy_cls,
             "Press": press_cls,
-            "PressCfg": press_cfg_cls,
             "PressGoal": press_target_cls,
+            "PressOptions": press_options_cls,
             "RigidBodyAttributesCfg": rigid_body_attributes_cfg_cls,
             "RigidObjectCfg": rigid_object_cfg_cls,
             "VisualMaterialCfg": visual_material_cfg_cls,
@@ -486,14 +486,18 @@ def _build_atomic_engine(
 ) -> AtomicActionEngine:
     """Build a Press benchmark engine with MoveEndEffector pre-positioning."""
     hand_close = get_hand_close_qpos(robot, device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveEndEffector(cfg=MoveEndEffectorCfg()))
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                grasp=hand_close,
+            )
+        },
+    )
+    atomic_engine.register(MoveEndEffector())
     atomic_engine.register(
         Press(
-            cfg=PressCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_close_qpos=hand_close,
+            default_options=PressOptions(
                 hand_interp_steps=HAND_INTERP_STEPS,
             ),
         )

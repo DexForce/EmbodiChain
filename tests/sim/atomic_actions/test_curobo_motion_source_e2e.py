@@ -52,7 +52,6 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
     EndEffectorPoseGoal,
     MotionPolicy,
     MoveEndEffector,
-    MoveEndEffectorCfg,
 )
 
 ROBOT_UID = "curobo_franka"
@@ -89,7 +88,7 @@ def _make_franka_curobo_engine():
         )
     )
     engine = AtomicActionEngine(mg)
-    engine.register(MoveEndEffector(MoveEndEffectorCfg()))
+    engine.register(MoveEndEffector())
     return sim, robot, engine
 
 
