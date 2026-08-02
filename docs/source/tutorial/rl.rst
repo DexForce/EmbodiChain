@@ -81,18 +81,6 @@ APG and PPO. Launch either config with the same CLI:
    embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
    embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
 
-After training, plot deterministic 2D trajectories from a checkpoint:
-
-.. code-block:: bash
-
-   python scripts/tutorials/rl/visualize_point_mass.py \
-       --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml \
-       --checkpoint outputs/<exp_name>/checkpoints/<exp_name>_best.pt \
-       --tag apg_best \
-       --num-episodes 4
-
-Plots are written under ``outputs/point_mass_viz/`` by default.
-
 Configuration Sections
 ---------------------
 
