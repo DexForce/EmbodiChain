@@ -47,7 +47,7 @@ def generate_action_engine_config(
     task_name: str,
     task_description: str | None = None,
     task_agent: Mapping[str, Any] | str | Path | None = None,
-    robot_profile: str = "franka",
+    robot_profile: str = "ur10",
     llm_model: str | None = None,
     source_scene_z_rotation_degrees: float | None = None,
     body_scale_policy: str = "preserve",
@@ -55,6 +55,7 @@ def generate_action_engine_config(
     overwrite: bool = False,
     max_episodes: int = 1,
     max_episode_steps: int = 2000,
+    randomize_scene: bool = False,
     randomize_table_material: bool = False,
 ) -> GeneratedConfigPaths:
     """Generate the complete Action Engine input bundle.
@@ -152,6 +153,7 @@ def generate_action_engine_config(
         execution_program_hash=program_hash,
         max_episodes=max_episodes,
         max_episode_steps=max_episode_steps,
+        randomize_scene=randomize_scene,
         randomize_table_material=randomize_table_material,
     )
     _validate_agent_config(agent_config)

@@ -211,6 +211,73 @@ def test_planner_rejects_a_non_visible_skill_after_one_repair() -> None:
         )
 
 
+def test_spatial_two_sided_phrase_does_not_invent_arm_constraint() -> None:
+    def caller(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "semantic_steps": [
+                {
+                    "id": "s01_left",
+                    "operator": "orient_object",
+                    "object": "cube",
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                },
+                {
+                    "id": "s02_right",
+                    "operator": "orient_object",
+                    "object": "cup",
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                },
+            ],
+            "allocation_groups": [],
+        }
+
+    program = plan_task(
+        task_name="two_sided_upright",
+        task_description="把两边东西扶正",
+        scene_objects=_dual_arm_scene(),
+        llm_caller=caller,
+    )
+
+    assert program["allocation_groups"] == []
+
+
+def test_explicit_both_arms_request_gets_distinct_arm_group() -> None:
+    def caller(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "semantic_steps": [
+                {
+                    "id": step_id,
+                    "operator": "orient_object",
+                    "object": object_uid,
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                }
+                for step_id, object_uid in (("s01", "cube"), ("s02", "cup"))
+            ],
+            "allocation_groups": [],
+        }
+
+    program = plan_task(
+        task_name="explicit_both_arms",
+        task_description="用双臂把两个物体扶正",
+        scene_objects=_dual_arm_scene(),
+        llm_caller=caller,
+    )
+
+    assert program["allocation_groups"][0]["arm_constraint"] == "distinct_arms"
+
+
 def test_planner_does_not_expose_internal_operator_contracts() -> None:
     def caller(**_kwargs: Any) -> dict[str, Any]:
         return {

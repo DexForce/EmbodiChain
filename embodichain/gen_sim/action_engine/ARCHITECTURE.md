@@ -1,9 +1,12 @@
 # Action Engine v1 Architecture
 
-Action Engine is an independent, compositional successor to
-`action_agent_pipeline`. Production code does not import the legacy package;
-it reuses only public EmbodiChain robot, simulator, solver, and atomic-action
-APIs.
+Action Engine is a compositional successor to `action_agent_pipeline`. During
+the parity phase, its default `pipeline` backend lowers the route-free
+Execution Program through `runtime/pipeline_backend.py` and executes it with
+the mature Action Agent graph runtime. The `independent` backend remains
+available only as an explicit characterization target. This keeps the new
+planner/compiler boundary without silently maintaining two production runtime
+implementations.
 
 ## Data Flow
 
@@ -12,8 +15,8 @@ APIs.
    constraints.
 3. `compiler` deterministically lowers semantic skills into one immutable,
    coordinate-free Execution Program.
-4. `runtime` schedules the dependency DAG, grounds targets from live simulator
-   observations, executes public atomic actions, and checks postconditions.
+4. The default runtime adapter validates a semantics-preserving Seed Graph v5
+   view, then the mature pipeline schedules, grounds, executes, and checks it.
 5. Runtime observations and failures are recorded without mutating the
    persisted program.
 
@@ -62,8 +65,15 @@ Older `hold_hover`, `press`, and `coordinated_place` definitions remain marked
 `planner_visible=False` only as internal characterization coverage while the
 independent runtime is stabilized. They are absent from the LLM prompt and
 planner vocabulary, so they are not part of the Action Engine v1 task contract.
-A future skill becomes planner-usable by registering one complete capability
-and supplying its usage description rather than adding a router branch.
+A future skill becomes planner-usable only after both its semantic lowering and
+production runtime support exist; adding prompt vocabulary alone is not enough.
+
+The parity adapter currently requires all steps in one Execution Program to
+belong to the same mature runtime route family. Unsupported cross-route
+composition, payload transport, and non-upright `orient_object` requests fail
+before execution rather than falling back silently. Removing those restrictions
+requires extracting the mature controllers from their historical route-level
+graph contract, not duplicating them in the independent executor.
 
 ## Live Execution
 
@@ -77,17 +87,37 @@ results, collision-free paths, and trajectories are computed from live state.
 Line slots use current table bounds and object footprints. Shared containers
 receive non-overlapping placement slots. Free arrangements may be rematched
 only after complete-path planning proves the nominal assignment infeasible.
+Contact-sensitive `orient_object` skills keep distinct-arm allocation but run
+their pickup-to-release lifecycles serially, so one object is not held aloft
+while the other arm completes a separate skill.
+
+`orient_object` persists the support object, XY anchor policy, and upright
+local axis instead of asking runtime to infer the task from a generic
+"upright" label. The adapter resolves an `auto` local axis from runtime mesh
+geometry, never from UID words such as "bottle" or "can", and maps upright
+in-place execution onto the mature direct-final controller. This avoids making
+an unrequested staging pose a mandatory IK constraint. Final semantic success
+uses the simulator's live object pose, including uprightness and XY proximity
+to the reset-time anchor. Contact-backed grasp confirmation remains a runtime
+limitation and must not be inferred from IK feasibility alone. Upright release
+also still needs surface-aware grasp screening: the chosen grasp must admit a
+closed-gripper descent to a stable support contact before the hand opens.
 
 ## Robot And Scene Boundary
 
 Generation accepts a Prompt2Scene `gym_export` directory or its
 `gym_config.json`. CLI aliases `franka`, `ur5`, and `ur10` resolve to their
 dual-arm profiles; explicit `dual_franka`, `dual_ur5`, and `dual_ur10` names are
-also accepted. Robot-specific assets and limits remain data-driven rather than
-being encoded in planner routes.
+also accepted. Named policies are resolved per canonical robot profile, while
+robot-specific assets and limits remain data-driven rather than being encoded
+in planner routes. Parity generation defaults to `dual_ur10`, matching the
+mature pipeline, and preserves the exported scene deterministically. Pose and
+table-height randomization require the explicit `--randomize-scene` flag.
 
-Legacy Action Agent artifacts are intentionally not converted. Callers must
-use `--overwrite` to regenerate the four canonical v1 artifacts:
+Persisted legacy Action Agent artifacts are not accepted as Action Engine
+inputs. The parity conversion is an in-memory runtime view of a validated
+Action Engine program. Callers must use `--overwrite` to regenerate the four
+canonical v1 artifacts:
 `task_agent.json`, `seed_task_graph.json`, `agent_config.json`, and
 `fast_gym_config.json`.
 
@@ -104,7 +134,10 @@ never execution inputs.
 - LLM output remains semantic and coordinate-free.
 - The registry is the single source of planner-visible skill vocabulary.
 - Compilation is deterministic and never reads simulator state.
-- Runtime arm selection and grounding are based on live per-environment state.
+- Production execution defaults to the mature pipeline backend; selecting the
+  independent backend must be explicit.
+- Runtime arm selection, grounding, and final postconditions are based on live
+  per-environment state.
 - A required arm is never silently replaced.
 - Failed or inactive vectorized environments preserve their last valid state.
 - Rendering and recording never define or mutate executable behavior.

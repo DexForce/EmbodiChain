@@ -250,6 +250,47 @@ def test_independent_required_arms_create_allocation_group() -> None:
     ]
 
 
+def test_orient_object_uses_upright_in_place_motion_policies() -> None:
+    execution = compile_task_agent(
+        {
+            "schema_version": TASK_AGENT_SCHEMA,
+            "task": "upright",
+            "goal": "Stand the can upright.",
+            "semantic_steps": [
+                {
+                    "id": "s01_orient",
+                    "operator": "orient_object",
+                    "object": "can",
+                    "actor": {"mode": "auto"},
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                }
+            ],
+            "allocation_groups": [],
+        }
+    )
+
+    assert [edge["actions"][0]["motion_policy"] for edge in execution["edges"]] == [
+        "upright_in_place_pickup",
+        "upright_in_place_transport",
+        "upright_in_place_release",
+        "upright_in_place_retreat",
+        "default_home",
+    ]
+    assert execution["semantic_steps"][0]["goal"] == {
+        "relation": "none",
+        "reference_state": "live",
+        "orientation_goal": "upright",
+        "orientation_axis": "none",
+        "position_anchor": "initial_xy",
+        "support_object": "table",
+        "upright_local_axis": "auto",
+    }
+
+
 def test_auto_pickups_require_shared_explicit_allocation_group() -> None:
     program = {
         "schema_version": TASK_AGENT_SCHEMA,

@@ -696,6 +696,29 @@ class TestPlaceAction:
         assert result.trajectory.shape[2] == TOTAL_DOF
         assert result.next_state.held_object is None
 
+    def test_post_release_hold_keeps_open_gripper_at_release_pose(self):
+        cfg = PlaceCfg(
+            hand_open_qpos=_hand_open(),
+            hand_close_qpos=_hand_close(),
+            sample_interval=20,
+            hand_interp_steps=4,
+            post_hold_steps=6,
+        )
+        action = Place(self.mg, cfg)
+        state = WorldState(last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF))
+        with patch(
+            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            side_effect=lambda trajectory, interp_num, device: torch.zeros(
+                NUM_ENVS, interp_num, ARM_DOF
+            ),
+        ):
+            result = action.execute(EndEffectorPoseTarget(xpos=torch.eye(4)), state)
+
+        assert result.trajectory.shape == (NUM_ENVS, 26, TOTAL_DOF)
+        hold = result.trajectory[:, 12:18]
+        expected_open = _hand_open().reshape(1, 1, HAND_DOF).expand(NUM_ENVS, 6, -1)
+        assert torch.allclose(hold[:, :, ARM_DOF:], expected_open)
+
     def test_execute_with_multi_waypoint_visits_each_waypoint(self):
         cfg = PlaceCfg(
             hand_open_qpos=_hand_open(),

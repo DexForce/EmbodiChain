@@ -99,6 +99,7 @@ def build_fast_gym_config(
     execution_program_hash: str,
     max_episodes: int,
     max_episode_steps: int,
+    randomize_scene: bool = False,
     randomize_table_material: bool = False,
 ) -> dict[str, Any]:
     """Build a runnable EmbodiChain gym config from a prepared source scene."""
@@ -162,6 +163,7 @@ def build_fast_gym_config(
             "events": _make_events(
                 sensors[0],
                 rigid_uids,
+                randomize_scene=randomize_scene,
                 randomize_table_material=randomize_table_material,
             ),
             "observations": observations,
@@ -311,6 +313,7 @@ def _make_events(
     camera: dict[str, Any],
     rigid_uids: list[str],
     *,
+    randomize_scene: bool = False,
     randomize_table_material: bool = False,
 ) -> dict[str, Any]:
     extrinsics = camera["extrinsics"]
@@ -398,32 +401,33 @@ def _make_events(
                 "roughness_range": [0.45, 0.95],
             },
         }
-    for uid in sorted(rigid_uids):
-        events[f"randomize_{uid}_pose"] = {
-            "func": "randomize_rigid_object_pose",
+    if randomize_scene:
+        for uid in sorted(rigid_uids):
+            events[f"randomize_{uid}_pose"] = {
+                "func": "randomize_rigid_object_pose",
+                "mode": "reset",
+                "params": {
+                    "entity_cfg": {"uid": uid},
+                    "position_range": [
+                        [-0.04, -0.04, 0.0],
+                        [0.04, 0.04, 0.0],
+                    ],
+                    "rotation_range": [
+                        [0.0, 0.0, -30.0],
+                        [0.0, 0.0, 30.0],
+                    ],
+                    "relative_position": True,
+                    "relative_rotation": True,
+                },
+            }
+        events["randomize_table_height"] = {
+            "func": "randomize_anchor_height",
             "mode": "reset",
             "params": {
-                "entity_cfg": {"uid": uid},
-                "position_range": [
-                    [-0.04, -0.04, 0.0],
-                    [0.04, 0.04, 0.0],
-                ],
-                "rotation_range": [
-                    [0.0, 0.0, -30.0],
-                    [0.0, 0.0, 30.0],
-                ],
-                "relative_position": True,
-                "relative_rotation": True,
+                "anchor_uid": "table",
+                "height_delta_range": [[-0.05], [0.05]],
             },
         }
-    events["randomize_table_height"] = {
-        "func": "randomize_anchor_height",
-        "mode": "reset",
-        "params": {
-            "anchor_uid": "table",
-            "height_delta_range": [[-0.05], [0.05]],
-        },
-    }
     return events
 
 

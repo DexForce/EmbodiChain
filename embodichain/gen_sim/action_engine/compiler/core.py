@@ -357,9 +357,11 @@ def _edge_resources(
     if isinstance(reference, str) and reference and uses_goal_workspace:
         resources.add(f"workspace:{reference}")
     elif isinstance(support, str) and support:
-        # The support is owned throughout a coordinated operation, but its
-        # surrounding workspace is occupied only by its motion phases.
-        resources.add(f"object:{support}")
+        # Passive supports such as a table may be shared by independent
+        # pickups. Only a coordinated placement manipulates and owns its
+        # support object throughout the semantic step.
+        if step["operator"] == "coordinated_place":
+            resources.add(f"object:{support}")
         if uses_goal_workspace:
             resources.add(f"workspace:{support}")
 

@@ -126,6 +126,7 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
         execution_program_hash="a" * 64,
         max_episodes=1,
         max_episode_steps=2000,
+        randomize_scene=True,
     )
 
     assert config["id"] == "ActionEngine-v1"
@@ -178,6 +179,25 @@ def test_fast_gym_config_supports_all_robot_profiles(
     assert config["env"]["extensions"]["agent_robot_profile"] == profile
     if solver_type is not None:
         assert config["robot"]["solver_cfg"]["left_arm"]["ur_type"] == solver_type
+
+
+def test_fast_gym_config_keeps_scene_deterministic_by_default(
+    gym_export: Path,
+) -> None:
+    scene = prepare_scene(gym_export)
+    config = build_fast_gym_config(
+        scene,
+        task_name="deterministic_task",
+        task_description="Keep the source scene fixed.",
+        robot_profile="ur10",
+        execution_program_hash="d" * 64,
+        max_episodes=1,
+        max_episode_steps=20,
+    )
+
+    events = config["env"]["events"]
+    assert "randomize_interact_can_pose" not in events
+    assert "randomize_table_height" not in events
 
 
 @pytest.mark.parametrize(
@@ -371,6 +391,24 @@ def test_documented_cli_accepts_franka_profile() -> None:
     )
     assert args.robot_profile == "franka"
     assert args.overwrite is True
+
+
+def test_generation_cli_defaults_to_mature_robot_without_scene_randomization() -> None:
+    args = build_parser().parse_args(
+        [
+            "--gym_project",
+            "gym_export",
+            "--output_dir",
+            "configs/task2_3",
+            "--task_name",
+            "task2_3",
+            "--task_description",
+            "Upright both objects.",
+        ]
+    )
+
+    assert args.robot_profile == "ur10"
+    assert args.randomize_scene is False
 
 
 def test_generation_cli_reports_seed_png_path(

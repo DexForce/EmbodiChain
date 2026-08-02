@@ -265,12 +265,15 @@ def test_documented_run_command_arguments_remain_compatible() -> None:
             "/tmp/agent_config.json",
             "--regenerate",
             "--headless",
+            "--seed",
+            "17",
         ]
     )
 
     assert args.task_name == "task4_2"
     assert args.regenerate is True
     assert args.headless is True
+    assert args.seed == 17
 
 
 def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
@@ -293,7 +296,16 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         program.edges[0].id,
         step,
         assignments=["left_arm", None],
-        grounded=[],
+        grounded=[
+            GroundedAction(
+                action_class="PickUp",
+                arm="left_arm",
+                control="arm",
+                target=None,
+                cfg={},
+                motion_policy={"obj_upright_direction": torch.tensor([0.0, 0.0, 1.0])},
+            )
+        ],
         active=torch.tensor([True, False]),
         failed=torch.tensor([False, True]),
         action_steps=4,
@@ -315,6 +327,9 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         "edge",
         "semantic_step",
     ]
+    assert checkpoint["events"][0]["actions"][0]["motion_policy"][
+        "obj_upright_direction"
+    ] == [0.0, 0.0, 1.0]
 
     rendered_documents: list[dict[str, Any]] = []
     visualization = ModuleType("embodichain.gen_sim.action_engine.graph_visualization")
@@ -364,6 +379,39 @@ def test_ready_scheduler_packs_only_declared_opposite_arm_pickups() -> None:
         "can_a",
         "can_b",
     }
+
+
+def test_ready_scheduler_serializes_contact_sensitive_orient_pickups() -> None:
+    steps = [
+        {
+            "id": step_id,
+            "operator": "orient_object",
+            "object": object_uid,
+            "actor": {"mode": "auto"},
+            "goal": {
+                "orientation_goal": "upright",
+                "orientation_axis": "none",
+            },
+            "depends_on": [],
+        }
+        for step_id, object_uid in (("left", "can_a"), ("right", "can_b"))
+    ]
+    task_agent = _task_agent(*steps)
+    task_agent["allocation_groups"] = [
+        {
+            "id": "dual_arms_1",
+            "semantic_step_ids": ["left", "right"],
+            "arm_constraint": "distinct_arms",
+        }
+    ]
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(task_agent)),
+        _FakeEnv(),
+        record_runtime=False,
+    )
+    ready = [edge for edge in executor.program.edges if not edge.depends_on]
+
+    assert len(executor._pack_ready_edges(ready)) == 1
 
 
 def test_required_arm_rejects_wrong_candidate_without_planning() -> None:
@@ -499,6 +547,116 @@ def test_object_held_predicate_checks_live_gripper_and_tcp_geometry() -> None:
             held_states={("can", "left_arm"): state},
         )[0]
     )
+
+
+def test_physical_pickup_rebases_a_compliant_grasp_from_live_pose() -> None:
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    env = _FakeEnv({"can": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    state = _held_state(env, entity)
+    entity._pose[:, 0, 3] += 0.02
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        env,
+        record_runtime=False,
+    )
+
+    physical = executor._physical_pickup(
+        "can",
+        "left_arm",
+        state,
+        torch.tensor([True]),
+    )
+
+    assert bool(physical[0])
+    left_eef, _ = env.get_current_xpos_agent()
+    rebased_eef = torch.bmm(
+        entity.get_local_pose(to_matrix=True),
+        state.held_object.object_to_eef,
+    )
+    assert torch.allclose(rebased_eef, left_eef)
+
+
+def test_physical_pickup_rejects_large_grasp_slip() -> None:
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    env = _FakeEnv({"can": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    state = _held_state(env, entity)
+    entity._pose[:, 0, 3] += 0.08
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        env,
+        record_runtime=False,
+    )
+
+    physical = executor._physical_pickup(
+        "can",
+        "left_arm",
+        state,
+        torch.tensor([True]),
+    )
+
+    assert not bool(physical[0])
+
+
+def test_physical_pickup_rejects_offset_even_when_object_was_lifted() -> None:
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    env = _FakeEnv({"can": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    state = _held_state(env, entity)
+    entity._pose[:, 0, 3] += 0.08
+    entity._pose[:, 2, 3] += 0.08
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        env,
+        record_runtime=False,
+    )
+
+    physical = executor._physical_pickup(
+        "can",
+        "left_arm",
+        state,
+        torch.tensor([True]),
+    )
+
+    assert not bool(physical[0])
+
+
+def test_physical_hold_detects_loss_and_releases_runtime_ownership() -> None:
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    env = _FakeEnv({"can": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    state = _held_state(env, entity)
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        env,
+        record_runtime=False,
+    )
+    executor._object_owners["can"] = ["left_arm"]
+    executor._arm_owners["left_arm"] = ["can"]
+    executor._object_states[("can", "left_arm")] = state
+    entity._pose[:, 0, 3] += 0.08
+
+    held = executor._physical_hold(
+        "can",
+        "left_arm",
+        state,
+        torch.tensor([True]),
+    )
+    executor._release_ownership("can", "left_arm", ~held)
+
+    assert not bool(held[0])
+    assert executor._object_owners["can"] == [None]
+    assert executor._arm_owners["left_arm"] == [None]
+    assert ("can", "left_arm") not in executor._object_states
 
 
 def test_existing_object_owner_reserves_same_arm(monkeypatch: Any) -> None:
@@ -1060,11 +1218,305 @@ def test_lay_flat_surface_height_uses_rotated_live_mesh() -> None:
     assert isinstance(grounded.target, HeldObjectPoseTarget)
     table_top = 0.70 + 0.02
     rotated_rod_half_height = 0.02
-    surface_clearance = 0.003
+    surface_clearance = 0.005
     expected_surface_z = table_top + rotated_rod_half_height + surface_clearance
     assert grounded.target.object_target_pose[0, 2, 3] == pytest.approx(
         expected_surface_z,
         abs=1.0e-5,
+    )
+
+
+def test_orient_object_anchors_final_pose_to_support_not_live_lift_height() -> None:
+    entities = {
+        "table": _FakeEntity(
+            "table",
+            _pose(0.0, 0.0, 0.70),
+            _rect_vertices(0.60, 0.40, 0.02),
+        ),
+        "bottle": _FakeEntity(
+            "bottle",
+            _pose(0.10, 0.20, 1.30),
+            _rect_vertices(0.02, 0.03, 0.10),
+        ),
+    }
+    env = _FakeEnv(entities)
+    env.agent_initial_object_poses = {"bottle": _pose(0.10, 0.20, 0.78)}
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "orient",
+                    "operator": "orient_object",
+                    "object": "bottle",
+                    "actor": {"mode": "auto"},
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    step = program.semantic_steps[0]
+    edges = {
+        edge.actions[0]["target_binding"].get("phase"): edge
+        for edge in program.edges
+        if edge.actions[0]["atomic_action_class"] == "MoveHeldObject"
+    }
+    grounder = ActionGrounder(
+        program,
+        env,
+        lambda uid: ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            label=uid,
+            entity=entities[uid],
+        ),
+    )
+
+    final = grounder.ground(
+        edges["final"].actions[0],
+        step,
+        arm="left_arm",
+        state=WorldState(last_qpos=env.robot.get_qpos()),
+    )
+    expected_final_z = 0.70 + 0.02 + 0.10 + 0.05
+    assert final.target_object_pose[0, 2, 3] == pytest.approx(expected_final_z)
+    assert final.target_object_pose[0, :2, 3].tolist() == pytest.approx([0.10, 0.20])
+
+
+def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
+    entities = {
+        "table": _FakeEntity(
+            "table",
+            _pose(0.0, 0.0, 0.70),
+            _rect_vertices(0.60, 0.40, 0.02),
+        ),
+        "bottle": _FakeEntity(
+            "bottle",
+            _pose(0.10, 0.20, 0.78),
+            _rect_vertices(0.02, 0.03, 0.10),
+        ),
+    }
+    env = _FakeEnv(entities)
+    env.agent_robot_profile = "dual_ur10"
+    env.agent_initial_object_poses = {"bottle": _pose(0.10, 0.20, 0.78)}
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "orient",
+                    "operator": "orient_object",
+                    "object": "bottle",
+                    "actor": {"mode": "auto"},
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                        "support_object": "table",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    step = program.semantic_steps[0]
+    final_edge = next(
+        edge
+        for edge in program.edges
+        if edge.actions[0]["target_binding"].get("phase") == "final"
+    )
+    grounder = ActionGrounder(
+        program,
+        env,
+        lambda uid: ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            label=uid,
+            entity=entities[uid],
+        ),
+    )
+
+    final = grounder.ground(
+        final_edge.actions[0],
+        step,
+        arm="left_arm",
+        state=WorldState(last_qpos=env.robot.get_qpos()),
+    )
+
+    table_top = 0.72
+    bottle_half_height = 0.10
+    expected_z = table_top + bottle_half_height + 0.05
+    assert final.target_object_pose[0, 2, 3] == pytest.approx(expected_z)
+    assert final.motion_policy["upright_local_axis"] == "long_axis"
+
+
+def test_orient_verification_requires_upright_pose_near_initial_xy() -> None:
+    bottle = _FakeEntity(
+        "bottle",
+        _pose(0.10, 0.20, 0.823),
+        _rect_vertices(0.02, 0.03, 0.10),
+    )
+    env = _FakeEnv({"bottle": bottle})
+    env.agent_initial_object_poses = {"bottle": _pose(0.10, 0.20, 0.78)}
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "orient",
+                        "operator": "orient_object",
+                        "object": "bottle",
+                        "actor": {"mode": "auto"},
+                        "goal": {
+                            "orientation_goal": "upright",
+                            "orientation_axis": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    executor._policies[step.id] = {
+        "upright_max_tilt": torch.pi / 12,
+        "upright_xy_tolerance": 0.05,
+        "upright_local_axis": "z",
+    }
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+    assert bool(success[0])
+    assert not bool(failed[0])
+
+    bottle._pose[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+    assert not bool(success[0])
+    assert bool(failed[0])
+
+
+def test_orient_verification_accepts_grounded_live_xy_anchor() -> None:
+    bottle = _FakeEntity(
+        "bottle",
+        _pose(0.15, -0.10, 0.823),
+        _rect_vertices(0.02, 0.03, 0.10),
+    )
+    env = _FakeEnv({"bottle": bottle})
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "orient",
+                        "operator": "orient_object",
+                        "object": "bottle",
+                        "actor": {"mode": "auto"},
+                        "goal": {
+                            "orientation_goal": "upright",
+                            "orientation_axis": "none",
+                            "position_anchor": "live_xy",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    executor._targets[step.id] = torch.tensor([[0.15, -0.10, 0.823]])
+    executor._policies[step.id] = {
+        "upright_max_tilt": torch.pi / 12,
+        "upright_xy_tolerance": 0.05,
+        "upright_local_axis": "z",
+    }
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert bool(success[0])
+    assert not bool(failed[0])
+
+
+def test_long_axis_upright_is_undirected_but_explicit_axis_is_not() -> None:
+    pose = _pose(0.0, 0.0, 0.75)
+    pose[:, :3, 1] = torch.tensor([0.0, 0.0, -1.0])
+    pose[:, :3, 2] = torch.tensor([0.0, 1.0, 0.0])
+    entity = _FakeEntity("can", pose, _rect_vertices(0.03, 0.10, 0.03))
+    env = _FakeEnv({"can": entity})
+
+    assert bool(
+        evaluate_predicate(
+            env,
+            {
+                "type": "object_upright",
+                "object": "can",
+                "local_axis": "long_axis",
+            },
+        )[0]
+    )
+    assert not bool(
+        evaluate_predicate(
+            env,
+            {
+                "type": "object_upright",
+                "object": "can",
+                "local_axis": "y",
+            },
+        )[0]
+    )
+
+
+def test_orient_object_maps_world_y_sides_to_robot_view_arms() -> None:
+    entities = {
+        "left_object": _FakeEntity(
+            "left_object",
+            _pose(0.0, 0.20, 0.8),
+            _rect_vertices(0.02, 0.02, 0.08),
+        ),
+        "right_object": _FakeEntity(
+            "right_object",
+            _pose(0.0, -0.20, 0.8),
+            _rect_vertices(0.02, 0.02, 0.08),
+        ),
+    }
+    env = _FakeEnv(entities)
+    env.agent_initial_object_poses = {
+        uid: entity.get_local_pose(to_matrix=True) for uid, entity in entities.items()
+    }
+    execution = compile_task_agent(
+        _task_agent(
+            *[
+                {
+                    "id": uid,
+                    "operator": "orient_object",
+                    "object": uid,
+                    "actor": {"mode": "auto"},
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                }
+                for uid in entities
+            ]
+        )
+    )
+    executor = ProgramExecutor(
+        load_execution_program(execution), env, record_runtime=False
+    )
+
+    assert executor._preferred_in_place_arm(executor.steps["left_object"], 0) == (
+        "left_arm"
+    )
+    assert executor._preferred_in_place_arm(executor.steps["right_object"], 0) == (
+        "right_arm"
     )
 
 

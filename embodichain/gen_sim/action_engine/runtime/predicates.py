@@ -43,6 +43,7 @@ PREDICATE_TYPES = frozenset(
         "object_not_fallen",
         "object_on_object",
         "object_position_near",
+        "object_upright",
         "object_xy_near",
         "objects_collinear",
         "objects_ordered",
@@ -90,6 +91,27 @@ def _object(spec: Mapping[str, Any]) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("Predicate requires a non-empty object uid.")
     return value
+
+
+def _local_axis_index(env: Any, uid: str, axis: Any) -> int:
+    name = str(axis).lower()
+    if name in {"x", "y", "z"}:
+        return {"x": 0, "y": 1, "z": 2}[name]
+    if name not in {"long", "long_axis", "longest"}:
+        raise ValueError(f"Unsupported upright local axis {axis!r}.")
+    entity = env.sim.get_rigid_object(uid)
+    if entity is None:
+        raise ValueError(f"Unknown rigid object {uid!r}.")
+    vertices = entity.get_vertices(env_ids=[0], scale=True)
+    if isinstance(vertices, (tuple, list)):
+        vertices = vertices[0]
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=env.device)
+    if vertices.ndim == 3:
+        vertices = vertices[0]
+    if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+        raise ValueError(f"Rigid object {uid!r} has invalid mesh vertices.")
+    extents = vertices.max(dim=0).values - vertices.min(dim=0).values
+    return int(torch.argmax(extents).item())
 
 
 def _arm_values(
@@ -366,6 +388,19 @@ def evaluate_predicate(
         axis = _pose(env, _object(spec))[:, :3, 2]
         cosine = axis[:, 2].clamp(-1.0, 1.0)
         return torch.arccos(cosine) <= float(spec.get("max_tilt", math.radians(45.0)))
+    if kind == "object_upright":
+        uid = _object(spec)
+        local_axis = spec.get("local_axis", "long_axis")
+        axis_index = _local_axis_index(
+            env,
+            uid,
+            local_axis,
+        )
+        axis = _pose(env, uid)[:, :3, axis_index]
+        cosine = axis[:, 2].clamp(-1.0, 1.0)
+        if str(local_axis).lower() in {"long", "long_axis", "longest"}:
+            cosine = cosine.abs()
+        return torch.arccos(cosine) <= float(spec.get("max_tilt", math.radians(15.0)))
     if kind in {"object_axis_offset_near", "object_axis_near"}:
         object_position = _position(env, _object(spec))
         axis = _axis_index(spec.get("axis", "x"))

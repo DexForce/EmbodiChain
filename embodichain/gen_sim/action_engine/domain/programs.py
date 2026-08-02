@@ -130,6 +130,7 @@ _POSTCONDITION_TYPES = frozenset(
         "object_not_fallen",
         "object_on_object",
         "object_position_near",
+        "object_upright",
         "object_xy_near",
         "objects_collinear",
         "objects_ordered",

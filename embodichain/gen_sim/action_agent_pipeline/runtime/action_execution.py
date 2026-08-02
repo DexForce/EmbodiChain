@@ -210,7 +210,7 @@ def _execute_atomic_action_result(
     )
     action_np = _append_hold_steps(
         action_np,
-        int(spec.cfg.get("post_hold_steps", 0)),
+        _external_post_hold_steps(spec),
         "atomic action",
     )
     action_log_prefix = (
@@ -245,6 +245,13 @@ def _execute_atomic_action_result(
         resolved_left_eef_target_pose=None,
         resolved_right_eef_target_pose=None,
     )
+
+
+def _external_post_hold_steps(spec: AtomicActionSpec) -> int:
+    """Keep release stabilization inside Place, before its retract phase."""
+    if spec.atomic_action_class == "Place":
+        return 0
+    return int(spec.cfg.get("post_hold_steps", 0))
 
 
 def _executed_coordinated_atomic_action(

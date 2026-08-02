@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,66 +38,9 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.utils.math import pose_inv
 
 from .models import ExecutionProgram, GroundedAction, SemanticStep
+from .motion_policy import resolve_motion_policy
 
 __all__ = ["ActionGrounder", "LiveArrangementPlan", "LivePlacementPlan"]
-
-_POLICY_DEFAULTS: dict[str, dict[str, Any]] = {
-    "default_pickup": {
-        "sample_interval": 80,
-        "pre_grasp_distance": 0.10,
-        "lift_height": 0.16,
-    },
-    "default_transport": {
-        "sample_interval": 80,
-        "relation_distance": 0.16,
-        "hover_height": 0.10,
-        "staging_lift_height": 0.12,
-        "transport_clearance": 0.10,
-        "surface_clearance": 0.003,
-        "postcondition_tolerance": 0.05,
-        "line_axis_tolerance": 0.06,
-        "line_perpendicular_tolerance": 0.06,
-    },
-    "default_release": {
-        "sample_interval": 80,
-        "lift_height": 0.15,
-        "cartesian_waypoint_count": 4,
-        "postcondition_tolerance": 0.05,
-    },
-    "default_retreat": {
-        "sample_interval": 30,
-        "retreat_height": 0.10,
-        "maximum_eef_height": 0.80,
-        "postcondition_tolerance": 0.05,
-    },
-    "default_home": {
-        "sample_interval": 30,
-        "postcondition_tolerance": 0.05,
-    },
-    "default_hold": {
-        "sample_interval": 10,
-        "postcondition_tolerance": 0.05,
-    },
-    "default_press": {
-        "sample_interval": 80,
-        "press_depth": 0.004,
-        "postcondition_tolerance": 0.03,
-    },
-    "default_coordinated_transport": {
-        "sample_interval": 120,
-        "object_motion_keyframes": 6,
-        "pre_grasp_distance": 0.10,
-        "lift_height": 0.08,
-        "postcondition_tolerance": 0.06,
-    },
-    "default_coordinated_place": {
-        "sample_interval": 100,
-        "hand_interp_steps": 10,
-        "hold_steps": 4,
-        "retreat_steps": 16,
-        "postcondition_tolerance": 0.06,
-    },
-}
 
 
 def _batched_pose(value: Any, env: Any) -> torch.Tensor:
@@ -527,6 +469,7 @@ class ActionGrounder:
         self.program = program
         self.env = env
         self.semantics_factory = semantics_factory
+        self.robot_profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
         if isinstance(arrangement, Mapping):
             self.arrangements = dict(arrangement)
         elif arrangement is None:
@@ -541,14 +484,13 @@ class ActionGrounder:
 
     def policy(self, action: Mapping[str, Any]) -> dict[str, Any]:
         name = str(action.get("motion_policy", "default_transport"))
-        policy = deepcopy(
-            _POLICY_DEFAULTS.get(name, _POLICY_DEFAULTS["default_transport"])
-        )
-        policy.update(deepcopy(self.program.motion_policies.get(name, {})))
         inline = action.get("motion_policy_config", action.get("cfg"))
-        if isinstance(inline, Mapping):
-            policy.update(deepcopy(dict(inline)))
-        return policy
+        return resolve_motion_policy(
+            self.robot_profile,
+            name,
+            program_overrides=self.program.motion_policies.get(name),
+            inline_overrides=inline if isinstance(inline, Mapping) else None,
+        )
 
     def ground(
         self,
@@ -567,6 +509,10 @@ class ActionGrounder:
         kind = str(binding.get("kind", ""))
         policy = self.policy(action)
         object_pose = _live_pose(self.env, step.object_uid)
+        if step.operator == "orient_object":
+            policy["upright_local_axis"] = self._upright_local_axis(step)
+            if action_class == "PickUp":
+                policy["obj_upright_direction"] = self._upright_local_direction(step)
         reference_pose = self._reference_pose(step)
         target_object_pose = None
 
@@ -765,6 +711,34 @@ class ActionGrounder:
             if phase == "staging":
                 target[:, 2, 3] += float(policy.get("transport_clearance", 0.10))
             return target
+        if step.operator == "orient_object":
+            initial = None
+            if step.goal.get("position_anchor", "initial_xy") == "initial_xy":
+                initial = getattr(self.env, "agent_initial_object_poses", {}).get(
+                    step.object_uid
+                )
+            target = (
+                _batched_pose(initial, self.env).clone()
+                if initial is not None
+                else object_pose.clone()
+            )
+            target[:, :3, :3] = self._target_rotation(step, target)
+            support_uid = str(step.goal.get("support_object", "table"))
+            support = _object(self.env, support_uid)
+            moved = _object(self.env, step.object_uid)
+            for env_id in range(int(self.env.num_envs)):
+                support_top = _world_vertices(support, self.env, env_id)[:, 2].max()
+                bottom = self._rotated_local_z_min(
+                    moved,
+                    target[env_id, :3, :3],
+                    env_id,
+                )
+                target[env_id, 2, 3] = (
+                    support_top + float(policy.get("surface_clearance", 0.003)) - bottom
+                )
+            if phase == "staging":
+                target[:, 2, 3] += float(policy.get("staging_lift_height", 0.12))
+            return target
         target = object_pose.clone()
         if reference_pose is not None:
             target[:, :3, 3] = reference_pose[:, :3, 3]
@@ -869,6 +843,24 @@ class ActionGrounder:
             target[:, 2, 3] += float(policy.get("transport_clearance", 0.10))
         return target
 
+    def _upright_local_direction(self, step: SemanticStep) -> torch.Tensor:
+        axis = self._upright_local_axis(step)
+        entity = _object(self.env, step.object_uid)
+        vertices = _local_vertices(entity, self.env, 0)
+        extents = vertices.max(dim=0).values - vertices.min(dim=0).values
+        if axis == "long_axis":
+            axis_index = int(torch.argmax(extents).item())
+        else:
+            axis_index = {"x": 0, "y": 1, "z": 2}[axis]
+        direction = torch.zeros(3, dtype=torch.float32, device=self.env.device)
+        direction[axis_index] = 1.0
+        return direction
+
+    @staticmethod
+    def _upright_local_axis(step: SemanticStep) -> str:
+        axis = str(step.goal.get("upright_local_axis", "auto"))
+        return "long_axis" if axis == "auto" else axis
+
     def _target_rotation(
         self,
         step: SemanticStep,
@@ -890,8 +882,17 @@ class ActionGrounder:
                 descending=True,
             ).tolist()
             if goal == "upright":
-                vertical_axis = int(longest_to_shortest[0])
-                horizontal_axis = int(longest_to_shortest[1])
+                upright_axis = self._upright_local_axis(step)
+                vertical_axis = (
+                    int(longest_to_shortest[0])
+                    if upright_axis == "long_axis"
+                    else {"x": 0, "y": 1, "z": 2}[upright_axis]
+                )
+                horizontal_axis = next(
+                    int(axis)
+                    for axis in longest_to_shortest
+                    if int(axis) != vertical_axis
+                )
             elif goal == "lay_flat":
                 vertical_axis = int(longest_to_shortest[-1])
                 horizontal_axis = int(longest_to_shortest[0])

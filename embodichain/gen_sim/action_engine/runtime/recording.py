@@ -150,7 +150,7 @@ class RuntimeRecorder:
                         "target_object_pose": _jsonable(
                             item.target_object_pose, env_id
                         ),
-                        "motion_policy": _jsonable(item.motion_policy, env_id),
+                        "motion_policy": _jsonable(item.motion_policy),
                     }
                     for item in grounded
                 ],

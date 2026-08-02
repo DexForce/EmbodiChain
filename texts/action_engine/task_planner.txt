@@ -57,6 +57,9 @@ Hard rules:
   actor={"mode":"auto"} and depends_on=[], then reference their step IDs in one
   allocation_groups entry. The deterministic compiler assigns distinct arms;
   do not guess left/right from object positions.
+- Spatial phrases such as "both sides", "两侧", or "两边" describe object
+  locations, not an arm-allocation constraint. Emit an allocation group only
+  when the user explicitly requests both or distinct arms.
 
 Built-in operator shapes:
 
@@ -90,8 +93,14 @@ Built-in operator shapes:
 4. orient_object
    - object: one movable object.
    - goal fields: orientation_goal="upright"|"lay_flat"|"axis_align";
-     orientation_axis="none"|"x"|"y"|"long_axis"|"short_axis".
+     orientation_axis="none"|"x"|"y"|"long_axis"|"short_axis";
+     support_object=<runtime_uid>; position_anchor="initial_xy"|"live_xy";
+     upright_local_axis="auto"|"long_axis"|"x"|"y"|"z".
    - Use orientation_goal="upright" for instructions such as Chinese "扶正".
+   - Use support_object="table" and position_anchor="initial_xy" for an
+     in-place tabletop orientation request. Use upright_local_axis="auto"
+     unless the scene inventory explicitly supplies a local semantic axis;
+     never infer a mesh-local axis from an object name.
 
 5. coordinated_transport
    - object: one shared object moved by both arms.

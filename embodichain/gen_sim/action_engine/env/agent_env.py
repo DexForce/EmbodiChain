@@ -25,8 +25,8 @@ import torch
 
 from embodichain.gen_sim.action_engine.protocol import ACTION_ENGINE_ENV_ID
 from embodichain.gen_sim.action_engine.runtime import (
-    ExecutionResult,
     ProgramExecutor,
+    execute_pipeline_program,
     evaluate_predicate,
     load_agent_execution_program,
 )
@@ -49,6 +49,7 @@ class ActionEngineEnv(EmbodiedEnv):
         agent_config = kwargs.pop("agent_config", None)
         task_name = kwargs.pop("task_name", None)
         agent_config_path = kwargs.pop("agent_config_path", None)
+        runtime_backend = kwargs.pop("runtime_backend", "pipeline")
         if not isinstance(agent_config, Mapping):
             raise ValueError("ActionEngineEnv requires an agent_config mapping.")
         if not isinstance(task_name, str) or not task_name:
@@ -58,7 +59,13 @@ class ActionEngineEnv(EmbodiedEnv):
         self.agent_config = dict(agent_config)
         self.agent_config_path = agent_config_path
         self.task_name = task_name
-        self.last_execution: ExecutionResult | None = None
+        if runtime_backend not in {"pipeline", "independent"}:
+            raise ValueError(
+                "ActionEngineEnv runtime_backend must be 'pipeline' or "
+                f"'independent', got {runtime_backend!r}."
+            )
+        self.runtime_backend = str(runtime_backend)
+        self.last_execution: Any | None = None
         self._runtime_state_ready = False
         super().__init__(cfg, **kwargs)
         install_pytorch_solver_tcp_compat(self.robot)
@@ -103,6 +110,9 @@ class ActionEngineEnv(EmbodiedEnv):
         self.update_obj_info()
         self.agent_initial_object_poses = {
             uid: item["pose"].clone() for uid, item in self.obj_info.items()
+        }
+        self.agent_initial_object_heights = {
+            uid: item["height"].clone() for uid, item in self.obj_info.items()
         }
         self._runtime_state_ready = True
 
@@ -186,19 +196,71 @@ class ActionEngineEnv(EmbodiedEnv):
         return str(eef) if eef else None
 
     def get_current_qpos_agent(self) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.left_arm_current_qpos, self.right_arm_current_qpos
+        qpos = self.robot.get_qpos()
+        return tuple(
+            qpos[:, list(getattr(self, f"{side}_arm_joints", ()))].clone()
+            for side in ("left", "right")
+        )
+
+    def set_current_qpos_agent(
+        self,
+        arm_qpos: torch.Tensor,
+        is_left: bool,
+    ) -> None:
+        side = "left" if is_left else "right"
+        setattr(self, f"{side}_arm_current_qpos", arm_qpos)
 
     def get_current_xpos_agent(
         self,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        return self.left_arm_current_xpos, self.right_arm_current_xpos
+        qpos = self.robot.get_qpos()
+        result = []
+        for side in ("left", "right"):
+            slot = self._agent_arm_slots.get(side)
+            arm = None if slot is None else slot.get("arm")
+            arm_ids = list(getattr(self, f"{side}_arm_joints", ()))
+            if not arm or not arm_ids:
+                result.append(None)
+                continue
+            result.append(
+                self.robot.compute_fk(
+                    qpos[:, arm_ids],
+                    name=arm,
+                    to_matrix=True,
+                )
+            )
+        return result[0], result[1]
+
+    def set_current_xpos_agent(
+        self,
+        arm_xpos: torch.Tensor,
+        is_left: bool,
+    ) -> None:
+        side = "left" if is_left else "right"
+        setattr(self, f"{side}_arm_current_xpos", arm_xpos)
 
     def get_current_gripper_state_agent(
         self,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        return (
-            self.left_arm_current_gripper_state,
-            self.right_arm_current_gripper_state,
+        qpos = self.robot.get_qpos()
+        return tuple(
+            qpos[:, list(getattr(self, f"{side}_eef_joints", ()))].clone()
+            for side in ("left", "right")
+        )
+
+    def set_current_gripper_state_agent(
+        self,
+        arm_gripper_state: torch.Tensor,
+        is_left: bool,
+    ) -> None:
+        side = "left" if is_left else "right"
+        setattr(self, f"{side}_arm_current_gripper_state", arm_gripper_state)
+
+    def get_arm_fk(self, qpos: torch.Tensor, is_left: bool) -> torch.Tensor:
+        return self.robot.compute_fk(
+            name=self.get_agent_arm_control_part(is_left),
+            qpos=torch.as_tensor(qpos, device=self.robot.device),
+            to_matrix=True,
         )
 
     def sync_agent_state_from_qpos(self, qpos: torch.Tensor) -> None:
@@ -258,13 +320,22 @@ class ActionEngineEnv(EmbodiedEnv):
         self,
         regenerate: bool = False,
         **kwargs: Any,
-    ) -> ExecutionResult:
+    ) -> Any:
         """Compile in memory when requested, then execute the program online."""
         program = load_agent_execution_program(
             self.agent_config,
             agent_config_path=self.agent_config_path,
             regenerate=regenerate,
         )
+        if self.runtime_backend == "pipeline":
+            self.last_execution = execute_pipeline_program(
+                program,
+                self,
+                run_id=kwargs.get("runtime_run_id"),
+                episode_index=int(kwargs.get("episode_index", 0)),
+                runtime_graph_renderer=kwargs.get("runtime_graph_renderer"),
+            )
+            return self.last_execution
         executor = ProgramExecutor(
             program,
             self,
@@ -288,7 +359,7 @@ class ActionEngineEnv(EmbodiedEnv):
         already been sent to the simulator, so no replay normalization is
         needed.
         """
-        if isinstance(action_list, ExecutionResult) and action_list.already_executed:
+        if getattr(action_list, "already_executed", False):
             return action_list
         return super()._normalize_demo_action_list(action_list)
 
@@ -297,7 +368,15 @@ class ActionEngineEnv(EmbodiedEnv):
         if isinstance(configured, Mapping):
             return evaluate_predicate(self, configured)
         if self.last_execution is not None:
-            return self.last_execution.success
+            return torch.as_tensor(
+                getattr(
+                    self.last_execution,
+                    "runtime_success",
+                    getattr(self.last_execution, "success", False),
+                ),
+                dtype=torch.bool,
+                device=self.device,
+            )
         return torch.zeros(
             int(self.num_envs),
             dtype=torch.bool,

@@ -408,13 +408,32 @@ def _expand_orient_object(step: Mapping[str, Any]) -> list[dict[str, Any]]:
     object_uid = _single_object(step, "orient_object")
     goal = _goal(
         step,
-        allowed={"orientation_axis", "orientation_goal"},
+        allowed={
+            "orientation_axis",
+            "orientation_goal",
+            "position_anchor",
+            "support_object",
+            "upright_local_axis",
+        },
     )
     orientation_goal, orientation_axis = _orientation(goal, "orient_object")
     if orientation_goal == "preserve":
         raise ValueError(
             "orient_object requires upright, lay_flat, or axis_align orientation."
         )
+    position_anchor = str(goal.get("position_anchor", "initial_xy"))
+    if position_anchor not in {"initial_xy", "live_xy"}:
+        raise ValueError(
+            "orient_object position_anchor must be 'initial_xy' or 'live_xy'."
+        )
+    upright_local_axis = str(goal.get("upright_local_axis", "auto"))
+    if upright_local_axis not in {"auto", "long_axis", "x", "y", "z"}:
+        raise ValueError(
+            "orient_object upright_local_axis must be auto, long_axis, x, y, or z."
+        )
+    support_object = str(goal.get("support_object", "table"))
+    if not support_object:
+        raise ValueError("orient_object support_object must be a non-empty string.")
     return [
         _execution_step(
             step,
@@ -425,6 +444,9 @@ def _expand_orient_object(step: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "reference_state": "live",
                 "orientation_goal": orientation_goal,
                 "orientation_axis": orientation_axis,
+                "position_anchor": position_anchor,
+                "support_object": support_object,
+                "upright_local_axis": upright_local_axis,
             },
             postcondition={
                 "type": "semantic_goal",
@@ -624,12 +646,19 @@ def _build_single_arm_phases(
 def _build_orient_object_phases(
     step: Mapping[str, Any],
 ) -> tuple[PhaseTemplate, ...]:
-    """Use a lifted waypoint before applying the final in-place orientation."""
+    """Move directly to the release pose with the mature upright policy."""
     return (
-        _pickup_phase(step),
-        _move_phase(step, "staging"),
-        _move_phase(step, "final"),
-        *_release_retreat_home(step),
+        _pickup_phase(step, motion_policy="upright_in_place_pickup"),
+        _move_phase(
+            step,
+            "final",
+            motion_policy="upright_in_place_transport",
+        ),
+        *_release_retreat_home(
+            step,
+            release_policy="upright_in_place_release",
+            retreat_policy="upright_in_place_retreat",
+        ),
     )
 
 
@@ -760,7 +789,11 @@ def _build_coordinated_place_phases(
     )
 
 
-def _pickup_phase(step: Mapping[str, Any]) -> PhaseTemplate:
+def _pickup_phase(
+    step: Mapping[str, Any],
+    *,
+    motion_policy: str = "default_pickup",
+) -> PhaseTemplate:
     return PhaseTemplate(
         name="pick_up",
         state_semantic=f"Holding `{step['object']}`",
@@ -772,13 +805,18 @@ def _pickup_phase(step: Mapping[str, Any]) -> PhaseTemplate:
                     "object": step["object"],
                     "affordance": "antipodal",
                 },
-                "default_pickup",
+                motion_policy,
             ),
         ),
     )
 
 
-def _move_phase(step: Mapping[str, Any], phase: str | None = None) -> PhaseTemplate:
+def _move_phase(
+    step: Mapping[str, Any],
+    phase: str | None = None,
+    *,
+    motion_policy: str = "default_transport",
+) -> PhaseTemplate:
     target_binding = {
         "kind": "semantic_goal",
         "semantic_step": step["id"],
@@ -792,7 +830,7 @@ def _move_phase(step: Mapping[str, Any], phase: str | None = None) -> PhaseTempl
             ActionTemplate(
                 "MoveHeldObject",
                 target_binding,
-                "default_transport",
+                motion_policy,
             ),
         ),
     )
@@ -800,6 +838,9 @@ def _move_phase(step: Mapping[str, Any], phase: str | None = None) -> PhaseTempl
 
 def _release_retreat_home(
     step: Mapping[str, Any],
+    *,
+    release_policy: str = "default_release",
+    retreat_policy: str = "default_retreat",
 ) -> tuple[PhaseTemplate, ...]:
     return (
         PhaseTemplate(
@@ -809,7 +850,7 @@ def _release_retreat_home(
                 ActionTemplate(
                     "Place",
                     {"kind": "current_held_pose"},
-                    "default_release",
+                    release_policy,
                 ),
             ),
         ),
@@ -820,7 +861,7 @@ def _release_retreat_home(
                 ActionTemplate(
                     "MoveEndEffector",
                     {"kind": "policy_pose"},
-                    "default_retreat",
+                    retreat_policy,
                 ),
             ),
         ),

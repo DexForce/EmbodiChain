@@ -48,6 +48,9 @@ class PlaceCfg(ActionCfg):
     hand_interp_steps: int = 5
     """Number of waypoints for the gripper open interpolation phase."""
 
+    post_hold_steps: int = 0
+    """Number of stationary open-gripper waypoints before retracting."""
+
     hand_control_part: str = "hand"
     """Name of the robot part that controls the hand joints."""
 
@@ -104,6 +107,8 @@ class Place(AtomicAction):
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
         if self.cfg.cartesian_waypoint_count < 1:
             logger.log_error("cartesian_waypoint_count must be at least 1.", ValueError)
+        if self.cfg.post_hold_steps < 0:
+            logger.log_error("post_hold_steps must be non-negative.", ValueError)
 
     def execute(self, target: EndEffectorPoseTarget, state: WorldState) -> ActionResult:
         place_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
@@ -179,8 +184,9 @@ class Place(AtomicAction):
             self.hand_close_qpos, self.hand_open_qpos, n_waypoints=n_open
         )
 
+        n_hold = int(self.cfg.post_hold_steps)
         full = torch.empty(
-            (self.n_envs, n_down + n_open + n_back, self.robot_dof),
+            (self.n_envs, n_down + n_open + n_hold + n_back, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
@@ -191,8 +197,16 @@ class Place(AtomicAction):
             reach_arm_qpos.unsqueeze(1)
         )
         full[:, n_down : n_down + n_open, self.hand_joint_ids] = hand_open_path
-        full[:, n_down + n_open :, self.arm_joint_ids] = back_arm
-        full[:, n_down + n_open :, self.hand_joint_ids] = self.hand_open_qpos
+        hold_end = n_down + n_open + n_hold
+        if n_hold:
+            full[:, n_down + n_open : hold_end, self.arm_joint_ids] = (
+                reach_arm_qpos.unsqueeze(1)
+            )
+            full[:, n_down + n_open : hold_end, self.hand_joint_ids] = (
+                self.hand_open_qpos
+            )
+        full[:, hold_end:, self.arm_joint_ids] = back_arm
+        full[:, hold_end:, self.hand_joint_ids] = self.hand_open_qpos
 
         return ActionResult(
             success=success,

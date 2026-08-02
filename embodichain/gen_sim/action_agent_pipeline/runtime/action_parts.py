@@ -296,7 +296,8 @@ def _build_action_cfg(
     hand_dof: int,
 ):
     cfg_values = dict(spec.cfg)
-    cfg_values.pop("post_hold_steps", None)
+    if spec.atomic_action_class != "Place":
+        cfg_values.pop("post_hold_steps", None)
     device = env.robot.device
 
     if spec.atomic_action_class == "CoordinatedPickment":

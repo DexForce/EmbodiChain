@@ -233,6 +233,7 @@ class AgentTaskGraph:
         self._step_arm_world_states.clear()
         world_states = init_parallel_world_states(env)
         failed = torch.zeros(int(env.num_envs), dtype=torch.bool, device=env.device)
+        unsafe_failed = torch.zeros_like(failed)
         cleanup_failed = torch.zeros_like(failed)
         step_cleanup_failed: dict[str, torch.Tensor] = {}
         semantic_success: dict[str, torch.Tensor] = {}
@@ -267,6 +268,31 @@ class AgentTaskGraph:
                 if transitions > self.max_transitions:
                     raise RuntimeError("Agent task graph exceeded max_transitions.")
 
+                # ``failed`` is local to the currently executing semantic branch.
+                # A completed sibling branch must not suppress an independent
+                # ready step; only declared semantic dependencies propagate failure.
+                new_steps = []
+                for edge in batch:
+                    step = self.semantic_step_by_edge[edge.id]
+                    if (
+                        step.id in dependency_checked_steps
+                        or self._is_prefetched_pickup(
+                            edge,
+                            step,
+                        )
+                    ):
+                        continue
+                    new_steps.append(step)
+                if new_steps:
+                    failed = unsafe_failed.clone()
+                    for step in new_steps:
+                        failed = self._check_dependencies(
+                            step,
+                            failed=failed,
+                            semantic_success=semantic_success,
+                        )
+                        dependency_checked_steps.add(step.id)
+
                 if len(batch) == 2 and self._batch_has_distinct_arm_group(batch):
                     eligible_for_group = ~failed
                     assignments_by_step, selection_failed = (
@@ -287,17 +313,6 @@ class AgentTaskGraph:
 
                 for edge in batch:
                     step = self.semantic_step_by_edge[edge.id]
-                    deferred_dependency = self._is_prefetched_pickup(edge, step)
-                    if (
-                        step.id not in dependency_checked_steps
-                        and not deferred_dependency
-                    ):
-                        failed = self._check_dependencies(
-                            step,
-                            failed=failed,
-                            semantic_success=semantic_success,
-                        )
-                        dependency_checked_steps.add(step.id)
                     if step.id not in step_assignments:
                         eligible_for_step = ~failed
                         assignments, selection_failed = self._select_step_arms(
@@ -391,6 +406,7 @@ class AgentTaskGraph:
                     cleanup=batch_is_cleanup,
                 )
                 if batch_is_cleanup:
+                    unsafe_failed |= newly_cleanup_failed
                     cleanup_failed |= newly_cleanup_failed
                     for edge in batch:
                         step_id = self.semantic_step_by_edge[edge.id].id
@@ -399,6 +415,8 @@ class AgentTaskGraph:
                             torch.zeros_like(failed),
                         )
                         current_cleanup |= newly_cleanup_failed
+                else:
+                    unsafe_failed |= execution_failed & ~failed_before
 
                 for edge in batch:
                     step = self.semantic_step_by_edge[edge.id]
@@ -475,12 +493,13 @@ class AgentTaskGraph:
                             tolerance=tolerance,
                             cleanup_failed_mask=step_cleanup_failed.get(step.id),
                         )
+            semantic_all = torch.ones_like(failed)
+            for success in semantic_success.values():
+                semantic_all &= success
+            failed = ~semantic_all
             if arrangement_plan is not None:
                 relation_success = evaluate_configured_success(env)
-                semantic_all = torch.ones_like(failed)
-                for success in semantic_success.values():
-                    semantic_all &= success
-                failed |= ~(semantic_all & relation_success)
+                failed |= ~relation_success
         except BaseException as error:
             aborted_reason = f"{type(error).__name__}: {error}"
             raise

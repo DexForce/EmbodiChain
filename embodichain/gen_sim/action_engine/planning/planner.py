@@ -261,16 +261,49 @@ def _wrap_agent(
         scene,
         task_description=task_description,
     )
+    groups = _ensure_bilateral_allocation_group(
+        task_description,
+        steps,
+        allocation_groups,
+    )
     return validate_task_agent(
         {
             "schema_version": TASK_AGENT_SCHEMA,
             "task": task_name,
             "goal": task_description,
             "semantic_steps": steps,
-            "allocation_groups": deepcopy(allocation_groups),
+            "allocation_groups": groups,
         },
         known_objects=[_scene_runtime_uid(item) for item in scene],
     )
+
+
+def _ensure_bilateral_allocation_group(
+    task_description: str,
+    steps: Sequence[Mapping[str, Any]],
+    allocation_groups: Any,
+) -> Any:
+    """Preserve explicit or unambiguous two-sided upright arm intent."""
+    if allocation_groups:
+        return deepcopy(allocation_groups)
+    normalized = task_description.casefold()
+    bilateral = any(marker in normalized for marker in ("用双臂", "双臂", "both arms"))
+    orient_steps = [
+        step
+        for step in steps
+        if step.get("operator") == "orient_object"
+        and not step.get("depends_on")
+        and step.get("actor", {}).get("mode", "auto") == "auto"
+    ]
+    if not bilateral or len(orient_steps) != 2 or len(steps) != 2:
+        return deepcopy(allocation_groups)
+    return [
+        {
+            "id": "dual_arms_1",
+            "semantic_step_ids": [step["id"] for step in orient_steps],
+            "arm_constraint": "distinct_arms",
+        }
+    ]
 
 
 def _normalize_semantic_steps(

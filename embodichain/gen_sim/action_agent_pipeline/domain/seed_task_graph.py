@@ -1005,8 +1005,19 @@ def _validate_object_manipulation_steps(
                 f"Object-manipulation semantic step {step_id!r} postcondition "
                 "is inconsistent."
             )
-        expected_layout = _object_manipulation_action_layout(step)
-        if _step_action_layout(step, edge_by_id) != expected_layout:
+        actual_layout = _step_action_layout(step, edge_by_id)
+        valid_layouts = [_object_manipulation_action_layout(step)]
+        if step["goal"].get("placement_mode") == "upright_in_place":
+            valid_layouts.append(
+                [
+                    ["PickUp"],
+                    ["MoveHeldObject"],
+                    ["Place"],
+                    ["MoveEndEffector"],
+                    ["MoveJoints"],
+                ]
+            )
+        if actual_layout not in valid_layouts:
             raise ValueError(
                 f"Object-manipulation semantic step {step_id!r} has an invalid "
                 "action topology."

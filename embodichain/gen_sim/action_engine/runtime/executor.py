@@ -402,9 +402,35 @@ class ProgramExecutor:
         if len(edge.actions) != 1:
             return False
         step = self.step_by_edge[edge.id]
-        return edge.actions[0].get(
-            "atomic_action_class"
-        ) == "PickUp" and step.actor.get("mode") in {"auto", "required"}
+        return (
+            edge.actions[0].get("atomic_action_class") == "PickUp"
+            and step.actor.get("mode") in {"auto", "required"}
+            and step.operator != "orient_object"
+        )
+
+    def _preferred_in_place_arm(
+        self,
+        step: SemanticStep,
+        env_id: int,
+    ) -> str | None:
+        """Map a clearly sided in-place object to the robot-view arm slot."""
+        if step.operator != "orient_object":
+            return None
+        initial = getattr(self.env, "agent_initial_object_poses", {}).get(
+            step.object_uid
+        )
+        if initial is None:
+            entity = self.env.sim.get_rigid_object(step.object_uid)
+            if entity is None:
+                return None
+            initial = entity.get_local_pose(to_matrix=True)
+        pose = torch.as_tensor(initial, device=self.env.device)
+        if pose.ndim == 2:
+            pose = pose.unsqueeze(0)
+        y = float(pose[min(env_id, pose.shape[0] - 1), 1, 3])
+        if abs(y) <= 0.02:
+            return None
+        return "left_arm" if y > 0.0 else "right_arm"
 
     def _ensure_assignment(
         self,
@@ -416,6 +442,11 @@ class ProgramExecutor:
         if step.id in self._assignments:
             return
         mode = str(step.actor.get("mode", "auto"))
+        group = self.group_by_step.get(step.id)
+        if mode == "auto" and group is not None:
+            self._ensure_serial_group_assignments(group, failed)
+            if step.id in self._assignments:
+                return
         if mode == "coordinated":
             self._assignments[step.id] = [
                 (
@@ -462,7 +493,24 @@ class ProgramExecutor:
                 continue
             left_ok = bool(left.feasible[env_id])
             right_ok = bool(right.feasible[env_id])
-            if left_ok and (
+            preferred = self._preferred_in_place_arm(step, env_id)
+            if preferred == "left_arm":
+                if left_ok:
+                    assignments.append("left_arm")
+                elif right_ok:
+                    assignments.append("right_arm")
+                else:
+                    assignments.append(None)
+                    selection_failed[env_id] = True
+            elif preferred == "right_arm":
+                if right_ok:
+                    assignments.append("right_arm")
+                elif left_ok:
+                    assignments.append("left_arm")
+                else:
+                    assignments.append(None)
+                    selection_failed[env_id] = True
+            elif left_ok and (
                 not right_ok or float(left.cost[env_id]) <= float(right.cost[env_id])
             ):
                 assignments.append("left_arm")
@@ -484,6 +532,68 @@ class ProgramExecutor:
             return
         self._assignments[step.id] = assignments
         self._report_candidates(step, (left, right))
+
+    def _ensure_serial_group_assignments(
+        self,
+        group: Mapping[str, Any],
+        failed: torch.Tensor,
+    ) -> None:
+        """Bind a distinct-arm pair even when its operators execute serially."""
+        step_ids = [str(value) for value in group.get("semantic_step_ids", ())]
+        if len(step_ids) != 2 or any(
+            step_id in self._assignments for step_id in step_ids
+        ):
+            return
+        steps = [self.steps[step_id] for step_id in step_ids]
+        candidates = {
+            (candidate_step.id, arm): self._candidate(candidate_step, arm, failed)
+            for candidate_step in steps
+            for arm in ("left_arm", "right_arm")
+        }
+        for candidate_step in steps:
+            self._report_candidates(
+                candidate_step,
+                (
+                    candidates[(candidate_step.id, "left_arm")],
+                    candidates[(candidate_step.id, "right_arm")],
+                ),
+            )
+        assignments = {
+            candidate_step.id: [None] * len(failed) for candidate_step in steps
+        }
+        permutations = (("left_arm", "right_arm"), ("right_arm", "left_arm"))
+        for env_id in range(len(failed)):
+            if bool(failed[env_id]):
+                continue
+            ranked: list[tuple[bool, float, float, str, str]] = []
+            for first_arm, second_arm in permutations:
+                first = candidates[(steps[0].id, first_arm)]
+                second = candidates[(steps[1].id, second_arm)]
+                feasible = bool(first.feasible[env_id] and second.feasible[env_id])
+                preferred = (
+                    self._preferred_in_place_arm(steps[0], env_id),
+                    self._preferred_in_place_arm(steps[1], env_id),
+                )
+                side_penalty = float(first_arm != preferred[0]) if preferred[0] else 0.0
+                side_penalty += (
+                    float(second_arm != preferred[1]) if preferred[1] else 0.0
+                )
+                ranked.append(
+                    (
+                        not feasible,
+                        side_penalty,
+                        float(first.cost[env_id] + second.cost[env_id]),
+                        first_arm,
+                        second_arm,
+                    )
+                )
+            ranked.sort()
+            infeasible, _, _, first_arm, second_arm = ranked[0]
+            if infeasible:
+                continue
+            assignments[steps[0].id][env_id] = first_arm
+            assignments[steps[1].id][env_id] = second_arm
+        self._assignments.update(assignments)
 
     def _candidate(
         self,
@@ -707,9 +817,7 @@ class ProgramExecutor:
             if arm not in owners:
                 self._object_states.pop((step.object_uid, arm), None)
             return
-        if state.held_object is None or (
-            action_class == "PickUp" and not bool(successful.any())
-        ):
+        if state.held_object is None or not bool(successful.any()):
             return
         self._object_states[(step.object_uid, arm)] = state
         if action_class == "PickUp":
@@ -846,6 +954,14 @@ class ProgramExecutor:
                     )
                     physical_failed |= successful & ~physical
                     successful = physical
+                elif action_class == "MoveHeldObject":
+                    physical = self._physical_hold(
+                        step.object_uid, arm, outcome.next_state, successful
+                    )
+                    lost = successful & ~physical
+                    physical_failed |= lost
+                    self._release_ownership(step.object_uid, arm, lost)
+                    successful = physical
                 self._update_ownership(
                     step,
                     arm,
@@ -878,18 +994,93 @@ class ProgramExecutor:
         state: WorldState,
         attempted: torch.Tensor,
     ) -> torch.Tensor:
-        """Confirm a planned grasp against live geometry before reserving an arm."""
         owners = list(self._object_owners.get(uid, [None] * int(self.env.num_envs)))
         for env_id in torch.nonzero(attempted, as_tuple=False).flatten().tolist():
             owners[env_id] = arm
         states = dict(self._object_states)
         states[(uid, arm)] = state
-        return attempted & evaluate_predicate(
+        physical = attempted & evaluate_predicate(
             self.env,
-            {"type": "object_held", "object": uid},
+            {
+                "type": "object_held",
+                "object": uid,
+                "position_tolerance": 0.05,
+            },
             held_owners={**self._object_owners, uid: owners},
             held_states=states,
         )
+        held = state.held_object
+        if held is None:
+            return physical
+        entity = self.env.sim.get_rigid_object(uid)
+        if entity is None:
+            return torch.zeros_like(physical)
+        eef_poses = self.env.get_current_xpos_agent()
+        eef_pose = eef_poses[0 if arm == "left_arm" else 1]
+        eef_pose = torch.as_tensor(
+            eef_pose,
+            dtype=held.object_to_eef.dtype,
+            device=held.object_to_eef.device,
+        )
+        if eef_pose.ndim == 2:
+            eef_pose = eef_pose.unsqueeze(0).repeat(int(self.env.num_envs), 1, 1)
+        object_pose = torch.as_tensor(
+            entity.get_local_pose(to_matrix=True),
+            dtype=eef_pose.dtype,
+            device=eef_pose.device,
+        )
+        if object_pose.ndim == 2:
+            object_pose = object_pose.unsqueeze(0).repeat(int(self.env.num_envs), 1, 1)
+        rebase = physical.clone()
+        if not bool(rebase.any()):
+            return physical
+        live_object_to_eef = torch.bmm(torch.linalg.inv(object_pose), eef_pose)
+        mask = rebase[:, None, None]
+        held.object_to_eef = torch.where(
+            mask,
+            live_object_to_eef,
+            held.object_to_eef,
+        )
+        held.grasp_xpos = torch.where(mask, eef_pose, held.grasp_xpos)
+        return physical
+
+    def _physical_hold(
+        self,
+        uid: str,
+        arm: str,
+        state: WorldState,
+        attempted: torch.Tensor,
+    ) -> torch.Tensor:
+        states = dict(self._object_states)
+        states[(uid, arm)] = state
+        return attempted & evaluate_predicate(
+            self.env,
+            {
+                "type": "object_held",
+                "object": uid,
+                "position_tolerance": 0.05,
+                "arm": arm,
+            },
+            held_owners=self._object_owners,
+            held_states=states,
+        )
+
+    def _release_ownership(
+        self,
+        uid: str,
+        arm: str,
+        lost: torch.Tensor,
+    ) -> None:
+        owners = self._object_owners.get(uid)
+        if owners is None:
+            return
+        for env_id in torch.nonzero(lost, as_tuple=False).flatten().tolist():
+            if owners[env_id] == arm:
+                owners[env_id] = None
+            if self._arm_owners[arm][env_id] == uid:
+                self._arm_owners[arm][env_id] = None
+        if arm not in owners:
+            self._object_states.pop((uid, arm), None)
 
     def _execute_coordinated(
         self,
@@ -1008,15 +1199,23 @@ class ProgramExecutor:
         for env_id in range(len(failed)):
             if bool(failed[env_id]):
                 continue
-            ranked = []
+            ranked: list[tuple[bool, float, float, str, str]] = []
             for first_arm, second_arm in permutations:
                 first = candidates[(steps[0].id, first_arm)]
                 second = candidates[(steps[1].id, second_arm)]
                 feasible = bool(first.feasible[env_id] and second.feasible[env_id])
+                first_preferred = self._preferred_in_place_arm(steps[0], env_id)
+                second_preferred = self._preferred_in_place_arm(steps[1], env_id)
+                side_penalty = (
+                    float(first_arm != first_preferred) if first_preferred else 0.0
+                )
+                side_penalty += (
+                    float(second_arm != second_preferred) if second_preferred else 0.0
+                )
                 cost = float(first.cost[env_id] + second.cost[env_id])
-                ranked.append((not feasible, cost, first_arm, second_arm))
+                ranked.append((not feasible, side_penalty, cost, first_arm, second_arm))
             ranked.sort()
-            infeasible, _, first_arm, second_arm = ranked[0]
+            infeasible, _, _, first_arm, second_arm = ranked[0]
             if infeasible:
                 selection_failed[env_id] = True
                 continue
@@ -1150,6 +1349,51 @@ class ProgramExecutor:
                     "support": reference,
                 },
             )
+        elif step.operator == "orient_object":
+            position_anchor = str(step.goal.get("position_anchor", "initial_xy"))
+            anchor_pose = None
+            if position_anchor == "initial_xy":
+                anchor_pose = getattr(self.env, "agent_initial_object_poses", {}).get(
+                    step.object_uid
+                )
+            if anchor_pose is None:
+                anchor_pose = self._targets.get(step.id)
+            if anchor_pose is None:
+                raise ValueError(
+                    f"orient_object step {step.id!r} has no {position_anchor} anchor."
+                )
+            anchor_pose = torch.as_tensor(
+                anchor_pose,
+                dtype=observed.dtype,
+                device=observed.device,
+            )
+            if anchor_pose.ndim == 2 and anchor_pose.shape == (4, 4):
+                anchor_pose = anchor_pose.unsqueeze(0).repeat(
+                    int(self.env.num_envs), 1, 1
+                )
+            target_xy = (
+                anchor_pose[:, :2, 3] if anchor_pose.ndim == 3 else anchor_pose[:, :2]
+            )
+            policy = self._policies.get(step.id, {})
+            upright = evaluate_predicate(
+                self.env,
+                {
+                    "type": "object_upright",
+                    "object": step.object_uid,
+                    "local_axis": policy.get("upright_local_axis", "long_axis"),
+                    "max_tilt": float(policy.get("upright_max_tilt", torch.pi / 12)),
+                },
+            )
+            xy_near_initial = evaluate_predicate(
+                self.env,
+                {
+                    "type": "object_xy_near",
+                    "object": step.object_uid,
+                    "target_xy": target_xy,
+                    "tolerance": float(policy.get("upright_xy_tolerance", 0.05)),
+                },
+            )
+            satisfied = upright & xy_near_initial
         elif step.id in self._targets:
             target = self._targets[step.id].to(
                 device=observed.device,

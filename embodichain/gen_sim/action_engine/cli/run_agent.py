@@ -34,6 +34,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
 )
+from embodichain.utils import set_seed
 from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.utility import load_config
 
@@ -42,9 +43,7 @@ __all__ = ["build_parser", "cli"]
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser used by generated demo commands."""
-    parser = argparse.ArgumentParser(
-        description="Execute an Action Engine task agent."
-    )
+    parser = argparse.ArgumentParser(description="Execute an Action Engine task agent.")
     add_env_launcher_args_to_parser(parser)
     parser.add_argument("--task_name", required=True, help="Generated task name.")
     parser.add_argument(
@@ -61,6 +60,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--show-physical-collision",
         action="store_true",
         help="Show physical collision geometry after every reset.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Base random seed; episode N uses seed + N.",
+    )
+    parser.add_argument(
+        "--runtime-backend",
+        choices=("pipeline", "independent"),
+        default="pipeline",
+        help=(
+            "Execution backend. The mature action-agent pipeline is the default; "
+            "independent is retained for explicit characterization only."
+        ),
     )
     return parser
 
@@ -99,7 +113,11 @@ def cli() -> None:
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
     args = build_parser().parse_args()
+    if args.seed is not None:
+        set_seed(args.seed)
     env_cfg, gym_config, _ = build_env_cfg_from_args(args)
+    if args.seed is not None:
+        env_cfg.seed = args.seed
     _validate_gym_id(gym_config)
     agent_config = load_config(args.agent_config)
     if not isinstance(agent_config, dict):
@@ -117,12 +135,14 @@ def cli() -> None:
         agent_config=agent_config,
         agent_config_path=args.agent_config,
         task_name=args.task_name,
+        runtime_backend=args.runtime_backend,
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     episodes = int(gym_config.get("max_episodes", 1))
     try:
         for episode_index in range(episodes):
-            env.reset()
+            episode_seed = None if args.seed is None else int(args.seed) + episode_index
+            env.reset(seed=episode_seed)
             if args.show_physical_collision:
                 _show_physical_collision(env)
             execute = env.get_wrapper_attr("create_demo_action_list")

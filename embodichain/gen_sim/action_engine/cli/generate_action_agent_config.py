@@ -83,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-profile",
         "--robot_profile",
         choices=_ROBOT_PROFILE_CHOICES,
-        default="franka",
+        default="ur10",
         help="Robot template used in fast_gym_config.json.",
     )
     parser.add_argument(
@@ -136,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace existing canonical artifacts in the output directory.",
     )
     parser.add_argument(
+        "--randomize-scene",
+        action="store_true",
+        help="Randomize rigid-object poses and table height on every reset.",
+    )
+    parser.add_argument(
         "--randomize-table-material",
         action="store_true",
         help="Randomize the table material independently on every reset.",
@@ -161,6 +166,7 @@ def cli() -> None:
         overwrite=args.overwrite,
         max_episodes=args.max_episodes,
         max_episode_steps=args.max_episode_steps,
+        randomize_scene=args.randomize_scene,
         randomize_table_material=args.randomize_table_material,
     )
 
