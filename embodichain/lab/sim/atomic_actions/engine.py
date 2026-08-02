@@ -26,6 +26,7 @@ from .core import (
     ActionResult,
     AtomicAction,
     WorldState,
+    _resolve_runtime_device,
 )
 
 if TYPE_CHECKING:
@@ -73,7 +74,7 @@ class AtomicActionEngine:
     def __init__(self, motion_generator: MotionGenerator) -> None:
         self.motion_generator = motion_generator
         self.robot = motion_generator.robot
-        self.device = motion_generator.device
+        self.device = _resolve_runtime_device(motion_generator.device)
         self._actions: dict[str, AtomicAction] = {}
 
     @property
@@ -125,7 +126,23 @@ class AtomicActionEngine:
         if state is None:
             state = WorldState(last_qpos=self.robot.get_qpos().clone())
 
-        b = state.last_qpos.shape[0]
+        if state.robot_dof != self.robot.dof:
+            raise ValueError(
+                "Initial WorldState DoF must match the engine robot, "
+                f"got {state.robot_dof} and {self.robot.dof}."
+            )
+        robot_batch_size = int(self.robot.get_qpos().shape[0])
+        if state.batch_size != robot_batch_size:
+            raise ValueError(
+                "Initial WorldState batch size must match the engine robot, "
+                f"got {state.batch_size} and {robot_batch_size}."
+            )
+        if state.last_qpos.device != self.device:
+            raise ValueError(
+                "Initial WorldState and AtomicActionEngine must use the same device."
+            )
+
+        b = state.batch_size
         full_traj = torch.empty(
             (b, 0, self.robot.dof),
             dtype=torch.float32,
@@ -148,23 +165,29 @@ class AtomicActionEngine:
                 break
             prev_last_qpos = state.last_qpos.clone()
             result: ActionResult = action.execute(target, state)
-            step_success = (
-                result.success
-                if isinstance(result.success, torch.Tensor)
-                else torch.tensor(bool(result.success), device=self.device)
-            )
-            step_success = step_success.to(self.device)
+            if result.trajectory.shape[0] != b:
+                raise ValueError(
+                    f"Action '{name}' returned batch {result.trajectory.shape[0]}, "
+                    f"but the engine state batch is {b}."
+                )
+            if result.trajectory.shape[2] != self.robot.dof:
+                raise ValueError(
+                    f"Action '{name}' returned {result.trajectory.shape[2]} DoF, "
+                    f"but the engine robot has {self.robot.dof}."
+                )
+            if result.trajectory.device != self.device:
+                raise ValueError(
+                    f"Action '{name}' returned a trajectory on "
+                    f"{result.trajectory.device}, expected {self.device}."
+                )
+            step_success = result.success.to(self.device)
             alive = alive & step_success
             # Failed envs freeze at their last successful qpos for this step's trajectory.
             traj = result.trajectory
             held_rows = prev_last_qpos.unsqueeze(1).repeat(1, traj.shape[1], 1)
             traj = torch.where(alive[:, None, None], traj, held_rows)
             full_traj = torch.cat([full_traj, traj], dim=1)
-            state = result.next_state.with_updates(
-                last_qpos=torch.where(
-                    alive[:, None], result.next_state.last_qpos, prev_last_qpos
-                )
-            )
+            state = state.masked_merge(result.next_state, alive)
 
         return alive, full_traj, state
 

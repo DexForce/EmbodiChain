@@ -147,6 +147,10 @@ class TestEngineRun:
         self.engine.register(action, name="custom")
         assert "custom" in self.engine.actions
 
+    def test_rejects_initial_state_with_wrong_batch_size(self):
+        with pytest.raises(ValueError, match="batch size"):
+            self.engine.run([], state=WorldState(last_qpos=torch.zeros(1, TOTAL_DOF)))
+
     def test_run_concatenates_trajectories(self):
         a = _fake_action("a", EndEffectorPoseTarget)
         b = _fake_action("b", EndEffectorPoseTarget)
