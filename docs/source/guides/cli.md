@@ -324,8 +324,10 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agent
 |---|---|---|
 | ``--config`` | *(required)* | Path to the RL training config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
+| ``--profile`` | ``False`` | Same as ``run-env --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
+| ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
 
-Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
+See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
 
 ---
 

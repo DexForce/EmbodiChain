@@ -19,6 +19,7 @@ This module provides the RL training entry script, responsible for parsing confi
 - Supports command-line arguments:
     - `--config`: Specify the path to the config file (``.json``, ``.yaml``, or ``.yml``).
     - `--distributed`: Enable multi-GPU distributed training.
+    - `--profile` / `--profile_output`: Gym env profiling during training (requires `trainer.gym_config`).
 - The config file includes parameters for trainer, policy, algorithm, events, and other modules.
 - See [Multi-GPU Training](multi_gpu.md) for distributed training.
 

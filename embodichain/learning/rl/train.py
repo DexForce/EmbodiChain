@@ -50,6 +50,7 @@ from embodichain.lab.gym.utils.registration import (
     execute_init_hooks,
 )
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
+from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.sim import SimulationManagerCfg
@@ -83,7 +84,34 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Enable or disable multi-GPU distributed training",
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable per-section time profiling of gym env reset/step "
+            "(report on env.close()). Requires trainer.gym_config."
+        ),
+    )
+    parser.add_argument(
+        "--profile_output",
+        type=str,
+        default=None,
+        help="Dump the profiling report as JSON on env.close() (requires --profile).",
+    )
     return parser.parse_args(argv)
+
+
+def _resolve_profile_output(
+    path: str | None,
+    *,
+    rank: int,
+    world_size: int,
+) -> str | None:
+    if path is None or world_size <= 1:
+        return path
+    output = Path(path)
+    return str(output.with_name(f"{output.stem}_rank{rank}{output.suffix}"))
 
 
 def _build_learning_policy(
@@ -122,8 +150,13 @@ def _train_learning_env(
     cfg_data: dict,
     *,
     distributed: bool | None,
+    profile: bool = False,
 ):
     """Train a lightweight registered environment through the unified CLI."""
+    if profile:
+        raise ValueError(
+            "--profile requires trainer.gym_config; learning_env is unsupported."
+        )
     trainer_cfg = cfg_data["trainer"]
     policy_block = cfg_data["policy"]
     algorithm_block = cfg_data["algorithm"]
@@ -268,19 +301,34 @@ def _train_learning_env(
             eval_env.close()
 
 
-def train_from_config(config_path: str, distributed: bool | None = None):
+def train_from_config(
+    config_path: str,
+    distributed: bool | None = None,
+    *,
+    profile: bool = False,
+    profile_output: str | None = None,
+):
     """Run training from a config file path.
 
     Args:
         config_path: Path to the training config file (.json, .yaml, or .yml).
         distributed: If True, run multi-GPU distributed training.
             If None, use trainer.distributed from config.
+        profile: Enable gym ``EnvProfiler`` on the training environment.
+        profile_output: Optional JSON dump path for the profiling report.
     """
+    if profile_output is not None and not profile:
+        raise ValueError("--profile_output requires --profile.")
+
     cfg_data = load_config(config_path)
 
     trainer_cfg = cfg_data["trainer"]
     if "learning_env" in trainer_cfg:
-        return _train_learning_env(cfg_data, distributed=distributed)
+        return _train_learning_env(
+            cfg_data,
+            distributed=distributed,
+            profile=profile,
+        )
     policy_block = cfg_data["policy"]
     algo_block = cfg_data["algorithm"]
 
@@ -417,9 +465,19 @@ def train_from_config(config_path: str, distributed: bool | None = None):
     gym_env_cfg.sim_cfg.headless = headless
     gym_env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
     gym_env_cfg.sim_cfg.gpu_id = gpu_id
-    logger.log_info(
-        f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
-    )
+    if profile:
+        gym_env_cfg.profiler = EnvProfilerCfg(
+            enable_time=True,
+            output_path=_resolve_profile_output(
+                profile_output,
+                rank=rank,
+                world_size=world_size,
+            ),
+        )
+    if rank == 0:
+        logger.log_info(
+            f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
+        )
 
     env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
     sample_obs, _ = env.reset()
@@ -434,6 +492,7 @@ def train_from_config(config_path: str, distributed: bool | None = None):
         eval_gym_env_cfg = deepcopy(gym_env_cfg)
         eval_gym_env_cfg.num_envs = num_eval_envs
         eval_gym_env_cfg.sim_cfg.headless = True
+        eval_gym_env_cfg.profiler = None
         eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
         logger.log_info(
             f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
@@ -643,7 +702,12 @@ def cli(argv: Sequence[str] | None = None) -> None:
     discover_task_packages()
     execute_init_hooks()
 
-    train_from_config(args.config, distributed=args.distributed)
+    train_from_config(
+        args.config,
+        distributed=args.distributed,
+        profile=args.profile,
+        profile_output=args.profile_output,
+    )
 
 
 if __name__ == "__main__":
