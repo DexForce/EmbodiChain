@@ -31,6 +31,8 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPlacementTarget,
     EndEffectorPoseTarget,
     GraspTarget,
+    HandOver,
+    HandOverCfg,
     HeldObjectPoseTarget,
     JointPositionTarget,
     NamedJointPositionTarget,
@@ -1043,6 +1045,67 @@ class TestPressAction:
 
 
 # ---------------------------------------------------------------------------
+# HandOver
+# ---------------------------------------------------------------------------
+
+
+class TestHandOverAction:
+    def test_execute_does_not_mutate_cached_final_pose(self):
+        motion_generator = _make_dual_arm_mock_motion_generator()
+        action = HandOver(
+            motion_generator,
+            HandOverCfg(
+                transfer_hand_open_qpos=_hand_open(),
+                transfer_hand_close_qpos=_hand_close(),
+                receive_hand_open_qpos=_hand_open(),
+                receive_hand_close_qpos=_hand_close(),
+                middle_object_pose=torch.eye(4),
+                final_object_pose=torch.eye(4),
+                sample_interval=30,
+                hand_interp_steps=4,
+                hold_steps=2,
+                retreat_steps=5,
+            ),
+        )
+        original_final_pose = action.final_object_pose.clone()
+        current_object_pose = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        current_object_pose[:, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+        entity = Mock()
+        entity.get_local_pose.return_value = current_object_pose
+        semantics = ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            label="handover-object",
+            entity=entity,
+        )
+        held = HeldObjectState(
+            semantics=semantics,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+        state = WorldState(
+            last_qpos=torch.zeros(NUM_ENVS, DUAL_TOTAL_DOF),
+            held_objects={"left_arm": held},
+        )
+        receive_grasp = torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        action._resolve_receive_grasp = Mock(
+            return_value=(
+                receive_grasp,
+                torch.ones(NUM_ENVS, dtype=torch.bool),
+            )
+        )
+
+        def plan_from_start(control_part, start_qpos, target_poses, n_waypoints):
+            return True, start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
+
+        action._plan_named_arm_trajectory = Mock(side_effect=plan_from_start)
+
+        action.execute(GraspTarget(semantics=semantics), state)
+
+        assert torch.equal(action.final_object_pose, original_final_pose)
+
+
+# ---------------------------------------------------------------------------
 # CoordinatedPickment
 # ---------------------------------------------------------------------------
 
@@ -1176,6 +1239,23 @@ class TestCoordinatedPlacementAction:
         )
         self.action = CoordinatedPlacement(self.mg, cfg=self.cfg)
 
+    def test_named_arm_planning_forwards_action_configuration(self):
+        self.action.builder.plan_arm_traj = Mock(
+            return_value=(
+                torch.ones(NUM_ENVS, dtype=torch.bool),
+                torch.zeros(NUM_ENVS, 4, ARM_DOF),
+            )
+        )
+
+        self.action._plan_named_arm_trajectory(
+            "left_arm",
+            torch.zeros(NUM_ENVS, ARM_DOF),
+            torch.eye(4).reshape(1, 1, 4, 4).repeat(NUM_ENVS, 1, 1, 1),
+            4,
+        )
+
+        assert self.action.builder.plan_arm_traj.call_args.kwargs["cfg"] is self.cfg
+
     def _make_target_and_state(
         self,
     ) -> tuple[
@@ -1298,7 +1378,7 @@ class TestCoordinatedPlacementAction:
         ):
             result = self.action.execute(target, state)
 
-        assert result.success is True
+        assert result.success.tolist() == [True] * NUM_ENVS
         assert result.trajectory.shape == (
             NUM_ENVS,
             self.cfg.sample_interval,

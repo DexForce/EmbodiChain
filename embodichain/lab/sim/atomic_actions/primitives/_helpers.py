@@ -33,7 +33,7 @@ def resolve_object_target(
     name: str = "object_target_pose",
 ) -> torch.Tensor:
     """Broadcast an object target pose to ``(n_envs, 4, 4)`` or validate it."""
-    target = target.to(device=device, dtype=torch.float32)
+    target = target.to(device=device, dtype=torch.float32).clone()
     if target.shape == (4, 4):
         target = target.unsqueeze(0).repeat(n_envs, 1, 1)
     if target.shape != (n_envs, 4, 4):

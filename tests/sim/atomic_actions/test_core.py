@@ -249,6 +249,26 @@ class TestHeldObjectState:
         assert s.semantics is sem
         assert s.object_to_eef.shape == (1, 4, 4)
         assert s.grasp_xpos.shape == (1, 4, 4)
+        assert s.env_mask.tolist() == [True]
+
+    def test_rejects_mismatched_pose_batches(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
+        with pytest.raises(ValueError, match="same batch size"):
+            HeldObjectState(
+                semantics=sem,
+                object_to_eef=torch.eye(4).unsqueeze(0),
+                grasp_xpos=torch.eye(4).unsqueeze(0).repeat(2, 1, 1),
+            )
+
+    def test_rejects_invalid_env_mask(self):
+        sem = ObjectSemantics(affordance=Affordance(), geometry={})
+        with pytest.raises(ValueError, match="env_mask"):
+            HeldObjectState(
+                semantics=sem,
+                object_to_eef=torch.eye(4).unsqueeze(0),
+                grasp_xpos=torch.eye(4).unsqueeze(0),
+                env_mask=torch.ones(2, dtype=torch.bool),
+            )
 
 
 class TestCoordinatedHeldObjectState:
@@ -313,15 +333,154 @@ class TestWorldState:
         )
         assert ws.held_objects == {}
 
+    def test_rejects_non_batched_last_qpos(self):
+        with pytest.raises(ValueError, match="last_qpos"):
+            WorldState(last_qpos=torch.zeros(6))
+
+    def test_rejects_held_state_with_different_batch(self):
+        held = HeldObjectState(
+            semantics=ObjectSemantics(affordance=Affordance(), geometry={}),
+            object_to_eef=torch.eye(4).unsqueeze(0),
+            grasp_xpos=torch.eye(4).unsqueeze(0),
+        )
+        with pytest.raises(ValueError, match="batch size"):
+            WorldState(
+                last_qpos=torch.zeros(2, 6),
+                held_objects={"arm": held},
+            )
+
+    def test_broadcasts_unbatched_held_state_at_world_boundary(self):
+        held = HeldObjectState(
+            semantics=ObjectSemantics(affordance=Affordance(), geometry={}),
+            object_to_eef=torch.eye(4),
+            grasp_xpos=torch.eye(4),
+        )
+
+        world = WorldState(
+            last_qpos=torch.zeros(2, 6),
+            held_objects={"arm": held},
+        )
+
+        normalized = world.get_held_object("arm")
+        assert normalized is not None
+        assert normalized is not held
+        assert normalized.object_to_eef.shape == (2, 4, 4)
+        assert normalized.grasp_xpos.shape == (2, 4, 4)
+        assert normalized.env_mask.tolist() == [True, True]
+
+    def test_masked_merge_applies_new_hold_only_to_successful_envs(self):
+        batch_size = 2
+        previous = WorldState(last_qpos=torch.zeros(batch_size, 6))
+        held = HeldObjectState(
+            semantics=ObjectSemantics(affordance=Affordance(), geometry={}),
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+        )
+        candidate = WorldState(
+            last_qpos=torch.ones(batch_size, 6),
+            held_objects={"arm": held},
+        )
+
+        merged = previous.masked_merge(
+            candidate, torch.tensor([True, False], dtype=torch.bool)
+        )
+
+        assert merged.get_held_object("arm").env_mask.tolist() == [True, False]
+
+    def test_masked_merge_preserves_removed_hold_in_failed_envs(self):
+        batch_size = 2
+        held = HeldObjectState(
+            semantics=ObjectSemantics(affordance=Affordance(), geometry={}),
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+        )
+        previous = WorldState(
+            last_qpos=torch.zeros(batch_size, 6),
+            held_objects={"arm": held},
+        )
+        candidate = WorldState(last_qpos=torch.ones(batch_size, 6))
+
+        merged = previous.masked_merge(
+            candidate, torch.tensor([True, False], dtype=torch.bool)
+        )
+
+        assert merged.get_held_object("arm").env_mask.tolist() == [False, True]
+
+    def test_masked_merge_preserves_coordinated_hold_in_failed_envs(self):
+        batch_size = 2
+        held = CoordinatedHeldObjectState(
+            semantics=ObjectSemantics(affordance=Affordance(), geometry={}),
+            left_object_to_eef=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+            right_object_to_eef=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+            left_grasp_xpos=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+            right_grasp_xpos=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+        )
+        previous = WorldState(
+            last_qpos=torch.zeros(batch_size, 12),
+            coordinated_held_objects={("left_arm", "right_arm"): held},
+        )
+        candidate = WorldState(last_qpos=torch.ones(batch_size, 12))
+
+        merged = previous.masked_merge(
+            candidate, torch.tensor([True, False], dtype=torch.bool)
+        )
+
+        coordinated = merged.get_coordinated_held_object("left_arm", "right_arm")
+        assert coordinated is not None
+        assert coordinated.env_mask.tolist() == [False, True]
+
+    def test_masked_merge_updates_qpos_per_environment(self):
+        previous = WorldState(last_qpos=torch.zeros(2, 3))
+        candidate = WorldState(last_qpos=torch.ones(2, 3))
+
+        merged = previous.masked_merge(
+            candidate, torch.tensor([True, False], dtype=torch.bool)
+        )
+
+        assert torch.equal(merged.last_qpos[0], torch.ones(3))
+        assert torch.equal(merged.last_qpos[1], torch.zeros(3))
+
 
 class TestActionResult:
-    def test_shape_contract(self):
+    def test_bool_success_is_normalized_to_per_environment_tensor(self):
         traj = torch.zeros(2, 10, 8)
         ws = WorldState(last_qpos=torch.zeros(2, 8))
         res = ActionResult(success=True, trajectory=traj, next_state=ws)
-        assert res.success is True
+        assert res.success.tolist() == [True, True]
         assert res.trajectory.shape == (2, 10, 8)
         assert res.next_state is ws
+
+    def test_scalar_tensor_success_is_normalized(self):
+        res = ActionResult(
+            success=torch.tensor(False),
+            trajectory=torch.zeros(2, 0, 3),
+            next_state=WorldState(last_qpos=torch.zeros(2, 3)),
+        )
+        assert res.success.tolist() == [False, False]
+
+    def test_rejects_non_boolean_success_tensor(self):
+        with pytest.raises(TypeError, match="torch.bool"):
+            ActionResult(
+                success=torch.ones(2),
+                trajectory=torch.zeros(2, 0, 3),
+                next_state=WorldState(last_qpos=torch.zeros(2, 3)),
+            )
+
+    def test_rejects_wrong_success_shape(self):
+        with pytest.raises(ValueError, match="success"):
+            ActionResult(
+                success=torch.ones(3, dtype=torch.bool),
+                trajectory=torch.zeros(2, 0, 3),
+                next_state=WorldState(last_qpos=torch.zeros(2, 3)),
+            )
+
+    def test_rejects_trajectory_state_dof_mismatch(self):
+        with pytest.raises(ValueError, match="batch/DoF"):
+            ActionResult(
+                success=torch.ones(2, dtype=torch.bool),
+                trajectory=torch.zeros(2, 4, 4),
+                next_state=WorldState(last_qpos=torch.zeros(2, 3)),
+            )
 
 
 class TestActionCfg:
@@ -332,3 +491,8 @@ class TestActionCfg:
         assert cfg.interpolation_type == "linear"
         assert cfg.velocity_limit is None
         assert cfg.acceleration_limit is None
+        assert cfg.plan_opts is None
+
+    def test_rejects_unsupported_interpolation_type(self):
+        with pytest.raises(ValueError, match="interpolation_type"):
+            ActionCfg(interpolation_type="cubic")

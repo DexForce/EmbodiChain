@@ -22,11 +22,14 @@ import torch
 import pytest
 from unittest.mock import Mock
 
+from embodichain.lab.sim.atomic_actions.affordance import Affordance
 from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
 from embodichain.lab.sim.atomic_actions.core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
+    HeldObjectState,
+    ObjectSemantics,
     WorldState,
 )
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
@@ -49,6 +52,30 @@ class _StubAction(AtomicAction):
             success=self._success.clone(),
             trajectory=traj,
             next_state=WorldState(last_qpos=traj[:, -1, :].clone()),
+        )
+
+
+class _HeldStateAction(_StubAction):
+    def __init__(self, mg, success_vec, *, set_held):
+        super().__init__(mg, success_vec)
+        self._set_held = set_held
+
+    def execute(self, target, state):
+        result = super().execute(target, state)
+        held_objects = {}
+        if self._set_held:
+            batch_size = state.batch_size
+            held_objects["arm"] = HeldObjectState(
+                semantics=ObjectSemantics(
+                    affordance=Affordance(), geometry={}, label="test-object"
+                ),
+                object_to_eef=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+                grasp_xpos=torch.eye(4).unsqueeze(0).repeat(batch_size, 1, 1),
+            )
+        return ActionResult(
+            success=result.success,
+            trajectory=result.trajectory,
+            next_state=result.next_state.with_updates(held_objects=held_objects),
         )
 
 
@@ -75,3 +102,41 @@ class TestRunPerEnv:
         # env 1's rows after its failure should equal its pre-failure qpos (held)
         # all zeros here, so just check shape and that env 0/2 advanced
         assert state.last_qpos.shape == (3, 3)
+
+    def test_failed_env_does_not_acquire_successful_env_held_state(self):
+        mg = Mock()
+        mg.robot.get_qpos = lambda: torch.zeros(3, 3)
+        mg.robot.dof = 3
+        mg.device = torch.device("cpu")
+        engine = AtomicActionEngine(mg)
+        engine.register(
+            _HeldStateAction(mg, [True, False, True], set_held=True), name="pick"
+        )
+
+        _, _, state = engine.run([("pick", EndEffectorPoseTarget(xpos=torch.eye(4)))])
+
+        assert state.get_held_object("arm").env_mask.tolist() == [True, False, True]
+
+    def test_failed_env_preserves_held_state_when_successful_envs_release(self):
+        mg = Mock()
+        mg.robot.get_qpos = lambda: torch.zeros(3, 3)
+        mg.robot.dof = 3
+        mg.device = torch.device("cpu")
+        engine = AtomicActionEngine(mg)
+        engine.register(
+            _HeldStateAction(mg, [True, False, True], set_held=False), name="place"
+        )
+        held = HeldObjectState(
+            semantics=ObjectSemantics(
+                affordance=Affordance(), geometry={}, label="test-object"
+            ),
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(3, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(3, 1, 1),
+        )
+        initial = WorldState(last_qpos=torch.zeros(3, 3), held_objects={"arm": held})
+
+        _, _, state = engine.run(
+            [("place", EndEffectorPoseTarget(xpos=torch.eye(4)))], state=initial
+        )
+
+        assert state.get_held_object("arm").env_mask.tolist() == [False, True, False]

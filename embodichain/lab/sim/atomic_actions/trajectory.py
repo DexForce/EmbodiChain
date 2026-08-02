@@ -31,16 +31,10 @@ from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
 from embodichain.utils import logger
 
+from .core import _resolve_runtime_device
+
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
-
-
-def _resolve_runtime_device(device: torch.device | str) -> torch.device:
-    """Resolve an indexless CUDA device to the active concrete GPU index."""
-    resolved = torch.device(device)
-    if resolved.type == "cuda" and resolved.index is None:
-        return torch.device(f"cuda:{torch.cuda.current_device()}")
-    return resolved
 
 
 class TrajectoryBuilder:
@@ -66,6 +60,49 @@ class TrajectoryBuilder:
             return bool(torch.all(is_success).item())
         return bool(is_success)
 
+    def _resolve_success_mask(
+        self,
+        success: bool | torch.Tensor,
+        *,
+        n_envs: int,
+        name: str,
+    ) -> torch.Tensor:
+        """Normalize planner success to a boolean tensor with shape ``(n_envs,)``."""
+        if isinstance(success, bool):
+            return torch.full((n_envs,), success, dtype=torch.bool, device=self.device)
+        if not isinstance(success, torch.Tensor):
+            logger.log_error(
+                f"{name} must be a bool or torch.Tensor, got "
+                f"{type(success).__name__}.",
+                TypeError,
+            )
+        success = success.to(self.device)
+        if success.dtype != torch.bool:
+            integer_dtypes = {
+                torch.uint8,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            }
+            if success.dtype not in integer_dtypes or not torch.all(
+                (success == 0) | (success == 1)
+            ):
+                logger.log_error(
+                    f"{name} must be boolean or a binary integer tensor, "
+                    f"got dtype {success.dtype}.",
+                    TypeError,
+                )
+            success = success.to(dtype=torch.bool)
+        if success.dim() == 0 or success.shape == (1,):
+            success = success.reshape(1).expand(n_envs)
+        if success.shape != (n_envs,):
+            logger.log_error(
+                f"{name} must have shape ({n_envs},), got {tuple(success.shape)}.",
+                ValueError,
+            )
+        return success.clone()
+
     def resolve_pose_target(self, target: torch.Tensor, *, n_envs: int) -> torch.Tensor:
         """Resolve an end-effector pose target into batched homogeneous transforms.
 
@@ -85,7 +122,7 @@ class TrajectoryBuilder:
                 f"or ({n_envs}, n_waypoint, 4, 4)",
                 TypeError,
             )
-        target = target.to(device=self.device, dtype=torch.float32)
+        target = target.to(device=self.device, dtype=torch.float32).clone()
         if target.shape == (4, 4):
             target = target.unsqueeze(0).repeat(n_envs, 1, 1)
         if target.dim() == 3:
@@ -165,7 +202,7 @@ class TrajectoryBuilder:
                 f"({n_envs}, n_waypoint, {joint_dof})",
                 TypeError,
             )
-        target_qpos = target_qpos.to(device=self.device, dtype=torch.float32)
+        target_qpos = target_qpos.to(device=self.device, dtype=torch.float32).clone()
         if target_qpos.shape == (joint_dof,):
             target_qpos = target_qpos.unsqueeze(0).repeat(n_envs, 1)
         if target_qpos.dim() == 2:
@@ -362,6 +399,11 @@ class TrajectoryBuilder:
             is_success, qpos = self.robot.compute_ik(
                 pose=xpos_traj[:, j], name=control_part, joint_seed=qpos_seed
             )
+            is_success = self._resolve_success_mask(
+                is_success,
+                n_envs=n_envs,
+                name=f"IK success for target state {j}",
+            )
             if not self.all_envs_success(is_success):
                 logger.log_warning(
                     f"Failed to compute IK for target state {j} in some environments."
@@ -417,13 +459,13 @@ class TrajectoryBuilder:
         arm_dof: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Validate a MotionGenerator PlanResult and apply sample/hold policy."""
-        success = (
-            result.success.to(self.device)
-            if isinstance(result.success, torch.Tensor)
-            else torch.tensor(result.success, device=self.device)
+        n_envs = start_qpos.shape[0]
+        success = self._resolve_success_mask(
+            result.success,
+            n_envs=n_envs,
+            name="MotionGenerator PlanResult.success",
         )
         positions = result.positions
-        n_envs = start_qpos.shape[0]
         if positions is None or positions.ndim != 3:
             logger.log_error(
                 "MotionGenerator returned no (B, N, controlled_dof) positions",

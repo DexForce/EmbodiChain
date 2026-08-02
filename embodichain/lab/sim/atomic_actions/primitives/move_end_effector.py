@@ -23,7 +23,7 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanOptions, PlanState
+from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass
 
 from ._helpers import arm_qpos_from_state
@@ -63,9 +63,6 @@ class MoveEndEffectorCfg(ActionCfg):
 
     sample_interval: int = 50
     """Number of waypoints in the planned trajectory."""
-
-    plan_opts: PlanOptions | None = None
-    """Optional planner-specific options copied for each motion-generator call."""
 
 
 class MoveEndEffector(AtomicAction[EndEffectorPoseTarget]):

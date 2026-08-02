@@ -23,6 +23,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
+from embodichain.lab.sim.planners import PlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
 from embodichain.lab.sim.atomic_actions.core import ActionCfg
 
@@ -74,6 +75,32 @@ def _pose_targets_for_two_envs():
 
 
 class TestPlanArmTrajMotionGen:
+    def test_shared_action_cfg_forwards_copied_plan_options(self):
+        mg = _mock_mg(num_envs=2, arm_dof=6)
+        mg.generate.return_value = PlanResult(
+            success=torch.ones(2, dtype=torch.bool),
+            positions=torch.zeros(2, 6, 6),
+        )
+        builder = TrajectoryBuilder(mg)
+        cfg = ActionCfg(
+            motion_source="motion_gen",
+            control_part="arm",
+            plan_opts=PlanOptions(),
+        )
+
+        builder.plan_arm_traj(
+            _pose_targets_for_two_envs(),
+            torch.zeros(2, 6),
+            6,
+            control_part="arm",
+            arm_dof=6,
+            cfg=cfg,
+        )
+
+        forwarded = mg.generate.call_args.kwargs["options"].plan_opts
+        assert type(forwarded) is PlanOptions
+        assert forwarded is not cfg.plan_opts
+
     def test_motion_gen_path_delegates_to_generate(self):
         mg = _mock_mg(num_envs=3, arm_dof=6)
         from embodichain.lab.sim.planners.utils import PlanResult

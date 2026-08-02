@@ -517,6 +517,7 @@ class CoordinatedPlacement(AtomicAction[CoordinatedPlacementTarget]):
             n_waypoints,
             control_part=control_part,
             arm_dof=start_qpos.shape[-1],
+            cfg=self.cfg,
         )
         return self.builder.all_envs_success(success), trajectory
 

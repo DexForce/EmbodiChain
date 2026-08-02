@@ -205,7 +205,7 @@ class HandOver(AtomicAction[GraspTarget]):
         semantics = target.semantics
         transfer_object_to_eef = self._resolve_transfer_object_to_eef(state)
         middle_object_pose = self.middle_object_pose.clone()
-        final_object_pose = self.final_object_pose
+        final_object_pose = self.final_object_pose.clone()
         # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
         current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
         middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]

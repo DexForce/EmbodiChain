@@ -257,7 +257,7 @@ class PickUp(AtomicAction[GraspTarget]):
                 target.grasp_xpos, n_envs=self.n_envs
             )
             if self.cfg.rotate_upright is not None:
-                self._apply_upright_rotation(sem, grasp_xpos)
+                grasp_xpos = self._upright_adjusted_grasp_poses(sem, grasp_xpos)
             is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
         if not self.builder.all_envs_success(is_success):
             logger.log_warning("PickUp failed to resolve a grasp pose.")
@@ -479,12 +479,6 @@ class PickUp(AtomicAction[GraspTarget]):
             is_success.reshape(n_envs, n_pose, n_variant),
             qpos.reshape(n_envs, n_pose, n_variant, self.arm_dof),
         )
-
-    def _apply_upright_rotation(
-        self, semantics: ObjectSemantics, grasp_xpos: torch.Tensor
-    ) -> None:
-        """Apply the configured upright-in-place grasp roll adjustment."""
-        grasp_xpos.copy_(self._upright_adjusted_grasp_poses(semantics, grasp_xpos))
 
     def _upright_adjusted_grasp_poses(
         self, semantics: ObjectSemantics, grasp_xpos: torch.Tensor
