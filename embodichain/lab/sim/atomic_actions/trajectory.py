@@ -290,6 +290,19 @@ class TrajectoryBuilder:
     # Arm trajectory planning
     # ------------------------------------------------------------------
 
+    def interpolate_arm_qpos(
+        self,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        n_waypoints: int,
+    ) -> torch.Tensor:
+        """Interpolate a pre-solved arm joint target without solving IK again."""
+        return interpolate_with_distance(
+            trajectory=torch.stack((start_qpos, target_qpos), dim=1),
+            interp_num=n_waypoints,
+            device=self.device,
+        )
+
     def plan_arm_traj(
         self,
         target_states_list: list[list[PlanState]],

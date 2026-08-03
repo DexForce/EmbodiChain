@@ -403,6 +403,7 @@ def _atomic_cfg(action_class: str, policy: Mapping[str, Any]) -> dict[str, Any]:
                 "lift_height",
                 "sample_interval",
                 "rotate_upright",
+                "upright_yaw_samples",
             )
             if key in policy
         }
@@ -415,6 +416,12 @@ def _atomic_cfg(action_class: str, policy: Mapping[str, Any]) -> dict[str, Any]:
                 "post_hold_steps",
                 "sample_interval",
             )
+            if key in policy
+        }
+    if action_class == "MoveHeldObject":
+        return {
+            key: policy[key]
+            for key in ("sample_interval", "upright_yaw_samples")
             if key in policy
         }
     return {

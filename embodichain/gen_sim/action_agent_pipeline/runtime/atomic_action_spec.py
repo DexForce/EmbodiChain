@@ -73,6 +73,7 @@ SUPPORTED_CFG_KEYS = {
     "post_hold_steps",
     "obj_upright_direction",
     "rotate_upright",
+    "upright_yaw_samples",
     "approach_alignment_max_angle",
     "cartesian_waypoint_count",
     _COORDINATED_WORLD_Y_ANGLE_CFG_KEY,
@@ -607,6 +608,10 @@ def _validate_cfg_values(cfg: Mapping[str, Any]) -> None:
         value = cfg["rotate_upright"]
         if value is not None and not isinstance(value, int | float):
             raise ValueError("rotate_upright must be a numeric value in radians.")
+    if "upright_yaw_samples" in cfg:
+        value = cfg["upright_yaw_samples"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError("upright_yaw_samples must be an integer >= 1.")
     if "approach_alignment_max_angle" in cfg:
         value = cfg["approach_alignment_max_angle"]
         if value is not None and (

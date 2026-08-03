@@ -46,6 +46,7 @@ _COMMON_POLICIES: dict[str, dict[str, Any]] = {
         "lift_height": 0.30,
         "sample_interval": 45,
         "rotate_upright": 0.7853981633974483,
+        "upright_yaw_samples": 8,
     },
     "upright_in_place_transport": {
         "sample_interval": 45,
@@ -58,6 +59,7 @@ _COMMON_POLICIES: dict[str, dict[str, Any]] = {
         ),
         "surface_clearance": float(_GEOMETRY_DEFAULTS["surface_release_clearance"]),
         "postcondition_tolerance": 0.08,
+        "upright_yaw_samples": 8,
     },
     "default_transport": {
         "sample_interval": 45,

@@ -64,15 +64,9 @@ class QposSeedSampler:
             )
         n_random_samples = self.num_samples - 1
 
-        # seed_random = torch.rand(
-        #     size=(batch_size, n_random_samples, self.dof), device=self.device
-        # )
-
-        # save sampling time, repeat for each batch and sample in one go
         seed_random = torch.rand(
-            size=(1, n_random_samples, self.dof), device=self.device
+            size=(batch_size, n_random_samples, self.dof), device=self.device
         )
-        seed_random = seed_random.repeat(batch_size, 1, 1)
         seed_random = lower_limits + (upper_limits - lower_limits) * seed_random
         joint_seeds = torch.cat([seed_head, seed_random], dim=1)
         return joint_seeds.reshape(-1, self.dof)

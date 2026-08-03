@@ -1371,8 +1371,10 @@ def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
         torch.tensor([0.0, 0.0, 1.0]),
     )
     assert pickup.motion_policy["rotate_upright"] == pytest.approx(torch.pi / 4)
+    assert pickup.motion_policy["upright_yaw_samples"] == 8
     assert final.target_object_pose[0, 2, 3] == pytest.approx(expected_z)
     assert final.motion_policy["upright_local_axis"] == "long_axis"
+    assert final.motion_policy["upright_yaw_samples"] == 8
 
 
 def test_orient_verification_requires_upright_pose_near_initial_xy() -> None:

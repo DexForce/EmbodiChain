@@ -26,7 +26,11 @@ from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
 
-from ._helpers import arm_qpos_from_state, resolve_object_target
+from ._helpers import (
+    arm_qpos_from_state,
+    resolve_object_target,
+    upright_yaw_pose_variants,
+)
 from ..core import (
     ActionCfg,
     ActionResult,
@@ -57,6 +61,9 @@ class MoveHeldObjectCfg(ActionCfg):
     pick_rotate_upright: float | None = None
     """Optional rotation in radians used by the legacy upright transport mode."""
 
+    upright_yaw_samples: int = 1
+    """Equivalent world-yaw samples for semantically upright targets."""
+
 
 class MoveHeldObject(AtomicAction):
     """Move the held object to a target object pose; keep the gripper closed."""
@@ -81,6 +88,8 @@ class MoveHeldObject(AtomicAction):
                 "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
             )
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
+        if self.cfg.upright_yaw_samples < 1:
+            logger.log_error("upright_yaw_samples must be positive.", ValueError)
 
     def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
         if state.held_object is None:
@@ -113,21 +122,42 @@ class MoveHeldObject(AtomicAction):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-        if self.cfg.pick_rotate_upright is None:
+        if self.cfg.pick_rotate_upright is None and self.cfg.upright_yaw_samples == 1:
             self._apply_automatic_transport_rotation(move_eef_xpos, end_arm_xpos)
-
-        target_states_list = [
-            [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
-        success, arm_traj = self.builder.plan_arm_traj(
-            target_states_list,
-            start_arm_qpos,
-            self.cfg.sample_interval,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
-        )
+        if self.cfg.upright_yaw_samples > 1:
+            success, target_qpos, selected_object_pose = (
+                self._select_upright_yaw_target(
+                    object_target_pose,
+                    object_to_eef,
+                    start_arm_qpos,
+                )
+            )
+            object_target_pose.copy_(
+                torch.where(
+                    success[:, None, None],
+                    selected_object_pose,
+                    object_target_pose,
+                )
+            )
+            target_qpos = torch.where(success[:, None], target_qpos, start_arm_qpos)
+            arm_traj = self.builder.interpolate_arm_qpos(
+                start_arm_qpos,
+                target_qpos,
+                self.cfg.sample_interval,
+            )
+        else:
+            target_states_list = [
+                [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
+                for i in range(self.n_envs)
+            ]
+            success, arm_traj = self.builder.plan_arm_traj(
+                target_states_list,
+                start_arm_qpos,
+                self.cfg.sample_interval,
+                control_part=self.cfg.control_part,
+                arm_dof=self.arm_dof,
+                cfg=self.cfg,
+            )
 
         full = torch.empty(
             (self.n_envs, arm_traj.shape[1], self.robot_dof),
@@ -146,6 +176,40 @@ class MoveHeldObject(AtomicAction):
                 held_object=state.held_object,
                 coordinated_held_object=state.coordinated_held_object,
             ),
+        )
+
+    def _select_upright_yaw_target(
+        self,
+        object_target_pose: torch.Tensor,
+        object_to_eef: torch.Tensor,
+        start_arm_qpos: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        object_variants = upright_yaw_pose_variants(
+            object_target_pose,
+            self.cfg.upright_yaw_samples,
+        )
+        eef_variants = torch.matmul(
+            object_variants,
+            object_to_eef[:, None],
+        )
+        seeds = start_arm_qpos[:, None].expand(-1, self.cfg.upright_yaw_samples, -1)
+        success, qpos = self.robot.compute_batch_ik(
+            pose=eef_variants,
+            name=self.cfg.control_part,
+            joint_seed=seeds,
+        )
+        joint_delta = torch.linalg.vector_norm(qpos - seeds, dim=-1)
+        joint_delta = torch.where(
+            success,
+            joint_delta,
+            torch.full_like(joint_delta, torch.inf),
+        )
+        best = joint_delta.argmin(dim=1)
+        env_ids = torch.arange(self.n_envs, device=self.device)
+        return (
+            success.any(dim=1),
+            qpos[env_ids, best],
+            object_variants[env_ids, best],
         )
 
     def _apply_configured_upright_rotation(

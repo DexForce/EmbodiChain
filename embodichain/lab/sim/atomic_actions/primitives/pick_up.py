@@ -32,7 +32,7 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
-from ._helpers import arm_qpos_from_state
+from ._helpers import arm_qpos_from_state, upright_yaw_pose_variants
 from ..affordance import AntipodalAffordance
 from ..core import (
     ActionCfg,
@@ -86,6 +86,9 @@ class PickUpCfg(ActionCfg):
     downstream_object_target_poses: tuple[torch.Tensor, ...] = ()
     """Future object poses that must be reachable with the selected grasp."""
 
+    upright_yaw_samples: int = 1
+    """Equivalent world-yaw samples for downstream upright targets."""
+
     obj_upright_direction: torch.Tensor | None = None
     """Optional object local direction used to choose the upright grasp rotation."""
 
@@ -135,6 +138,8 @@ class PickUp(AtomicAction):
                 "approach_alignment_max_angle must be in [0, pi / 2].",
                 ValueError,
             )
+        if self.cfg.upright_yaw_samples < 1:
+            logger.log_error("upright_yaw_samples must be positive.", ValueError)
 
     def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
         sem = target.semantics
@@ -385,12 +390,28 @@ class PickUp(AtomicAction):
                     f"{object_target_pose.shape}.",
                     ValueError,
                 )
-            downstream_eef_variants = torch.matmul(
-                object_target_pose[:, None, None], object_to_eef_variants
+            object_target_variants = upright_yaw_pose_variants(
+                object_target_pose,
+                self.cfg.upright_yaw_samples,
             )
-            downstream_success, downstream_seed = self._compute_batch_candidate_ik(
-                downstream_eef_variants, downstream_seed
-            )
+            downstream_success = torch.zeros_like(pickup_success)
+            selected_qpos = downstream_seed
+            for yaw_target in object_target_variants.unbind(dim=1):
+                downstream_eef_variants = torch.matmul(
+                    yaw_target[:, None, None], object_to_eef_variants
+                )
+                yaw_success, yaw_qpos = self._compute_batch_candidate_ik(
+                    downstream_eef_variants,
+                    downstream_seed,
+                )
+                newly_solved = ~downstream_success & yaw_success
+                selected_qpos = torch.where(
+                    newly_solved[..., None], yaw_qpos, selected_qpos
+                )
+                downstream_success |= yaw_success
+                if bool((pickup_success & downstream_success).any(dim=(1, 2)).all()):
+                    break
+            downstream_seed = selected_qpos
             pickup_success &= downstream_success
             downstream_success_counts.append(pickup_success.sum(dim=(1, 2)).tolist())
         if not pickup_success.any(dim=(1, 2)).all():

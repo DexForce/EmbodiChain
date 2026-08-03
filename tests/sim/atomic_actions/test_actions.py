@@ -399,6 +399,53 @@ class TestPickUpAction:
     def test_approach_alignment_filter_is_opt_in(self):
         assert PickUpCfg().approach_alignment_max_angle is None
 
+    def test_accepts_yaw_equivalent_upright_downstream_target(self):
+        action = PickUp(
+            self.mg,
+            PickUpCfg(
+                hand_open_qpos=_hand_open(),
+                hand_close_qpos=_hand_close(),
+                downstream_object_target_poses=(torch.eye(4),),
+                upright_yaw_samples=4,
+            ),
+        )
+        succeeded = torch.ones((NUM_ENVS, 2), dtype=torch.bool)
+        qpos = torch.zeros((NUM_ENVS, 2, ARM_DOF))
+
+        def compute_batch_ik(*, pose, name, joint_seed):
+            del name
+            if compute_batch_ik.call_count <= 3:
+                return succeeded, qpos
+            assert pose.shape[1] == 2
+            success = torch.zeros((NUM_ENVS, 2), dtype=torch.bool)
+            if compute_batch_ik.call_count == 5:
+                success[:, 0] = True
+            return success, joint_seed + 1.0
+
+        compute_batch_ik.call_count = 0
+
+        def counted_compute_batch_ik(**kwargs):
+            compute_batch_ik.call_count += 1
+            return compute_batch_ik(**kwargs)
+
+        action.robot.compute_batch_ik = Mock(side_effect=counted_compute_batch_ik)
+        semantics = ObjectSemantics(
+            affordance=AntipodalAffordance(),
+            geometry={},
+            label="object",
+            entity=Mock(),
+        )
+
+        _, success = action._select_feasible_grasp_variants(
+            semantics,
+            torch.eye(4).reshape(1, 1, 4, 4).repeat(NUM_ENVS, 1, 1, 1),
+            torch.zeros(NUM_ENVS, ARM_DOF),
+            torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+
+        assert success[:, 0].all()
+        assert action.robot.compute_batch_ik.call_count == 5
+
     def test_execute_populates_held_object_state(self):
         cfg = PickUpCfg(
             hand_open_qpos=_hand_open(),
@@ -787,6 +834,61 @@ class TestMoveHeldObjectAction:
         target_states = action.builder.plan_arm_traj.call_args.args[0]
         assert not torch.allclose(target_states[0][0].xpos[:3, :3], torch.eye(3))
         assert torch.allclose(target_states[1][0].xpos[:3, :3], torch.eye(3))
+
+    def test_selects_reachable_yaw_equivalent_upright_target(self):
+        action = MoveHeldObject(
+            self.mg,
+            MoveHeldObjectCfg(
+                hand_close_qpos=_hand_close(),
+                sample_interval=10,
+                upright_yaw_samples=4,
+            ),
+        )
+        action.robot.compute_fk = Mock(
+            return_value=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        selected_qpos = torch.arange(
+            NUM_ENVS * 4 * ARM_DOF, dtype=torch.float32
+        ).reshape(NUM_ENVS, 4, ARM_DOF)
+        yaw_success = torch.zeros((NUM_ENVS, 4), dtype=torch.bool)
+        yaw_success[:, 1] = True
+        action.robot.compute_batch_ik = Mock(return_value=(yaw_success, selected_qpos))
+        action.builder.interpolate_arm_qpos = Mock(
+            return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF)
+        )
+        semantics = ObjectSemantics(
+            affordance=AntipodalAffordance(), geometry={}, label="object"
+        )
+        held = HeldObjectState(
+            semantics=semantics,
+            object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+        )
+
+        target = HeldObjectPoseTarget(
+            object_target_pose=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        result = action.execute(
+            target,
+            WorldState(
+                last_qpos=torch.zeros(NUM_ENVS, TOTAL_DOF),
+                held_object=held,
+            ),
+        )
+
+        assert result.success.all()
+        expected = selected_qpos[:, 1]
+        assert torch.equal(
+            action.builder.interpolate_arm_qpos.call_args.args[1], expected
+        )
+        expected_rotation = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        assert torch.allclose(
+            target.object_target_pose[:, :3, :3],
+            expected_rotation.unsqueeze(0).repeat(NUM_ENVS, 1, 1),
+            atol=1e-6,
+        )
 
 
 # ---------------------------------------------------------------------------
