@@ -58,6 +58,38 @@ def _rate(values: Iterable[bool]) -> float | None:
     return sum(materialized) / len(materialized) if materialized else None
 
 
+def _case_macro_rate(
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+    attribute: str,
+) -> float:
+    """Macro-average a boolean outcome attribute equally across mandatory cases.
+
+    Within each case, env rows (and measured repeats) are micro-averaged first.
+    Cases then receive equal weight regardless of ``batch_size``, so a B=64
+    case cannot dominate a B=1 case on the leaderboard. Missing cases
+    contribute ``0.0`` so selective skipping cannot inflate the rate.
+    """
+    if not track_cases:
+        return 0.0
+
+    outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        outcomes_by_case[record.case_id].extend(record.outcomes)
+
+    case_rates: list[float] = []
+    for case in track_cases:
+        outcomes = outcomes_by_case.get(case.case_id, [])
+        if not outcomes:
+            case_rates.append(0.0)
+            continue
+        case_rates.append(
+            sum(bool(getattr(outcome, attribute)) for outcome in outcomes)
+            / len(outcomes)
+        )
+    return sum(case_rates) / len(case_rates)
+
+
 def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
     """Return the most frequent non-empty external failure code."""
     failures = Counter(
@@ -329,7 +361,12 @@ def _leaderboard_rows(
     cases: list[BenchmarkCase],
     measured_trials: int,
 ) -> list[dict[str, object]]:
-    """Build a complete success/coverage/latency ordered leaderboard per track."""
+    """Build a complete success/coverage/latency ordered leaderboard per track.
+
+    Success rates are macro-averaged over mandatory cases (equal case weight).
+    ``coverage_rate`` remains an outcome-count completeness check used for
+    eligibility.
+    """
     entries: list[dict[str, object]] = []
     for track in _track_ids(records, cases):
         track_cases = [case for case in cases if case.track == track]
@@ -347,9 +384,9 @@ def _leaderboard_rows(
             ]
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
-            motion_rate = _rate(outcome.motion_valid for outcome in outcomes) or 0.0
-            planning_rate = (
-                _rate(outcome.planning_success for outcome in outcomes) or 0.0
+            motion_rate = _case_macro_rate(measured, track_cases, "motion_valid")
+            planning_rate = _case_macro_rate(
+                measured, track_cases, "planning_success"
             )
             latency_p95 = _percentile(
                 (record.cost_time_ms for record in measured), 95.0

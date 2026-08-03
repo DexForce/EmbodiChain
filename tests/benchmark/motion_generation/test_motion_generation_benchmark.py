@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -504,6 +505,122 @@ def test_aggregation_excludes_warmup_and_keeps_unavailable_algorithm():
     nmg = next(row for row in leaderboard if row["algorithm"] == "nmg")
     assert nmg["eligible"] is False
     assert nmg["coverage_rate"] == pytest.approx(0.0)
+
+
+def test_leaderboard_uses_case_macro_average_not_env_micro_average():
+    """B=64 failures must not dominate a B=1 success on the leaderboard."""
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    small = BenchmarkCase(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-b1",
+        seed=11,
+        batch_size=1,
+        num_waypoints=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
+        reference_qpos=torch.zeros(1, 1, 7),
+    )
+    large = BenchmarkCase(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-b64",
+        seed=23,
+        batch_size=64,
+        num_waypoints=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        start_qpos=torch.zeros(64, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).expand(64, 1, 4, 4).clone(),
+        reference_qpos=torch.zeros(64, 1, 7),
+    )
+    failed = CaseOutcome(
+        env_index=0,
+        planning_success=False,
+        finite=True,
+        ordered_waypoints_reached=False,
+        motion_valid=False,
+        completed_waypoint_ratio=0.0,
+        final_translation_err_mm=None,
+        final_rotation_err_deg=None,
+        waypoint_translation_err_mm_mean=None,
+        waypoint_translation_err_mm_p95=None,
+        waypoint_translation_err_mm_max=None,
+        waypoint_rotation_err_deg_mean=None,
+        waypoint_rotation_err_deg_p95=None,
+        waypoint_rotation_err_deg_max=None,
+        joint_limit_violation=False,
+        max_normalized_joint_violation=0.0,
+        joint_path_length_rad=None,
+        cartesian_path_length_m=None,
+        path_efficiency=None,
+        failure_code="waypoint_miss",
+    )
+    records = [
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=small.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=small.seed,
+            repeat=0,
+            batch_size=1,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=10.0,
+            outcomes=(_outcome(),),
+        ),
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=large.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=large.seed,
+            repeat=0,
+            batch_size=64,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=40.0,
+            outcomes=tuple(
+                replace(failed, env_index=env_index) for env_index in range(64)
+            ),
+        ),
+    ]
+
+    row = aggregate_results(records, metadata, [small, large], measured_trials=1)[
+        "leaderboard"
+    ][0]
+
+    # Env micro-average would be 1/65 ≈ 0.015; case macro-average is 0.5.
+    assert row["overall_success_rate"] == pytest.approx(0.5)
+    assert row["motion_valid_rate"] == pytest.approx(0.5)
+    assert row["planning_success_rate"] == pytest.approx(0.5)
+    assert row["coverage_rate"] == pytest.approx(1.0)
+    assert row["eligible"] is True
 
 
 def test_report_contains_exactly_three_markdown_tables(tmp_path):

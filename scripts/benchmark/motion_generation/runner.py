@@ -445,6 +445,9 @@ class BenchmarkRunner:
                 "CPU/GPU memory values are process/PyTorch allocator deltas around timed calls.",
                 "Continuous error and path metrics are conditioned on externally motion-valid trajectories.",
                 "Collision, dynamic, execution, and task metrics are N/A in free-space-common v1.",
+                "Leaderboard overall_success_rate / motion_valid_rate / planning_success_rate "
+                "are macro averages over mandatory cases (equal case weight after within-case "
+                "env/repeat micro-average); coverage_rate remains outcome-count completeness.",
                 *self.notes,
             ],
         )
