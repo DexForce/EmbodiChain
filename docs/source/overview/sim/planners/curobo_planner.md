@@ -74,6 +74,10 @@ planner_cfg = CuroboPlannerCfg(
 motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 ~~~
 
+cuRobo's Python logger defaults to error-only output. Set
+`CuroboPlannerCfg.log_level` to `"debug"`, `"info"`, `"warning"`, or `"error"`
+to change its verbosity. This setting does not affect EmbodiChain's own logs.
+
 The physics and planner devices are independent.
 `SimulationManagerCfg(sim_device="cpu")` keeps robot state, targets, and
 returned trajectories on CPU,
