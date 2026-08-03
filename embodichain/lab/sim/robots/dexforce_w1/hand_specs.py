@@ -29,9 +29,6 @@ from .types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
-    parse_w1_arm_side,
-    parse_w1_hand_brand,
-    parse_w1_hand_version,
 )
 
 __all__ = [
@@ -77,7 +74,7 @@ class W1HandSpec:
         object.__setattr__(self, "sides", MappingProxyType(dict(self.sides)))
 
     def for_side(self, side: DexforceW1ArmSide | str) -> W1HandSideSpec:
-        side = parse_w1_arm_side(side)
+        side = DexforceW1ArmSide.parse(side)
         try:
             return self.sides[side]
         except KeyError as exc:
@@ -177,7 +174,7 @@ def get_default_w1_hand_version(
     brand: DexforceW1HandBrand | str,
 ) -> DexforceW1HandVersion:
     """Return the explicitly selected default release for a hand brand."""
-    brand = parse_w1_hand_brand(brand)
+    brand = DexforceW1HandBrand.parse(brand)
     try:
         return _DEFAULT_W1_HAND_VERSIONS[brand]
     except KeyError as exc:
@@ -191,8 +188,8 @@ def get_w1_hand_spec(
     version: DexforceW1HandVersion | str,
 ) -> W1HandSpec:
     """Return an explicitly registered hand release."""
-    brand = parse_w1_hand_brand(brand)
-    version = parse_w1_hand_version(version)
+    brand = DexforceW1HandBrand.parse(brand)
+    version = DexforceW1HandVersion.parse(version)
     try:
         return _W1_HAND_SPECS[(brand, version)]
     except KeyError as exc:

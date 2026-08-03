@@ -15,6 +15,8 @@
 # ----------------------------------------------------------------------------
 
 import enum
+import re
+from typing import TypeVar
 
 __all__ = [
     "DexforceW1Version",
@@ -22,14 +24,32 @@ __all__ = [
     "DexforceW1ArmSide",
     "DexforceW1Type",
     "DexforceW1HandBrand",
-    "parse_w1_version",
-    "parse_w1_hand_version",
-    "parse_w1_arm_side",
-    "parse_w1_hand_brand",
 ]
 
+_W1EnumT = TypeVar("_W1EnumT", bound="_W1Enum")
 
-class DexforceW1Version(enum.Enum):
+
+class _W1Enum(enum.Enum):
+    @classmethod
+    def _parse_label(cls) -> str:
+        name = cls.__name__.removeprefix("DexforceW1")
+        words = re.sub(r"(?<!^)(?=[A-Z])", " ", name).lower()
+        return f"Dexforce W1 {words}"
+
+    @classmethod
+    def parse(cls: type[_W1EnumT], value) -> _W1EnumT:
+        """Parse an enum instance, member name, or serialized value."""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            normalized = value.lower()
+            for member in cls:
+                if normalized in (member.name.lower(), str(member.value).lower()):
+                    return member
+        raise ValueError(f"Invalid {cls._parse_label()}: {value!r}")
+
+
+class DexforceW1Version(_W1Enum):
     """Released version of the W1 robot body and arms."""
 
     V021 = "v021"
@@ -37,20 +57,20 @@ class DexforceW1Version(enum.Enum):
     V025 = "v025"
 
 
-class DexforceW1HandVersion(enum.Enum):
+class DexforceW1HandVersion(_W1Enum):
     """Released version of an external W1 hand or gripper asset."""
 
     V021 = "v021"
 
 
-class DexforceW1ArmSide(enum.Enum):
+class DexforceW1ArmSide(_W1Enum):
     """Arm side for DexforceW1: left or right."""
 
     LEFT = "left"
     RIGHT = "right"
 
 
-class DexforceW1Type(enum.Enum):
+class DexforceW1Type(_W1Enum):
     """Component type for DexforceW1."""
 
     CHASSIS = "chassis"
@@ -64,38 +84,7 @@ class DexforceW1Type(enum.Enum):
     FULL_BODY = "full_body"  # Full robot
 
 
-class DexforceW1HandBrand(enum.Enum):
+class DexforceW1HandBrand(_W1Enum):
     BRAINCO_HAND = "BRAINCO_HAND"
     DH_PGC_GRIPPER = "DH_PGC_GRIPPER"
     DH_PGC_GRIPPER_M = "DH_PGC_GRIPPER_M"
-
-
-def _parse_enum(value, enum_type, label):
-    if isinstance(value, enum_type):
-        return value
-    if isinstance(value, str):
-        normalized = value.lower()
-        for member in enum_type:
-            if normalized in (member.name.lower(), str(member.value).lower()):
-                return member
-    raise ValueError(f"Invalid {label}: {value!r}")
-
-
-def parse_w1_version(value) -> DexforceW1Version:
-    """Parse a W1 robot version from an enum, member name, or value."""
-    return _parse_enum(value, DexforceW1Version, "Dexforce W1 version")
-
-
-def parse_w1_hand_version(value) -> DexforceW1HandVersion:
-    """Parse a W1 hand version from an enum, member name, or value."""
-    return _parse_enum(value, DexforceW1HandVersion, "Dexforce W1 hand version")
-
-
-def parse_w1_arm_side(value) -> DexforceW1ArmSide:
-    """Parse a W1 arm side from an enum, member name, or serialized value."""
-    return _parse_enum(value, DexforceW1ArmSide, "Dexforce W1 arm side")
-
-
-def parse_w1_hand_brand(value) -> DexforceW1HandBrand:
-    """Parse a W1 hand brand from an enum, member name, or serialized value."""
-    return _parse_enum(value, DexforceW1HandBrand, "Dexforce W1 hand brand")

@@ -29,7 +29,6 @@ from .types import (
     DexforceW1ArmSide,
     DexforceW1Type,
     DexforceW1Version,
-    parse_w1_version,
 )
 
 __all__ = [
@@ -243,4 +242,4 @@ _W1_VERSION_SPECS = {
 
 
 def get_w1_version_spec(version: DexforceW1Version | str) -> W1VersionSpec:
-    return _W1_VERSION_SPECS[parse_w1_version(version)]
+    return _W1_VERSION_SPECS[DexforceW1Version.parse(version)]

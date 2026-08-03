@@ -28,10 +28,6 @@ from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1HandBrand,
     DexforceW1HandVersion,
     DexforceW1Version,
-    parse_w1_arm_side,
-    parse_w1_hand_brand,
-    parse_w1_hand_version,
-    parse_w1_version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
@@ -170,17 +166,17 @@ class DexforceW1Cfg(RobotCfg):
         ``solver_cfg``, ``drive_pros`` and ``attrs``.
         """
         init_dict = init_dict or {}
-        self.version = parse_w1_version(
+        self.version = DexforceW1Version.parse(
             init_dict.get("version", DexforceW1Version.V021)
         )
         self.with_default_eef = bool(init_dict.get("with_default_eef", True))
 
         self.hand_types = {
-            parse_w1_arm_side(side): parse_w1_hand_brand(brand)
+            DexforceW1ArmSide.parse(side): DexforceW1HandBrand.parse(brand)
             for side, brand in init_dict.get("hand_types", {}).items()
         }
         configured_hand_versions = {
-            parse_w1_arm_side(side): parse_w1_hand_version(version)
+            DexforceW1ArmSide.parse(side): DexforceW1HandVersion.parse(version)
             for side, version in init_dict.get("hand_versions", {}).items()
         }
         self.hand_versions = {
@@ -193,7 +189,7 @@ class DexforceW1Cfg(RobotCfg):
             for side in DexforceW1ArmSide
         }
         self.hand_attach_xposes = {
-            parse_w1_arm_side(side): np.asarray(transform, dtype=float)
+            DexforceW1ArmSide.parse(side): np.asarray(transform, dtype=float)
             for side, transform in init_dict.get("hand_attach_xposes", {}).items()
         }
 

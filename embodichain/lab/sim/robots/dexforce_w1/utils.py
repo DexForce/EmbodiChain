@@ -23,9 +23,6 @@ from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1Version,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
-    parse_w1_arm_side,
-    parse_w1_hand_version,
-    parse_w1_version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
     get_default_w1_hand_version,
@@ -206,9 +203,9 @@ def build_dexforce_w1_assembly_urdf_cfg(
         URDFCfg: Assembled URDF configuration.
     """
 
-    version = parse_w1_version(version)
+    version = DexforceW1Version.parse(version)
     hand_versions = {
-        parse_w1_arm_side(side): parse_w1_hand_version(hand_version)
+        DexforceW1ArmSide.parse(side): DexforceW1HandVersion.parse(hand_version)
         for side, hand_version in (hand_versions or {}).items()
     }
 
@@ -362,9 +359,9 @@ def build_dexforce_w1_control_parts(
     include_hand: bool,
 ) -> dict[str, list[str]]:
     """Build control-part joint lists for a complete dual-arm W1."""
-    version = parse_w1_version(version)
+    version = DexforceW1Version.parse(version)
     hand_versions = {
-        parse_w1_arm_side(side): parse_w1_hand_version(hand_version)
+        DexforceW1ArmSide.parse(side): DexforceW1HandVersion.parse(hand_version)
         for side, hand_version in (hand_versions or {}).items()
     }
 
