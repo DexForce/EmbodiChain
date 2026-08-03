@@ -36,6 +36,9 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner import (
+    AssetsGroupTableAligner,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
@@ -43,13 +46,14 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_gravity_settler impo
     AssetsGravitySettler,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
-    align_assets_group_to_table_aabb_top,
     export_baked_layout_object_glbs,
     layout_object_to_transform_matrix,
     load_glb_mesh,
     quaternion_wxyz_to_euler_xyz_degrees,
-    simready_object_glb,
     transform_matrix_to_layout_object,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_scene_processor import (
+    SimReadySceneProcessor,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
     TableSupportSurfaceDetector,
@@ -204,21 +208,14 @@ def _refine_geometries_and_layout(
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
 
-    # Simready all the assets.
-    simready_assets_layout = _simready_assets(
+    simready_processor = SimReadySceneProcessor(
         scene=scene,
         coarse_layout_by_id=coarse_layout_by_id,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
+        coarse_geometry_root=coarse_geometry_output_root,
+        simready_geometry_root=simready_geometry_output_root,
     )
-
-    # Simready the table.
-    simready_table_layout = _simready_table(
-        scene=scene,
-        coarse_layout_by_id=coarse_layout_by_id,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
+    simready_assets_layout = simready_processor.process_assets()
+    simready_table_layout = simready_processor.process_table()
     # Concat then save the table info and the assets info in one JSON file.
     simready_layout = [simready_table_layout, *simready_assets_layout]
     (Path(simready_geometry_output_root) / "simready_layout.json").write_text(
@@ -407,11 +404,12 @@ def _layout_refinement(
     # the table. This preserves the initial relative poses for the later
     # gravity simulation, which can settle individual assets physically.
 
-    refined_table_layout, refined_assets_layout = align_assets_group_to_table_aabb_top(
+    group_table_aligner = AssetsGroupTableAligner(
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
+    refined_table_layout, refined_assets_layout = group_table_aligner.align()
     if not refined_assets_layout:
         log_info("Scene has no movable assets; skipping support-region clamping.")
         return refined_table_layout, []
@@ -554,89 +552,6 @@ def _measure_table_and_assets_in_z_up_world(
             dtype=float,
         )
     return table_world_mesh_z_up, asset_aabbs_by_id
-
-
-def _simready_assets(
-    *,
-    scene: Scene,
-    coarse_layout_by_id: dict[str, dict[str, object]],
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> list[dict[str, object]]:
-    # Batch process all the assets in the scene.
-    return [
-        _simready_asset(
-            asset_id=asset.id,
-            coarse_layout=coarse_layout_by_id.get(asset.id),
-            coarse_geometry_output_root=coarse_geometry_output_root,
-            simready_geometry_output_root=simready_geometry_output_root,
-        )
-        for asset in scene.assets
-    ]
-
-
-def _simready_asset(
-    *,
-    asset_id: str,
-    coarse_layout: dict[str, object] | None,
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> dict[str, object]:
-    # Hard code some asset like bottle, treat their z-axis carefully.
-    # For the table, treat it with the same strategy for now.
-    # Add asset-id-specific SimReady processing here before the generic path.
-    return _simready_object(
-        asset_id=asset_id,
-        coarse_layout=coarse_layout,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
-
-
-def _simready_object(
-    *,
-    asset_id: str,
-    coarse_layout: dict[str, object] | None,
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> dict[str, object]:
-    if coarse_layout is None:
-        raise ValueError(f"Coarse layout does not contain object {asset_id!r}.")
-    simready_mesh, simready_transform = simready_object_glb(
-        Path(coarse_geometry_output_root) / f"{asset_id}.glb",
-        object_id=asset_id,
-        rot=coarse_layout.get("rot"),
-        pos=coarse_layout.get("pos"),
-        scale=coarse_layout.get("scale"),
-    )
-    output_path = Path(simready_geometry_output_root) / f"{asset_id}.glb"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    simready_mesh.export(output_path, file_type="glb")
-    if not output_path.is_file():
-        raise FileNotFoundError(
-            f"SimReady object geometry was not written: {output_path}"
-        )
-    return {"id": asset_id, **simready_transform}
-
-
-def _simready_table(
-    *,
-    scene: Scene,
-    coarse_layout_by_id: dict[str, dict[str, object]],
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> dict[str, object]:
-    # There must be a table in one scene.
-    if scene.table is None:
-        raise ValueError("Cannot SimReady a scene without a table.")
-
-    # Using the same strategy as the normal assets first.
-    return _simready_object(
-        asset_id=scene.table.id,
-        coarse_layout=coarse_layout_by_id.get(scene.table.id),
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
 
 
 def _load_layout(layout_path: str | Path) -> list[dict[str, object]]:
