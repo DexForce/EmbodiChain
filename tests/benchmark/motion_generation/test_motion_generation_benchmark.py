@@ -671,6 +671,86 @@ def test_leaderboard_uses_case_macro_average_not_env_micro_average():
     assert row["eligible"] is True
 
 
+def test_leaderboard_latency_p95_uses_case_macro_not_trial_pool():
+    """Many fast repeats must not drown a slow case in leaderboard latency_p95."""
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    fast = BenchmarkCase(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-fast",
+        seed=11,
+        batch_size=1,
+        num_waypoints=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
+        reference_qpos=torch.zeros(1, 1, 7),
+    )
+    slow = BenchmarkCase(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-slow",
+        seed=23,
+        batch_size=64,
+        num_waypoints=5,
+        path_shape="s_curve",
+        start_state_bin="nominal",
+        start_qpos=torch.zeros(64, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).expand(64, 1, 4, 4).clone(),
+        reference_qpos=torch.zeros(64, 1, 7),
+    )
+
+    def _latency_record(
+        case: BenchmarkCase, *, cost: float, repeat: int
+    ) -> TrialRecord:
+        return TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id=case.scenario_id,
+            case_id=case.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=case.seed,
+            repeat=repeat,
+            batch_size=case.batch_size,
+            waypoint_count=case.num_waypoints,
+            path_shape=case.path_shape,
+            start_state_bin=case.start_state_bin,
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=cost,
+            outcomes=tuple(
+                replace(_outcome(), env_index=env_index)
+                for env_index in range(case.batch_size)
+            ),
+        )
+
+    # 20 fast repeats at 10 ms plus one slow case at 1000 ms.
+    # Trial-pooled nearest-rank p95 over 21 values is still 10 ms; case-macro
+    # p95 over case means [10, 1000] is 1000 ms.
+    records = [
+        _latency_record(fast, cost=10.0, repeat=index) for index in range(20)
+    ] + [_latency_record(slow, cost=1000.0, repeat=0)]
+
+    row = aggregate_results(records, metadata, [fast, slow], measured_trials=1)[
+        "leaderboard"
+    ][0]
+
+    assert row["latency_p95_ms"] == pytest.approx(1000.0)
+
+
 def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
     """Cold latency from W=1 must not be copied onto W=5 Time & Memory rows."""
     metadata = [

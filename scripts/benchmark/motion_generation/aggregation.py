@@ -96,6 +96,36 @@ def _case_macro_mean(
     return sum(case_means) / len(case_means) if case_means else None
 
 
+def _case_macro_latency_p95(
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+) -> float | None:
+    """Return a case-macro warm-latency p95 for leaderboard ranking.
+
+    Each mandatory case first collapses its measured repeats to a mean
+    ``cost_time_ms``. The leaderboard then takes the nearest-rank p95 over
+    those case means so every case has equal weight regardless of repeat
+    count, ``batch_size``, or waypoint difficulty. Missing cases are omitted
+    from the percentile (coverage / ``eligible`` already penalize skips);
+    stratified absolute latency remains in the Time & Memory table.
+    """
+    if not track_cases:
+        return None
+
+    costs_by_case: dict[str, list[float]] = defaultdict(list)
+    for record in measured:
+        if record.cost_time_ms is None or not math.isfinite(float(record.cost_time_ms)):
+            continue
+        costs_by_case[record.case_id].append(float(record.cost_time_ms))
+
+    case_means = [
+        sum(costs_by_case[case.case_id]) / len(costs_by_case[case.case_id])
+        for case in track_cases
+        if case.case_id in costs_by_case
+    ]
+    return nearest_rank_percentile(case_means, 95.0)
+
+
 def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
     """Return the most frequent non-empty external failure code."""
     failures = Counter(
@@ -393,8 +423,9 @@ def _leaderboard_rows(
     """Build a complete success/coverage/latency ordered leaderboard per track.
 
     Success rates are macro-averaged over mandatory cases (equal case weight).
-    ``coverage_rate`` remains an outcome-count completeness check used for
-    eligibility.
+    ``latency_p95_ms`` uses the same case-equal weighting: per-case mean warm
+    latency, then nearest-rank p95 across cases. ``coverage_rate`` remains an
+    outcome-count completeness check used for eligibility.
     """
     entries: list[dict[str, object]] = []
     for track in _track_ids(records, cases):
@@ -415,9 +446,7 @@ def _leaderboard_rows(
             coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
             motion_rate = _case_macro_rate(measured, track_cases, "motion_valid")
             planning_rate = _case_macro_rate(measured, track_cases, "planning_success")
-            latency_p95 = nearest_rank_percentile(
-                (record.cost_time_ms for record in measured), 95.0
-            )
+            latency_p95 = _case_macro_latency_p95(measured, track_cases)
             peak_gpu = _peak_gpu(measured)
             track_entries.append(
                 {

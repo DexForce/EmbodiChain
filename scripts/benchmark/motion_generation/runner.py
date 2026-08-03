@@ -473,6 +473,10 @@ class BenchmarkRunner:
                 "over mandatory cases (equal case weight after within-case env/repeat "
                 "micro-average). Missing cases contribute 0.0. coverage_rate remains "
                 "outcome-count completeness.",
+                "Leaderboard latency_p95_ms is a case-macro tiebreaker: mean warm "
+                "cost_time_ms within each case, then nearest-rank p95 across cases "
+                "(equal case weight; missing cases omitted). Stratified absolute latency "
+                "stays in Time & Memory (warm_plan_ms_p50/p95 by batch_size/waypoint_count).",
                 "cold_plan_ms is reported only on the Time & Memory row whose waypoint_count "
                 "matches the first real case measured for that batch; other waypoint rows "
                 "show N/A. planner_construct_ms / backend_prepare_ms are one-time batch costs.",
