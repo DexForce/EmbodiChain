@@ -20,7 +20,8 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
     ├──────────────► app_processes.py  子进程、环境、日志和阶段检测
     ├──────────────► app_state.py      共享 RuntimeState、锁和计时
     ├──────────────► app_media.py      视频、数据集预览和日志归档
-    └──────────────► app_config.py     路径、端口、文案和固定参数
+    └──────────────► app_config.py     UI 常量、路径推导和命令定义
+                         └──────────► ../.env  部署路径、端口和服务凭据
 ```
 
 | 模块 | 职责 |
@@ -34,7 +35,8 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
 | `app_state.py` | `RuntimeState`、互斥锁、进度阶段、运行 token 和耗时统计。 |
 | `app_commands.py` | prompt2scene、动作配置和 `run_agent` 的参数构造。 |
 | `app_media.py` | 观众视频、LeRobot 数据预览、组合视频和运行日志归档。 |
-| `app_config.py` | 路径、环境变量、端口、UI 文案、引擎模式和 CLI 固定参数。 |
+| `app_config.py` | UI 文案、引擎模式、路径推导和 CLI 固定参数；部署值从 `.env` 读取。 |
+| `../.env` | Gradio 与 Scene Engine 共用的路径、端口、LLM 和服务端点配置；不提交凭据。 |
 
 ## 启动、路径和网络环境
 
@@ -172,7 +174,6 @@ image
   → python -m embodichain scene-engine
        --image <input.png>
        --output_root <hash-dir>
-       --config <EMBODICHAIN_ROOT>/embodichain/gen_sim/scene_engine_config.json
   → <hash-dir>/scene_export/scene_config.json
   → preview.py <hash-dir> --viser --viser-host 0.0.0.0 --viser-port 8080
   → Gradio iframe
@@ -247,7 +248,7 @@ embodichain.gen_sim.action_agent_pipeline.cli.run_agent
 ```text
 python -m embodichain scene-engine
 embodichain/gen_sim/scene_engine/cli/preview.py
-embodichain/gen_sim/scene_engine_config.json
+.env
 ```
 
 Articulation 还需要 Git（首次 clone）、Conda、`ARTICRAFT_CONDA_ENV` 和 Codex CLI。生成请求会交给本机 Codex CLI 执行，因此只应提交可信请求。

@@ -14,10 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Central configuration for the Gradio application.
+"""Shared settings and helpers for the Gradio application.
 
-Keep deployment-specific paths, UI copy, and CLI command definitions here so
-application modules do not embed environment-specific values.
+Deployment-specific values are read from ``embodichain/gen_sim/.env``; this
+module keeps UI constants, path derivation, and CLI command definitions close
+to the application code.
 """
 
 from __future__ import annotations
@@ -25,6 +26,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+
+from embodichain.gen_sim.env import load_gen_sim_env
+
+load_gen_sim_env()
 
 PROXY_ENV_KEYS = (
     "HTTP_PROXY",
@@ -38,13 +43,19 @@ PROXY_ENV_KEYS = (
 )
 DIRECT_NO_PROXY_VALUE = "*"
 
+
+def _getenv(name: str, default: str) -> str:
+    """Read a non-empty shared ``.env`` value, falling back to ``default``."""
+    return os.environ.get(name) or default
+
+
 # SimReady uses an OpenAI-compatible multimodal endpoint.  Configure these
 # values here for a local deployment, or provide the matching SIMREADY_* env
 # vars before launch.  Keep the API key out of commits; an empty value leaves
 # any inherited OPENAI_* variables and SimReady's own JSON configuration intact.
-SIMREADY_OPENAI_API_KEY = os.environ.get("SIMREADY_OPENAI_API_KEY", "")
-SIMREADY_OPENAI_MODEL = os.environ.get("SIMREADY_OPENAI_MODEL", "")
-SIMREADY_OPENAI_BASE_URL = os.environ.get("SIMREADY_OPENAI_BASE_URL", "")
+SIMREADY_OPENAI_API_KEY = _getenv("SIMREADY_OPENAI_API_KEY", "")
+SIMREADY_OPENAI_MODEL = _getenv("SIMREADY_OPENAI_MODEL", "")
+SIMREADY_OPENAI_BASE_URL = _getenv("SIMREADY_OPENAI_BASE_URL", "")
 
 
 def configure_direct_network_env(env: Any = None) -> None:
@@ -74,7 +85,7 @@ def configure_simready_llm_env(env: Any = None) -> None:
 
 APP_ROOT = Path(__file__).resolve().parent
 EMBODICHAIN_ROOT = Path(
-    os.environ.get("EMBODICHAIN_ROOT", "/home/dex/桌面/EmbodiChain")
+    _getenv("EMBODICHAIN_ROOT", str(Path(__file__).resolve().parents[3]))
 ).expanduser()
 ASSETS_DIR = APP_ROOT / "assets"
 DEXFORCE_LOGO = ASSETS_DIR / "dexforce.png"
@@ -82,25 +93,22 @@ INTERACT_RANDOM_PREVIEW_DIR = APP_ROOT / ".gradio_previews"
 DEBUG_ENGINE_ROOT = APP_ROOT / ".debug_engine"
 DEBUG_ASSET_ENGINE_ROOT = DEBUG_ENGINE_ROOT / "assets"
 ARTICRAFT_ROOT = Path(
-    os.environ.get("ARTICRAFT_ROOT", str(APP_ROOT / ".articraft"))
+    _getenv("ARTICRAFT_ROOT", str(APP_ROOT / ".articraft"))
 ).expanduser()
-ARTICRAFT_REPOSITORY_URL = os.environ.get(
+ARTICRAFT_REPOSITORY_URL = _getenv(
     "ARTICRAFT_REPOSITORY_URL", "https://github.com/mattzh72/articraft.git"
 )
-ARTICRAFT_CONDA_ENV = os.environ.get("ARTICRAFT_CONDA_ENV", "articraft")
+ARTICRAFT_CONDA_ENV = _getenv("ARTICRAFT_CONDA_ENV", "articraft")
 # Keep every Articraft record, copied reference image, log, and downloadable
 # result bundle under one app-owned directory rather than the source checkout.
 ARTICRAFT_OUTPUT_ROOT = Path(
-    os.environ.get("ARTICRAFT_OUTPUT_ROOT", str(DEBUG_ENGINE_ROOT / "articraft"))
+    _getenv("ARTICRAFT_OUTPUT_ROOT", str(DEBUG_ENGINE_ROOT / "articraft"))
 ).expanduser()
 DEBUG_SCENE_ENGINE_ROOT = DEBUG_ENGINE_ROOT / "scenes"
-SCENE_ENGINE_CONFIG = (
-    EMBODICHAIN_ROOT / "embodichain" / "gen_sim" / "scene_engine_config.json"
-)
-SCENE_ENGINE_VISER_PORT = int(os.environ.get("SCENE_ENGINE_VISER_PORT", "8080"))
+SCENE_ENGINE_VISER_PORT = int(_getenv("SCENE_ENGINE_VISER_PORT", "8080"))
 # Articulation previews run as a separate Viser process from scene previews,
 # so they need their own externally configurable port.
-ARTICRAFT_VISER_PORT = int(os.environ.get("ARTICRAFT_VISER_PORT", "8081"))
+ARTICRAFT_VISER_PORT = int(_getenv("ARTICRAFT_VISER_PORT", "8081"))
 SCENE_ID = "current"
 
 GYM_PROJECT_ROOT = EMBODICHAIN_ROOT / "gym_project"
@@ -264,7 +272,6 @@ COMMANDS = {
         "single_num_envs": "1",
     },
     # Scene Engine is dispatched by EmbodiChain's registered top-level CLI.
-    # The scene_engine package itself has no __main__.py in this checkout.
     "scene_engine": {
         "module": "embodichain",
         "base_args": ("scene-engine",),
@@ -298,6 +305,6 @@ TIMING_PHASE_ORDER = (
     "action_graph_execution",
 )
 
-SERVER_NAME = os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0")
-SERVER_PORT = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
+SERVER_NAME = _getenv("GRADIO_SERVER_NAME", "0.0.0.0")
+SERVER_PORT = int(_getenv("GRADIO_SERVER_PORT", "7860"))
 DEFAULT_CONCURRENCY_LIMIT = 1

@@ -20,18 +20,14 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from embodichain.gen_sim.scene_engine.pipeline.generate import generate_scene_from_image
-
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 
 def cli_scene_engine(
     image: str | Path,
     output_root: str | Path,
-    *,
-    config_path: str | Path | None = None,
 ) -> None:
-    """Generate one scene using an optional user-owned service configuration."""
+    """Generate one scene using the shared GenSim ``.env`` configuration."""
     resolved_image_path = Path(image).expanduser().resolve()
     if not resolved_image_path.exists():
         raise FileNotFoundError(f"Image input not found: {resolved_image_path}")
@@ -45,15 +41,16 @@ def cli_scene_engine(
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
+    # Importing the generation pipeline initializes simulation dependencies.
+    # Keeping it here lets ``embodichain scene-engine --help`` work in a
+    # lightweight CLI-only environment.
+    from embodichain.gen_sim.scene_engine.pipeline.generate import (
+        generate_scene_from_image,
+    )
+
     generate_scene_from_image(
         image_path=resolved_image_path,
         output_root=resolved_output_root,
-        # One Scene Engine config contains the LLM, segmentation, and geometry
-        # sections. Passing it through lets callers use their own service URLs
-        # instead of editing the package-installed default JSON.
-        llm_config_path=config_path,
-        image_segmentation_config_path=config_path,
-        geometry_generation_config_path=config_path,
     )
     print("Successfully completed!")
 
@@ -75,18 +72,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         required=True,
         help="Path to the output directory",
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help=(
-            "Optional Scene Engine JSON config containing the llm, "
-            "image_segmentation, and geometry_generation service settings."
-        ),
-    )
     args = parser.parse_args(argv)
 
-    cli_scene_engine(args.image, args.output_root, config_path=args.config)
+    cli_scene_engine(args.image, args.output_root)
 
 
 if __name__ == "__main__":

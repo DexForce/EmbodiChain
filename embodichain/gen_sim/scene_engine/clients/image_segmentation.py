@@ -17,15 +17,13 @@
 
 from __future__ import annotations
 
-import json
+import os
 from pathlib import Path
 from typing import Any
 
 import requests
 
-_DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
-)
+from embodichain.gen_sim.env import load_gen_sim_env
 
 
 class ImageSegmentationClient:
@@ -48,12 +46,9 @@ class ImageSegmentationClient:
         self._session = session or requests.Session()
 
     @classmethod
-    def from_config(
-        cls,
-        config_path: str | Path | None = None,
-    ) -> "ImageSegmentationClient":
-        config = _load_config(config_path)
-        return cls(**config)
+    def from_env(cls) -> "ImageSegmentationClient":
+        """Create a client from the shared GenSim ``.env`` configuration."""
+        return cls(**_load_config())
 
     def check_health(self) -> None:
         last_error: requests.RequestException | None = None
@@ -136,68 +131,35 @@ class ImageSegmentationClient:
         return f"{self._base_url}/{path.lstrip('/')}"
 
 
-def _load_config(config_path: str | Path | None) -> dict[str, Any]:
-    resolved_config_path = Path(config_path or _DEFAULT_CONFIG_PATH).expanduser()
-    resolved_config_path = resolved_config_path.resolve()
-    if not resolved_config_path.is_file():
-        raise FileNotFoundError(f"Config not found: {resolved_config_path}")
-
-    try:
-        config_data = json.loads(resolved_config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Config is not valid JSON: {resolved_config_path}") from exc
-
-    config = config_data.get("image_segmentation")
-    if not isinstance(config, dict):
-        raise ValueError("Config key image_segmentation must be an object.")
-
-    required_keys = (
-        "base_url",
-        "timeout_s",
-        "max_attempts",
-        "health_path",
-        "segment_single_object_path",
-    )
-    missing = [key for key in required_keys if key not in config]
-    if missing:
-        raise ValueError(f"Missing Image Segmentation Server config keys: {missing}")
-
-    try:
-        timeout_s = int(config["timeout_s"])
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "Image Segmentation Server config timeout_s must be an integer."
-        ) from exc
-    if timeout_s < 1:
-        raise ValueError(
-            "Image Segmentation Server config timeout_s must be at least 1."
-        )
-
-    try:
-        max_attempts = int(config["max_attempts"])
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "Image Segmentation Server config max_attempts must be an integer."
-        ) from exc
-    if max_attempts < 1:
-        raise ValueError(
-            "Image Segmentation Server config max_attempts must be at least 1."
-        )
-
-    string_keys = ("base_url", "health_path", "segment_single_object_path")
-    for key in string_keys:
-        if not isinstance(config[key], str) or not config[key].strip():
-            raise ValueError(
-                f"Image Segmentation Server config key {key} must be a non-empty string."
-            )
-
+def _load_config() -> dict[str, Any]:
+    load_gen_sim_env()
+    prefix = "SCENE_ENGINE_IMAGE_SEGMENTATION_"
     return {
-        "base_url": config["base_url"].strip(),
-        "timeout_s": timeout_s,
-        "max_attempts": max_attempts,
-        "health_path": config["health_path"].strip(),
-        "segment_single_object_path": config["segment_single_object_path"].strip(),
+        "base_url": _read_required_string(f"{prefix}BASE_URL"),
+        "timeout_s": _read_positive_int(f"{prefix}TIMEOUT_S"),
+        "max_attempts": _read_positive_int(f"{prefix}MAX_ATTEMPTS"),
+        "health_path": _read_required_string(f"{prefix}HEALTH_PATH"),
+        "segment_single_object_path": _read_required_string(
+            f"{prefix}SINGLE_OBJECT_PATH"
+        ),
     }
+
+
+def _read_required_string(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ValueError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _read_positive_int(name: str) -> int:
+    try:
+        value = int(os.getenv(name, ""))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1.")
+    return value
 
 
 def _extract_rle_masks(response_data: dict[str, Any]) -> list[dict[str, Any]]:

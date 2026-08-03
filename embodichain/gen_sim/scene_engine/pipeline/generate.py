@@ -47,17 +47,13 @@ from embodichain.gen_sim.scene_engine.pipeline.scene_export import export_scene
 def generate_scene_from_image(
     image_path: str | Path,
     output_root: str | Path,
-    *,
-    llm_config_path: str | Path | None = None,
-    image_segmentation_config_path: str | Path | None = None,
-    geometry_generation_config_path: str | Path | None = None,
 ) -> Scene:
-    """Generate the initial core scene state from an input image."""
+    """Generate the initial core scene state from an input image and ``.env``."""
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
     # Initialize the VLM client and the Scene data structure.
-    vlm_client = OpenAICompatibleVLM.from_config(llm_config_path)
+    vlm_client = OpenAICompatibleVLM.from_env()
     scene = Scene()
 
     # 1. Scene Understanding
@@ -72,10 +68,8 @@ def generate_scene_from_image(
 
     # 2. Scene Segmentation
     log_stage_start("Scene Segmentation")
-    # Load the config and fail if the Image Segmentation Server is unavailable.
-    image_segmentation_client = ImageSegmentationClient.from_config(
-        image_segmentation_config_path
-    )
+    # Load the environment configuration and verify the segmentation service.
+    image_segmentation_client = ImageSegmentationClient.from_env()
     try:
         image_segmentation_client.check_health()  # Error raising will happen internally.
         scene = segment_scene(
@@ -91,10 +85,8 @@ def generate_scene_from_image(
 
     # 3. Objects + Coarse Layout Generation
     log_stage_start("Objects + Coarse Layout Generation")
-    # Load the config and fail if the Geometry Generation Server is unavailable.
-    geometry_generation_client = GeometryGenerationClient.from_config(
-        geometry_generation_config_path
-    )
+    # Load the environment configuration and verify the geometry service.
+    geometry_generation_client = GeometryGenerationClient.from_env()
     try:
         geometry_generation_client.check_health()  # Error raising will happen internally.
         scene = generate_scene_and_refine(

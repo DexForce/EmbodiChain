@@ -20,12 +20,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 from typing import Any
 
-DEFAULT_LLM_CONFIG_PATH = (
-    Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
-)
+from embodichain.gen_sim.env import load_gen_sim_env
 
 
 @dataclass(frozen=True)
@@ -39,32 +36,23 @@ class LLMConfig:
     max_attempts: int
 
 
-def load_llm_config(config_path: str | Path | None = None) -> LLMConfig:
-    """Load LLM settings from JSON, with ``OPENAI_*`` overrides."""
-    resolved_config_path = Path(config_path or DEFAULT_LLM_CONFIG_PATH).expanduser()
-    resolved_config_path = resolved_config_path.resolve()
-    if not resolved_config_path.is_file():
-        raise FileNotFoundError(f"LLM config not found: {resolved_config_path}")
-
+def load_llm_config() -> LLMConfig:
+    """Load LLM settings from the shared ``.env`` and process environment."""
+    load_gen_sim_env()
     try:
-        raw_config = json.loads(resolved_config_path.read_text(encoding="utf-8"))
+        default_query = json.loads(os.getenv("SCENE_ENGINE_OPENAI_DEFAULT_QUERY", "{}"))
     except json.JSONDecodeError as exc:
         raise ValueError(
-            f"LLM config is not valid JSON: {resolved_config_path}"
+            "SCENE_ENGINE_OPENAI_DEFAULT_QUERY must be valid JSON."
         ) from exc
 
-    llm_config = raw_config.get("llm", {}).get("openai_compatible", {})
-    if not isinstance(llm_config, dict):
-        raise ValueError("LLM config key llm.openai_compatible must be an object.")
-
-    api_key = os.getenv("OPENAI_API_KEY") or llm_config.get("api_key", "")
-    model = os.getenv("OPENAI_MODEL") or llm_config.get("model", "")
-    base_url = os.getenv("OPENAI_BASE_URL") or llm_config.get("base_url", "")
-    default_query = llm_config.get("default_query", {})
-    max_attempts = os.getenv("OPENAI_MAX_ATTEMPTS") or llm_config.get("max_attempts", 3)
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    model = os.getenv("OPENAI_MODEL", "")
+    base_url = os.getenv("OPENAI_BASE_URL", "")
+    max_attempts = os.getenv("OPENAI_MAX_ATTEMPTS", "3")
 
     if not isinstance(default_query, dict):
-        raise ValueError("LLM config key default_query must be an object.")
+        raise ValueError("SCENE_ENGINE_OPENAI_DEFAULT_QUERY must be a JSON object.")
     missing = [
         key
         for key, value in {
@@ -80,9 +68,9 @@ def load_llm_config(config_path: str | Path | None = None) -> LLMConfig:
     try:
         parsed_max_attempts = int(max_attempts)
     except (TypeError, ValueError) as exc:
-        raise ValueError("LLM config key max_attempts must be an integer.") from exc
+        raise ValueError("OPENAI_MAX_ATTEMPTS must be an integer.") from exc
     if parsed_max_attempts < 1:
-        raise ValueError("LLM config key max_attempts must be at least 1.")
+        raise ValueError("OPENAI_MAX_ATTEMPTS must be at least 1.")
 
     return LLMConfig(
         api_key=api_key.strip(),

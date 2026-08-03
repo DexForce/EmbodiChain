@@ -2043,10 +2043,6 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     preview_html = ""
     try:
         scene_hash, output_root, image_path = _prepare_scene_engine_input(image_value)
-        if not SCENE_ENGINE_CONFIG.is_file():
-            raise FileNotFoundError(
-                f"Scene Engine config not found: {SCENE_ENGINE_CONFIG}"
-            )
     except Exception as exc:
         with runtime_lock:
             set_runtime_phase_locked("failed")
@@ -2093,8 +2089,6 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
         str(image_path),
         "--output_root",
         str(output_root),
-        "--config",
-        str(SCENE_ENGINE_CONFIG),
     ]
     with runtime_lock:
         runtime.log_lines.append("$ " + " ".join(command))

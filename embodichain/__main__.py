@@ -52,6 +52,11 @@ COMMANDS = (
         help="Convert a raw asset directory into a SimReady asset.",
     ),
     Command(
+        name="scene-engine",
+        target="embodichain.gen_sim.scene_engine.cli.start:main",
+        help="Generate a scene from an input image using configured services.",
+    ),
+    Command(
         name="preview-asset",
         target="embodichain.lab.scripts.preview_asset:cli",
         help="Preview a USD, URDF, or mesh asset in simulation.",
