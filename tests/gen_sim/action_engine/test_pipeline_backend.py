@@ -25,6 +25,9 @@ import torch
 from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
     compile_agent_graph_spec,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.symbolic_grounding import (
+    ground_symbolic_action,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime import (
     task_graph as task_graph_module,
 )
@@ -104,14 +107,13 @@ def test_orient_program_lowers_to_valid_mature_pipeline_graph() -> None:
             )
         )
     )
-    seed = lower_to_pipeline_seed(
-        execution,
-        env=_env(
-            tea=_Object((0.03, 0.03, 0.12)),
-            can=_Object((0.04, 0.04, 0.08)),
-            table=_Object((0.6, 0.4, 0.03)),
-        ),
+    env = _env(
+        tea=_Object((0.03, 0.03, 0.12)),
+        can=_Object((0.04, 0.04, 0.08)),
+        table=_Object((0.6, 0.4, 0.03)),
     )
+    env.agent_robot_profile = "dual_franka"
+    seed = lower_to_pipeline_seed(execution, env=env)
 
     graph = compile_agent_graph_spec(seed, task_name="pipeline_parity")
 
@@ -127,11 +129,22 @@ def test_orient_program_lowers_to_valid_mature_pipeline_graph() -> None:
     assert [edge["actions"][0]["atomic_action_class"] for edge in seed["edges"]] == [
         "PickUp",
         "MoveHeldObject",
+        "MoveHeldObject",
         "Place",
         "MoveEndEffector",
         "MoveJoints",
     ] * 2
     assert len(graph.edges) == len(execution.edges)
+
+    first_step = graph.semantic_steps["s01_tea"]
+    pickup = ground_symbolic_action(
+        graph.edges[first_step.edge_ids[0]].symbolic_actions[0],
+        first_step,
+        env=env,
+        arm="left_arm",
+    )
+    assert pickup.action_spec["cfg"]["obj_upright_direction"] == [0.0, 0.0, 1.0]
+    assert pickup.action_spec["cfg"]["rotate_upright"] == pytest.approx(torch.pi / 4)
 
 
 def test_arrangement_resolves_table_axis_and_strips_engine_actor_metadata() -> None:

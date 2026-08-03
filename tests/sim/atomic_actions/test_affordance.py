@@ -96,6 +96,35 @@ class TestAntipodalAffordance:
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
 
+    def test_valid_grasp_poses_forwards_runtime_cost_function(self):
+        aff = AntipodalAffordance()
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        grasp_pose = torch.eye(4).unsqueeze(0)
+
+        def get_valid_grasp_poses(object_pose, approach_direction, *, pose_cost_fn):
+            del approach_direction
+            costs = pose_cost_fn(grasp_pose, torch.tensor([0.25]))
+            return True, grasp_pose, torch.tensor([0.05]), costs
+
+        generator.get_valid_grasp_poses.side_effect = get_valid_grasp_poses
+        aff._generator = generator
+        observed_object_poses = []
+
+        def grasp_cost_fn(object_pose, grasp_poses, costs):
+            observed_object_poses.append(object_pose)
+            assert grasp_poses is grasp_pose
+            return costs + 1.0
+
+        results = aff.get_valid_grasp_poses(
+            torch.eye(4).unsqueeze(0),
+            grasp_cost_fn=grasp_cost_fn,
+        )
+
+        assert len(observed_object_poses) == 1
+        assert torch.equal(observed_object_poses[0], torch.eye(4))
+        assert results[0][1].tolist() == [1.25]
+
     def test_best_grasp_poses_casts_approach_direction_to_generator_device(self):
         aff = AntipodalAffordance()
         generator = Mock()

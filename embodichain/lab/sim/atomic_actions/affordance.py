@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import torch
 from dataclasses import dataclass, field
 from typing import Any
@@ -110,14 +111,26 @@ class AntipodalAffordance(Affordance):
         approach_direction: torch.Tensor = torch.tensor(
             [0, 0, -1], dtype=torch.float32
         ),
+        grasp_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         if self._generator is None:
             self._init_generator()
         approach_direction = self._resolve_approach_direction(approach_direction)
         results = []
         for i, obj_pose in enumerate(obj_poses):
+            pose_cost_fn = None
+            if grasp_cost_fn is not None:
+                pose_cost_fn = lambda grasp_poses, costs: grasp_cost_fn(
+                    obj_pose,
+                    grasp_poses,
+                    costs,
+                )
             is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
-                obj_pose, approach_direction
+                obj_pose,
+                approach_direction,
+                pose_cost_fn=pose_cost_fn,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)

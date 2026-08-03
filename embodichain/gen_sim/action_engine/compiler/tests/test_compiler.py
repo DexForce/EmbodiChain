@@ -276,10 +276,17 @@ def test_orient_object_uses_upright_in_place_motion_policies() -> None:
     assert [edge["actions"][0]["motion_policy"] for edge in execution["edges"]] == [
         "upright_in_place_pickup",
         "upright_in_place_transport",
+        "upright_in_place_transport",
         "upright_in_place_release",
         "upright_in_place_retreat",
         "default_home",
     ]
+    move_phases = [
+        edge["actions"][0]["target_binding"]["phase"]
+        for edge in execution["edges"]
+        if edge["actions"][0]["atomic_action_class"] == "MoveHeldObject"
+    ]
+    assert move_phases == ["staging", "final"]
     assert execution["semantic_steps"][0]["goal"] == {
         "relation": "none",
         "reference_state": "live",

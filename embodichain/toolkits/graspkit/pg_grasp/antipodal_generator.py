@@ -18,6 +18,7 @@ import os
 import argparse
 import open3d as o3d
 import time
+from collections.abc import Callable
 import torch
 import numpy as np
 import trimesh
@@ -611,6 +612,9 @@ class GraspGenerator:
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         visualize_collision: bool = False,
+        pose_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ):
         if self._hit_point_pairs is None:
             logger.log_warning(
@@ -718,6 +722,17 @@ class GraspGenerator:
         center_cost = center_distance / center_distance.max()
         length_cost = 1 - valid_open_lengths / valid_open_lengths.max()
         total_cost = 0.2 * angle_cost + 0.2 * length_cost + 0.6 * center_cost
+        if pose_cost_fn is not None:
+            adjusted_cost = pose_cost_fn(valid_grasp_poses, total_cost)
+            if adjusted_cost.shape != total_cost.shape:
+                logger.log_error(
+                    "pose_cost_fn must preserve the grasp cost shape.",
+                    ValueError,
+                )
+            total_cost = adjusted_cost.to(
+                device=total_cost.device,
+                dtype=total_cost.dtype,
+            )
 
         n_valid = valid_grasp_poses.shape[0]
         if n_valid == 0:

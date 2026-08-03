@@ -45,6 +45,11 @@ from ..core import (
 )
 from ..trajectory import TrajectoryBuilder
 
+_UPRIGHT_SIDE_GRASP_MAX_AXIS_ALIGNMENT = 0.65
+_UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION = 0.35
+_UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION = 0.75
+_UPRIGHT_SIDE_GRASP_HEIGHT_COST_WEIGHT = 2.0
+
 
 @configclass
 class PickUpCfg(ActionCfg):
@@ -259,9 +264,20 @@ class PickUp(AtomicAction):
         self, semantics: ObjectSemantics, start_qpos: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         obj_poses = semantics.entity.get_local_pose(to_matrix=True)
+        grasp_cost_fn = None
+        if self.cfg.rotate_upright is not None:
+            grasp_cost_fn = lambda object_pose, grasp_poses, costs: (
+                self._upright_grasp_costs(
+                    semantics,
+                    object_pose,
+                    grasp_poses,
+                    costs,
+                )
+            )
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses,
             approach_direction=self.approach_direction,
+            grasp_cost_fn=grasp_cost_fn,
         )
         n_envs = obj_poses.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
@@ -313,6 +329,11 @@ class PickUp(AtomicAction):
         grasp_variants = self._upright_adjusted_grasp_poses(
             semantics, selection_variants
         )
+        upright_compatible = self._upright_grasp_compatibility_mask(
+            semantics,
+            grasp_variants,
+            object_poses,
+        )
 
         pre_grasp_variants = grasp_variants.clone()
         pre_grasp_variants[..., :3, 3] -= (
@@ -336,7 +357,11 @@ class PickUp(AtomicAction):
         )
         alignment_success = self._approach_alignment_mask(grasp_variants)
         pickup_success = (
-            alignment_success & pre_grasp_success & grasp_success & lift_success
+            upright_compatible
+            & alignment_success
+            & pre_grasp_success
+            & grasp_success
+            & lift_success
         )
         downstream_success_counts: list[list[int]] = []
         object_to_eef_variants = torch.matmul(
@@ -371,6 +396,7 @@ class PickUp(AtomicAction):
         if not pickup_success.any(dim=(1, 2)).all():
             logger.log_warning(
                 "PickUp found no candidate with a feasible vertical pickup path: "
+                f"upright_compatible={upright_compatible.sum(dim=(1, 2)).tolist()}, "
                 f"aligned={alignment_success.sum(dim=(1, 2)).tolist()}, "
                 f"pre_grasp={pre_grasp_success.sum(dim=(1, 2)).tolist()}, "
                 f"grasp={(pre_grasp_success & grasp_success).sum(dim=(1, 2)).tolist()}, "
@@ -448,14 +474,7 @@ class PickUp(AtomicAction):
         if self.cfg.rotate_upright is None:
             return grasp_xpos
 
-        if self.cfg.obj_upright_direction is None:
-            upright_direction = torch.tensor(
-                [0, 0, 1], dtype=torch.float32, device=self.device
-            )
-        else:
-            upright_direction = self.cfg.obj_upright_direction.to(
-                device=self.device, dtype=torch.float32
-            )
+        upright_direction = self._normalized_obj_upright_direction()
         obj_pose = semantics.entity.get_local_pose(to_matrix=True)
         obj_upright = torch.matmul(obj_pose[:, :3, :3], upright_direction)
         adjusted_grasp_xpos = grasp_xpos.clone()
@@ -474,6 +493,115 @@ class PickUp(AtomicAction):
             rota_offset, adjusted_grasp_xpos[..., :3, :3]
         )
         return adjusted_grasp_xpos
+
+    def _upright_grasp_compatibility_mask(
+        self,
+        semantics: ObjectSemantics,
+        grasp_xpos: torch.Tensor,
+        object_poses: torch.Tensor,
+    ) -> torch.Tensor:
+        """Reject upright grasps that clamp the object's support and top faces."""
+        del semantics
+        shape = grasp_xpos.shape[:3]
+        if self.cfg.rotate_upright is None:
+            return torch.ones(shape, dtype=torch.bool, device=grasp_xpos.device)
+
+        local_upright = self._normalized_obj_upright_direction().to(
+            device=grasp_xpos.device,
+            dtype=grasp_xpos.dtype,
+        )
+        object_poses = object_poses.to(
+            device=grasp_xpos.device,
+            dtype=grasp_xpos.dtype,
+        )
+        world_upright = torch.matmul(object_poses[:, :3, :3], local_upright)
+        closing_axes = torch.nn.functional.normalize(
+            grasp_xpos[..., :3, 0],
+            dim=-1,
+        )
+        axis_alignment = torch.abs(
+            torch.sum(closing_axes * world_upright[:, None, None, :], dim=-1)
+        )
+        return axis_alignment <= _UPRIGHT_SIDE_GRASP_MAX_AXIS_ALIGNMENT
+
+    def _upright_grasp_costs(
+        self,
+        semantics: ObjectSemantics,
+        object_pose: torch.Tensor,
+        grasp_poses: torch.Tensor,
+        costs: torch.Tensor,
+    ) -> torch.Tensor:
+        """Rank side grasps before generator top-k truncation."""
+        local_upright = self._normalized_obj_upright_direction().to(
+            device=grasp_poses.device,
+            dtype=grasp_poses.dtype,
+        )
+        object_pose = object_pose.to(
+            device=grasp_poses.device,
+            dtype=grasp_poses.dtype,
+        )
+        world_upright = torch.matmul(object_pose[:3, :3], local_upright)
+        closing_axes = torch.nn.functional.normalize(
+            grasp_poses[:, :3, 0],
+            dim=-1,
+        )
+        axis_alignment = torch.abs(
+            torch.sum(closing_axes * world_upright[None, :], dim=-1)
+        )
+        adjusted = torch.where(
+            axis_alignment <= _UPRIGHT_SIDE_GRASP_MAX_AXIS_ALIGNMENT,
+            costs,
+            torch.full_like(costs, torch.inf),
+        )
+
+        vertices = semantics.geometry.get("mesh_vertices")
+        if vertices is None:
+            return adjusted
+        vertices = torch.as_tensor(
+            vertices,
+            dtype=grasp_poses.dtype,
+            device=grasp_poses.device,
+        )
+        if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+            return adjusted
+
+        vertex_axis_positions = torch.matmul(vertices, local_upright)
+        axis_min = vertex_axis_positions.min()
+        axis_extent = vertex_axis_positions.max() - axis_min
+        if float(axis_extent) <= 1.0e-6:
+            return adjusted
+
+        relative_centers = grasp_poses[:, :3, 3] - object_pose[None, :3, 3]
+        center_axis_positions = torch.sum(
+            relative_centers * world_upright[None, :],
+            dim=-1,
+        )
+        center_fractions = (center_axis_positions - axis_min) / axis_extent
+        interval = (
+            _UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION
+            - _UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION
+        )
+        height_penalty = (
+            torch.clamp(
+                _UPRIGHT_SIDE_GRASP_MIN_AXIS_FRACTION - center_fractions,
+                min=0.0,
+            )
+            + torch.clamp(
+                center_fractions - _UPRIGHT_SIDE_GRASP_MAX_AXIS_FRACTION,
+                min=0.0,
+            )
+        ) / interval
+        return adjusted + _UPRIGHT_SIDE_GRASP_HEIGHT_COST_WEIGHT * height_penalty
+
+    def _normalized_obj_upright_direction(self) -> torch.Tensor:
+        direction = self.cfg.obj_upright_direction
+        if direction is None:
+            direction = torch.tensor([0, 0, 1], dtype=torch.float32)
+        direction = direction.to(device=self.device, dtype=torch.float32)
+        norm = torch.linalg.vector_norm(direction)
+        if norm <= 1.0e-6:
+            logger.log_error("obj_upright_direction must be non-zero.", ValueError)
+        return direction / norm
 
 
 __all__ = ["PickUp", "PickUpCfg"]

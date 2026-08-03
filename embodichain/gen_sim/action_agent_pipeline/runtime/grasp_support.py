@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import MISSING, dataclass
 from typing import Any
 
@@ -77,17 +77,28 @@ class _ActionAgentAntipodalAffordance(AntipodalAffordance):
         approach_direction: torch.Tensor = torch.tensor(
             [0, 0, -1], dtype=torch.float32
         ),
+        grasp_cost_fn: (
+            Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
+        ) = None,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         if self._generator is None:
             self._init_generator()
         alignment_angle = self.get_custom_config(_GRASP_ALIGNMENT_CONFIG_KEY)
         if alignment_angle is None:
-            return super().get_valid_grasp_poses(obj_poses, approach_direction)
+            return super().get_valid_grasp_poses(
+                obj_poses,
+                approach_direction,
+                grasp_cost_fn=grasp_cost_fn,
+            )
 
         previous_angle = self._generator.cfg.max_deviation_angle
         self._generator.cfg.max_deviation_angle = float(alignment_angle)
         try:
-            return super().get_valid_grasp_poses(obj_poses, approach_direction)
+            return super().get_valid_grasp_poses(
+                obj_poses,
+                approach_direction,
+                grasp_cost_fn=grasp_cost_fn,
+            )
         finally:
             self._generator.cfg.max_deviation_angle = previous_angle
 

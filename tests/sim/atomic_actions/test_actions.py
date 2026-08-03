@@ -535,6 +535,151 @@ class TestPickUpAction:
             assert call.kwargs["pose"].shape == (NUM_ENVS, 2, 4, 4)
             assert call.kwargs["joint_seed"].shape == (NUM_ENVS, 2, ARM_DOF)
 
+    def test_upright_pickup_selects_mid_body_side_grasp(self):
+        action = PickUp(
+            self.mg,
+            PickUpCfg(
+                hand_open_qpos=_hand_open(),
+                hand_close_qpos=_hand_close(),
+                obj_upright_direction=torch.tensor([0.0, 0.0, 1.0]),
+                rotate_upright=torch.pi / 4,
+            ),
+        )
+        end_grasp = torch.eye(4)
+        end_grasp[:3, :3] = torch.tensor(
+            [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+        )
+        end_grasp[2, 3] = 0.5
+        low_side_grasp = torch.eye(4)
+        low_side_grasp[2, 3] = 0.05
+        mid_side_grasp = torch.eye(4)
+        mid_side_grasp[2, 3] = 0.5
+        grasp_poses = torch.stack([end_grasp, low_side_grasp, mid_side_grasp])
+
+        affordance = AntipodalAffordance()
+
+        def get_valid_grasp_poses(*, obj_poses, grasp_cost_fn, **_kwargs):
+            return [
+                (
+                    grasp_poses,
+                    grasp_cost_fn(
+                        obj_pose,
+                        grasp_poses,
+                        torch.tensor([0.0, 0.1, 1.0]),
+                    ),
+                )
+                for obj_pose in obj_poses
+            ]
+
+        affordance.get_valid_grasp_poses = Mock(side_effect=get_valid_grasp_poses)
+        entity = Mock()
+        entity.get_local_pose.return_value = (
+            torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        semantics = ObjectSemantics(
+            affordance=affordance,
+            geometry={
+                "mesh_vertices": torch.tensor([[-0.1, -0.1, 0.0], [0.1, 0.1, 1.0]])
+            },
+            label="object",
+            entity=entity,
+        )
+
+        success, selected = action._resolve_grasp_pose(
+            semantics,
+            torch.zeros(NUM_ENVS, ARM_DOF),
+        )
+
+        assert success.all()
+        selected_closing_axis = selected[:, :3, 0]
+        assert torch.all(torch.abs(selected_closing_axis[:, 2]) < 0.65)
+        assert selected[:, 2, 3].tolist() == pytest.approx([0.5, 0.5])
+
+    def test_upright_pickup_keeps_off_center_side_grasp_as_fallback(self):
+        action = PickUp(
+            self.mg,
+            PickUpCfg(
+                hand_open_qpos=_hand_open(),
+                hand_close_qpos=_hand_close(),
+                obj_upright_direction=torch.tensor([0.0, 0.0, 1.0]),
+                rotate_upright=torch.pi / 4,
+            ),
+        )
+        side_grasp = torch.eye(4)
+        side_grasp[2, 3] = 0.2
+        affordance = AntipodalAffordance()
+
+        def get_valid_grasp_poses(*, obj_poses, grasp_cost_fn, **_kwargs):
+            poses = side_grasp.unsqueeze(0)
+            return [
+                (
+                    poses,
+                    grasp_cost_fn(obj_pose, poses, torch.tensor([0.0])),
+                )
+                for obj_pose in obj_poses
+            ]
+
+        affordance.get_valid_grasp_poses = Mock(side_effect=get_valid_grasp_poses)
+        entity = Mock()
+        entity.get_local_pose.return_value = (
+            torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        semantics = ObjectSemantics(
+            affordance=affordance,
+            geometry={
+                "mesh_vertices": torch.tensor([[-0.1, -0.1, 0.0], [0.1, 0.1, 1.0]])
+            },
+            label="object",
+            entity=entity,
+        )
+
+        success, selected = action._resolve_grasp_pose(
+            semantics,
+            torch.zeros(NUM_ENVS, ARM_DOF),
+        )
+
+        assert success.all()
+        assert selected[:, 2, 3].tolist() == pytest.approx([0.2, 0.2])
+
+    def test_upright_pickup_rejects_end_face_only_grasps(self):
+        action = PickUp(
+            self.mg,
+            PickUpCfg(
+                hand_open_qpos=_hand_open(),
+                hand_close_qpos=_hand_close(),
+                obj_upright_direction=torch.tensor([0.0, 0.0, 1.0]),
+                rotate_upright=torch.pi / 4,
+            ),
+        )
+        end_grasp = torch.eye(4)
+        end_grasp[:3, :3] = torch.tensor(
+            [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+        )
+        end_grasp[2, 3] = 0.5
+        affordance = AntipodalAffordance()
+        affordance.get_valid_grasp_poses = Mock(
+            return_value=[
+                (end_grasp.unsqueeze(0), torch.tensor([0.0])) for _ in range(NUM_ENVS)
+            ]
+        )
+        entity = Mock()
+        entity.get_local_pose.return_value = (
+            torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1)
+        )
+        semantics = ObjectSemantics(
+            affordance=affordance,
+            geometry={},
+            label="object",
+            entity=entity,
+        )
+
+        success, _ = action._resolve_grasp_pose(
+            semantics,
+            torch.zeros(NUM_ENVS, ARM_DOF),
+        )
+
+        assert not success.any()
+
 
 # ---------------------------------------------------------------------------
 # MoveHeldObject

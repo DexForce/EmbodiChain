@@ -646,9 +646,14 @@ def _build_single_arm_phases(
 def _build_orient_object_phases(
     step: Mapping[str, Any],
 ) -> tuple[PhaseTemplate, ...]:
-    """Move directly to the release pose with the mature upright policy."""
+    """Rotate at a clearance waypoint before descending to the support."""
     return (
         _pickup_phase(step, motion_policy="upright_in_place_pickup"),
+        _move_phase(
+            step,
+            "staging",
+            motion_policy="upright_in_place_transport",
+        ),
         _move_phase(
             step,
             "final",

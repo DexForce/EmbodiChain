@@ -1275,6 +1275,12 @@ def test_orient_object_anchors_final_pose_to_support_not_live_lift_height() -> N
         ),
     )
 
+    staging = grounder.ground(
+        edges["staging"].actions[0],
+        step,
+        arm="left_arm",
+        state=WorldState(last_qpos=env.robot.get_qpos()),
+    )
     final = grounder.ground(
         edges["final"].actions[0],
         step,
@@ -1284,6 +1290,8 @@ def test_orient_object_anchors_final_pose_to_support_not_live_lift_height() -> N
     expected_final_z = 0.70 + 0.02 + 0.10 + 0.05
     assert final.target_object_pose[0, 2, 3] == pytest.approx(expected_final_z)
     assert final.target_object_pose[0, :2, 3].tolist() == pytest.approx([0.10, 0.20])
+    assert staging.target_object_pose[0, 2, 3] > final.target_object_pose[0, 2, 3]
+    assert staging.target_object_pose[0, :2, 3].tolist() == pytest.approx([0.10, 0.20])
 
 
 def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
@@ -1321,6 +1329,11 @@ def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
         )
     )
     step = program.semantic_steps[0]
+    pickup_edge = next(
+        edge
+        for edge in program.edges
+        if edge.actions[0]["atomic_action_class"] == "PickUp"
+    )
     final_edge = next(
         edge
         for edge in program.edges
@@ -1337,6 +1350,12 @@ def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
         ),
     )
 
+    pickup = grounder.ground(
+        pickup_edge.actions[0],
+        step,
+        arm="left_arm",
+        state=WorldState(last_qpos=env.robot.get_qpos()),
+    )
     final = grounder.ground(
         final_edge.actions[0],
         step,
@@ -1347,6 +1366,11 @@ def test_orient_grounding_uses_mature_robot_profile_policy() -> None:
     table_top = 0.72
     bottle_half_height = 0.10
     expected_z = table_top + bottle_half_height + 0.05
+    assert torch.equal(
+        pickup.motion_policy["obj_upright_direction"],
+        torch.tensor([0.0, 0.0, 1.0]),
+    )
+    assert pickup.motion_policy["rotate_upright"] == pytest.approx(torch.pi / 4)
     assert final.target_object_pose[0, 2, 3] == pytest.approx(expected_z)
     assert final.motion_policy["upright_local_axis"] == "long_axis"
 
