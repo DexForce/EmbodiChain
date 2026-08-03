@@ -21,6 +21,7 @@ The built-in atomic actions currently support gripper-based manipulation only. D
 | `Press` | Single | `PressTarget` — EEF contact pose | Close gripper → press down → return | <img src="../../../_static/atomic_actions/press.gif" alt="Press" width="480" style="max-width: 100%;" /> |
 | `CoordinatedPickment` | Dual | `CoordinatedPickTarget` — shared-object pose | Approach both ends → close both grippers → lift → move object | <img src="../../../_static/atomic_actions/coordinated_pickment.gif" alt="CoordinatedPickment" width="480" style="max-width: 100%;" /> |
 | `CoordinatedPlacement` | Dual | `CoordinatedPlacementTarget` — two held-object poses | Move support object → align placing object → release placing hand → retreat | <img src="../../../_static/atomic_actions/coordinated_placement.gif" alt="CoordinatedPlacement" width="480" style="max-width: 100%;" /> |
+| `HandOver` | Dual | `GraspTarget` — object semantics | Move to handover pose → receive grasp → close receiving hand → release transferring hand → deliver and retreat | <img src="../../../_static/atomic_actions/hand_over.gif" alt="HandOver" width="480" style="max-width: 100%;" /> |
 
 ---
 
@@ -139,6 +140,37 @@ equivalent; `Place` then chooses the closer TCP z-roll 180 variant from
 
 ![Place demo](../../../_static/atomic_actions/place.gif)
 
+### Object assembly
+
+`Place` also accepts an `AssembleTarget` in place of a `PlaceTarget` to place a
+held object onto a base object at a declared relative pose. There is no separate
+assembly action — the same `Place` primitive consumes an `AssembleAffordance`
+and derives the release pose from the base object's live pose.
+
+An `AssembleAffordance` anchors the assemble object (the part that is picked up
+and placed) to a base object (the assembly anchor). The base object's world pose
+is read at planning time from `base_object_entity`, so the target tracks a moved
+base. The assemble-object target pose is `base_pose @ assemble_to_base_pose`,
+which `Place` converts to an EEF release pose through the held object's
+`object_to_eef` — the transform a prior `PickUp` writes into
+`WorldState.held_objects[control_part]`.
+
+| `AssembleAffordance` field | Default | Description |
+|---|---|---|
+| `base_object_label` | `""` | Label of the base object the assemble object is placed onto |
+| `base_object_entity` | `None` | **Required.** Simulation entity for the base object; its pose anchors the assembly |
+| `assemble_object_label` | `""` | Label of the assemble object that is picked up and placed |
+| `assemble_object_entity` | `None` | Optional simulation entity for the assemble object (reference/logging) |
+| `assemble_to_base_pose` | `torch.eye(4)` | Pose of the assemble object relative to the base object frame, shape `(4, 4)` or `(n_envs, 4, 4)` |
+
+**Target:** `AssembleTarget(affordance=...)` wrapping an `AssembleAffordance`.
+The release EEF pose is `base_pose @ assemble_to_base_pose @ object_to_eef`,
+reusing the held-object transform populated by the prior `PickUp`.
+
+**Tutorial:** `scripts/tutorials/atomic_action/assemble.py`
+
+![Assemble demo](../../../_static/atomic_actions/assemble.gif)
+
 ---
 
 ## `Press`
@@ -233,3 +265,50 @@ when `release=True`.
 **Tutorial:** `scripts/tutorials/atomic_action/coordinated_placement.py`
 
 ![CoordinatedPlacement demo](../../../_static/atomic_actions/coordinated_placement.gif)
+
+---
+
+## `HandOver`
+
+Dual-arm object handover. The transferring arm (already holding the object)
+moves it to a middle handover pose, the receiving arm approaches and grasps a
+different part of the object, the transferring arm releases and retreats, and
+the receiving arm carries the object to a final pose.
+
+`HandOver` requires a prior `PickUp`: it reads the `HeldObjectState` for the
+transferring arm from `WorldState.held_objects[transfer_arm_control_part]` to
+recover the object-to-EEF transform. On success, it removes that entry and
+writes a new `HeldObjectState` under `receive_arm_control_part`, so the
+receiving arm now holds the object.
+
+| Config field | Default | Description |
+|---|---|---|
+| `control_part` | `"dual_arm"` | Combined control part containing both the transferring and receiving arms |
+| `transfer_arm_control_part` | `"left_arm"` | Arm that already holds the object and hands it over |
+| `receive_arm_control_part` | `"right_arm"` | Arm that grasps the object and carries it away |
+| `transfer_hand_control_part` | `"left_hand"` | Hand attached to the transferring arm |
+| `receive_hand_control_part` | `"right_hand"` | Hand attached to the receiving arm |
+| `transfer_hand_open_qpos` | `None` | **Required.** Transferring-hand qpos for the open (released) state, shape `[hand_dof,]` |
+| `transfer_hand_close_qpos` | `None` | **Required.** Transferring-hand qpos for the closed (holding) state, shape `[hand_dof,]` |
+| `receive_hand_open_qpos` | `None` | **Required.** Receiving-hand qpos for the open state, shape `[hand_dof,]` |
+| `receive_hand_close_qpos` | `None` | **Required.** Receiving-hand qpos for the closed state, shape `[hand_dof,]` |
+| `receive_pick_object_part` | `"bottom"` | Object part the receiving arm grasps during the handover |
+| `middle_object_pose` | `None` | **Required.** Object pose at the handover point, shape `(4, 4)` or `(n_envs, 4, 4)` |
+| `final_object_pose` | `None` | **Required.** Object pose the receiving arm delivers to, shape `(4, 4)` or `(n_envs, 4, 4)` |
+| `receive_approach_direction` | `[0, 0, -1]` | World-frame approach direction used to sample the receiving grasp |
+| `pre_grasp_distance` | `0.10` | Distance to offset back from the receiving grasp pose (m) |
+| `lift_height` | `0.08` | World-Z lift distance for the transferring arm after release (m) |
+| `sample_interval` | `120` | Total waypoints for the full handover trajectory |
+| `hand_interp_steps` | `10` | Waypoints for the receiving-hand close and transferring-hand release |
+| `hold_steps` | `4` | Waypoints to hold the handoff pose before releasing |
+| `retreat_steps` | `24` | Waypoints for the final deliver/retreat phase |
+
+**Target:** `GraspTarget(semantics=...)` with an `ObjectSemantics` whose
+`affordance` is an `AntipodalAffordance`. The receiving grasp is solved from
+the affordance and `receive_pick_object_part` at the middle handover pose; the
+transferring arm reuses the object-to-EEF transform stored by the prior
+`PickUp`.
+
+**Tutorial:** `scripts/tutorials/atomic_action/hand_over.py`
+
+![HandOver demo](../../../_static/atomic_actions/hand_over.gif)

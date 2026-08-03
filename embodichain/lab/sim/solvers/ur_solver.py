@@ -34,7 +34,6 @@ class URSolverCfg(SolverCfg):
     ur_type: str = "ur10"
     end_link_name: str = "ee_link"
     root_link_name: str = "base_link"
-    urdf_path: str = get_data_path("UniversalRobots/UR10/UR10.urdf")
     # DH parameters: default ur10 parameters
     d1: float = 0.1273
     a2: float = -0.612
@@ -57,7 +56,6 @@ class URSolverCfg(SolverCfg):
             self.d6 = 0.0819
             self.a2 = -0.24365
             self.a3 = -0.21325
-            self.urdf_path = get_data_path("UniversalRobots/UR3/UR3.urdf")
         elif self.ur_type == "ur3e":
             self.d1 = 0.15185
             self.d4 = 0.13105
@@ -65,7 +63,6 @@ class URSolverCfg(SolverCfg):
             self.d6 = 0.0921
             self.a2 = -0.24355
             self.a3 = -0.2132
-            self.urdf_path = get_data_path("UniversalRobots/UR3e/UR3e.urdf")
         elif self.ur_type == "ur5":
             self.d1 = 0.089159
             self.d4 = 0.10915
@@ -73,7 +70,6 @@ class URSolverCfg(SolverCfg):
             self.d6 = 0.0823
             self.a2 = -0.425
             self.a3 = -0.39225
-            self.urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
         elif self.ur_type == "ur5e":
             self.d1 = 0.1625
             self.d4 = 0.1333
@@ -81,7 +77,6 @@ class URSolverCfg(SolverCfg):
             self.d6 = 0.0996
             self.a2 = -0.425
             self.a3 = -0.3922
-            self.urdf_path = get_data_path("UniversalRobots/UR5e/UR5e.urdf")
         elif self.ur_type == "ur10":
             self.d1 = 0.1273
             self.d4 = 0.163941
@@ -89,7 +84,6 @@ class URSolverCfg(SolverCfg):
             self.d6 = 0.0922
             self.a2 = -0.612
             self.a3 = -0.5723
-            self.urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
         elif self.ur_type == "ur10e":
             self.d1 = 0.1807
             self.d4 = 0.17415
@@ -97,7 +91,6 @@ class URSolverCfg(SolverCfg):
             self.d6 = 0.11655
             self.a2 = -0.612
             self.a3 = -0.5723
-            self.urdf_path = get_data_path("UniversalRobots/UR10e/UR10e.urdf")
         else:
             raise ValueError(f"Unknown UR type: {self.ur_type}")
 

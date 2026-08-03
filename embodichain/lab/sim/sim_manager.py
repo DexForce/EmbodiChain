@@ -91,6 +91,7 @@ from embodichain.lab.sim.cfg import (
     RigidConstraintCfg,
 )
 from embodichain.lab.sim import VisualMaterial, VisualMaterialCfg
+from embodichain.lab.sim.profiler import Profiler, ProfilerCfg
 from embodichain.lab.visualization.cfg import VisualizationCfg
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import look_at_to_pose, matrix_from_quat, pose_inv
@@ -159,6 +160,14 @@ class SimulationManagerCfg:
 
     physics_dt: float = 1.0 / 100.0
     """The time step for the physics simulation."""
+
+    profiler: ProfilerCfg | None = None
+    """Optional simulation profiler. ``None`` disables profiling.
+
+    Standalone calls to :meth:`SimulationManager.update` are recorded below a
+    ``sim_update`` root. When the manager is owned by an environment, the same
+    profiler instance composes with the environment's step/reset hierarchy.
+    """
 
     sim_device: Union[str, torch.device] = "cpu"
     """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
@@ -266,6 +275,7 @@ class SimulationManager:
         self.device = torch.device("cpu")
 
         world_config = self._convert_sim_config(sim_config)
+        self.profiler = Profiler(sim_config.profiler, self.device)
 
         # Initialize warp runtime context before creating the world.
         wp.init()
@@ -352,7 +362,6 @@ class SimulationManager:
 
         # Set physics to manual update mode by default.
         self.set_manual_update(True)
-
         self._build_multiple_arenas(sim_config.num_envs)
         self.start_visualization()
 
@@ -791,34 +800,45 @@ class SimulationManager:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
         """
-        if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                f"Using GPU physics, but not initialized yet. Forcing initialization."
-            )
-            self.init_gpu_physics()
-
-        if self.is_physics_manually_update:
-            if physics_dt is None:
-                physics_dt = self.sim_config.physics_dt
-            for i in range(step):
-                self.update_gizmos()
-                self._world.update(physics_dt)
-                self._visualization_sim_step += 1
-                self._visualization_sim_time += physics_dt
-                if (
-                    self._window_record_state is not None
-                    and self._window_record_state.capture_from_sim_update
-                ):
-                    self._step_window_record_from_sim_update(
-                        self._window_record_state, physics_dt
+        with self.profiler.section("sim_update", is_root=True):
+            with self.profiler.section("gpu_physics_check"):
+                if self.is_use_gpu_physics and not self._is_initialized_gpu_physics:
+                    logger.log_warning(
+                        "Using GPU physics, but not initialized yet. "
+                        "Forcing initialization."
                     )
-                if self.sim_config.visualization.backend == "viser":
-                    self.capture_visualization_safely(
-                        capture_camera_images=i == step - 1
-                    )
+                    with self.profiler.section("gpu_physics_init"):
+                        self.init_gpu_physics()
 
-        else:
-            logger.log_warning("Physics simulation is not manually updated.")
+            if self.is_physics_manually_update:
+                with self.profiler.section("manual_update"):
+                    if physics_dt is None:
+                        with self.profiler.section("resolve_physics_dt"):
+                            physics_dt = self.sim_config.physics_dt
+                    for i in range(step):
+                        with self.profiler.section("gizmo_update"):
+                            self.update_gizmos()
+                        with self.profiler.section("world_update"):
+                            self._world.update(physics_dt)
+                        self._visualization_sim_step += 1
+                        self._visualization_sim_time += physics_dt
+                        if (
+                            self._window_record_state is not None
+                            and self._window_record_state.capture_from_sim_update
+                        ):
+                            with self.profiler.section("window_record_capture"):
+                                self._step_window_record_from_sim_update(
+                                    self._window_record_state, physics_dt
+                                )
+                        if self.sim_config.visualization.backend == "viser":
+                            with self.profiler.section("visualization_capture"):
+                                self.capture_visualization_safely(
+                                    capture_camera_images=i == step - 1
+                                )
+
+            else:
+                with self.profiler.section("manual_update_disabled"):
+                    logger.log_warning("Physics simulation is not manually updated.")
 
     def get_env(self, arena_index: int = -1) -> dexsim.environment.Arena:
         """Get the arena or env by index.

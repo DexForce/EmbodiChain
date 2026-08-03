@@ -20,6 +20,7 @@ types and utilities that wire all of these together.
    :toctree: .
 
    sim_manager
+   profiler
    cfg
    common
    material
@@ -43,6 +44,20 @@ Simulation Manager
    :maxdepth: 1
 
    embodichain.lab.sim.sim_manager
+
+Profiler
+--------
+
+.. autoclass:: Profiler
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. autoclass:: ProfilerCfg
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
 
 Configuration
 -------------
