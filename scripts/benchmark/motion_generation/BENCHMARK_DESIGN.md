@@ -68,7 +68,7 @@ reported as `unsupported`, not silently converted into success or failure.
 
 ### 2.2 Gaps in the current NeuralPlanner benchmark
 
-`scripts/benchmark/planners/neural_planner/run_benchmark.py` already handles:
+`scripts/benchmark/motion_generation/run_benchmark.py` already handles:
 
 - warmup trials separately from measured trials;
 - CUDA synchronization;
@@ -153,7 +153,7 @@ Suite YAML + fixed Case Manifest
 Keep the existing CLI entry point:
 
 ```bash
-embodichain benchmark planners-neural-planner
+embodichain benchmark motion-generation
 ```
 
 Reuse established patterns from the current benchmark system:
@@ -170,7 +170,7 @@ Reuse established patterns from the current benchmark system:
 Refactor the current monolithic script incrementally into:
 
 ```text
-scripts/benchmark/planners/neural_planner/
+scripts/benchmark/motion_generation/
 ├── run_benchmark.py        # thin CLI and compatibility entry point
 ├── config.py               # suite, planner, and scenario configuration
 ├── registry.py             # planner/scenario/metric registries

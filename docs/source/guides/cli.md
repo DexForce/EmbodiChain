@@ -394,9 +394,9 @@ Run the packaged benchmark suites through the same CLI:
 # RL train/evaluate/report workflow
 embodichain benchmark rl --tasks push_cube --algorithms ppo
 
-# Kinematic solver and neural planner benchmarks
+# Kinematic solver and motion-generation benchmarks
 embodichain benchmark robotics-kinematic-solver --solvers all
-embodichain benchmark planners-neural-planner --num-waypoints 1 3 5
+embodichain benchmark motion-generation --suite smoke
 
 # Atomic actions, grasp generation, and workspace analysis
 embodichain benchmark atomic-action --smoke

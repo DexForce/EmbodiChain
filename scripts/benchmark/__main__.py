@@ -21,7 +21,7 @@ Usage examples::
     embodichain benchmark rl --tasks push_cube --algorithms ppo --suite default
     embodichain benchmark rl --rebuild-report-only
     embodichain benchmark robotics-kinematic-solver -s pytorch
-    embodichain benchmark planners-neural-planner --num-waypoints 1 3 5
+    embodichain benchmark motion-generation --suite smoke
     embodichain benchmark atomic-action --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer
@@ -50,11 +50,9 @@ def _run_rl_cli(_: argparse.Namespace) -> None:
     rl_main()
 
 
-def _run_neural_planner_cli(args: argparse.Namespace) -> None:
+def _run_motion_generation_cli(args: argparse.Namespace) -> None:
     """Run the free-space motion-generation benchmark."""
-    from scripts.benchmark.planners.neural_planner.run_benchmark import (
-        run_from_args,
-    )
+    from scripts.benchmark.motion_generation.run_benchmark import run_from_args
 
     run_from_args(args)
 
@@ -113,17 +111,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     robotics_ks_parser.set_defaults(func=_run_robotics_kinematic_solver_cli)
 
-    # -- planners-neural-planner --------------------------------------------
-    neural_planner_parser = subparsers.add_parser(
-        "planners-neural-planner",
-        help="Benchmark free-space motion generation with cuRobo as baseline.",
-    )
-    from scripts.benchmark.planners.neural_planner.run_benchmark import (
+    # -- motion-generation ---------------------------------------------------
+    from scripts.benchmark.motion_generation.run_benchmark import (
         add_parser_arguments,
     )
 
-    add_parser_arguments(neural_planner_parser)
-    neural_planner_parser.set_defaults(func=_run_neural_planner_cli)
+    motion_generation_parser = subparsers.add_parser(
+        "motion-generation",
+        help="Benchmark free-space motion generation with cuRobo as baseline.",
+    )
+    add_parser_arguments(motion_generation_parser)
+    motion_generation_parser.set_defaults(func=_run_motion_generation_cli)
 
     # -- atomic-action -------------------------------------------------------
     atomic_action_parser = subparsers.add_parser(

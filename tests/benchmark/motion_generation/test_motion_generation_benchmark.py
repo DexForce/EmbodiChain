@@ -25,16 +25,16 @@ import torch
 
 from embodichain.lab.sim.planners.curobo.curobo_planner import CuroboPlanner
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult
-from scripts.benchmark.planners.neural_planner.aggregation import aggregate_results
-from scripts.benchmark.planners.neural_planner.config import load_suite
-from scripts.benchmark.planners.neural_planner.metrics.trajectory import (
+from scripts.benchmark.motion_generation.aggregation import aggregate_results
+from scripts.benchmark.motion_generation.config import load_suite
+from scripts.benchmark.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
     match_ordered_waypoints,
 )
-from scripts.benchmark.planners.neural_planner import (
+from scripts.benchmark.motion_generation import (
     scenarios as _scenarios,
 )  # noqa: F401
-from scripts.benchmark.planners.neural_planner.models import (
+from scripts.benchmark.motion_generation.models import (
     AlgorithmRole,
     BenchmarkCase,
     CaseOutcome,
@@ -42,14 +42,14 @@ from scripts.benchmark.planners.neural_planner.models import (
     TrialPhase,
     TrialRecord,
 )
-from scripts.benchmark.planners.neural_planner.registry import (
+from scripts.benchmark.motion_generation.registry import (
     create_scenario_provider,
     scenario_provider_names,
 )
-from scripts.benchmark.planners.neural_planner.reporting import (
+from scripts.benchmark.motion_generation.reporting import (
     write_markdown_report,
 )
-from scripts.benchmark.planners.neural_planner.run_benchmark import (
+from scripts.benchmark.motion_generation.run_benchmark import (
     _apply_overrides,
 )
 

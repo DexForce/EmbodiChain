@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Extensible free-space motion-generation benchmark."""
+"""cuRobo post-processing hot-path microbenchmark."""
 
 from __future__ import annotations
 

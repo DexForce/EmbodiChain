@@ -29,7 +29,7 @@ The win has two parts: (1) Python-overhead reduction (visible on CPU) and
 old ``_extract_segment`` does B per-row H2D copies, replaced by one bulk H2D.
 Part (2) only shows on CUDA, so the benchmark runs on both ``cuda`` and ``cpu``.
 
-Run: python -m scripts.benchmark.planners.benchmark_curobo_extraction
+Run: python -m scripts.benchmark.curobo_extraction.run_benchmark
 """
 
 from __future__ import annotations

@@ -20,7 +20,7 @@ cuRobo is the default primary baseline. IK interpolation and TOPPRA are
 optional diagnostic baselines. NMG remains an explicitly configurable,
 unsupported adapter stub until its production checkpoint contract is ready.
 
-Run: ``embodichain benchmark planners-neural-planner --suite smoke``
+Run: ``embodichain benchmark motion-generation --suite smoke``
 """
 
 from __future__ import annotations

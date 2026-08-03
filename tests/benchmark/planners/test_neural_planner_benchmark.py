@@ -21,7 +21,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from scripts.benchmark.planners.neural_planner.run_benchmark import (
+from scripts.benchmark.motion_generation.run_benchmark import (
     IMPL_IK,
     IMPL_NEURAL,
     IMPL_TOPPRA,
