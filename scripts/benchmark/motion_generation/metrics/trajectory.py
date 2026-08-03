@@ -139,8 +139,8 @@ def compute_waypoint_errors(
     trajectory_poses: list[torch.Tensor] | torch.Tensor,
     waypoints: torch.Tensor,
     *,
-    position_threshold_m: float = 0.05,
-    rotation_threshold_rad: float = 0.3,
+    position_threshold_m: float = 0.01,
+    rotation_threshold_rad: float = 0.1,
 ) -> dict[str, float]:
     """Return ordered, same-sample waypoint errors for one trajectory."""
     if isinstance(trajectory_poses, list):

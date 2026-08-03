@@ -368,6 +368,7 @@ def _metric_rows(
                     "path_shape": path_shape,
                     "start_state_bin": start_state_bin,
                     "cases": len(group_cases),
+                    "n_valid": len(valid_outcomes),
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
                     # Free-space primary success is external motion validity.
                     "success_rate": _case_macro_rate(

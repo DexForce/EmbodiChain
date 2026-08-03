@@ -339,6 +339,31 @@ def test_free_space_cases_use_one_start_state_bin_each():
     assert len({case.case_id for case in cases}) == 2
 
 
+def test_free_space_starts_align_across_path_shape_and_waypoint_count():
+    """random_reachable starts must be shared across shapes/W for fair compares."""
+    suite = load_suite("smoke")
+    suite.free_space.batch_sizes = [2]
+    suite.free_space.waypoint_counts = [1, 5]
+    suite.free_space.path_shapes = ["direct", "s_curve"]
+    suite.free_space.seeds = [11]
+    suite.free_space.start_state_bins = ["random_reachable"]
+    track = suite.enabled_tracks()[0]
+    cases = create_scenario_provider("free_space").generate_cases(
+        suite, track, _FrankaLimitRobot(), "arm", batch_size=2
+    )
+
+    assert len(cases) == 4
+    assert {(case.path_shape, case.num_waypoints) for case in cases} == {
+        ("direct", 1),
+        ("direct", 5),
+        ("s_curve", 1),
+        ("s_curve", 5),
+    }
+    reference = cases[0].start_qpos
+    for case in cases[1:]:
+        assert torch.equal(case.start_qpos, reference)
+
+
 def test_success_metrics_are_stratified_by_start_state_bin():
     metadata = [
         PlannerMetadata(
@@ -880,6 +905,8 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
     assert text.count("## Time & Memory") == 1
     assert text.count("## Success & Other Metrics") == 1
     assert text.count("## Leaderboard") == 1
+    assert "motion-validity gate" in text
+    assert "n_valid" in text
 
 
 def test_curobo_prepare_backend_exposes_actual_graph_mode():
@@ -967,6 +994,7 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
         "success_and_metrics"
     ][0]
     assert row["cases"] == 2
+    assert row["n_valid"] == 1
     # One measured success + one missing case (counts as 0) → macro 0.5.
     assert row["success_rate"] == pytest.approx(0.5)
     assert row["coverage_rate"] == pytest.approx(0.5)
@@ -1011,6 +1039,7 @@ def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
         "success_and_metrics"
     ][0]
     assert large_row["cases"] == 1
+    assert large_row["n_valid"] == 0
     assert large_row["success_rate"] == pytest.approx(0.0)
 
 

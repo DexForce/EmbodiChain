@@ -57,6 +57,7 @@ METRIC_COLUMNS = (
     "path_shape",
     "start_state_bin",
     "cases",
+    "n_valid",
     "coverage_rate",
     "success_rate",
     "planning_success_rate",
@@ -138,14 +139,29 @@ def write_markdown_report(
         f"- suite: `{suite.name}`",
         f"- suite_version: `{suite.suite_version}`",
         f"- profile: `{suite.profile}`",
-        f"- external position threshold: `{suite.protocol.position_threshold_m} m`",
-        f"- external rotation threshold: `{suite.protocol.rotation_threshold_rad} rad`",
+        (
+            f"- external position threshold: `{suite.protocol.position_threshold_m} m` "
+            "(motion-validity gate, not a high-precision tolerance)"
+        ),
+        (
+            f"- external rotation threshold: `{suite.protocol.rotation_threshold_rad} rad` "
+            "(motion-validity gate, not a high-precision tolerance)"
+        ),
         "",
         "## Time & Memory",
         "",
     ]
     lines.extend(_format_table(aggregates["time_and_memory"], TIME_COLUMNS))
-    lines.extend(["", "## Success & Other Metrics", ""])
+    lines.extend(
+        [
+            "",
+            "## Success & Other Metrics",
+            "",
+            "Continuous error/path columns are conditioned on `motion_valid` "
+            "outcomes; use `n_valid` as the denominator before comparing them.",
+            "",
+        ]
+    )
     lines.extend(_format_table(aggregates["success_and_metrics"], METRIC_COLUMNS))
     lines.extend(["", "## Leaderboard", ""])
     lines.extend(_format_table(aggregates["leaderboard"], LEADERBOARD_COLUMNS))

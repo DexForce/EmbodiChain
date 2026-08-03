@@ -130,12 +130,16 @@ def _build_case(
     batch_size: int,
     num_waypoints: int,
     path_shape: str,
-    shape_index: int,
     start_state_bin: str,
     bin_index: int,
     track_id: str,
 ) -> BenchmarkCase:
-    """Build one reachable env-batched case using FK reference targets."""
+    """Build one reachable env-batched case using FK reference targets.
+
+    Start postures depend only on ``(seed, start_state_bin, env_index)`` so the
+    same env row keeps a shared start across path shapes and waypoint counts.
+    Path shape and waypoint count affect targets only.
+    """
     limits = robot.get_qpos_limits(name=control_part)[0].detach().cpu()
     if limits.shape[0] != _NOMINAL_QPOS.shape[0]:
         raise ValueError(
@@ -146,9 +150,8 @@ def _build_case(
     starts: list[torch.Tensor] = []
     for env_index in range(batch_size):
         generator = torch.Generator(device="cpu")
-        generator.manual_seed(
-            seed * 100_003 + shape_index * 997 + bin_index * 131 + env_index
-        )
+        # Keep starts aligned across path_shape / num_waypoints comparisons.
+        generator.manual_seed(seed * 100_003 + bin_index * 131 + env_index)
         starts.append(_start_qpos_for_bin(start_state_bin, limits, generator))
 
     start_qpos_cpu = torch.stack(starts)
@@ -218,7 +221,7 @@ class FreeSpaceScenario(ScenarioProvider):
         cases: list[BenchmarkCase] = []
         for seed in suite.free_space.seeds:
             for num_waypoints in suite.free_space.waypoint_counts:
-                for shape_index, path_shape in enumerate(suite.free_space.path_shapes):
+                for path_shape in suite.free_space.path_shapes:
                     for bin_index, start_state_bin in enumerate(
                         suite.free_space.start_state_bins
                     ):
@@ -231,7 +234,6 @@ class FreeSpaceScenario(ScenarioProvider):
                                 batch_size=batch_size,
                                 num_waypoints=num_waypoints,
                                 path_shape=path_shape,
-                                shape_index=shape_index,
                                 start_state_bin=start_state_bin,
                                 bin_index=bin_index,
                                 track_id=track.id,

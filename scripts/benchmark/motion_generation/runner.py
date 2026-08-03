@@ -465,7 +465,14 @@ class BenchmarkRunner:
             aggregates,
             notes=[
                 "CPU/GPU memory values are process/PyTorch allocator deltas around timed calls.",
-                "Continuous error and path metrics are conditioned on externally motion-valid trajectories.",
+                "External position/rotation thresholds (default 0.01 m / 0.1 rad) are "
+                "feasibility gates for ordered_waypoints_reached / motion_valid. "
+                "Read final_*_err and waypoint_*_p95 for finer precision on the "
+                "motion-valid subset.",
+                "Continuous error and path metrics (final_*_err, waypoint_*_p95, "
+                "path lengths, path_efficiency) average only motion_valid outcomes "
+                "(success-conditioned / survivor-biased). Always read them with n_valid; "
+                "a high path_efficiency on n_valid=2 is not comparable to n_valid=200.",
                 "Collision, dynamic, execution, and task metrics are N/A in free-space-common v1.",
                 "Leaderboard and Success-table boolean rates "
                 "(overall_success_rate / success_rate / motion_valid_rate / "

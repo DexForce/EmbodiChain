@@ -50,8 +50,8 @@ protocol:
   measured_trials: 20
   sample_interval: 80
   validation_samples: 256
-  position_threshold_m: 0.05
-  rotation_threshold_rad: 0.3
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
   joint_limit_tolerance_rad: 0.00001
 
 tracks:

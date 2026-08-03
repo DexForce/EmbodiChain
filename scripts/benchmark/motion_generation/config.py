@@ -79,8 +79,8 @@ class ProtocolCfg:
     measured_trials: int = 3
     sample_interval: int = 40
     validation_samples: int = 128
-    position_threshold_m: float = 0.05
-    rotation_threshold_rad: float = 0.3
+    position_threshold_m: float = 0.01
+    rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
 
 
@@ -111,7 +111,7 @@ class SuiteCfg:
 
     schema_version: int = 1
     name: str = "free_space_common"
-    suite_version: str = "free_space_common_v1"
+    suite_version: str = "free_space_common_v2"
     profile: str = "smoke"
     planners: list[PlannerSpecCfg] = []
     protocol: ProtocolCfg = ProtocolCfg()
@@ -126,7 +126,7 @@ class SuiteCfg:
         suite = cls(
             schema_version=int(data.get("schema_version", 1)),
             name=str(data.get("name", "free_space_common")),
-            suite_version=str(data.get("suite_version", "free_space_common_v1")),
+            suite_version=str(data.get("suite_version", "free_space_common_v2")),
             profile=str(data.get("profile", "smoke")),
             planners=planners,
             protocol=ProtocolCfg(**data.get("protocol", {})),
