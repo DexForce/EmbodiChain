@@ -138,6 +138,7 @@ class CuroboAdapter(PlannerAdapter):
             close_fn = getattr(self.motion_generator.planner, "close", None)
             if close_fn is not None:
                 close_fn()
+            self.motion_generator = None
 
 
 register_planner_adapter("curobo", CuroboAdapter)

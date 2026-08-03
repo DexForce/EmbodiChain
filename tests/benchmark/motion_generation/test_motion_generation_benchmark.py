@@ -29,6 +29,7 @@ from scripts.benchmark.motion_generation.aggregation import aggregate_results
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (
     compute_case_outcomes,
+    compute_waypoint_errors,
     match_ordered_waypoints,
 )
 from scripts.benchmark.motion_generation import (
@@ -58,6 +59,25 @@ def _translated_pose(x: float) -> torch.Tensor:
     pose = torch.eye(4)
     pose[0, 3] = x
     return pose
+
+
+def test_compute_waypoint_errors_uses_ordered_trajectory_hits():
+    waypoints = torch.stack(
+        [
+            torch.eye(4),
+            torch.tensor(
+                [
+                    [1.0, 0.0, 0.0, 0.1],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            ),
+        ]
+    )
+    errors = compute_waypoint_errors([torch.eye(4), waypoints[1]], waypoints)
+    assert errors["mean_waypoint_pos_err_mm"] == pytest.approx(0.0)
+    assert errors["max_waypoint_pos_err_mm"] == pytest.approx(0.0)
 
 
 def test_ordered_waypoints_reject_out_of_order_hits():
@@ -178,7 +198,7 @@ def test_top_failure_ignores_planner_internal_codes_when_motion_valid():
     aggregates = aggregate_results([measured], metadata, [case], measured_trials=1)
     row = aggregates["success_and_metrics"][0]
 
-    assert row["motion_valid_rate"] == pytest.approx(1.0)
+    assert row["success_rate"] == pytest.approx(1.0)
     assert row["planning_success_rate"] == pytest.approx(0.0)
     assert row["top_failure"] is None
     assert row["start_state_bin"] == "nominal"
@@ -380,8 +400,8 @@ def test_success_metrics_are_stratified_by_start_state_bin():
     by_bin = {row["start_state_bin"]: row for row in rows}
 
     assert set(by_bin) == {"nominal", "near_limit"}
-    assert by_bin["nominal"]["motion_valid_rate"] == pytest.approx(1.0)
-    assert by_bin["near_limit"]["motion_valid_rate"] == pytest.approx(0.0)
+    assert by_bin["nominal"]["success_rate"] == pytest.approx(1.0)
+    assert by_bin["near_limit"]["success_rate"] == pytest.approx(0.0)
     assert by_bin["near_limit"]["top_failure"] == "waypoint_miss"
 
 
@@ -522,3 +542,68 @@ def test_curobo_prepare_backend_exposes_actual_graph_mode():
     planner._get_backend.assert_called_once_with("arm", 8, MoveType.EEF_MOVE)
     assert result["use_cuda_graph"] is False
     assert result["batch_size"] == 8
+
+
+def test_metric_rows_use_success_rate_and_null_peak_gpu():
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    measured = TrialRecord(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-1",
+        algorithm_id="curobo",
+        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+        model_revision="curobo-v2",
+        planner_config_hash="abc",
+        seed=11,
+        repeat=0,
+        batch_size=1,
+        waypoint_count=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        phase=TrialPhase.MEASURED,
+        cost_time_ms=10.0,
+        peak_gpu_mb=None,
+        outcomes=(_outcome(),),
+    )
+    aggregates = aggregate_results([measured], metadata, [_case()], measured_trials=1)
+
+    assert aggregates["success_and_metrics"][0]["success_rate"] == pytest.approx(1.0)
+    assert "motion_valid_rate" not in aggregates["success_and_metrics"][0]
+    assert aggregates["time_and_memory"][0]["peak_gpu_mb"] is None
+    assert aggregates["leaderboard"][0]["peak_gpu_mb"] is None
+
+
+def test_toppra_adapter_close_releases_planner():
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+
+    planner = Mock()
+    adapter = ToppraAdapter(
+        PlannerSpecCfg(
+            id="toppra",
+            adapter="toppra",
+            role=AlgorithmRole.DIAGNOSTIC_BASELINE.value,
+        ),
+        PlannerContext(
+            robot=Mock(),
+            control_part="arm",
+            device=torch.device("cpu"),
+            sample_interval=40,
+        ),
+    )
+    adapter.motion_generator = Mock(planner=planner)
+
+    adapter.close()
+
+    planner.close.assert_called_once_with()
+    assert adapter.motion_generator is None

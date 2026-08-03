@@ -10,6 +10,7 @@ Design background and roadmap: see [`BENCHMARK_DESIGN.md`](./BENCHMARK_DESIGN.md
 embodichain benchmark motion-generation --suite smoke
 embodichain benchmark motion-generation --suite coverage
 embodichain benchmark motion-generation --extra-baselines ik_interpolate toppra
+embodichain benchmark motion-generation --path-shapes direct l_turn --start-state-bins nominal near_singularity
 ```
 
 Artifacts land under `outputs/benchmarks/motion_generation/<timestamp>/`

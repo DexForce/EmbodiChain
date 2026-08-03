@@ -51,7 +51,12 @@ def _start_qpos_for_bin(
     limits: torch.Tensor,
     generator: torch.Generator,
 ) -> torch.Tensor:
-    """Create one deterministic start posture for a named condition bin."""
+    """Create one deterministic start posture for a named condition bin.
+
+    ``near_singularity`` uses a fixed elbow-extended Franka posture. It is a
+    reproducible low-manipulability seed for free-space-common v1, not a
+    runtime singularity search.
+    """
     lower, upper = limits[:, 0], limits[:, 1]
     midpoint = (lower + upper) * 0.5
     span = upper - lower
@@ -70,6 +75,7 @@ def _start_qpos_for_bin(
         ).to(limits)
         return _clamp_with_margin(midpoint + signs * span * 0.42, limits)
     if name == "near_singularity":
+        # Elbow nearly extended (q3≈0): a fixed Franka near-singularity seed.
         candidate = torch.tensor(
             [0.0, 0.0, 0.0, -0.15, 0.0, 0.20, 0.0], dtype=limits.dtype
         ).to(limits)
@@ -196,7 +202,9 @@ def _build_case(
 class FreeSpaceScenario(ScenarioProvider):
     required_capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
 
-    def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:  # noqa: ARG002
+    def batch_sizes(
+        self, suite: SuiteCfg, track: TrackCfg
+    ) -> list[int]:  # noqa: ARG002
         return list(suite.free_space.batch_sizes)
 
     def generate_cases(

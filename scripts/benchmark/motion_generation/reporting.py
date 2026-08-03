@@ -61,7 +61,6 @@ METRIC_COLUMNS = (
     "success_rate",
     "planning_success_rate",
     "ordered_waypoint_success_rate",
-    "motion_valid_rate",
     "waypoint_completion_rate",
     "final_pos_err_mm",
     "final_rot_err_deg",

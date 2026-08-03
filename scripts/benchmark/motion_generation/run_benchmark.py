@@ -30,36 +30,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .compat import (
-    IMPL_IK,
-    IMPL_NEURAL,
-    IMPL_TOPPRA,
-    QUALITY_SUMMARY_COLUMNS,
-    aggregate_legacy_rows,
-    format_waypoint_grouped_tables,
-)
 from .config import PlannerSpecCfg, SuiteCfg, load_suite
-from .metrics.trajectory import compute_waypoint_errors, get_pose_err
 
 if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
 
 __all__ = [
-    "IMPL_IK",
-    "IMPL_NEURAL",
-    "IMPL_TOPPRA",
-    "QUALITY_SUMMARY_COLUMNS",
-    "_aggregate_rows",
-    "_format_waypoint_grouped_tables",
     "add_parser_arguments",
-    "compute_waypoint_errors",
-    "get_pose_err",
     "run_all_benchmarks",
     "run_from_args",
 ]
-
-_aggregate_rows = aggregate_legacy_rows
-_format_waypoint_grouped_tables = format_waypoint_grouped_tables
 
 
 def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
@@ -90,6 +70,8 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--batch-sizes", nargs="+", type=int, default=None)
     parser.add_argument("--num-waypoints", nargs="+", type=int, default=None)
+    parser.add_argument("--path-shapes", nargs="+", default=None)
+    parser.add_argument("--start-state-bins", nargs="+", default=None)
     parser.add_argument("--seeds", nargs="+", type=int, default=None)
     parser.add_argument("--num-trials", type=int, default=None)
     parser.add_argument("--warmup-trials", type=int, default=None)
@@ -115,16 +97,6 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
         help="Reserved NMG checkpoint path; the current NMG adapter remains a stub.",
     )
     parser.add_argument(
-        "--compare-ik",
-        action="store_true",
-        help="Compatibility alias for --extra-baselines ik_interpolate.",
-    )
-    parser.add_argument(
-        "--compare-toppra",
-        action="store_true",
-        help="Compatibility alias for --extra-baselines toppra.",
-    )
-    parser.add_argument(
         "--output-root", default="outputs/benchmarks", help="Artifact root directory."
     )
     parser.add_argument(
@@ -132,11 +104,6 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-headless", action="store_false", dest="headless", help="Open a viewer."
-    )
-    parser.add_argument(
-        "--save-trial-details",
-        action="store_true",
-        help="Deprecated: numeric trial details are always saved to trials.jsonl.",
     )
 
 
@@ -176,6 +143,8 @@ def _apply_overrides(
     *,
     batch_sizes: list[int] | None = None,
     num_waypoints: list[int] | None = None,
+    path_shapes: list[str] | None = None,
+    start_state_bins: list[str] | None = None,
     seeds: list[int] | None = None,
     num_trials: int | None = None,
     warmup_trials: int | None = None,
@@ -192,6 +161,10 @@ def _apply_overrides(
         suite.free_space.batch_sizes = batch_sizes
     if num_waypoints is not None:
         suite.free_space.waypoint_counts = num_waypoints
+    if path_shapes is not None:
+        suite.free_space.path_shapes = path_shapes
+    if start_state_bins is not None:
+        suite.free_space.start_state_bins = start_state_bins
     if seeds is not None:
         suite.free_space.seeds = seeds
     if num_trials is not None:
@@ -228,6 +201,8 @@ def run_all_benchmarks(
     algorithms: list[str] | None = None,
     extra_baselines: list[str] | None = None,
     batch_sizes: list[int] | None = None,
+    path_shapes: list[str] | None = None,
+    start_state_bins: list[str] | None = None,
     seeds: list[int] | None = None,
     num_trials: int | None = None,
     warmup_trials: int | None = None,
@@ -237,9 +212,6 @@ def run_all_benchmarks(
     rotation_threshold_rad: float | None = None,
     nmg_pos_eps: float | None = None,
     nmg_rot_eps: float | None = None,
-    compare_ik: bool = False,
-    compare_toppra: bool = False,
-    include_trial_details: bool = False,  # noqa: ARG001 - compatibility parameter
     output_root: str | Path = "outputs/benchmarks",
 ) -> BenchmarkRunResult:
     """Resolve configuration and run all selected free-space benchmarks."""
@@ -250,6 +222,8 @@ def run_all_benchmarks(
         suite,
         batch_sizes=batch_sizes,
         num_waypoints=num_waypoints_list,
+        path_shapes=path_shapes,
+        start_state_bins=start_state_bins,
         seeds=seeds,
         num_trials=num_trials,
         warmup_trials=warmup_trials,
@@ -261,12 +235,7 @@ def run_all_benchmarks(
         nmg_rot_eps=nmg_rot_eps,
         checkpoint_path=checkpoint_path,
     )
-    extras = list(extra_baselines or [])
-    if compare_ik and "ik_interpolate" not in extras:
-        extras.append("ik_interpolate")
-    if compare_toppra and "toppra" not in extras:
-        extras.append("toppra")
-    specs = _resolve_planners(suite, algorithms, extras)
+    specs = _resolve_planners(suite, algorithms, list(extra_baselines or []))
     return BenchmarkRunner(
         suite,
         specs,
@@ -287,6 +256,8 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         algorithms=args.algorithms,
         extra_baselines=args.extra_baselines,
         batch_sizes=args.batch_sizes,
+        path_shapes=args.path_shapes,
+        start_state_bins=args.start_state_bins,
         seeds=args.seeds,
         num_trials=args.num_trials,
         warmup_trials=args.warmup_trials,
@@ -296,9 +267,6 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         rotation_threshold_rad=args.rotation_threshold_rad,
         nmg_pos_eps=args.nmg_pos_eps,
         nmg_rot_eps=args.nmg_rot_eps,
-        compare_ik=args.compare_ik,
-        compare_toppra=args.compare_toppra,
-        include_trial_details=args.save_trial_details,
         output_root=args.output_root,
     )
 

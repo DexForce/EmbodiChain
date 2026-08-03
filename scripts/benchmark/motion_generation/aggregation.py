@@ -66,6 +66,16 @@ def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
     return failures.most_common(1)[0][0] if failures else None
 
 
+def _peak_gpu(records: Iterable[TrialRecord]) -> float | None:
+    """Return the maximum observed peak GPU MB, or ``None`` when unavailable."""
+    peaks = [
+        float(record.peak_gpu_mb)
+        for record in records
+        if record.peak_gpu_mb is not None and math.isfinite(float(record.peak_gpu_mb))
+    ]
+    return max(peaks) if peaks else None
+
+
 def _track_ids(records: list[TrialRecord], cases: list[BenchmarkCase]) -> list[str]:
     """Return deterministic track ids observed in cases or records."""
     tracks = {case.track for case in cases}
@@ -153,9 +163,7 @@ def _performance_rows(
                 ),
                 "cpu_delta_mb": _mean(record.cpu_delta_mb for record in group),
                 "gpu_delta_mb": _mean(record.gpu_delta_mb for record in group),
-                "peak_gpu_mb": max(
-                    (record.peak_gpu_mb or 0.0 for record in group), default=0.0
-                ),
+                "peak_gpu_mb": _peak_gpu(group),
             }
         )
 
@@ -272,15 +280,13 @@ def _metric_rows(
                     "start_state_bin": start_state_bin,
                     "cases": unique_cases_by_group[group_key],
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
+                    # Free-space primary success is external motion validity.
                     "success_rate": _rate(outcome.motion_valid for outcome in outcomes),
                     "planning_success_rate": _rate(
                         outcome.planning_success for outcome in outcomes
                     ),
                     "ordered_waypoint_success_rate": _rate(
                         outcome.ordered_waypoints_reached for outcome in outcomes
-                    ),
-                    "motion_valid_rate": _rate(
-                        outcome.motion_valid for outcome in outcomes
                     ),
                     "waypoint_completion_rate": _mean(
                         outcome.completed_waypoint_ratio for outcome in outcomes
@@ -348,9 +354,7 @@ def _leaderboard_rows(
             latency_p95 = _percentile(
                 (record.cost_time_ms for record in measured), 95.0
             )
-            peak_gpu = max(
-                (record.peak_gpu_mb or 0.0 for record in measured), default=None
-            )
+            peak_gpu = _peak_gpu(measured)
             track_entries.append(
                 {
                     "track": track,
