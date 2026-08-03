@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import signal
 
-from app_articraft import stop_articraft_viser_preview
 from app_config import (
     ASSETS_DIR,
     DEBUG_ENGINE_ROOT,
@@ -33,23 +32,24 @@ from app_config import (
     SERVER_NAME,
     SERVER_PORT,
 )
+from app_processes import force_stop_all_child_processes
 from app_services import build_demo
 
 __all__ = ["main"]
 
 
-def _stop_child_previews() -> None:
-    """Release UI-owned preview subprocesses without masking app shutdown."""
+def _stop_child_processes() -> None:
+    """Force-stop UI-owned subprocesses without masking app shutdown."""
     try:
-        stop_articraft_viser_preview()
+        force_stop_all_child_processes()
     except Exception:
         # Shutdown must not be blocked by an already-exited preview process.
         pass
 
 
 def _handle_shutdown_signal(signum: int, _frame: object) -> None:
-    """Terminate the Articraft Viser child before leaving the Gradio process."""
-    _stop_child_previews()
+    """Terminate UI subprocesses before leaving the Gradio process."""
+    _stop_child_processes()
     if signum == signal.SIGINT:
         raise KeyboardInterrupt
     raise SystemExit(128 + signum)
@@ -78,7 +78,7 @@ def main() -> None:
             ],
         )
     finally:
-        _stop_child_previews()
+        _stop_child_processes()
 
 
 if __name__ == "__main__":

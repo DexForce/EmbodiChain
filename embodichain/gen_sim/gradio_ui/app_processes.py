@@ -23,13 +23,30 @@ import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 from app_config import *  # noqa: F403 - process settings are central configuration.
 from app_state import PHASES
 
+__all__ = [
+    "build_pipeline_env",
+    "build_run_agent_command",
+    "detect_phase_from_files",
+    "force_stop_all_child_processes",
+    "read_process_output",
+    "register_managed_process",
+    "run_agent_cli_supports_robot_profile",
+    "start_pipeline",
+    "terminate_process_group",
+    "update_phase_from_log",
+]
+
 _RUN_AGENT_SUPPORTS_ROBOT_PROFILE: bool | None = None
+_managed_processes: dict[int, subprocess.Popen[str]] = {}
+_managed_processes_lock = threading.Lock()
+_shutdown_requested = False
 
 
 def run_agent_cli_supports_robot_profile() -> bool:
@@ -74,15 +91,17 @@ def build_run_agent_command(
 def start_pipeline(command: list[str]) -> subprocess.Popen[str]:
     env = build_pipeline_env()
     env["PYTHONUNBUFFERED"] = "1"
-    return subprocess.Popen(
-        command,
-        cwd=EMBODICHAIN_ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        start_new_session=True,
-        env=env,
+    return register_managed_process(
+        subprocess.Popen(
+            command,
+            cwd=EMBODICHAIN_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+            env=env,
+        )
     )
 
 
@@ -93,28 +112,147 @@ def build_pipeline_env() -> dict[str, str]:
     return env
 
 
-def terminate_process_group(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
+def register_managed_process(
+    process: subprocess.Popen[str],
+) -> subprocess.Popen[str]:
+    """Register a UI-owned subprocess for application-shutdown cleanup.
+
+    Processes must be registered immediately after they are created. If Gradio
+    shutdown has already begun, the new process is stopped before this function
+    returns so a callback cannot leave an orphan behind.
+    """
+    with _managed_processes_lock:
+        if not _shutdown_requested:
+            _managed_processes[process.pid] = process
+            return process
+
+    terminate_process_group(process)
+    return process
+
+
+def _unregister_managed_process(process: subprocess.Popen[str]) -> None:
+    with _managed_processes_lock:
+        _managed_processes.pop(process.pid, None)
+
+
+def _child_process_ids(parent_pid: int) -> set[int]:
+    """Return a snapshot of every descendant of ``parent_pid`` on POSIX."""
     try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    except Exception:
-        process.terminate()
+        result = subprocess.run(
+            ["ps", "-eo", "pid=,ppid="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+
+    children_by_parent: dict[int, set[int]] = {}
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not all(field.isdecimal() for field in fields):
+            continue
+        pid, ppid = (int(field) for field in fields)
+        children_by_parent.setdefault(ppid, set()).add(pid)
+
+    descendants: set[int] = set()
+    pending = list(children_by_parent.get(parent_pid, set()))
+    while pending:
+        pid = pending.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        pending.extend(children_by_parent.get(pid, set()))
+    return descendants
+
+
+def _force_stop_process_ids(process_ids: set[int]) -> None:
+    """Stop unregistered child PIDs, escalating from SIGTERM to SIGKILL."""
+    process_ids.discard(os.getpid())
+    for pid in process_ids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            continue
 
     deadline = time.monotonic() + PROCESS_STOP_TIMEOUT_S
-    while time.monotonic() < deadline:
+    remaining = set(process_ids)
+    while remaining and time.monotonic() < deadline:
+        remaining = {pid for pid in remaining if _process_is_running(pid)}
+        if remaining:
+            time.sleep(0.1)
+
+    for pid in remaining:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            continue
+
+
+def _process_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        status = Path(f"/proc/{pid}/stat").read_text().rsplit(")", maxsplit=1)[1]
+    except (FileNotFoundError, IndexError, PermissionError):
+        return True
+    return not status.lstrip().startswith("Z")
+
+
+def force_stop_all_child_processes() -> None:
+    """Force-stop every subprocess owned by the Gradio application.
+
+    Registered processes are stopped by their isolated process groups, which
+    also stops their descendants. A second descendant scan catches short-lived
+    or legacy subprocesses that were not registered explicitly.
+    """
+    global _shutdown_requested
+    with _managed_processes_lock:
+        _shutdown_requested = True
+        managed_processes = tuple(_managed_processes.values())
+    child_process_ids = _child_process_ids(os.getpid())
+
+    for process in managed_processes:
+        terminate_process_group(process)
+
+    _force_stop_process_ids(child_process_ids)
+
+
+def terminate_process_group(process: subprocess.Popen[str]) -> None:
+    try:
         if process.poll() is not None:
             return
-        time.sleep(0.2)
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            process.terminate()
 
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-    except Exception:
-        process.kill()
+        deadline = time.monotonic() + PROCESS_STOP_TIMEOUT_S
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                return
+            time.sleep(0.2)
+
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        except Exception:
+            process.kill()
+    finally:
+        _unregister_managed_process(process)
 
 
 def detect_phase_from_files(current_key: str, paths: ScenePaths) -> str:

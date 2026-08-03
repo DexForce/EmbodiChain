@@ -49,7 +49,12 @@ from app_config import (
     ARTICRAFT_ROOT,
     ARTICRAFT_VISER_PORT,
 )
-from app_processes import read_process_output, start_pipeline, terminate_process_group
+from app_processes import (
+    read_process_output,
+    register_managed_process,
+    start_pipeline,
+    terminate_process_group,
+)
 
 __all__ = [
     "build_articraft_panel",
@@ -727,15 +732,17 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
     ), ""
 
     try:
-        process = subprocess.Popen(
-            codex_command,
-            cwd=ARTICRAFT_ROOT,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            start_new_session=True,
-            env=os.environ.copy(),
+        process = register_managed_process(
+            subprocess.Popen(
+                codex_command,
+                cwd=ARTICRAFT_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+                env=os.environ.copy(),
+            )
         )
     except Exception as exc:
         yield None, record_dir.as_posix(), f"**Codex could not start:** {exc}", "\n".join(
