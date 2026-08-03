@@ -104,9 +104,12 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             #   2. Part dict lacks "class_type" → attribute overrides for an
             #      existing solver part (e.g. {"tcp": ..., "stiffness": ...}).
             provided_solver_cfg = override_cfg_dict.get("solver_cfg")
-            if provided_solver_cfg and isinstance(provided_solver_cfg, dict):
+            if isinstance(provided_solver_cfg, dict):
                 if base_cfg.solver_cfg is None:
                     base_cfg.solver_cfg = {}
+                if not provided_solver_cfg:
+                    base_cfg.solver_cfg = {}
+                    continue
                 for part, item in provided_solver_cfg.items():
                     if isinstance(item, dict) and "class_type" in item:
                         # New or replacement solver part — use the deserialized

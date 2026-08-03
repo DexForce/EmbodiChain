@@ -18,45 +18,33 @@ Dexforce W1 is a dual-arm humanoid robot developed by DexForce Technology Co., L
 - Flexible URDF assembly and simulation configuration
 - Compatible with SimulationManager simulation environment
 
-## Method 1: Fine-grained configuration with `build_dexforce_w1_cfg`
+## Configuration with `DexforceW1Cfg.from_dict`
 
-This method allows you to specify detailed parameters for each arm and hand.
+`DexforceW1Cfg.from_dict` is the single public construction entry point. A W1
+configuration always describes the complete chassis, torso, head, eyes, wrist
+cameras, and both arms for one robot version.
 
 **Parameters:**
 
 - `hand_types`: Dict specifying hand brand for each arm side (`LEFT`/`RIGHT`).
 - `hand_versions`: Dict specifying hand version for each arm side.
-
-```python
-hand_types = {
-    DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
-    DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
-}
-hand_versions = {
-    DexforceW1ArmSide.LEFT: DexforceW1Version.V025,
-    DexforceW1ArmSide.RIGHT: DexforceW1Version.V025,
-}
-cfg = build_dexforce_w1_cfg(
-    version=DexforceW1Version.V025,
-    hand_types=hand_types,
-    hand_versions=hand_versions,
-)
-robot = sim.add_robot(cfg=cfg)
-print("DexforceW1 robot added to the simulation.")
-```
-
-## Method 2: Quick configuration with `DexforceW1Cfg.from_dict`
-
-This method allows fast setup using a dictionary, suitable for simple scenarios or when default options are sufficient. Recommended for rapid prototyping or when only basic parameters are needed.
-
-**Parameters:**
-
-- `uid`: Unique robot identifier (string).
-- `version`: Robot version, e.g., `v021`, `v022`, or `v025`.
+- `with_default_eef`: Whether to install the registered default end effectors.
+- `hand_attach_xposes`: Optional hand-specific mounting transforms.
 
 ```python
 from embodichain.lab.sim.robots import DexforceW1Cfg
-cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v025"})
+
+cfg = DexforceW1Cfg.from_dict(
+    {
+        "uid": "dexforce_w1",
+        "version": "v025",
+        "hand_types": {
+            "left": "BRAINCO_HAND",
+            "right": "BRAINCO_HAND",
+        },
+        "hand_versions": {"left": "v021", "right": "v021"},
+    }
+)
 robot = sim.add_robot(cfg=cfg)
 print("DexforceW1 robot added to the simulation.")
 ```
@@ -77,22 +65,13 @@ robot.set_qpos(qpos=[0, np.pi/4, 0.0, np.pi/2, np.pi/4, 0.0, 0.0], joint_ids=rob
 
 This mirrored design simplifies motion planning and ensures that both arms can perform coordinated or symmetric actions efficiently.
 
-## Configuration Method Selection
-
-Choose `build_dexforce_w1_cfg` for maximum flexibility and hardware customization. Use `DexforceW1Cfg.from_dict` for quick setup and prototyping. Both methods produce a configuration object (`cfg`) that can be passed to `sim.add_robot(cfg=cfg)` to add the robot to the simulation.
-
-**Note:**
-
-- Ensure parameter types match the expected enums or strings.
-- For advanced simulation scenarios, prefer the fine-grained method.
-- For most demos or simple tasks, the quick method is sufficient.
-
 ## Type Descriptions
 
 | Type                    | Options / Values                                      | Description                        |
 |-------------------------|-------------------------------------------------------|------------------------------------|
 | `DexforceW1HandBrand`   | `BRAINCO_HAND`, `DH_PGC_GRIPPER`, `DH_PGC_GRIPPER_M`  | Hand brand                         |
 | `DexforceW1Version`     | `V021`, `V022`, `V025`                                | Release version                    |
+| `DexforceW1HandVersion` | `V021`                                                  | External hand/gripper asset version |
 | `DexforceW1ArmSide`     | `LEFT`, `RIGHT`                                       | Left/right hand identifier         |
 
 ## Unified asset layout and version extension
@@ -151,20 +130,20 @@ Do not manually add the 12 mm correction to an end-effector transform or TCP.
 Those values must describe the end-effector relative to the standard mounting
 surface; the W1 version layer adds the robot revision correction.
 
-Per-component version overrides are supported for controlled migrations:
+One `DexforceW1Version` selects the complete W1 robot release. Mixed body/arm
+versions are intentionally unsupported because their assets, kinematics, TCP,
+and camera calibration must remain consistent.
 
-```python
-cfg = DexforceW1Cfg.from_dict(
-    {
-        "uid": "dexforce_w1",
-        "version": "v021",
-        "component_versions": {
-            "left_arm": "v025",
-            "right_arm": "v025",
-        },
-    }
-)
-```
+Robot and hand versions are independent. `DexforceW1Version` selects the W1
+body, arm assets, kinematics, and flange calibration. `DexforceW1HandVersion`
+selects an external hand or gripper asset from
+`embodichain/lab/sim/robots/dexforce_w1/hand_specs.py`.
+
+The currently released BrainCo hand and DH gripper registrations all use
+`DexforceW1HandVersion.V021`. Therefore W1 V021, V022, and V025 select hand V021
+by default. This is an explicit default, not a compatibility alias keyed by the
+robot version. A future hand release is added by registering a new hand version
+and hand spec; it does not require adding aliases for every W1 robot version.
 
 To add another W1 revision:
 
@@ -180,5 +159,13 @@ To add another W1 revision:
 6. Validate hand/gripper mounting, wrist cameras, FK/IK, VR teleoperation, and
    real2sim task regression.
 
-Builders, control parts, assembly, TCP selection, analytical parameters and
-FK/IK then use the version specification without revision-specific branches.
+To add another hand release:
+
+1. Add a `DexforceW1HandVersion` value.
+2. Register each supported brand and side in `hand_specs.py`, including its
+   URDF, joint names, root/end links, and mounting transform.
+3. Select it explicitly through `hand_versions`; an unregistered version fails
+   during config construction.
+
+Control parts, assembly, TCP selection, analytical parameters and FK/IK then use
+the version specification without revision-specific branches.

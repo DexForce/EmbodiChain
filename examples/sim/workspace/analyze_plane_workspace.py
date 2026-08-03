@@ -97,7 +97,6 @@ def main() -> None:
             {
                 "uid": "dexforce_w1",
                 "version": "v021",
-                "arm_kind": "industrial",
                 "with_default_eef": False,
             }
         )

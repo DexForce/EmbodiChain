@@ -39,19 +39,19 @@ to `left_arm`/`right_arm` or the first available part).
 | Argument | Description |
 |----------|-------------|
 | `--robot NAME` | Predefined robot. Choices: `franka_panda`, `cobotmagic`, `dexforce_w1`, `ur`. |
-| `--robot-params JSON` | JSON dict of variant overrides, e.g. `{"robot_type":"ur5"}` or `{"version":"v021","arm_kind":"industrial"}`. |
+| `--robot-params JSON` | JSON dict of variant overrides, e.g. `{"robot_type":"ur5"}` or `{"version":"v025","with_default_eef":false}`. |
 | `--control-part NAME` | Control part to analyze (e.g. `arm`, `left_arm`, `right_arm`). Optional; auto-selected if omitted. |
 
 ```bash
 embodichain analyze-workspace \
     --robot dexforce_w1 \
-    --robot-params '{"version":"v021","arm_kind":"industrial"}' \
+    --robot-params '{"version":"v025","with_default_eef":false}' \
     --control-part left_arm --mode joint_space --num-samples 20000
 ```
 
 Available control parts per robot: `franka_panda` (`arm`, `hand`), `cobotmagic`
 (`left_arm`, `left_eef`, `right_arm`, `right_eef`), `dexforce_w1`
-(`left_arm`, `right_arm` for industrial), `ur` (`arm`).
+(`left_arm`, `left_eef`, `right_arm`, `right_eef`), `ur` (`arm`).
 
 ## Generic asset (`--asset`)
 

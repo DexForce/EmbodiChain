@@ -33,7 +33,7 @@ ObjectBaseCfg          uid, init_pos, init_rot, init_local_pose
   │                     disable_self_collision, init_qpos, body_scale,
   │                     build_pk_chain, use_usd_properties
       └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, drive_pros (override default to "force")
-          ├─ DexforceW1Cfg   version, with_default_eef
+          ├─ DexforceW1Cfg   version, hand_versions, with_default_eef
           └─ CobotMagicCfg   (dual-arm defaults)
 ```
 
@@ -51,8 +51,8 @@ Key fields on `RobotCfg`:
 
 ## The robot config protocol
 
-Every robot config subclasses `RobotCfg` and overrides two hooks. `from_dict` is a
-3-line template — do not reimplement it:
+Every robot config subclasses `RobotCfg` and overrides the construction hooks.
+The default `from_dict` implementation is this 3-line template:
 
 ```python
 @classmethod
@@ -69,8 +69,26 @@ def from_dict(cls, init_dict):
   reading the PK URDF from a single `_pk_urdf_path` source (a property for
   constant-path robots, a method when the path depends on a variant).
 
-Serialization (`to_dict` / `to_string` / `save_to_file`) is **inherited** from
-`RobotCfg` and round-trips: `RobotCfg.from_dict(cfg.to_dict())` reproduces the cfg.
+Serialization (`to_dict` / `to_string` / `save_to_file`) is inherited from
+`RobotCfg` unless the config stores version-derived runtime transforms.
+`DexforceW1Cfg` is the current exception: serialized hand transforms and solver
+TCPs are raw end-effector values, while the in-memory values include the selected
+W1 revision offset. Its `to_dict` removes that derived offset and `from_dict`
+restores it. Every config, including this exception, must satisfy
+`type(cfg).from_dict(cfg.to_dict())` without changing the selected components or
+applying a derived transform twice.
+
+W1 robot and hand releases use separate types and registries:
+
+- `DexforceW1Version` selects body/arm assets, kinematics, and flange calibration
+  through `specs.py`.
+- `DexforceW1HandVersion` selects external hand/gripper assets, joint metadata,
+  and raw mounting transforms through `hand_specs.py`.
+- The current default is hand V021 for every W1 robot version. Never infer a
+  hand version from `DexforceW1Version`.
+- `DexforceW1Cfg` always represents a complete dual-arm W1. Structural
+  `include_*`, `arm_sides`, and mixed `component_versions` options are not part
+  of its public protocol.
 
 .. note::
     `merge_robot_cfg` calls the base `RobotCfg.from_dict` internally, so the
@@ -119,7 +137,7 @@ Full guide: `docs/source/tutorial/add_robot.rst` · Quick reference: `docs/sourc
 Minimal checklist:
 1. Create a `@configclass` inheriting `RobotCfg`.
 2. Override `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`, `drive_pros` and `attrs`.
-3. Keep `from_dict` as the 3-line template (`cls()` → `_build_defaults` → `merge_robot_cfg`); do not reimplement.
+3. Keep `from_dict` as the 3-line template (`cls()` → `_build_defaults` → `merge_robot_cfg`) unless version-derived state requires an explicitly documented post-merge step.
 4. Define `control_parts` mapping part names to joint name lists.
 5. Configure `solver_cfg` (one `SolverCfg` per control part).
 6. Implement `build_pk_serial_chain` reading from `_pk_urdf_path` (property for constant paths, method for variant-dependent).
@@ -128,13 +146,15 @@ Minimal checklist:
 9. Add robot docs in `docs/source/resources/robot/` and update `docs/source/resources/robot/index.rst`.
 10. Test — a `__main__` smoke test + the DOF drift guard + `preview-asset` CLI.
 
-Serialization (`to_dict` / `save_to_file`) is inherited — no need to implement it.
+Serialization (`to_dict` / `save_to_file`) is normally inherited. A robot-specific
+override requires documented raw/final semantics and regression tests for default,
+custom-transform, component-version, and public-builder round-trips.
 
 ## Available Robots
 
 | Robot | Config Class | Module | Structure | Notes |
 |---|---|---|---|---|
-| DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `params.py`, `utils.py`) | Humanoid; versioned chassis, torso, head, left/right arm and hand components |
+| DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `specs.py`, `hand_specs.py`, `params.py`, `utils.py`) | Humanoid; robot and hand versions are independently registered |
 | CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; uses OPW solver |
 
 ## Common Failure Modes
@@ -148,4 +168,4 @@ Serialization (`to_dict` / `save_to_file`) is inherited — no need to implement
 - **`all` instead of `__all__`** — lowercase `all` does not work with `from module import *`; use `__all__`.
 - **`solver_cfg` set in multiple places** — set it once in `_build_defaults` only; setting it elsewhere (e.g. a build helper) gets overwritten and is dead code.
 - **PK URDF drifts from the sim URDF** — route `build_pk_serial_chain` through `_pk_urdf_path` and keep the DOF drift-guard test so silent drift is caught.
-- **Reimplementing `from_dict`** — keep the 3-line template; put construction logic in `_build_defaults`. (Making the base `RobotCfg.from_dict` call `merge_robot_cfg` would infinite-recurse, since `merge_robot_cfg` calls `RobotCfg.from_dict`.)
+- **Reimplementing `from_dict` without a serialization protocol** — keep the 3-line template by default. If derived version state requires post-merge processing, document the raw/final values and test round-trips. (Making the base `RobotCfg.from_dict` call `merge_robot_cfg` would infinite-recurse, since `merge_robot_cfg` calls `RobotCfg.from_dict`.)

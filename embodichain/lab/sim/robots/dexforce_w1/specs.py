@@ -18,22 +18,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from .types import (
     DexforceW1ArmSide,
-    DexforceW1HandBrand,
     DexforceW1Type,
     DexforceW1Version,
+    parse_w1_version,
 )
 
 __all__ = [
     "W1VersionSpec",
     "get_w1_version_spec",
-    "normalize_component_versions",
 ]
 
 
@@ -60,16 +61,27 @@ class W1VersionSpec:
     """Asset layout and calibrated defaults belonging to one W1 revision."""
 
     version: DexforceW1Version
-    component_urdfs: dict[DexforceW1Type, str]
+    component_urdfs: Mapping[DexforceW1Type, str]
     full_robot_urdf_path: str
     arm_d_list: tuple[float, ...]
     arm_base_z: float
-    default_eef_attach_xpos: dict[DexforceW1ArmSide, tuple]
-    solver_tcp: dict[DexforceW1ArmSide, tuple]
+    default_eef_attach_xpos: Mapping[DexforceW1ArmSide, tuple]
+    solver_tcp: Mapping[DexforceW1ArmSide, tuple]
     eyes_attach_xpos: tuple[tuple[float, ...], ...]
     wrist_camera_rpy: tuple[float, float, float]
     wrist_camera_xyz: tuple[float, float, float]
     head_contains_eyes: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "component_urdfs", MappingProxyType(dict(self.component_urdfs))
+        )
+        object.__setattr__(
+            self,
+            "default_eef_attach_xpos",
+            MappingProxyType(dict(self.default_eef_attach_xpos)),
+        )
+        object.__setattr__(self, "solver_tcp", MappingProxyType(dict(self.solver_tcp)))
 
     @property
     def assembly_name(self) -> str:
@@ -110,26 +122,6 @@ class W1VersionSpec:
             arm_side,
             np.asarray(self.solver_tcp[arm_side], dtype=float),
         )
-
-    def hand_attach_xpos(
-        self,
-        brand: DexforceW1HandBrand,
-        arm_side: DexforceW1ArmSide,
-    ) -> np.ndarray:
-        """Return the default transform from the arm flange to an external EEF."""
-        is_left = arm_side == DexforceW1ArmSide.LEFT
-        result = np.eye(4)
-        if brand == DexforceW1HandBrand.BRAINCO_HAND:
-            rotation = [90, 0, 180] if is_left else [90, 0, 0]
-            result[:3, :3] = R.from_euler("xyz", rotation, degrees=True).as_matrix()
-        elif brand == DexforceW1HandBrand.DH_PGC_GRIPPER:
-            result[2, 3] = 0.015
-            result[:3, :3] = R.from_rotvec([0, 0, 90], degrees=True).as_matrix()
-        elif brand == DexforceW1HandBrand.DH_PGC_GRIPPER_M:
-            result[:3, :3] = R.from_rotvec([0, 0, 90], degrees=True).as_matrix()
-        else:
-            raise ValueError(f"Unknown hand brand: {brand}")
-        return self.compose_eef_attach_xpos(arm_side, result)
 
     def eyes_xpos(self) -> np.ndarray:
         return np.asarray(self.eyes_attach_xpos, dtype=float).copy()
@@ -251,19 +243,4 @@ _W1_VERSION_SPECS = {
 
 
 def get_w1_version_spec(version: DexforceW1Version | str) -> W1VersionSpec:
-    if not isinstance(version, DexforceW1Version):
-        version = DexforceW1Version(version.lower())
-    return _W1_VERSION_SPECS[version]
-
-
-def normalize_component_versions(
-    versions: dict[DexforceW1Type | str, DexforceW1Version | str] | None,
-) -> dict[DexforceW1Type, DexforceW1Version]:
-    normalized = {}
-    for component_type, version in (versions or {}).items():
-        if not isinstance(component_type, DexforceW1Type):
-            component_type = DexforceW1Type(component_type)
-        if not isinstance(version, DexforceW1Version):
-            version = DexforceW1Version(version.lower())
-        normalized[component_type] = version
-    return normalized
+    return _W1_VERSION_SPECS[parse_w1_version(version)]

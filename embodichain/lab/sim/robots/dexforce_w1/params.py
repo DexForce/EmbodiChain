@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
+    parse_w1_arm_side,
+    parse_w1_version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 
@@ -146,17 +148,8 @@ class W1ArmKineParams:
 
     @classmethod
     def from_dict(cls, data: dict) -> "W1ArmKineParams":
-        arm_side = (
-            DexforceW1ArmSide[data["arm_side"]]
-            if isinstance(data.get("arm_side"), str)
-            else data.get("arm_side")
-        )
-
-        version = (
-            DexforceW1Version[data["version"]]
-            if isinstance(data.get("version"), str)
-            else data.get("version", DexforceW1Version.V021)
-        )
+        arm_side = parse_w1_arm_side(data["arm_side"])
+        version = parse_w1_version(data.get("version", DexforceW1Version.V021))
         inst = cls(arm_side=arm_side, version=version)
 
         # allow overriding computed arrays if provided

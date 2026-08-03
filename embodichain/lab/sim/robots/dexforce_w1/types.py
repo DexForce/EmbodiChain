@@ -18,18 +18,29 @@ import enum
 
 __all__ = [
     "DexforceW1Version",
+    "DexforceW1HandVersion",
     "DexforceW1ArmSide",
     "DexforceW1Type",
     "DexforceW1HandBrand",
+    "parse_w1_version",
+    "parse_w1_hand_version",
+    "parse_w1_arm_side",
+    "parse_w1_hand_brand",
 ]
 
 
 class DexforceW1Version(enum.Enum):
-    """Versioning for DexforceW1 components."""
+    """Released version of the W1 robot body and arms."""
 
     V021 = "v021"
     V022 = "v022"
     V025 = "v025"
+
+
+class DexforceW1HandVersion(enum.Enum):
+    """Released version of an external W1 hand or gripper asset."""
+
+    V021 = "v021"
 
 
 class DexforceW1ArmSide(enum.Enum):
@@ -57,3 +68,34 @@ class DexforceW1HandBrand(enum.Enum):
     BRAINCO_HAND = "BRAINCO_HAND"
     DH_PGC_GRIPPER = "DH_PGC_GRIPPER"
     DH_PGC_GRIPPER_M = "DH_PGC_GRIPPER_M"
+
+
+def _parse_enum(value, enum_type, label):
+    if isinstance(value, enum_type):
+        return value
+    if isinstance(value, str):
+        normalized = value.lower()
+        for member in enum_type:
+            if normalized in (member.name.lower(), str(member.value).lower()):
+                return member
+    raise ValueError(f"Invalid {label}: {value!r}")
+
+
+def parse_w1_version(value) -> DexforceW1Version:
+    """Parse a W1 robot version from an enum, member name, or value."""
+    return _parse_enum(value, DexforceW1Version, "Dexforce W1 version")
+
+
+def parse_w1_hand_version(value) -> DexforceW1HandVersion:
+    """Parse a W1 hand version from an enum, member name, or value."""
+    return _parse_enum(value, DexforceW1HandVersion, "Dexforce W1 hand version")
+
+
+def parse_w1_arm_side(value) -> DexforceW1ArmSide:
+    """Parse a W1 arm side from an enum, member name, or serialized value."""
+    return _parse_enum(value, DexforceW1ArmSide, "Dexforce W1 arm side")
+
+
+def parse_w1_hand_brand(value) -> DexforceW1HandBrand:
+    """Parse a W1 hand brand from an enum, member name, or serialized value."""
+    return _parse_enum(value, DexforceW1HandBrand, "Dexforce W1 hand brand")

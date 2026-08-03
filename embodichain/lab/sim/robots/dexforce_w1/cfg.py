@@ -24,18 +24,23 @@ import torch
 from typing import TYPE_CHECKING, Dict
 
 from embodichain.lab.sim.robots.dexforce_w1.types import (
-    DexforceW1HandBrand,
     DexforceW1ArmSide,
+    DexforceW1HandBrand,
+    DexforceW1HandVersion,
     DexforceW1Version,
-    DexforceW1Type,
+    parse_w1_arm_side,
+    parse_w1_hand_brand,
+    parse_w1_hand_version,
+    parse_w1_version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.utils import (
-    build_dexforce_w1_cfg,
+    build_dexforce_w1_assembly_urdf_cfg,
+    build_dexforce_w1_control_parts,
 )
-from embodichain.lab.sim.robots.dexforce_w1.specs import (
-    get_w1_version_spec,
-    normalize_component_versions,
+from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
+    get_default_w1_hand_version,
 )
+from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.cfg import (
     RobotCfg,
     JointDrivePropertiesCfg,
@@ -54,7 +59,9 @@ class DexforceW1Cfg(RobotCfg):
 
     version: DexforceW1Version = DexforceW1Version.V021
     with_default_eef: bool = True
-    component_versions: dict | None = None
+    hand_types: dict | None = None
+    hand_versions: dict[DexforceW1ArmSide, DexforceW1HandVersion] | None = None
+    hand_attach_xposes: dict | None = None
 
     @classmethod
     def from_dict(
@@ -79,14 +86,6 @@ class DexforceW1Cfg(RobotCfg):
         cfg = merge_robot_cfg(cfg, init_dict)
         cfg._compose_user_eef_overrides(init_dict)
         return cfg
-
-    def _arm_version(self, arm_side: DexforceW1ArmSide) -> DexforceW1Version:
-        component_type = (
-            DexforceW1Type.LEFT_ARM
-            if arm_side == DexforceW1ArmSide.LEFT
-            else DexforceW1Type.RIGHT_ARM
-        )
-        return (self.component_versions or {}).get(component_type, self.version)
 
     def _compose_user_eef_overrides(self, init_dict: dict) -> None:
         """Apply the version offset to user-supplied EEF transforms and TCPs."""
@@ -113,7 +112,7 @@ class DexforceW1Cfg(RobotCfg):
             component = self.urdf_cfg.components.get(component_name)
             if component is None:
                 continue
-            spec = get_w1_version_spec(self._arm_version(arm_side))
+            spec = get_w1_version_spec(self.version)
             component["transform"] = spec.compose_eef_attach_xpos(
                 arm_side, component["transform"]
             )
@@ -129,7 +128,7 @@ class DexforceW1Cfg(RobotCfg):
             solver = self.solver_cfg.get(part_name)
             if solver is None:
                 continue
-            spec = get_w1_version_spec(self._arm_version(arm_side))
+            spec = get_w1_version_spec(self.version)
             solver.tcp = spec.compose_eef_attach_xpos(arm_side, solver.tcp)
 
     def to_dict(self):
@@ -144,7 +143,7 @@ class DexforceW1Cfg(RobotCfg):
             component = components.get(component_name)
             if not isinstance(component, dict) or component.get("transform") is None:
                 continue
-            spec = get_w1_version_spec(self._arm_version(arm_side))
+            spec = get_w1_version_spec(self.version)
             offset_inv = np.linalg.inv(spec.eef_attach_xpos(arm_side))
             component["transform"] = (
                 offset_inv @ np.asarray(component["transform"], dtype=float)
@@ -156,7 +155,7 @@ class DexforceW1Cfg(RobotCfg):
             solver = solver_cfg.get(part_name)
             if not isinstance(solver, dict) or solver.get("tcp") is None:
                 continue
-            spec = get_w1_version_spec(self._arm_version(arm_side))
+            spec = get_w1_version_spec(self.version)
             offset_inv = np.linalg.inv(spec.eef_attach_xpos(arm_side))
             solver["tcp"] = (
                 offset_inv @ np.asarray(solver["tcp"], dtype=float)
@@ -171,39 +170,51 @@ class DexforceW1Cfg(RobotCfg):
         ``solver_cfg``, ``drive_pros`` and ``attrs``.
         """
         init_dict = init_dict or {}
-        version = init_dict.get("version", DexforceW1Version.V021)
-        with_default_eef = init_dict.get("with_default_eef", True)
-
-        self.version = (
-            DexforceW1Version(version) if isinstance(version, str) else version
+        self.version = parse_w1_version(
+            init_dict.get("version", DexforceW1Version.V021)
         )
-        self.with_default_eef = with_default_eef
-        self.component_versions = normalize_component_versions(
-            init_dict.get("component_versions")
-        )
+        self.with_default_eef = bool(init_dict.get("with_default_eef", True))
 
-        # Build the version-matched URDF assembly and control-part definitions.
-        hand_types = {
-            DexforceW1ArmSide.LEFT: DexforceW1HandBrand.BRAINCO_HAND,
-            DexforceW1ArmSide.RIGHT: DexforceW1HandBrand.BRAINCO_HAND,
+        self.hand_types = {
+            parse_w1_arm_side(side): parse_w1_hand_brand(brand)
+            for side, brand in init_dict.get("hand_types", {}).items()
         }
-        hand_versions = {
-            DexforceW1ArmSide.LEFT: self.version,
-            DexforceW1ArmSide.RIGHT: self.version,
+        configured_hand_versions = {
+            parse_w1_arm_side(side): parse_w1_hand_version(version)
+            for side, version in init_dict.get("hand_versions", {}).items()
         }
-        base_cfg = build_dexforce_w1_cfg(
+        self.hand_versions = {
+            side: configured_hand_versions.get(
+                side,
+                get_default_w1_hand_version(
+                    self.hand_types.get(side, DexforceW1HandBrand.BRAINCO_HAND)
+                ),
+            )
+            for side in DexforceW1ArmSide
+        }
+        self.hand_attach_xposes = {
+            parse_w1_arm_side(side): np.asarray(transform, dtype=float)
+            for side, transform in init_dict.get("hand_attach_xposes", {}).items()
+        }
+
+        self.urdf_cfg = build_dexforce_w1_assembly_urdf_cfg(
             version=self.version,
-            hand_types=hand_types,
-            hand_versions=hand_versions,
-            include_hand=with_default_eef,
-            component_versions=self.component_versions,
-            solver_cfg={},
+            hand_types=self.hand_types,
+            hand_versions=self.hand_versions,
+            hand_attach_xposes=self.hand_attach_xposes,
+            include_hand=self.with_default_eef,
         )
-        self.urdf_cfg = base_cfg.urdf_cfg
-        self.control_parts = base_cfg.control_parts
+        self.control_parts = build_dexforce_w1_control_parts(
+            version=self.version,
+            hand_types=self.hand_types,
+            hand_versions=self.hand_versions,
+            include_hand=self.with_default_eef,
+        )
 
         # physics
-        physics = self._build_default_physics_cfgs(with_default_eef=with_default_eef)
+        physics = self._build_default_physics_cfgs(
+            with_default_eef=self.with_default_eef
+        )
         for key, value in physics.items():
             setattr(self, key, value)
 
@@ -217,46 +228,22 @@ class DexforceW1Cfg(RobotCfg):
             W1ArmKineParams,
         )
 
-        left_version = self._arm_version(DexforceW1ArmSide.LEFT)
-        right_version = self._arm_version(DexforceW1ArmSide.RIGHT)
-        left_version_spec = get_w1_version_spec(left_version)
-        right_version_spec = get_w1_version_spec(right_version)
-        w1_left_arm_params = W1ArmKineParams(
-            arm_side=DexforceW1ArmSide.LEFT,
-            version=left_version,
-        )
-        w1_right_arm_params = W1ArmKineParams(
-            arm_side=DexforceW1ArmSide.RIGHT,
-            version=right_version,
-        )
-
-        left_arm_tcp = left_version_spec.tcp(DexforceW1ArmSide.LEFT)
-        right_arm_tcp = right_version_spec.tcp(DexforceW1ArmSide.RIGHT)
-
-        return {
-            "right_arm": SRSSolverCfg(
-                end_link_name="right_ee",
-                root_link_name="right_arm_base",
-                dh_params=w1_right_arm_params.dh_params,
-                user_qpos_limits=w1_right_arm_params.qpos_limits,
-                T_e_oe=w1_right_arm_params.T_e_oe,
-                T_b_ob=w1_right_arm_params.T_b_ob,
-                link_lengths=w1_right_arm_params.link_lengths,
-                rotation_directions=w1_right_arm_params.rotation_directions,
-                tcp=right_arm_tcp,
-            ),
-            "left_arm": SRSSolverCfg(
-                end_link_name="left_ee",
-                root_link_name="left_arm_base",
-                dh_params=w1_left_arm_params.dh_params,
-                user_qpos_limits=w1_left_arm_params.qpos_limits,
-                T_e_oe=w1_left_arm_params.T_e_oe,
-                T_b_ob=w1_left_arm_params.T_b_ob,
-                link_lengths=w1_left_arm_params.link_lengths,
-                rotation_directions=w1_left_arm_params.rotation_directions,
-                tcp=left_arm_tcp,
-            ),
-        }
+        solver_cfg = {}
+        for arm_side in DexforceW1ArmSide:
+            params = W1ArmKineParams(arm_side=arm_side, version=self.version)
+            part_name = f"{arm_side.value}_arm"
+            solver_cfg[part_name] = SRSSolverCfg(
+                end_link_name=f"{arm_side.value}_ee",
+                root_link_name=f"{arm_side.value}_arm_base",
+                dh_params=params.dh_params,
+                user_qpos_limits=params.qpos_limits,
+                T_e_oe=params.T_e_oe,
+                T_b_ob=params.T_b_ob,
+                link_lengths=params.link_lengths,
+                rotation_directions=params.rotation_directions,
+                tcp=get_w1_version_spec(self.version).tcp(arm_side),
+            )
+        return solver_cfg
 
     def _build_default_physics_cfgs(
         self, with_default_eef: bool = True
@@ -327,13 +314,7 @@ class DexforceW1Cfg(RobotCfg):
         """
         from embodichain.lab.sim.robots.dexforce_w1.utils import arm_manager
 
-        component_type = (
-            DexforceW1Type.LEFT_ARM
-            if arm_side == DexforceW1ArmSide.LEFT
-            else DexforceW1Type.RIGHT_ARM
-        )
-        version = (self.component_versions or {}).get(component_type, self.version)
-        return arm_manager.get_urdf(side=arm_side, version=version)
+        return arm_manager.get_urdf(side=arm_side, version=self.version)
 
     def build_pk_serial_chain(
         self, device: torch.device = torch.device("cpu"), **kwargs
@@ -342,22 +323,14 @@ class DexforceW1Cfg(RobotCfg):
             create_pk_serial_chain,
         )
 
-        left_arm_chain = create_pk_serial_chain(
-            urdf_path=self._pk_urdf_path(DexforceW1ArmSide.LEFT),
-            device=device,
-            end_link_name="left_ee",
-            root_link_name="left_arm_base",
-        )
-        right_arm_chain = create_pk_serial_chain(
-            urdf_path=self._pk_urdf_path(DexforceW1ArmSide.RIGHT),
-            device=device,
-            end_link_name="right_ee",
-            root_link_name="right_arm_base",
-        )
-
         return {
-            "left_arm": left_arm_chain,
-            "right_arm": right_arm_chain,
+            f"{arm_side.value}_arm": create_pk_serial_chain(
+                urdf_path=self._pk_urdf_path(arm_side),
+                device=device,
+                end_link_name=f"{arm_side.value}_ee",
+                root_link_name=f"{arm_side.value}_arm_base",
+            )
+            for arm_side in DexforceW1ArmSide
         }
 
 

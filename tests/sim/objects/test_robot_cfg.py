@@ -26,16 +26,36 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.workspace import RobotWorkspaceCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
+from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
+    DexforceW1HandVersion,
     DexforceW1Type,
     DexforceW1Version,
+)
+from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
+    get_default_w1_hand_version,
+    get_w1_hand_spec,
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
 from embodichain.lab.sim.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
+
+
+def _mock_w1_asset_paths(monkeypatch, tmp_path):
+    import embodichain.lab.sim.cfg as sim_cfg
+    from embodichain.lab.sim.robots.dexforce_w1 import utils as w1_utils
+
+    def resolve(path):
+        resolved = tmp_path / path
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text("<robot name='w1' />")
+        return str(resolved)
+
+    monkeypatch.setattr(w1_utils, "get_data_path", resolve)
+    monkeypatch.setattr(sim_cfg, "get_data_path", resolve)
 
 
 def test_dexforce_w1_roundtrip():
@@ -58,11 +78,31 @@ def test_dexforce_w1_rejects_unknown_fields():
         DexforceW1Cfg.from_dict({"unsupported_variant": "value"})
 
 
+@pytest.mark.parametrize(
+    "removed_field",
+    [
+        "arm_sides",
+        "include_chassis",
+        "include_torso",
+        "include_head",
+        "include_eyes",
+        "include_wrist_cameras",
+        "component_versions",
+    ],
+)
+def test_dexforce_w1_rejects_removed_builder_fields(removed_field):
+    with pytest.raises(ValueError, match="Unknown DexforceW1 configuration fields"):
+        DexforceW1Cfg.from_dict({removed_field: None})
+
+
 def test_w1_v025_eef_offset_applies_to_attach_and_tcp():
     v021 = get_w1_version_spec(DexforceW1Version.V021)
     v025 = get_w1_version_spec(DexforceW1Version.V025)
     expected_offset = np.eye(4)
     expected_offset[2, 3] = 0.012
+    hand_spec = get_w1_hand_spec(
+        DexforceW1HandBrand.BRAINCO_HAND, DexforceW1HandVersion.V021
+    )
 
     for arm_side in DexforceW1ArmSide:
         np.testing.assert_allclose(v021.eef_attach_xpos(arm_side), np.eye(4))
@@ -72,9 +112,11 @@ def test_w1_v025_eef_offset_applies_to_attach_and_tcp():
             expected_offset @ v021.tcp(arm_side),
         )
         np.testing.assert_allclose(
-            v025.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
-            expected_offset
-            @ v021.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
+            v025.compose_eef_attach_xpos(
+                arm_side,
+                hand_spec.for_side(arm_side).attach_xpos,
+            ),
+            expected_offset @ np.asarray(hand_spec.for_side(arm_side).attach_xpos),
         )
 
 
@@ -112,10 +154,6 @@ def test_w1_v022_provisional_eef_baseline_is_composed_consistently():
     for arm_side in DexforceW1ArmSide:
         np.testing.assert_allclose(v022.eef_attach_xpos(arm_side), np.eye(4))
         np.testing.assert_allclose(v022.tcp(arm_side), v021.tcp(arm_side))
-        np.testing.assert_allclose(
-            v022.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
-            v021.hand_attach_xpos(DexforceW1HandBrand.BRAINCO_HAND, arm_side),
-        )
 
 
 def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
@@ -146,6 +184,145 @@ def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
     assert cfg.urdf_cfg.fname == "DexforceW1V022"
     assert "DexforceW1V022/w1/left_arm.urdf" in registered_paths
     assert "DexforceW1V022/w1/right_arm.urdf" in registered_paths
+
+
+def test_w1_cfg_builds_complete_dual_arm_robot(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    cfg = DexforceW1Cfg.from_dict({"version": "v021", "with_default_eef": False})
+
+    assert set(cfg.urdf_cfg.components) == {
+        "chassis",
+        "torso",
+        "head",
+        "left_arm",
+        "right_arm",
+    }
+    assert set(cfg.control_parts) == {
+        "torso",
+        "head",
+        "left_arm",
+        "right_arm",
+        "dual_arm",
+        "full_body",
+    }
+    assert set(cfg.solver_cfg) == {"left_arm", "right_arm"}
+
+
+def test_w1_hand_version_is_independent_of_robot_version(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    from embodichain.lab.sim.robots.dexforce_w1 import utils as w1_utils
+
+    selected_versions = []
+    original_get_urdf = w1_utils.hand_manager.get_urdf
+
+    def capture_version(brand, side, version):
+        selected_versions.append((side, version))
+        return original_get_urdf(brand, side, version)
+
+    monkeypatch.setattr(w1_utils.hand_manager, "get_urdf", capture_version)
+    DexforceW1Cfg.from_dict(
+        {
+            "version": "v025",
+        }
+    )
+
+    assert selected_versions
+    assert all(
+        version == DexforceW1HandVersion.V021 for _, version in selected_versions
+    )
+
+
+@pytest.mark.parametrize("brand", list(DexforceW1HandBrand))
+def test_w1_hand_brand_defaults_are_explicitly_registered(brand):
+    version = get_default_w1_hand_version(brand)
+
+    assert version == DexforceW1HandVersion.V021
+    assert get_w1_hand_spec(brand, version).brand == brand
+
+
+def test_w1_hand_version_roundtrip(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    cfg = DexforceW1Cfg.from_dict(
+        {"version": "v025", "hand_versions": {"left": "v021"}}
+    )
+
+    data = cfg.to_dict()
+    restored = DexforceW1Cfg.from_dict(data)
+
+    assert data["hand_versions"] == {"left": "v021", "right": "v021"}
+    assert restored.hand_versions == {
+        DexforceW1ArmSide.LEFT: DexforceW1HandVersion.V021,
+        DexforceW1ArmSide.RIGHT: DexforceW1HandVersion.V021,
+    }
+
+
+def test_w1_rejects_unregistered_hand_version():
+    with pytest.raises(ValueError, match="Invalid Dexforce W1 hand version"):
+        DexforceW1Cfg.from_dict({"hand_versions": {"left": "v025"}})
+
+
+def test_w1_rejects_robot_version_as_hand_version():
+    with pytest.raises(ValueError, match="Invalid Dexforce W1 hand version"):
+        DexforceW1Cfg.from_dict({"hand_versions": {"left": DexforceW1Version.V021}})
+
+
+@pytest.mark.parametrize("version", ["v025", "V025", DexforceW1Version.V025])
+def test_w1_kine_params_accept_consistent_version_forms(version):
+    params = W1ArmKineParams.from_dict({"arm_side": "left", "version": version})
+
+    assert params.arm_side == DexforceW1ArmSide.LEFT
+    assert params.version == DexforceW1Version.V025
+
+
+def test_w1_version_spec_mappings_are_immutable():
+    spec = get_w1_version_spec("v025")
+
+    with pytest.raises(TypeError):
+        spec.solver_tcp[DexforceW1ArmSide.LEFT] = np.eye(4)
+    with pytest.raises(TypeError):
+        spec.component_urdfs[DexforceW1Type.LEFT_ARM] = "other.urdf"
+
+
+def test_w1_v025_custom_eef_and_tcp_roundtrip(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    baseline = DexforceW1Cfg.from_dict({"version": "v025"})
+    raw_attach = np.eye(4)
+    raw_attach[:3, 3] = [0.01, -0.02, 0.03]
+    raw_tcp = np.eye(4)
+    raw_tcp[:3, 3] = [0.04, 0.05, 0.06]
+    cfg = DexforceW1Cfg.from_dict(
+        {
+            "version": "v025",
+            "urdf_cfg": {
+                "components": {
+                    "left_hand": {
+                        "urdf_path": baseline.urdf_cfg.components["left_hand"][
+                            "urdf_path"
+                        ],
+                        "transform": raw_attach.tolist(),
+                    }
+                }
+            },
+            "solver_cfg": {"left_arm": {"tcp": raw_tcp.tolist()}},
+        }
+    )
+
+    expected_attach = get_w1_version_spec("v025").compose_eef_attach_xpos(
+        DexforceW1ArmSide.LEFT, raw_attach
+    )
+    expected_tcp = get_w1_version_spec("v025").compose_eef_attach_xpos(
+        DexforceW1ArmSide.LEFT, raw_tcp
+    )
+    restored = DexforceW1Cfg.from_dict(cfg.to_dict())
+
+    np.testing.assert_allclose(
+        cfg.urdf_cfg.components["left_hand"]["transform"], expected_attach
+    )
+    np.testing.assert_allclose(cfg.solver_cfg["left_arm"].tcp, expected_tcp)
+    np.testing.assert_allclose(
+        restored.urdf_cfg.components["left_hand"]["transform"], expected_attach
+    )
+    np.testing.assert_allclose(restored.solver_cfg["left_arm"].tcp, expected_tcp)
 
 
 class _RoundTripVariant(enum.Enum):

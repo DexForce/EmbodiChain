@@ -1842,6 +1842,8 @@ class RobotCfg(ArticulationCfg):
         def serialize(obj, _visited=None):
             if _visited is None:
                 _visited = set()
+            if isinstance(obj, enum.Enum):
+                return obj.value
             if isinstance(obj, (dict, object)) and not isinstance(
                 obj, (str, int, float, bool, type(None))
             ):
@@ -1850,12 +1852,15 @@ class RobotCfg(ArticulationCfg):
                     return None
                 _visited.add(obj_id)
 
-            if isinstance(obj, enum.Enum):
-                return obj.value
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
             if isinstance(obj, dict):
-                return {str(k): serialize(v, _visited) for k, v in obj.items()}
+                return {
+                    (k.value if isinstance(k, enum.Enum) else str(k)): serialize(
+                        v, _visited
+                    )
+                    for k, v in obj.items()
+                }
             if isinstance(obj, (list, tuple)):
                 return [serialize(v, _visited) for v in obj]
             if hasattr(obj, "to_dict") and obj is not self:
