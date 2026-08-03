@@ -14,25 +14,28 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Metric evaluators for motion-generation benchmarks."""
+"""Shared numeric helpers for benchmark metric aggregation."""
 
 from __future__ import annotations
 
-from .performance import TimedCall, timed_call
-from .trajectory import (
-    compute_case_outcomes,
-    compute_waypoint_errors,
-    get_pose_err,
-    make_failure_outcomes,
-    match_ordered_waypoints,
-)
+import math
+from collections.abc import Iterable
 
-__all__ = [
-    "TimedCall",
-    "compute_case_outcomes",
-    "compute_waypoint_errors",
-    "get_pose_err",
-    "make_failure_outcomes",
-    "match_ordered_waypoints",
-    "timed_call",
-]
+__all__ = ["nearest_rank_percentile"]
+
+
+def nearest_rank_percentile(
+    values: Iterable[float | None], percentile: float
+) -> float | None:
+    """Return a nearest-rank percentile over finite values, or ``None`` if empty."""
+    finite = sorted(
+        float(value)
+        for value in values
+        if value is not None and math.isfinite(float(value))
+    )
+    if not finite:
+        return None
+    index = max(
+        0, min(len(finite) - 1, math.ceil(percentile / 100.0 * len(finite)) - 1)
+    )
+    return finite[index]

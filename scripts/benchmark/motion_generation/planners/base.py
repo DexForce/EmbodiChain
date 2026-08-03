@@ -88,5 +88,15 @@ class PlannerAdapter(ABC):
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Plan one env-batched benchmark case."""
 
+    def _close_motion_generator(self) -> None:
+        """Release ``motion_generator.planner`` when adapters own one."""
+        motion_generator = getattr(self, "motion_generator", None)
+        if motion_generator is None:
+            return
+        close_fn = getattr(getattr(motion_generator, "planner", None), "close", None)
+        if close_fn is not None:
+            close_fn()
+        self.motion_generator = None
+
     def close(self) -> None:
         """Release backend resources when the implementation exposes them."""

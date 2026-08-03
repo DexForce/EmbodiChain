@@ -40,7 +40,7 @@ class TimedCall(Generic[_T]):
     cost_time_ms: float
     cpu_delta_mb: float
     gpu_delta_mb: float
-    peak_gpu_mb: float
+    peak_gpu_mb: float | None
 
 
 def _sync_cuda() -> None:

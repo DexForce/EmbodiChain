@@ -40,7 +40,7 @@ TIME_COLUMNS = (
     "warm_plan_ms_p50",
     "warm_plan_ms_p95",
     "latency_per_env_ms",
-    "cost_time_per_segment_ms",
+    "cost_time_per_waypoint_ms",
     "trajectories_per_second",
     "cpu_delta_mb",
     "gpu_delta_mb",

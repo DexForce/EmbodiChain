@@ -201,7 +201,6 @@ class BenchmarkRunner:
         metadata: PlannerMetadata,
         case: BenchmarkCase,
         phase: TrialPhase,
-        adapter: PlannerAdapter,
         callable_fn: "Callable[[], object]",
     ) -> tuple[object | None, Exception | None]:
         """Measure a construct/prepare operation and persist its outcome."""
@@ -240,7 +239,7 @@ class BenchmarkRunner:
         case: BenchmarkCase,
         phase: TrialPhase,
         repeat: int,
-    ) -> bool:
+    ) -> None:
         """Time one plan, validate outside timing, and persist the record."""
         self._set_case_start(sim, robot, case)
         measured = timed_call(lambda: _capture(lambda: adapter.plan(case)))
@@ -303,7 +302,6 @@ class BenchmarkRunner:
                 f"{phase.value:<8} {measured.cost_time_ms:>10.3f} ms "
                 f"status={status}"
             )
-        return error is None and status == "ok"
 
     def _run_adapter(
         self,
@@ -351,7 +349,6 @@ class BenchmarkRunner:
             metadata,
             first_case,
             TrialPhase.CONSTRUCT,
-            adapter,
             adapter.build,
         )
         if build_error is not None:
@@ -364,7 +361,6 @@ class BenchmarkRunner:
                     metadata,
                     first_case,
                     TrialPhase.PREPARE,
-                    adapter,
                     lambda: adapter.prepare(first_case),
                 )
                 if prepare_error is not None:

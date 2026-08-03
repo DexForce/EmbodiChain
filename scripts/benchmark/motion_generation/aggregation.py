@@ -22,6 +22,7 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 
+from .metrics.stats import nearest_rank_percentile
 from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, TrialRecord
 
 __all__ = ["aggregate_results"]
@@ -35,21 +36,6 @@ def _mean(values: Iterable[float | None]) -> float | None:
         if value is not None and math.isfinite(float(value))
     ]
     return sum(finite) / len(finite) if finite else None
-
-
-def _percentile(values: Iterable[float | None], percentile: float) -> float | None:
-    """Return a nearest-rank percentile over finite values."""
-    finite = sorted(
-        float(value)
-        for value in values
-        if value is not None and math.isfinite(float(value))
-    )
-    if not finite:
-        return None
-    index = max(
-        0, min(len(finite) - 1, math.ceil(percentile / 100.0 * len(finite)) - 1)
-    )
-    return finite[index]
 
 
 def _case_macro_rate(
@@ -197,15 +183,12 @@ def _performance_rows(
                 "batch_size": batch_size,
                 "waypoint_count": waypoint_count,
                 "num_trials": len(group),
-                # Construct/prepare are one-time deployment costs for the batch.
                 "planner_construct_ms": _lifecycle_value(
                     records, track, algorithm_id, batch_size, TrialPhase.CONSTRUCT
                 ),
                 "backend_prepare_ms": _lifecycle_value(
                     records, track, algorithm_id, batch_size, TrialPhase.PREPARE
                 ),
-                # Cold plan is the first real case only; attach it to that
-                # waypoint shape rather than repeating it on every W row.
                 "cold_plan_ms": _lifecycle_value(
                     records,
                     track,
@@ -215,12 +198,12 @@ def _performance_rows(
                     waypoint_count=waypoint_count,
                 ),
                 "cost_time_ms": mean_cost,
-                "warm_plan_ms_p50": _percentile(costs, 50.0),
-                "warm_plan_ms_p95": _percentile(costs, 95.0),
+                "warm_plan_ms_p50": nearest_rank_percentile(costs, 50.0),
+                "warm_plan_ms_p95": nearest_rank_percentile(costs, 95.0),
                 "latency_per_env_ms": (
                     mean_cost / batch_size if mean_cost is not None else None
                 ),
-                "cost_time_per_segment_ms": (
+                "cost_time_per_waypoint_ms": (
                     mean_cost / waypoint_count if mean_cost is not None else None
                 ),
                 "trajectories_per_second": (
@@ -254,7 +237,7 @@ def _performance_rows(
                     "warm_plan_ms_p50": None,
                     "warm_plan_ms_p95": None,
                     "latency_per_env_ms": None,
-                    "cost_time_per_segment_ms": None,
+                    "cost_time_per_waypoint_ms": None,
                     "trajectories_per_second": None,
                     "cpu_delta_mb": None,
                     "gpu_delta_mb": None,
@@ -432,7 +415,7 @@ def _leaderboard_rows(
             coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
             motion_rate = _case_macro_rate(measured, track_cases, "motion_valid")
             planning_rate = _case_macro_rate(measured, track_cases, "planning_success")
-            latency_p95 = _percentile(
+            latency_p95 = nearest_rank_percentile(
                 (record.cost_time_ms for record in measured), 95.0
             )
             peak_gpu = _peak_gpu(measured)
@@ -445,6 +428,7 @@ def _leaderboard_rows(
                     "planner_config_hash": info.config_hash[:12],
                     "eligible": coverage >= 1.0 - 1.0e-12,
                     "coverage_rate": coverage,
+                    # free-space v1: primary_success == motion_valid
                     "overall_success_rate": motion_rate,
                     "planning_success_rate": planning_rate,
                     "motion_valid_rate": motion_rate,

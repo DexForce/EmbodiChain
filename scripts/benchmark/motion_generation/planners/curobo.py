@@ -134,11 +134,7 @@ class CuroboAdapter(PlannerAdapter):
 
     def close(self) -> None:
         """Destroy cached cuRobo graph and planner resources."""
-        if self.motion_generator is not None:
-            close_fn = getattr(self.motion_generator.planner, "close", None)
-            if close_fn is not None:
-                close_fn()
-            self.motion_generator = None
+        self._close_motion_generator()
 
 
 register_planner_adapter("curobo", CuroboAdapter)

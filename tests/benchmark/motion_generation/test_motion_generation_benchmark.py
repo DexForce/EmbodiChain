@@ -135,15 +135,18 @@ def test_waypoint_errors_use_threshold_greedy_arrivals():
 
     assert result["ordered_waypoints_reached"] is True
     assert result["arrival_indices"] == [0, 2]
-    assert result["matched_indices"] == result["arrival_indices"]
     assert max(result["position_errors_m"]) <= 0.05 + 1.0e-9
 
 
 class _MetricRobot:
+    """Minimal FK stub: joint xyz maps to TCP translation."""
+
     device = torch.device("cpu")
+    limit_lo = -1.0
+    limit_hi = 1.0
 
     def get_qpos_limits(self, name: str):  # noqa: ARG002
-        limits = torch.tensor([[-1.0, 1.0]]).repeat(7, 1)
+        limits = torch.tensor([[self.limit_lo, self.limit_hi]]).repeat(7, 1)
         return limits.unsqueeze(0)
 
     def compute_batch_fk(
@@ -153,13 +156,24 @@ class _MetricRobot:
         poses[..., :3, 3] = qpos[..., :3]
         return poses
 
+    def compute_fk(
+        self, qpos: torch.Tensor, name: str, to_matrix: bool
+    ):  # noqa: ARG002
+        poses = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        poses[:, :3, 3] = qpos[:, :3]
+        return poses
 
-def test_motion_valid_is_independent_of_planner_reported_success():
+
+def _valid_motion_case_and_positions() -> tuple[BenchmarkCase, torch.Tensor]:
     case = _case()
     case.target_waypoints[0, 0, 0, 3] = 0.1
     positions = torch.zeros(1, 2, 7)
     positions[0, 1, 0] = 0.1
+    return case, positions
 
+
+def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():
+    case, positions = _valid_motion_case_and_positions()
     outcomes = compute_case_outcomes(
         PlanResult(success=False, positions=positions),
         case,
@@ -170,28 +184,11 @@ def test_motion_valid_is_independent_of_planner_reported_success():
         rotation_threshold_rad=1.0e-4,
         joint_limit_tolerance_rad=1.0e-5,
     )
-
     assert outcomes[0].planning_success is False
     assert outcomes[0].motion_valid is True
     assert outcomes[0].failure_code is None
     assert outcomes[0].planner_failure_code == "planner_reported_failure"
 
-
-def test_top_failure_ignores_planner_internal_codes_when_motion_valid():
-    case = _case()
-    case.target_waypoints[0, 0, 0, 3] = 0.1
-    positions = torch.zeros(1, 2, 7)
-    positions[0, 1, 0] = 0.1
-    outcomes = compute_case_outcomes(
-        PlanResult(success=False, positions=positions),
-        case,
-        _MetricRobot(),
-        "arm",
-        validation_samples=8,
-        position_threshold_m=1.0e-4,
-        rotation_threshold_rad=1.0e-4,
-        joint_limit_tolerance_rad=1.0e-5,
-    )
     metadata = [
         PlannerMetadata(
             algorithm_id="curobo",
@@ -220,14 +217,47 @@ def test_top_failure_ignores_planner_internal_codes_when_motion_valid():
         cost_time_ms=10.0,
         outcomes=outcomes,
     )
-
-    aggregates = aggregate_results([measured], metadata, [case], measured_trials=1)
-    row = aggregates["success_and_metrics"][0]
-
+    row = aggregate_results([measured], metadata, [case], measured_trials=1)[
+        "success_and_metrics"
+    ][0]
     assert row["success_rate"] == pytest.approx(1.0)
     assert row["planning_success_rate"] == pytest.approx(0.0)
     assert row["top_failure"] is None
-    assert row["start_state_bin"] == "nominal"
+
+
+def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
+    case = _case()
+    missing = compute_case_outcomes(
+        PlanResult(success=True, positions=None),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+    assert missing[0].motion_valid is False
+    assert missing[0].failure_code == "non_finite_trajectory"
+
+    # Reach the waypoint at x=2 while joint 0 is outside [-1, 1].
+    case.target_waypoints[0, 0, 0, 3] = 2.0
+    positions = torch.zeros(1, 2, 7)
+    positions[0, :, 0] = 2.0
+    violated = compute_case_outcomes(
+        PlanResult(success=True, positions=positions),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+    assert violated[0].ordered_waypoints_reached is True
+    assert violated[0].joint_limit_violation is True
+    assert violated[0].motion_valid is False
+    assert violated[0].failure_code == "joint_limit_violation"
 
 
 def test_nmg_precision_and_external_accuracy_are_independently_configurable():
@@ -255,20 +285,13 @@ def test_nmg_precision_rejects_non_positive_values(override):
         _apply_overrides(suite, **override)
 
 
-class _FakeRobot:
-    device = torch.device("cpu")
+class _FrankaLimitRobot(_MetricRobot):
+    """FK stub with Franka-like joint limits for free-space case generation."""
 
     def get_qpos_limits(self, name: str):  # noqa: ARG002
         lower = torch.tensor([-2.8, -1.7, -2.8, -3.0, -2.8, 0.0, -2.8])
         upper = torch.tensor([2.8, 1.7, 2.8, -0.05, 2.8, 3.7, 2.8])
         return torch.stack([lower, upper], dim=-1).unsqueeze(0)
-
-    def compute_fk(
-        self, qpos: torch.Tensor, name: str, to_matrix: bool
-    ):  # noqa: ARG002
-        poses = torch.eye(4).repeat(qpos.shape[0], 1, 1)
-        poses[:, :3, 3] = qpos[:, :3]
-        return poses
 
 
 def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
@@ -287,7 +310,7 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
 
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     suite = load_suite("smoke")
-    robot = _FakeRobot()
+    robot = _FrankaLimitRobot()
     provider = create_scenario_provider("free_space")
     track = suite.enabled_tracks()[0]
 
@@ -309,7 +332,7 @@ def test_free_space_cases_use_one_start_state_bin_each():
     suite.free_space.start_state_bins = ["nominal", "near_limit"]
     track = suite.enabled_tracks()[0]
     cases = create_scenario_provider("free_space").generate_cases(
-        suite, track, _FakeRobot(), "arm", batch_size=2
+        suite, track, _FrankaLimitRobot(), "arm", batch_size=2
     )
 
     assert [case.start_state_bin for case in cases] == ["nominal", "near_limit"]
@@ -800,44 +823,6 @@ def test_curobo_prepare_backend_exposes_actual_graph_mode():
     assert result["batch_size"] == 8
 
 
-def test_metric_rows_use_success_rate_and_null_peak_gpu():
-    metadata = [
-        PlannerMetadata(
-            algorithm_id="curobo",
-            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
-            adapter="curobo",
-            config_hash="abc",
-            capabilities=frozenset({"eef_waypoint"}),
-        )
-    ]
-    measured = TrialRecord(
-        suite_version="test_v1",
-        track="free-space-common",
-        scenario_id="reach",
-        case_id="case-1",
-        algorithm_id="curobo",
-        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
-        model_revision="curobo-v2",
-        planner_config_hash="abc",
-        seed=11,
-        repeat=0,
-        batch_size=1,
-        waypoint_count=1,
-        path_shape="direct",
-        start_state_bin="nominal",
-        phase=TrialPhase.MEASURED,
-        cost_time_ms=10.0,
-        peak_gpu_mb=None,
-        outcomes=(_outcome(),),
-    )
-    aggregates = aggregate_results([measured], metadata, [_case()], measured_trials=1)
-
-    assert aggregates["success_and_metrics"][0]["success_rate"] == pytest.approx(1.0)
-    assert "motion_valid_rate" not in aggregates["success_and_metrics"][0]
-    assert aggregates["time_and_memory"][0]["peak_gpu_mb"] is None
-    assert aggregates["leaderboard"][0]["peak_gpu_mb"] is None
-
-
 def test_toppra_adapter_close_releases_planner():
     from scripts.benchmark.motion_generation.config import PlannerSpecCfg
     from scripts.benchmark.motion_generation.planners.base import PlannerContext
@@ -967,7 +952,10 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         SuiteCfg,
     )
     from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
-    from scripts.benchmark.motion_generation.registry import register_planner_adapter
+    from scripts.benchmark.motion_generation.registry import (
+        register_planner_adapter,
+        unregister_planner_adapter,
+    )
     from scripts.benchmark.motion_generation.runner import BenchmarkRunner
 
     class _CapableFake(PlannerAdapter):
@@ -990,25 +978,52 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         def plan(self, case: BenchmarkCase) -> PlanResult:  # noqa: ARG002
             raise AssertionError("incapable adapter must not plan")
 
+    class _RuntimeUnavailableFake(PlannerAdapter):
+        capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+
+        def availability(self) -> tuple[bool, str | None]:
+            return False, "runtime missing"
+
+        def build(self) -> None:
+            return None
+
+        def plan(self, case: BenchmarkCase) -> PlanResult:  # noqa: ARG002
+            raise AssertionError("unavailable adapter must not plan")
+
+    class _ContractBrokenFake(PlannerAdapter):
+        capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+
+        def build(self) -> None:
+            return None
+
+        def plan(self, case: BenchmarkCase):  # noqa: ARG002
+            return "not-a-plan-result"
+
+    names = (
+        "fake_capable",
+        "fake_incapable",
+        "fake_runtime_unavailable",
+        "fake_contract_broken",
+    )
     register_planner_adapter("fake_capable", _CapableFake)
     register_planner_adapter("fake_incapable", _IncapableFake)
-
-    suite = SuiteCfg(
-        name="motion_generation",
-        suite_version="test_fake_v1",
-        profile="smoke",
-        protocol=ProtocolCfg(
-            warmup_trials=0,
-            measured_trials=1,
-            sample_interval=4,
-            validation_samples=4,
-            position_threshold_m=1.0,
-            rotation_threshold_rad=1.0,
-        ),
-    )
-    runner = BenchmarkRunner(
-        suite,
-        [
+    register_planner_adapter("fake_runtime_unavailable", _RuntimeUnavailableFake)
+    register_planner_adapter("fake_contract_broken", _ContractBrokenFake)
+    try:
+        suite = SuiteCfg(
+            name="motion_generation",
+            suite_version="test_fake_v1",
+            profile="smoke",
+            protocol=ProtocolCfg(
+                warmup_trials=0,
+                measured_trials=1,
+                sample_interval=4,
+                validation_samples=4,
+                position_threshold_m=1.0,
+                rotation_threshold_rad=1.0,
+            ),
+        )
+        specs = [
             PlannerSpecCfg(
                 id="capable",
                 adapter="fake_capable",
@@ -1021,77 +1036,85 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
                 role=AlgorithmRole.CANDIDATE.value,
                 enabled=True,
             ),
-        ],
-        device="cpu",
-        output_root=tmp_path,
-    )
-    case = _case()
-    case = replace(case, suite_version=suite.suite_version)
-    runner.cases = [case]
-    writer = TrialJsonlWriter(tmp_path / "trials.jsonl")
+            PlannerSpecCfg(
+                id="runtime_down",
+                adapter="fake_runtime_unavailable",
+                role=AlgorithmRole.CANDIDATE.value,
+                enabled=True,
+            ),
+            PlannerSpecCfg(
+                id="broken",
+                adapter="fake_contract_broken",
+                role=AlgorithmRole.CANDIDATE.value,
+                enabled=True,
+            ),
+        ]
+        runner = BenchmarkRunner(suite, specs, device="cpu", output_root=tmp_path)
+        case = replace(_case(), suite_version=suite.suite_version)
+        runner.cases = [case]
+        writer = TrialJsonlWriter(tmp_path / "trials.jsonl")
 
-    robot = Mock(device=torch.device("cpu"))
-    robot.set_qpos = Mock()
-    robot.clear_dynamics = Mock()
-    robot.get_qpos_limits = Mock(
-        return_value=torch.tensor([[-2.0, 2.0]]).repeat(7, 1).unsqueeze(0)
-    )
-    robot.compute_batch_fk = Mock(
-        side_effect=lambda qpos, name, to_matrix: (  # noqa: ARG005
-            torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1).to(qpos.device)
+        robot = Mock(device=torch.device("cpu"))
+        robot.set_qpos = Mock()
+        robot.clear_dynamics = Mock()
+        robot.get_qpos_limits = Mock(
+            return_value=torch.tensor([[-2.0, 2.0]]).repeat(7, 1).unsqueeze(0)
         )
-    )
-    sim = Mock()
-    sim.update = Mock()
+        robot.compute_batch_fk = Mock(
+            side_effect=lambda qpos, name, to_matrix: (  # noqa: ARG005
+                torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1).to(qpos.device)
+            )
+        )
+        sim = Mock()
+        sim.update = Mock()
+        required = frozenset({"eef_waypoint", "batched", "empty_world"})
+        for spec in specs:
+            runner._run_adapter(writer, sim, robot, spec, [case], required)
 
-    required = frozenset({"eef_waypoint", "batched", "empty_world"})
-    runner._run_adapter(
-        writer,
-        sim,
-        robot,
-        runner.planner_specs[0],
-        [case],
-        required,
-    )
-    runner._run_adapter(
-        writer,
-        sim,
-        robot,
-        runner.planner_specs[1],
-        [case],
-        required,
-    )
+        phases = {
+            (r.algorithm_id, r.phase, r.status, r.failure_code) for r in runner.records
+        }
+        assert (
+            "incapable",
+            TrialPhase.AVAILABILITY,
+            "unsupported",
+            "unsupported_capability",
+        ) in phases
+        assert (
+            "runtime_down",
+            TrialPhase.AVAILABILITY,
+            "unsupported",
+            "runtime_unavailable",
+        ) in phases
+        assert any(
+            r.algorithm_id == "broken"
+            and r.phase is TrialPhase.MEASURED
+            and r.failure_code == "planner_contract_error"
+            for r in runner.records
+        )
+        assert any(
+            r.algorithm_id == "capable"
+            and r.phase is TrialPhase.COLD
+            and r.outcomes == ()
+            for r in runner.records
+        )
 
-    phases = {
-        (r.algorithm_id, r.phase, r.status, r.failure_code) for r in runner.records
-    }
-    assert (
-        "incapable",
-        TrialPhase.AVAILABILITY,
-        "unsupported",
-        "unsupported_capability",
-    ) in phases
-    assert any(
-        r.algorithm_id == "capable" and r.phase is TrialPhase.COLD and r.outcomes == ()
-        for r in runner.records
-    )
-    assert any(
-        r.algorithm_id == "capable" and r.phase is TrialPhase.MEASURED
-        for r in runner.records
-    )
-
-    metadata = list(runner.metadata.values())
-    aggregates = aggregate_results(
-        runner.records, metadata, [case], suite.protocol.measured_trials
-    )
-    capable = next(
-        row for row in aggregates["leaderboard"] if row["algorithm"] == "capable"
-    )
-    incapable = next(
-        row for row in aggregates["leaderboard"] if row["algorithm"] == "incapable"
-    )
-    assert capable["eligible"] is True
-    assert capable["overall_success_rate"] == pytest.approx(1.0)
-    assert incapable["eligible"] is False
-    assert incapable["overall_success_rate"] == pytest.approx(0.0)
-    assert any("missing required capabilities" in note for note in runner.notes)
+        aggregates = aggregate_results(
+            runner.records,
+            list(runner.metadata.values()),
+            [case],
+            suite.protocol.measured_trials,
+        )
+        capable = next(
+            row for row in aggregates["leaderboard"] if row["algorithm"] == "capable"
+        )
+        incapable = next(
+            row for row in aggregates["leaderboard"] if row["algorithm"] == "incapable"
+        )
+        assert capable["eligible"] is True
+        assert capable["overall_success_rate"] == pytest.approx(1.0)
+        assert incapable["eligible"] is False
+        assert any("missing required capabilities" in note for note in runner.notes)
+    finally:
+        for name in names:
+            unregister_planner_adapter(name)

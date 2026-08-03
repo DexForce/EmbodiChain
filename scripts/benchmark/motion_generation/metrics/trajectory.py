@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import torch
@@ -26,6 +27,7 @@ import torch
 from embodichain.lab.sim.planners.utils import PlanResult
 
 from ..models import BenchmarkCase, CaseOutcome
+from .stats import nearest_rank_percentile
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -37,21 +39,6 @@ __all__ = [
     "make_failure_outcomes",
     "match_ordered_waypoints",
 ]
-
-
-def _percentile(values: list[float], percentile: float) -> float:
-    """Return a nearest-rank percentile for a non-empty list."""
-    if not values:
-        return float("inf")
-    ordered = sorted(values)
-    index = max(
-        0,
-        min(
-            len(ordered) - 1,
-            math.ceil(percentile / 100.0 * len(ordered)) - 1,
-        ),
-    )
-    return float(ordered[index])
 
 
 def _pose_error_matrices(
@@ -110,7 +97,6 @@ def match_ordered_waypoints(
             "ordered_waypoints_reached": False,
             "completed_waypoint_ratio": 0.0,
             "arrival_indices": [],
-            "matched_indices": [],
             "position_errors_m": [],
             "rotation_errors_rad": [],
         }
@@ -144,8 +130,6 @@ def match_ordered_waypoints(
         "ordered_waypoints_reached": completed == total,
         "completed_waypoint_ratio": completed / max(total, 1),
         "arrival_indices": arrival_indices,
-        # Alias kept for callers; same threshold-greedy matching as success.
-        "matched_indices": list(arrival_indices),
         "position_errors_m": position_errors,
         "rotation_errors_rad": rotation_errors,
     }
@@ -277,12 +261,13 @@ def make_failure_outcomes(
     failure_code: str,
     *,
     planner_failure_code: str | None = None,
+    planning_success: bool = False,
 ) -> tuple[CaseOutcome, ...]:
-    """Create per-env outcomes for an exception before validation was possible."""
+    """Create per-env outcomes when validation cannot produce a trajectory."""
     return tuple(
         CaseOutcome(
             env_index=index,
-            planning_success=False,
+            planning_success=planning_success,
             finite=False,
             ordered_waypoints_reached=False,
             motion_valid=False,
@@ -322,32 +307,18 @@ def compute_case_outcomes(
     planning_success = _success_tensor(result.success, case.batch_size)
     if result.positions is None or result.positions.ndim != 3:
         return tuple(
-            CaseOutcome(
+            replace(
+                make_failure_outcomes(
+                    1,
+                    "non_finite_trajectory",
+                    planning_success=bool(planning_success[env_index].item()),
+                    planner_failure_code=(
+                        None
+                        if bool(planning_success[env_index].item())
+                        else "planner_reported_failure"
+                    ),
+                )[0],
                 env_index=env_index,
-                planning_success=bool(planning_success[env_index].item()),
-                finite=False,
-                ordered_waypoints_reached=False,
-                motion_valid=False,
-                completed_waypoint_ratio=0.0,
-                final_translation_err_mm=None,
-                final_rotation_err_deg=None,
-                waypoint_translation_err_mm_mean=None,
-                waypoint_translation_err_mm_p95=None,
-                waypoint_translation_err_mm_max=None,
-                waypoint_rotation_err_deg_mean=None,
-                waypoint_rotation_err_deg_p95=None,
-                waypoint_rotation_err_deg_max=None,
-                joint_limit_violation=False,
-                max_normalized_joint_violation=None,
-                joint_path_length_rad=None,
-                cartesian_path_length_m=None,
-                path_efficiency=None,
-                failure_code="non_finite_trajectory",
-                planner_failure_code=(
-                    None
-                    if bool(planning_success[env_index].item())
-                    else "planner_reported_failure"
-                ),
             )
             for env_index in range(case.batch_size)
         )
@@ -456,8 +427,8 @@ def compute_case_outcomes(
                 waypoint_translation_err_mm_mean=(
                     sum(pos_errors_mm) / len(pos_errors_mm) if pos_errors_mm else None
                 ),
-                waypoint_translation_err_mm_p95=(
-                    _percentile(pos_errors_mm, 95.0) if pos_errors_mm else None
+                waypoint_translation_err_mm_p95=nearest_rank_percentile(
+                    pos_errors_mm, 95.0
                 ),
                 waypoint_translation_err_mm_max=(
                     max(pos_errors_mm) if pos_errors_mm else None
@@ -467,8 +438,8 @@ def compute_case_outcomes(
                     if rot_errors_deg
                     else None
                 ),
-                waypoint_rotation_err_deg_p95=(
-                    _percentile(rot_errors_deg, 95.0) if rot_errors_deg else None
+                waypoint_rotation_err_deg_p95=nearest_rank_percentile(
+                    rot_errors_deg, 95.0
                 ),
                 waypoint_rotation_err_deg_max=(
                     max(rot_errors_deg) if rot_errors_deg else None

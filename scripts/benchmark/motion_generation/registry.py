@@ -32,6 +32,7 @@ __all__ = [
     "register_planner_adapter",
     "register_scenario_provider",
     "scenario_provider_names",
+    "unregister_planner_adapter",
 ]
 
 _PLANNER_ADAPTERS: dict[str, type["PlannerAdapter"]] = {}
@@ -46,6 +47,11 @@ def register_planner_adapter(name: str, adapter_cls: type["PlannerAdapter"]) -> 
     if previous is not None and previous is not adapter_cls:
         raise ValueError(f"Planner adapter {name!r} is already registered.")
     _PLANNER_ADAPTERS[name] = adapter_cls
+
+
+def unregister_planner_adapter(name: str) -> None:
+    """Remove one planner adapter registration when present."""
+    _PLANNER_ADAPTERS.pop(name, None)
 
 
 def planner_adapter_names() -> tuple[str, ...]:
