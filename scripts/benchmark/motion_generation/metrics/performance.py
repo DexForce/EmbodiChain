@@ -74,7 +74,7 @@ def timed_call(callable_fn: Callable[[], _T]) -> TimedCall[_T]:
     peak_gpu_mb = (
         torch.cuda.max_memory_allocated() / 1024**2
         if torch.cuda.is_available()
-        else 0.0
+        else None
     )
     return TimedCall(
         result=result,

@@ -52,12 +52,6 @@ def _percentile(values: Iterable[float | None], percentile: float) -> float | No
     return finite[index]
 
 
-def _rate(values: Iterable[bool]) -> float | None:
-    """Return a boolean rate or ``None`` for an empty sequence."""
-    materialized = list(values)
-    return sum(materialized) / len(materialized) if materialized else None
-
-
 def _case_macro_rate(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
@@ -88,6 +82,32 @@ def _case_macro_rate(
             / len(outcomes)
         )
     return sum(case_rates) / len(case_rates)
+
+
+def _case_macro_mean(
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+    attribute: str,
+) -> float | None:
+    """Macro-average a numeric outcome attribute across cases with values."""
+    if not track_cases:
+        return None
+
+    outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        outcomes_by_case[record.case_id].extend(record.outcomes)
+
+    case_means: list[float] = []
+    for case in track_cases:
+        values = [
+            float(getattr(outcome, attribute))
+            for outcome in outcomes_by_case.get(case.case_id, [])
+            if getattr(outcome, attribute) is not None
+            and math.isfinite(float(getattr(outcome, attribute)))
+        ]
+        if values:
+            case_means.append(sum(values) / len(values))
+    return sum(case_means) / len(case_means) if case_means else None
 
 
 def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
@@ -258,9 +278,14 @@ def _metric_rows(
     cases: list[BenchmarkCase],
     measured_trials: int,
 ) -> list[dict[str, object]]:
-    """Aggregate external success and quality metrics by scenario condition."""
-    outcome_groups: dict[
-        tuple[str, str, str, int, int, str, str], list[CaseOutcome]
+    """Aggregate external success and quality metrics by scenario condition.
+
+    Boolean success columns use the same case-level macro average as the
+    leaderboard (missing cases contribute ``0.0``). Continuous quality metrics
+    remain conditioned on externally motion-valid outcomes.
+    """
+    measured_by_key: dict[
+        tuple[str, str, str, int, int, str, str], list[TrialRecord]
     ] = defaultdict(list)
     for record in records:
         if record.phase is not TrialPhase.MEASURED:
@@ -274,10 +299,12 @@ def _metric_rows(
             record.path_shape,
             record.start_state_bin,
         )
-        outcome_groups[key].extend(record.outcomes)
+        measured_by_key[key].append(record)
 
     expected_by_group: Counter[tuple[str, str, int, int, str, str]] = Counter()
-    unique_cases_by_group: Counter[tuple[str, str, int, int, str, str]] = Counter()
+    cases_by_group: dict[tuple[str, str, int, int, str, str], list[BenchmarkCase]] = (
+        defaultdict(list)
+    )
     for case in cases:
         key = (
             case.track,
@@ -288,7 +315,7 @@ def _metric_rows(
             case.start_state_bin,
         )
         expected_by_group[key] += case.batch_size * measured_trials
-        unique_cases_by_group[key] += case.batch_size
+        cases_by_group[key].append(case)
 
     rows: list[dict[str, object]] = []
     for info in metadata:
@@ -301,7 +328,8 @@ def _metric_rows(
                 path_shape,
                 start_state_bin,
             ) = group_key
-            outcomes = outcome_groups.get(
+            group_cases = cases_by_group[group_key]
+            measured = measured_by_key.get(
                 (
                     track,
                     info.algorithm_id,
@@ -313,6 +341,7 @@ def _metric_rows(
                 ),
                 [],
             )
+            outcomes = [outcome for record in measured for outcome in record.outcomes]
             valid_outcomes = [outcome for outcome in outcomes if outcome.motion_valid]
             expected = expected_by_group[group_key]
             rows.append(
@@ -325,18 +354,20 @@ def _metric_rows(
                     "waypoint_count": waypoint_count,
                     "path_shape": path_shape,
                     "start_state_bin": start_state_bin,
-                    "cases": unique_cases_by_group[group_key],
+                    "cases": len(group_cases),
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
                     # Free-space primary success is external motion validity.
-                    "success_rate": _rate(outcome.motion_valid for outcome in outcomes),
-                    "planning_success_rate": _rate(
-                        outcome.planning_success for outcome in outcomes
+                    "success_rate": _case_macro_rate(
+                        measured, group_cases, "motion_valid"
                     ),
-                    "ordered_waypoint_success_rate": _rate(
-                        outcome.ordered_waypoints_reached for outcome in outcomes
+                    "planning_success_rate": _case_macro_rate(
+                        measured, group_cases, "planning_success"
                     ),
-                    "waypoint_completion_rate": _mean(
-                        outcome.completed_waypoint_ratio for outcome in outcomes
+                    "ordered_waypoint_success_rate": _case_macro_rate(
+                        measured, group_cases, "ordered_waypoints_reached"
+                    ),
+                    "waypoint_completion_rate": _case_macro_mean(
+                        measured, group_cases, "completed_waypoint_ratio"
                     ),
                     "final_pos_err_mm": _mean(
                         outcome.final_translation_err_mm for outcome in valid_outcomes
@@ -352,8 +383,8 @@ def _metric_rows(
                         outcome.waypoint_rotation_err_deg_p95
                         for outcome in valid_outcomes
                     ),
-                    "joint_violation_rate": _rate(
-                        outcome.joint_limit_violation for outcome in outcomes
+                    "joint_violation_rate": _case_macro_rate(
+                        measured, group_cases, "joint_limit_violation"
                     ),
                     "joint_path_length_rad": _mean(
                         outcome.joint_path_length_rad for outcome in valid_outcomes
@@ -400,9 +431,7 @@ def _leaderboard_rows(
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
             motion_rate = _case_macro_rate(measured, track_cases, "motion_valid")
-            planning_rate = _case_macro_rate(
-                measured, track_cases, "planning_success"
-            )
+            planning_rate = _case_macro_rate(measured, track_cases, "planning_success")
             latency_p95 = _percentile(
                 (record.cost_time_ms for record in measured), 95.0
             )

@@ -178,14 +178,16 @@ class BenchmarkRunner:
         metadata: PlannerMetadata,
         case: BenchmarkCase,
         reason: str,
+        *,
+        failure_code: str,
     ) -> None:
-        """Record an unsupported runtime without converting it into failure."""
+        """Record an unsupported/unavailable planner without counting a failure."""
         self._append(
             writer,
             TrialRecord(
                 **self._base_record(metadata, case, TrialPhase.AVAILABILITY),
                 status="unsupported",
-                failure_code="unsupported_capability",
+                failure_code=failure_code,
                 failure_message=reason,
             ),
         )
@@ -256,7 +258,9 @@ class BenchmarkRunner:
             failure_code = "planner_contract_error"
             failure_message = f"Expected PlanResult, got {type(result).__name__}."
             outcomes = make_failure_outcomes(case.batch_size, failure_code)
-        elif phase is TrialPhase.WARMUP:
+        elif phase in (TrialPhase.WARMUP, TrialPhase.COLD):
+            # Cold/warmup timing must not pay for FK validation that is unused
+            # by aggregation.
             outcomes = ()
         else:
             try:
@@ -308,6 +312,7 @@ class BenchmarkRunner:
         robot: "Robot",
         spec: PlannerSpecCfg,
         cases: list[BenchmarkCase],
+        required_capabilities: frozenset[str],
     ) -> None:
         """Execute one adapter over every case for a fixed simulator batch."""
         context = PlannerContext(
@@ -320,10 +325,24 @@ class BenchmarkRunner:
         metadata = adapter.metadata
         self.metadata.setdefault(metadata.algorithm_id, metadata)
         first_case = cases[0]
+        missing = sorted(required_capabilities - adapter.capabilities)
+        if missing:
+            self._record_unavailable(
+                writer,
+                metadata,
+                first_case,
+                f"missing required capabilities: {', '.join(missing)}",
+                failure_code="unsupported_capability",
+            )
+            return
         available, reason = adapter.availability()
         if not available:
             self._record_unavailable(
-                writer, metadata, first_case, reason or "runtime unavailable"
+                writer,
+                metadata,
+                first_case,
+                reason or "runtime unavailable",
+                failure_code="runtime_unavailable",
             )
             return
 
@@ -415,7 +434,14 @@ class BenchmarkRunner:
                     )
                     self.cases.extend(cases)
                     for spec in self.planner_specs:
-                        self._run_adapter(writer, sim, robot, spec, cases)
+                        self._run_adapter(
+                            writer,
+                            sim,
+                            robot,
+                            spec,
+                            cases,
+                            provider.required_capabilities,
+                        )
                 finally:
                     if sim is not None:
                         # Benchmarks must aggregate and report after simulator
@@ -445,12 +471,17 @@ class BenchmarkRunner:
                 "CPU/GPU memory values are process/PyTorch allocator deltas around timed calls.",
                 "Continuous error and path metrics are conditioned on externally motion-valid trajectories.",
                 "Collision, dynamic, execution, and task metrics are N/A in free-space-common v1.",
-                "Leaderboard overall_success_rate / motion_valid_rate / planning_success_rate "
-                "are macro averages over mandatory cases (equal case weight after within-case "
-                "env/repeat micro-average); coverage_rate remains outcome-count completeness.",
+                "Leaderboard and Success-table boolean rates "
+                "(overall_success_rate / success_rate / motion_valid_rate / "
+                "planning_success_rate / ordered_waypoint_success_rate) are macro averages "
+                "over mandatory cases (equal case weight after within-case env/repeat "
+                "micro-average). Missing cases contribute 0.0. coverage_rate remains "
+                "outcome-count completeness.",
                 "cold_plan_ms is reported only on the Time & Memory row whose waypoint_count "
                 "matches the first real case measured for that batch; other waypoint rows "
                 "show N/A. planner_construct_ms / backend_prepare_ms are one-time batch costs.",
+                "Waypoint continuous errors use the same threshold-greedy arrival matching "
+                "as ordered_waypoints_reached / motion_valid.",
                 *self.notes,
             ],
         )

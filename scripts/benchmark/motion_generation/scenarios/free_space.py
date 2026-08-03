@@ -40,7 +40,7 @@ _NOMINAL_QPOS = torch.tensor(
 
 
 def _clamp_with_margin(qpos: torch.Tensor, limits: torch.Tensor) -> torch.Tensor:
-    """Clamp qpos inside ten-percent joint-limit margins."""
+    """Clamp qpos inside five-percent joint-limit margins."""
     lower, upper = limits[:, 0], limits[:, 1]
     margin = (upper - lower).clamp_min(1.0e-3) * 0.05
     return torch.maximum(torch.minimum(qpos, upper - margin), lower + margin)

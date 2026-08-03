@@ -114,6 +114,31 @@ def test_ordered_waypoint_requires_position_and_rotation_at_same_sample():
     assert result["arrival_indices"] == []
 
 
+def test_waypoint_errors_use_threshold_greedy_arrivals():
+    """Continuous errors must come from the same matching as motion_valid."""
+    waypoints = torch.stack([_translated_pose(0.0), _translated_pose(0.10)])
+    # Sample 0 hits W0 under threshold. Sample 1 is a high-error later pose that
+    # unconstrained DP could prefer for W0 while still sequencing W1 later.
+    trajectory = torch.stack(
+        [
+            _translated_pose(0.0),
+            _translated_pose(0.04),
+            _translated_pose(0.10),
+        ]
+    )
+    result = match_ordered_waypoints(
+        trajectory,
+        waypoints,
+        position_threshold_m=0.05,
+        rotation_threshold_rad=0.3,
+    )
+
+    assert result["ordered_waypoints_reached"] is True
+    assert result["arrival_indices"] == [0, 2]
+    assert result["matched_indices"] == result["arrival_indices"]
+    assert max(result["position_errors_m"]) <= 0.05 + 1.0e-9
+
+
 class _MetricRobot:
     device = torch.device("cpu")
 
@@ -838,3 +863,235 @@ def test_toppra_adapter_close_releases_planner():
 
     planner.close.assert_called_once_with()
     assert adapter.motion_generator is None
+
+
+def test_success_table_uses_case_macro_and_counts_cases_not_env_slots():
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    case_a = _case()
+    case_b = replace(_case(), case_id="case-missing", seed=23)
+    records = [
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=case_a.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=case_a.seed,
+            repeat=0,
+            batch_size=1,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=10.0,
+            outcomes=(_outcome(),),
+        )
+    ]
+    row = aggregate_results(records, metadata, [case_a, case_b], measured_trials=1)[
+        "success_and_metrics"
+    ][0]
+    assert row["cases"] == 2
+    # One measured success + one missing case (counts as 0) → macro 0.5.
+    assert row["success_rate"] == pytest.approx(0.5)
+    assert row["coverage_rate"] == pytest.approx(0.5)
+
+    large = replace(
+        _case(),
+        case_id="case-b64",
+        seed=23,
+        batch_size=64,
+        start_qpos=torch.zeros(64, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).expand(64, 1, 4, 4).clone(),
+        reference_qpos=torch.zeros(64, 1, 7),
+    )
+    failed = replace(
+        _outcome(),
+        planning_success=False,
+        ordered_waypoints_reached=False,
+        motion_valid=False,
+        completed_waypoint_ratio=0.0,
+        failure_code="waypoint_miss",
+    )
+    large_record = TrialRecord(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id=large.case_id,
+        algorithm_id="curobo",
+        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+        model_revision="curobo-v2",
+        planner_config_hash="abc",
+        seed=large.seed,
+        repeat=0,
+        batch_size=64,
+        waypoint_count=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        phase=TrialPhase.MEASURED,
+        cost_time_ms=40.0,
+        outcomes=tuple(replace(failed, env_index=i) for i in range(64)),
+    )
+    large_row = aggregate_results([large_record], metadata, [large], measured_trials=1)[
+        "success_and_metrics"
+    ][0]
+    assert large_row["cases"] == 1
+    assert large_row["success_rate"] == pytest.approx(0.0)
+
+
+def test_timed_call_reports_null_peak_gpu_without_cuda(monkeypatch):
+    from scripts.benchmark.motion_generation.metrics import performance
+
+    monkeypatch.setattr(performance.torch.cuda, "is_available", lambda: False)
+    measured = performance.timed_call(lambda: 42)
+    assert measured.result == 42
+    assert measured.peak_gpu_mb is None
+
+
+def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
+    """Exercise AVAILABILITY gating and MEASURED aggregation without DexSim."""
+    from scripts.benchmark.motion_generation.artifacts import TrialJsonlWriter
+    from scripts.benchmark.motion_generation.config import (
+        PlannerSpecCfg,
+        ProtocolCfg,
+        SuiteCfg,
+    )
+    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
+    from scripts.benchmark.motion_generation.registry import register_planner_adapter
+    from scripts.benchmark.motion_generation.runner import BenchmarkRunner
+
+    class _CapableFake(PlannerAdapter):
+        capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+
+        def build(self) -> None:
+            return None
+
+        def plan(self, case: BenchmarkCase) -> PlanResult:
+            steps = max(case.num_waypoints + 1, 2)
+            positions = case.start_qpos.unsqueeze(1).expand(-1, steps, -1).clone()
+            return PlanResult(success=True, positions=positions)
+
+    class _IncapableFake(PlannerAdapter):
+        capabilities = frozenset({"eef_waypoint"})
+
+        def build(self) -> None:
+            return None
+
+        def plan(self, case: BenchmarkCase) -> PlanResult:  # noqa: ARG002
+            raise AssertionError("incapable adapter must not plan")
+
+    register_planner_adapter("fake_capable", _CapableFake)
+    register_planner_adapter("fake_incapable", _IncapableFake)
+
+    suite = SuiteCfg(
+        name="motion_generation",
+        suite_version="test_fake_v1",
+        profile="smoke",
+        protocol=ProtocolCfg(
+            warmup_trials=0,
+            measured_trials=1,
+            sample_interval=4,
+            validation_samples=4,
+            position_threshold_m=1.0,
+            rotation_threshold_rad=1.0,
+        ),
+    )
+    runner = BenchmarkRunner(
+        suite,
+        [
+            PlannerSpecCfg(
+                id="capable",
+                adapter="fake_capable",
+                role=AlgorithmRole.DIAGNOSTIC_BASELINE.value,
+                enabled=True,
+            ),
+            PlannerSpecCfg(
+                id="incapable",
+                adapter="fake_incapable",
+                role=AlgorithmRole.CANDIDATE.value,
+                enabled=True,
+            ),
+        ],
+        device="cpu",
+        output_root=tmp_path,
+    )
+    case = _case()
+    case = replace(case, suite_version=suite.suite_version)
+    runner.cases = [case]
+    writer = TrialJsonlWriter(tmp_path / "trials.jsonl")
+
+    robot = Mock(device=torch.device("cpu"))
+    robot.set_qpos = Mock()
+    robot.clear_dynamics = Mock()
+    robot.get_qpos_limits = Mock(
+        return_value=torch.tensor([[-2.0, 2.0]]).repeat(7, 1).unsqueeze(0)
+    )
+    robot.compute_batch_fk = Mock(
+        side_effect=lambda qpos, name, to_matrix: (  # noqa: ARG005
+            torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1).to(qpos.device)
+        )
+    )
+    sim = Mock()
+    sim.update = Mock()
+
+    required = frozenset({"eef_waypoint", "batched", "empty_world"})
+    runner._run_adapter(
+        writer,
+        sim,
+        robot,
+        runner.planner_specs[0],
+        [case],
+        required,
+    )
+    runner._run_adapter(
+        writer,
+        sim,
+        robot,
+        runner.planner_specs[1],
+        [case],
+        required,
+    )
+
+    phases = {
+        (r.algorithm_id, r.phase, r.status, r.failure_code) for r in runner.records
+    }
+    assert (
+        "incapable",
+        TrialPhase.AVAILABILITY,
+        "unsupported",
+        "unsupported_capability",
+    ) in phases
+    assert any(
+        r.algorithm_id == "capable" and r.phase is TrialPhase.COLD and r.outcomes == ()
+        for r in runner.records
+    )
+    assert any(
+        r.algorithm_id == "capable" and r.phase is TrialPhase.MEASURED
+        for r in runner.records
+    )
+
+    metadata = list(runner.metadata.values())
+    aggregates = aggregate_results(
+        runner.records, metadata, [case], suite.protocol.measured_trials
+    )
+    capable = next(
+        row for row in aggregates["leaderboard"] if row["algorithm"] == "capable"
+    )
+    incapable = next(
+        row for row in aggregates["leaderboard"] if row["algorithm"] == "incapable"
+    )
+    assert capable["eligible"] is True
+    assert capable["overall_success_rate"] == pytest.approx(1.0)
+    assert incapable["eligible"] is False
+    assert incapable["overall_success_rate"] == pytest.approx(0.0)
+    assert any("missing required capabilities" in note for note in runner.notes)

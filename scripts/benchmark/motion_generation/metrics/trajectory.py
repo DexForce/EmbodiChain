@@ -88,36 +88,6 @@ def get_pose_err(matrix_a: torch.Tensor, matrix_b: torch.Tensor) -> tuple[float,
     return float(translation.mean().item()), float(rotation.mean().item())
 
 
-def _minimum_cost_monotonic_indices(cost: torch.Tensor) -> list[int]:
-    """Match each waypoint to one strictly later sample with minimum total cost."""
-    waypoint_count, sample_count = cost.shape
-    if waypoint_count == 0 or sample_count == 0 or sample_count < waypoint_count:
-        return []
-
-    dp = torch.full_like(cost, float("inf"))
-    parents = torch.full(
-        (waypoint_count, sample_count), -1, dtype=torch.long, device=cost.device
-    )
-    dp[0] = cost[0]
-    for waypoint_index in range(1, waypoint_count):
-        for sample_index in range(waypoint_index, sample_count):
-            previous = dp[waypoint_index - 1, :sample_index]
-            best_cost, best_index = torch.min(previous, dim=0)
-            dp[waypoint_index, sample_index] = (
-                best_cost + cost[waypoint_index, sample_index]
-            )
-            parents[waypoint_index, sample_index] = best_index
-
-    final_index = int(torch.argmin(dp[-1]).item())
-    if not torch.isfinite(dp[-1, final_index]):
-        return []
-    indices = [final_index]
-    for waypoint_index in range(waypoint_count - 1, 0, -1):
-        final_index = int(parents[waypoint_index, final_index].item())
-        indices.append(final_index)
-    return list(reversed(indices))
-
-
 def match_ordered_waypoints(
     trajectory_poses: torch.Tensor,
     waypoints: torch.Tensor,
@@ -125,7 +95,14 @@ def match_ordered_waypoints(
     position_threshold_m: float,
     rotation_threshold_rad: float,
 ) -> dict[str, object]:
-    """Evaluate ordered arrival and joint position/rotation waypoint errors."""
+    """Evaluate ordered arrival and threshold-constrained waypoint errors.
+
+    Success and continuous waypoint errors share the same greedy matching:
+    each waypoint must be hit after the previous arrival by a sample that
+    jointly satisfies the position and rotation thresholds. Reported errors
+    are taken at those arrival samples so ``motion_valid`` cannot disagree
+    with waypoint p95/max exceeding the external thresholds.
+    """
     trajectory_poses = torch.as_tensor(trajectory_poses)
     waypoints = torch.as_tensor(waypoints)
     if trajectory_poses.numel() == 0 or waypoints.numel() == 0:
@@ -153,17 +130,13 @@ def match_ordered_waypoints(
         arrival_indices.append(sample_index)
         next_sample = sample_index + 1
 
-    normalized_cost = (
-        pos_error / position_threshold_m + rot_error / rotation_threshold_rad
-    )
-    matched_indices = _minimum_cost_monotonic_indices(normalized_cost)
     position_errors = [
         float(pos_error[index, sample].item())
-        for index, sample in enumerate(matched_indices)
+        for index, sample in enumerate(arrival_indices)
     ]
     rotation_errors = [
         float(rot_error[index, sample].item())
-        for index, sample in enumerate(matched_indices)
+        for index, sample in enumerate(arrival_indices)
     ]
     completed = len(arrival_indices)
     total = int(waypoints.shape[0])
@@ -171,7 +144,8 @@ def match_ordered_waypoints(
         "ordered_waypoints_reached": completed == total,
         "completed_waypoint_ratio": completed / max(total, 1),
         "arrival_indices": arrival_indices,
-        "matched_indices": matched_indices,
+        # Alias kept for callers; same threshold-greedy matching as success.
+        "matched_indices": list(arrival_indices),
         "position_errors_m": position_errors,
         "rotation_errors_rad": rotation_errors,
     }
