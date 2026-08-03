@@ -39,10 +39,12 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp 
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_gravity_settler import (
+    AssetsGravitySettler,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     align_assets_group_to_table_aabb_top,
     export_baked_layout_object_glbs,
-    gravity_settle_assets_on_table,
     layout_object_to_transform_matrix,
     load_glb_mesh,
     quaternion_wxyz_to_euler_xyz_degrees,
@@ -481,11 +483,12 @@ def _layout_refinement(
     # 7. Gravity simulation, to let all the assets to be stable and placed well on the table's support surface.
     # Notice that: we do not consider the assets like a bottle, which should be standing on the table but laid down
     # after the simulation.
-    refined_assets_layout = gravity_settle_assets_on_table(
+    gravity_settler = AssetsGravitySettler(
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
+    refined_assets_layout = gravity_settler.settle()
 
     return refined_table_layout, refined_assets_layout
 
