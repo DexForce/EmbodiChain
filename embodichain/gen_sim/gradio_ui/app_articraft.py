@@ -60,6 +60,9 @@ __all__ = [
 
 _VISER_START_TIMEOUT_SECONDS = 15.0
 _VISER_STOP_TIMEOUT_SECONDS = 5.0
+_ARTICRAFT_PYTHON_VERSION = "3.12"
+_CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
+_articraft_environment_lock = threading.Lock()
 
 
 def _command_path(name: str) -> str | None:
@@ -107,6 +110,92 @@ def _articraft_conda_environment_exists() -> bool:
         return any(Path(path).name == ARTICRAFT_CONDA_ENV for path in environments)
     except (OSError, json.JSONDecodeError, TypeError):
         return False
+
+
+def _ensure_articraft_conda_environment() -> tuple[bool, str]:
+    """Create and populate the Articraft Conda environment when it is absent.
+
+    Articraft currently supports Python 3.11 and 3.12, while the Gradio process
+    can use a different interpreter. The setup therefore creates an isolated
+    Python 3.12 environment and installs the checked-out project's runtime
+    dependencies into it.
+
+    Returns:
+        Whether the environment is ready and a status message suitable for the
+        Gradio configuration panel.
+    """
+    conda = _conda_path()
+    if not conda:
+        return False, "Conda is not on PATH. Set CONDA_EXE to the conda executable."
+
+    with _articraft_environment_lock:
+        if _articraft_conda_environment_exists():
+            return True, f"Conda environment: {ARTICRAFT_CONDA_ENV} (already exists)"
+
+        create_command = [
+            conda,
+            "create",
+            "--yes",
+            "--name",
+            ARTICRAFT_CONDA_ENV,
+            f"python={_ARTICRAFT_PYTHON_VERSION}",
+            "pip",
+        ]
+        try:
+            created = subprocess.run(
+                create_command,
+                cwd=ARTICRAFT_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=_CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, f"Unable to create Conda environment: {exc}"
+        if created.returncode and not _articraft_conda_environment_exists():
+            return False, (
+                "Conda environment creation failed: "
+                f"{_short_output(created, limit=3000)}"
+            )
+
+        for install_args, description in (
+            (
+                ["python", "-m", "pip", "install", "--upgrade", "pip"],
+                "upgrade pip",
+            ),
+            (["python", "-m", "pip", "install", "."], "install Articraft dependencies"),
+        ):
+            install_command = [
+                conda,
+                "run",
+                "--no-capture-output",
+                "--name",
+                ARTICRAFT_CONDA_ENV,
+                *install_args,
+            ]
+            try:
+                installed = subprocess.run(
+                    install_command,
+                    cwd=ARTICRAFT_ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=_CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return False, f"Unable to {description}: {exc}"
+            if installed.returncode:
+                return (
+                    False,
+                    f"Unable to {description}: {_short_output(installed, limit=3000)}",
+                )
+
+    return True, (
+        f"Created Conda environment: {ARTICRAFT_CONDA_ENV} "
+        f"(Python {_ARTICRAFT_PYTHON_VERSION})"
+    )
 
 
 def _run_check(
@@ -199,10 +288,13 @@ def _prepare_articraft_checkout() -> tuple[bool, str]:
 
 
 def configure_articraft_environment() -> str:
-    """Clone the checkout, then verify the Conda environment and Codex."""
+    """Clone the checkout, prepare its Conda environment, and verify Codex."""
     checkout_ready, checkout_message = _prepare_articraft_checkout()
     if not checkout_ready:
         return "**Articulation is not ready.**\n\n- " + checkout_message
+    environment_ready, environment_message = _ensure_articraft_conda_environment()
+    if not environment_ready:
+        return "**Articulation is not ready.**\n\n- " + environment_message
     try:
         for directory in (
             ARTICRAFT_OUTPUT_ROOT,
@@ -218,6 +310,7 @@ def configure_articraft_environment() -> str:
             f"- {error}" for error in errors
         )
     details.insert(0, checkout_message)
+    details.insert(1, environment_message)
     details.extend(
         (
             f"Shared output: `{ARTICRAFT_OUTPUT_ROOT}`",
