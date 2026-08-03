@@ -165,6 +165,7 @@ def test_top_failure_ignores_planner_internal_codes_when_motion_valid():
         batch_size=1,
         waypoint_count=1,
         path_shape="direct",
+        start_state_bin="nominal",
         phase=TrialPhase.MEASURED,
         cost_time_ms=10.0,
         outcomes=outcomes,
@@ -176,6 +177,7 @@ def test_top_failure_ignores_planner_internal_codes_when_motion_valid():
     assert row["motion_valid_rate"] == pytest.approx(1.0)
     assert row["planning_success_rate"] == pytest.approx(0.0)
     assert row["top_failure"] is None
+    assert row["start_state_bin"] == "nominal"
 
 
 def test_nmg_precision_and_external_accuracy_are_independently_configurable():
@@ -231,6 +233,134 @@ def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     assert torch.equal(first[0].target_waypoints, second[0].target_waypoints)
 
 
+def test_free_space_cases_use_one_start_state_bin_each():
+    suite = load_suite("coverage")
+    suite.free_space.batch_sizes = [2]
+    suite.free_space.waypoint_counts = [1]
+    suite.free_space.path_shapes = ["direct"]
+    suite.free_space.seeds = [11]
+    suite.free_space.start_state_bins = ["nominal", "near_limit"]
+    cases = generate_free_space_cases(suite, _FakeRobot(), "arm", batch_size=2)
+
+    assert [case.start_state_bin for case in cases] == ["nominal", "near_limit"]
+    assert len({case.case_id for case in cases}) == 2
+
+
+def test_success_metrics_are_stratified_by_start_state_bin():
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    cases = [
+        BenchmarkCase(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id="nominal-case",
+            seed=11,
+            batch_size=1,
+            num_waypoints=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            start_qpos=torch.zeros(1, 7),
+            target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
+            reference_qpos=torch.zeros(1, 1, 7),
+        ),
+        BenchmarkCase(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id="limit-case",
+            seed=11,
+            batch_size=1,
+            num_waypoints=1,
+            path_shape="direct",
+            start_state_bin="near_limit",
+            start_qpos=torch.zeros(1, 7),
+            target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
+            reference_qpos=torch.zeros(1, 1, 7),
+        ),
+    ]
+    records = [
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=cases[0].case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=11,
+            repeat=0,
+            batch_size=1,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=10.0,
+            outcomes=(_outcome(),),
+        ),
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=cases[1].case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=11,
+            repeat=0,
+            batch_size=1,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="near_limit",
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=12.0,
+            outcomes=(
+                CaseOutcome(
+                    env_index=0,
+                    planning_success=False,
+                    finite=True,
+                    ordered_waypoints_reached=False,
+                    motion_valid=False,
+                    completed_waypoint_ratio=0.0,
+                    final_translation_err_mm=None,
+                    final_rotation_err_deg=None,
+                    waypoint_translation_err_mm_mean=None,
+                    waypoint_translation_err_mm_p95=None,
+                    waypoint_translation_err_mm_max=None,
+                    waypoint_rotation_err_deg_mean=None,
+                    waypoint_rotation_err_deg_p95=None,
+                    waypoint_rotation_err_deg_max=None,
+                    joint_limit_violation=False,
+                    max_normalized_joint_violation=0.0,
+                    joint_path_length_rad=None,
+                    cartesian_path_length_m=None,
+                    path_efficiency=None,
+                    failure_code="waypoint_miss",
+                ),
+            ),
+        ),
+    ]
+
+    rows = aggregate_results(records, metadata, cases, measured_trials=1)[
+        "success_and_metrics"
+    ]
+    by_bin = {row["start_state_bin"]: row for row in rows}
+
+    assert set(by_bin) == {"nominal", "near_limit"}
+    assert by_bin["nominal"]["motion_valid_rate"] == pytest.approx(1.0)
+    assert by_bin["near_limit"]["motion_valid_rate"] == pytest.approx(0.0)
+    assert by_bin["near_limit"]["top_failure"] == "waypoint_miss"
+
+
 def _case() -> BenchmarkCase:
     return BenchmarkCase(
         suite_version="test_v1",
@@ -241,7 +371,7 @@ def _case() -> BenchmarkCase:
         batch_size=1,
         num_waypoints=1,
         path_shape="direct",
-        start_state_bins=("nominal",),
+        start_state_bin="nominal",
         start_qpos=torch.zeros(1, 7),
         target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
         reference_qpos=torch.zeros(1, 1, 7),
@@ -287,6 +417,7 @@ def _record(phase: TrialPhase, cost: float) -> TrialRecord:
         batch_size=1,
         waypoint_count=1,
         path_shape="direct",
+        start_state_bin="nominal",
         phase=phase,
         cost_time_ms=cost,
         cpu_delta_mb=1.0,

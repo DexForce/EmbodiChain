@@ -123,6 +123,8 @@ def _build_case(
     num_waypoints: int,
     path_shape: str,
     shape_index: int,
+    start_state_bin: str,
+    bin_index: int,
 ) -> BenchmarkCase:
     """Build one reachable env-batched case using FK reference targets."""
     limits = robot.get_qpos_limits(name=control_part)[0].detach().cpu()
@@ -132,16 +134,13 @@ def _build_case(
             f"{limits.shape[0]} DoF."
         )
 
-    configured_bins = suite.free_space.start_state_bins
-    start_bins: list[str] = []
     starts: list[torch.Tensor] = []
     for env_index in range(batch_size):
-        bin_index = (seed + shape_index + env_index) % len(configured_bins)
-        bin_name = configured_bins[bin_index]
         generator = torch.Generator(device="cpu")
-        generator.manual_seed(seed * 100_003 + shape_index * 997 + env_index)
-        start_bins.append(bin_name)
-        starts.append(_start_qpos_for_bin(bin_name, limits, generator))
+        generator.manual_seed(
+            seed * 100_003 + shape_index * 997 + bin_index * 131 + env_index
+        )
+        starts.append(_start_qpos_for_bin(start_state_bin, limits, generator))
 
     start_qpos_cpu = torch.stack(starts)
     references: list[torch.Tensor] = []
@@ -171,7 +170,7 @@ def _build_case(
         "batch_size": batch_size,
         "num_waypoints": num_waypoints,
         "path_shape": path_shape,
-        "start_state_bins": start_bins,
+        "start_state_bin": start_state_bin,
     }
     case_id = f"free_space_{stable_hash(identity)[:16]}"
     return BenchmarkCase(
@@ -183,7 +182,7 @@ def _build_case(
         batch_size=batch_size,
         num_waypoints=num_waypoints,
         path_shape=path_shape,
-        start_state_bins=tuple(start_bins),
+        start_state_bin=start_state_bin,
         start_qpos=start_qpos,
         target_waypoints=target_waypoints,
         reference_qpos=reference_qpos,
@@ -201,16 +200,21 @@ def generate_free_space_cases(
     for seed in suite.free_space.seeds:
         for num_waypoints in suite.free_space.waypoint_counts:
             for shape_index, path_shape in enumerate(suite.free_space.path_shapes):
-                cases.append(
-                    _build_case(
-                        suite,
-                        robot,
-                        control_part,
-                        seed=seed,
-                        batch_size=batch_size,
-                        num_waypoints=num_waypoints,
-                        path_shape=path_shape,
-                        shape_index=shape_index,
+                for bin_index, start_state_bin in enumerate(
+                    suite.free_space.start_state_bins
+                ):
+                    cases.append(
+                        _build_case(
+                            suite,
+                            robot,
+                            control_part,
+                            seed=seed,
+                            batch_size=batch_size,
+                            num_waypoints=num_waypoints,
+                            path_shape=path_shape,
+                            shape_index=shape_index,
+                            start_state_bin=start_state_bin,
+                            bin_index=bin_index,
+                        )
                     )
-                )
     return cases

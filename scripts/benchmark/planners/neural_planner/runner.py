@@ -168,6 +168,7 @@ class BenchmarkRunner:
             "batch_size": case.batch_size,
             "waypoint_count": case.num_waypoints,
             "path_shape": case.path_shape,
+            "start_state_bin": case.start_state_bin,
             "phase": phase,
         }
 

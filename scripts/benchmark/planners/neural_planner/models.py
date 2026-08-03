@@ -79,7 +79,7 @@ class BenchmarkCase:
     batch_size: int
     num_waypoints: int
     path_shape: str
-    start_state_bins: tuple[str, ...]
+    start_state_bin: str
     start_qpos: torch.Tensor
     target_waypoints: torch.Tensor
     reference_qpos: torch.Tensor
@@ -129,6 +129,7 @@ class TrialRecord:
     batch_size: int
     waypoint_count: int
     path_shape: str
+    start_state_bin: str
     phase: TrialPhase
     status: str = "ok"
     failure_code: str | None = None

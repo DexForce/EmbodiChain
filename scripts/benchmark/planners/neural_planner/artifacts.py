@@ -123,7 +123,7 @@ def _case_to_dict(case: BenchmarkCase) -> dict[str, Any]:
         "batch_size": case.batch_size,
         "num_waypoints": case.num_waypoints,
         "path_shape": case.path_shape,
-        "start_state_bins": list(case.start_state_bins),
+        "start_state_bin": case.start_state_bin,
         "start_qpos": case.start_qpos.detach().cpu().tolist(),
         "target_waypoints": case.target_waypoints.detach().cpu().tolist(),
         "validity_evidence": {

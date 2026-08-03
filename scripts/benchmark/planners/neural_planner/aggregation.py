@@ -184,7 +184,7 @@ def _metric_rows(
     measured_trials: int,
 ) -> list[dict[str, object]]:
     """Aggregate external success and quality metrics by scenario condition."""
-    outcome_groups: dict[tuple[str, str, int, int, str], list[CaseOutcome]] = (
+    outcome_groups: dict[tuple[str, str, int, int, str, str], list[CaseOutcome]] = (
         defaultdict(list)
     )
     for record in records:
@@ -196,20 +196,29 @@ def _metric_rows(
             record.batch_size,
             record.waypoint_count,
             record.path_shape,
+            record.start_state_bin,
         )
         outcome_groups[key].extend(record.outcomes)
 
-    expected_by_group: Counter[tuple[str, int, int, str]] = Counter()
-    unique_cases_by_group: Counter[tuple[str, int, int, str]] = Counter()
+    expected_by_group: Counter[tuple[str, int, int, str, str]] = Counter()
+    unique_cases_by_group: Counter[tuple[str, int, int, str, str]] = Counter()
     for case in cases:
-        key = (case.scenario_id, case.batch_size, case.num_waypoints, case.path_shape)
+        key = (
+            case.scenario_id,
+            case.batch_size,
+            case.num_waypoints,
+            case.path_shape,
+            case.start_state_bin,
+        )
         expected_by_group[key] += case.batch_size * measured_trials
         unique_cases_by_group[key] += case.batch_size
 
     rows: list[dict[str, object]] = []
     for info in metadata:
         for group_key in sorted(expected_by_group):
-            scenario_id, batch_size, waypoint_count, path_shape = group_key
+            scenario_id, batch_size, waypoint_count, path_shape, start_state_bin = (
+                group_key
+            )
             outcomes = outcome_groups.get(
                 (
                     info.algorithm_id,
@@ -217,6 +226,7 @@ def _metric_rows(
                     batch_size,
                     waypoint_count,
                     path_shape,
+                    start_state_bin,
                 ),
                 [],
             )
@@ -231,6 +241,7 @@ def _metric_rows(
                     "batch_size": batch_size,
                     "waypoint_count": waypoint_count,
                     "path_shape": path_shape,
+                    "start_state_bin": start_state_bin,
                     "cases": unique_cases_by_group[group_key],
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
                     "success_rate": _rate(outcome.motion_valid for outcome in outcomes),

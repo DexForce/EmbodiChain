@@ -55,6 +55,7 @@ METRIC_COLUMNS = (
     "batch_size",
     "waypoint_count",
     "path_shape",
+    "start_state_bin",
     "cases",
     "coverage_rate",
     "success_rate",
