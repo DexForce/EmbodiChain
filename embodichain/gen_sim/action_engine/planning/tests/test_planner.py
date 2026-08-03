@@ -66,6 +66,24 @@ def _dual_arm_scene() -> list[dict[str, Any]]:
     ]
 
 
+def _stack_scene() -> list[dict[str, Any]]:
+    return [
+        {
+            "uid": uid,
+            "runtime_uid": uid,
+            "source_uid": f"{uid}_0",
+            "role": role,
+            "description": description,
+        }
+        for uid, role, description in (
+            ("table", "background", "A table."),
+            ("paper_cup", "rigid_object", "A paper cup."),
+            ("popcorn_bucket", "rigid_object", "A popcorn bucket."),
+            ("earbuds_case", "rigid_object", "A blue earbuds case."),
+        )
+    ]
+
+
 def test_injected_planner_returns_only_semantics_and_resolves_aliases() -> None:
     observed: dict[str, Any] = {}
 
@@ -173,6 +191,61 @@ def test_planner_repairs_a_non_visible_skill_once() -> None:
     ]
     assert calls == 2
     assert program["allocation_groups"][0]["arm_constraint"] == "distinct_arms"
+
+
+def test_planner_repairs_build_stack_singular_object_contract() -> None:
+    prompts: list[str] = []
+
+    def caller(*, prompt: str, **_kwargs: Any) -> dict[str, Any]:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return {
+                "semantic_steps": [
+                    {
+                        "id": "s01_build_stack",
+                        "operator": "build_stack",
+                        "object": "paper_cup",
+                        "goal": {
+                            "anchor": "popcorn_bucket",
+                            "stack_mode": "on_top",
+                        },
+                        "depends_on": [],
+                    }
+                ],
+                "allocation_groups": [],
+            }
+        return {
+            "semantic_steps": [
+                {
+                    "id": "s01_build_stack",
+                    "operator": "build_stack",
+                    "objects": ["paper_cup", "earbuds_case"],
+                    "goal": {
+                        "anchor": "popcorn_bucket",
+                        "stack_mode": "on_top",
+                        "orientation_goal": "preserve",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                }
+            ],
+            "allocation_groups": [],
+        }
+
+    program = plan_task(
+        task_name="task3_2",
+        task_description="把纸杯叠放到爆米花桶上，然后把蓝色耳机盒叠放到纸杯上",
+        scene_objects=_stack_scene(),
+        llm_caller=caller,
+    )
+
+    assert len(prompts) == 2
+    assert "build_stack requires an 'objects' list" in prompts[1]
+    assert program["semantic_steps"][0]["objects"] == [
+        "paper_cup",
+        "earbuds_case",
+    ]
+    assert program["semantic_steps"][0]["goal"]["anchor"] == "popcorn_bucket"
 
 
 def test_planner_rejects_a_non_visible_skill_after_one_repair() -> None:
@@ -366,6 +439,70 @@ def test_arrange_line_discards_unrequested_orientation_change() -> None:
     goal = program["semantic_steps"][0]["goal"]
     assert goal["orientation_goal"] == "preserve"
     assert goal["orientation_axis"] == "none"
+
+
+def test_arrange_line_defaults_ambiguous_direction_to_robot_view_horizontal() -> None:
+    def caller(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "semantic_steps": [
+                {
+                    "id": "s01_line",
+                    "operator": "arrange_line",
+                    "objects": [
+                        "interact_soda_can_0",
+                        "interact_soda_can_1",
+                    ],
+                    "goal": {
+                        "anchor": "table_center",
+                        "axis": "world_x",
+                        "order_constraint": "free",
+                    },
+                    "depends_on": [],
+                }
+            ],
+            "allocation_groups": [],
+        }
+
+    program = plan_task(
+        task_name="ambiguous_line_axis",
+        task_description="将罐头摆成一排",
+        scene_objects=_scene(),
+        llm_caller=caller,
+    )
+
+    assert program["semantic_steps"][0]["goal"]["axis"] == "world_y"
+
+
+def test_arrange_line_uses_world_x_for_explicit_front_to_back_request() -> None:
+    def caller(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "semantic_steps": [
+                {
+                    "id": "s01_line",
+                    "operator": "arrange_line",
+                    "objects": [
+                        "interact_soda_can_0",
+                        "interact_soda_can_1",
+                    ],
+                    "goal": {
+                        "anchor": "table_center",
+                        "axis": "world_y",
+                        "order_constraint": "free",
+                    },
+                    "depends_on": [],
+                }
+            ],
+            "allocation_groups": [],
+        }
+
+    program = plan_task(
+        task_name="front_to_back_line_axis",
+        task_description="将罐头沿前后方向摆成一列",
+        scene_objects=_scene(),
+        llm_caller=caller,
+    )
+
+    assert program["semantic_steps"][0]["goal"]["axis"] == "world_x"
 
 
 def test_arrange_line_preserves_explicit_orientation_request() -> None:

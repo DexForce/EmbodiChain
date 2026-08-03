@@ -57,6 +57,7 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.parallel_execution import
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.symbolic_grounding import (
     ground_symbolic_action,
+    score_arm_candidate,
     select_auto_arm_from_candidates,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.task_graph_artifact import (
@@ -219,6 +220,78 @@ def test_auto_arm_selection_is_per_environment_and_deterministic() -> None:
 
     assert assignments == ["left_arm", "right_arm", "left_arm", None]
     assert failed.tolist() == [False, False, False, True]
+
+
+def test_arm_crossing_penalty_allows_a_small_centerline_deadband() -> None:
+    source_pose = torch.eye(4).repeat(2, 1, 1)
+    source_pose[:, 1, 3] = torch.tensor([-0.03, -0.14])
+
+    score = score_arm_candidate(
+        arm="left_arm",
+        motion_cost=torch.zeros(2),
+        source_pose=source_pose,
+        target_pose=None,
+        workspace_center_y=torch.zeros(2),
+        workspace_half_width=torch.full((2,), 0.5),
+        crossing_deadband_ratio=0.08,
+        pickup_crossing_weight=1.0,
+        placement_crossing_weight=1.5,
+        motion_cost_scale=float(np.pi),
+    )
+
+    assert score.pickup_crossing_penalty.tolist() == pytest.approx([0.0, 0.04])
+
+
+def test_arm_crossing_penalty_is_robot_view_symmetric() -> None:
+    source_pose = torch.eye(4).repeat(2, 1, 1)
+    source_pose[:, 1, 3] = torch.tensor([0.3, -0.3])
+    common = {
+        "motion_cost": torch.zeros(2),
+        "source_pose": source_pose,
+        "target_pose": None,
+        "workspace_center_y": torch.zeros(2),
+        "workspace_half_width": torch.full((2,), 0.5),
+        "crossing_deadband_ratio": 0.08,
+        "pickup_crossing_weight": 1.0,
+        "placement_crossing_weight": 1.5,
+        "motion_cost_scale": float(np.pi),
+    }
+
+    left = score_arm_candidate(arm="left_arm", **common)
+    right = score_arm_candidate(arm="right_arm", **common)
+
+    assert left.pickup_crossing_penalty.tolist() == pytest.approx(
+        list(reversed(right.pickup_crossing_penalty.tolist()))
+    )
+    assert left.pickup_crossing_penalty[0] == 0.0
+    assert right.pickup_crossing_penalty[1] == 0.0
+
+
+def test_placement_crossing_penalty_grows_with_normalized_distance() -> None:
+    source_pose = torch.eye(4).repeat(2, 1, 1)
+    source_pose[:, 1, 3] = 0.3
+    target_positions = torch.tensor(
+        [
+            [0.2, -0.1, 0.2],
+            [0.2, -0.3, 0.2],
+        ]
+    )
+
+    score = score_arm_candidate(
+        arm="left_arm",
+        motion_cost=torch.zeros(2),
+        source_pose=source_pose,
+        target_pose=target_positions,
+        workspace_center_y=torch.zeros(2),
+        workspace_half_width=torch.full((2,), 0.5),
+        crossing_deadband_ratio=0.08,
+        pickup_crossing_weight=1.0,
+        placement_crossing_weight=1.5,
+        motion_cost_scale=float(np.pi),
+    )
+
+    assert score.pickup_crossing_penalty.tolist() == [0.0, 0.0]
+    assert score.placement_crossing_penalty.tolist() == pytest.approx([0.0216, 0.4056])
 
 
 def test_auto_arm_remains_unresolved_in_relative_seed() -> None:
@@ -460,6 +533,68 @@ def test_auto_arm_candidate_checks_transport_reachability(
     )
 
     assert saw_downstream_target
+    assert assignments == ["left_arm", "right_arm"]
+    assert failed.tolist() == [False, False]
+    candidate_scores = graph._step_candidate_scores(step, 2)
+    assert candidate_scores[0]["left_arm"]["feasible"] is True
+    assert candidate_scores[1]["left_arm"]["feasible"] is False
+    assert candidate_scores[1]["right_arm"]["feasible"] is True
+
+
+def test_auto_arm_selection_prefers_the_objects_robot_view_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.gen_sim.action_agent_pipeline.runtime import task_graph
+    from embodichain.gen_sim.action_agent_pipeline.runtime.action_runtime_types import (
+        ExecutedAtomicAction,
+    )
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    seed = make_relative_seed_task_graph(
+        "sided_candidate",
+        _relative_spec(first_arm="auto"),
+    )
+    graph = compile_agent_graph_spec(seed)
+    step = next(iter(graph.semantic_steps.values()))
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "object_a": _Object([[0.0, 0.3, 0.2], [0.0, -0.3, 0.2]]),
+                "object_c": _Object([[0.3, 0.0, 0.2], [0.3, 0.0, 0.2]]),
+                "table": _Object(
+                    [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                    half_extents=(0.6, 0.5, 0.04),
+                ),
+            }
+        ),
+        agent_initial_object_poses={},
+    )
+
+    def plan(action_spec, *, state, **kwargs):
+        del kwargs
+        return ExecutedAtomicAction(
+            action=np.zeros((2, 2, 1), dtype=np.float32),
+            next_state=state,
+            robot_name=action_spec["robot_name"],
+            control="arm",
+            failed_env_mask=torch.zeros(2, dtype=torch.bool),
+            atomic_action_class=action_spec["atomic_action_class"],
+        )
+
+    monkeypatch.setattr(task_graph, "_execute_atomic_action_result", plan)
+    assignments, failed = graph._select_step_arms(
+        step,
+        env=env,
+        world_states={"left": None, "right": None},
+        failed=torch.zeros(2, dtype=torch.bool),
+        runtime_kwargs={},
+    )
+
     assert assignments == ["left_arm", "right_arm"]
     assert failed.tolist() == [False, False]
 
@@ -1539,6 +1674,111 @@ def test_runtime_arrangement_slots_are_centered_per_environment() -> None:
     assert bool((plan.slot_positions[:, :, :2] <= table_upper[:, None, :]).all())
 
 
+def test_free_arrangement_initially_matches_live_spatial_order() -> None:
+    seed = make_arrangement_seed_task_graph(
+        "spatially_matched_line",
+        SimpleNamespace(
+            task_description="form a row in any order",
+            order_by="none",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=(),
+            steps=tuple(
+                SimpleNamespace(
+                    runtime_uid=f"object_{index}",
+                    slot_index=index,
+                    orientation_goal="preserve",
+                    orientation_axis="none",
+                )
+                for index in range(3)
+            ),
+        ),
+    )
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "table": _Object(
+                    [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                    half_extents=(0.6, 0.5, 0.04),
+                ),
+                "object_0": _Object([[0.0, 0.2, 0.1], [0.0, -0.2, 0.1]]),
+                "object_1": _Object([[0.0, 0.0, 0.1], [0.0, 0.0, 0.1]]),
+                "object_2": _Object([[0.0, -0.2, 0.1], [0.0, 0.2, 0.1]]),
+            }
+        ),
+    )
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(seed)
+    steps = list(graph.semantic_steps.values())
+    plan = ArrangementRuntimePlan(env=env, semantic_steps=steps)
+
+    assert [plan.resolved_slots[step.id].tolist() for step in steps] == [
+        [2, 0],
+        [1, 1],
+        [0, 2],
+    ]
+    assert plan.metadata(steps[0])[0]["reassignment_reason"] == (
+        "free arrangement initialized from live spatial order"
+    )
+    assert plan.metadata(steps[0])[1]["slot_reassigned"] is False
+
+
+def test_ordered_arrangement_preserves_nominal_slot_bindings() -> None:
+    seed = make_arrangement_seed_task_graph(
+        "ordered_line",
+        SimpleNamespace(
+            task_description="arrange the objects by size",
+            order_by="size",
+            order_direction="ascending",
+            axis="world_y",
+            anchor="table_center",
+            semantic_order=("object_0", "object_1", "object_2"),
+            steps=tuple(
+                SimpleNamespace(
+                    runtime_uid=f"object_{index}",
+                    slot_index=index,
+                    orientation_goal="preserve",
+                    orientation_axis="none",
+                )
+                for index in range(3)
+            ),
+        ),
+    )
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        agent_robot_profile="dual_franka",
+        sim=_Sim(
+            {
+                "table": _Object(
+                    [[0.0, 0.0, 0.0]],
+                    half_extents=(0.6, 0.5, 0.04),
+                ),
+                "object_0": _Object([[0.0, 0.2, 0.1]]),
+                "object_1": _Object([[0.0, 0.0, 0.1]]),
+                "object_2": _Object([[0.0, -0.2, 0.1]]),
+            }
+        ),
+    )
+    from embodichain.gen_sim.action_agent_pipeline.runtime.graph_compiler import (
+        compile_agent_graph_spec,
+    )
+
+    graph = compile_agent_graph_spec(seed)
+    steps = list(graph.semantic_steps.values())
+    plan = ArrangementRuntimePlan(env=env, semantic_steps=steps)
+
+    assert [int(plan.resolved_slots[step.id][0]) for step in steps] == [0, 1, 2]
+    assert all(plan.metadata(step)[0]["slot_reassigned"] is False for step in steps)
+
+
 def test_runtime_arrangement_searches_a_safe_parallel_row() -> None:
     seed = make_arrangement_seed_task_graph(
         "offset_line",
@@ -1879,6 +2119,16 @@ def test_recorder_accepts_partitioned_arm_actions_by_environment(
         reference_pose=None,
         active_mask=torch.tensor([True, True]),
         selection_failed_mask=torch.tensor([False, False]),
+        candidate_scores=[
+            {
+                "left_arm": {"total_cost": 0.1},
+                "right_arm": {"total_cost": 0.8},
+            },
+            {
+                "left_arm": {"total_cost": 0.7},
+                "right_arm": {"total_cost": 0.2},
+            },
+        ],
     )
     grounded_actions = tuple(
         SimpleNamespace(
@@ -1908,7 +2158,11 @@ def test_recorder_accepts_partitioned_arm_actions_by_environment(
     )
 
     for env_id, expected_arm in enumerate(assignments):
+        step_runtime = recorder.documents[env_id]["semantic_steps"][0]["runtime"]
         runtime = recorder.documents[env_id]["edges"][0]["actions"][0]["runtime"]
+        assert step_runtime["candidate_scores"][expected_arm]["total_cost"] == (
+            pytest.approx(0.1 if env_id == 0 else 0.2)
+        )
         assert runtime["assigned_arm"] == expected_arm
         assert runtime["planning"]["status"] == "planned"
         assert runtime["planning"]["trajectory_step_count"] == 45

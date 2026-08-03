@@ -29,8 +29,10 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.motion_policy import (
 )
 
 __all__ = [
+    "ArmCandidateScore",
     "GroundedSymbolicAction",
     "ground_symbolic_action",
+    "score_arm_candidate",
     "select_auto_arm_from_candidates",
 ]
 
@@ -44,6 +46,124 @@ class GroundedSymbolicAction:
     object_pose: torch.Tensor | None
     reference_pose: torch.Tensor | None
     target_object_pose: torch.Tensor | None
+
+
+@dataclass(frozen=True)
+class ArmCandidateScore:
+    """Auditable cost components for one semantic arm candidate."""
+
+    motion_cost: torch.Tensor
+    normalized_motion_cost: torch.Tensor
+    pickup_crossing_penalty: torch.Tensor
+    placement_crossing_penalty: torch.Tensor
+    total_cost: torch.Tensor
+
+
+def score_arm_candidate(
+    *,
+    arm: str,
+    motion_cost: torch.Tensor,
+    source_pose: torch.Tensor | None,
+    target_pose: torch.Tensor | None,
+    workspace_center_y: torch.Tensor,
+    workspace_half_width: torch.Tensor,
+    crossing_deadband_ratio: float,
+    pickup_crossing_weight: float,
+    placement_crossing_weight: float,
+    motion_cost_scale: float,
+) -> ArmCandidateScore:
+    """Combine normalized motion length with continuous cross-zone penalties.
+
+    Positive world-y is the semantic robot-view left side. A deadband permits
+    small opposite-side reaches, while squared penetration makes deep crossing
+    progressively less attractive without overriding IK feasibility.
+    """
+    if arm not in {"left_arm", "right_arm"}:
+        raise ValueError(f"Unsupported semantic arm slot: {arm!r}.")
+    if motion_cost.ndim != 1:
+        raise ValueError("Arm candidate motion cost must be one-dimensional.")
+    if not 0.0 <= crossing_deadband_ratio < 1.0:
+        raise ValueError("Arm crossing deadband ratio must be in [0, 1).")
+    if pickup_crossing_weight < 0.0 or placement_crossing_weight < 0.0:
+        raise ValueError("Arm crossing penalty weights must be non-negative.")
+    if motion_cost_scale <= 0.0:
+        raise ValueError("Arm candidate motion cost scale must be positive.")
+
+    center = _candidate_batch_values(
+        workspace_center_y,
+        like=motion_cost,
+        name="workspace center",
+    )
+    half_width = _candidate_batch_values(
+        workspace_half_width,
+        like=motion_cost,
+        name="workspace half-width",
+    )
+    if bool((half_width <= 0.0).any()):
+        raise ValueError("Arm selection workspace half-width must be positive.")
+
+    arm_sign = 1.0 if arm == "left_arm" else -1.0
+    deadband = half_width * crossing_deadband_ratio
+
+    def crossing_penalty(
+        pose: torch.Tensor | None,
+        weight: float,
+    ) -> torch.Tensor:
+        if pose is None:
+            return torch.zeros_like(motion_cost)
+        batched_pose = torch.as_tensor(
+            pose,
+            dtype=motion_cost.dtype,
+            device=motion_cost.device,
+        )
+        if batched_pose.ndim == 1 and batched_pose.shape[0] == 3:
+            batched_pose = batched_pose.unsqueeze(0)
+        if batched_pose.ndim == 2 and batched_pose.shape == (4, 4):
+            batched_pose = batched_pose.unsqueeze(0)
+        if batched_pose.ndim == 2 and batched_pose.shape[-1] == 3:
+            positions = batched_pose
+        elif batched_pose.ndim == 3 and batched_pose.shape[-2:] == (4, 4):
+            positions = batched_pose[:, :3, 3]
+        else:
+            raise ValueError(
+                "Arm candidate positions must have shape (3,), (N, 3), "
+                "(4, 4), or (N, 4, 4)."
+            )
+        if positions.shape[0] == 1 and motion_cost.shape[0] != 1:
+            positions = positions.expand(motion_cost.shape[0], -1)
+        if positions.shape[0] != motion_cost.shape[0]:
+            raise ValueError("Arm candidate pose batch does not match motion cost.")
+        lateral = positions[:, 1] - center
+        wrong_side_depth = torch.clamp(
+            -arm_sign * lateral - deadband,
+            min=0.0,
+        )
+        return weight * torch.square(wrong_side_depth / half_width)
+
+    pickup_penalty = crossing_penalty(source_pose, pickup_crossing_weight)
+    placement_penalty = crossing_penalty(target_pose, placement_crossing_weight)
+    normalized_motion = motion_cost / motion_cost_scale
+    return ArmCandidateScore(
+        motion_cost=motion_cost,
+        normalized_motion_cost=normalized_motion,
+        pickup_crossing_penalty=pickup_penalty,
+        placement_crossing_penalty=placement_penalty,
+        total_cost=normalized_motion + pickup_penalty + placement_penalty,
+    )
+
+
+def _candidate_batch_values(
+    values: torch.Tensor,
+    *,
+    like: torch.Tensor,
+    name: str,
+) -> torch.Tensor:
+    tensor = torch.as_tensor(values, dtype=like.dtype, device=like.device)
+    if tensor.ndim == 0:
+        tensor = tensor.expand_as(like)
+    if tensor.ndim != 1 or tensor.shape != like.shape:
+        raise ValueError(f"Arm selection {name} must match the candidate batch.")
+    return tensor
 
 
 def ground_symbolic_action(

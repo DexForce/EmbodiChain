@@ -71,6 +71,42 @@ _ORIENTATION_REQUEST_MARKERS = (
     "对齐",
     "平行",
 )
+_ARRANGEMENT_WORLD_X_MARKERS = (
+    "world_x",
+    "world x",
+    "x-axis",
+    "x axis",
+    "x轴",
+    "x 轴",
+    "x方向",
+    "x 方向",
+    "纵向",
+    "前后排列",
+    "前后摆放",
+    "前后方向",
+    "从前到后",
+    "从前往后",
+    "从后到前",
+    "从后往前",
+    "排成一列",
+    "front-to-back",
+    "front to back",
+    "back-to-front",
+    "back to front",
+    "depth-wise",
+    "depthwise",
+    "longitudinal",
+    "in a column",
+)
+_ARRANGEMENT_TABLE_LONG_AXIS_MARKERS = (
+    "table_long_axis",
+    "table long axis",
+    "table's long axis",
+    "table longest axis",
+    "桌面长轴",
+    "桌子的长轴",
+    "桌子长轴",
+)
 _MODEL_STEP_KEYS = frozenset(
     {"id", "operator", "object", "objects", "actor", "goal", "depends_on"}
 )
@@ -266,7 +302,7 @@ def _wrap_agent(
         steps,
         allocation_groups,
     )
-    return validate_task_agent(
+    task_agent = validate_task_agent(
         {
             "schema_version": TASK_AGENT_SCHEMA,
             "task": task_name,
@@ -276,6 +312,27 @@ def _wrap_agent(
         },
         known_objects=[_scene_runtime_uid(item) for item in scene],
     )
+    _validate_operator_contracts(task_agent)
+    return task_agent
+
+
+def _validate_operator_contracts(task_agent: Mapping[str, Any]) -> None:
+    """Validate capability-specific step shapes inside the planner repair loop."""
+    registry = build_default_registry()
+    for step in task_agent["semantic_steps"]:
+        operator = str(step["operator"])
+        try:
+            expanded = registry.operator(operator).expand(step)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"Semantic step {step['id']!r} violates the {operator!r} "
+                f"operator contract: {error}"
+            ) from error
+        if not expanded:
+            raise ValueError(
+                f"Semantic step {step['id']!r} produced no executable "
+                f"{operator!r} operation."
+            )
 
 
 def _ensure_bilateral_allocation_group(
@@ -371,14 +428,17 @@ def _normalize_semantic_steps(
         if not isinstance(raw_goal, Mapping):
             raise ValueError(f"Semantic step {step_id!r} goal must be an object.")
         goal = deepcopy(dict(raw_goal))
-        if operator == "arrange_line" and not _requests_orientation_change(
-            task_description
-        ):
-            # A line-layout request does not imply reorientation. Silently
-            # adding it can turn a reachable transport into an infeasible
-            # fixed-grasp wrist flip.
-            goal["orientation_goal"] = "preserve"
-            goal["orientation_axis"] = "none"
+        if operator == "arrange_line":
+            # The model chooses semantics, but an unspecified line direction
+            # has one stable robot-view default. Do not let sampling turn a
+            # left-to-right row into a depth-wise layout with weaker reachability.
+            goal["axis"] = _arrangement_line_axis(task_description)
+            if not _requests_orientation_change(task_description):
+                # A line-layout request does not imply reorientation. Silently
+                # adding it can turn a reachable transport into an infeasible
+                # fixed-grasp wrist flip.
+                goal["orientation_goal"] = "preserve"
+                goal["orientation_axis"] = "none"
         for key in (
             "anchor",
             "orientation_reference_object",
@@ -415,6 +475,16 @@ def _normalize_semantic_steps(
 def _requests_orientation_change(task_description: str) -> bool:
     normalized = task_description.casefold()
     return any(marker in normalized for marker in _ORIENTATION_REQUEST_MARKERS)
+
+
+def _arrangement_line_axis(task_description: str) -> str:
+    """Resolve line direction from explicit intent, defaulting left-to-right."""
+    normalized = task_description.casefold()
+    if any(marker in normalized for marker in _ARRANGEMENT_TABLE_LONG_AXIS_MARKERS):
+        return "table_long_axis"
+    if any(marker in normalized for marker in _ARRANGEMENT_WORLD_X_MARKERS):
+        return "world_x"
+    return "world_y"
 
 
 def _fuse_redundant_hold_place_steps(

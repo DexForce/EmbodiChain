@@ -43,8 +43,13 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atom_actions import (
     init_parallel_world_states,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.symbolic_grounding import (
+    ArmCandidateScore,
     ground_symbolic_action,
+    score_arm_candidate,
     select_auto_arm_from_candidates,
+)
+from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
+    _object_world_vertices,
 )
 from embodichain.gen_sim.action_agent_pipeline.runtime.success_evaluator import (
     evaluate_configured_success,
@@ -68,6 +73,16 @@ _UPRIGHT_IN_PLACE_XY_TOLERANCE = float(
     _CLOSED_LOOP_DEFAULTS["upright_in_place_xy_tolerance"]
 )
 _UPRIGHT_MAX_TILT = float(_CLOSED_LOOP_DEFAULTS["upright_max_tilt"])
+_ARM_SELECTION_DEFAULTS = defaults_section("arm_selection")
+_ARM_CROSSING_DEADBAND_RATIO = float(_ARM_SELECTION_DEFAULTS["crossing_deadband_ratio"])
+_ARM_PICKUP_CROSSING_WEIGHT = float(_ARM_SELECTION_DEFAULTS["pickup_crossing_weight"])
+_ARM_PLACEMENT_CROSSING_WEIGHT = float(
+    _ARM_SELECTION_DEFAULTS["placement_crossing_weight"]
+)
+_ARM_MOTION_COST_SCALE = float(_ARM_SELECTION_DEFAULTS["motion_cost_scale"])
+_ARM_FALLBACK_WORKSPACE_HALF_WIDTH = float(
+    _ARM_SELECTION_DEFAULTS["fallback_workspace_half_width"]
+)
 
 
 @dataclass
@@ -154,6 +169,8 @@ class AgentTaskGraph:
             for step_id in group["semantic_step_ids"]
         }
         self._candidate_failure_phases: dict[tuple[str, str], list[str | None]] = {}
+        self._candidate_scores: dict[tuple[str, str], ArmCandidateScore] = {}
+        self._candidate_feasible: dict[tuple[str, str], torch.Tensor] = {}
         self._step_arm_world_states: dict[tuple[str, str], Any] = {}
 
     def add_node(self, node_id: str, semantic: str = "") -> "AgentTaskGraph":
@@ -231,6 +248,9 @@ class AgentTaskGraph:
         )
         executed_actions: list[Any] = []
         self._step_arm_world_states.clear()
+        self._candidate_failure_phases.clear()
+        self._candidate_scores.clear()
+        self._candidate_feasible.clear()
         world_states = init_parallel_world_states(env)
         failed = torch.zeros(int(env.num_envs), dtype=torch.bool, device=env.device)
         unsafe_failed = torch.zeros_like(failed)
@@ -355,6 +375,10 @@ class AgentTaskGraph:
                             else None
                         ),
                         candidate_failures=self._step_candidate_failures(
+                            step,
+                            int(env.num_envs),
+                        ),
+                        candidate_scores=self._step_candidate_scores(
                             step,
                             int(env.num_envs),
                         ),
@@ -619,6 +643,8 @@ class AgentTaskGraph:
                     log_info(
                         f"Rejected {arm} candidate for {step.id}: {error}",
                     )
+                    self._candidate_scores.pop((step.id, arm), None)
+                    self._candidate_feasible.pop((step.id, arm), None)
                     feasible = torch.zeros_like(failed)
                     cost = torch.full_like(failed, float("inf"), dtype=torch.float32)
                     self._candidate_failure_phases[(step.id, arm)] = [
@@ -1031,6 +1057,8 @@ class AgentTaskGraph:
                 )
             except Exception as error:
                 log_warning(f"Required-arm {arm} planning failed: {error}")
+                self._candidate_scores.pop((step.id, arm), None)
+                self._candidate_feasible.pop((step.id, arm), None)
                 feasible = torch.zeros_like(failed)
                 self._candidate_failure_phases[(step.id, arm)] = [
                     (
@@ -1072,6 +1100,8 @@ class AgentTaskGraph:
                 )
             except Exception as error:
                 log_warning(f"Auto-arm {arm} candidate planning failed: {error}")
+                self._candidate_scores.pop((step.id, arm), None)
+                self._candidate_feasible.pop((step.id, arm), None)
                 feasible = torch.zeros_like(failed)
                 cost = torch.full_like(failed, float("inf"), dtype=torch.float32)
                 self._candidate_failure_phases[(step.id, arm)] = [
@@ -1190,6 +1220,9 @@ class AgentTaskGraph:
                                 f"env={env_id}, step={step_id}, slot={slot}, "
                                 f"arm={side}_arm: {error}"
                             )
+                            key = (step_id, f"{side}_arm")
+                            self._candidate_scores.pop(key, None)
+                            self._candidate_feasible.pop(key, None)
                             continue
                         if bool(feasible[env_id].item()):
                             arm_costs.append(float(cost[env_id].item()))
@@ -1266,6 +1299,8 @@ class AgentTaskGraph:
         )
         state = initial_state
         previous_eef_target: torch.Tensor | None = None
+        source_pose: torch.Tensor | None = None
+        target_pose: torch.Tensor | None = None
         failure_phases: list[str | None] = [None] * int(env.num_envs)
         for edge in candidate_edges:
             grounded = ground_symbolic_action(
@@ -1276,6 +1311,13 @@ class AgentTaskGraph:
                 arrangement_plan=arrangement_plan,
                 policy_reference_pose=previous_eef_target,
             )
+            if source_pose is None and grounded.object_pose is not None:
+                source_pose = grounded.object_pose
+            if grounded.target_object_pose is not None:
+                binding = edge.symbolic_actions[0].get("target_binding", {})
+                phase = str(binding.get("phase", "final"))
+                if target_pose is None or phase == "final":
+                    target_pose = grounded.target_object_pose
             executed = _execute_atomic_action_result(
                 grounded.action_spec,
                 env=env,
@@ -1302,7 +1344,32 @@ class AgentTaskGraph:
             if not bool((feasible & ~failed).any()):
                 break
         self._candidate_failure_phases[(step.id, arm)] = failure_phases
-        return feasible, total_cost
+        workspace_center_y, workspace_half_width = _arm_selection_workspace(
+            env,
+            device=failed.device,
+        )
+        score = score_arm_candidate(
+            arm=arm,
+            motion_cost=total_cost,
+            source_pose=source_pose,
+            target_pose=target_pose,
+            workspace_center_y=workspace_center_y,
+            workspace_half_width=workspace_half_width,
+            crossing_deadband_ratio=_ARM_CROSSING_DEADBAND_RATIO,
+            pickup_crossing_weight=_ARM_PICKUP_CROSSING_WEIGHT,
+            placement_crossing_weight=_ARM_PLACEMENT_CROSSING_WEIGHT,
+            motion_cost_scale=_ARM_MOTION_COST_SCALE,
+        )
+        self._candidate_scores[(step.id, arm)] = score
+        self._candidate_feasible[(step.id, arm)] = feasible.clone()
+        log_info(
+            f"Scored arm candidate: step={step.id}, arm={arm}, "
+            f"motion={score.normalized_motion_cost.detach().cpu().tolist()}, "
+            f"pickup_crossing={score.pickup_crossing_penalty.detach().cpu().tolist()}, "
+            f"placement_crossing={score.placement_crossing_penalty.detach().cpu().tolist()}, "
+            f"total={score.total_cost.detach().cpu().tolist()}."
+        )
+        return feasible, score.total_cost
 
     def _step_candidate_failures(
         self,
@@ -1324,6 +1391,47 @@ class AgentTaskGraph:
             }
             for index in range(count)
         ]
+
+    def _step_candidate_scores(
+        self,
+        step: AgentSemanticStep,
+        count: int,
+    ) -> list[dict[str, dict[str, float | bool] | None]]:
+        scores = {
+            arm: self._candidate_scores.get((step.id, arm))
+            for arm in ("left_arm", "right_arm")
+        }
+        feasible = {
+            arm: self._candidate_feasible.get((step.id, arm))
+            for arm in ("left_arm", "right_arm")
+        }
+        result: list[dict[str, dict[str, float | bool] | None]] = []
+        for env_id in range(count):
+            env_scores: dict[str, dict[str, float | bool] | None] = {}
+            for arm, score in scores.items():
+                if score is None or env_id >= len(score.total_cost):
+                    env_scores[arm] = None
+                    continue
+                env_scores[arm] = {
+                    "feasible": bool(
+                        feasible[arm] is not None
+                        and env_id < len(feasible[arm])
+                        and feasible[arm][env_id].item()
+                    ),
+                    "motion_cost": float(score.motion_cost[env_id].item()),
+                    "normalized_motion_cost": float(
+                        score.normalized_motion_cost[env_id].item()
+                    ),
+                    "pickup_crossing_penalty": float(
+                        score.pickup_crossing_penalty[env_id].item()
+                    ),
+                    "placement_crossing_penalty": float(
+                        score.placement_crossing_penalty[env_id].item()
+                    ),
+                    "total_cost": float(score.total_cost[env_id].item()),
+                }
+            result.append(env_scores)
+        return result
 
     def _pickup_downstream_targets(
         self,
@@ -1509,6 +1617,37 @@ def _trajectory_cost(
     diffs = np.diff(trajectory, axis=1)
     cost = np.linalg.norm(diffs, axis=-1).sum(axis=-1)
     return torch.as_tensor(cost, dtype=torch.float32, device=device)
+
+
+def _arm_selection_workspace(
+    env: Any,
+    *,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return live table center and half-width along robot-view world-y."""
+    count = int(env.num_envs)
+    centers = torch.zeros(count, dtype=torch.float32, device=device)
+    half_widths = torch.full(
+        (count,),
+        _ARM_FALLBACK_WORKSPACE_HALF_WIDTH,
+        dtype=torch.float32,
+        device=device,
+    )
+    sim = getattr(env, "sim", None)
+    table = sim.get_rigid_object("table") if sim is not None else None
+    if table is None or not hasattr(table, "get_vertices"):
+        return centers, half_widths
+
+    for env_id in range(count):
+        vertices = _object_world_vertices(table, device, env_id=env_id)
+        minimum = vertices[:, 1].min()
+        maximum = vertices[:, 1].max()
+        half_width = (maximum - minimum) * 0.5
+        if float(half_width) <= 1.0e-6:
+            continue
+        centers[env_id] = (minimum + maximum) * 0.5
+        half_widths[env_id] = half_width
+    return centers, half_widths
 
 
 def _candidate_edge_phase(edge: AgentGraphEdge) -> str:

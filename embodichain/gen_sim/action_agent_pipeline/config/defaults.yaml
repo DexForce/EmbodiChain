@@ -100,6 +100,16 @@ action:
   empty_hand_retreat_sample_interval: 30
   coordinated_max_grasp_separation_angle_to_world_y_degrees: 60.0
 
+# Auto-arm selection uses the rotated robot-view convention: positive world-y
+# is left and negative world-y is right. Distances are normalized by the live
+# table half-width so the policy transfers across tabletop sizes.
+arm_selection:
+  crossing_deadband_ratio: 0.08
+  pickup_crossing_weight: 1.0
+  placement_crossing_weight: 1.5
+  motion_cost_scale: 3.141592653589793
+  fallback_workspace_half_width: 0.5
+
 physics:
   background:
     mass: 10.0

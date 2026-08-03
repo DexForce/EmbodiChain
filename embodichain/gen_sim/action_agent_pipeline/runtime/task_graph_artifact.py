@@ -99,6 +99,9 @@ class RuntimeTaskGraphRecorder:
         physical_control_parts: Sequence[str | None] | None = None,
         arrangement_metadata: Sequence[Mapping[str, Any]] | None = None,
         candidate_failures: Sequence[Mapping[str, str | None]] | None = None,
+        candidate_scores: (
+            Sequence[Mapping[str, Mapping[str, float | bool] | None]] | None
+        ) = None,
     ) -> None:
         for env_id, document in enumerate(self.documents):
             record = self._step_by_id[env_id][step.id]["runtime"]
@@ -131,6 +134,8 @@ class RuntimeTaskGraphRecorder:
             )
             record["observed_object_pose"] = _pose_at(object_pose, env_id)
             record["observed_reference_pose"] = _pose_at(reference_pose, env_id)
+            if candidate_scores is not None:
+                record["candidate_scores"] = deepcopy(dict(candidate_scores[env_id]))
             if arrangement_metadata is not None:
                 record["arrangement"] = deepcopy(dict(arrangement_metadata[env_id]))
             document["status"] = "running"

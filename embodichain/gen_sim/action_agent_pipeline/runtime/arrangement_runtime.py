@@ -112,15 +112,6 @@ class ArrangementRuntimePlan:
             torch.full_like(max_diameter, _MIN_SLOT_SPACING),
         )
         self.slot_positions = self._make_slots()
-        self.resolved_slots = {
-            step.id: torch.full(
-                (self.num_envs,),
-                int(step.goal["nominal_slot_index"]),
-                dtype=torch.long,
-                device=self.device,
-            )
-            for step in self.semantic_steps
-        }
         self.reassignment_reason: list[str | None] = [None] * self.num_envs
         self.reassignment_cost = torch.full(
             (self.num_envs,),
@@ -128,6 +119,7 @@ class ArrangementRuntimePlan:
             dtype=torch.float32,
             device=self.device,
         )
+        self.resolved_slots = self._initial_slot_assignments()
         self.completed = {
             step.id: torch.zeros(
                 self.num_envs,
@@ -136,6 +128,76 @@ class ArrangementRuntimePlan:
             )
             for step in self.semantic_steps
         }
+
+    def _initial_slot_assignments(self) -> dict[str, torch.Tensor]:
+        """Match free-order objects to slots without crossing their live order."""
+        resolved = {
+            step.id: torch.full(
+                (self.num_envs,),
+                int(step.goal["nominal_slot_index"]),
+                dtype=torch.long,
+                device=self.device,
+            )
+            for step in self.semantic_steps
+        }
+        free_steps = [
+            step
+            for step in self.semantic_steps
+            if step.goal.get("slot_constraint") == "free_reassignable"
+        ]
+        if not free_steps:
+            return resolved
+
+        required_slots = {
+            int(step.goal["nominal_slot_index"])
+            for step in self.semantic_steps
+            if step.goal.get("slot_constraint") != "free_reassignable"
+        }
+        available_slots = [
+            slot for slot in range(self.slot_count) if slot not in required_slots
+        ]
+        if len(available_slots) != len(free_steps):
+            raise ValueError(
+                "Arrangement slot constraints do not define a one-to-one assignment."
+            )
+
+        object_axis_positions = {
+            step.id: self.env.sim.get_rigid_object(step.object_uid)
+            .get_local_pose(to_matrix=True)[:, self.axis_index, 3]
+            .clone()
+            for step in free_steps
+        }
+        for env_id in range(self.num_envs):
+            ordered_steps = sorted(
+                free_steps,
+                key=lambda step: (
+                    float(object_axis_positions[step.id][env_id].item()),
+                    int(step.goal["nominal_slot_index"]),
+                    step.id,
+                ),
+            )
+            ordered_slots = sorted(
+                available_slots,
+                key=lambda slot: (
+                    float(self.slot_positions[env_id, slot, self.axis_index].item()),
+                    slot,
+                ),
+            )
+            matching_cost = 0.0
+            changed = False
+            for step, slot in zip(ordered_steps, ordered_slots):
+                resolved[step.id][env_id] = slot
+                changed |= slot != int(step.goal["nominal_slot_index"])
+                matching_cost += abs(
+                    float(object_axis_positions[step.id][env_id].item())
+                    - float(self.slot_positions[env_id, slot, self.axis_index].item())
+                )
+            if changed:
+                self.reassignment_reason[env_id] = (
+                    "free arrangement initialized from live spatial order"
+                )
+                self.reassignment_cost[env_id] = matching_cost
+        return resolved
 
     def target_positions(
         self,

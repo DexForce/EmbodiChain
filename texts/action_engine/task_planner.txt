@@ -71,6 +71,12 @@ Built-in operator shapes:
      "ascending"|"descending"; orientation_goal="preserve"|"upright"|
      "lay_flat"|"axis_align"; orientation_axis="none"|"x"|"y"|
      "long_axis"|"short_axis".
+   - In the rotated robot view, world_y is the horizontal left-to-right axis
+     and world_x is the front-to-back depth axis. For an unspecified line or
+     row direction, always use axis="world_y". Use axis="world_x" only when
+     the user explicitly requests a front-to-back, depth-wise, column, or
+     x-axis layout. Use table_long_axis only when the user explicitly names the
+     table's long axis; never infer it from a generic line request.
    - Use order_constraint="free" when the user wants a line but does not care
      which object occupies each slot.
    - A line layout does not imply an orientation change. Use
@@ -81,6 +87,12 @@ Built-in operator shapes:
    - objects: bottom-to-top movable object order.
    - goal fields: stack_mode="on_top"|"nested"; anchor="table_center" or a
      passive support runtime_uid; orientation_goal and orientation_axis.
+   - A vertical stack chain is exactly one build_stack step. Always use the
+     plural "objects" list, never singular "object", and do not include the
+     passive anchor in that list.
+   - Repeated clauses such as "put A on anchor, then put B on top" describe one
+     chain: objects=[A,B], anchor=anchor. Use separate place_relative steps only
+     when every object should independently contact the same support.
 
 3. place_relative
    - object: one movable object.
