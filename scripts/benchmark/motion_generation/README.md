@@ -2,6 +2,8 @@
 
 Free-space motion-generation suite with cuRobo as the default primary baseline.
 
+Design background and roadmap: see [`BENCHMARK_DESIGN.md`](./BENCHMARK_DESIGN.md).
+
 ## Run
 
 ```bash
