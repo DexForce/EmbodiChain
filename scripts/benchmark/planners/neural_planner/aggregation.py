@@ -66,16 +66,25 @@ def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
     return failures.most_common(1)[0][0] if failures else None
 
 
+def _track_ids(records: list[TrialRecord], cases: list[BenchmarkCase]) -> list[str]:
+    """Return deterministic track ids observed in cases or records."""
+    tracks = {case.track for case in cases}
+    tracks.update(record.track for record in records)
+    return sorted(tracks)
+
+
 def _lifecycle_value(
     records: list[TrialRecord],
+    track: str,
     algorithm_id: str,
     batch_size: int,
     phase: TrialPhase,
 ) -> float | None:
-    """Return the first lifecycle cost for one algorithm and batch size."""
+    """Return the first lifecycle cost for one track, algorithm, and batch size."""
     for record in records:
         if (
-            record.algorithm_id == algorithm_id
+            record.track == track
+            and record.algorithm_id == algorithm_id
             and record.batch_size == batch_size
             and record.phase is phase
         ):
@@ -84,40 +93,49 @@ def _lifecycle_value(
 
 
 def _performance_rows(
-    records: list[TrialRecord], metadata: list[PlannerMetadata]
+    records: list[TrialRecord],
+    metadata: list[PlannerMetadata],
+    cases: list[BenchmarkCase],
 ) -> list[dict[str, object]]:
-    """Aggregate steady-state time and memory by algorithm and input shape."""
-    measured_groups: dict[tuple[str, int, int], list[TrialRecord]] = defaultdict(list)
+    """Aggregate steady-state time and memory by track, algorithm, and input shape."""
+    measured_groups: dict[tuple[str, str, int, int], list[TrialRecord]] = defaultdict(
+        list
+    )
     for record in records:
         if record.phase is TrialPhase.MEASURED:
             measured_groups[
-                (record.algorithm_id, record.batch_size, record.waypoint_count)
+                (
+                    record.track,
+                    record.algorithm_id,
+                    record.batch_size,
+                    record.waypoint_count,
+                )
             ].append(record)
 
     metadata_by_id = {item.algorithm_id: item for item in metadata}
     rows: list[dict[str, object]] = []
     for key in sorted(measured_groups):
-        algorithm_id, batch_size, waypoint_count = key
+        track, algorithm_id, batch_size, waypoint_count = key
         group = measured_groups[key]
         info = metadata_by_id[algorithm_id]
         costs = [record.cost_time_ms for record in group]
         mean_cost = _mean(costs)
         rows.append(
             {
-                "track": "free-space-common",
+                "track": track,
                 "algorithm": algorithm_id,
                 "algorithm_role": info.algorithm_role.value,
                 "batch_size": batch_size,
                 "waypoint_count": waypoint_count,
                 "num_trials": len(group),
                 "planner_construct_ms": _lifecycle_value(
-                    records, algorithm_id, batch_size, TrialPhase.CONSTRUCT
+                    records, track, algorithm_id, batch_size, TrialPhase.CONSTRUCT
                 ),
                 "backend_prepare_ms": _lifecycle_value(
-                    records, algorithm_id, batch_size, TrialPhase.PREPARE
+                    records, track, algorithm_id, batch_size, TrialPhase.PREPARE
                 ),
                 "cold_plan_ms": _lifecycle_value(
-                    records, algorithm_id, batch_size, TrialPhase.COLD
+                    records, track, algorithm_id, batch_size, TrialPhase.COLD
                 ),
                 "cost_time_ms": mean_cost,
                 "warm_plan_ms_p50": _percentile(costs, 50.0),
@@ -141,35 +159,37 @@ def _performance_rows(
             }
         )
 
-    present_algorithms = {row["algorithm"] for row in rows}
-    for info in metadata:
-        if info.algorithm_id in present_algorithms:
-            continue
-        rows.append(
-            {
-                "track": "free-space-common",
-                "algorithm": info.algorithm_id,
-                "algorithm_role": info.algorithm_role.value,
-                "batch_size": None,
-                "waypoint_count": None,
-                "num_trials": 0,
-                "planner_construct_ms": None,
-                "backend_prepare_ms": None,
-                "cold_plan_ms": None,
-                "cost_time_ms": None,
-                "warm_plan_ms_p50": None,
-                "warm_plan_ms_p95": None,
-                "latency_per_env_ms": None,
-                "cost_time_per_segment_ms": None,
-                "trajectories_per_second": None,
-                "cpu_delta_mb": None,
-                "gpu_delta_mb": None,
-                "peak_gpu_mb": None,
-            }
-        )
+    present = {(row["track"], row["algorithm"]) for row in rows}
+    for track in _track_ids(records, cases):
+        for info in metadata:
+            if (track, info.algorithm_id) in present:
+                continue
+            rows.append(
+                {
+                    "track": track,
+                    "algorithm": info.algorithm_id,
+                    "algorithm_role": info.algorithm_role.value,
+                    "batch_size": None,
+                    "waypoint_count": None,
+                    "num_trials": 0,
+                    "planner_construct_ms": None,
+                    "backend_prepare_ms": None,
+                    "cold_plan_ms": None,
+                    "cost_time_ms": None,
+                    "warm_plan_ms_p50": None,
+                    "warm_plan_ms_p95": None,
+                    "latency_per_env_ms": None,
+                    "cost_time_per_segment_ms": None,
+                    "trajectories_per_second": None,
+                    "cpu_delta_mb": None,
+                    "gpu_delta_mb": None,
+                    "peak_gpu_mb": None,
+                }
+            )
     return sorted(
         rows,
         key=lambda row: (
+            str(row["track"]),
             str(row["algorithm"]),
             int(row["batch_size"] or 0),
             int(row["waypoint_count"] or 0),
@@ -184,13 +204,14 @@ def _metric_rows(
     measured_trials: int,
 ) -> list[dict[str, object]]:
     """Aggregate external success and quality metrics by scenario condition."""
-    outcome_groups: dict[tuple[str, str, int, int, str, str], list[CaseOutcome]] = (
-        defaultdict(list)
-    )
+    outcome_groups: dict[
+        tuple[str, str, str, int, int, str, str], list[CaseOutcome]
+    ] = defaultdict(list)
     for record in records:
         if record.phase is not TrialPhase.MEASURED:
             continue
         key = (
+            record.track,
             record.algorithm_id,
             record.scenario_id,
             record.batch_size,
@@ -200,10 +221,11 @@ def _metric_rows(
         )
         outcome_groups[key].extend(record.outcomes)
 
-    expected_by_group: Counter[tuple[str, int, int, str, str]] = Counter()
-    unique_cases_by_group: Counter[tuple[str, int, int, str, str]] = Counter()
+    expected_by_group: Counter[tuple[str, str, int, int, str, str]] = Counter()
+    unique_cases_by_group: Counter[tuple[str, str, int, int, str, str]] = Counter()
     for case in cases:
         key = (
+            case.track,
             case.scenario_id,
             case.batch_size,
             case.num_waypoints,
@@ -216,11 +238,17 @@ def _metric_rows(
     rows: list[dict[str, object]] = []
     for info in metadata:
         for group_key in sorted(expected_by_group):
-            scenario_id, batch_size, waypoint_count, path_shape, start_state_bin = (
-                group_key
-            )
+            (
+                track,
+                scenario_id,
+                batch_size,
+                waypoint_count,
+                path_shape,
+                start_state_bin,
+            ) = group_key
             outcomes = outcome_groups.get(
                 (
+                    track,
                     info.algorithm_id,
                     scenario_id,
                     batch_size,
@@ -234,7 +262,7 @@ def _metric_rows(
             expected = expected_by_group[group_key]
             rows.append(
                 {
-                    "track": "free-space-common",
+                    "track": track,
                     "scenario": scenario_id,
                     "algorithm": info.algorithm_id,
                     "algorithm_role": info.algorithm_role.value,
@@ -295,54 +323,69 @@ def _leaderboard_rows(
     cases: list[BenchmarkCase],
     measured_trials: int,
 ) -> list[dict[str, object]]:
-    """Build a complete success/coverage/latency ordered leaderboard."""
-    expected_outcomes = sum(case.batch_size for case in cases) * measured_trials
+    """Build a complete success/coverage/latency ordered leaderboard per track."""
     entries: list[dict[str, object]] = []
-    for info in metadata:
-        measured = [
-            record
-            for record in records
-            if record.algorithm_id == info.algorithm_id
-            and record.phase is TrialPhase.MEASURED
-        ]
-        outcomes = [outcome for record in measured for outcome in record.outcomes]
-        coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
-        motion_rate = _rate(outcome.motion_valid for outcome in outcomes) or 0.0
-        planning_rate = _rate(outcome.planning_success for outcome in outcomes) or 0.0
-        latency_p95 = _percentile((record.cost_time_ms for record in measured), 95.0)
-        peak_gpu = max((record.peak_gpu_mb or 0.0 for record in measured), default=None)
-        entries.append(
-            {
-                "track": "free-space-common",
-                "algorithm": info.algorithm_id,
-                "algorithm_role": info.algorithm_role.value,
-                "model_revision": info.model_revision,
-                "planner_config_hash": info.config_hash[:12],
-                "eligible": coverage >= 1.0 - 1.0e-12,
-                "coverage_rate": coverage,
-                "overall_success_rate": motion_rate,
-                "planning_success_rate": planning_rate,
-                "motion_valid_rate": motion_rate,
-                "task_success_rate": None,
-                "latency_p95_ms": latency_p95,
-                "peak_gpu_mb": peak_gpu,
-            }
+    for track in _track_ids(records, cases):
+        track_cases = [case for case in cases if case.track == track]
+        expected_outcomes = (
+            sum(case.batch_size for case in track_cases) * measured_trials
         )
+        track_entries: list[dict[str, object]] = []
+        for info in metadata:
+            measured = [
+                record
+                for record in records
+                if record.algorithm_id == info.algorithm_id
+                and record.track == track
+                and record.phase is TrialPhase.MEASURED
+            ]
+            outcomes = [outcome for record in measured for outcome in record.outcomes]
+            coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
+            motion_rate = _rate(outcome.motion_valid for outcome in outcomes) or 0.0
+            planning_rate = (
+                _rate(outcome.planning_success for outcome in outcomes) or 0.0
+            )
+            latency_p95 = _percentile(
+                (record.cost_time_ms for record in measured), 95.0
+            )
+            peak_gpu = max(
+                (record.peak_gpu_mb or 0.0 for record in measured), default=None
+            )
+            track_entries.append(
+                {
+                    "track": track,
+                    "algorithm": info.algorithm_id,
+                    "algorithm_role": info.algorithm_role.value,
+                    "model_revision": info.model_revision,
+                    "planner_config_hash": info.config_hash[:12],
+                    "eligible": coverage >= 1.0 - 1.0e-12,
+                    "coverage_rate": coverage,
+                    "overall_success_rate": motion_rate,
+                    "planning_success_rate": planning_rate,
+                    "motion_valid_rate": motion_rate,
+                    "task_success_rate": None,
+                    "latency_p95_ms": latency_p95,
+                    "peak_gpu_mb": peak_gpu,
+                }
+            )
 
-    entries.sort(
-        key=lambda row: (
-            not bool(row["eligible"]),
-            -float(row["overall_success_rate"]),
-            -float(row["coverage_rate"]),
-            (
-                float(row["latency_p95_ms"])
-                if row["latency_p95_ms"] is not None
-                else math.inf
-            ),
-            str(row["algorithm"]),
+        track_entries.sort(
+            key=lambda row: (
+                not bool(row["eligible"]),
+                -float(row["overall_success_rate"]),
+                -float(row["coverage_rate"]),
+                (
+                    float(row["latency_p95_ms"])
+                    if row["latency_p95_ms"] is not None
+                    else math.inf
+                ),
+                str(row["algorithm"]),
+            )
         )
-    )
-    return [{"rank": rank, **entry} for rank, entry in enumerate(entries, start=1)]
+        entries.extend(
+            {"rank": rank, **entry} for rank, entry in enumerate(track_entries, start=1)
+        )
+    return entries
 
 
 def aggregate_results(
@@ -353,7 +396,7 @@ def aggregate_results(
 ) -> dict[str, list[dict[str, object]]]:
     """Build all three report datasets from raw numeric records."""
     return {
-        "time_and_memory": _performance_rows(records, metadata),
+        "time_and_memory": _performance_rows(records, metadata, cases),
         "success_and_metrics": _metric_rows(records, metadata, cases, measured_trials),
         "leaderboard": _leaderboard_rows(records, metadata, cases, measured_trials),
     }

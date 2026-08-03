@@ -54,9 +54,13 @@ protocol:
   rotation_threshold_rad: 0.3
   joint_limit_tolerance_rad: 0.00001
 
-free_space:
-  batch_sizes: [1]
-  waypoint_counts: [1, 3, 5]
-  path_shapes: [direct, l_turn, s_curve]
-  start_state_bins: [nominal]
-  seeds: [11]
+tracks:
+  - id: free-space-common
+    scenario: free_space
+    enabled: true
+    config:
+      batch_sizes: [1]
+      waypoint_counts: [1, 3, 5]
+      path_shapes: [direct, l_turn, s_curve]
+      start_state_bins: [nominal]
+      seeds: [11]

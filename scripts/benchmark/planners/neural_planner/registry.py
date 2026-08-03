@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Planner adapter registry used by the generic benchmark runner."""
+"""Planner and scenario registries used by the generic benchmark runner."""
 
 from __future__ import annotations
 
@@ -23,14 +23,19 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .config import PlannerSpecCfg
     from .planners.base import PlannerAdapter, PlannerContext
+    from .scenarios.base import ScenarioProvider
 
 __all__ = [
     "create_planner_adapter",
+    "create_scenario_provider",
     "planner_adapter_names",
     "register_planner_adapter",
+    "register_scenario_provider",
+    "scenario_provider_names",
 ]
 
 _PLANNER_ADAPTERS: dict[str, type["PlannerAdapter"]] = {}
+_SCENARIO_PROVIDERS: dict[str, type["ScenarioProvider"]] = {}
 
 
 def register_planner_adapter(name: str, adapter_cls: type["PlannerAdapter"]) -> None:
@@ -60,3 +65,32 @@ def create_planner_adapter(
             f"registered adapters: {planner_adapter_names()}."
         ) from exc
     return adapter_cls(spec=spec, context=context)
+
+
+def register_scenario_provider(
+    name: str, provider_cls: type["ScenarioProvider"]
+) -> None:
+    """Register one scenario provider class under a stable configuration name."""
+    if not name:
+        raise ValueError("Scenario provider name must not be empty.")
+    previous = _SCENARIO_PROVIDERS.get(name)
+    if previous is not None and previous is not provider_cls:
+        raise ValueError(f"Scenario provider {name!r} is already registered.")
+    _SCENARIO_PROVIDERS[name] = provider_cls
+
+
+def scenario_provider_names() -> tuple[str, ...]:
+    """Return registered scenario provider names in deterministic order."""
+    return tuple(sorted(_SCENARIO_PROVIDERS))
+
+
+def create_scenario_provider(name: str) -> "ScenarioProvider":
+    """Construct the scenario provider selected by a track specification."""
+    try:
+        provider_cls = _SCENARIO_PROVIDERS[name]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown scenario provider {name!r}; "
+            f"registered providers: {scenario_provider_names()}."
+        ) from exc
+    return provider_cls()

@@ -31,6 +31,9 @@ from scripts.benchmark.planners.neural_planner.metrics.trajectory import (
     compute_case_outcomes,
     match_ordered_waypoints,
 )
+from scripts.benchmark.planners.neural_planner import (
+    scenarios as _scenarios,
+)  # noqa: F401
 from scripts.benchmark.planners.neural_planner.models import (
     AlgorithmRole,
     BenchmarkCase,
@@ -39,14 +42,15 @@ from scripts.benchmark.planners.neural_planner.models import (
     TrialPhase,
     TrialRecord,
 )
+from scripts.benchmark.planners.neural_planner.registry import (
+    create_scenario_provider,
+    scenario_provider_names,
+)
 from scripts.benchmark.planners.neural_planner.reporting import (
     write_markdown_report,
 )
 from scripts.benchmark.planners.neural_planner.run_benchmark import (
     _apply_overrides,
-)
-from scripts.benchmark.planners.neural_planner.scenarios.free_space import (
-    generate_free_space_cases,
 )
 
 
@@ -221,16 +225,33 @@ class _FakeRobot:
         return poses
 
 
+def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
+    suite = load_suite("smoke")
+
+    assert [track.id for track in suite.enabled_tracks()] == ["free-space-common"]
+    assert suite.enabled_tracks()[0].scenario == "free_space"
+    assert "free_space" in scenario_provider_names()
+    provider = create_scenario_provider("free_space")
+    assert provider.batch_sizes(suite, suite.enabled_tracks()[0]) == [1]
+
+    suite.free_space.batch_sizes = [1, 8]
+    suite.validate_benchmark()
+    assert suite.enabled_tracks()[0].config["batch_sizes"] == [1, 8]
+
+
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     suite = load_suite("smoke")
     robot = _FakeRobot()
+    provider = create_scenario_provider("free_space")
+    track = suite.enabled_tracks()[0]
 
-    first = generate_free_space_cases(suite, robot, "arm", batch_size=1)
-    second = generate_free_space_cases(suite, robot, "arm", batch_size=1)
+    first = provider.generate_cases(suite, track, robot, "arm", batch_size=1)
+    second = provider.generate_cases(suite, track, robot, "arm", batch_size=1)
 
     assert [case.case_id for case in first] == [case.case_id for case in second]
     assert torch.equal(first[0].start_qpos, second[0].start_qpos)
     assert torch.equal(first[0].target_waypoints, second[0].target_waypoints)
+    assert {case.track for case in first} == {"free-space-common"}
 
 
 def test_free_space_cases_use_one_start_state_bin_each():
@@ -240,7 +261,10 @@ def test_free_space_cases_use_one_start_state_bin_each():
     suite.free_space.path_shapes = ["direct"]
     suite.free_space.seeds = [11]
     suite.free_space.start_state_bins = ["nominal", "near_limit"]
-    cases = generate_free_space_cases(suite, _FakeRobot(), "arm", batch_size=2)
+    track = suite.enabled_tracks()[0]
+    cases = create_scenario_provider("free_space").generate_cases(
+        suite, track, _FakeRobot(), "arm", batch_size=2
+    )
 
     assert [case.start_state_bin for case in cases] == ["nominal", "near_limit"]
     assert len({case.case_id for case in cases}) == 2

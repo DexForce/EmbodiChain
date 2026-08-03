@@ -23,13 +23,15 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from ..config import SuiteCfg, stable_hash
+from ..config import SuiteCfg, TrackCfg, stable_hash
 from ..models import BenchmarkCase
+from ..registry import register_scenario_provider
+from .base import ScenarioProvider
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
 
-__all__ = ["generate_free_space_cases"]
+__all__ = ["FreeSpaceScenario"]
 
 _NOMINAL_QPOS = torch.tensor(
     [0.0, -math.pi / 4, 0.0, -3.0 * math.pi / 4, 0.0, math.pi / 2, math.pi / 4],
@@ -125,6 +127,7 @@ def _build_case(
     shape_index: int,
     start_state_bin: str,
     bin_index: int,
+    track_id: str,
 ) -> BenchmarkCase:
     """Build one reachable env-batched case using FK reference targets."""
     limits = robot.get_qpos_limits(name=control_part)[0].detach().cpu()
@@ -166,6 +169,7 @@ def _build_case(
 
     identity = {
         "suite_version": suite.suite_version,
+        "track": track_id,
         "seed": seed,
         "batch_size": batch_size,
         "num_waypoints": num_waypoints,
@@ -175,7 +179,7 @@ def _build_case(
     case_id = f"free_space_{stable_hash(identity)[:16]}"
     return BenchmarkCase(
         suite_version=suite.suite_version,
-        track="free-space-common",
+        track=track_id,
         scenario_id="waypoint_path" if num_waypoints > 1 else "reach",
         case_id=case_id,
         seed=seed,
@@ -189,32 +193,43 @@ def _build_case(
     )
 
 
-def generate_free_space_cases(
-    suite: SuiteCfg,
-    robot: "Robot",
-    control_part: str,
-    batch_size: int,
-) -> list[BenchmarkCase]:
-    """Generate the fixed case manifest for one simulator batch size."""
-    cases: list[BenchmarkCase] = []
-    for seed in suite.free_space.seeds:
-        for num_waypoints in suite.free_space.waypoint_counts:
-            for shape_index, path_shape in enumerate(suite.free_space.path_shapes):
-                for bin_index, start_state_bin in enumerate(
-                    suite.free_space.start_state_bins
-                ):
-                    cases.append(
-                        _build_case(
-                            suite,
-                            robot,
-                            control_part,
-                            seed=seed,
-                            batch_size=batch_size,
-                            num_waypoints=num_waypoints,
-                            path_shape=path_shape,
-                            shape_index=shape_index,
-                            start_state_bin=start_state_bin,
-                            bin_index=bin_index,
+class FreeSpaceScenario(ScenarioProvider):
+    required_capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+
+    def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:  # noqa: ARG002
+        return list(suite.free_space.batch_sizes)
+
+    def generate_cases(
+        self,
+        suite: SuiteCfg,
+        track: TrackCfg,
+        robot: "Robot",
+        control_part: str,
+        batch_size: int,
+    ) -> list[BenchmarkCase]:
+        cases: list[BenchmarkCase] = []
+        for seed in suite.free_space.seeds:
+            for num_waypoints in suite.free_space.waypoint_counts:
+                for shape_index, path_shape in enumerate(suite.free_space.path_shapes):
+                    for bin_index, start_state_bin in enumerate(
+                        suite.free_space.start_state_bins
+                    ):
+                        cases.append(
+                            _build_case(
+                                suite,
+                                robot,
+                                control_part,
+                                seed=seed,
+                                batch_size=batch_size,
+                                num_waypoints=num_waypoints,
+                                path_shape=path_shape,
+                                shape_index=shape_index,
+                                start_state_bin=start_state_bin,
+                                bin_index=bin_index,
+                                track_id=track.id,
+                            )
                         )
-                    )
-    return cases
+        return cases
+
+
+register_scenario_provider("free_space", FreeSpaceScenario)

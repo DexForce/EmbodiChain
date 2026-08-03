@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Generic lifecycle runner for the ``free-space-common`` benchmark."""
+"""Generic lifecycle runner for motion-generation benchmark tracks."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from embodichain.lab.sim.planners.utils import PlanResult
 from embodichain.lab.sim.robots import FrankaPandaCfg
 
 from . import planners as _builtin_planners  # noqa: F401 - registry side effects
+from . import scenarios as _builtin_scenarios  # noqa: F401 - registry side effects
 from .aggregation import aggregate_results
 from .artifacts import (
     TrialJsonlWriter,
@@ -48,9 +49,8 @@ from .models import (
     TrialRecord,
 )
 from .planners.base import PlannerAdapter, PlannerContext
-from .registry import create_planner_adapter
+from .registry import create_planner_adapter, create_scenario_provider
 from .reporting import write_markdown_report
-from .scenarios import generate_free_space_cases
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -395,30 +395,34 @@ class BenchmarkRunner:
         writer = TrialJsonlWriter(run_dir / "trials.jsonl")
 
         print("=" * 60)
-        print("Motion Generation Free-Space Benchmark")
+        print("Motion Generation Benchmark")
         print("=" * 60)
+        enabled_tracks = self.suite.enabled_tracks()
         print(
             f"suite={self.suite.suite_version} device={self.device} "
+            f"tracks={','.join(track.id for track in enabled_tracks)} "
             f"planners={','.join(spec.id for spec in self.planner_specs)}"
         )
 
-        for batch_size in self.suite.free_space.batch_sizes:
-            sim: SimulationManager | None = None
-            try:
-                sim, robot = self._create_simulation(batch_size)
-                cases = generate_free_space_cases(
-                    self.suite, robot, _CONTROL_PART, batch_size
-                )
-                self.cases.extend(cases)
-                for spec in self.planner_specs:
-                    self._run_adapter(writer, sim, robot, spec, cases)
-            finally:
-                if sim is not None:
-                    # Benchmarks must aggregate and report after simulator
-                    # teardown; the SimulationManager default exits the whole
-                    # process, so opt into deferred in-process cleanup here.
-                    sim.destroy(exit_process=False)
-                    SimulationManager.flush_cleanup_queue()
+        for track in enabled_tracks:
+            provider = create_scenario_provider(track.scenario)
+            for batch_size in provider.batch_sizes(self.suite, track):
+                sim: SimulationManager | None = None
+                try:
+                    sim, robot = self._create_simulation(batch_size)
+                    cases = provider.generate_cases(
+                        self.suite, track, robot, _CONTROL_PART, batch_size
+                    )
+                    self.cases.extend(cases)
+                    for spec in self.planner_specs:
+                        self._run_adapter(writer, sim, robot, spec, cases)
+                finally:
+                    if sim is not None:
+                        # Benchmarks must aggregate and report after simulator
+                        # teardown; the SimulationManager default exits the whole
+                        # process, so opt into deferred in-process cleanup here.
+                        sim.destroy(exit_process=False)
+                        SimulationManager.flush_cleanup_queue()
 
         write_case_manifest(run_dir / "case_manifest.json", self.cases)
         metadata = [

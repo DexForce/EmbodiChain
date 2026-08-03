@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
-from .free_space import generate_free_space_cases
+from .base import ScenarioProvider
+from .free_space import FreeSpaceScenario
 
-__all__ = ["generate_free_space_cases"]
+__all__ = ["FreeSpaceScenario", "ScenarioProvider"]

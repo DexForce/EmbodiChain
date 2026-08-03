@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Configuration loading and hashing for free-space planner benchmark suites."""
+"""Configuration loading and hashing for motion-generation benchmark suites."""
 
 from __future__ import annotations
 
@@ -36,12 +36,15 @@ __all__ = [
     "PlannerSpecCfg",
     "ProtocolCfg",
     "SuiteCfg",
+    "TrackCfg",
     "load_suite",
     "stable_hash",
     "suite_to_dict",
 ]
 
 BENCHMARK_ROOT = Path(__file__).resolve().parent
+_FREE_SPACE_TRACK_ID = "free-space-common"
+_FREE_SPACE_SCENARIO = "free_space"
 _SUPPORTED_PATH_SHAPES = {
     "direct",
     "l_turn",
@@ -93,6 +96,16 @@ class FreeSpaceTrackCfg:
 
 
 @configclass
+class TrackCfg:
+    """One enabled benchmark track and its scenario provider."""
+
+    id: str = ""
+    scenario: str = ""
+    enabled: bool = True
+    config: dict[str, Any] = {}
+
+
+@configclass
 class SuiteCfg:
     """Resolved benchmark suite configuration."""
 
@@ -102,12 +115,14 @@ class SuiteCfg:
     profile: str = "smoke"
     planners: list[PlannerSpecCfg] = []
     protocol: ProtocolCfg = ProtocolCfg()
+    tracks: list[TrackCfg] = []
     free_space: FreeSpaceTrackCfg = FreeSpaceTrackCfg()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SuiteCfg":
         """Build and validate a suite from a YAML-compatible mapping."""
         planners = [PlannerSpecCfg(**item) for item in data.get("planners", [])]
+        tracks, free_space = _resolve_tracks_and_free_space(data)
         suite = cls(
             schema_version=int(data.get("schema_version", 1)),
             name=str(data.get("name", "free_space_common")),
@@ -115,13 +130,26 @@ class SuiteCfg:
             profile=str(data.get("profile", "smoke")),
             planners=planners,
             protocol=ProtocolCfg(**data.get("protocol", {})),
-            free_space=FreeSpaceTrackCfg(**data.get("free_space", {})),
+            tracks=tracks,
+            free_space=free_space,
         )
         suite.validate_benchmark()
         return suite
 
+    def enabled_tracks(self) -> list[TrackCfg]:
+        """Return enabled tracks in suite order."""
+        return [track for track in self.tracks if track.enabled]
+
+    def sync_track_configs(self) -> None:
+        """Copy typed free-space settings into the matching track config."""
+        for track in self.tracks:
+            if track.scenario == _FREE_SPACE_SCENARIO:
+                track.id = track.id or _FREE_SPACE_TRACK_ID
+                track.config = asdict(self.free_space)
+
     def validate_benchmark(self) -> None:
         """Validate values that affect benchmark correctness."""
+        self.sync_track_configs()
         missing_fields = self.validate()
         if missing_fields:
             raise ValueError(
@@ -143,6 +171,16 @@ class SuiteCfg:
                     "Every planner must define a non-empty id and adapter."
                 )
             AlgorithmRole(spec.role)
+        if not self.tracks:
+            raise ValueError("The benchmark suite must declare at least one track.")
+        track_ids = [track.id for track in self.tracks]
+        if len(track_ids) != len(set(track_ids)):
+            raise ValueError("Track ids must be unique within a suite.")
+        if not self.enabled_tracks():
+            raise ValueError("At least one track must be enabled.")
+        for track in self.tracks:
+            if not track.id or not track.scenario:
+                raise ValueError("Every track must define a non-empty id and scenario.")
         if self.protocol.warmup_trials < 0:
             raise ValueError("warmup_trials must be >= 0.")
         if self.protocol.measured_trials < 1:
@@ -157,43 +195,70 @@ class SuiteCfg:
             raise ValueError("rotation_threshold_rad must be > 0.")
         if self.protocol.joint_limit_tolerance_rad < 0.0:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
-        if not self.free_space.batch_sizes or any(
-            value < 1 for value in self.free_space.batch_sizes
-        ):
-            raise ValueError("batch_sizes must contain positive integers.")
-        if not self.free_space.waypoint_counts or any(
-            value < 1 for value in self.free_space.waypoint_counts
-        ):
-            raise ValueError("waypoint_counts must contain positive integers.")
-        if not self.free_space.seeds:
-            raise ValueError("seeds must not be empty.")
-        if not self.free_space.path_shapes:
-            raise ValueError("path_shapes must not be empty.")
-        unknown_shapes = set(self.free_space.path_shapes) - _SUPPORTED_PATH_SHAPES
-        if unknown_shapes:
-            raise ValueError(f"Unsupported path_shapes: {sorted(unknown_shapes)}.")
-        if not self.free_space.start_state_bins:
-            raise ValueError("start_state_bins must not be empty.")
-        unknown_bins = (
-            set(self.free_space.start_state_bins) - _SUPPORTED_START_STATE_BINS
-        )
-        if unknown_bins:
-            raise ValueError(f"Unsupported start_state_bins: {sorted(unknown_bins)}.")
-        for name, values in (
-            ("batch_sizes", self.free_space.batch_sizes),
-            ("waypoint_counts", self.free_space.waypoint_counts),
-            ("path_shapes", self.free_space.path_shapes),
-            ("start_state_bins", self.free_space.start_state_bins),
-            ("seeds", self.free_space.seeds),
-        ):
-            if len(values) != len(set(values)):
-                raise ValueError(f"{name} must not contain duplicate values.")
+        if any(track.scenario == _FREE_SPACE_SCENARIO for track in self.tracks):
+            _validate_free_space(self.free_space)
         nmg = next((spec for spec in self.planners if spec.id == "nmg"), None)
         if nmg is not None:
             if float(nmg.config.get("pos_eps", 0.05)) <= 0.0:
                 raise ValueError("NMG pos_eps must be > 0.")
             if float(nmg.config.get("rot_eps", 0.3)) <= 0.0:
                 raise ValueError("NMG rot_eps must be > 0.")
+
+
+def _resolve_tracks_and_free_space(
+    data: dict[str, Any],
+) -> tuple[list[TrackCfg], FreeSpaceTrackCfg]:
+    """Accept either ``tracks`` or legacy top-level ``free_space``."""
+    tracks_data = data.get("tracks")
+    free_space_data = dict(data.get("free_space", {}) or {})
+    if tracks_data is None:
+        tracks = [
+            TrackCfg(
+                id=_FREE_SPACE_TRACK_ID,
+                scenario=_FREE_SPACE_SCENARIO,
+                enabled=True,
+                config=dict(free_space_data),
+            )
+        ]
+    else:
+        if not isinstance(tracks_data, list):
+            raise TypeError("tracks must be a list of track mappings.")
+        tracks = [TrackCfg(**item) for item in tracks_data]
+        for track in tracks:
+            if track.scenario == _FREE_SPACE_SCENARIO and track.config:
+                free_space_data = {**free_space_data, **dict(track.config)}
+    return tracks, FreeSpaceTrackCfg(**free_space_data)
+
+
+def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
+    """Validate free-space case-matrix fields."""
+    if not free_space.batch_sizes or any(value < 1 for value in free_space.batch_sizes):
+        raise ValueError("batch_sizes must contain positive integers.")
+    if not free_space.waypoint_counts or any(
+        value < 1 for value in free_space.waypoint_counts
+    ):
+        raise ValueError("waypoint_counts must contain positive integers.")
+    if not free_space.seeds:
+        raise ValueError("seeds must not be empty.")
+    if not free_space.path_shapes:
+        raise ValueError("path_shapes must not be empty.")
+    unknown_shapes = set(free_space.path_shapes) - _SUPPORTED_PATH_SHAPES
+    if unknown_shapes:
+        raise ValueError(f"Unsupported path_shapes: {sorted(unknown_shapes)}.")
+    if not free_space.start_state_bins:
+        raise ValueError("start_state_bins must not be empty.")
+    unknown_bins = set(free_space.start_state_bins) - _SUPPORTED_START_STATE_BINS
+    if unknown_bins:
+        raise ValueError(f"Unsupported start_state_bins: {sorted(unknown_bins)}.")
+    for name, values in (
+        ("batch_sizes", free_space.batch_sizes),
+        ("waypoint_counts", free_space.waypoint_counts),
+        ("path_shapes", free_space.path_shapes),
+        ("start_state_bins", free_space.start_state_bins),
+        ("seeds", free_space.seeds),
+    ):
+        if len(values) != len(set(values)):
+            raise ValueError(f"{name} must not contain duplicate values.")
 
 
 def load_suite(name_or_path: str = "smoke") -> SuiteCfg:
@@ -217,7 +282,10 @@ def load_suite(name_or_path: str = "smoke") -> SuiteCfg:
 
 def suite_to_dict(suite: SuiteCfg) -> dict[str, Any]:
     """Convert a resolved suite to plain YAML/JSON-compatible values."""
-    return asdict(suite)
+    suite.sync_track_configs()
+    data = asdict(suite)
+    data.pop("free_space", None)
+    return data
 
 
 def stable_hash(value: object) -> str:
