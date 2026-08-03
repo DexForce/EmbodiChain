@@ -623,6 +623,120 @@ def test_leaderboard_uses_case_macro_average_not_env_micro_average():
     assert row["eligible"] is True
 
 
+def test_cold_plan_ms_only_attaches_to_matching_waypoint_row():
+    """Cold latency from W=1 must not be copied onto W=5 Time & Memory rows."""
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    case_w1 = BenchmarkCase(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-w1",
+        seed=11,
+        batch_size=1,
+        num_waypoints=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
+        reference_qpos=torch.zeros(1, 1, 7),
+    )
+    case_w5 = BenchmarkCase(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-w5",
+        seed=11,
+        batch_size=1,
+        num_waypoints=5,
+        path_shape="direct",
+        start_state_bin="nominal",
+        start_qpos=torch.zeros(1, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).expand(1, 5, 4, 4).clone(),
+        reference_qpos=torch.zeros(1, 5, 7),
+    )
+
+    def _measured(case: BenchmarkCase, cost: float) -> TrialRecord:
+        return TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=case.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=case.seed,
+            repeat=0,
+            batch_size=case.batch_size,
+            waypoint_count=case.num_waypoints,
+            path_shape=case.path_shape,
+            start_state_bin=case.start_state_bin,
+            phase=TrialPhase.MEASURED,
+            cost_time_ms=cost,
+            outcomes=(_outcome(),),
+        )
+
+    records = [
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=case_w1.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=case_w1.seed,
+            repeat=-1,
+            batch_size=1,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            phase=TrialPhase.COLD,
+            cost_time_ms=123.0,
+        ),
+        TrialRecord(
+            suite_version="test_v1",
+            track="free-space-common",
+            scenario_id="reach",
+            case_id=case_w1.case_id,
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            model_revision="curobo-v2",
+            planner_config_hash="abc",
+            seed=case_w1.seed,
+            repeat=-1,
+            batch_size=1,
+            waypoint_count=1,
+            path_shape="direct",
+            start_state_bin="nominal",
+            phase=TrialPhase.CONSTRUCT,
+            cost_time_ms=50.0,
+        ),
+        _measured(case_w1, 10.0),
+        _measured(case_w5, 20.0),
+    ]
+
+    rows = aggregate_results(records, metadata, [case_w1, case_w5], measured_trials=1)[
+        "time_and_memory"
+    ]
+    by_waypoints = {row["waypoint_count"]: row for row in rows}
+
+    assert by_waypoints[1]["cold_plan_ms"] == pytest.approx(123.0)
+    assert by_waypoints[5]["cold_plan_ms"] is None
+    # One-time construct cost remains visible on every batch row.
+    assert by_waypoints[1]["planner_construct_ms"] == pytest.approx(50.0)
+    assert by_waypoints[5]["planner_construct_ms"] == pytest.approx(50.0)
+
+
 def test_report_contains_exactly_three_markdown_tables(tmp_path):
     suite = load_suite("smoke")
     aggregates = {
