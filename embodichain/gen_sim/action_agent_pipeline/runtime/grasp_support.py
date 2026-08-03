@@ -77,6 +77,7 @@ class _ActionAgentAntipodalAffordance(AntipodalAffordance):
         approach_direction: torch.Tensor = torch.tensor(
             [0, 0, -1], dtype=torch.float32
         ),
+        object_part: str = "center",
         grasp_cost_fn: (
             Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
@@ -88,6 +89,7 @@ class _ActionAgentAntipodalAffordance(AntipodalAffordance):
             return super().get_valid_grasp_poses(
                 obj_poses,
                 approach_direction,
+                object_part=object_part,
                 grasp_cost_fn=grasp_cost_fn,
             )
 
@@ -97,6 +99,7 @@ class _ActionAgentAntipodalAffordance(AntipodalAffordance):
             return super().get_valid_grasp_poses(
                 obj_poses,
                 approach_direction,
+                object_part=object_part,
                 grasp_cost_fn=grasp_cost_fn,
             )
         finally:
