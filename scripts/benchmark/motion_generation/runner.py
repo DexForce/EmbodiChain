@@ -448,6 +448,9 @@ class BenchmarkRunner:
                 "Leaderboard overall_success_rate / motion_valid_rate / planning_success_rate "
                 "are macro averages over mandatory cases (equal case weight after within-case "
                 "env/repeat micro-average); coverage_rate remains outcome-count completeness.",
+                "cold_plan_ms is reported only on the Time & Memory row whose waypoint_count "
+                "matches the first real case measured for that batch; other waypoint rows "
+                "show N/A. planner_construct_ms / backend_prepare_ms are one-time batch costs.",
                 *self.notes,
             ],
         )

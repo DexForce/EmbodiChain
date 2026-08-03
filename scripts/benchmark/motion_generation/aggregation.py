@@ -121,14 +121,21 @@ def _lifecycle_value(
     algorithm_id: str,
     batch_size: int,
     phase: TrialPhase,
+    waypoint_count: int | None = None,
 ) -> float | None:
-    """Return the first lifecycle cost for one track, algorithm, and batch size."""
+    """Return the first lifecycle cost for one track, algorithm, and batch size.
+
+    When ``waypoint_count`` is provided, only records for that waypoint shape
+    match. This keeps first-case ``cold_plan_ms`` from being reused on every
+    waypoint row in the Time & Memory table.
+    """
     for record in records:
         if (
             record.track == track
             and record.algorithm_id == algorithm_id
             and record.batch_size == batch_size
             and record.phase is phase
+            and (waypoint_count is None or record.waypoint_count == waypoint_count)
         ):
             return record.cost_time_ms
     return None
@@ -170,14 +177,22 @@ def _performance_rows(
                 "batch_size": batch_size,
                 "waypoint_count": waypoint_count,
                 "num_trials": len(group),
+                # Construct/prepare are one-time deployment costs for the batch.
                 "planner_construct_ms": _lifecycle_value(
                     records, track, algorithm_id, batch_size, TrialPhase.CONSTRUCT
                 ),
                 "backend_prepare_ms": _lifecycle_value(
                     records, track, algorithm_id, batch_size, TrialPhase.PREPARE
                 ),
+                # Cold plan is the first real case only; attach it to that
+                # waypoint shape rather than repeating it on every W row.
                 "cold_plan_ms": _lifecycle_value(
-                    records, track, algorithm_id, batch_size, TrialPhase.COLD
+                    records,
+                    track,
+                    algorithm_id,
+                    batch_size,
+                    TrialPhase.COLD,
+                    waypoint_count=waypoint_count,
                 ),
                 "cost_time_ms": mean_cost,
                 "warm_plan_ms_p50": _percentile(costs, 50.0),
