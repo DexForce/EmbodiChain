@@ -123,7 +123,59 @@ def test_motion_valid_is_independent_of_planner_reported_success():
 
     assert outcomes[0].planning_success is False
     assert outcomes[0].motion_valid is True
-    assert outcomes[0].failure_code == "planner_reported_failure"
+    assert outcomes[0].failure_code is None
+    assert outcomes[0].planner_failure_code == "planner_reported_failure"
+
+
+def test_top_failure_ignores_planner_internal_codes_when_motion_valid():
+    case = _case()
+    case.target_waypoints[0, 0, 0, 3] = 0.1
+    positions = torch.zeros(1, 2, 7)
+    positions[0, 1, 0] = 0.1
+    outcomes = compute_case_outcomes(
+        PlanResult(success=False, positions=positions),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    measured = TrialRecord(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-1",
+        algorithm_id="curobo",
+        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+        model_revision="curobo-v2",
+        planner_config_hash="abc",
+        seed=11,
+        repeat=0,
+        batch_size=1,
+        waypoint_count=1,
+        path_shape="direct",
+        phase=TrialPhase.MEASURED,
+        cost_time_ms=10.0,
+        outcomes=outcomes,
+    )
+
+    aggregates = aggregate_results([measured], metadata, [case], measured_trials=1)
+    row = aggregates["success_and_metrics"][0]
+
+    assert row["motion_valid_rate"] == pytest.approx(1.0)
+    assert row["planning_success_rate"] == pytest.approx(0.0)
+    assert row["top_failure"] is None
 
 
 def test_nmg_precision_and_external_accuracy_are_independently_configurable():

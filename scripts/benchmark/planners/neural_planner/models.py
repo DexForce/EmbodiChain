@@ -109,6 +109,7 @@ class CaseOutcome:
     cartesian_path_length_m: float | None
     path_efficiency: float | None
     failure_code: str | None = None
+    planner_failure_code: str | None = None
 
 
 @dataclass(frozen=True)

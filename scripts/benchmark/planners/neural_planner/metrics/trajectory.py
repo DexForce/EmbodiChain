@@ -301,6 +301,8 @@ def _path_metrics(
 def make_failure_outcomes(
     batch_size: int,
     failure_code: str,
+    *,
+    planner_failure_code: str | None = None,
 ) -> tuple[CaseOutcome, ...]:
     """Create per-env outcomes for an exception before validation was possible."""
     return tuple(
@@ -325,6 +327,7 @@ def make_failure_outcomes(
             cartesian_path_length_m=None,
             path_efficiency=None,
             failure_code=failure_code,
+            planner_failure_code=planner_failure_code,
         )
         for index in range(batch_size)
     )
@@ -346,11 +349,31 @@ def compute_case_outcomes(
     if result.positions is None or result.positions.ndim != 3:
         return tuple(
             CaseOutcome(
-                **{
-                    **make_failure_outcomes(1, "planner_reported_failure")[0].__dict__,
-                    "env_index": env_index,
-                    "planning_success": bool(planning_success[env_index].item()),
-                }
+                env_index=env_index,
+                planning_success=bool(planning_success[env_index].item()),
+                finite=False,
+                ordered_waypoints_reached=False,
+                motion_valid=False,
+                completed_waypoint_ratio=0.0,
+                final_translation_err_mm=None,
+                final_rotation_err_deg=None,
+                waypoint_translation_err_mm_mean=None,
+                waypoint_translation_err_mm_p95=None,
+                waypoint_translation_err_mm_max=None,
+                waypoint_rotation_err_deg_mean=None,
+                waypoint_rotation_err_deg_p95=None,
+                waypoint_rotation_err_deg_max=None,
+                joint_limit_violation=False,
+                max_normalized_joint_violation=None,
+                joint_path_length_rad=None,
+                cartesian_path_length_m=None,
+                path_efficiency=None,
+                failure_code="non_finite_trajectory",
+                planner_failure_code=(
+                    None
+                    if bool(planning_success[env_index].item())
+                    else "planner_reported_failure"
+                ),
             )
             for env_index in range(case.batch_size)
         )
@@ -430,15 +453,15 @@ def compute_case_outcomes(
             final_pos_m = final_rot_rad = None
             joint_length = cartesian_length = efficiency = None
 
-        failure_code = None
-        if not planner_ok:
-            failure_code = "planner_reported_failure"
-        elif not finite:
+        if not finite:
             failure_code = "non_finite_trajectory"
         elif not ordered:
             failure_code = "waypoint_miss"
         elif joint_violation:
             failure_code = "joint_limit_violation"
+        else:
+            failure_code = None
+        planner_failure_code = None if planner_ok else "planner_reported_failure"
 
         outcomes.append(
             CaseOutcome(
@@ -482,6 +505,7 @@ def compute_case_outcomes(
                 cartesian_path_length_m=cartesian_length,
                 path_efficiency=efficiency,
                 failure_code=failure_code,
+                planner_failure_code=planner_failure_code,
             )
         )
     return tuple(outcomes)

@@ -59,7 +59,7 @@ def _rate(values: Iterable[bool]) -> float | None:
 
 
 def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
-    """Return the most frequent non-empty failure code."""
+    """Return the most frequent non-empty external failure code."""
     failures = Counter(
         outcome.failure_code for outcome in outcomes if outcome.failure_code
     )
