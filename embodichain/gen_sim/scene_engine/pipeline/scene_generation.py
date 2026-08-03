@@ -22,6 +22,7 @@ from pathlib import Path
 import shutil
 
 import numpy as np
+import trimesh
 
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
@@ -32,19 +33,26 @@ from embodichain.gen_sim.scene_engine.core.table import Table
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
+    AssetsGroupSupportClamp,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
+    AssetsSupportLayoutOptimizer,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     align_assets_group_to_table_aabb_top,
-    align_assets_to_table_aabb_top,  # Currently be replaced by align_assets_group_to_table_aabb_top.
     export_baked_layout_object_glbs,
     gravity_settle_assets_on_table,
-    heuristic_table_largest_internal_rectangle,
-    heuristic_table_support_surface,
     layout_object_to_transform_matrix,
-    make_assets_2d_aabb_inside_table_largest_rectangle,
+    load_glb_mesh,
     quaternion_wxyz_to_euler_xyz_degrees,
     simready_object_glb,
     transform_matrix_to_layout_object,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
+    TableSupportSurfaceDetector,
+)
+from embodichain.utils.logger import log_info
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
@@ -397,57 +405,78 @@ def _layout_refinement(
     # the table. This preserves the initial relative poses for the later
     # gravity simulation, which can settle individual assets physically.
 
-    # refined_table_layout, refined_assets_layout = align_assets_to_table_aabb_top(
-    #     table_layout=refined_table_layout,
-    #     assets_layout=refined_assets_layout,
-    #     geometry_root=simready_geometry_output_root,
-    # )
     refined_table_layout, refined_assets_layout = align_assets_group_to_table_aabb_top(
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
+    if not refined_assets_layout:
+        log_info("Scene has no movable assets; skipping support-region clamping.")
+        return refined_table_layout, []
 
-    # 4.1. Get the table's support surface info.
-    # Return value format: in z-up world, the 2D convex-hull boundary coordinates.
+    # 4. Detect the actual upward support triangles instead of projecting the
+    # entire table mesh to one convex hull.  The result retains concavities
+    # (for example, an L-shaped tabletop) and is the only boundary used for
+    # placement below.
     (
-        table_support_surface_2d_z_up_world_boundary,
+        table_world_mesh_z_up,
         assets_aabb_2d_z_up_world_corners_by_id,
-        table_mesh_2d_z_up_world_projection,
-    ) = heuristic_table_support_surface(
+    ) = _measure_table_and_assets_in_z_up_world(
         table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,  # Render each asset's 2D AABB with its own id for checking whether any asset's AABB is outside the table's support surface.
-        geometry_root=simready_geometry_output_root,
-        debug_output_root=debug_output_root,  # Keep the support surface rendered image(s) for debugging.
-    )
-
-    # 4.2. Find the table's largest internal biggest rectangle. (AABB-aligned largest rectangle.)
-    # Notice that, this heuristic method assumes that the table does not have some big rotation angle around z-axis in z-up world.
-    # Render one image for debugging.
-    # This rectange is axis-aligned with the z-up world coordinate system.
-    table_largest_internal_rectangle_2d_z_up_world = heuristic_table_largest_internal_rectangle(
-        table_support_surface_2d_z_up_world_boundary=table_support_surface_2d_z_up_world_boundary,  # For computing the largest internal rectangle + rendering.
-        assets_aabb_2d_z_up_world_corners_by_id=assets_aabb_2d_z_up_world_corners_by_id,  # Only for rendering.
-        table_mesh_2d_z_up_world_projection=table_mesh_2d_z_up_world_projection,  # Only for rendering.
-        debug_output_root=debug_output_root,
-    )
-
-    # 6. Use the table's largest internal AABB-aligned rectange as boundary to do 2D AABB optimization,
-    # to let all the projected 2D AABBs of the assets inside this boundary, and keep them have no overlap
-    # with each other. (prepare for the next step: gravity simulation.)
-    # The assets layout will only update their x-y pos, and keep their z pos and rot unchanged. (do not forget the
-    # differences between y-up and z-up!)
-    refined_assets_layout = make_assets_2d_aabb_inside_table_largest_rectangle(
-        table_id=scene.table.id,
-        table_support_surface_2d_z_up_world_boundary=(
-            table_support_surface_2d_z_up_world_boundary
-        ),
-        table_mesh_2d_z_up_world_projection=table_mesh_2d_z_up_world_projection,
-        table_largest_internal_rectangle_2d_z_up_world=table_largest_internal_rectangle_2d_z_up_world,
-        assets_aabb_2d_z_up_world_corners_by_id=assets_aabb_2d_z_up_world_corners_by_id,
-        debug_output_root=debug_output_root,
         assets_layout=refined_assets_layout,
+        geometry_root=simready_geometry_output_root,
     )
+    support_detector = TableSupportSurfaceDetector(
+        table_world_mesh=table_world_mesh_z_up,
+        debug_output_root=debug_output_root,
+    )
+    table_support_region = support_detector.detect()
+    support_detector.save_support_surface_debug_images()
+
+    # 5. Keep the complete clutter rigid in the table plane.  A successful
+    # result applies one shared z-up XY delta to every AABB, so it preserves
+    # all existing asset-to-asset relations.  It is *not* an asset packing
+    # pass: pre-existing overlap is deliberately left to a later optimizer.
+    group_clamp = AssetsGroupSupportClamp(
+        support_region=table_support_region.support_polygon,
+        assets_aabb_2d_z_up_world_corners_by_id=(
+            assets_aabb_2d_z_up_world_corners_by_id
+        ),
+        assets_layout=refined_assets_layout,
+        debug_output_root=debug_output_root,
+    )
+    refined_assets_layout = group_clamp.clamp()
+    group_clamp.save_group_clamp_debug_images()
+
+    # The clamp returns y-up layouts; measure their resulting z-up AABBs again
+    # so the following independent optimizer consumes the same world-frame
+    # geometry as every other stage.
+    _, clamped_assets_aabb_2d_z_up_world_corners_by_id = (
+        _measure_table_and_assets_in_z_up_world(
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=simready_geometry_output_root,
+        )
+    )
+
+    # 6. Restore the previous pairwise AABB separation stage, but constrain
+    # every candidate with the actual support polygon rather than the legacy
+    # largest internal rectangle.  Assets may now move independently only as
+    # much as needed to remove overlap; every resulting AABB remains on the
+    # L-shaped, circular, or otherwise non-convex support region.
+    overlap_optimizer = AssetsSupportLayoutOptimizer(
+        support_region=table_support_region.support_polygon,
+        assets_aabb_2d_z_up_world_corners_by_id=(
+            clamped_assets_aabb_2d_z_up_world_corners_by_id
+        ),
+        assets_layout=refined_assets_layout,
+        debug_output_root=debug_output_root,
+    )
+    # Render this stage separately from the rigid group clamp.  The latter
+    # intentionally preserves pre-existing overlaps, while this figure shows
+    # whether independent AABB separation actually resolved them.
+    refined_assets_layout = overlap_optimizer.optimize()
+    overlap_optimizer.save_overlap_optimization_debug_images()
 
     # 7. Gravity simulation, to let all the assets to be stable and placed well on the table's support surface.
     # Notice that: we do not consider the assets like a bottle, which should be standing on the table but laid down
@@ -459,6 +488,69 @@ def _layout_refinement(
     )
 
     return refined_table_layout, refined_assets_layout
+
+
+def _measure_table_and_assets_in_z_up_world(
+    *,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+    geometry_root: str | Path,
+) -> tuple[trimesh.Trimesh, dict[str, np.ndarray]]:
+    """Measure a table mesh and asset AABBs in one shared z-up world frame.
+
+    Scene layouts and SimReady GLBs are y-up.  The support detector and the
+    group clamp both operate in z-up world XY, so this conversion is performed
+    once here and the exact same measured AABBs are passed to the clamp.
+    """
+    table_id = table_layout.get("id")
+    if not isinstance(table_id, str) or not table_id:
+        raise ValueError("Table layout must contain a non-empty string id.")
+
+    y_up_to_z_up_matrix = np.eye(4)
+    y_up_to_z_up_matrix[:3, :3] = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    z_up_to_y_up_matrix = np.linalg.inv(y_up_to_z_up_matrix)
+    resolved_geometry_root = Path(geometry_root).expanduser().resolve()
+
+    def _mesh_in_z_up_world(layout_object: dict[str, object]) -> trimesh.Trimesh:
+        object_id = layout_object.get("id")
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError("Layout object must contain a non-empty string id.")
+        mesh = load_glb_mesh(resolved_geometry_root / f"{object_id}.glb")
+        z_up_layout = transform_matrix_to_layout_object(
+            object_id,
+            y_up_to_z_up_matrix
+            @ layout_object_to_transform_matrix(layout_object)
+            @ z_up_to_y_up_matrix,
+        )
+        mesh.apply_transform(y_up_to_z_up_matrix)
+        mesh.apply_transform(layout_object_to_transform_matrix(z_up_layout))
+        return mesh
+
+    table_world_mesh_z_up = _mesh_in_z_up_world(table_layout)
+    asset_aabbs_by_id: dict[str, np.ndarray] = {}
+    for asset_layout in assets_layout:
+        asset_id = asset_layout.get("id")
+        if not isinstance(asset_id, str) or not asset_id:
+            raise ValueError("Each asset layout must contain a non-empty string id.")
+        if asset_id in asset_aabbs_by_id:
+            raise ValueError(f"Asset layouts contain duplicate id {asset_id!r}.")
+        asset_bounds_xy = _mesh_in_z_up_world(asset_layout).bounds[:, :2]
+        asset_aabbs_by_id[asset_id] = np.array(
+            [
+                [asset_bounds_xy[0, 0], asset_bounds_xy[0, 1]],
+                [asset_bounds_xy[1, 0], asset_bounds_xy[0, 1]],
+                [asset_bounds_xy[1, 0], asset_bounds_xy[1, 1]],
+                [asset_bounds_xy[0, 0], asset_bounds_xy[1, 1]],
+            ],
+            dtype=float,
+        )
+    return table_world_mesh_z_up, asset_aabbs_by_id
 
 
 def _simready_assets(
