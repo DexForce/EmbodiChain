@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Protocol
 
 import numpy as np
 
@@ -34,6 +34,10 @@ __all__ = [
     "GizmoCommand",
     "GizmoSpec",
     "GizmoState",
+    "JointControlCommand",
+    "JointControlProvider",
+    "JointControlSpec",
+    "JointControlState",
     "MeshGeometry",
     "PointCloudOverlay",
     "SceneFrame",
@@ -48,7 +52,7 @@ __all__ = [
     "pose_to_position_wxyz",
 ]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 Color = tuple[int, int, int]
 
 
@@ -349,6 +353,119 @@ class GizmoCommand:
 
 
 @dataclass(frozen=True)
+class JointControlSpec:
+    """Static description of one scalar articulation joint control.
+
+    Values use simulation units: radians for rotational joints and meters for
+    prismatic joints. Controls with two finite limits can be rendered as a
+    slider; controls with one or both limits missing use a numeric input.
+    """
+
+    control_id: str
+    articulation_uid: str
+    env_id: int
+    joint_id: int
+    joint_name: str
+    joint_type: Literal["revolute", "continuous", "prismatic"]
+    lower: float | None
+    upper: float | None
+    step: float
+    initial_value: float
+
+    def __post_init__(self) -> None:
+        if not self.control_id:
+            raise ValueError("Joint control ID must not be empty.")
+        if not self.articulation_uid:
+            raise ValueError("Joint control articulation_uid must not be empty.")
+        if self.env_id < 0:
+            raise ValueError("Joint control env_id must be non-negative.")
+        if self.joint_id < 0:
+            raise ValueError("Joint control joint_id must be non-negative.")
+        if not self.joint_name:
+            raise ValueError("Joint control joint_name must not be empty.")
+        if self.joint_type not in {"revolute", "continuous", "prismatic"}:
+            raise ValueError(
+                "Joint control joint_type must be 'revolute', 'continuous', "
+                "or 'prismatic'."
+            )
+        if self.lower is not None and not np.isfinite(self.lower):
+            raise ValueError("Joint control lower limit must be finite when set.")
+        if self.upper is not None and not np.isfinite(self.upper):
+            raise ValueError("Joint control upper limit must be finite when set.")
+        if self.lower is not None and self.initial_value < self.lower:
+            raise ValueError("Joint control initial value is below its lower limit.")
+        if self.upper is not None and self.initial_value > self.upper:
+            raise ValueError("Joint control initial value is above its upper limit.")
+        if self.lower is not None and self.upper is not None:
+            if self.lower >= self.upper:
+                raise ValueError("Joint control lower limit must be less than upper.")
+        if not np.isfinite(self.step) or self.step <= 0.0:
+            raise ValueError("Joint control step must be finite and greater than zero.")
+        if not np.isfinite(self.initial_value):
+            raise ValueError("Joint control initial value must be finite.")
+
+
+@dataclass(frozen=True)
+class JointControlState:
+    """Authoritative value and command acknowledgement for one joint control."""
+
+    control_id: str
+    value: float
+    applied_sequence: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.control_id:
+            raise ValueError("Joint control state ID must not be empty.")
+        if not np.isfinite(self.value):
+            raise ValueError("Joint control state value must be finite.")
+        if self.applied_sequence < 0:
+            raise ValueError(
+                "Joint control state applied_sequence must be non-negative."
+            )
+
+
+@dataclass(frozen=True)
+class JointControlCommand:
+    """Immutable browser joint command consumed on the simulation thread."""
+
+    run_id: str
+    scene_revision: int
+    sequence: int
+    client_id: str
+    control_id: str
+    value: float
+    schema_version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("Joint control command run_id must not be empty.")
+        if self.scene_revision < 0:
+            raise ValueError(
+                "Joint control command scene_revision must be non-negative."
+            )
+        if self.sequence < 0:
+            raise ValueError("Joint control command sequence must be non-negative.")
+        if not self.client_id:
+            raise ValueError("Joint control command client_id must not be empty.")
+        if not self.control_id:
+            raise ValueError("Joint control command control_id must not be empty.")
+        if not np.isfinite(self.value):
+            raise ValueError("Joint control command value must be finite.")
+
+
+class JointControlProvider(Protocol):
+    """Simulation-thread source of optional articulation joint controls."""
+
+    def joint_control_specs(self) -> tuple[JointControlSpec, ...]:
+        """Return the static controls to include in the next manifest."""
+        ...
+
+    def joint_control_states(self) -> tuple[JointControlState, ...]:
+        """Return current values ordered independently of backend state."""
+        ...
+
+
+@dataclass(frozen=True)
 class SceneNode:
     """One mesh-bearing logical node in a scene manifest."""
 
@@ -372,6 +489,7 @@ class SceneManifest:
     geometries: tuple[MeshGeometry, ...]
     cameras: tuple[CameraSpec, ...] = field(default_factory=tuple)
     gizmos: tuple[GizmoSpec, ...] = field(default_factory=tuple)
+    joint_controls: tuple[JointControlSpec, ...] = field(default_factory=tuple)
     schema_version: int = SCHEMA_VERSION
     up_direction: str = "+z"
     length_unit: str = "meter"
@@ -391,6 +509,9 @@ class SceneManifest:
         gizmo_ids = {gizmo.gizmo_id for gizmo in self.gizmos}
         if len(gizmo_ids) != len(self.gizmos):
             raise ValueError("SceneManifest contains duplicate Gizmo IDs.")
+        joint_control_ids = {control.control_id for control in self.joint_controls}
+        if len(joint_control_ids) != len(self.joint_controls):
+            raise ValueError("SceneManifest contains duplicate joint control IDs.")
         missing = {node.geometry_id for node in self.nodes} - geometry_ids
         if missing:
             raise ValueError(
@@ -517,6 +638,7 @@ class SceneFrame:
     )
     dynamic_meshes: tuple[DynamicMeshUpdate, ...] = field(default_factory=tuple)
     gizmos: tuple[GizmoState, ...] = field(default_factory=tuple)
+    joint_controls: tuple[JointControlState, ...] = field(default_factory=tuple)
     overlays: SceneOverlays = field(default_factory=SceneOverlays)
     wall_time: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -535,6 +657,9 @@ class SceneFrame:
         gizmo_ids = [gizmo.gizmo_id for gizmo in self.gizmos]
         if len(gizmo_ids) != len(set(gizmo_ids)):
             raise ValueError("SceneFrame contains duplicate Gizmo IDs.")
+        joint_control_ids = [control.control_id for control in self.joint_controls]
+        if len(joint_control_ids) != len(set(joint_control_ids)):
+            raise ValueError("SceneFrame contains duplicate joint control IDs.")
         node_count = len(self.node_ids)
         if positions.shape != (node_count, 3):
             raise ValueError(

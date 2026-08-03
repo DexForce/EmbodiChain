@@ -80,6 +80,11 @@ embodichain preview-asset \
 embodichain preview-asset \
     --asset_path /path/to/asset.usda \
     --headless
+
+# Control articulation joints in Viser
+embodichain preview-asset \
+    --asset_path /path/to/robot.urdf \
+    --viser
 ```
 
 ### Arguments
@@ -98,6 +103,12 @@ embodichain preview-asset \
 | ``--headless`` | ``False`` | Run without rendering window |
 | ``--renderer`` | ``hybrid`` | Renderer backend: ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |
+| ``--joint-control`` / ``--no-joint-control`` | ``True`` | Enable or disable articulation joint controls in Viser previews |
+
+The Viser articulation panel displays rotational joints in degrees and
+prismatic joints in meters. It excludes mimic joints, leaves articulations with
+unsupported multi-DOF mappings read-only, and provides per-articulation reset
+buttons. The native DexSim window does not yet expose these controls.
 
 ### Preview Mode
 
