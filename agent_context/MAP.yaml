@@ -454,6 +454,11 @@ topics:
       - RecoveryPolicy
       - plan_arm_traj
       - register_action
+      - BUILTIN_ACTION_TYPES
+      - load_builtins
+      - engine.plan
+      - engine.compile
+      - engine.start
     paths:
       - topics/atomic-actions/atomic-actions.md
     source_of_truth:

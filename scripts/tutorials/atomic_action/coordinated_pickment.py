@@ -23,8 +23,6 @@ the object to an object-centric target pose while both grippers stay closed.
 from __future__ import annotations
 
 import argparse
-import math
-import os
 import sys
 import time
 from dataclasses import dataclass
@@ -34,54 +32,58 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import numpy as np
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
-    Affordance,
     AtomicActionEngine,
     ControlPartCommandProfile,
     CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentOptions,
-    ObjectSemantics,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
-    RobotCfg,
-    URDFCfg,
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
+from scripts.tutorials.atomic_action.scenario_utils import (
+    add_dual_ur5_robot,
+    add_support_surface,
+    compute_local_bounds,
+    compute_world_bounds,
+    create_manual_object_semantics,
+    get_local_vertices,
+    invert_pose,
+    log_action_plan,
+    make_dual_ur5_solver_cfg,
+    normalize_vector,
+    resolve_cached_data_path,
+    rotate_pose_about_world_z,
+    settle_object,
+)
 from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
+    format_tensor,
+    get_hand_open_close_qpos,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
 )
 
-ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 PICKMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
 GRIPPER_TCP_Z = 0.121
-ROBOT_INIT_POS = (1.95, 0.0, 0.1)
-ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
-LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
-RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
 SUPPORT_SURFACE_Z = 0.65
 SUPPORT_SURFACE_SIZE = (0.60, 0.60, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -155,28 +157,16 @@ TRAJECTORY_SIM_STEPS = 4
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
-    parser = argparse.ArgumentParser(description="Dual-arm coordinated pickment demo")
-    add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(device="cpu", renderer="hybrid")
-    parser.add_argument(
-        "--diagnose_plan",
-        action="store_true",
-        help="Plan and print diagnostics without playing the trajectory.",
-    )
-    parser.add_argument(
-        "--debug_state",
-        action="store_true",
-        help="Log hand targets and object poses during execution.",
-    )
-    parser.add_argument(
-        "--auto_play",
-        action="store_true",
-        help="Run the viewer demo without waiting for keyboard input.",
-    )
-    parser.add_argument(
-        "--headless_play",
-        action="store_true",
-        help="Execute planned trajectories without opening the viewer window.",
+    parser = create_tutorial_argument_parser(
+        "Dual-arm coordinated pickment demo",
+        features=(
+            "debug_state",
+            "diagnose_plan",
+            "headless_play",
+            "visualize_axes",
+        ),
+        default_device="cpu",
+        default_renderer="hybrid",
     )
     parser.add_argument(
         "--object",
@@ -184,154 +174,27 @@ def parse_arguments() -> argparse.Namespace:
         default="pencil",
         help="Object mesh to grasp in the coordinated pickment demo.",
     )
-    parser.add_argument(
-        "--no_vis_eef_axis",
-        action="store_true",
-        help="Do not draw the pickment target/grasp coordinate frames before planning.",
-    )
     return parser.parse_args()
-
-
-def get_cached_data_path(data_path: str) -> str:
-    """Resolve an asset path from the local cache before importing data helpers."""
-    if os.path.isabs(data_path):
-        return data_path
-
-    data_root = Path(
-        os.environ.get(
-            "EMBODICHAIN_DATA_ROOT",
-            str(Path.home() / ".cache" / "embodichain_data"),
-        )
-    )
-    candidates = (
-        data_root / data_path,
-        data_root / "extract" / data_path,
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-
-    from embodichain.data import get_data_path
-
-    return get_data_path(data_path)
-
-
-def rotation_z(yaw: float) -> np.ndarray:
-    """Build a 3x3 yaw rotation matrix."""
-    cos_yaw = math.cos(yaw)
-    sin_yaw = math.sin(yaw)
-    return np.array(
-        [
-            [cos_yaw, -sin_yaw, 0.0],
-            [sin_yaw, cos_yaw, 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-
-
-def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
-    """Build a homogeneous transform from translation and yaw."""
-    transform = np.eye(4, dtype=np.float32)
-    transform[:3, :3] = rotation_z(yaw)
-    transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
-    return transform
 
 
 def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
     """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    arm_urdf_path = get_cached_data_path(ARM_URDF_PATH)
-    gripper_urdf_path = get_cached_data_path(GRIPPER_URDF_PATH)
-    tcp = [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-    cfg = RobotCfg(
+    return add_dual_ur5_robot(
+        sim,
         uid="DualUR5CoordinatedPickment",
-        urdf_cfg=URDFCfg(
-            components=[
-                {
-                    "component_type": "left_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": make_transform((-0.3, -1.45, 0.4), np.pi / 2),
-                },
-                {
-                    "component_type": "right_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": make_transform((0.3, -1.45, 0.4), np.pi / 2),
-                },
-                {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
-                {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
-            ],
-            fname="dual_ur5_coordinated_pickment",
-            name_case={"joint": "upper", "link": "lower"},
-        ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={
-                "LEFT_JOINT[0-9]": 1e4,
-                "RIGHT_JOINT[0-9]": 1e4,
-                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
-                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
-            },
-            damping={
-                "LEFT_JOINT[0-9]": 1e3,
-                "RIGHT_JOINT[0-9]": 1e3,
-                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
-                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
-            },
-            max_effort={
-                "LEFT_JOINT[0-9]": 1e5,
-                "RIGHT_JOINT[0-9]": 1e5,
-                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e4,
-                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e4,
-            },
-            drive_type="force",
-        ),
-        control_parts={
-            "left_arm": ["LEFT_JOINT[0-9]"],
-            "right_arm": ["RIGHT_JOINT[0-9]"],
-            "dual_arm": ["LEFT_JOINT[0-9]", "RIGHT_JOINT[0-9]"],
-            "left_hand": ["LEFT_GRIPPER_FINGER1_JOINT_1"],
-            "right_hand": ["RIGHT_GRIPPER_FINGER1_JOINT_1"],
-        },
-        solver_cfg={
-            "left_arm": PytorchSolverCfg(
-                end_link_name="left_ee_link",
-                root_link_name="left_base_link",
-                tcp=tcp,
-                num_samples=30,
-            ),
-            "right_arm": PytorchSolverCfg(
-                end_link_name="right_ee_link",
-                root_link_name="right_base_link",
-                tcp=tcp,
-                num_samples=30,
-            ),
-        },
-        init_pos=list(ROBOT_INIT_POS),
-        init_rot=list(ROBOT_INIT_ROT),
-        init_qpos=list(LEFT_ARM_HOME) + list(RIGHT_ARM_HOME) + [0.0, 0.0, 0.0, 0.0],
+        urdf_name="dual_ur5_coordinated_pickment",
+        arm_urdf_path=resolve_cached_data_path("UniversalRobots/UR5/UR5.urdf"),
+        gripper_urdf_path=resolve_cached_data_path("DH_PGI_140_80/DH_PGI_140_80.urdf"),
+        solver_cfg=make_dual_ur5_solver_cfg(GRIPPER_TCP_Z, solver="pytorch"),
     )
-    return sim.add_robot(cfg=cfg)
 
 
 def create_support_surface(sim: SimulationManager) -> RigidObject:
     """Create a compact support slab under the staged object."""
-    return sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="support_surface",
-            shape=CubeCfg(size=list(SUPPORT_SURFACE_SIZE)),
-            attrs=RigidBodyAttributesCfg(
-                mass=10.0,
-                dynamic_friction=0.9,
-                static_friction=0.95,
-                restitution=0.01,
-            ),
-            body_type="static",
-            init_pos=list(SUPPORT_SURFACE_CENTER),
-        )
+    return add_support_surface(
+        sim,
+        size=SUPPORT_SURFACE_SIZE,
+        center=SUPPORT_SURFACE_CENTER,
     )
 
 
@@ -344,7 +207,7 @@ def create_pickment_object(
         cfg=RigidObjectCfg(
             uid=preset.label,
             shape=MeshCfg(
-                fpath=get_cached_data_path(preset.mesh_path), compute_uv=False
+                fpath=resolve_cached_data_path(preset.mesh_path), compute_uv=False
             ),
             attrs=RigidBodyAttributesCfg(
                 mass=0.01,
@@ -370,55 +233,6 @@ def create_pickment_object(
     return obj
 
 
-def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
-    """Settle an object before planning."""
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
-    obj.reset()
-    if step > 0:
-        sim.update(step=step)
-    obj.clear_dynamics()
-
-
-def create_object_semantics(obj: RigidObject, label: str) -> ObjectSemantics:
-    """Create minimal object semantics for manually specified grasps."""
-    return ObjectSemantics(
-        label=label,
-        geometry={},
-        affordance=Affordance(object_label=label),
-        entity=obj,
-    )
-
-
-def get_hand_open_close_qpos(
-    robot: Robot,
-    hand_control_part: str,
-    device: torch.device,
-    close_qpos: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Get open and close qpos for a PGI gripper control part."""
-    limits = robot.get_qpos_limits(name=hand_control_part)[0].to(
-        device=device, dtype=torch.float32
-    )
-    hand_open = limits[:, 0]
-    hand_close = torch.clamp(
-        torch.full_like(limits[:, 1], close_qpos),
-        min=limits[:, 0],
-        max=limits[:, 1],
-    )
-    return hand_open, hand_close
-
-
-def get_local_vertices(obj: RigidObject) -> torch.Tensor:
-    """Get scaled local mesh vertices."""
-    return obj.get_vertices(env_ids=[0], scale=True)[0]
-
-
-def compute_local_bounds(vertices: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute local mesh AABB from scaled vertices."""
-    return vertices.min(dim=0).values, vertices.max(dim=0).values
-
-
 def compute_supported_init_pos(
     obj: RigidObject,
     preset: PickmentObjectPreset,
@@ -432,50 +246,6 @@ def compute_supported_init_pos(
     bottom_z = rotated_vertices[:, 2].min().item()
     z = SUPPORT_SURFACE_Z + preset.surface_clearance - bottom_z
     return (preset.init_xy[0], preset.init_xy[1], z)
-
-
-def invert_pose(pose: torch.Tensor) -> torch.Tensor:
-    """Invert batched homogeneous transforms."""
-    inv_pose = pose.clone()
-    rot_t = pose[:, :3, :3].transpose(1, 2)
-    inv_pose[:, :3, :3] = rot_t
-    inv_pose[:, :3, 3] = -torch.bmm(rot_t, pose[:, :3, 3:4]).squeeze(-1)
-    return inv_pose
-
-
-def transform_points(pose: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
-    """Transform local points by a homogeneous pose."""
-    return points @ pose[:3, :3].transpose(0, 1) + pose[:3, 3]
-
-
-def compute_world_bounds(
-    object_pose: torch.Tensor,
-    local_vertices: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Compute world AABB from transformed local mesh vertices."""
-    world_vertices = transform_points(object_pose, local_vertices)
-    return world_vertices.min(dim=0).values, world_vertices.max(dim=0).values
-
-
-def normalize_vector(vector: torch.Tensor, fallback: torch.Tensor) -> torch.Tensor:
-    """Normalize a vector with a deterministic fallback for degenerate cases."""
-    norm = torch.linalg.norm(vector)
-    if norm < 1e-6:
-        return fallback.to(device=vector.device, dtype=vector.dtype)
-    return vector / norm
-
-
-def rotate_pose_about_world_z(pose: torch.Tensor, yaw_deg: float) -> torch.Tensor:
-    """Rotate pose orientation about world Z while preserving translation."""
-    yaw = math.radians(yaw_deg)
-    rot = torch.eye(3, dtype=pose.dtype, device=pose.device)
-    rot[0, 0] = math.cos(yaw)
-    rot[0, 1] = -math.sin(yaw)
-    rot[1, 0] = math.sin(yaw)
-    rot[1, 1] = math.cos(yaw)
-    rotated_pose = pose.clone()
-    rotated_pose[:3, :3] = rot @ pose[:3, :3]
-    return rotated_pose
 
 
 def build_object_grasp_poses(
@@ -554,28 +324,6 @@ def build_object_target_pose(
     bottom_z = compute_world_bounds(pose, object_vertices)[0][2]
     pose[2, 3] += SUPPORT_SURFACE_Z + preset.surface_clearance + 0.10 - bottom_z
     return pose
-
-
-def format_tensor(tensor: torch.Tensor) -> str:
-    """Format tensor values for compact logging."""
-    rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
-    return str(rounded.tolist())
-
-
-def log_action_plan(
-    robot: Robot,
-    action_name: str,
-    traj: torch.Tensor,
-    joint_ids: list[int],
-    segments: dict[str, int] | None = None,
-) -> None:
-    """Log common action plan details."""
-    joint_names = [robot.joint_names[joint_id] for joint_id in joint_ids]
-    logger.log_info(f"{action_name} joint ids: {joint_ids}")
-    logger.log_info(f"{action_name} joint names: {joint_names}")
-    logger.log_info(f"{action_name} trajectory shape: {tuple(traj.shape)}")
-    if segments is not None:
-        logger.log_info(f"{action_name} trajectory segments: {segments}")
 
 
 def log_scene_targets(
@@ -660,23 +408,25 @@ def run_coordinated_pickment_demo(
     object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
     n_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
-    object_semantics = create_object_semantics(obj, preset.label)
+    object_semantics = create_manual_object_semantics(obj, preset.label)
     motion_gen = create_toppra_motion_generator(robot)
 
     left_open, left_close = get_hand_open_close_qpos(
-        robot, "left_hand", sim.device, preset.hand_close_qpos
+        robot,
+        hand_control_part="left_hand",
+        close_qpos=preset.hand_close_qpos,
     )
     right_open, right_close = get_hand_open_close_qpos(
-        robot, "right_hand", sim.device, preset.hand_close_qpos
+        robot,
+        hand_control_part="right_hand",
+        close_qpos=preset.hand_close_qpos,
     )
-    pickment_action = CoordinatedPickment(
-        default_options=CoordinatedPickmentOptions(
-            pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,
-            lift_height=PICKMENT_LIFT_HEIGHT,
-            hand_interp_steps=PICKMENT_HAND_INTERP_STEPS,
-            hold_steps=PICKMENT_HOLD_STEPS,
-            object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
-        ),
+    pickment_options = CoordinatedPickmentOptions(
+        pre_grasp_distance=PICKMENT_PRE_GRASP_DISTANCE,
+        lift_height=PICKMENT_LIFT_HEIGHT,
+        hand_interp_steps=PICKMENT_HAND_INTERP_STEPS,
+        hold_steps=PICKMENT_HOLD_STEPS,
+        object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
     )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -691,7 +441,9 @@ def run_coordinated_pickment_demo(
             ),
         },
     )
-    engine.register(pickment_action)
+    pickment_action = engine.actions["coordinated_pickment"]
+    if not isinstance(pickment_action, CoordinatedPickment):
+        raise RuntimeError("Unexpected coordinated_pickment implementation.")
 
     left_grasp_pose, right_grasp_pose = build_object_grasp_poses(
         object_pose,
@@ -752,6 +504,7 @@ def run_coordinated_pickment_demo(
                     end_effectors={"left": "left_hand", "right": "right_hand"},
                 ),
                 MotionPolicy(sample_count=PICKMENT_SAMPLE_INTERVAL),
+                skill_options=pickment_options,
             ),
         )
     )
@@ -769,7 +522,10 @@ def run_coordinated_pickment_demo(
         "coordinated_pickment",
         traj,
         joint_ids,
-        pickment_action.get_segment_lengths(PICKMENT_SAMPLE_INTERVAL),
+        pickment_action.get_segment_lengths(
+            PICKMENT_SAMPLE_INTERVAL,
+            pickment_options,
+        ),
     )
 
     if args.diagnose_plan:

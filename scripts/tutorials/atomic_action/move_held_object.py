@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.data import get_data_path
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
@@ -38,9 +37,6 @@ from embodichain.lab.sim.atomic_actions import (
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectPoseGoal,
-    MoveEndEffector,
-    MoveHeldObject,
-    PickUp,
     PickUpOptions,
     MotionPolicy,
 )
@@ -54,9 +50,11 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
+    make_clear_dynamics_callback,
     make_eef_pose_at,
     prepare_tutorial_scene,
     replay_trajectory,
@@ -74,14 +72,10 @@ POST_TRAJECTORY_STEPS = 240
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the MoveHeldObject tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Pick up a paper cup and move it by object pose."
+    parser = create_tutorial_argument_parser(
+        "Pick up a paper cup and move it by object pose.",
+        features=("grasp_sampling", "visualize_axes"),
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--n_sample", type=int, default=10000)
-    parser.add_argument("--force_reannotate", action="store_true")
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -137,18 +131,6 @@ def main() -> None:
             )
         },
     )
-    engine.register(MoveEndEffector())
-    engine.register(
-        PickUp(
-            default_options=PickUpOptions(
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
-    )
-    engine.register(MoveHeldObject())
-
     semantics = create_antipodal_semantics(
         obj,
         label="paper_cup",
@@ -183,6 +165,11 @@ def main() -> None:
                 GraspGoal(semantics),
                 binding,
                 MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
             ActionInvocation(
                 "move_held_object",
@@ -203,14 +190,6 @@ def main() -> None:
         + round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6)
         + HAND_INTERP_STEPS
     )
-    dynamics_cleared = False
-
-    def clear_object_dynamics(step_idx: int, _: int) -> None:
-        nonlocal dynamics_cleared
-        if not dynamics_cleared and step_idx + 1 >= clear_after_step:
-            obj.clear_dynamics()
-            dynamics_cleared = True
-
     replay_trajectory(
         sim,
         robot,
@@ -218,7 +197,7 @@ def main() -> None:
         args,
         video_prefix="move_held_object_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
-        on_trajectory_step=clear_object_dynamics,
+        on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")

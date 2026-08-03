@@ -86,9 +86,7 @@ def _ensure_runtime_imports() -> None:
             AtomicActionEngine as atomic_action_engine_cls,
             ControlPartCommandProfile as control_part_command_profile_cls,
             EndEffectorPoseGoal as end_effector_pose_target_cls,
-            MoveEndEffector as move_end_effector_cls,
             MotionPolicy as motion_policy_cls,
-            Press as press_cls,
             PressGoal as press_target_cls,
             PressOptions as press_options_cls,
         )
@@ -130,9 +128,7 @@ def _ensure_runtime_imports() -> None:
             "ActionBinding": action_binding_cls,
             "ActionInvocation": action_invocation_cls,
             "EndEffectorPoseGoal": end_effector_pose_target_cls,
-            "MoveEndEffector": move_end_effector_cls,
             "MotionPolicy": motion_policy_cls,
-            "Press": press_cls,
             "PressGoal": press_target_cls,
             "PressOptions": press_options_cls,
             "RigidBodyAttributesCfg": rigid_body_attributes_cfg_cls,
@@ -494,14 +490,6 @@ def _build_atomic_engine(
             )
         },
     )
-    atomic_engine.register(MoveEndEffector())
-    atomic_engine.register(
-        Press(
-            default_options=PressOptions(
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
-    )
     return atomic_engine
 
 
@@ -596,6 +584,9 @@ def _timed_atomic_run(
                 PressGoal(xpos=press_target),
                 binding,
                 MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                skill_options=PressOptions(
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
         )
     )

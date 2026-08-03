@@ -180,7 +180,11 @@ def _bind_action(
         if "hand" in name
     }
     profiles.update({} if control_profiles is None else control_profiles)
-    engine = AtomicActionEngine(generator, control_profiles=profiles)
+    engine = AtomicActionEngine(
+        generator,
+        control_profiles=profiles,
+        load_builtins=False,
+    )
     engine.register(action)
     return action
 

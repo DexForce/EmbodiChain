@@ -49,17 +49,17 @@ and whole-body control are not implemented by this module yet.
 |   +-- MotionGenerator / planner backend                     |
 |   +-- device and shared TrajectoryBuilder                   |
 |                                                             |
-|   registered AtomicAction.plan(...) -> ActionPlan           |
-+--------------------------+----------------------------------+
-                           |
-              +------------+-------------+
-              |                          |
-              v                          v
-      compile(...)                 start(...) / tick(...)
-      fixed projection             observed closed loop
-              |                          |
-              v                          v
-   CompiledTrajectory              JointCommand + events
+|   resolves requests and calls AtomicAction.plan(...)        |
++------------------------------+------------------------------+
+                               |
+                 +-------------+-------------+
+                 |             |             |
+                 v             v             v
+          engine.plan()  engine.compile()  engine.start()/tick()
+          one ActionPlan fixed projection  observed closed loop
+                               |             |
+                               v             v
+                      CompiledTrajectory  JointCommand + events
 ```
 
 The boundary is deliberate:
@@ -90,10 +90,10 @@ manual_invocation = ActionInvocation(
     recovery_policy=RecoveryPolicy(max_replans=2),
 )
 
-# Inspect a single plan, compile a fixed sequence, or execute with recovery.
-plan = engine.plan(manual_invocation, latest_context)
-compiled = engine.compile((manual_invocation,), latest_context)
-session = engine.start((manual_invocation,), latest_context)
+# Choose one entry point according to the planning/execution requirement.
+single_plan = engine.plan(manual_invocation, latest_context)
+static_program = engine.compile((manual_invocation,), latest_context)
+live_session = engine.start((manual_invocation,), latest_context)
 ```
 
 A manual caller may bypass the semantic-schema adapter only when its target and
@@ -107,6 +107,37 @@ the same goal validation, capability checks, planning backend, execution
 events, bounded recovery, and physical-effect verification. Manual authoring is
 an alternative orchestration entry point, not a lower-level path around the
 engine contracts.
+
+## Choosing an engine entry point
+
+Application code normally chooses between these three public entry points:
+
+| API | Choose it when | Returns | State and observation behavior |
+|---|---|---|---|
+| `engine.plan(invocation, context)` | You need to inspect or plan exactly one registered action | `ActionPlan` | Reads one context; does not project its terminal qpos or expected task effect for another action |
+| `engine.compile(invocations, context)` | All goals for an ordered static sequence are known before execution | `CompiledTrajectory` | Plans in order and propagates hypothetical qpos and expected effects through `projected_context`; never observes execution |
+| `engine.start(invocations, context)` | Commands must be issued incrementally from fresh observations with bounded recovery | `ExecutionSession` | `tick(latest_context)` consumes measured state, emits at most one command, requests effect verification, and can replan |
+
+The short selection rule is:
+
+```text
+one action to inspect or plan             -> plan
+one or more actions in a fixed scene      -> compile
+observed execution and error recovery     -> start, then tick
+```
+
+All three leave simulator stepping and controller I/O to the application.
+`plan()` and `compile()` only return planning data. An `ExecutionSession` also
+does not step the simulator itself; its `tick()` method returns commands for the
+application to send.
+
+Calling `compile()` with one invocation is valid and gives a uniform
+`CompiledTrajectory` result, but it is not required for a single action. More
+importantly, `compile()` cannot observe physical execution. If a later goal
+depends on the measured result of an earlier action, end the compiled phase,
+observe a new `PlanningContext`, and plan or compile the next phase. Use
+`start()` when that observe/replan loop should be managed continuously by an
+`ExecutionSession`.
 
 ## Core contracts
 
@@ -238,52 +269,108 @@ calibrated commands.
 
 ### Engine-owned planning resources
 
-One engine owns one motion generator. Actions borrow its planning services only
-after `register()` or `plan_action()` binds them:
+One engine owns one motion generator. At initialization it creates a fresh
+instance of every action type in `BUILTIN_ACTION_TYPES` and binds those
+instances to the engine's planning services:
 
 ```python
 engine = AtomicActionEngine(motion_generator, control_profiles=profiles)
-engine.register(MoveEndEffector())
-engine.register(MoveJoints())
+
+# All nine built-ins are immediately usable by stable skill ID.
+assert "move_end_effector" in engine.actions
+assert "pick_up" in engine.actions
 ```
 
 Consequences of this ownership model:
 
-- action constructors optionally contain only typed default options;
+- built-in action constructors use their typed default options unless an
+  invocation supplies `skill_options`;
 - every action in an engine sees the same robot, device, backend, caches, and
   collision world;
 - an action instance cannot be silently reused by a different engine;
 - one registered instance exists per stable `skill_id` in an engine.
 
-Prefer invocation `skill_options` when behavior varies per call. If an
-application still needs two instances with different default options and the
-same stable skill ID, keep one or both outside the registry and call
-`engine.plan_action(...)` explicitly:
+Registration means that an implementation is installed, not that every robot
+can execute it. Required roles, control parts, profiles, and task-state
+preconditions are validated while an invocation is resolved and planned. Agent
+adapters must additionally filter the catalog by `agent_visible` and
+embodiment capability instead of exposing every `engine.actions` entry blindly.
+
+Use invocation `skill_options` whenever behavior varies per call. Two variants
+with the same stable skill ID therefore share one built-in implementation:
 
 ```python
-left_pick = PickUp(default_options=left_pick_options)
-right_pick = PickUp(default_options=right_pick_options)
+left_invocation = ActionInvocation(
+    skill_id="pick_up",
+    goal=left_goal,
+    binding=left_binding,
+    skill_options=left_pick_options,
+)
+right_invocation = ActionInvocation(
+    skill_id="pick_up",
+    goal=right_goal,
+    binding=right_binding,
+    skill_options=right_pick_options,
+)
 
-left_plan = engine.plan_action(left_pick, left_invocation, latest_context)
-right_plan = engine.plan_action(right_pick, right_invocation, latest_context)
+left_plan = engine.plan(left_invocation, latest_context)
+right_plan = engine.plan(right_invocation, latest_context)
 ```
 
-Both instances still borrow the same engine-owned motion generator.
+`register()` remains the extension point for a custom skill. Replacing a
+built-in implementation requires an explicit `replace=True`; isolated tests or
+fully custom engines can opt out of the catalog with `load_builtins=False`:
 
-## Which planning API to use
+```python
+custom_engine = AtomicActionEngine(motion_generator, load_builtins=False)
+custom_engine.register(MyAction())
 
-| API | Use it for | Result / behavior |
+engine.register(CustomPickUp(), replace=True)
+```
+
+The module-level `register_action()` catalog is only for process-wide extension
+type discovery. It does not mutate existing engines or join their default
+built-in set; instantiate a discovered extension and pass it to
+`engine.register()` explicitly.
+
+### Implementation and advanced APIs
+
+The similarly named `AtomicAction.plan()` method is not a fourth application
+entry point. It is the polymorphic method implemented by each skill and called
+by the engine after resolving an invocation:
+
+| API | Intended caller | Behavior |
 |---|---|---|
-| `AtomicAction.plan(request, context)` | Implementing a skill | Consumes an engine-resolved immutable request; application code normally calls it through the engine |
-| `engine.plan(invocation, context)` | Planning one registered skill | Resolves the registered action, binds shared resources, and validates its plan |
-| `engine.plan_action(action, invocation, context)` | Planning an unregistered configured instance | Supports multiple configurations with one `skill_id` and one engine backend |
-| `engine.compile(invocations, context)` | Fixed-scene/offline sequence planning | Returns one concatenated `CompiledTrajectory` and a hypothetical projected context |
-| `engine.start(invocations, context)` | Observed incremental execution | Returns an `ExecutionSession`; each `tick()` emits at most one command and recovery events |
-| `session.revise_current(invocation)` | Explicit runtime parameter/goal update | Requires a newer revision of the active logical invocation and replans from the latest context |
+| `AtomicAction.plan(request, context)` | Atomic-action implementer | Consumes an immutable `ResolvedActionRequest` and returns an `ActionPlan` |
+| `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
+| `session.revise_current(invocation)` | Runtime orchestrator or Action Agent | Replaces the active logical call with a newer revision and replans from the latest observed context |
 
-`AtomicAction.plan()` is therefore not a second execution API. It is the
-polymorphic implementation point used by the engine. Neither it nor the engine
-mutates the simulator.
+Application code should start with `engine.plan()`, `engine.compile()`, or
+`engine.start()` unless it specifically needs one of these extension points.
+
+## Planning one action
+
+Use `engine.plan()` when one registered action needs to be inspected, tested,
+or integrated into application-owned orchestration:
+
+```python
+invocation = ActionInvocation(
+    skill_id="move_end_effector",
+    goal=EndEffectorPoseGoal(xpos=target_pose),
+    binding=ActionBinding(manipulators={"primary": "left_arm"}),
+    motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+)
+
+plan = engine.plan(invocation, latest_context)
+if plan.plan_success.all():
+    positions = plan.trajectory.positions
+```
+
+The result contains that action's trajectory, diagnostics, completion
+conditions, and uncommitted expected effects. `plan()` does not automatically
+create a next context. If another action must be planned against this action's
+hypothetical result, use `compile()` instead of manually reproducing its state
+projection rules.
 
 ## Static compilation
 
@@ -298,32 +385,42 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
-    ExecutionEventKind,
-    ExecutionStatus,
     MotionPolicy,
-    MoveEndEffector,
-    RecoveryPolicy,
-    SceneEntityPose,
 )
 
 engine = AtomicActionEngine(motion_generator)
-engine.register(MoveEndEffector())
+binding = ActionBinding(manipulators={"primary": "left_arm"})
+motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
 
-invocation = ActionInvocation(
+approach = ActionInvocation(
     skill_id="move_end_effector",
-    goal=EndEffectorPoseGoal(xpos=target_pose),
-    binding=ActionBinding(manipulators={"primary": "left_arm"}),
-    motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+    goal=EndEffectorPoseGoal(xpos=approach_pose),
+    binding=binding,
+    motion_policy=motion_policy,
+)
+retreat = ActionInvocation(
+    skill_id="move_end_effector",
+    goal=EndEffectorPoseGoal(xpos=retreat_pose),
+    binding=binding,
+    motion_policy=motion_policy,
 )
 
-compiled = engine.compile((invocation,))
+initial_context = engine.initial_context()
+compiled = engine.compile((approach, retreat), initial_context)
 if compiled.plan_success.all():
     positions = compiled.trajectory.positions  # (B, N, robot_dof)
+    approach_plan, retreat_plan = compiled.action_plans
+    final_context = compiled.projected_context
 ```
 
 When no context is supplied, the engine captures robot qpos/qvel and creates an
 empty task state and scene snapshot. Supply an explicit context whenever goals
 depend on perceived entities or a previous verified attachment.
+
+Do not compile across a boundary where execution feedback changes a later goal.
+For example, `scripts/tutorials/atomic_action/coordinated_placement.py` compiles
+the two pick-ups, executes them, rebuilds the held-object state from measured
+poses, and only then compiles placement.
 
 ## Dynamic goals and closed-loop recovery
 
@@ -331,6 +428,12 @@ Pose-valued goals can use `SceneEntityPose` instead of freezing an object pose
 at invocation creation time:
 
 ```python
+from embodichain.lab.sim.atomic_actions import (
+    ExecutionStatus,
+    RecoveryPolicy,
+    SceneEntityPose,
+)
+
 moving_goal = ActionInvocation(
     skill_id="move_end_effector",
     goal=EndEffectorPoseGoal(

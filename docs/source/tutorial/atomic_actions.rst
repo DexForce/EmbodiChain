@@ -41,10 +41,48 @@ hand/tool serving the same functional participant, but the caller is still
 responsible for choosing a physically compatible pair.
 
 The engine exclusively owns the ``MotionGenerator``, shared trajectory builder,
-and control-part profiles. Atomic action constructors accept only optional
-typed default options; ``register()`` binds each action to the engine resources. Use
-``engine.plan_action(action, invocation, context)`` for an unregistered,
-default-option-specific action instance.
+and control-part profiles. It creates and binds all built-in actions by default;
+callers select them by stable ``skill_id`` without a separate ``register()``
+step. Put invocation-varying behavior in ``ActionInvocation.skill_options``.
+``register()`` remains available for custom implementations, and
+``load_builtins=False`` creates an isolated or fully custom engine.
+
+Choosing an engine entry point
+------------------------------
+
+Application code normally uses one of three engine entry points:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 26 22 34
+
+   * - API
+     - Choose it when
+     - Returns
+     - State and observation behavior
+   * - ``engine.plan()``
+     - Planning or inspecting one action
+     - ``ActionPlan``
+     - Reads one context and does not project a next context
+   * - ``engine.compile()``
+     - Planning a fixed sequence whose goals are already known
+     - ``CompiledTrajectory``
+     - Propagates hypothetical qpos and expected effects, without observing execution
+   * - ``engine.start()``
+     - Executing from fresh observations with bounded recovery
+     - ``ExecutionSession``
+     - ``tick()`` consumes measured context, emits commands, requests effect verification, and can replan
+
+As a short rule: use ``plan`` for one action, ``compile`` for a static action
+sequence, and ``start`` followed by ``tick`` for observed execution and error
+recovery. None of these APIs steps the simulator directly. The application
+sends commands returned by an execution session and supplies new observations.
+
+``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
+It is the implementation method overridden by an atomic-action author, not an
+additional application execution entry point. Similarly,
+``engine.plan_action()`` is reserved for extensions and isolated tests that
+need to plan an unregistered instance.
 
 Runnable examples
 -----------------
@@ -109,11 +147,45 @@ engine is built:
 from its bound manipulator. Joint limits validate possible commands, but do not
 define their semantic meaning; supply calibrated robot commands in production.
 
+Planning one action
+-------------------
+
+Use :meth:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine.plan` when one
+registered action needs to be inspected, tested, or passed through
+application-owned orchestration:
+
+.. code-block:: python
+
+   from embodichain.lab.sim.atomic_actions import (
+       ActionBinding,
+       ActionInvocation,
+       EndEffectorPoseGoal,
+       MotionPolicy,
+   )
+
+   invocation = ActionInvocation(
+       skill_id="move_end_effector",
+       goal=EndEffectorPoseGoal(xpos=target_pose),
+       binding=ActionBinding(manipulators={"primary": "left_arm"}),
+       motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+   )
+
+   plan = engine.plan(invocation, latest_context)
+   if plan.plan_success.all():
+       trajectory = plan.trajectory.positions
+       phase_diagnostics = tuple(phase.diagnostics for phase in plan.phases)
+
+The returned :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` describes
+only that invocation. Its expected effects are not committed, and ``plan`` does
+not produce a projected context for a following action. Use ``compile`` when
+the engine should propagate hypothetical state through a sequence.
+
 Static compilation
 ------------------
 
 Use :meth:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine.compile` when
-the scene is treated as fixed during planning:
+the scene is treated as fixed and all goals in a sequence are known during
+planning:
 
 .. code-block:: python
 
@@ -123,25 +195,43 @@ the scene is treated as fixed during planning:
        AtomicActionEngine,
        EndEffectorPoseGoal,
        MotionPolicy,
-       MoveEndEffector,
    )
 
    engine = AtomicActionEngine(motion_generator)
-   engine.register(MoveEndEffector())
+   binding = ActionBinding(manipulators={"primary": "left_arm"})
+   motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
 
-   invocation = ActionInvocation(
+   approach = ActionInvocation(
        skill_id="move_end_effector",
-       goal=EndEffectorPoseGoal(xpos=target_pose),
-       binding=ActionBinding(manipulators={"primary": "left_arm"}),
-       motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+       goal=EndEffectorPoseGoal(xpos=approach_pose),
+       binding=binding,
+       motion_policy=motion_policy,
    )
-   compiled = engine.compile((invocation,))
-   trajectory = compiled.trajectory.positions
+   retreat = ActionInvocation(
+       skill_id="move_end_effector",
+       goal=EndEffectorPoseGoal(xpos=retreat_pose),
+       binding=binding,
+       motion_policy=motion_policy,
+   )
+
+   initial_context = engine.initial_context()
+   compiled = engine.compile((approach, retreat), initial_context)
+   if compiled.plan_success.all():
+       trajectory = compiled.trajectory.positions
+       approach_plan, retreat_plan = compiled.action_plans
+       final_context = compiled.projected_context
 
 ``compile`` never steps the simulator. It applies each plan's expected
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta` only to the returned
 ``projected_context`` so a following action can be planned against hypothetical
-state.
+state. Calling it with one invocation is valid, but ``plan`` is simpler when a
+projected context and sequence-shaped result are unnecessary.
+
+Do not compile across a point where later targets depend on physical execution.
+The coordinated-placement tutorial, for example, compiles both pick-ups,
+executes them, rebuilds held-object state from measured poses, and then compiles
+the placement phase. Use ``start`` when that observation and recovery loop
+should remain active throughout execution.
 
 Dynamic goals and closed-loop execution
 ---------------------------------------

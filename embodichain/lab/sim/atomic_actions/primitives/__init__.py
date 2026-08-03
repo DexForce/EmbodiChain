@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from ..core import AtomicAction
 from .coordinated_pickment import (
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -44,8 +45,22 @@ from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
 
+BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
+    MoveEndEffector,
+    MoveJoints,
+    PickUp,
+    MoveHeldObject,
+    Place,
+    Press,
+    CoordinatedPickment,
+    CoordinatedPlacement,
+    HandOver,
+)
+"""Built-in action implementations instantiated once per action engine."""
+
 __all__ = [
     "AssembleGoal",
+    "BUILTIN_ACTION_TYPES",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",

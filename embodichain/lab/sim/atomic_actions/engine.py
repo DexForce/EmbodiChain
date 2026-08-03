@@ -36,11 +36,15 @@ if TYPE_CHECKING:
     from .execution import ExecutionSession
 
 
-_global_action_registry: dict[str, type[AtomicAction]] = {}
+_global_extension_registry: dict[str, type[AtomicAction]] = {}
 
 
 def register_action(action_class: type[AtomicAction]) -> None:
-    """Register an atomic action class under its stable skill identifier.
+    """Register an extension action type for process-wide discovery.
+
+    This catalog does not bind the type to an engine or automatically load it.
+    Built-in types live in ``BUILTIN_ACTION_TYPES`` and are loaded separately
+    by each :class:`AtomicActionEngine`.
 
     Args:
         action_class: Concrete :class:`AtomicAction` subclass.
@@ -52,27 +56,27 @@ def register_action(action_class: type[AtomicAction]) -> None:
     if not isinstance(action_class, type) or not issubclass(action_class, AtomicAction):
         raise TypeError("action_class must be an AtomicAction subclass.")
     descriptor = action_class.descriptor()
-    existing = _global_action_registry.get(descriptor.skill_id)
+    existing = _global_extension_registry.get(descriptor.skill_id)
     if existing is not None and existing is not action_class:
         raise ValueError(
             f"Skill id {descriptor.skill_id!r} is already registered by "
             f"{existing.__name__}."
         )
-    _global_action_registry[descriptor.skill_id] = action_class
+    _global_extension_registry[descriptor.skill_id] = action_class
 
 
 def unregister_action(skill_id: str) -> None:
-    """Remove a globally registered skill class if present.
+    """Remove a globally discoverable extension action type if present.
 
     Args:
         skill_id: Stable registered skill identifier.
     """
-    _global_action_registry.pop(skill_id, None)
+    _global_extension_registry.pop(skill_id, None)
 
 
 def get_registered_actions() -> dict[str, type[AtomicAction]]:
-    """Return a copy of the global skill-class registry."""
-    return dict(_global_action_registry)
+    """Return a copy of the process-wide extension action-type registry."""
+    return dict(_global_extension_registry)
 
 
 class AtomicActionEngine:
@@ -82,12 +86,24 @@ class AtomicActionEngine:
         self,
         motion_generator: MotionGenerator,
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        *,
+        load_builtins: bool = True,
     ) -> None:
+        """Initialize one engine and bind its built-in action implementations.
+
+        Args:
+            motion_generator: Engine-owned motion-generation backend.
+            control_profiles: Semantic commands keyed by robot control-part name.
+            load_builtins: Whether to instantiate and register every built-in
+                action. Disable this for isolated tests or fully custom engines.
+        """
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
         )
         self._actions: dict[str, AtomicAction] = {}
+        if load_builtins:
+            self._load_builtin_actions()
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -119,11 +135,14 @@ class AtomicActionEngine:
         """Registered action instances keyed by stable skill identifier."""
         return dict(self._actions)
 
-    def register(self, action: AtomicAction) -> None:
+    def register(self, action: AtomicAction, *, replace: bool = False) -> None:
         """Register one action instance using its descriptor.
 
         Args:
             action: Configured action instance.
+            replace: Whether to replace an implementation already registered
+                under the same stable skill identifier. Replacement is always
+                explicit so extensions cannot silently shadow built-ins.
 
         Raises:
             TypeError: If ``action`` is not an AtomicAction.
@@ -134,12 +153,21 @@ class AtomicActionEngine:
             raise TypeError("action must be an AtomicAction instance.")
         descriptor = action.descriptor()
         existing = self._actions.get(descriptor.skill_id)
-        if existing is not None and existing is not action:
+        if existing is not None and existing is not action and not replace:
             raise ValueError(
                 f"Skill id {descriptor.skill_id!r} is already registered in this engine."
             )
         action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
+
+    def _load_builtin_actions(self) -> None:
+        """Create and bind fresh built-in action instances for this engine."""
+        # Import lazily to keep the engine/core dependency independent from the
+        # concrete primitive modules and to avoid package import cycles.
+        from .primitives import BUILTIN_ACTION_TYPES
+
+        for action_type in BUILTIN_ACTION_TYPES:
+            self.register(action_type())
 
     def plan_action(
         self,
@@ -150,9 +178,9 @@ class AtomicActionEngine:
         """Plan with a configured action using this engine's resources.
 
         Unlike :meth:`plan`, the supplied action does not need to be in the
-        skill registry. This supports multiple configured instances with the
-        same stable skill identifier while preserving one engine-owned motion
-        generator.
+        skill registry. This is an advanced extension and testing escape hatch;
+        built-in parameter variants should use ``ActionInvocation.skill_options``
+        with the engine's registered implementation.
 
         Args:
             action: Configured action implementation to invoke.

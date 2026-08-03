@@ -123,7 +123,7 @@ def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(generator)
+    engine = AtomicActionEngine(generator, load_builtins=False)
     action = DynamicAction()
     engine.register(action)
     return engine, action

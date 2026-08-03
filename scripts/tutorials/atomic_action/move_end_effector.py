@@ -28,13 +28,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
-    MoveEndEffector,
     MotionPolicy,
 )
 from embodichain.utils import logger
@@ -43,6 +41,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     make_top_down_eef_pose,
@@ -57,12 +56,10 @@ POST_TRAJECTORY_STEPS = 120
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the MoveEndEffector tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Demonstrate MoveEndEffector with a multi-waypoint pose trajectory."
+    parser = create_tutorial_argument_parser(
+        "Demonstrate MoveEndEffector with a multi-waypoint pose trajectory.",
+        features=("visualize_axes",),
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -74,7 +71,6 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector())
 
     poses = torch.stack(
         [

@@ -30,15 +30,33 @@ uncommitted `StateDelta`.
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, motion generator, planner backend, shared
 `TrajectoryBuilder`, and control-part command profiles. Actions retain only an
-owned copy of typed default options and borrow engine services after
-`engine.register(action)` or
-`engine.plan_action(action, invocation, context)`. A bound action cannot be
-reused by another engine.
+owned copy of typed default options and borrow engine services. Engine
+construction creates and binds a fresh instance of every type in
+`BUILTIN_ACTION_TYPES`; use `load_builtins=False` only for isolated tests or a
+fully custom action set. A bound action cannot be reused by another engine.
+
+## Engine entry points
+
+Choose the public engine entry point by lifecycle, not by skill type:
+
+| Entry point | Use | Result and state behavior |
+|---|---|---|
+| `engine.plan(invocation, context)` | Inspect or plan one registered action | Returns one `ActionPlan`; does not project a context for another action |
+| `engine.compile(invocations, context)` | Plan an ordered sequence against a fixed scene | Returns a concatenated `CompiledTrajectory`; propagates hypothetical qpos and expected effects through `projected_context` |
+| `engine.start(invocations, context)` | Execute incrementally from observations | Returns an `ExecutionSession`; `tick(latest_context)` emits commands and performs bounded recovery |
+
+None steps simulation directly. `compile()` never observes physical execution;
+split compilation at observation boundaries when later goals depend on measured
+results. Use `start()` when observation, effect verification, and replanning
+must remain active during execution.
+
+`AtomicAction.plan(request, context)` is the skill implementation hook called
+by the engine, not a fourth application entry point. `engine.plan_action(...)`
+is only an extension/testing escape hatch for an unregistered instance.
 
 ## Static compilation
 
-Register configured action instances by their class-level stable `skill_id`,
-then call:
+Built-ins are already registered by their class-level stable `skill_id`; call:
 
 ```python
 compiled = engine.compile(invocations, context=None)
@@ -49,9 +67,8 @@ applies successful expected effects only to `compiled.projected_context`, so a
 following action can be checked against hypothetical state. Failed rows hold
 their last successful qpos.
 
-Use `engine.plan_action(...)` for an unregistered configured instance when an
-application needs multiple variants with the same stable `skill_id`; the action
-still uses the engine's single motion generator.
+Use invocation `skill_options` for multiple variants with the same stable
+`skill_id`; do not create per-variant built-in instances.
 
 ## Dynamic execution and recovery
 
@@ -100,6 +117,15 @@ frozen `*Options` value for invocation-varying phase counts, offsets, and grasp
 selection behavior. An action constructor may accept `default_options`; an
 invocation's `skill_options` replaces them for that call. There is no
 `ActionCfg` or built-in `*Cfg` layer.
+
+`engine.register(action)` is reserved for custom skill implementations. A
+built-in can be replaced only with explicit `replace=True`. Registration means
+an implementation is installed; it does not prove that the current embodiment
+has compatible control parts, profiles, bindings, or task state. Capability
+adapters must filter registered descriptors before exposing skills to an Agent.
+The module-level `register_action()` API is a process-wide extension-type
+discovery catalog only; it neither binds actions nor changes an engine's
+default built-in set.
 
 Every `ActionBinding` value is a `RobotCfg.control_parts` key. It is not a link,
 TCP-frame, joint, or scene-object name. Planning services validate those names

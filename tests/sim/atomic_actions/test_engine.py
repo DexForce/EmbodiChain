@@ -33,11 +33,14 @@ from embodichain.lab.sim.atomic_actions import (
     ActionPlan,
     AtomicAction,
     AtomicActionEngine,
+    BUILTIN_ACTION_TYPES,
     ControlPartCommandProfile,
     JointPositionCommand,
     JointPositionGoal,
     MotionPolicy,
     PlanningContext,
+    PressGoal,
+    PressOptions,
     ResolvedActionRequest,
     register_action,
     get_registered_actions,
@@ -83,11 +86,10 @@ class OtherStubAction(StubAction):
     skill_id: ClassVar[str] = "other_stub"
 
 
-def _engine(
+def _motion_generator(
     batch_size: int = 2,
     robot_dof: int = 3,
-    control_profiles: dict[str, ControlPartCommandProfile] | None = None,
-) -> AtomicActionEngine:
+) -> Mock:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = robot_dof
@@ -99,7 +101,21 @@ def _engine(
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub_planner"
-    return AtomicActionEngine(generator, control_profiles=control_profiles)
+    return generator
+
+
+def _engine(
+    batch_size: int = 2,
+    robot_dof: int = 3,
+    control_profiles: dict[str, ControlPartCommandProfile] | None = None,
+    *,
+    load_builtins: bool = False,
+) -> AtomicActionEngine:
+    return AtomicActionEngine(
+        _motion_generator(batch_size, robot_dof),
+        control_profiles=control_profiles,
+        load_builtins=load_builtins,
+    )
 
 
 def _invocation(
@@ -121,6 +137,43 @@ def test_global_registry_uses_stable_skill_id() -> None:
         register_action(StubAction)
     finally:
         unregister_action("stub")
+
+
+def test_engine_loads_fresh_builtin_instances_by_default() -> None:
+    first = AtomicActionEngine(_motion_generator())
+    second = AtomicActionEngine(_motion_generator())
+    expected_ids = tuple(action_type.skill_id for action_type in BUILTIN_ACTION_TYPES)
+
+    assert tuple(first.actions) == expected_ids
+    assert all(action.is_bound for action in first.actions.values())
+    assert all(
+        first.actions[skill_id] is not second.actions[skill_id]
+        for skill_id in expected_ids
+    )
+
+
+def test_engine_can_disable_builtin_loading() -> None:
+    assert _engine(load_builtins=False).actions == {}
+
+
+def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
+    engine = _engine(load_builtins=True)
+    options = PressOptions(hand_interp_steps=7)
+    invocation = ActionInvocation(
+        skill_id="press",
+        goal=PressGoal(torch.eye(4)),
+        binding=ActionBinding(
+            manipulators={"primary": "all"},
+            end_effectors={"primary": "all"},
+        ),
+        motion_policy=MotionPolicy(sample_count=20),
+        skill_options=options,
+    )
+
+    request = engine.resolve(invocation)
+
+    assert request.skill_options.hand_interp_steps == 7
+    assert request.skill_options is not options
 
 
 def test_engine_compile_projects_terminal_state_between_actions() -> None:
@@ -176,6 +229,18 @@ def test_engine_rejects_duplicate_instance_registration() -> None:
     engine.register(first)
     with pytest.raises(ValueError, match="already registered"):
         engine.register(second)
+
+
+def test_engine_replaces_registered_action_only_when_explicit() -> None:
+    engine = _engine()
+    first = StubAction()
+    replacement = StubAction()
+    engine.register(first)
+
+    engine.register(replacement, replace=True)
+
+    assert engine.actions["stub"] is replacement
+    assert replacement.is_bound
 
 
 def test_engine_binds_one_planning_service_to_every_action() -> None:

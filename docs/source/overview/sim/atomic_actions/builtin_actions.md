@@ -6,7 +6,9 @@
 ```
 
 EmbodiChain ships nine built-in action implementations with stable skill IDs;
-applications register the configured instances they need with an engine.
+`AtomicActionEngine` creates and registers a fresh instance of every built-in by
+default. Applications select them by stable skill ID rather than registering
+routine instances themselves.
 `Place` additionally accepts an `AssembleGoal`, so assembly reuses the same
 release primitive instead of introducing a tenth skill ID.
 
@@ -14,9 +16,14 @@ All built-ins implement
 `plan(request, context) -> ActionPlan`, where `request` is the engine-resolved
 snapshot of an invocation revision. Constructors accept only optional typed
 default `*Options`; the owning `AtomicActionEngine` supplies the shared motion
-generator, trajectory builder, and control-part command profiles during
-`register()` or `plan_action()`. Generic motion and recovery choices belong to
-the invocation.
+generator, trajectory builder, and control-part command profiles when it binds
+the built-in catalog. Generic motion and recovery choices belong to the
+invocation, and per-call primitive behavior belongs to `skill_options`.
+
+Registration only installs an implementation. Whether a built-in is executable
+for a particular call still depends on its binding roles, the robot's control
+parts, semantic command profiles, and task-state preconditions. Action Agent
+adapters must also honor `agent_visible` and filter by embodiment capability.
 
 ```{note}
 The current manipulation primitives consume semantic `open` and `grasp`
@@ -280,7 +287,6 @@ engine = AtomicActionEngine(
         "left_arm": ControlPartCommandProfile.joint_positions(home=home_qpos),
     },
 )
-engine.register(MoveJoints())
 
 explicit_goal = JointPositionGoal(target=home_qpos)
 named_goal = JointPositionGoal(target="home")

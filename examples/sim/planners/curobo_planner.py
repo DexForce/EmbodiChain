@@ -63,7 +63,6 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
-    MoveEndEffector,
     MotionPolicy,
 )
 from embodichain.data import get_data_path
@@ -750,7 +749,6 @@ def main() -> None:
             )
         )
         engine = AtomicActionEngine(motion_generator)
-        engine.register(MoveEndEffector())
         binding = ActionBinding(manipulators={"primary": control_part})
         motion_policy = MotionPolicy(
             motion_source="motion_gen",

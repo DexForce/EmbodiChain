@@ -181,9 +181,7 @@ def _prepare_held_state(
         ControlPartCommandProfile,
         EndEffectorPoseGoal,
         GraspGoal,
-        MoveEndEffector,
         MotionPolicy,
-        PickUp,
         PickUpOptions,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
@@ -202,19 +200,6 @@ def _prepare_held_state(
                 grasp=hand_close,
             )
         },
-    )
-    atomic_engine.register(MoveEndEffector())
-    atomic_engine.register(
-        PickUp(
-            default_options=PickUpOptions(
-                approach_direction=resolve_pickup_approach_direction(
-                    pickup_approach, position_case, sim.device
-                ),
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
     )
     semantics = create_antipodal_object_semantics(
         obj=obj,
@@ -244,6 +229,14 @@ def _prepare_held_state(
                 GraspGoal(semantics=semantics),
                 binding,
                 MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    approach_direction=resolve_pickup_approach_direction(
+                        pickup_approach, position_case, sim.device
+                    ),
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
         )
     )
@@ -281,7 +274,6 @@ def _run_case(
         AtomicActionEngine,
         ControlPartCommandProfile,
         HeldObjectPoseGoal,
-        MoveHeldObject,
         MotionPolicy,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
@@ -326,7 +318,6 @@ def _run_case(
                 )
             },
         )
-        atomic_engine.register(MoveHeldObject())
         target_pose = _make_object_target_pose(sim.device, case.xyz)
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(

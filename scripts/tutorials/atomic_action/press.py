@@ -28,15 +28,12 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     EndEffectorPoseGoal,
-    MoveEndEffector,
-    Press,
     PressOptions,
     PressGoal,
     MotionPolicy,
@@ -53,6 +50,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     broadcast_pose_batch,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     format_tensor,
@@ -75,15 +73,14 @@ DEFAULT_PRESS_TOLERANCE = 0.01
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Press tutorial."""
-    parser = argparse.ArgumentParser(description="Demonstrate Press on a wooden block.")
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--debug_state", action="store_true")
+    parser = create_tutorial_argument_parser(
+        "Demonstrate Press on a wooden block.",
+        features=("debug_state", "visualize_axes"),
+    )
     parser.add_argument(
         "--press_tolerance", type=float, default=DEFAULT_PRESS_TOLERANCE
     )
     parser.add_argument("--block_pos", type=float, nargs=2, default=(-0.30, -0.12))
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -172,15 +169,6 @@ def main() -> None:
             )
         },
     )
-    engine.register(MoveEndEffector())
-    engine.register(
-        Press(
-            default_options=PressOptions(
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
-    )
-
     block_center = block.get_local_pose(to_matrix=True)[0, :3, 3]
     press_position = block_center.clone()
     press_position[2] += 0.5 * BLOCK_SIZE[2] + PRESS_SURFACE_OFFSET
@@ -212,6 +200,9 @@ def main() -> None:
                 PressGoal(press_target),
                 binding,
                 MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                skill_options=PressOptions(
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
         )
     )

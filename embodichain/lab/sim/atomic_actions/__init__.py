@@ -74,6 +74,7 @@ from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
+    BUILTIN_ACTION_TYPES,
     CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentOptions,
@@ -126,6 +127,7 @@ __all__ = [
     "AssembleGoal",
     "AtomicAction",
     "AtomicActionEngine",
+    "BUILTIN_ACTION_TYPES",
     "CompiledTrajectory",
     "CompletionCondition",
     "CompletionConditionKind",

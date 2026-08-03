@@ -179,7 +179,6 @@ def _prepare_held_state(
         AtomicActionEngine,
         ControlPartCommandProfile,
         GraspGoal,
-        PickUp,
         PickUpOptions,
         MotionPolicy,
     )
@@ -201,18 +200,6 @@ def _prepare_held_state(
             )
         },
     )
-    atomic_engine.register(
-        PickUp(
-            default_options=PickUpOptions(
-                approach_direction=resolve_pickup_approach_direction(
-                    pickup_approach, position_case, sim.device
-                ),
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
-    )
     semantics = create_antipodal_object_semantics(
         obj=obj,
         preset=object_preset,
@@ -230,6 +217,14 @@ def _prepare_held_state(
                     end_effectors={"primary": "hand"},
                 ),
                 motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    approach_direction=resolve_pickup_approach_direction(
+                        pickup_approach, position_case, sim.device
+                    ),
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
         )
     )
@@ -265,7 +260,6 @@ def _run_case(
         AtomicActionEngine,
         ControlPartCommandProfile,
         MotionPolicy,
-        Place,
         PlaceGoal,
         PlaceOptions,
     )
@@ -313,14 +307,6 @@ def _run_case(
                 )
             },
         )
-        atomic_engine.register(
-            Place(
-                default_options=PlaceOptions(
-                    lift_height=PLACE_LIFT_HEIGHT,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
-            )
-        )
         place_pose = _make_place_pose(sim.device, case.xyz)
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(
@@ -333,6 +319,10 @@ def _run_case(
                             end_effectors={"primary": "hand"},
                         ),
                         motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                        skill_options=PlaceOptions(
+                            lift_height=PLACE_LIFT_HEIGHT,
+                            hand_interp_steps=HAND_INTERP_STEPS,
+                        ),
                     ),
                 ),
                 context=state,

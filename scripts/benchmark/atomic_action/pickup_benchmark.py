@@ -128,7 +128,6 @@ def _run_case(
         AtomicActionEngine,
         ControlPartCommandProfile,
         GraspGoal,
-        PickUp,
         PickUpOptions,
         MotionPolicy,
     )
@@ -169,16 +168,6 @@ def _run_case(
                 )
             },
         )
-        atomic_engine.register(
-            PickUp(
-                default_options=PickUpOptions(
-                    approach_direction=approach_direction,
-                    pre_grasp_distance=0.15,
-                    lift_height=0.16,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
-            )
-        )
         semantics = create_antipodal_object_semantics(
             obj=obj,
             preset=object_preset,
@@ -197,6 +186,12 @@ def _run_case(
                             end_effectors={"primary": "hand"},
                         ),
                         motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                        skill_options=PickUpOptions(
+                            approach_direction=approach_direction,
+                            pre_grasp_distance=0.15,
+                            lift_height=0.16,
+                            hand_interp_steps=HAND_INTERP_STEPS,
+                        ),
                     ),
                 )
             )
