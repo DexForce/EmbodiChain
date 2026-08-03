@@ -125,10 +125,7 @@ class CuroboAdapter(PlannerAdapter):
             MotionGenOptions(
                 start_qpos=case.start_qpos,
                 control_part=self.context.control_part,
-                plan_opts=CuroboPlanOptions(
-                    start_qpos=case.start_qpos,
-                    control_part=self.context.control_part,
-                ),
+                plan_opts=CuroboPlanOptions(),
             ),
         )
 
