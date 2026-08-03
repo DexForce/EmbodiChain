@@ -26,7 +26,7 @@ from embodichain.learning.rl.collector import DifferentiableRollout
 from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 
-from .base import BaseAlgorithm
+from .base import BaseAlgorithm, RolloutKind
 
 __all__ = ["APG", "APGCfg", "segmented_discounted_return"]
 
@@ -53,10 +53,9 @@ def segmented_discounted_return(
 
 @configclass
 class APGCfg(AlgorithmCfg):
-    """Configuration for analytic policy-gradient updates.
+    """Analytic policy-gradient config.
 
-    ``gamma`` is applied within each truncated-backpropagation segment. The
-    discount restarts after a terminated or truncated transition.
+    ``gamma`` applies within each TBPTT segment and restarts after done.
     """
 
     ent_coef: float = 0.0
@@ -66,11 +65,13 @@ class APGCfg(AlgorithmCfg):
 class APG(BaseAlgorithm[DifferentiableRollout]):
     """Optimize policy parameters through differentiable rollout rewards."""
 
+    rollout_kind = RolloutKind.DIFFERENTIABLE
+
     def __init__(self, cfg: APGCfg, policy: torch.nn.Module) -> None:
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
+        self._setup_optimization(cfg, policy.parameters())
         self._update_active = False
         self._update_valid = True
         self._discount: torch.Tensor | None = None
@@ -80,14 +81,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self._num_accumulated_steps = 0
 
     def update(self, rollout: DifferentiableRollout) -> Dict[str, float]:
-        """Apply one pathwise-gradient update from a rollout segment.
-
-        Args:
-            rollout: Graph-preserving rollout used for the update.
-
-        Returns:
-            Scalar metrics describing the optimizer update.
-        """
+        """Apply one pathwise-gradient update from a rollout segment."""
         self.begin_update()
         try:
             self.accumulate_segment(rollout)
@@ -97,7 +91,6 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             raise
 
     def begin_update(self) -> None:
-        """Start accumulating segment gradients for one optimizer update."""
         if self._update_active:
             raise RuntimeError("An APG optimizer update is already active.")
         self.optimizer.zero_grad(set_to_none=True)
@@ -110,11 +103,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         self._num_accumulated_steps = 0
 
     def accumulate_segment(self, rollout: DifferentiableRollout) -> None:
-        """Accumulate gradients from one TBPTT segment without updating policy.
-
-        Args:
-            rollout: Graph-preserving segment from the active update horizon.
-        """
+        """Accumulate gradients from one TBPTT segment without stepping the optimizer."""
         if not self._update_active:
             raise RuntimeError("Call begin_update() before accumulating a segment.")
         if rollout.num_steps == 0:
@@ -155,11 +144,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             return
 
     def finish_update(self) -> Dict[str, float]:
-        """Clip accumulated gradients and perform one optimizer step.
-
-        Returns:
-            Metrics aggregated across all accumulated segments.
-        """
+        """Clip gradients and apply one optimizer step."""
         if not self._update_active:
             raise RuntimeError("Call begin_update() before finishing an update.")
         if self._num_accumulated_steps == 0:
@@ -178,6 +163,7 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             self.cfg.max_grad_norm,
         )
         self.optimizer.step()
+        self._step_scheduler()
         metrics = self._accumulated_metrics(
             grad_norm=float(grad_norm.detach()),
             skipped_update=0.0,
@@ -186,7 +172,6 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
         return metrics
 
     def cancel_update(self) -> None:
-        """Discard gradients accumulated for the active optimizer update."""
         self.optimizer.zero_grad(set_to_none=True)
         self._update_active = False
 
@@ -227,4 +212,5 @@ class APG(BaseAlgorithm[DifferentiableRollout]):
             "entropy": self._entropy_total,
             "grad_norm": grad_norm,
             "skipped_update": skipped_update,
+            "learning_rate": self.current_learning_rate(),
         }

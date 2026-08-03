@@ -1,0 +1,59 @@
+trainer:
+  exp_name: point_mass_ppo
+  learning_env:
+    name: PointMassRL
+    cfg:
+      max_episode_steps: 100
+      success_threshold: 0.03
+      success_bonus: 5.0
+  seed: 42
+  device: cuda:0
+  num_envs: 64
+  iterations: 550
+  buffer_size: 256
+  enable_eval: true
+  eval_freq: 32768
+  num_eval_envs: 32
+  num_eval_episodes: 128
+  eval_seed: 10042
+  best_eval_metric: eval/success_rate
+  best_eval_mode: max
+  save_freq: 262144
+  use_wandb: false
+  wandb_project_name: embodichain-point-mass
+
+policy:
+  name: actor_critic
+  initial_log_std: -1.0
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [64, 64]
+      activation: tanh
+      last_activation: tanh
+      orthogonal_init: [1.414, 1.414, 0.01]
+  critic:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [64, 64]
+      activation: tanh
+      orthogonal_init: [1.414, 1.414, 1.0]
+
+algorithm:
+  name: ppo
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.00025
+    lr_scheduler:
+      name: linear
+      kwargs:
+        end_factor: 0.4
+    n_epochs: 10
+    batch_size: 4096
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_coef: 0.2
+    ent_coef: 0.01
+    vf_coef: 0.5
+    max_grad_norm: 0.5

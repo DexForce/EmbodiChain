@@ -47,7 +47,7 @@ class PPO(BaseAlgorithm[TensorDict]):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
+        self._setup_optimization(cfg, policy.parameters())
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""
@@ -108,8 +108,10 @@ class PPO(BaseAlgorithm[TensorDict]):
                 total_entropy += (-entropy_loss.item()) * bs
                 total_steps += bs
 
+        self._step_scheduler()
         return {
             "actor_loss": total_actor_loss / max(1, total_steps),
             "value_loss": total_value_loss / max(1, total_steps),
             "entropy": total_entropy / max(1, total_steps),
+            "learning_rate": self.current_learning_rate(),
         }

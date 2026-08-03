@@ -14,15 +14,43 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from typing import Any
+
 from embodichain.utils import configclass
+
+__all__ = ["AlgorithmCfg", "LRSchedulerCfg", "OptimizerCfg"]
+
+
+@configclass
+class OptimizerCfg:
+    """Policy optimizer configuration."""
+
+    name: str = "adam"
+    learning_rate: float = 3e-4
+    kwargs: dict[str, Any] = dict()
+
+
+@configclass
+class LRSchedulerCfg:
+    """Optional LR scheduler. ``name=None`` disables scheduling.
+
+    Horizon keys (``total_iters`` / ``T_max``) may be omitted and bound later by
+    ``BaseAlgorithm.bind_schedule``.
+    """
+
+    name: str | None = None
+    kwargs: dict[str, Any] = dict()
 
 
 @configclass
 class AlgorithmCfg:
-    """Minimal algorithm configuration shared across RL algorithms."""
+    """Shared fields for RL algorithm configs."""
 
-    device: str = "cuda"
-    learning_rate: float = 3e-4
+    device: str = "cpu"
+    optimizer: OptimizerCfg = OptimizerCfg()
+    lr_scheduler: LRSchedulerCfg = LRSchedulerCfg()
     batch_size: int = 64
     gamma: float = 0.99
     gae_lambda: float = 0.95

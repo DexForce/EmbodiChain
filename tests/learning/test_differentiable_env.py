@@ -73,6 +73,9 @@ class _MockDifferentiableEnv:
         self._state = self._state.detach()
         return self._state
 
+    def close(self) -> None:
+        return None
+
 
 def test_structural_protocol_accepts_differentiable_environment() -> None:
     env = _MockDifferentiableEnv()

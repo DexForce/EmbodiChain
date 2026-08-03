@@ -347,6 +347,9 @@ class NewtonPlanarReachEnv:
         self._last_action = self._last_action.detach()
         return self._get_observation().detach()
 
+    def close(self) -> None:
+        """No-op; Warp/Newton resources are released with the Python object."""
+
     def _build_model(self) -> tuple[Any, wp.array]:
         template = newton.ModelBuilder(gravity=0.0, up_axis=newton.Axis.Y)
         first_link = template.add_link(label="planar_first_link")

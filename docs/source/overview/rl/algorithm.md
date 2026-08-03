@@ -1,15 +1,17 @@
 # RL Algorithms
 
-This module contains the core implementations of reinforcement learning algorithms, including PPO (Proximal Policy Optimization) and GRPO (Group Relative Policy Optimization).
+This module contains the core implementations of reinforcement learning algorithms, including PPO (Proximal Policy Optimization), GRPO (Group Relative Policy Optimization), and APG (Analytic Policy Gradients).
 
 ## Main Classes and Functions
 
 ### BaseAlgorithm
 - Abstract base class for RL algorithms, defining a single update interface over a collected rollout.
 - Key methods:
-  - `update(rollout)`: Update the policy based on a shared rollout `TensorDict`.
-- Designed to be algorithm-agnostic; `Trainer` handles collection while algorithms focus on loss computation and optimization.
-- Consumes a shared `[N, T + 1]` rollout `TensorDict` and typically converts it to a transition-aligned view over the valid first `T` steps before optimization.
+  - `update(rollout)`: Update the policy based on collected rollout data and return training metrics.
+- Declares `rollout_kind` so `train-rl` can route algorithms to the matching trainer:
+  - `RolloutKind.STANDARD` (PPO/GRPO) → `Trainer` + shared `[N, T + 1]` rollout `TensorDict`
+  - `RolloutKind.DIFFERENTIABLE` (APG) → `DifferentiableTrainer` + graph-preserving `DifferentiableRollout`
+- Designed to be algorithm-agnostic; trainers handle collection while algorithms focus on loss computation and optimization.
 
 ### PPO
 - Mainstream on-policy algorithm, supports Generalized Advantage Estimation (GAE), policy update, and hyperparameter configuration.
@@ -31,8 +33,23 @@ This module contains the core implementations of reinforcement learning algorith
   - `update(rollout)`: Multi-epoch minibatch optimization with optional KL penalty.
 - Supports both **Embodied AI** (dense reward, from-scratch training) and **VLA** (sparse reward, fine-tuning) modes via `kl_coef` configuration.
 
+### APG
+- Analytic Policy Gradients for **differentiable** environments: backpropagates pathwise gradients from discounted returns through the dynamics graph into policy parameters.
+- Requires `RolloutKind.DIFFERENTIABLE`. `train-rl` therefore selects `DifferentiableTrainer` and `DifferentiableCollector` instead of the standard PPO/GRPO path.
+- **Segmented discounted returns**: Within each TBPTT segment, computes \(R = \sum_t \gamma^{t} r_t\) per environment (`segmented_discounted_return` / `_discounted_terms`), restarting the discount after `done`.
+- **TBPTT accumulation**: `DifferentiableTrainer` collects `segment_length` steps at a time and accumulates gradients until `update_horizon` before one optimizer step. Graph is detached only at segment boundaries.
+- **Non-finite safety**: When `skip_nonfinite_updates=True` (default), non-finite losses or gradients skip the optimizer step instead of crashing training.
+- Key methods:
+  - `begin_update()` / `accumulate_segment(rollout)` / `finish_update()`: Multi-segment pathwise update used by `DifferentiableTrainer`.
+  - `update(rollout)`: Convenience wrapper for a single-segment update (`begin` → `accumulate` → `finish`).
+  - `segmented_discounted_return(rollout, gamma)`: Standalone helper for per-env discounted returns inside one segment.
+- Typical training flow: differentiable collect → accumulate pathwise loss over TBPTT segments → clip grads → optimizer step.
+- Does **not** currently support distributed (DDP) training; `build_algo(..., distributed=True)` raises for differentiable algorithms.
+- Use an `actor_only` policy (no Critic). PointMass and Newton planar-reach are reference differentiable tasks.
+
 ### Config Classes
-- `AlgorithmCfg`, `PPOCfg`, `GRPOCfg`: Centralized management of learning rate, batch size, clip_coef, ent_coef, vf_coef, and other parameters.
+- `AlgorithmCfg`, `PPOCfg`, `GRPOCfg`, `APGCfg`: Centralized management of learning rate, batch size, clip_coef, ent_coef, vf_coef, gamma, max_grad_norm, and other parameters.
+- `APGCfg` adds `ent_coef` and `skip_nonfinite_updates`; TBPTT lengths (`segment_length`, `update_horizon`) live on the trainer config, not the algorithm config.
 - Supports automatic loading from JSON or YAML config files for batch experiments and parameter tuning.
 - Can be extended via inheritance for multiple algorithms and tasks.
 
@@ -45,6 +62,14 @@ class BaseAlgorithm:
 class PPO(BaseAlgorithm):
     def update(self, rollout):
         ...
+
+class APG(BaseAlgorithm):
+    def begin_update(self):
+        ...
+    def accumulate_segment(self, rollout):
+        ...
+    def finish_update(self):
+        ...
 ```
 
 ## Usage Recommendations
@@ -52,16 +77,25 @@ class PPO(BaseAlgorithm):
 - Supports multi-environment parallel collection to improve sampling efficiency.
 - Custom algorithm classes can be implemented to extend new RL methods.
 - **GRPO**: Use `actor_only` policy (no Critic). Set `kl_coef=0` for from-scratch training (CartPole, dense reward); set `kl_coef=0.02` for VLA/LLM fine-tuning.
+- **APG**: Use a differentiable environment and `actor_only` policy. Prefer `segment_length == update_horizon` for short episodes; shorten `segment_length` when long horizons cause memory pressure. Keep `skip_nonfinite_updates=True` for unstable dynamics.
 
 ## Extension Notes
 - Users can inherit from `BaseAlgorithm` to implement custom algorithms and flexibly integrate them into the RL framework.
+- Set `rollout_kind = RolloutKind.DIFFERENTIABLE` when the algorithm needs an unbroken autograd graph through environment steps.
 - Supports multi-environment parallelism and event-driven extension.
-- Typical usage:
+- Typical standard-path usage:
 ```python
 algo = PPO(cfg, policy)
 rollout = collector.collect(buffer_size, rollout=buffer.start_rollout())
 buffer.add(rollout)
 algo.update(buffer.get(flatten=False))
+```
+- Typical differentiable-path usage (orchestrated by `DifferentiableTrainer`):
+```python
+algo = APG(cfg, policy)
+algo.begin_update()
+algo.accumulate_segment(segment_rollout)  # repeated until update_horizon
+metrics = algo.finish_update()
 ```
 
 ---

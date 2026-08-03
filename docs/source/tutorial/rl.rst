@@ -37,12 +37,20 @@ The core components and their relationships:
 Configuration via JSON or YAML
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Training is configured via a JSON or YAML file that defines runtime settings, environment, policy, and algorithm parameters. EmbodiChain loads either format with ``load_config()``; the nested ``trainer.gym_config`` path supports the same extensions.
+Training is configured via a JSON or YAML file that defines runtime settings, environment, policy, and algorithm parameters. EmbodiChain loads either format with ``load_config()``. Two environment sources are supported:
+
+- ``trainer.gym_config``: simulator ``EmbodiedEnv`` tasks such as CartPole and PushCube
+- ``trainer.learning_env``: lightweight registered tensor environments such as PointMass
+
+``algorithm.name`` selects the update rule. Standard algorithms (PPO/GRPO) use
+``Trainer`` and ``SyncCollector``. Differentiable algorithms (APG) use
+``DifferentiableTrainer`` and ``DifferentiableCollector``. Both paths share
+``evaluate_episodes()`` for deterministic evaluation metrics under ``eval/*``.
 
 Example Configuration
 ---------------------   
 
-The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is located in ``embodichain_tasks/configs/agents/rl/push_cube`` or ``embodichain_tasks/configs/agents/rl/basic/cart_pole``:
+The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is located in ``embodichain_tasks/configs/agents/rl/push_cube`` or ``embodichain_tasks/configs/agents/rl/basic/cart_pole``. PointMass APG/PPO configs live under ``embodichain_tasks/configs/agents/rl/basic/point_mass``:
 
 .. dropdown:: Example: train_config.json
    :icon: code
@@ -57,6 +65,21 @@ The configuration file (e.g., ``train_config.json`` or ``train_config.yaml``) is
    .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/basic/cart_pole/train_config.yaml
       :language: yaml
       :linenos:
+
+.. dropdown:: Example: train_apg.yaml (PointMass)
+   :icon: code
+
+   .. literalinclude:: ../../../embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
+      :language: yaml
+      :linenos:
+
+PointMass uses one differentiable PyTorch dynamics implementation for both
+APG and PPO. Launch either config with the same CLI:
+
+.. code-block:: bash
+
+   embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_apg.yaml
+   embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
 
 Configuration Sections
 ---------------------
