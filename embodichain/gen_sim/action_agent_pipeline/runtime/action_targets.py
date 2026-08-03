@@ -27,6 +27,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.atomic_action_spec import
     AtomicActionSpec,
     _COORDINATED_WORLD_Y_ANGLE_CFG_KEY,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.action_parts import (
+    _select_arm_parts,
+)
 from embodichain.gen_sim.action_agent_pipeline.runtime.coordinated_grasp import (
     _default_coordinated_object_to_eef,
 )
@@ -138,11 +141,14 @@ def _resolve_pickup_downstream_object_targets(
     object_pose = _ensure_batched_pose_tensor(
         semantics.entity.get_local_pose(to_matrix=True), env.robot.device
     )
+    _, arm_part, _, _, _ = _select_arm_parts(env, spec.robot_name)
     state = WorldState(
         last_qpos=env.robot.get_qpos().clone(),
-        held_object=_semantics_as_held_object_state(
-            semantics, object_pose, env.robot.device
-        ),
+        held_objects={
+            arm_part: _semantics_as_held_object_state(
+                semantics, object_pose, env.robot.device
+            )
+        },
     )
     targets: list[torch.Tensor] = []
     for target_spec in target_specs:
@@ -175,7 +181,8 @@ def _resolve_move_held_object_target(
 ):
     if not spec.target_object_pose:
         raise ValueError("MoveHeldObject requires target_object_pose.")
-    if state is None or state.held_object is None:
+    _, arm_part, _, _, _ = _select_arm_parts(env, spec.robot_name)
+    if state is None or state.get_held_object(arm_part) is None:
         raise ValueError("MoveHeldObject requires a held object from a prior PickUp.")
     return _resolve_held_object_pose_target(env, spec, state)
 
@@ -189,13 +196,15 @@ def _resolve_place_target(
         return _resolve_pose_target(env, spec)
     if not spec.target_object_pose:
         raise ValueError("Place requires target_pose or target_object_pose.")
-    if state is None or state.held_object is None:
+    _, arm_part, _, _, _ = _select_arm_parts(env, spec.robot_name)
+    held_object = None if state is None else state.get_held_object(arm_part)
+    if held_object is None:
         raise ValueError(
             "Place with target_object_pose requires a held object from a prior PickUp."
         )
 
     object_target_pose = _resolve_held_object_pose_target(env, spec, state)
-    object_to_eef = state.held_object.object_to_eef.to(
+    object_to_eef = held_object.object_to_eef.to(
         device=env.robot.device,
         dtype=torch.float32,
     )
@@ -260,7 +269,7 @@ def _resolve_coordinated_pickment_target(
         right_object_to_eef = right_object_to_eef.unsqueeze(0).repeat(num_envs, 1, 1)
     return CoordinatedPickmentTarget(
         object_target_pose=object_target_pose,
-        object_semantics=semantics,
+        semantics=semantics,
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
         object_initial_pose=object_initial_pose,

@@ -118,6 +118,7 @@ def _execute_atomic_action_result(
         spec,
         resolved_target_pose,
         state=state,
+        control_part=arm_part,
     )
     coordinated_object_target_pose = getattr(target, "object_target_pose", None)
     coordinated_left_eef_target_pose = None
@@ -150,11 +151,10 @@ def _execute_atomic_action_result(
         target=target,
         state=state,
     )
-    if (
-        spec.atomic_action_class == "PickUp"
-        and result.next_state.held_object is not None
-    ):
-        resolved_eef_target_pose = result.next_state.held_object.grasp_xpos
+    if spec.atomic_action_class == "PickUp":
+        held_object = result.next_state.get_held_object(arm_part)
+        if held_object is not None:
+            resolved_eef_target_pose = held_object.grasp_xpos
     failed_env_mask = _failed_env_mask(result.success, result.trajectory.shape[0])
     if failed_env_mask is not None and bool(failed_env_mask.any()):
         n_failed = int(failed_env_mask.sum().item())
@@ -227,11 +227,7 @@ def _execute_atomic_action_result(
     )
     next_state = result.next_state
     if int(spec.cfg.get("post_hold_steps", 0)) > 0:
-        next_state = WorldState(
-            last_qpos=next_state.last_qpos.clone(),
-            held_object=next_state.held_object,
-            coordinated_held_object=next_state.coordinated_held_object,
-        )
+        next_state = next_state.with_updates(last_qpos=next_state.last_qpos.clone())
     return ExecutedAtomicAction(
         action=action_np,
         next_state=next_state,
@@ -308,14 +304,16 @@ def _resolved_pose_targets(
     target: torch.Tensor | None,
     *,
     state: WorldState | None,
+    control_part: str,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     """Classify the planner target as an object pose and/or an EEF pose."""
     if target is None:
         return None, None
+    held_object = None if state is None else state.get_held_object(control_part)
     if spec.atomic_action_class == "MoveHeldObject":
-        if state is None or state.held_object is None:
+        if held_object is None:
             return target, None
-        object_to_eef = state.held_object.object_to_eef.to(
+        object_to_eef = held_object.object_to_eef.to(
             device=target.device,
             dtype=target.dtype,
         )
@@ -323,12 +321,8 @@ def _resolved_pose_targets(
             object_to_eef = object_to_eef.unsqueeze(0).repeat(target.shape[0], 1, 1)
         return target, torch.bmm(target, object_to_eef)
     if spec.atomic_action_class == "Place":
-        if (
-            state is not None
-            and state.held_object is not None
-            and spec.target_object_pose
-        ):
-            object_to_eef = state.held_object.object_to_eef.to(
+        if held_object is not None and spec.target_object_pose:
+            object_to_eef = held_object.object_to_eef.to(
                 device=target.device,
                 dtype=target.dtype,
             )

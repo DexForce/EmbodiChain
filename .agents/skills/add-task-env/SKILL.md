@@ -18,14 +18,17 @@ Scaffold a new task environment following EmbodiChain's conventions and patterns
 
 Ask the user:
 
-- **Category**: `tableware`, `rl`, or `special` (maps to `embodichain/lab/gym/envs/tasks/<category>/`)
+- **Category**: `tableware`, `rl`, or `special` (maps to `embodichain_tasks/embodichain_tasks/<category>/`)
 - **Task name** (snake_case, e.g. `pick_place`)
 - **Gym ID** (e.g. `PickPlace-v1`)
 - **Task type**: RL task (needs reward functors) or expert demonstration task (needs `create_demo_action_list`)
 
 ### 2. Create the Task File
 
-Place at `embodichain/lab/gym/envs/tasks/<category>/<name>.py`.
+Place at `embodichain_tasks/embodichain_tasks/<category>/<name>.py`.
+Lightweight pure-PyTorch RL tasks (e.g. PointMass) also live under
+`embodichain_tasks/embodichain_tasks/rl/basic/` and register through
+`@register_learning_env` when they are not `EmbodiedEnv` subclasses.
 
 Template:
 
@@ -76,22 +79,28 @@ class <CamelCaseName>Env(EmbodiedEnv):
 
 ### 3. Update Exports
 
-Add to `embodichain/lab/gym/envs/tasks/__init__.py`:
+Task packages under `embodichain_tasks` are auto-imported via
+`import_packages()`. Prefer an explicit export in the category
+`__init__.py`:
 
 ```python
-from embodichain.lab.gym.envs.tasks.<category>.<name> import <CamelCaseName>Env
+from .<name> import <CamelCaseName>Env
+
+__all__ = [..., "<CamelCaseName>Env"]
 ```
 
-Add `"<CamelCaseName>Env"` to the `__all__` list.
+Optional compatibility re-export may also be added in
+`embodichain/lab/gym/envs/tasks/__init__.py`.
 
 ### 4. Create Test Stub
 
-Place at `tests/gym/envs/tasks/test_<name>.py`.
+Place at `tests/gym/envs/tasks/test_<name>.py` (or `tests/learning/` for
+lightweight learning environments).
 
 ### 5. Format
 
 ```bash
-black embodichain/lab/gym/envs/tasks/<category>/<name>.py
+black embodichain_tasks/embodichain_tasks/<category>/<name>.py
 black tests/gym/envs/tasks/test_<name>.py
 ```
 
@@ -99,9 +108,9 @@ black tests/gym/envs/tasks/test_<name>.py
 
 - [ ] File has Apache 2.0 header
 - [ ] Uses `from __future__ import annotations`
-- [ ] `@register_env` decorator with unique gym ID
+- [ ] `@register_env` or `@register_learning_env` with a unique ID
 - [ ] `__all__` defined in the task module
-- [ ] Default `cfg = EmbodiedEnvCfg()` in `__init__`
-- [ ] Import and `__all__` added to `tasks/__init__.py`
+- [ ] Default `cfg = EmbodiedEnvCfg()` in `__init__` for EmbodiedEnv tasks
+- [ ] Category `__init__.py` export updated
 - [ ] Test stub created
 - [ ] `black` run on both files

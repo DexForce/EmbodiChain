@@ -29,16 +29,18 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPlacementTarget,
     EndEffectorPoseTarget,
     GraspTarget,
-    HeldObjectState,
     HeldObjectPoseTarget,
     JointPositionTarget,
     ObjectSemantics,
+    PlaceTarget,
+    PressTarget,
     WorldState,
 )
 from embodichain.utils.math import pose_inv
 
 from .models import ExecutionProgram, GroundedAction, SemanticStep
 from .motion_policy import resolve_motion_policy
+from .robot_parts import arm_control_part
 
 __all__ = ["ActionGrounder", "LiveArrangementPlan", "LivePlacementPlan"]
 
@@ -531,14 +533,14 @@ class ActionGrounder:
                 )
                 target = CoordinatedPickmentTarget(
                     object_target_pose=target_object_pose,
-                    object_semantics=semantics,
+                    semantics=semantics,
                     left_object_to_eef=left_to_eef,
                     right_object_to_eef=right_to_eef,
                     object_initial_pose=object_pose,
                 )
             elif action_class == "Press":
                 target_object_pose = object_pose.clone()
-                target = EndEffectorPoseTarget(
+                target = PressTarget(
                     xpos=self._press_pose(
                         arm,
                         step.object_uid,
@@ -562,7 +564,7 @@ class ActionGrounder:
                 )
                 target = CoordinatedPickmentTarget(
                     object_target_pose=target_object_pose,
-                    object_semantics=semantics,
+                    semantics=semantics,
                     left_object_to_eef=left_to_eef,
                     right_object_to_eef=right_to_eef,
                     object_initial_pose=object_pose,
@@ -572,7 +574,7 @@ class ActionGrounder:
                 # live pose as the postcondition reference while grounding a
                 # downward contact point from its current surface geometry.
                 target_object_pose = object_pose.clone()
-                target = EndEffectorPoseTarget(
+                target = PressTarget(
                     xpos=self._press_pose(
                         arm,
                         step.object_uid,
@@ -603,20 +605,12 @@ class ActionGrounder:
             target = CoordinatedPlacementTarget(
                 placing_object_target_pose=target_object_pose,
                 support_object_target_pose=support_pose,
-                placing_held_object=self._held_state_from_live_pose(
-                    placing_uid,
-                    "left_arm",
-                ),
-                support_held_object=self._held_state_from_live_pose(
-                    support_uid,
-                    "right_arm",
-                ),
                 release=bool(step.goal.get("release", True)),
             )
         elif kind == "current_held_pose":
-            if state.held_object is None:
+            if state.get_held_object(arm_control_part(self.env, arm)) is None:
                 raise ValueError("Place requires a held object from a prior PickUp.")
-            target = EndEffectorPoseTarget(
+            target = PlaceTarget(
                 xpos=(
                     reference_eef_pose
                     if reference_eef_pose is not None
@@ -1043,25 +1037,6 @@ class ActionGrounder:
             top = _world_vertices(entity, self.env, env_id)[:, 2].max()
             target[env_id, 2, 3] = top - depth
         return target
-
-    def _held_state_from_live_pose(
-        self,
-        uid: str,
-        arm: str,
-    ) -> HeldObjectState:
-        """Describe the live object-to-TCP relationship for coordinated placement.
-
-        ``CoordinatedPlacement`` receives both held-object states in its typed
-        target. Keeping this computation in the grounder ensures that no pose
-        from the symbolic program is trusted as runtime geometry.
-        """
-        object_pose = _live_pose(self.env, uid)
-        eef_pose = self._current_eef_pose(arm)
-        return HeldObjectState(
-            semantics=self.semantics_factory(uid),
-            object_to_eef=torch.bmm(pose_inv(object_pose), eef_pose),
-            grasp_xpos=eef_pose,
-        )
 
     def _retreat_pose(
         self,

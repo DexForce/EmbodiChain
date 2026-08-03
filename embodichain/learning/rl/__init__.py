@@ -14,7 +14,43 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""On-policy reinforcement learning pipeline.
+
+Algorithms (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the training entry point; rollout data flows as ``TensorDict`` objects.
+"""
+
 from . import algo
 from . import buffer
 from . import models
 from . import utils
+from .differentiable_trainer import (
+    DifferentiableTrainer,
+    DifferentiableTrainerCfg,
+)
+from .env import (
+    DifferentiableObservation,
+    DifferentiableVecEnv,
+    LearningVecEnv,
+    build_learning_env,
+    get_registered_learning_env_names,
+    register_learning_env,
+)
+from .evaluation import evaluate_episodes
+from .routing import get_trainer_class
+
+__all__ = [
+    "DifferentiableObservation",
+    "DifferentiableTrainer",
+    "DifferentiableTrainerCfg",
+    "DifferentiableVecEnv",
+    "LearningVecEnv",
+    "build_learning_env",
+    "evaluate_episodes",
+    "get_registered_learning_env_names",
+    "get_trainer_class",
+    "register_learning_env",
+    "algo",
+    "buffer",
+    "models",
+    "utils",
+]

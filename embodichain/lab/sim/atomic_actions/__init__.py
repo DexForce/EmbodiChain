@@ -18,9 +18,9 @@
 
 This module provides a unified interface for the atomic motion primitives
 (``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``),
-with typed targets, a ``WorldState`` threaded across sequenced actions, and
-extensible custom action registration.
+``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``,
+``hand_over``), with typed targets, a ``WorldState`` threaded across sequenced
+actions, and extensible custom action registration.
 """
 
 from __future__ import annotations
@@ -28,22 +28,17 @@ from __future__ import annotations
 from .affordance import (
     Affordance,
     AntipodalAffordance,
+    AssembleAffordance,
     InteractionPoints,
 )
 from .core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
     CoordinatedHeldObjectState,
-    CoordinatedPickmentTarget,
-    CoordinatedPlacementTarget,
-    GraspTarget,
     HeldObjectState,
-    HeldObjectPoseTarget,
-    JointPositionTarget,
-    NamedJointPositionTarget,
     ObjectSemantics,
-    EndEffectorPoseTarget,
     Target,
     WorldState,
 )
@@ -53,42 +48,81 @@ from .engine import (
     unregister_action,
     get_registered_actions,
 )
+from .targets import ObjectActionTarget
 from .primitives import (
+    AssembleTarget,
+    CoordinatedPickTarget,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
+    CoordinatedPickmentTarget,
     CoordinatedPlacement,
     CoordinatedPlacementCfg,
+    CoordinatedPlacementTarget,
+    EndEffectorPoseTarget,
+    GraspTarget,
+    HandOver,
+    HandOverCfg,
+    HeldObjectPoseTarget,
+    JointPositionTarget,
     MoveEndEffector,
     MoveEndEffectorCfg,
     MoveHeldObject,
     MoveHeldObjectCfg,
     MoveJoints,
     MoveJointsCfg,
+    NamedJointPositionTarget,
     PickUp,
     PickUpCfg,
     Place,
     PlaceCfg,
+    PlaceTarget,
     Press,
     PressCfg,
+    PressTarget,
 )
 from .trajectory import TrajectoryBuilder
 
+BuiltinTarget = (
+    EndEffectorPoseTarget
+    | JointPositionTarget
+    | NamedJointPositionTarget
+    | GraspTarget
+    | HeldObjectPoseTarget
+    | PlaceTarget
+    | PressTarget
+    | CoordinatedPickTarget
+    | CoordinatedPlacementTarget
+    | AssembleTarget
+)
+"""Union of target types shipped by EmbodiChain.
+
+Use :class:`ActionTarget` rather than this closed union at extension boundaries.
+"""
+
 __all__ = [
     # Core classes
+    "ActionTarget",
     "Affordance",
     "AntipodalAffordance",
+    "AssembleAffordance",
     "InteractionPoints",
     "ObjectSemantics",
+    "ObjectActionTarget",
     "HeldObjectState",
     "CoordinatedHeldObjectState",
     "HeldObjectPoseTarget",
     "JointPositionTarget",
     "NamedJointPositionTarget",
     "EndEffectorPoseTarget",
+    "PlaceTarget",
+    "PressTarget",
+    "CoordinatedPickTarget",
     "CoordinatedPickmentTarget",
     "CoordinatedPlacementTarget",
+    "AssembleTarget",
     "GraspTarget",
     "Target",
+    "BuiltinTarget",
     "WorldState",
     "ActionResult",
     "ActionCfg",
@@ -96,6 +130,7 @@ __all__ = [
     # Action implementations
     "CoordinatedPickment",
     "CoordinatedPlacement",
+    "HandOver",
     "MoveEndEffector",
     "MoveJoints",
     "MoveHeldObject",
@@ -104,6 +139,7 @@ __all__ = [
     "Press",
     "CoordinatedPickmentCfg",
     "CoordinatedPlacementCfg",
+    "HandOverCfg",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",

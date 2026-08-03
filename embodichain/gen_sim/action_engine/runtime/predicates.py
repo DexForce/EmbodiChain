@@ -24,6 +24,8 @@ from typing import Any
 
 import torch
 
+from .robot_parts import arm_control_part
+
 __all__ = ["PREDICATE_TYPES", "evaluate_predicate"]
 
 PREDICATE_TYPES = frozenset(
@@ -172,7 +174,9 @@ def _object_held(
         if required_arm is not None and arm != required_arm:
             continue
         state = states.get((uid, arm))
-        held = None if state is None else state.held_object
+        held = (
+            None if state is None else state.get_held_object(arm_control_part(env, arm))
+        )
         actual_eef = eef_values[arm_index]
         gripper = gripper_values[arm_index]
         if held is None or actual_eef is None or gripper is None:
@@ -218,7 +222,12 @@ def _coordinated_held(
     gripper_tolerance: float,
 ) -> torch.Tensor:
     result = _constant(env, False)
-    held = getattr(state, "coordinated_held_object", None)
+    if state is None:
+        return result
+    held = state.get_coordinated_held_object(
+        arm_control_part(env, "left_arm"),
+        arm_control_part(env, "right_arm"),
+    )
     if held is None:
         return result
     label = getattr(held.semantics, "label", None)

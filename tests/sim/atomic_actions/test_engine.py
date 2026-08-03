@@ -23,16 +23,20 @@ import torch
 from unittest.mock import Mock
 
 from embodichain.lab.sim.atomic_actions.affordance import Affordance
-from embodichain.lab.sim.atomic_actions.core import (
-    ActionResult,
-    AtomicAction,
+from embodichain.lab.sim.atomic_actions import (
+    EndEffectorPoseTarget,
     GraspTarget,
-    HeldObjectState,
     HeldObjectPoseTarget,
     JointPositionTarget,
     NamedJointPositionTarget,
+    PlaceTarget,
+)
+from embodichain.lab.sim.atomic_actions.core import (
+    ActionTarget,
+    ActionResult,
+    AtomicAction,
+    HeldObjectState,
     ObjectSemantics,
-    EndEffectorPoseTarget,
     WorldState,
 )
 from embodichain.lab.sim.atomic_actions.engine import (
@@ -104,23 +108,23 @@ def _fake_action(name, target_type, *, sets_held=False, clears_held=False, fails
                 trajectory=torch.empty(NUM_ENVS, 0, TOTAL_DOF),
                 next_state=state,
             )
-        held = state.held_object
+        held_objects = dict(state.held_objects)
         if sets_held:
             sem = ObjectSemantics(affordance=Affordance(), geometry={}, label="x")
-            held = HeldObjectState(
+            held_objects["arm"] = HeldObjectState(
                 semantics=sem,
                 object_to_eef=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
                 grasp_xpos=torch.eye(4).unsqueeze(0).repeat(NUM_ENVS, 1, 1),
             )
         if clears_held:
-            held = None
+            held_objects.pop("arm", None)
         traj = torch.zeros(NUM_ENVS, 5, TOTAL_DOF)
         return ActionResult(
             success=True,
             trajectory=traj,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=traj[:, -1, :].clone(),
-                held_object=held,
+                held_objects=held_objects,
             ),
         )
 
@@ -160,7 +164,7 @@ class TestEngineRun:
     def test_run_threads_world_state(self):
         pick = _fake_action("pick", GraspTarget, sets_held=True)
         move = _fake_action("move", HeldObjectPoseTarget)
-        place = _fake_action("place", EndEffectorPoseTarget, clears_held=True)
+        place = _fake_action("place", PlaceTarget, clears_held=True)
         self.engine.register(pick, name="pick")
         self.engine.register(move, name="move")
         self.engine.register(place, name="place")
@@ -169,15 +173,15 @@ class TestEngineRun:
             [
                 ("pick", GraspTarget(sem)),
                 ("move", HeldObjectPoseTarget(torch.eye(4))),
-                ("place", EndEffectorPoseTarget(torch.eye(4))),
+                ("place", PlaceTarget(torch.eye(4))),
             ]
         )
         assert success.all().item()
-        # The move action saw a non-None held_object (set by pick).
+        # The move action saw the held object set by pick.
         move_state_arg = move.execute.call_args_list[0].args[1]
-        assert move_state_arg.held_object is not None
+        assert move_state_arg.get_held_object("arm") is not None
         # Final state cleared by place.
-        assert final_state.held_object is None
+        assert final_state.get_held_object("arm") is None
 
     def test_run_stops_on_first_failure(self):
         a = _fake_action("a", EndEffectorPoseTarget)
@@ -225,7 +229,22 @@ class TestEngineRun:
         # First call's state argument
         state_arg = a.execute.call_args_list[0].args[1]
         assert state_arg.last_qpos.shape == (NUM_ENVS, TOTAL_DOF)
-        assert state_arg.held_object is None
+        assert state_arg.held_objects == {}
         assert state_arg.last_qpos.data_ptr() != seed_qpos.data_ptr()
         seed_qpos.fill_(1.0)
         assert torch.equal(state_arg.last_qpos, torch.zeros(NUM_ENVS, TOTAL_DOF))
+
+    def test_run_accepts_third_party_action_target(self):
+        class CustomTarget(ActionTarget):
+            pass
+
+        action = _fake_action("custom", CustomTarget)
+        self.engine.register(action)
+        success, traj, _ = self.engine.run([("custom", CustomTarget())])
+        assert success.all().item()
+        assert traj.shape == (NUM_ENVS, 5, TOTAL_DOF)
+
+    def test_register_rejects_non_action_target_type(self):
+        action = _fake_action("invalid", str)
+        with pytest.raises(TypeError, match="ActionTarget"):
+            self.engine.register(action)

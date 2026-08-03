@@ -11,14 +11,20 @@ embodichain.lab.sim.atomic_actions
       AntipodalAffordance
       InteractionPoints
       ObjectSemantics
+      ActionTarget
+      ObjectActionTarget
       EndEffectorPoseTarget
+      PlaceTarget
+      PressTarget
       JointPositionTarget
       NamedJointPositionTarget
       GraspTarget
       HeldObjectPoseTarget
+      CoordinatedPickTarget
       CoordinatedPickmentTarget
       CoordinatedPlacementTarget
       Target
+      BuiltinTarget
       HeldObjectState
       CoordinatedHeldObjectState
       WorldState
@@ -48,6 +54,7 @@ embodichain.lab.sim.atomic_actions
    :maxdepth: 1
    :hidden:
 
+   embodichain.lab.sim.atomic_actions.targets
    embodichain.lab.sim.atomic_actions.primitives
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
@@ -58,6 +65,8 @@ Layout
 The public API is exported from ``embodichain.lab.sim.atomic_actions``. Built-in
 primitive implementations live under
 ``embodichain.lab.sim.atomic_actions.primitives`` and
+shared target contracts live in
+``embodichain.lab.sim.atomic_actions.targets``.
 ``embodichain.lab.sim.atomic_actions.actions`` remains a compatibility re-export
 for existing imports.
 
@@ -80,7 +89,23 @@ Core
     :members:
     :show-inheritance:
 
+.. autoclass:: ActionTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: ObjectActionTarget
+    :members:
+    :show-inheritance:
+
 .. autoclass:: EndEffectorPoseTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PlaceTarget
+    :members:
+    :show-inheritance:
+
+.. autoclass:: PressTarget
     :members:
     :show-inheritance:
 
@@ -100,15 +125,19 @@ Core
     :members:
     :show-inheritance:
 
-.. autoclass:: CoordinatedPickmentTarget
+.. autoclass:: CoordinatedPickTarget
     :members:
     :show-inheritance:
+
+.. autodata:: CoordinatedPickmentTarget
 
 .. autoclass:: CoordinatedPlacementTarget
     :members:
     :show-inheritance:
 
 .. autodata:: Target
+
+.. autodata:: BuiltinTarget
 
 .. autoclass:: HeldObjectState
     :members:

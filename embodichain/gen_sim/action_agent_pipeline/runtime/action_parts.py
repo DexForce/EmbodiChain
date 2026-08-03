@@ -53,6 +53,7 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpCfg,
     Place,
     PlaceCfg,
+    PlaceTarget,
     WorldState,
 )
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
@@ -199,11 +200,7 @@ def _state_with_current_agent_qpos(
         if hand_qpos.ndim == 1:
             hand_qpos = hand_qpos.unsqueeze(0).repeat(num_envs, 1)
         qpos[:, eef_joints] = hand_qpos
-    return WorldState(
-        last_qpos=qpos,
-        held_object=state.held_object,
-        coordinated_held_object=state.coordinated_held_object,
-    )
+    return state.with_updates(last_qpos=qpos)
 
 
 def _coordinated_state_with_current_agent_qpos(
@@ -236,11 +233,7 @@ def _coordinated_state_with_current_agent_qpos(
             if hand_qpos.ndim == 1:
                 hand_qpos = hand_qpos.unsqueeze(0).repeat(num_envs, 1)
             qpos[:, eef_joints] = hand_qpos
-    return WorldState(
-        last_qpos=qpos,
-        held_object=state.held_object,
-        coordinated_held_object=state.coordinated_held_object,
-    )
+    return state.with_updates(last_qpos=qpos)
 
 
 def _motion_generator_for_env(
@@ -279,8 +272,10 @@ def _build_typed_target(spec: AtomicActionSpec, target):
         return target
     if spec.atomic_action_class == "PickUp":
         return GraspTarget(semantics=target)
-    if spec.atomic_action_class in {"MoveEndEffector", "Place"}:
+    if spec.atomic_action_class == "MoveEndEffector":
         return EndEffectorPoseTarget(xpos=target)
+    if spec.atomic_action_class == "Place":
+        return PlaceTarget(xpos=target)
     if spec.atomic_action_class == "MoveJoints":
         return JointPositionTarget(qpos=target)
     if spec.atomic_action_class == "MoveHeldObject":

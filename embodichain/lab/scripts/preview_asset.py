@@ -14,34 +14,39 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Standalone script to preview a USD or mesh asset in the simulation.
+"""Preview a USD or mesh asset in the simulation.
 
 Usage examples::
 
     # Preview a rigid object from USD
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
         --asset_type rigid \\
         --preview
 
     # Preview an articulation from USD
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/robot.usd \\
         --asset_type articulation \\
         --preview
 
     # Headless check (no render window)
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/asset.usda \\
         --headless
 
+    # Preview in a browser with Viser
+    embodichain preview-asset \\
+        --asset_path /path/to/asset.usda \\
+        --viser
+
     # Preview with a built-in environment map
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
         --env_map "Studio"
 
     # Preview with a custom HDR environment map
-    python -m embodichain.lab.scripts.preview_asset \\
+    embodichain preview-asset \\
         --asset_path /path/to/sugar_box.usda \\
         --env_map /path/to/environment.hdr
 """
@@ -51,15 +56,20 @@ from __future__ import annotations
 import argparse
 import os
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.lab.sim.objects import Articulation, RigidObject
+    from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.scripts.preview_joint_control import (
+        ArticulationPreviewController,
+    )
 
 
-def build_sim_cfg(args: argparse.Namespace):
+def build_sim_cfg(args: argparse.Namespace) -> SimulationManagerCfg:
     """Build a SimulationManagerCfg from CLI arguments.
 
     Args:
@@ -70,20 +80,24 @@ def build_sim_cfg(args: argparse.Namespace):
     """
     from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
+    from embodichain.lab.visualization import visualization_cfg_from_args
 
     return SimulationManagerCfg(
         headless=args.headless,
         sim_device=args.sim_device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        visualization=visualization_cfg_from_args(args),
     )
 
 
-def load_assets(sim: SimulationManager, args: argparse.Namespace):
+def load_assets(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+) -> list[RigidObject | Articulation]:
     """Load one or more assets into the simulation.
 
-    If ``--asset_type`` is not specified and the file is USD, the script will
-    inspect the USD stage for articulation roots to decide between articulation
-    and rigid object.  For non-USD files the default is always ``rigid``.
+    URDF files are always loaded as articulations. Other file types use the
+    value of ``--asset_type``, which defaults to ``rigid``.
 
     Args:
         sim: The simulation manager instance.
@@ -163,7 +177,11 @@ def load_assets(sim: SimulationManager, args: argparse.Namespace):
     return loaded_assets
 
 
-def preview(sim: SimulationManager, assets) -> None:
+def preview(
+    sim: SimulationManager,
+    assets: list[RigidObject | Articulation],
+    joint_controller: ArticulationPreviewController | None = None,
+) -> None:
     """Enter interactive preview mode.
 
     Provides a simple REPL:
@@ -175,6 +193,7 @@ def preview(sim: SimulationManager, assets) -> None:
     Args:
         sim: The simulation manager instance.
         assets: Loaded assets (list of RigidObject/Articulation).
+        joint_controller: Optional Viser articulation preview controller.
     """
     print("Press `p` to enter embed mode to interact with the asset.")
     print("Press `s <N>` to step the simulation N times (default 10).")
@@ -200,9 +219,103 @@ def preview(sim: SimulationManager, assets) -> None:
             parts = txt.split()
             n = int(parts[1]) if len(parts) > 1 else 10
             log_info(f"Stepping simulation {n} times ...")
-            sim.update(step=n)
+            _step_preview_simulation(sim, joint_controller, step=n)
         else:
             log_warning(f"Unknown command: {txt!r}")
+
+
+def _publish_loaded_assets(sim: SimulationManager, args: argparse.Namespace) -> None:
+    """Immediately publish assets loaded after Viser startup.
+
+    Args:
+        sim: Simulation manager containing the newly loaded assets.
+        args: Parsed CLI arguments.
+    """
+    if getattr(args, "viser", False):
+        sim.capture_visualization_safely(force=True)
+
+
+def _setup_viser_joint_control(
+    sim: SimulationManager,
+    assets: list[RigidObject | Articulation],
+    args: argparse.Namespace,
+) -> ArticulationPreviewController | None:
+    """Register articulation joint controls with the active Viser runtime."""
+    if not getattr(args, "viser", False) or not getattr(
+        args,
+        "joint_control",
+        True,
+    ):
+        return None
+
+    from embodichain.lab.scripts.preview_joint_control import (
+        ArticulationPreviewController,
+    )
+    from embodichain.lab.sim.objects import Articulation
+
+    articulations = [asset for asset in assets if isinstance(asset, Articulation)]
+    if not articulations:
+        return None
+    runtime = sim.visualization_runtime
+    if runtime is None:
+        log_warning("Viser is enabled but its visualization runtime is unavailable.")
+        return None
+
+    controller = ArticulationPreviewController(articulations, runtime)
+    if not controller.has_controls:
+        log_warning("No supported independent articulation joints were found.")
+        return None
+    controller.update()
+    runtime.set_joint_control_provider(controller)
+    log_info(
+        "Viser articulation joint controls enabled.",
+        color="green",
+    )
+    return controller
+
+
+def _step_preview_simulation(
+    sim: SimulationManager,
+    joint_controller: ArticulationPreviewController | None,
+    *,
+    step: int = 1,
+) -> None:
+    """Apply pending preview controls before every physics step."""
+    for _ in range(step):
+        if joint_controller is not None:
+            joint_controller.update()
+        sim.update(step=1)
+
+
+def _run_preview_mode(
+    sim: SimulationManager,
+    assets: list[RigidObject | Articulation],
+    args: argparse.Namespace,
+    joint_controller: ArticulationPreviewController | None = None,
+) -> None:
+    """Run the interactive REPL or keep the selected visualizer alive.
+
+    Args:
+        sim: Active simulation manager.
+        assets: Loaded assets exposed to the interactive REPL.
+        args: Parsed CLI arguments.
+        joint_controller: Optional Viser articulation preview controller.
+    """
+    if args.preview:
+        preview(sim, assets, joint_controller)
+        return
+
+    viser_enabled = bool(getattr(args, "viser", False))
+    if args.headless and not viser_enabled:
+        return
+
+    target = "Viser browser preview" if viser_enabled else "Simulation window"
+    log_info(f"{target} open. Press Ctrl+C to exit.", color="green")
+    try:
+        while True:
+            _step_preview_simulation(sim, joint_controller)
+    except KeyboardInterrupt:
+        pass
 
 
 def main(args: argparse.Namespace) -> None:
@@ -224,29 +337,19 @@ def main(args: argparse.Namespace) -> None:
 
         assets = load_assets(sim, args)
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
-
-        if args.preview:
-            preview(sim, assets)
-        elif not args.headless:
-            # Keep window open when not headless and not in preview mode
-            log_info("Window open. Press Ctrl+C to exit.", color="green")
-            try:
-                while True:
-                    sim.update(step=1)
-            except KeyboardInterrupt:
-                pass
+        joint_controller = _setup_viser_joint_control(sim, assets, args)
+        _publish_loaded_assets(sim, args)
+        _run_preview_mode(sim, assets, args, joint_controller)
     finally:
         log_info("Destroying simulation ...", color="green")
         sim.destroy()
 
 
-def cli():
-    """Command-line interface for asset preview.
-
-    Parses CLI arguments and launches the preview workflow.
-    """
+def _create_parser() -> argparse.ArgumentParser:
+    """Create the complete asset-preview argument parser."""
     parser = argparse.ArgumentParser(
-        description="Preview a USD or mesh asset in the EmbodiChain simulation."
+        prog="embodichain preview-asset",
+        description="Preview a USD or mesh asset in the EmbodiChain simulation.",
     )
 
     parser.add_argument(
@@ -261,7 +364,7 @@ def cli():
         type=str,
         choices=["rigid", "articulation"],
         default="rigid",
-        help="Asset type. Auto-detected for USD files if not specified (default: rigid).",
+        help="Asset type for non-URDF files (default: rigid).",
     )
     parser.add_argument(
         "--uid",
@@ -298,7 +401,7 @@ def cli():
         "--body_type",
         type=str,
         choices=["dynamic", "kinematic", "static"],
-        default="dynamic",
+        default="kinematic",
         help="Body type for rigid objects (default: kinematic).",
     )
     parser.add_argument(
@@ -309,9 +412,9 @@ def cli():
     )
     parser.add_argument(
         "--fix_base",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Fix the base of articulations (default: True).",
+        help="Fix or unfix the base of articulations (default: fixed).",
     )
     parser.add_argument(
         "--sim_device",
@@ -347,11 +450,36 @@ def cli():
         default=False,
         help="Enter interactive embed mode after loading.",
     )
+    parser.add_argument(
+        "--joint-control",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Expose supported articulation joints in Viser (default: enabled; "
+            "use --no-joint-control to disable)."
+        ),
+    )
 
-    args = parser.parse_args()
+    from embodichain.lab.visualization import add_viser_args_to_parser
+
+    add_viser_args_to_parser(parser)
+    return parser
+
+
+def cli(argv: Sequence[str] | None = None) -> None:
+    """Command-line interface for asset preview.
+
+    Args:
+        argv: Arguments excluding the command name. Uses ``sys.argv`` when
+            omitted.
+    """
+    args = _create_parser().parse_args(argv)
 
     main(args)
 
 
 if __name__ == "__main__":
     cli()
+
+
+__all__ = ["build_sim_cfg", "cli", "load_assets", "main", "preview"]

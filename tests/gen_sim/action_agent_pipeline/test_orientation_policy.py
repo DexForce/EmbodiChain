@@ -192,9 +192,11 @@ def test_generation_and_runtime_use_the_same_canonical_policy(
         lambda _state, _device: tensor_vertices,
     )
     state = SimpleNamespace(
-        held_object=SimpleNamespace(
-            semantics=SimpleNamespace(label="generic_block"),
-        )
+        held_objects={
+            "arm": SimpleNamespace(
+                semantics=SimpleNamespace(label="generic_block"),
+            )
+        }
     )
     env = SimpleNamespace(robot=SimpleNamespace(device=torch.device("cpu")))
     current_pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)

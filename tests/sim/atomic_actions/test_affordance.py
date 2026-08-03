@@ -24,6 +24,7 @@ from unittest.mock import Mock
 from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
     AntipodalAffordance,
+    AssembleAffordance,
     InteractionPoints,
 )
 
@@ -92,7 +93,9 @@ class TestAntipodalAffordance:
             approach_direction=torch.tensor([0, 0, -1], dtype=torch.int64),
         )
 
-        _, approach_direction = generator.get_valid_grasp_poses.call_args.args
+        approach_direction = generator.get_valid_grasp_poses.call_args.kwargs[
+            "approach_direction"
+        ]
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
 
@@ -102,8 +105,11 @@ class TestAntipodalAffordance:
         generator.device = torch.device("cpu")
         grasp_pose = torch.eye(4).unsqueeze(0)
 
-        def get_valid_grasp_poses(object_pose, approach_direction, *, pose_cost_fn):
+        def get_valid_grasp_poses(
+            object_pose, approach_direction, *, object_part, pose_cost_fn
+        ):
             del approach_direction
+            assert object_part == "center"
             costs = pose_cost_fn(grasp_pose, torch.tensor([0.25]))
             return True, grasp_pose, torch.tensor([0.05]), costs
 
@@ -171,3 +177,51 @@ class TestInteractionPoints:
     def test_approach_direction_default_when_no_normals(self):
         ip = InteractionPoints(points=torch.zeros(1, 3))
         assert torch.equal(ip.get_approach_direction(0), torch.tensor([0.0, 0, 1.0]))
+
+
+class TestAssembleAffordance:
+    def _rel_pose(self) -> torch.Tensor:
+        pose = torch.eye(4)
+        pose[:3, :3] = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+        )
+        pose[2, 3] = 0.1
+        return pose
+
+    def test_default_fields(self):
+        aff = AssembleAffordance()
+        assert aff.base_object_label == ""
+        assert aff.assemble_object_label == ""
+        assert aff.base_object_entity is None
+        assert aff.assemble_object_entity is None
+        assert torch.equal(aff.assemble_to_base_pose, torch.eye(4))
+
+    def test_get_assemble_object_pose_single_base_pose(self):
+        aff = AssembleAffordance(assemble_to_base_pose=self._rel_pose())
+        base_pose = torch.eye(4)
+        base_pose[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+        result = aff.get_assemble_object_pose(base_pose)
+        assert result.shape == (1, 4, 4)
+        assert torch.allclose(result[0], base_pose @ self._rel_pose())
+
+    def test_get_assemble_object_pose_broadcasts_across_envs(self):
+        n_envs = 3
+        aff = AssembleAffordance(assemble_to_base_pose=self._rel_pose())
+        base_pose = torch.eye(4).unsqueeze(0).repeat(n_envs, 1, 1)
+        base_pose[:, 0, 3] = torch.arange(n_envs, dtype=torch.float32)
+        result = aff.get_assemble_object_pose(base_pose)
+        assert result.shape == (n_envs, 4, 4)
+        expected = torch.bmm(
+            base_pose, self._rel_pose().unsqueeze(0).repeat(n_envs, 1, 1)
+        )
+        assert torch.allclose(result, expected)
+
+    def test_get_assemble_object_pose_broadcasts_batched_relative_pose(self):
+        n_envs = 2
+        rel = self._rel_pose().unsqueeze(0).repeat(n_envs, 1, 1)
+        aff = AssembleAffordance(assemble_to_base_pose=rel)
+        base_pose = torch.eye(4).unsqueeze(0).repeat(n_envs, 1, 1)
+        base_pose[:, 2, 3] = 0.5
+        result = aff.get_assemble_object_pose(base_pose)
+        assert result.shape == (n_envs, 4, 4)
+        assert torch.allclose(result, torch.bmm(base_pose, rel))

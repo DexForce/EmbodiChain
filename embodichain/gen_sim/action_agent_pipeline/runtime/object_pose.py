@@ -60,6 +60,9 @@ from embodichain.gen_sim.action_agent_pipeline.runtime.pose_utils import (
     _normalize_vector,
     _object_world_vertices,
 )
+from embodichain.gen_sim.action_agent_pipeline.runtime.world_state import (
+    get_arm_local_held_object,
+)
 from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
     ObjectSemantics,
@@ -123,15 +126,15 @@ def _resolve_coordinated_object_pose_target(
         current_object_pose,
     )
     orientation_state = state or WorldState(last_qpos=env.robot.get_qpos().clone())
-    if orientation_state.held_object is None:
-        orientation_state = WorldState(
-            last_qpos=orientation_state.last_qpos,
-            held_object=_semantics_as_held_object_state(
-                semantics,
-                current_object_pose,
-                env.robot.device,
-            ),
-            coordinated_held_object=orientation_state.coordinated_held_object,
+    if get_arm_local_held_object(orientation_state) is None:
+        orientation_state = orientation_state.with_updates(
+            held_objects={
+                "orientation": _semantics_as_held_object_state(
+                    semantics,
+                    current_object_pose,
+                    env.robot.device,
+                )
+            },
         )
     target_pose[..., :3, :3] = _resolve_object_orientation(
         env,
@@ -288,7 +291,7 @@ def _resolve_held_object_pose_target(
 
 
 def _held_object_current_pose(state: WorldState, device) -> torch.Tensor:
-    held = state.held_object
+    held = get_arm_local_held_object(state)
     if held is None:
         raise ValueError("Held object state is required.")
     entity = held.semantics.entity
@@ -307,7 +310,7 @@ def _resolve_object_orientation(
     orientation_goal = target_pose_spec.get("orientation_goal", "preserve")
     current_rotation = current_object_pose[..., :3, :3].clone()
     if orientation_goal == "preserve":
-        held = state.held_object
+        held = get_arm_local_held_object(state)
         if held is None:
             return current_rotation
         pickup_object_pose = torch.matmul(
@@ -425,7 +428,7 @@ def _target_local_zmin_after_rotation(
 
 
 def _held_object_mesh_vertices(state: WorldState, device) -> torch.Tensor:
-    held = state.held_object
+    held = get_arm_local_held_object(state)
     if held is None:
         raise ValueError("Held object state is required.")
     vertices = held.semantics.geometry.get("mesh_vertices")
@@ -438,7 +441,7 @@ def _held_object_mesh_vertices(state: WorldState, device) -> torch.Tensor:
 
 
 def _held_object_label(state: WorldState) -> str:
-    held = state.held_object
+    held = get_arm_local_held_object(state)
     if held is None:
         return ""
     return str(getattr(held.semantics, "label", ""))

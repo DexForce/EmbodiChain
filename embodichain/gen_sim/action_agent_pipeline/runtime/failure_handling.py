@@ -124,11 +124,7 @@ def _hold_failed_world_state_qpos(
         device=last_qpos.device,
     )
     last_qpos[failed_on_device] = current_qpos_t[failed_on_device]
-    return WorldState(
-        last_qpos=last_qpos,
-        held_object=state.held_object,
-        coordinated_held_object=state.coordinated_held_object,
-    )
+    return state.with_updates(last_qpos=last_qpos)
 
 
 def _failed_parallel_hold_result(

@@ -30,9 +30,15 @@ from dexsim.types import (
     ArticulationGPUAPIWriteType,
     ArticulationGPUAPIReadType,
 )
-from dexsim.engine import CudaArray, PhysicsScene
+from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
 
-from embodichain.lab.sim import VisualMaterialInst, VisualMaterial
+from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
+from embodichain.lab.sim.material import (
+    _capture_render_materials,
+    _restore_render_materials,
+    _set_render_material,
+    _wrap_first_render_material,
+)
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
@@ -723,6 +729,8 @@ class Articulation(BatchEntity):
             self._world.update(0.001)
 
         super().__init__(cfg, entities, device)
+
+        self._initialize_existing_visual_material()
 
         # set default collision filter
         self._set_default_collision_filter()
@@ -1895,6 +1903,9 @@ class Articulation(BatchEntity):
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
         self.cfg: ArticulationCfg
+
+        self.restore_visual_material(env_ids=local_env_ids)
+
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
         )
@@ -2227,6 +2238,160 @@ class Articulation(BatchEntity):
                 }
                 result.append(mat_dict)
         return result
+
+    def _initialize_existing_visual_material(self) -> None:
+        """Wrap asset-parsed materials during articulation construction.
+
+        The public material mapping stores one representative material per link.
+        For links with multiple mesh segments, the first segment with a valid
+        material is registered. Segment-specific materials remain available
+        through :meth:`get_existing_visual_material`.
+        """
+        self._original_visual_material = [{} for _ in self._entities]
+        self._original_visual_material_inst = [{} for _ in self._entities]
+        for env_idx, entity in enumerate(self._entities):
+            for link_name in self.link_names:
+                render_body = entity.get_render_body(link_name)
+                if render_body is None:
+                    continue
+                original_materials = _capture_render_materials(render_body)
+                self._original_visual_material[env_idx][link_name] = original_materials
+                wrapped = _wrap_first_render_material(original_materials)
+                if wrapped is not None:
+                    self._visual_material[env_idx][link_name] = wrapped
+                    self._original_visual_material_inst[env_idx][link_name] = wrapped
+
+    def restore_visual_material(
+        self,
+        env_ids: Sequence[int] | None = None,
+        link_names: List[str] | None = None,
+    ) -> None:
+        """Restore visual materials captured when the articulation was created.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are restored.
+            link_names: Links to restore. If None, all links are restored.
+        """
+        if not hasattr(self, "_original_visual_material"):
+            return
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        local_link_names = self.link_names if link_names is None else link_names
+        for env_idx in local_env_ids:
+            for link_name in local_link_names:
+                original_materials = self._original_visual_material[env_idx].get(
+                    link_name
+                )
+                if original_materials is None:
+                    continue
+                render_body = self._entities[env_idx].get_render_body(link_name)
+                if render_body is None:
+                    continue
+                _restore_render_materials(render_body, original_materials)
+                original_inst = self._original_visual_material_inst[env_idx].get(
+                    link_name
+                )
+                if original_inst is None:
+                    self._visual_material[env_idx].pop(link_name, None)
+                else:
+                    self._visual_material[env_idx][link_name] = original_inst
+        self.is_shared_visual_material = False
+
+    def get_existing_visual_material(
+        self,
+        env_ids: Sequence[int] | None = None,
+        link_names: List[str] | None = None,
+        shared: bool = False,
+    ) -> List[Dict[str, List[ReuseSegmentState]]]:
+        """Build reuse state from materials dexsim parsed onto each link's render body.
+
+        Each segment keeps its original material for restoration. Segments on the
+        same link share one working material so randomized property updates happen
+        once per link instead of once per mesh segment.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are used.
+            link_names: Links to include. If None, all links are used.
+            shared: If True, build state for the first env only.
+
+        Returns:
+            Per-env dict mapping link name to per-segment :obj:`ReuseSegmentState`.
+
+        Raises:
+            ValueError: If a link/segment has no material or no retrievable template.
+        """
+        if shared:
+            local_env_ids = [self._all_indices[0]]
+        else:
+            local_env_ids = self._all_indices if env_ids is None else list(env_ids)
+        link_names = self.link_names if link_names is None else list(link_names)
+
+        if not hasattr(self, "_original_visual_material"):
+            self._original_visual_material = [{} for _ in self._entities]
+        for env_idx in local_env_ids:
+            for link_name in link_names:
+                if link_name in self._original_visual_material[env_idx]:
+                    continue
+                render_body = self._entities[env_idx].get_render_body(link_name)
+                if render_body is not None:
+                    self._original_visual_material[env_idx][link_name] = (
+                        _capture_render_materials(render_body)
+                    )
+
+        per_env: List[Dict[str, List[ReuseSegmentState]]] = []
+        for env_idx in local_env_ids:
+            link_map: Dict[str, List[ReuseSegmentState]] = {}
+            for link_name in link_names:
+                if self._entities[env_idx].get_render_body(link_name) is None:
+                    raise ValueError(
+                        f"Articulation '{self.uid}' link '{link_name}' has no render body."
+                    )
+                segments: List[ReuseSegmentState] = []
+                working_inst = None
+                for mesh_id, original_inst in enumerate(
+                    self._original_visual_material[env_idx][link_name]
+                ):
+                    if original_inst is None:
+                        raise ValueError(
+                            f"Articulation '{self.uid}' link '{link_name}' segment {mesh_id} has no material."
+                        )
+                    template = original_inst.get_template()
+                    if template is None:
+                        raise ValueError(
+                            f"Articulation '{self.uid}' link '{link_name}' material has no template."
+                        )
+                    if working_inst is None:
+                        working_name = f"{self.uid}_reuse_{env_idx}_{link_name}"
+                        template.create_inst(working_name)
+                        working_inst = VisualMaterialInst(working_name, template)
+                    segments.append(
+                        ReuseSegmentState(
+                            mesh_id=mesh_id,
+                            original_inst=original_inst,
+                            working_inst=working_inst,
+                        )
+                    )
+                link_map[link_name] = segments
+            per_env.append(link_map)
+        return per_env
+
+    def apply_render_material_inst(
+        self,
+        env_idx: int,
+        mat_inst: MaterialInst,
+        link_name: str,
+        mesh_id: int = 0,
+    ) -> None:
+        """Swap a dexsim MaterialInst onto a link's render-body segment for the given env.
+
+        Args:
+            env_idx: Environment index.
+            mat_inst: dexsim ``MaterialInst`` to attach.
+            link_name: Link whose render body receives the material.
+            mesh_id: Render-body segment index.
+        """
+        _set_render_material(
+            self._entities[env_idx].get_render_body(link_name), mesh_id, mat_inst
+        )
 
     def set_physical_visible(
         self,

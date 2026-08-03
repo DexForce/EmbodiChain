@@ -444,11 +444,13 @@ def _held_state(env: _FakeEnv, entity: _FakeEntity) -> WorldState:
     object_pose = entity.get_local_pose(to_matrix=True)
     return WorldState(
         last_qpos=env.robot.get_qpos(),
-        held_object=HeldObjectState(
-            semantics=semantics,
-            object_to_eef=torch.bmm(torch.linalg.inv(object_pose), left_eef),
-            grasp_xpos=left_eef,
-        ),
+        held_objects={
+            "physical_left_arm": HeldObjectState(
+                semantics=semantics,
+                object_to_eef=torch.bmm(torch.linalg.inv(object_pose), left_eef),
+                grasp_xpos=left_eef,
+            )
+        },
     )
 
 
@@ -574,7 +576,7 @@ def test_physical_pickup_rebases_a_compliant_grasp_from_live_pose() -> None:
     left_eef, _ = env.get_current_xpos_agent()
     rebased_eef = torch.bmm(
         entity.get_local_pose(to_matrix=True),
-        state.held_object.object_to_eef,
+        state.get_held_object("physical_left_arm").object_to_eef,
     )
     assert torch.allclose(rebased_eef, left_eef)
 
@@ -718,7 +720,9 @@ def test_place_uses_preceding_or_live_eef_pose_not_original_grasp() -> None:
         )
     )
     state = _held_state(env, entities["can"])
-    state.held_object.grasp_xpos = _pose(0.0, -0.3, 0.75)
+    held_object = state.get_held_object("physical_left_arm")
+    assert held_object is not None
+    held_object.grasp_xpos = _pose(0.0, -0.3, 0.75)
     edge = next(
         edge
         for edge in program.edges
@@ -727,7 +731,7 @@ def test_place_uses_preceding_or_live_eef_pose_not_original_grasp() -> None:
     grounder = ActionGrounder(
         program,
         env,
-        lambda uid: state.held_object.semantics,
+        lambda uid: held_object.semantics,
     )
     reference = _pose(0.0, 0.4, 0.85)
 
@@ -747,7 +751,7 @@ def test_place_uses_preceding_or_live_eef_pose_not_original_grasp() -> None:
 
     assert torch.equal(planned.target.xpos, reference)
     assert torch.equal(live.target.xpos, env.get_current_xpos_agent()[0])
-    assert not torch.equal(live.target.xpos, state.held_object.grasp_xpos)
+    assert not torch.equal(live.target.xpos, held_object.grasp_xpos)
 
 
 def test_coordinated_step_rejects_an_arm_reserved_by_terminal_hold() -> None:

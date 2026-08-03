@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import torch
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from embodichain.toolkits.graspkit.pg_grasp import (
     GraspGenerator,
@@ -29,6 +29,9 @@ from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.common import BatchEntity
 
 
 @dataclass
@@ -111,6 +114,7 @@ class AntipodalAffordance(Affordance):
         approach_direction: torch.Tensor = torch.tensor(
             [0, 0, -1], dtype=torch.float32
         ),
+        object_part: str = "center",
         grasp_cost_fn: (
             Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
@@ -128,8 +132,9 @@ class AntipodalAffordance(Affordance):
                     costs,
                 )
             is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
-                obj_pose,
-                approach_direction,
+                object_pose=obj_pose,
+                approach_direction=approach_direction,
+                object_part=object_part,
                 pose_cost_fn=pose_cost_fn,
             )
             if grasp_poses.shape == (4, 4):
@@ -147,6 +152,29 @@ class AntipodalAffordance(Affordance):
                     device=grasp_poses.device,
                 )
             results.append((grasp_poses, costs))
+        return results
+
+    def get_dual_arm_valid_grasp_poses(
+        self,
+        obj_poses: torch.Tensor,
+        left_to_right_arm_direction: torch.Tensor,
+        approach_direction: torch.Tensor = torch.tensor(
+            [0, 0, -1], dtype=torch.float32
+        ),
+        middle_empty_ratio: float = 0.4,
+    ) -> list[dict | None]:
+        if self._generator is None:
+            self._init_generator()
+        approach_direction = self._resolve_approach_direction(approach_direction)
+        results = []
+        for i, obj_pose in enumerate(obj_poses):
+            result = self._generator.get_dual_arm_valid_grasp_poses(
+                object_pose=obj_pose,
+                approach_direction=approach_direction,
+                left_to_right_arm_direction=left_to_right_arm_direction,
+                middle_empty_ratio=middle_empty_ratio,
+            )
+            results.append(result)
         return results
 
     def get_best_grasp_poses(
@@ -220,4 +248,62 @@ class InteractionPoints(Affordance):
         )
 
 
-__all__ = ["Affordance", "AntipodalAffordance", "InteractionPoints"]
+@dataclass
+class AssembleAffordance(Affordance):
+    """Affordance describing how an assemble object fits onto a base object.
+
+    The base object anchors the assembly: its world pose is read at planning
+    time from :attr:`base_object_entity` so the target tracks a moved base. The
+    assemble object is the part that is picked up and placed; its target pose is
+    ``base_pose @ assemble_to_base_pose``.
+    """
+
+    base_object_label: str = ""
+    """Label of the base object the assemble object is placed onto."""
+
+    base_object_entity: BatchEntity | None = None
+    """Simulation entity for the base object; its pose anchors the assembly."""
+
+    assemble_object_label: str = ""
+    """Label of the assemble object that is picked up and placed."""
+
+    assemble_object_entity: BatchEntity | None = None
+    """Optional simulation entity for the assemble object (reference/logging)."""
+
+    assemble_to_base_pose: torch.Tensor = field(
+        default_factory=lambda: torch.eye(4, dtype=torch.float32)
+    )
+    """Pose of the assemble object relative to the base object frame, shape
+    ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+
+    def get_assemble_object_pose(self, base_pose: torch.Tensor) -> torch.Tensor:
+        """Return the assemble-object target pose for a given base-object pose.
+
+        The assemble object is placed at ``base_pose @ assemble_to_base_pose``.
+
+        Args:
+            base_pose: Base-object pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)``.
+
+        Returns:
+            Assemble-object target pose with shape ``(n_envs, 4, 4)``.
+        """
+        base_pose = base_pose.to(dtype=torch.float32)
+        if base_pose.dim() == 2:
+            base_pose = base_pose.unsqueeze(0)
+        n_envs = base_pose.shape[0]
+        rel = self.assemble_to_base_pose.to(
+            device=base_pose.device, dtype=torch.float32
+        )
+        if rel.dim() == 2:
+            rel = rel.unsqueeze(0).repeat(n_envs, 1, 1)
+        elif rel.shape[0] == 1:
+            rel = rel.repeat(n_envs, 1, 1)
+        return torch.bmm(base_pose, rel)
+
+
+__all__ = [
+    "Affordance",
+    "AntipodalAffordance",
+    "InteractionPoints",
+    "AssembleAffordance",
+]

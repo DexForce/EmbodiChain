@@ -18,7 +18,7 @@
 
 Measures MoveHeldObject-only planning latency and memory usage once a held
 object state has been produced by PickUp.
-Run: python -m scripts.benchmark.atomic_action.move_held_object_benchmark
+Run: embodichain benchmark atomic-action --action move_held_object
 """
 
 from __future__ import annotations
@@ -236,7 +236,7 @@ def _prepare_held_state(
             ("pick_up", GraspTarget(semantics=semantics)),
         ]
     )
-    if not is_success or state.held_object is None:
+    if not is_success or state.get_held_object("arm") is None:
         raise RuntimeError(
             "Failed to prepare held-object state for MoveHeldObject benchmark."
         )
@@ -380,7 +380,7 @@ def _run_case(
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
-        still_held = bool(is_success and final_state.held_object is not None)
+        still_held = bool(is_success and final_state.get_held_object("arm") is not None)
         physical_pick_success = bool(
             object_lift_delta_m is not None
             and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M

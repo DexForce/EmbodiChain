@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import dexsim
 import numpy as np
@@ -23,10 +25,18 @@ from dataclasses import dataclass
 from typing import List, Sequence, Union
 
 from dexsim.models import MeshObject
-from dexsim.engine import PhysicsScene, ClothBody
+from dexsim.engine import ClothBody, PhysicsScene
 from dexsim.types import ClothBodyGPUAPIReadWriteType
+from scipy.spatial import cKDTree
 from embodichain.lab.sim.common import (
     BatchEntity,
+)
+from embodichain.lab.sim.material import (
+    VisualMaterial,
+    VisualMaterialInst,
+    _capture_render_materials,
+    _restore_render_materials,
+    _wrap_first_render_material,
 )
 from embodichain.utils.math import (
     matrix_from_euler,
@@ -36,6 +46,8 @@ from embodichain.lab.sim.cfg import (
     ClothObjectCfg,
 )
 from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+__all__ = ["ClothBodyData", "ClothObject", "ClothObjectCfg"]
 
 
 @dataclass
@@ -124,9 +136,135 @@ class ClothObject(BatchEntity):
         self._data = ClothBodyData(entities=entities, ps=self._ps, device=device)
 
         self._world.update(0.001)
+        self._surface_triangles = self._build_surface_triangles(
+            entities[0],
+            self._data.rest_vertices[0].detach().cpu().numpy(),
+        )
+
+        self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
+        self.is_shared_visual_material = False
 
         super().__init__(cfg=cfg, entities=entities, device=device)
+
+        self._initialize_existing_visual_material()
+
         self._set_default_collision_filter()
+
+    @staticmethod
+    def _build_surface_triangles(
+        entity: MeshObject,
+        rest_vertices: np.ndarray,
+    ) -> np.ndarray:
+        """Map render triangles onto DexSim's welded cloth vertex buffer."""
+        render_body = entity.get_render_body()
+        render_vertices: list[np.ndarray] = []
+        render_triangles: list[np.ndarray] = []
+        vertex_offset = 0
+        for mesh_id in range(render_body.get_mesh_count()):
+            vertices = np.asarray(
+                render_body.get_vertices(mesh_id),
+                dtype=np.float32,
+            )
+            triangles = np.asarray(
+                render_body.get_triangles(mesh_id),
+                dtype=np.int64,
+            )
+            render_vertices.append(vertices)
+            render_triangles.append(triangles + vertex_offset)
+            vertex_offset += len(vertices)
+
+        vertices = np.concatenate(render_vertices, axis=0)
+        triangles = np.concatenate(render_triangles, axis=0)
+        distances, cloth_vertex_ids = cKDTree(rest_vertices).query(vertices)
+        scale = max(float(np.ptp(rest_vertices, axis=0).max()), 1.0)
+        if float(distances.max(initial=0.0)) > scale * 1.0e-5:
+            raise RuntimeError(
+                "Could not map cloth render vertices onto the physical vertex buffer."
+            )
+        return np.asarray(cloth_vertex_ids[triangles], dtype=np.int32)
+
+    def _initialize_existing_visual_material(self) -> None:
+        """Wrap asset-parsed materials during cloth-object construction.
+
+        For a multi-segment render body, the first segment with a valid
+        material is registered as the environment's representative material.
+        """
+        self._original_visual_material = [[] for _ in self._entities]
+        self._original_visual_material_inst = [None] * len(self._entities)
+        for env_idx, entity in enumerate(self._entities):
+            render_body = entity.get_render_body()
+            if render_body is None:
+                continue
+            original_materials = _capture_render_materials(render_body)
+            self._original_visual_material[env_idx] = original_materials
+            wrapped = _wrap_first_render_material(original_materials)
+            if wrapped is not None:
+                self._visual_material[env_idx] = wrapped
+                self._original_visual_material_inst[env_idx] = wrapped
+
+    def set_visual_material(
+        self,
+        mat: VisualMaterial,
+        env_ids: Sequence[int] | None = None,
+        shared: bool = False,
+    ) -> None:
+        """Set visual material for the cloth object.
+
+        Args:
+            mat: The material template to assign.
+            env_ids: Environment indices. If None, all instances are used.
+            shared: Whether selected environments share one material instance.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        if shared:
+            if len(local_env_ids) != self.num_instances:
+                logger.log_error("Cannot share material instance for partial env_ids.")
+            mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}")
+            for env_idx in local_env_ids:
+                self._entities[env_idx].set_material(mat_inst.mat)
+                self._visual_material[env_idx] = mat_inst
+            self.is_shared_visual_material = True
+        else:
+            for env_idx in local_env_ids:
+                mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
+                self._entities[env_idx].set_material(mat_inst.mat)
+                self._visual_material[env_idx] = mat_inst
+            self.is_shared_visual_material = False
+
+    def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore visual materials captured when the cloth object was created.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are restored.
+        """
+        if not hasattr(self, "_original_visual_material"):
+            return
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            render_body = self._entities[env_idx].get_render_body()
+            if render_body is None:
+                continue
+            _restore_render_materials(
+                render_body, self._original_visual_material[env_idx]
+            )
+            self._visual_material[env_idx] = self._original_visual_material_inst[
+                env_idx
+            ]
+        self.is_shared_visual_material = False
+
+    def get_visual_material_inst(
+        self, env_ids: Sequence[int] | None = None
+    ) -> List[VisualMaterialInst | None]:
+        """Get the material instance registered for each selected environment.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are returned.
+
+        Returns:
+            The existing material wrappers, or None where an asset has no material.
+        """
+        ids = env_ids if env_ids is not None else range(self.num_instances)
+        return [self._visual_material[i] for i in ids]
 
     def _set_default_collision_filter(self) -> None:
         collision_filter_data = torch.zeros(
@@ -196,6 +334,23 @@ class ClothObject(BatchEntity):
         """
         return self._data.vertex_velocity
 
+    def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+        """Get surface triangle indices for selected cloth instances.
+
+        Args:
+            env_ids: Environment indices. If ``None``, returns all instances.
+
+        Returns:
+            Triangle indices with shape ``(N, num_triangles, 3)``.
+        """
+        ids = self._all_indices if env_ids is None else env_ids
+        triangles = torch.as_tensor(
+            self._surface_triangles,
+            dtype=torch.int32,
+            device=self.device,
+        )
+        return triangles.unsqueeze(0).expand(len(ids), -1, -1).clone()
+
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None
     ) -> None:
@@ -263,6 +418,8 @@ class ClothObject(BatchEntity):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
         num_instances = len(local_env_ids)
+
+        self.restore_visual_material(env_ids=local_env_ids)
 
         # TODO: set attr for cloth body after loading in physics scene.
 

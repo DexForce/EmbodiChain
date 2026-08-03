@@ -190,7 +190,7 @@ def _coordinated_transport_failure_mask(
 
 def _has_coordinated_held_object(world_states: Mapping[str, WorldState]) -> bool:
     return any(
-        state.coordinated_held_object is not None
+        bool(state.coordinated_held_objects)
         for state in world_states.values()
         if isinstance(state, WorldState)
     )

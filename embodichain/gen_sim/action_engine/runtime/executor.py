@@ -44,6 +44,7 @@ from .models import (
 )
 from .predicates import evaluate_predicate
 from .recording import RuntimeRecorder
+from .robot_parts import arm_control_part
 
 __all__ = ["ProgramExecutor"]
 
@@ -754,15 +755,18 @@ class ProgramExecutor:
 
     def _eef_target(self, outcome: ActionOutcome) -> torch.Tensor | None:
         state = outcome.next_state
+        held_object = state.get_held_object(
+            arm_control_part(self.env, outcome.grounded.arm)
+        )
         object_target = outcome.grounded.target_object_pose
-        if object_target is not None and state.held_object is not None:
-            object_to_eef = state.held_object.object_to_eef.to(
+        if object_target is not None and held_object is not None:
+            object_to_eef = held_object.object_to_eef.to(
                 device=object_target.device,
                 dtype=object_target.dtype,
             )
             return torch.bmm(object_target, object_to_eef)
-        if state.held_object is not None:
-            return state.held_object.grasp_xpos
+        if held_object is not None:
+            return held_object.grasp_xpos
         target = outcome.grounded.target
         return getattr(target, "xpos", None)
 
@@ -772,11 +776,7 @@ class ProgramExecutor:
         live_qpos = self.env.robot.get_qpos().clone()
         if cached is None:
             return WorldState(last_qpos=live_qpos)
-        return WorldState(
-            last_qpos=live_qpos,
-            held_object=cached.held_object,
-            coordinated_held_object=cached.coordinated_held_object,
-        )
+        return cached.with_updates(last_qpos=live_qpos)
 
     def _resource_conflicts(
         self,
@@ -817,7 +817,8 @@ class ProgramExecutor:
             if arm not in owners:
                 self._object_states.pop((step.object_uid, arm), None)
             return
-        if state.held_object is None or not bool(successful.any()):
+        held_object = state.get_held_object(arm_control_part(self.env, arm))
+        if held_object is None or not bool(successful.any()):
             return
         self._object_states[(step.object_uid, arm)] = state
         if action_class == "PickUp":
@@ -1009,7 +1010,7 @@ class ProgramExecutor:
             held_owners={**self._object_owners, uid: owners},
             held_states=states,
         )
-        held = state.held_object
+        held = state.get_held_object(arm_control_part(self.env, arm))
         if held is None:
             return physical
         entity = self.env.sim.get_rigid_object(uid)
@@ -1099,6 +1100,17 @@ class ProgramExecutor:
         if edge.actions[0]["atomic_action_class"] == "CoordinatedPickment":
             self._capture_payloads(step)
         state = self._state_for(step, "coordinated")
+        if edge.actions[0]["atomic_action_class"] == "CoordinatedPlacement":
+            held_objects = dict(state.held_objects)
+            for arm in ("left_arm", "right_arm"):
+                arm_state = self._step_states.get((step.id, arm))
+                if arm_state is None:
+                    continue
+                control_part = arm_control_part(self.env, arm)
+                held_object = arm_state.get_held_object(control_part)
+                if held_object is not None:
+                    held_objects[control_part] = held_object
+            state = state.with_updates(held_objects=held_objects)
         grounded = self.grounder.ground(
             edge.actions[0],
             step,

@@ -479,11 +479,7 @@ def _merge_inactive_world_state_qpos(
             dtype=last_qpos.dtype,
         )
     last_qpos[inactive] = inactive_qpos[inactive]
-    return WorldState(
-        last_qpos=last_qpos,
-        held_object=candidate.held_object,
-        coordinated_held_object=candidate.coordinated_held_object,
-    )
+    return candidate.with_updates(last_qpos=last_qpos)
 
 
 def step_env_with_actions(
@@ -635,11 +631,10 @@ def _released_coordinated_world_state(
     final_action: torch.Tensor,
     world_states: Mapping[str, WorldState],
 ) -> WorldState:
-    held_object = None
+    held_objects = {}
     for state in world_states.values():
-        if isinstance(state, WorldState) and state.held_object is not None:
-            held_object = state.held_object
-            break
+        if isinstance(state, WorldState):
+            held_objects.update(state.held_objects)
     final_qpos = torch.as_tensor(final_action, dtype=torch.float32)
     if final_qpos.dim() == 1:
         final_qpos = final_qpos.unsqueeze(0)
@@ -653,8 +648,7 @@ def _released_coordinated_world_state(
         )
     return WorldState(
         last_qpos=final_qpos.clone(),
-        held_object=held_object,
-        coordinated_held_object=None,
+        held_objects=held_objects,
     )
 
 

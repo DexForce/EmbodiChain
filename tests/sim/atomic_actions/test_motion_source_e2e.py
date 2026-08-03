@@ -24,12 +24,14 @@ import pytest
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions import (
+    AtomicActionEngine,
+    EndEffectorPoseTarget,
+)
 from embodichain.lab.sim.atomic_actions.actions import (
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
-from embodichain.lab.sim.atomic_actions.core import EndEffectorPoseTarget
 
 
 @pytest.mark.requires_sim
@@ -59,7 +61,6 @@ class TestMotionSourceReachEquivalence:
         engine = AtomicActionEngine(mg)
         cfg = MoveEndEffectorCfg(
             motion_source=motion_source,
-            planner_type="toppra" if motion_source == "motion_gen" else None,
             control_part=self.CONTROL_PART,
             sample_interval=self.SAMPLE_INTERVAL,
         )

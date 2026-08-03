@@ -21,10 +21,55 @@ collection logic, policy/model builders, and training entry points.
       train
       utils
 
+   .. rubric:: Top-level APIs
+
+   .. autosummary::
+
+      DifferentiableTrainer
+      DifferentiableTrainerCfg
+      DifferentiableVecEnv
+      LearningVecEnv
+      build_learning_env
+      evaluate_episodes
+      get_trainer_class
+      register_learning_env
+
 Algorithms
 ----------
 
 .. automodule:: embodichain.learning.rl.algo
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Environments
+------------
+
+.. automodule:: embodichain.learning.rl.env
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Evaluation
+----------
+
+.. automodule:: embodichain.learning.rl.evaluation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Routing
+-------
+
+.. automodule:: embodichain.learning.rl.routing
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Differentiable Trainer
+----------------------
+
+.. automodule:: embodichain.learning.rl.differentiable_trainer
    :members:
    :undoc-members:
    :show-inheritance:

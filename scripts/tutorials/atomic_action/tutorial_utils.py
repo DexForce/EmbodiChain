@@ -26,6 +26,7 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     ObjectSemantics,
@@ -42,6 +43,7 @@ from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
 from embodichain.toolkits.graspkit.pg_grasp.gripper_collision_checker import (
     GripperCollisionCfg,
 )
+from embodichain.utils import logger
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -60,8 +62,8 @@ DEFAULT_AXIS_SIZE = 0.003
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
 GRIPPER_TCP_Z = 0.15
-GRIPPER_MAX_OPEN_WIDTH = 0.080
-GRIPPER_FINGER_LENGTH = 0.088
+GRIPPER_MAX_OPEN_WIDTH = 0.100
+GRIPPER_FINGER_LENGTH = 0.12
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
@@ -118,6 +120,7 @@ def create_tutorial_simulation(
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,
+            visualization=visualization_cfg_from_args(args),
         )
     )
     sim.add_light(
@@ -129,6 +132,29 @@ def create_tutorial_simulation(
         )
     )
     return sim
+
+
+def run_tutorial(main: Callable[[], None]) -> None:
+    """Run a tutorial entry point and release its simulation at top level.
+
+    ``SimulationManager.destroy`` defers native cleanup because action and
+    planner locals may still retain wrapped C++ objects. Calling it only after
+    ``main`` has unwound makes the cleanup deterministic and avoids native
+    teardown during Python interpreter finalization.
+
+    Args:
+        main: Zero-argument tutorial entry point.
+    """
+    try:
+        main()
+    finally:
+        if SimulationManager.is_instantiated():
+            sim = SimulationManager.get_instance()
+            if sim.is_window_recording():
+                sim.stop_window_record()
+            sim.wait_window_record_saves()
+            sim.destroy(exit_process=False)
+            SimulationManager.flush_cleanup_queue()
 
 
 def add_ur5_gripper_robot(
@@ -224,7 +250,7 @@ def create_antipodal_semantics(
                 antipodal_sampler_cfg=AntipodalSamplerCfg(
                     n_sample=n_sample,
                     max_length=GRIPPER_MAX_OPEN_WIDTH,
-                    min_length=0.003,
+                    min_length=0.005,
                 ),
                 is_partial_annotate=False,
                 is_filter_ground_collision=False,
@@ -344,6 +370,54 @@ def prepare_tutorial_scene(
     return wait_for_user
 
 
+def publish_tutorial_scene(sim: SimulationManager, args: argparse.Namespace) -> None:
+    """Immediately push the current scene to the Viser browser.
+
+    Tutorials build their scene and then run slow grasp annotation and motion
+    planning before the next :meth:`SimulationManager.update`. Without this call
+    the browser stays empty during that gap. It is a no-op unless ``--viser`` is
+    set, so callers can always invoke it right after assembling the scene.
+
+    Args:
+        sim: Simulation manager whose scene should be published.
+        args: Parsed tutorial arguments.
+    """
+    if getattr(args, "viser", False):
+        sim.capture_visualization_safely(force=True)
+
+
+def serve_tutorial_scene(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+    *,
+    message: str = "Viser browser preview open. Press Ctrl+C to exit.",
+) -> bool:
+    """Keep stepping the simulation so the Viser browser stays live.
+
+    After a tutorial replays its trajectory the process would otherwise exit and
+    tear the browser scene down. When ``--viser`` is set this blocks with a
+    physics-stepping loop until the user interrupts (``Ctrl+C``); otherwise it is
+    a no-op, so callers can always invoke it just before cleanup.
+
+    Args:
+        sim: Simulation manager to keep stepping.
+        args: Parsed tutorial arguments.
+        message: Informational message logged before the keep-alive loop.
+
+    Returns:
+        Whether a keep-alive loop was run.
+    """
+    if not getattr(args, "viser", False):
+        return False
+    logger.log_info(message, color="green")
+    try:
+        while True:
+            sim.update(step=1)
+    except KeyboardInterrupt:
+        pass
+    return True
+
+
 def replay_trajectory(
     sim: SimulationManager,
     robot: Robot,
@@ -418,6 +492,7 @@ def should_open_tutorial_window(args: argparse.Namespace) -> bool:
     """Return whether an interactive viewer window should be opened."""
     return not (
         getattr(args, "headless", False)
+        or getattr(args, "viser", False)
         or getattr(args, "diagnose_plan", False)
         or getattr(args, "headless_play", False)
     )
@@ -428,6 +503,7 @@ def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
     return not (
         getattr(args, "auto_play", False)
         or getattr(args, "headless", False)
+        or getattr(args, "viser", False)
         or getattr(args, "diagnose_plan", False)
         or getattr(args, "headless_play", False)
     )
@@ -652,7 +728,10 @@ __all__ = [
     "make_top_down_eef_pose",
     "get_tutorial_window_size",
     "prepare_tutorial_scene",
+    "publish_tutorial_scene",
     "replay_trajectory",
+    "run_tutorial",
+    "serve_tutorial_scene",
     "should_open_tutorial_window",
     "should_wait_for_tutorial_input",
     "start_auto_play_recording",

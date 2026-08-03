@@ -14,4 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Warp collision queries (convex signed-distance kernels via ``convex_query``)."""
+
 from . import convex_query

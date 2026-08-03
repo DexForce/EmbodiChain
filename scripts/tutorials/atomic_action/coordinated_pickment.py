@@ -42,9 +42,9 @@ from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AtomicActionEngine,
+    CoordinatedPickTarget,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
-    CoordinatedPickmentTarget,
     ObjectSemantics,
 )
 from embodichain.lab.sim.cfg import (
@@ -67,6 +67,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     draw_axis_marker,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
@@ -723,9 +724,9 @@ def run_coordinated_pickment_demo(
         broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
         broadcast_pose_batch(right_grasp_pose, num_envs=n_envs),
     )
-    pickment_target = CoordinatedPickmentTarget(
+    pickment_target = CoordinatedPickTarget(
+        semantics=object_semantics,
         object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
-        object_semantics=object_semantics,
         left_object_to_eef=left_object_to_eef,
         right_object_to_eef=right_object_to_eef,
         object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
@@ -792,4 +793,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)
