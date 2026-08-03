@@ -14,16 +14,30 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Environment framework: ``BaseEnv`` / ``EmbodiedEnv`` class hierarchy, task registration, manager wiring, and the step/reset lifecycle."""
+"""Paths for official task configuration resources."""
 
 from __future__ import annotations
 
-from .base_env import *
-from .embodied_env import *
-from .wrapper import *
+from pathlib import Path
 
-# Official task environments live in the bundled ``embodichain_tasks`` import
-# package (alongside any third-party ``embodichain.tasks`` entry points).
-# They are no longer re-exported here so that importing the core envs package
-# stays warning-free. Direct imports from ``embodichain.lab.gym.envs.tasks``
-# still work via the deprecation shim in ``tasks/__init__.py``.
+__all__ = ["get_config_path"]
+
+_CONFIG_ROOT = Path(__file__).resolve().parent
+
+
+def get_config_path(relative_path: str | Path = ".") -> Path:
+    """Return an installed official-task config path.
+
+    Args:
+        relative_path: Path relative to ``embodichain_tasks/configs``.
+
+    Returns:
+        Resolved filesystem path inside the installed task config package.
+
+    Raises:
+        ValueError: If ``relative_path`` is absolute or escapes the config root.
+    """
+    relative_path = Path(relative_path)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError(f"Config path must stay within the package: {relative_path}")
+    return _CONFIG_ROOT / relative_path
