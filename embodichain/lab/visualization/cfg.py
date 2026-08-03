@@ -68,8 +68,9 @@ class VisualizationCfg:
             rate limiting.
         soft_body_fps: Maximum soft-body and cloth vertex update rate.
         allow_commands: Whether simulation-mutating browser commands are allowed.
-            This enables Viser Gizmo dragging. Keep it disabled for untrusted
-            or publicly reachable browser sessions.
+            This enables Viser Gizmo dragging and registered articulation joint
+            controls. Keep it disabled for untrusted or publicly reachable
+            browser sessions.
         viser_server: Viser HTTP/WebSocket server binding settings.
     """
 

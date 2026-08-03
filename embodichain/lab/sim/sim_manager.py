@@ -573,7 +573,7 @@ class SimulationManager:
             not in {"127.0.0.1", "localhost", "::1"}
         ):
             logger.log_warning(
-                "Viser Gizmo commands are enabled on a non-loopback interface. "
+                "Viser simulation commands are enabled on a non-loopback interface. "
                 "Only expose this endpoint behind a trusted, authenticated boundary."
             )
         runtime = VisualizationRuntime(

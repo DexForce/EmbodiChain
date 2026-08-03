@@ -64,6 +64,9 @@ from embodichain.utils.logger import log_info, log_warning, log_error
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Articulation, RigidObject
     from embodichain.lab.sim.sim_manager import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.scripts.preview_joint_control import (
+        ArticulationPreviewController,
+    )
 
 
 def build_sim_cfg(args: argparse.Namespace) -> SimulationManagerCfg:
@@ -177,6 +180,7 @@ def load_assets(
 def preview(
     sim: SimulationManager,
     assets: list[RigidObject | Articulation],
+    joint_controller: ArticulationPreviewController | None = None,
 ) -> None:
     """Enter interactive preview mode.
 
@@ -189,6 +193,7 @@ def preview(
     Args:
         sim: The simulation manager instance.
         assets: Loaded assets (list of RigidObject/Articulation).
+        joint_controller: Optional Viser articulation preview controller.
     """
     print("Press `p` to enter embed mode to interact with the asset.")
     print("Press `s <N>` to step the simulation N times (default 10).")
@@ -214,7 +219,7 @@ def preview(
             parts = txt.split()
             n = int(parts[1]) if len(parts) > 1 else 10
             log_info(f"Stepping simulation {n} times ...")
-            sim.update(step=n)
+            _step_preview_simulation(sim, joint_controller, step=n)
         else:
             log_warning(f"Unknown command: {txt!r}")
 
@@ -230,10 +235,63 @@ def _publish_loaded_assets(sim: SimulationManager, args: argparse.Namespace) -> 
         sim.capture_visualization_safely(force=True)
 
 
+def _setup_viser_joint_control(
+    sim: SimulationManager,
+    assets: list[RigidObject | Articulation],
+    args: argparse.Namespace,
+) -> ArticulationPreviewController | None:
+    """Register articulation joint controls with the active Viser runtime."""
+    if not getattr(args, "viser", False) or not getattr(
+        args,
+        "joint_control",
+        True,
+    ):
+        return None
+
+    from embodichain.lab.scripts.preview_joint_control import (
+        ArticulationPreviewController,
+    )
+    from embodichain.lab.sim.objects import Articulation
+
+    articulations = [asset for asset in assets if isinstance(asset, Articulation)]
+    if not articulations:
+        return None
+    runtime = sim.visualization_runtime
+    if runtime is None:
+        log_warning("Viser is enabled but its visualization runtime is unavailable.")
+        return None
+
+    controller = ArticulationPreviewController(articulations, runtime)
+    if not controller.has_controls:
+        log_warning("No supported independent articulation joints were found.")
+        return None
+    controller.update()
+    runtime.set_joint_control_provider(controller)
+    log_info(
+        "Viser articulation joint controls enabled.",
+        color="green",
+    )
+    return controller
+
+
+def _step_preview_simulation(
+    sim: SimulationManager,
+    joint_controller: ArticulationPreviewController | None,
+    *,
+    step: int = 1,
+) -> None:
+    """Apply pending preview controls before every physics step."""
+    for _ in range(step):
+        if joint_controller is not None:
+            joint_controller.update()
+        sim.update(step=1)
+
+
 def _run_preview_mode(
     sim: SimulationManager,
     assets: list[RigidObject | Articulation],
     args: argparse.Namespace,
+    joint_controller: ArticulationPreviewController | None = None,
 ) -> None:
     """Run the interactive REPL or keep the selected visualizer alive.
 
@@ -241,9 +299,10 @@ def _run_preview_mode(
         sim: Active simulation manager.
         assets: Loaded assets exposed to the interactive REPL.
         args: Parsed CLI arguments.
+        joint_controller: Optional Viser articulation preview controller.
     """
     if args.preview:
-        preview(sim, assets)
+        preview(sim, assets, joint_controller)
         return
 
     viser_enabled = bool(getattr(args, "viser", False))
@@ -254,7 +313,7 @@ def _run_preview_mode(
     log_info(f"{target} open. Press Ctrl+C to exit.", color="green")
     try:
         while True:
-            sim.update(step=1)
+            _step_preview_simulation(sim, joint_controller)
     except KeyboardInterrupt:
         pass
 
@@ -278,8 +337,9 @@ def main(args: argparse.Namespace) -> None:
 
         assets = load_assets(sim, args)
         log_info(f"Loaded {len(assets)} asset(s) successfully.", color="green")
+        joint_controller = _setup_viser_joint_control(sim, assets, args)
         _publish_loaded_assets(sim, args)
-        _run_preview_mode(sim, assets, args)
+        _run_preview_mode(sim, assets, args, joint_controller)
     finally:
         log_info("Destroying simulation ...", color="green")
         sim.destroy()
@@ -389,6 +449,15 @@ def _create_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Enter interactive embed mode after loading.",
+    )
+    parser.add_argument(
+        "--joint-control",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Expose supported articulation joints in Viser (default: enabled; "
+            "use --no-joint-control to disable)."
+        ),
     )
 
     from embodichain.lab.visualization import add_viser_args_to_parser

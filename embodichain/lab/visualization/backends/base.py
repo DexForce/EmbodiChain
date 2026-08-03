@@ -19,7 +19,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from ..protocol import CameraImageFrame, GizmoCommand, SceneFrame, SceneManifest
+from ..protocol import (
+    CameraImageFrame,
+    GizmoCommand,
+    JointControlCommand,
+    SceneFrame,
+    SceneManifest,
+)
 
 __all__ = ["VisualizationBackend"]
 
@@ -33,6 +39,13 @@ class VisualizationBackend(ABC):
     ) -> None:
         """Set the thread-safe sink used for browser Gizmo commands."""
         self._gizmo_command_sink = sink
+
+    def set_joint_control_command_sink(
+        self,
+        sink: Callable[[JointControlCommand], None] | None,
+    ) -> None:
+        """Set the thread-safe sink used for browser joint commands."""
+        self._joint_control_command_sink = sink
 
     @property
     @abstractmethod

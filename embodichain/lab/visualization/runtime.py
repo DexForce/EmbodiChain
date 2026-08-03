@@ -28,6 +28,8 @@ from .cfg import VisualizationCfg
 from .protocol import (
     CameraImageFrame,
     GizmoCommand,
+    JointControlCommand,
+    JointControlProvider,
     SceneFrame,
     SceneManifest,
     SceneOverlays,
@@ -39,6 +41,7 @@ from .scene_exporter import SceneExporter
 
 __all__ = [
     "GizmoCommandQueue",
+    "JointControlCommandQueue",
     "LatestFrameQueue",
     "RuntimeHealth",
     "RuntimeStats",
@@ -138,6 +141,41 @@ class GizmoCommandQueue:
             self._commands.clear()
 
 
+class JointControlCommandQueue:
+    """Bounded queue that keeps only the newest value for each joint control."""
+
+    def __init__(self, maxsize: int = 256) -> None:
+        if maxsize <= 0:
+            raise ValueError("maxsize must be greater than zero.")
+        self._maxsize = maxsize
+        self._commands: deque[JointControlCommand] = deque()
+        self._lock = threading.Lock()
+
+    def put(self, command: JointControlCommand) -> None:
+        """Enqueue a value without blocking the Viser callback thread."""
+        with self._lock:
+            for index in range(len(self._commands) - 1, -1, -1):
+                if self._commands[index].control_id == command.control_id:
+                    del self._commands[index]
+                    self._commands.append(command)
+                    return
+            if len(self._commands) >= self._maxsize:
+                self._commands.popleft()
+            self._commands.append(command)
+
+    def drain(self) -> tuple[JointControlCommand, ...]:
+        """Return and clear all queued commands in arrival order."""
+        with self._lock:
+            commands = tuple(self._commands)
+            self._commands.clear()
+        return commands
+
+    def clear(self) -> None:
+        """Discard all queued commands."""
+        with self._lock:
+            self._commands.clear()
+
+
 @dataclass(frozen=True)
 class RuntimeStats:
     """Snapshot of scene and camera-image capture/upload telemetry."""
@@ -203,7 +241,11 @@ class VisualizationRuntime:
             )
         self._backend = backend
         self._gizmo_commands = GizmoCommandQueue()
+        self._joint_control_commands = JointControlCommandQueue()
         self._backend.set_gizmo_command_sink(self._enqueue_gizmo_command)
+        self._backend.set_joint_control_command_sink(
+            self._enqueue_joint_control_command
+        )
         self._frames: LatestFrameQueue[SceneFrame] = LatestFrameQueue()
         self._camera_images: LatestFrameQueue[CameraImageFrame] = LatestFrameQueue()
         self._manifests: queue.Queue[SceneManifest] = queue.Queue()
@@ -227,6 +269,28 @@ class VisualizationRuntime:
         if not self.cfg.allow_commands:
             return ()
         return self._gizmo_commands.drain()
+
+    def _enqueue_joint_control_command(self, command: JointControlCommand) -> None:
+        if self.cfg.allow_commands:
+            self._joint_control_commands.put(command)
+
+    def drain_joint_control_commands(self) -> tuple[JointControlCommand, ...]:
+        """Drain browser joint commands for simulation-thread processing."""
+        if not self.cfg.allow_commands:
+            return ()
+        return self._joint_control_commands.drain()
+
+    def set_joint_control_provider(
+        self,
+        provider: JointControlProvider | None,
+    ) -> None:
+        """Install a simulation-thread joint source for future scene captures.
+
+        Registering a provider does not publish a new manifest by itself. The
+        caller must refresh the scene after registration so the backend can
+        build its controls.
+        """
+        self.exporter.set_joint_control_provider(provider)
 
     @property
     def endpoint(self) -> str | None:
@@ -480,6 +544,7 @@ class VisualizationRuntime:
         self._frames.clear()
         self._camera_images.clear()
         self._gizmo_commands.clear()
+        self._joint_control_commands.clear()
         self._raise_worker_error()
 
     def __enter__(self) -> VisualizationRuntime:

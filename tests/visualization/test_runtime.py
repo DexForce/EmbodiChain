@@ -29,6 +29,8 @@ from embodichain.lab.visualization import (
     CaptureResult,
     GizmoCommand,
     GizmoCommandQueue,
+    JointControlCommand,
+    JointControlCommandQueue,
     LatestFrameQueue,
     SceneFrame,
     SceneManifest,
@@ -91,12 +93,39 @@ def test_gizmo_command_queue_coalesces_updates_but_retains_lifecycle() -> None:
     ]
 
 
+def _joint_command(sequence: int, control_id: str) -> JointControlCommand:
+    return JointControlCommand(
+        run_id="run",
+        scene_revision=1,
+        sequence=sequence,
+        client_id="client-a",
+        control_id=control_id,
+        value=float(sequence),
+    )
+
+
+def test_joint_control_queue_keeps_latest_value_per_control() -> None:
+    commands = JointControlCommandQueue(maxsize=2)
+
+    commands.put(_joint_command(1, "joint-a"))
+    commands.put(_joint_command(2, "joint-b"))
+    commands.put(_joint_command(3, "joint-a"))
+
+    drained = commands.drain()
+
+    assert [(command.control_id, command.sequence) for command in drained] == [
+        ("joint-b", 2),
+        ("joint-a", 3),
+    ]
+
+
 @dataclass
 class _Exporter:
     published: threading.Event
     scene_revision: int = 0
     dynamic_capture_flags: list[bool] = field(default_factory=list)
     image_capture_count: int = 0
+    joint_control_provider: object | None = None
 
     @property
     def has_cameras(self) -> bool:
@@ -114,6 +143,9 @@ class _Exporter:
             nodes=(),
             geometries=(),
         )
+
+    def set_joint_control_provider(self, provider: object | None) -> None:
+        self.joint_control_provider = provider
 
     def capture(self, **kwargs: object) -> CaptureResult:
         self.dynamic_capture_flags.append(
@@ -161,6 +193,21 @@ def test_runtime_captures_images_on_every_step_without_fps_limit() -> None:
     runtime.stop()
 
     assert exporter.image_capture_count == 2
+
+
+def test_runtime_forwards_joint_control_provider_to_exporter() -> None:
+    published = threading.Event()
+    exporter = _Exporter(published)
+    runtime = VisualizationRuntime(
+        exporter,
+        VisualizationCfg(backend="viser"),
+        backend=_Backend(published, threading.Event()),
+    )
+    provider = object()
+
+    runtime.set_joint_control_provider(provider)
+
+    assert exporter.joint_control_provider is provider
 
 
 class _Backend(VisualizationBackend):
