@@ -377,11 +377,14 @@ def compute_case_outcomes(
         rot_errors_deg = [
             float(value) * 180.0 / math.pi for value in matching["rotation_errors_rad"]
         ]
-        joint_violation, normalized_violation = _joint_limit_metrics(
-            native_qpos,
-            limits[env_index],
-            joint_limit_tolerance_rad,
-        )
+        if finite:
+            joint_violation, normalized_violation = _joint_limit_metrics(
+                native_qpos,
+                limits[env_index],
+                joint_limit_tolerance_rad,
+            )
+        else:
+            joint_violation, normalized_violation = False, None
         ordered = bool(matching["ordered_waypoints_reached"])
         planner_ok = bool(planning_success[env_index].item())
         # ``PlanResult.success`` is retained as a planner-stage outcome, but it

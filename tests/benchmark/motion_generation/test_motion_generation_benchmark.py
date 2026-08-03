@@ -260,6 +260,28 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     assert violated[0].failure_code == "joint_limit_violation"
 
 
+def test_non_finite_trajectory_skips_joint_limit_metrics():
+    case = _case()
+    positions = torch.zeros(1, 2, 7)
+    positions[0, 1, 0] = float("inf")
+    outcomes = compute_case_outcomes(
+        PlanResult(success=True, positions=positions),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )
+
+    assert outcomes[0].finite is False
+    assert outcomes[0].failure_code == "non_finite_trajectory"
+    assert outcomes[0].joint_limit_violation is False
+    assert outcomes[0].max_normalized_joint_violation is None
+    assert outcomes[0].motion_valid is False
+
+
 def test_nmg_precision_and_external_accuracy_are_independently_configurable():
     suite = load_suite("smoke")
     _apply_overrides(
