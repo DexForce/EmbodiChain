@@ -31,7 +31,6 @@ SRSSolver is configured via the `SRSSolverCfg` class, allowing detailed control 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
-    DexforceW1ArmKind,
     DexforceW1Version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.params import (
@@ -41,7 +40,6 @@ from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
 
 arm_params = W1ArmKineParams(
     arm_side=DexforceW1ArmSide.RIGHT,
-    arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
     version=DexforceW1Version.V021,
 )
 

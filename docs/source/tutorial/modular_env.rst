@@ -105,7 +105,6 @@ The main environment configuration inherits from :class:`envs.EmbodiedEnvCfg` an
 Uses the pre-configured :class:`DexforceW1Cfg` with customizations:
 
 - **Version**: Specific robot variant (v021)
-- **Arm Type**: Anthropomorphic configuration
 - **Position**: Initial placement in the scene
 
 **Sensor Configuration**

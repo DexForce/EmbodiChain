@@ -72,9 +72,7 @@ def main():
     sim.set_manual_update(False)
 
     # Get DexForce W1 URDF path
-    urdf_path = get_data_path(
-        "DexforceW1V021_INDUSTRIAL_DH_PGC_GRIPPER_M/DexforceW1V021.urdf"
-    )
+    urdf_path = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
 
     # Create DexForce W1 robot
     robot_cfg = RobotCfg(

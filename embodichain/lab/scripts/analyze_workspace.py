@@ -29,7 +29,7 @@ Usage examples::
 
     embodichain analyze-workspace \\
         --robot dexforce_w1 \\
-        --robot-params '{"version":"v021","arm_kind":"industrial"}' \\
+        --robot-params '{"version":"v025","with_default_eef":false}' \\
         --control-part left_arm --mode joint_space
 
     # Generic URDF/USD asset -- requires --ee-link (and --joints for grippers)
@@ -247,7 +247,7 @@ def build_preset_robot_cfg(
     Uses the robot's built-in ``control_parts`` and ``solver_cfg``, so the
     end-effector link and joint names come from the preset. Pass
     ``--robot-params`` (JSON) for variant overrides such as
-    ``{"robot_type": "ur5"}`` or ``{"version": "v021", "arm_kind": "industrial"}``.
+    ``{"robot_type": "ur5"}`` or ``{"version": "v025", "with_default_eef": false}``.
 
     Args:
         args: Parsed CLI arguments with ``args.robot`` and optionally
@@ -775,7 +775,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=str,
         default=None,
         help="JSON dict of variant overrides for --robot, e.g. "
-        '{"robot_type":"ur5"} or {"version":"v021","arm_kind":"industrial"}.',
+        '{"robot_type":"ur5"} or {"version":"v025","with_default_eef":false}.',
     )
     robot.add_argument(
         "--control-part",

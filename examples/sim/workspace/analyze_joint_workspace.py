@@ -92,7 +92,6 @@ def main() -> None:
             {
                 "uid": "dexforce_w1",
                 "version": "v021",
-                "arm_kind": "industrial",
                 # Workspace analysis only needs the arms. Excluding the grippers
                 # avoids loading unrelated joints and assets.
                 "with_default_eef": False,

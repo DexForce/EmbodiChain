@@ -15,53 +15,76 @@
 # ----------------------------------------------------------------------------
 
 import enum
+import re
+from typing import TypeVar
 
 __all__ = [
     "DexforceW1Version",
-    "DexforceW1ArmKind",
+    "DexforceW1HandVersion",
     "DexforceW1ArmSide",
     "DexforceW1Type",
     "DexforceW1HandBrand",
 ]
 
+_W1EnumT = TypeVar("_W1EnumT", bound="_W1Enum")
 
-class DexforceW1Version(enum.Enum):
-    """Versioning for DexforceW1 components."""
+
+class _W1Enum(enum.Enum):
+    @classmethod
+    def _parse_label(cls) -> str:
+        name = cls.__name__.removeprefix("DexforceW1")
+        words = re.sub(r"(?<!^)(?=[A-Z])", " ", name).lower()
+        return f"Dexforce W1 {words}"
+
+    @classmethod
+    def parse(cls: type[_W1EnumT], value) -> _W1EnumT:
+        """Parse an enum instance, member name, or serialized value."""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            normalized = value.lower()
+            for member in cls:
+                if normalized in (member.name.lower(), str(member.value).lower()):
+                    return member
+        raise ValueError(f"Invalid {cls._parse_label()}: {value!r}")
+
+
+class DexforceW1Version(_W1Enum):
+    """Released version of the W1 robot body and arms."""
+
+    V021 = "v021"
+    V022 = "v022"
+    V025 = "v025"
+
+
+class DexforceW1HandVersion(_W1Enum):
+    """Released version of an external W1 hand or gripper asset."""
 
     V021 = "v021"
 
 
-class DexforceW1ArmKind(enum.Enum):
-    """Arm type for DexforceW1: anthropomorphic or industrial."""
-
-    ANTHROPOMORPHIC = "anthropomorphic"
-    INDUSTRIAL = "industrial"
-
-
-class DexforceW1ArmSide(enum.Enum):
+class DexforceW1ArmSide(_W1Enum):
     """Arm side for DexforceW1: left or right."""
 
     LEFT = "left"
     RIGHT = "right"
 
 
-class DexforceW1Type(enum.Enum):
+class DexforceW1Type(_W1Enum):
     """Component type for DexforceW1."""
 
     CHASSIS = "chassis"
     TORSO = "torso"
     EYES = "eyes"
     HEAD = "head"
-    LEFT_ARM1 = "left_arm"  # Anthropomorphic left arm
-    RIGHT_ARM1 = "right_arm"  # Anthropomorphic right arm
-    LEFT_ARM2 = "left_arm2"  # Industrial left arm
-    RIGHT_ARM2 = "right_arm2"  # Industrial right arm
+    LEFT_ARM = "left_arm"
+    RIGHT_ARM = "right_arm"
     LEFT_HAND = "left_hand"
     RIGHT_HAND = "right_hand"
     FULL_BODY = "full_body"  # Full robot
 
 
-class DexforceW1HandBrand(enum.Enum):
+class DexforceW1HandBrand(_W1Enum):
     BRAINCO_HAND = "BRAINCO_HAND"
     DH_PGC_GRIPPER = "DH_PGC_GRIPPER"
     DH_PGC_GRIPPER_M = "DH_PGC_GRIPPER_M"

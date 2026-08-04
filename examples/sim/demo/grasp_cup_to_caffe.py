@@ -33,6 +33,7 @@ from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     LightCfg,
+    MarkerCfg,
     JointDrivePropertiesCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
@@ -97,6 +98,7 @@ def create_robot(sim: SimulationManager) -> Robot:
     cfg = DexforceW1Cfg.from_dict(
         {
             "uid": "dexforce_w1",
+            "version": "v025",
             "init_pos": [0.4, -0.5, 0.0],
         }
     )
@@ -423,6 +425,7 @@ def main():
     table = create_table(sim)
     caffe = create_caffe(sim)
     cup = create_cup(sim)
+
     sim.update(step=1)
 
     # apply random perturbation

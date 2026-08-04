@@ -33,8 +33,7 @@ sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
 # Add robot
 robot = sim.add_robot(DexforceW1Cfg.from_dict({
     "uid": "dexforce_w1", 
-    "version": "v021", 
-    "arm_kind": "industrial"
+    "version": "v021"
 }))
 
 # Quick analysis with defaults
@@ -175,7 +174,7 @@ sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
 
 # Add robot
 robot = sim.add_robot(DexforceW1Cfg.from_dict({
-    "uid": "dexforce_w1", "version": "v021", "arm_kind": "industrial"
+    "uid": "dexforce_w1", "version": "v021"
 }))
 
 # 1. Joint Space Analysis

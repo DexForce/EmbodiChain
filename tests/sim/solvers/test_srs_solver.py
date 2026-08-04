@@ -31,7 +31,6 @@ from embodichain.data import get_data_path
 from embodichain.lab.sim.solvers.srs_solver import SRSSolver, SRSSolverCfg
 from embodichain.lab.sim.robots.dexforce_w1.types import (
     DexforceW1ArmSide,
-    DexforceW1ArmKind,
     DexforceW1Version,
 )
 from embodichain.lab.sim.robots.dexforce_w1.params import (
@@ -44,23 +43,17 @@ class BaseSolverTest:
 
     def get_arm_config(self):
         return [
-            (DexforceW1ArmSide.LEFT, DexforceW1ArmKind.ANTHROPOMORPHIC, "left_arm"),
-            (DexforceW1ArmSide.RIGHT, DexforceW1ArmKind.ANTHROPOMORPHIC, "right_arm"),
-            (DexforceW1ArmSide.LEFT, DexforceW1ArmKind.INDUSTRIAL, "left_arm"),
-            (DexforceW1ArmSide.RIGHT, DexforceW1ArmKind.INDUSTRIAL, "right_arm"),
+            (DexforceW1ArmSide.LEFT, "left_arm"),
+            (DexforceW1ArmSide.RIGHT, "right_arm"),
         ]
 
     def setup_solver(self, solver_type: str, device: str = "cpu"):
-        for arm_side, arm_kind, arm_name in self.get_arm_config():
+        for arm_side, arm_name in self.get_arm_config():
             arm_params = W1ArmKineParams(
                 arm_side=arm_side,
-                arm_kind=arm_kind,
                 version=DexforceW1Version.V021,
             )
-            if arm_kind == DexforceW1ArmKind.ANTHROPOMORPHIC:
-                urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
-            else:
-                urdf = get_data_path("DexforceW1V021/DexforceW1_v02_2.urdf")
+            urdf = get_data_path("DexforceW1V021/DexforceW1_v02_1.urdf")
 
             cfg = SRSSolverCfg()
             cfg.joint_names = [
@@ -83,24 +76,18 @@ class BaseSolverTest:
             cfg.link_lengths = arm_params.link_lengths
             cfg.rotation_directions = arm_params.rotation_directions
 
-            solver_key = f"{arm_name}_{arm_kind.name}"
-            self.solver[solver_key] = SRSSolver(cfg=cfg, num_envs=1, device=device)
+            self.solver[arm_name] = SRSSolver(cfg=cfg, num_envs=1, device=device)
 
     @pytest.mark.parametrize(
-        "arm_side, arm_kind, arm_name",
+        "arm_side, arm_name",
         [
-            (DexforceW1ArmSide.LEFT, DexforceW1ArmKind.ANTHROPOMORPHIC, "left_arm"),
-            (DexforceW1ArmSide.RIGHT, DexforceW1ArmKind.ANTHROPOMORPHIC, "right_arm"),
-            (DexforceW1ArmSide.LEFT, DexforceW1ArmKind.INDUSTRIAL, "left_arm"),
-            (DexforceW1ArmSide.RIGHT, DexforceW1ArmKind.INDUSTRIAL, "right_arm"),
+            (DexforceW1ArmSide.LEFT, "left_arm"),
+            (DexforceW1ArmSide.RIGHT, "right_arm"),
         ],
     )
-    def test_ik(
-        self, arm_side: DexforceW1ArmSide, arm_kind: DexforceW1ArmKind, arm_name: str
-    ):
+    def test_ik(self, arm_side: DexforceW1ArmSide, arm_name: str):
         # Test inverse kinematics (IK) with a 1x4x4 homogeneous matrix pose and a joint_seed
-        solver_key = f"{arm_name}_{arm_kind.name}"
-        device = self.solver[solver_key].device
+        device = self.solver[arm_name].device
 
         qpos_fk = torch.tensor(
             [[0.0, 0.0, 0.0, -np.pi / 4, 0.0, 0.0, 0.0]],
@@ -108,15 +95,15 @@ class BaseSolverTest:
             device=device,
         )
 
-        fk_xpos = self.solver[solver_key].get_fk(qpos=qpos_fk)
+        fk_xpos = self.solver[arm_name].get_fk(qpos=qpos_fk)
 
-        _, ik_qpos = self.solver[solver_key].get_ik(fk_xpos, return_all_solutions=False)
+        _, ik_qpos = self.solver[arm_name].get_ik(fk_xpos, return_all_solutions=False)
 
-        ik_xpos = self.solver[solver_key].get_fk(qpos=ik_qpos[:, 0, :])
+        ik_xpos = self.solver[arm_name].get_fk(qpos=ik_qpos[:, 0, :])
 
         assert torch.allclose(
             fk_xpos, ik_xpos, atol=1e-3, rtol=1e-3
-        ), f"FK and IK results do not match for {solver_key}"
+        ), f"FK and IK results do not match for {arm_name}"
 
     def test_update_with_robot_limit_intersects_existing_solver_limits(self):
         """Test robot limit sync only tightens solver limits and never widens them."""
@@ -212,12 +199,10 @@ class BaseRobotSolverTest:
 
         w1_left_arm_params = W1ArmKineParams(
             arm_side=DexforceW1ArmSide.LEFT,
-            arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
             version=DexforceW1Version.V021,
         )
         w1_right_arm_params = W1ArmKineParams(
             arm_side=DexforceW1ArmSide.RIGHT,
-            arm_kind=DexforceW1ArmKind.ANTHROPOMORPHIC,
             version=DexforceW1Version.V021,
         )
 
