@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import queue
 import shutil
+import subprocess
+import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterable
@@ -37,7 +40,57 @@ import trimesh
 from app_articraft import build_articraft_panel
 from app_config import DEBUG_ASSET_ENGINE_ROOT, SIMREADY_MESH_SUFFIXES
 from app_env import EMBODICHAIN_ROOT
-from app_processes import read_process_output, start_pipeline
+from app_processes import read_process_output, start_pipeline, terminate_process_group
+
+_simready_run_lock = threading.Lock()
+_simready_process: subprocess.Popen[str] | None = None
+_simready_run_token: str | None = None
+_SIMREADY_IDLE_STATUS = "**Status:** waiting for an asset."
+
+
+def _begin_simready_run() -> str:
+    """Invalidate any previous SimReady run and return a new ownership token."""
+    global _simready_process, _simready_run_token
+    with _simready_run_lock:
+        previous_process = _simready_process
+        _simready_process = None
+        token = uuid.uuid4().hex
+        _simready_run_token = token
+    if previous_process is not None:
+        terminate_process_group(previous_process)
+    return token
+
+
+def _simready_run_is_active(
+    token: str, process: subprocess.Popen[str] | None = None
+) -> bool:
+    with _simready_run_lock:
+        return _simready_run_token == token and (
+            process is None or _simready_process is process
+        )
+
+
+def _finish_simready_run(
+    token: str, process: subprocess.Popen[str] | None = None
+) -> None:
+    global _simready_process
+    with _simready_run_lock:
+        if _simready_run_token == token and (
+            process is None or _simready_process is process
+        ):
+            _simready_process = None
+
+
+def reset_simready_asset():
+    """Clear SimReady widgets and terminate the process group for its active run."""
+    global _simready_process, _simready_run_token
+    with _simready_run_lock:
+        process = _simready_process
+        _simready_process = None
+        _simready_run_token = None
+    if process is not None:
+        terminate_process_group(process)
+    return None, "rigid_object", None, None, None, _SIMREADY_IDLE_STATUS, ""
 
 
 def _as_paths(value: Any) -> list[Path]:
@@ -129,9 +182,12 @@ def _find_simready_output(output_root: Path) -> Path:
 
 def run_simready_asset(upload_value: Any, category: str):
     """Run one upstream SimReady job and stream concise subprocess progress."""
+    global _simready_process
+    token = _begin_simready_run()
     category = (category or "").strip()
     if not category:
-        yield None, None, None, "**Input error:** enter an asset category.", ""
+        if _simready_run_is_active(token):
+            yield None, None, None, "**Input error:** enter an asset category.", ""
         return
     try:
         uploads = _as_paths(upload_value)
@@ -142,11 +198,12 @@ def run_simready_asset(upload_value: Any, category: str):
         source_mesh = _safe_copy_uploads(uploads, input_dir)
         input_preview = _export_preview(source_mesh, run_root / "input_preview.glb")
     except Exception as exc:
-        yield None, None, None, f"**Input error:** {exc}", ""
+        if _simready_run_is_active(token):
+            yield None, None, None, f"**Input error:** {exc}", ""
         return
 
     command = [
-        __import__("sys").executable,
+        sys.executable,
         "-m",
         "embodichain.gen_sim.simready_pipeline.cli.start",
         "--input_dir",
@@ -157,6 +214,8 @@ def run_simready_asset(upload_value: Any, category: str):
         category,
     ]
     log_lines = ["$ " + " ".join(command)]
+    if not _simready_run_is_active(token):
+        return
     yield input_preview.as_posix(), None, None, "**SimReady is running…**", "\n".join(
         log_lines
     )
@@ -164,53 +223,69 @@ def run_simready_asset(upload_value: Any, category: str):
     try:
         process = start_pipeline(command)
     except Exception as exc:
-        yield input_preview.as_posix(), None, None, f"**Pipeline start failed:** {exc}", "\n".join(
-            log_lines
-        )
+        if _simready_run_is_active(token):
+            yield input_preview.as_posix(), None, None, f"**Pipeline start failed:** {exc}", "\n".join(
+                log_lines
+            )
         return
 
-    output_queue: queue.Queue[str] = queue.Queue()
-    reader = threading.Thread(
-        target=read_process_output, args=(process, output_queue), daemon=True
-    )
-    reader.start()
-    while process.poll() is None:
+    with _simready_run_lock:
+        owns_process = _simready_run_token == token
+        if owns_process:
+            _simready_process = process
+    if not owns_process:
+        terminate_process_group(process)
+        return
+
+    try:
+        output_queue: queue.Queue[str] = queue.Queue()
+        reader = threading.Thread(
+            target=read_process_output, args=(process, output_queue), daemon=True
+        )
+        reader.start()
+        while process.poll() is None:
+            if not _simready_run_is_active(token, process):
+                return
+            try:
+                while True:
+                    log_lines.append(output_queue.get_nowait())
+            except queue.Empty:
+                pass
+            # Keep the browser responsive while the Blender/LLM stages run.
+            yield input_preview.as_posix(), None, None, "**SimReady is running…**", "\n".join(
+                log_lines[-160:]
+            )
+            time.sleep(0.5)
+        reader.join(timeout=1)
         try:
             while True:
                 log_lines.append(output_queue.get_nowait())
         except queue.Empty:
             pass
-        # Keep the browser responsive while the Blender/LLM stages run.
-        yield input_preview.as_posix(), None, None, "**SimReady is running…**", "\n".join(
-            log_lines[-160:]
-        )
-        __import__("time").sleep(0.5)
-    reader.join(timeout=1)
-    try:
-        while True:
-            log_lines.append(output_queue.get_nowait())
-    except queue.Empty:
-        pass
+        if not _simready_run_is_active(token, process):
+            return
 
-    if process.returncode != 0:
-        yield input_preview.as_posix(), None, None, f"**SimReady failed** (exit code {process.returncode}).", "\n".join(
-            log_lines[-220:]
-        )
-        return
-    try:
-        result = _find_simready_output(output_root)
-        preview = (
-            result
-            if result.suffix.lower() == ".glb"
-            else _export_preview(result, run_root / "output_preview.glb")
-        )
-        yield input_preview.as_posix(), preview.as_posix(), result.as_posix(), "**SimReady completed.**", "\n".join(
-            log_lines[-220:]
-        )
-    except Exception as exc:
-        yield input_preview.as_posix(), None, None, f"**Output error:** {exc}", "\n".join(
-            log_lines[-220:]
-        )
+        if process.returncode != 0:
+            yield input_preview.as_posix(), None, None, f"**SimReady failed** (exit code {process.returncode}).", "\n".join(
+                log_lines[-220:]
+            )
+            return
+        try:
+            result = _find_simready_output(output_root)
+            preview = (
+                result
+                if result.suffix.lower() == ".glb"
+                else _export_preview(result, run_root / "output_preview.glb")
+            )
+            yield input_preview.as_posix(), preview.as_posix(), result.as_posix(), "**SimReady completed.**", "\n".join(
+                log_lines[-220:]
+            )
+        except Exception as exc:
+            yield input_preview.as_posix(), None, None, f"**Output error:** {exc}", "\n".join(
+                log_lines[-220:]
+            )
+    finally:
+        _finish_simready_run(token, process)
 
 
 def build_asset_engine_panel() -> dict[str, Any]:
@@ -258,10 +333,11 @@ def build_asset_engine_panel() -> dict[str, Any]:
                     )
                 with gr.Row():
                     run_button = gr.Button("Run SimReady", variant="primary")
+                    reset_button = gr.Button("Reset SimReady", variant="stop")
                     output_file = gr.File(
                         label="SimReady asset output", interactive=False
                     )
-                status = gr.Markdown("**Status:** waiting for an asset.")
+                status = gr.Markdown(_SIMREADY_IDLE_STATUS)
                 log = gr.Textbox(label="Pipeline log", lines=10, interactive=False)
             with gr.Tab("Articulation"):
                 build_articraft_panel()
@@ -276,5 +352,18 @@ def build_asset_engine_panel() -> dict[str, Any]:
         run_simready_asset,
         inputs=[uploads, category],
         outputs=[input_model, output_model, output_file, status, log],
+    )
+    reset_button.click(
+        reset_simready_asset,
+        outputs=[
+            uploads,
+            category,
+            input_model,
+            output_model,
+            output_file,
+            status,
+            log,
+        ],
+        queue=False,
     )
     return {"panel": panel}

@@ -100,7 +100,13 @@ def build_demo() -> gr.Blocks:
                             format="png",
                             height=300,
                         )
-                        debug_scene_run = gr.Button("Generate scene", variant="primary")
+                        with gr.Row():
+                            debug_scene_run = gr.Button(
+                                "Generate scene", variant="primary"
+                            )
+                            debug_scene_reset = gr.Button(
+                                "Reset Scene Engine", variant="stop"
+                            )
                     with gr.Column(scale=2):
                         debug_scene_progress = gr.Slider(
                             0,
@@ -342,6 +348,17 @@ def build_demo() -> gr.Blocks:
                 debug_scene_output,
                 debug_scene_preview,
             ],
+        )
+        debug_scene_reset.click(
+            reset_scene_engine,
+            outputs=[
+                debug_scene_image,
+                debug_scene_progress,
+                debug_scene_status,
+                debug_scene_output,
+                debug_scene_preview,
+            ],
+            queue=False,
         )
         debug_action_load.click(
             action_engine_snapshot,

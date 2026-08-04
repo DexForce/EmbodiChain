@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from embodichain.gen_sim.env import load_gen_sim_env
+from embodichain.gen_sim.env import get_embodichain_root, load_gen_sim_env
 
 __all__ = [
     "ARTICRAFT_CONDA_ENV",
@@ -65,9 +65,10 @@ def _getenv(name: str, default: str) -> str:
     return os.environ.get(name) or default
 
 
-EMBODICHAIN_ROOT = Path(
-    _getenv("EMBODICHAIN_ROOT", str(Path(__file__).resolve().parents[3]))
-).expanduser()
+# The repository root must follow this checkout, not a machine-specific .env
+# value. Its path is shared with child processes through their working
+# directory, so deriving it once here keeps every Debug workflow relocatable.
+EMBODICHAIN_ROOT = get_embodichain_root()
 ARTICRAFT_ROOT = Path(
     _getenv("ARTICRAFT_ROOT", str(APP_ROOT / ".articraft"))
 ).expanduser()

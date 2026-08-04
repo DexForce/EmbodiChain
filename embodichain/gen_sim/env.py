@@ -22,7 +22,17 @@ import os
 from pathlib import Path
 from typing import MutableMapping
 
-__all__ = ["find_gen_sim_env_file", "load_gen_sim_env"]
+__all__ = ["find_gen_sim_env_file", "get_embodichain_root", "load_gen_sim_env"]
+
+
+def get_embodichain_root() -> Path:
+    """Return the repository containing the installed GenSim source tree.
+
+    The Gradio app always launches its local tools from this directory. It is
+    derived from this module instead of a machine-specific dotenv value, so a
+    checkout continues to work after it is moved or cloned elsewhere.
+    """
+    return Path(__file__).resolve().parents[2]
 
 
 def find_gen_sim_env_file() -> Path:

@@ -25,13 +25,11 @@ from pathlib import Path
 
 import numpy as np
 
-from embodichain.gen_sim.env import load_gen_sim_env
+from embodichain.gen_sim.env import get_embodichain_root, load_gen_sim_env
 
 load_gen_sim_env()
 
-EMBODICHAIN_ROOT = Path(
-    os.environ.get("EMBODICHAIN_ROOT") or str(Path(__file__).resolve().parents[3])
-).expanduser()
+EMBODICHAIN_ROOT = get_embodichain_root()
 APP_ROOT = Path(__file__).resolve().parent
 IMAGE_DIR = Path(
     os.environ.get(

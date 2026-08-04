@@ -58,7 +58,9 @@ class RuntimeState:
     language: str = LANGUAGE_EN
     process: subprocess.Popen[str] | None = None
     sim_process: subprocess.Popen[str] | None = None
+    scene_engine_process: subprocess.Popen[str] | None = None
     scene_preview_process: subprocess.Popen[str] | None = None
+    scene_engine_is_running: bool = False
     sim_started: bool = False
     sim_finished: bool = False
     sim_returncode: int | None = None

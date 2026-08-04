@@ -50,7 +50,7 @@ conda run -n embodichain python gradio_app.py
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `EMBODICHAIN_ROOT` | `/home/dex/桌面/EmbodiChain` | EmbodiChain 根目录。 |
+| EmbodiChain root | 自动从 `embodichain/gen_sim/env.py` 的源码位置推导 | EmbodiChain 根目录；不再从 `.env` 配置。 |
 | `GRADIO_SERVER_NAME` | `0.0.0.0` | Gradio 监听地址。 |
 | `GRADIO_SERVER_PORT` | `7860` | Gradio 监听端口。 |
 | `SCENE_ENGINE_VISER_PORT` | `8080` | 独立 Scene Engine 的 Viser 端口。 |
@@ -147,6 +147,8 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 
 处理函数以 generator 持续返回最近的 stdout；完成时优先预览 `asset_simready.glb`，只有 OBJ 时再转为 GLB。此路径不依赖 DexSim。
 
+`Reset SimReady` 会清空上传、类别、预览、下载项和日志，并按进程组终止正在运行的 SimReady CLI 及其子进程。
+
 ### Articulation：Articraft + Codex
 
 Articulation 标签页根据文本和可选参考图生成一个可下载的 articulated asset。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会 clone `ARTICRAFT_REPOSITORY_URL`；随后检查 Conda、指定的 Articraft 环境和 Codex CLI。该操作会创建 checkout 和 `.debug_engine/articraft/` 中的输出目录，现有的非 Articraft 目录不会被覆盖。
@@ -166,6 +168,8 @@ description + optional image
 
 产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Demo 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 每次成功预览会终止旧的 Articraft 预览进程，再以 `0.0.0.0:<ARTICRAFT_VISER_PORT>` 启动新进程。
 
+`Reset Articulation` 会清空描述、参考图、记录与下载结果，终止当前 Articraft/Codex 命令进程组，并关闭该面板启动的 Viser。
+
 ## 独立 Scene engine 和 Viser
 
 Scene engine 只接收图像。上传图像会先进行 EXIF 归正并转为 RGB PNG，以 PNG 字节的 SHA-256 前 16 位作为目录名；相同图像会复用同一目录：
@@ -182,6 +186,8 @@ image
 ```
 
 当 `scene_export/scene_config.json` 存在且生成进程返回成功时，应用才启动 Viser。iframe 使用 Gradio 页面当前的协议和主机名转向 Viser 端口，因此从其他设备访问时，浏览器必须能访问该端口。每次新 Scene Engine 任务开始前会终止旧的 Scene Viser 进程。输出目录会显示在 UI 中，便于检查 hash 命名的场景导出。
+
+`Reset Scene Engine` 会清空图像、进度、输出目录和 iframe，并终止当前生成命令与 Scene Viser 的进程组；运行 token 会使已经失效的生成器停止回写界面。
 
 ## Action engine：Gym 场景契约
 

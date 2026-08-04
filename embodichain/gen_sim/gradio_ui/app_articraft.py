@@ -60,6 +60,7 @@ __all__ = [
     "build_articraft_panel",
     "configure_articraft_environment",
     "generate_articraft_asset",
+    "reset_articraft_asset",
     "stop_articraft_viser_preview",
 ]
 
@@ -68,6 +69,111 @@ _VISER_STOP_TIMEOUT_SECONDS = 5.0
 _ARTICRAFT_PYTHON_VERSION = "3.12"
 _CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
 _articraft_environment_lock = threading.Lock()
+_articraft_generation_lock = threading.Lock()
+_articraft_generation_process: subprocess.Popen[str] | None = None
+_articraft_generation_token: str | None = None
+_ARTICRAFT_IDLE_PREVIEW = (
+    "<div style='padding: 1rem; color: #6b7280;'>"
+    "The interactive Viser articulation preview will appear here after generation."
+    "</div>"
+)
+
+
+def _begin_articraft_generation() -> str:
+    """Invalidate the previous generation and return a new ownership token."""
+    global _articraft_generation_process, _articraft_generation_token
+    with _articraft_generation_lock:
+        previous_process = _articraft_generation_process
+        _articraft_generation_process = None
+        token = uuid.uuid4().hex
+        _articraft_generation_token = token
+    if previous_process is not None:
+        terminate_process_group(previous_process)
+    return token
+
+
+def _articraft_generation_is_active(
+    token: str, process: subprocess.Popen[str] | None = None
+) -> bool:
+    with _articraft_generation_lock:
+        return _articraft_generation_token == token and (
+            process is None or _articraft_generation_process is process
+        )
+
+
+def _set_articraft_generation_process(
+    token: str, process: subprocess.Popen[str]
+) -> bool:
+    global _articraft_generation_process
+    with _articraft_generation_lock:
+        if _articraft_generation_token != token:
+            return False
+        _articraft_generation_process = process
+        return True
+
+
+def _finish_articraft_generation_process(
+    token: str, process: subprocess.Popen[str]
+) -> None:
+    global _articraft_generation_process
+    with _articraft_generation_lock:
+        if (
+            _articraft_generation_token == token
+            and _articraft_generation_process is process
+        ):
+            _articraft_generation_process = None
+
+
+def _run_articraft_generation_check(
+    command: list[str], *, token: str, timeout: int
+) -> subprocess.CompletedProcess[str] | None:
+    """Run one Articraft CLI gate so Reset can stop its whole process group."""
+    process = register_managed_process(
+        subprocess.Popen(
+            command,
+            cwd=ARTICRAFT_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+            env=os.environ.copy(),
+        )
+    )
+    if not _set_articraft_generation_process(token, process):
+        terminate_process_group(process)
+        return None
+    try:
+        stdout, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        raise
+    finally:
+        _finish_articraft_generation_process(token, process)
+    if not _articraft_generation_is_active(token):
+        return None
+    return subprocess.CompletedProcess(command, process.returncode, stdout)
+
+
+def reset_articraft_asset():
+    """Clear Articraft inputs/results and stop its command and Viser processes."""
+    global _articraft_generation_process, _articraft_generation_token
+    with _articraft_generation_lock:
+        process = _articraft_generation_process
+        _articraft_generation_process = None
+        _articraft_generation_token = None
+    if process is not None:
+        terminate_process_group(process)
+    stop_articraft_viser_preview()
+    return (
+        "**Environment:** not checked.",
+        "",
+        None,
+        None,
+        "",
+        "**Status:** waiting for a description.",
+        "",
+        _ARTICRAFT_IDLE_PREVIEW,
+    )
 
 
 def _command_path(name: str) -> str | None:
@@ -656,9 +762,11 @@ briefly state the articulation mechanisms and validation result."""
 
 def generate_articraft_asset(prompt_value: str, image_value: Any):
     """Initialize a record, let Codex author it, and expose one result bundle."""
+    token = _begin_articraft_generation()
     prompt = (prompt_value or "").strip()
     if not prompt:
-        yield None, "", "**Input error:** enter a description of the articulated object.", "", ""
+        if _articraft_generation_is_active(token):
+            yield None, "", "**Input error:** enter a description of the articulated object.", "", ""
         return
 
     details, errors, codex = _check_requirements()
@@ -666,7 +774,8 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         message = (
             "\n".join(f"- {error}" for error in errors) or "Codex CLI is unavailable."
         )
-        yield None, "", f"**Articulation is not ready.**\n\n{message}", "", ""
+        if _articraft_generation_is_active(token):
+            yield None, "", f"**Articulation is not ready.**\n\n{message}", "", ""
         return
 
     record_id = _record_id()
@@ -688,7 +797,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
             prompt,
         )
         log_lines.append("$ " + " ".join(init_command[:-1]) + " <prompt>")
-        initialized = _run_check(init_command, timeout=90)
+        initialized = _run_articraft_generation_check(
+            init_command, token=token, timeout=90
+        )
+        if initialized is None:
+            return
         log_lines.append(_short_output(initialized, limit=4000))
         if initialized.returncode:
             yield None, "", "**Articraft record initialization failed.**", "\n".join(
@@ -697,7 +810,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
             return
         model_path = _active_model_path(record_dir)
     except Exception as exc:
-        yield None, "", f"**Setup failed:** {exc}", "\n".join(log_lines), ""
+        if _articraft_generation_is_active(token):
+            yield None, "", f"**Setup failed:** {exc}", "\n".join(log_lines), ""
+        return
+
+    if not _articraft_generation_is_active(token):
         return
 
     final_message = run_root / "codex_final_message.txt"
@@ -744,10 +861,14 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
                 env=os.environ.copy(),
             )
         )
+        if not _set_articraft_generation_process(token, process):
+            terminate_process_group(process)
+            return
     except Exception as exc:
-        yield None, record_dir.as_posix(), f"**Codex could not start:** {exc}", "\n".join(
-            log_lines
-        ), ""
+        if _articraft_generation_is_active(token):
+            yield None, record_dir.as_posix(), f"**Codex could not start:** {exc}", "\n".join(
+                log_lines
+            ), ""
         return
 
     output_queue: queue.Queue[str] = queue.Queue()
@@ -756,6 +877,8 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
     )
     reader.start()
     while process.poll() is None:
+        if not _articraft_generation_is_active(token, process):
+            return
         try:
             while True:
                 log_lines.append(output_queue.get_nowait())
@@ -765,12 +888,18 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
             log_lines[-240:]
         ), ""
         time.sleep(0.75)
-    reader.join(timeout=2)
     try:
-        while True:
-            log_lines.append(output_queue.get_nowait())
-    except queue.Empty:
-        pass
+        reader.join(timeout=2)
+        try:
+            while True:
+                log_lines.append(output_queue.get_nowait())
+        except queue.Empty:
+            pass
+    finally:
+        _finish_articraft_generation_process(token, process)
+
+    if not _articraft_generation_is_active(token):
+        return
 
     if final_message.is_file():
         final_text = final_message.read_text(encoding="utf-8", errors="replace").strip()
@@ -800,7 +929,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         "",
     )
     try:
-        checked = _run_check(check_command, timeout=300)
+        checked = _run_articraft_generation_check(
+            check_command, token=token, timeout=300
+        )
+        if checked is None:
+            return
         log_lines.append(_short_output(checked, limit=5000))
     except Exception as exc:
         yield (
@@ -845,7 +978,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
             "",
         )
         try:
-            compiled = _run_check(compile_command, timeout=300)
+            compiled = _run_articraft_generation_check(
+                compile_command, token=token, timeout=300
+            )
+            if compiled is None:
+                return
             log_lines.append(_short_output(compiled, limit=5000))
         except Exception as exc:
             yield (
@@ -886,7 +1023,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
     )
     log_lines.append("$ " + " ".join(finalize_command))
     try:
-        finalized = _run_check(finalize_command, timeout=300)
+        finalized = _run_articraft_generation_check(
+            finalize_command, token=token, timeout=300
+        )
+        if finalized is None:
+            return
         log_lines.append(_short_output(finalized, limit=5000))
     except Exception as exc:
         yield (
@@ -907,6 +1048,8 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         )
         return
 
+    if not _articraft_generation_is_active(token):
+        return
     try:
         materialized, archive = _make_result_bundle(record_id)
         status = (
@@ -938,6 +1081,7 @@ def build_articraft_panel() -> None:
     with gr.Row():
         configure_button = gr.Button("Configure Articulation & check Codex")
         generate_button = gr.Button("Generate articulation", variant="primary")
+        reset_button = gr.Button("Reset Articulation", variant="stop")
     environment_status = gr.Markdown("**Environment:** not checked.")
     with gr.Row():
         prompt = gr.Textbox(
@@ -958,11 +1102,7 @@ def build_articraft_panel() -> None:
         record_folder = gr.Textbox(
             label="Articulation record folder", interactive=False
         )
-    articulation_preview = gr.HTML(
-        "<div style='padding: 1rem; color: #6b7280;'>"
-        "The interactive Viser articulation preview will appear here after generation."
-        "</div>"
-    )
+    articulation_preview = gr.HTML(_ARTICRAFT_IDLE_PREVIEW)
     generation_status = gr.Markdown("**Status:** waiting for a description.")
     generation_log = gr.Textbox(
         label="Codex / Articraft log", lines=14, interactive=False
@@ -981,4 +1121,18 @@ def build_articraft_panel() -> None:
             generation_log,
             articulation_preview,
         ],
+    )
+    reset_button.click(
+        reset_articraft_asset,
+        outputs=[
+            environment_status,
+            prompt,
+            image,
+            output_file,
+            record_folder,
+            generation_status,
+            generation_log,
+            articulation_preview,
+        ],
+        queue=False,
     )

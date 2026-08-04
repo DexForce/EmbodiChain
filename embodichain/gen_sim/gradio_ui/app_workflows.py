@@ -1258,6 +1258,8 @@ def run_generate(
         process = start_pipeline(command)
     except Exception as exc:
         with runtime_lock:
+            if runtime.run_token != token:
+                return
             runtime.is_busy = False
             runtime.process = None
             runtime.phase_key = "failed"
@@ -2038,14 +2040,81 @@ def _viser_iframe(port: int, scene_hash: str) -> str:
     )
 
 
+def reset_scene_engine():
+    """Clear Scene Engine widgets and stop its generator and Viser process groups."""
+    with runtime_lock:
+        generator_process = runtime.scene_engine_process
+        preview_process = runtime.scene_preview_process
+        owns_runtime = runtime.scene_engine_is_running
+        other_workflow_running = not owns_runtime and runtime.is_busy
+        if owns_runtime or not runtime.is_busy:
+            if owns_runtime:
+                runtime.run_token = uuid.uuid4().hex
+            if runtime.process is generator_process:
+                runtime.process = None
+            runtime.is_busy = False
+            set_runtime_phase_locked("idle")
+            runtime.status = "Scene Engine reset."
+            runtime.image_path = None
+            runtime.last_error = None
+            runtime.log_lines.clear()
+            clear_run_timing_locked()
+        runtime.scene_engine_process = None
+        runtime.scene_preview_process = None
+        runtime.scene_engine_is_running = False
+
+    for process in {generator_process, preview_process}:
+        if process is not None:
+            terminate_process_group(process)
+
+    return (
+        None,
+        PHASES["idle"].progress,
+        format_status(
+            "Scene Engine reset."
+            if not other_workflow_running
+            else "Scene Engine preview reset; another workflow is still running."
+        ),
+        "",
+        "<div style='padding: 1rem; color: #6b7280;'>"
+        "The Viser preview will appear here after generation."
+        "</div>",
+    )
+
+
 def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     """Generate one image-conditioned scene and expose its Viser preview."""
     output_root: Path | None = None
     preview_html = ""
+    token = uuid.uuid4().hex
+    with runtime_lock:
+        if runtime.is_busy:
+            runtime.status = "Another pipeline is already running."
+            runtime.last_error = runtime.status
+            busy_message = runtime.status
+        else:
+            runtime.run_token = token
+            runtime.is_busy = True
+            runtime.scene_engine_is_running = True
+            set_runtime_phase_locked("received")
+            runtime.status = "Preparing Scene Engine input."
+            runtime.last_error = None
+            runtime.log_lines.clear()
+            clear_run_timing_locked()
+            busy_message = None
+
+    if busy_message is not None:
+        yield _scene_engine_updates(output_root, preview_html)
+        return
+
     try:
         scene_hash, output_root, image_path = _prepare_scene_engine_input(image_value)
     except Exception as exc:
         with runtime_lock:
+            if runtime.run_token != token:
+                return
+            runtime.is_busy = False
+            runtime.scene_engine_is_running = False
             set_runtime_phase_locked("failed")
             runtime.status = f"Input error: {exc}"
             runtime.last_error = str(exc)
@@ -2053,33 +2122,21 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
         return
 
     old_preview: subprocess.Popen[str] | None = None
-    busy_message: str | None = None
+    old_generator: subprocess.Popen[str] | None = None
     with runtime_lock:
-        if runtime.is_busy:
-            runtime.status = "Another pipeline is already running."
-            runtime.last_error = runtime.status
-            busy_message = runtime.status
-        else:
-            old_preview = runtime.scene_preview_process
-            runtime.scene_preview_process = None
-            token = uuid.uuid4().hex
-            runtime.run_token = token
-            runtime.is_busy = True
-            set_runtime_phase_locked("received")
-            runtime.status = (
-                f"Image saved. Generating Scene Engine output {scene_hash}."
-            )
-            runtime.last_error = None
-            runtime.image_path = image_path
-            runtime.log_lines.clear()
-            clear_run_timing_locked()
-
-    if busy_message is not None:
-        yield _scene_engine_updates(output_root, preview_html)
-        return
+        if runtime.run_token != token:
+            return
+        old_preview = runtime.scene_preview_process
+        old_generator = runtime.scene_engine_process
+        runtime.scene_engine_process = None
+        runtime.scene_preview_process = None
+        runtime.status = f"Image saved. Generating Scene Engine output {scene_hash}."
+        runtime.image_path = image_path
 
     if old_preview is not None:
         terminate_process_group(old_preview)
+    if old_generator is not None:
+        terminate_process_group(old_generator)
 
     command = [
         sys.executable,
@@ -2100,6 +2157,7 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     except Exception as exc:
         with runtime_lock:
             runtime.is_busy = False
+            runtime.scene_engine_is_running = False
             set_runtime_phase_locked("failed")
             runtime.status = f"Scene Engine start failed: {exc}"
             runtime.last_error = str(exc)
@@ -2115,6 +2173,7 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
             terminate_process_group(process)
             return
         runtime.process = process
+        runtime.scene_engine_process = process
         start_run_timing_locked("started")
         set_runtime_phase_locked("started")
         runtime.status = "Scene Engine generation started."
@@ -2123,6 +2182,11 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     while process.poll() is None:
         drained = drain_output_queue(output_queue)
         with runtime_lock:
+            if (
+                runtime.run_token != token
+                or runtime.scene_engine_process is not process
+            ):
+                return
             for line in drained:
                 runtime.log_lines.append(line)
                 set_runtime_phase_locked(
@@ -2136,12 +2200,15 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
 
     reader.join(timeout=1.0)
     with runtime_lock:
+        if runtime.run_token != token or runtime.scene_engine_process is not process:
+            return
         for line in drain_output_queue(output_queue):
             runtime.log_lines.append(line)
             set_runtime_phase_locked(
                 _scene_engine_phase_from_log(line, runtime.phase_key)
             )
         runtime.process = None
+        runtime.scene_engine_process = None
 
     scene_export = output_root / "scene_export" / "scene_config.json"
     if process.returncode != 0 or not scene_export.is_file():
@@ -2151,7 +2218,10 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
             else f"Scene Engine did not create {scene_export}."
         )
         with runtime_lock:
+            if runtime.run_token != token:
+                return
             runtime.is_busy = False
+            runtime.scene_engine_is_running = False
             set_runtime_phase_locked("failed")
             runtime.status = detail
             runtime.last_error = detail
@@ -2173,7 +2243,10 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
         preview_process = start_pipeline(preview_command)
     except Exception as exc:
         with runtime_lock:
+            if runtime.run_token != token:
+                return
             runtime.is_busy = False
+            runtime.scene_engine_is_running = False
             set_runtime_phase_locked("failed")
             runtime.status = f"Viser preview start failed: {exc}"
             runtime.last_error = str(exc)
@@ -2181,6 +2254,10 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
         return
 
     with runtime_lock:
+        if runtime.run_token != token:
+            terminate_process_group(preview_process)
+            return
+        runtime.scene_preview_process = preview_process
         runtime.log_lines.append("$ " + " ".join(preview_command))
         set_runtime_phase_locked("preview")
         runtime.status = "Starting Viser preview..."
@@ -2189,7 +2266,11 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     if not _wait_for_viser(port, preview_process):
         terminate_process_group(preview_process)
         with runtime_lock:
+            if runtime.run_token != token:
+                return
+            runtime.scene_preview_process = None
             runtime.is_busy = False
+            runtime.scene_engine_is_running = False
             set_runtime_phase_locked("failed")
             runtime.status = "Viser preview did not start."
             runtime.last_error = runtime.status
@@ -2198,8 +2279,15 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
 
     preview_html = _viser_iframe(port, scene_hash)
     with runtime_lock:
+        if (
+            runtime.run_token != token
+            or runtime.scene_preview_process is not preview_process
+        ):
+            terminate_process_group(preview_process)
+            return
         runtime.scene_preview_process = preview_process
         runtime.is_busy = False
+        runtime.scene_engine_is_running = False
         set_runtime_phase_locked("complete")
         runtime.status = "Scene generated successfully. Viser preview is ready."
         runtime.last_error = None
