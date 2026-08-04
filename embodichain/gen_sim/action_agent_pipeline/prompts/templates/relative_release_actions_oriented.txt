@@ -1,6 +1,0 @@
-- Direct final release object pose with requested orientation:
-  $release_pose_spec
-- Release-only Place:
-  $release_spec
-- Empty-hand retreat:
-  $retreat_spec

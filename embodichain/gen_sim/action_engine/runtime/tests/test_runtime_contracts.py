@@ -38,7 +38,10 @@ from embodichain.gen_sim.action_engine.domain import (
 )
 from embodichain.gen_sim.action_engine.env import agent_env as env_module
 from embodichain.gen_sim.action_engine.runtime.actions import AtomicActionAdapter
-from embodichain.gen_sim.action_engine.runtime.executor import ProgramExecutor
+from embodichain.gen_sim.action_engine.runtime.executor import (
+    ProgramExecutor,
+    _score_arm_candidate,
+)
 from embodichain.gen_sim.action_engine.runtime.grounding import ActionGrounder
 from embodichain.gen_sim.action_engine.runtime.loader import (
     load_agent_execution_program,
@@ -274,6 +277,7 @@ def test_documented_run_command_arguments_remain_compatible() -> None:
     assert args.regenerate is True
     assert args.headless is True
     assert args.seed == 17
+    assert args.runtime_backend == "independent"
 
 
 def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
@@ -315,6 +319,13 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         torch.tensor([True, False]),
         observed=torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
         target=torch.tensor([[0.1, 0.2, 0.3], [0.0, 0.0, 0.0]]),
+        metadata=[
+            {
+                "assigned_arm": "left_arm",
+                "physical_control_part": "physical_right_arm",
+            },
+            {"assigned_arm": None, "physical_control_part": None},
+        ],
     )
 
     episode_dir = tmp_path / "runtime_contract" / "run-1" / "episode_0003"
@@ -330,6 +341,8 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
     assert checkpoint["events"][0]["actions"][0]["motion_policy"][
         "obj_upright_direction"
     ] == [0.0, 0.0, 1.0]
+    assert checkpoint["events"][1]["assigned_arm"] == "left_arm"
+    assert checkpoint["events"][1]["physical_control_part"] == "physical_right_arm"
 
     rendered_documents: list[dict[str, Any]] = []
     visualization = ModuleType("embodichain.gen_sim.action_engine.graph_visualization")
@@ -468,8 +481,16 @@ def test_candidate_plan_is_reused_and_screens_downstream_targets(
     )
     plan_calls: list[GroundedAction] = []
 
-    def ground(action, step, *, arm, state, reference_eef_pose=None):
-        del reference_eef_pose
+    def ground(
+        action,
+        step,
+        *,
+        arm,
+        state,
+        reference_eef_pose=None,
+        orientation_reference_pose=None,
+    ):
+        del reference_eef_pose, orientation_reference_pose
         action_class = action["atomic_action_class"]
         target_pose = (
             _pose(0.0, 0.2, 0.85) if action_class == "MoveHeldObject" else None
@@ -531,6 +552,15 @@ def test_object_held_predicate_checks_live_gripper_and_tcp_geometry() -> None:
     assert bool(held[0])
     env.robot._qpos[:, env.left_eef_joints] = env.open_state
     assert not bool(
+        evaluate_predicate(
+            env,
+            {"type": "object_held", "object": "can"},
+            held_owners={"can": ["left_arm"]},
+            held_states={("can", "left_arm"): state},
+        )[0]
+    )
+    env.robot._qpos[:, env.left_eef_joints] = (env.open_state + env.close_state) / 2
+    assert bool(
         evaluate_predicate(
             env,
             {"type": "object_held", "object": "can"},
@@ -947,6 +977,151 @@ def test_arrange_line_builds_live_slots_for_compiler_operator_name() -> None:
     }
 
 
+def test_free_arrangement_matches_live_object_order_without_crossing() -> None:
+    entities = {
+        "table": _FakeEntity(
+            "table",
+            _pose(0.0, 0.0, 0.70),
+            _rect_vertices(0.60, 0.40, 0.02),
+        ),
+        "can_a": _FakeEntity(
+            "can_a",
+            _pose(0.0, 0.20, 0.78),
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+        "can_b": _FakeEntity(
+            "can_b",
+            _pose(0.0, 0.00, 0.78),
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+        "can_c": _FakeEntity(
+            "can_c",
+            _pose(0.0, -0.20, 0.78),
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "line",
+                        "operator": "arrange_line",
+                        "objects": ["can_a", "can_b", "can_c"],
+                        "actor": {"mode": "auto"},
+                        "goal": {
+                            "axis": "world_y",
+                            "order_constraint": "free",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        record_runtime=False,
+    )
+    arrangement = executor.arrangement
+
+    assert arrangement is not None
+    assert int(arrangement.assignments["line__01"][0]) == 2
+    assert int(arrangement.assignments["line__02"][0]) == 1
+    assert int(arrangement.assignments["line__03"][0]) == 0
+    assert arrangement.spacing[0] == pytest.approx(0.1648528)
+
+
+def test_arm_candidate_score_softly_penalizes_cross_zone_motion() -> None:
+    source = _pose(0.0, 0.30, 0.78)
+    target = _pose(0.0, 0.20, 0.78)
+    kwargs = {
+        "motion_cost": torch.tensor([torch.pi]),
+        "source_pose": source,
+        "target_pose": target,
+        "workspace_center_y": torch.tensor([0.0]),
+        "workspace_half_width": torch.tensor([0.40]),
+    }
+
+    left = _score_arm_candidate(arm="left_arm", **kwargs)
+    right = _score_arm_candidate(arm="right_arm", **kwargs)
+
+    assert left["normalized_motion_cost"][0] == pytest.approx(1.0)
+    assert left["pickup_crossing_penalty"][0] == pytest.approx(0.0)
+    assert left["placement_crossing_penalty"][0] == pytest.approx(0.0)
+    assert right["pickup_crossing_penalty"][0] > 0.0
+    assert right["placement_crossing_penalty"][0] > 0.0
+    assert right["total_cost"][0] > left["total_cost"][0]
+
+
+def test_preserve_grounding_uses_pre_pickup_orientation_reference() -> None:
+    entities = {
+        "table": _FakeEntity(
+            "table",
+            _pose(0.0, 0.0, 0.70),
+            _rect_vertices(0.60, 0.40, 0.02),
+        ),
+        "can_a": _FakeEntity(
+            "can_a",
+            _pose(0.0, -0.10, 0.78),
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+        "can_b": _FakeEntity(
+            "can_b",
+            _pose(0.0, 0.10, 0.78),
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "line",
+                        "operator": "arrange_line",
+                        "objects": ["can_a", "can_b"],
+                        "actor": {"mode": "auto"},
+                        "goal": {
+                            "axis": "world_y",
+                            "order_constraint": "free",
+                            "orientation_goal": "preserve",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    final_edge = next(
+        edge
+        for edge in executor.program.edges
+        if edge.id in step.edge_ids
+        and edge.actions[0]["atomic_action_class"] == "MoveHeldObject"
+        and edge.actions[0]["target_binding"].get("phase") == "final"
+    )
+    reference = entities[step.object_uid].get_local_pose(to_matrix=True)
+    disturbed = reference.clone()
+    disturbed[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    entities[step.object_uid]._pose = disturbed
+
+    grounded = executor.grounder.ground(
+        final_edge.actions[0],
+        step,
+        arm="left_arm",
+        state=WorldState(last_qpos=executor.env.robot.get_qpos()),
+        orientation_reference_pose=reference,
+    )
+
+    assert grounded.target_object_pose is not None
+    assert torch.allclose(
+        grounded.target_object_pose[:, :3, :3],
+        reference[:, :3, :3],
+    )
+
+
 def test_arrange_line_verifies_planar_slot_without_height_coupling() -> None:
     entities = {
         "table": _FakeEntity(
@@ -998,6 +1173,66 @@ def test_arrange_line_verifies_planar_slot_without_height_coupling() -> None:
 
     assert not bool(failed[0])
     assert bool(success[0])
+
+
+def test_arrange_line_rejects_preserve_orientation_drift() -> None:
+    rotated = _pose(0.0, -0.190, 0.755)
+    rotated[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    entities = {
+        "table": _FakeEntity(
+            "table",
+            _pose(0.0, 0.0, 0.70),
+            _rect_vertices(0.60, 0.40, 0.02),
+        ),
+        "can_a": _FakeEntity(
+            "can_a",
+            rotated,
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+        "can_b": _FakeEntity(
+            "can_b",
+            _pose(0.15, 0.0, 0.76),
+            _rect_vertices(0.03, 0.03, 0.06),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "line",
+                        "operator": "arrange_line",
+                        "objects": ["can_a", "can_b"],
+                        "actor": {"mode": "auto"},
+                        "goal": {
+                            "axis": "world_y",
+                            "order_constraint": "free",
+                            "orientation_goal": "preserve",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    executor._targets[step.id] = rotated[:, :3, 3].clone()
+    executor._orientation_references[step.id] = _pose(0.0, -0.190, 0.755)
+    executor._policies[step.id] = {
+        "line_axis_tolerance": 0.06,
+        "line_perpendicular_tolerance": 0.06,
+        "preserve_orientation_tolerance": torch.pi / 12,
+    }
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert bool(failed[0])
+    assert not bool(success[0])
 
 
 def test_shared_container_placements_receive_non_overlapping_live_slots() -> None:

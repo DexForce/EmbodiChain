@@ -26,7 +26,6 @@ import torch
 from embodichain.gen_sim.action_engine.protocol import ACTION_ENGINE_ENV_ID
 from embodichain.gen_sim.action_engine.runtime import (
     ProgramExecutor,
-    execute_pipeline_program,
     evaluate_predicate,
     load_agent_execution_program,
 )
@@ -49,7 +48,7 @@ class ActionEngineEnv(EmbodiedEnv):
         agent_config = kwargs.pop("agent_config", None)
         task_name = kwargs.pop("task_name", None)
         agent_config_path = kwargs.pop("agent_config_path", None)
-        runtime_backend = kwargs.pop("runtime_backend", "pipeline")
+        runtime_backend = kwargs.pop("runtime_backend", "independent")
         if not isinstance(agent_config, Mapping):
             raise ValueError("ActionEngineEnv requires an agent_config mapping.")
         if not isinstance(task_name, str) or not task_name:
@@ -59,10 +58,10 @@ class ActionEngineEnv(EmbodiedEnv):
         self.agent_config = dict(agent_config)
         self.agent_config_path = agent_config_path
         self.task_name = task_name
-        if runtime_backend not in {"pipeline", "independent"}:
+        if runtime_backend != "independent":
             raise ValueError(
-                "ActionEngineEnv runtime_backend must be 'pipeline' or "
-                f"'independent', got {runtime_backend!r}."
+                "ActionEngineEnv only supports its independent runtime, got "
+                f"{runtime_backend!r}."
             )
         self.runtime_backend = str(runtime_backend)
         self.last_execution: Any | None = None
@@ -327,15 +326,6 @@ class ActionEngineEnv(EmbodiedEnv):
             agent_config_path=self.agent_config_path,
             regenerate=regenerate,
         )
-        if self.runtime_backend == "pipeline":
-            self.last_execution = execute_pipeline_program(
-                program,
-                self,
-                run_id=kwargs.get("runtime_run_id"),
-                episode_index=int(kwargs.get("episode_index", 0)),
-                runtime_graph_renderer=kwargs.get("runtime_graph_renderer"),
-            )
-            return self.last_execution
         executor = ProgramExecutor(
             program,
             self,

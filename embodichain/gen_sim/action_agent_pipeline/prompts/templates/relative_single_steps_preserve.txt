@@ -1,7 +1,0 @@
-2. Move directly to the $release_step_label object pose, release, and retract without rotating:
-   - $active_slot: $place_spec
-   - $inactive_slot: null
-
-3. Return the active arm to its initial pose:
-   - $active_slot: $initial_spec
-   - $inactive_slot: null

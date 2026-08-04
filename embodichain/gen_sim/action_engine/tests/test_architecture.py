@@ -41,7 +41,7 @@ def _production_python_files() -> list[Path]:
     )
 
 
-def test_legacy_imports_are_isolated_to_runtime_adapters() -> None:
+def test_production_code_has_no_legacy_pipeline_imports() -> None:
     offenders: list[str] = []
     for path in _production_python_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -55,10 +55,7 @@ def test_legacy_imports_are_isolated_to_runtime_adapters() -> None:
             if any(name.startswith(_LEGACY_PACKAGE) for name in names):
                 offenders.append(path.relative_to(_PACKAGE_ROOT).as_posix())
                 break
-    assert offenders == [
-        "runtime/motion_policy.py",
-        "runtime/pipeline_backend.py",
-    ]
+    assert offenders == []
 
 
 def test_protocol_identifiers_are_new_and_stable() -> None:
@@ -92,14 +89,10 @@ def test_acceptance_manifest_covers_twenty_supported_tasks() -> None:
 
 
 def test_recovery_branch_stays_inside_temporary_physical_line_ceiling() -> None:
-    # P7 keeps 10,000 as the optimization target. During parity recovery, the
-    # explicit production-backend adapter temporarily raises the physical
-    # ceiling. This still prevents unbounded growth while the independent
-    # runtime is characterized and removed.
+    # Keep the owned planner, compiler, and runtime bounded as mature behavior
+    # is consolidated without copying the legacy route-level implementation.
     line_count = sum(
         len(path.read_text(encoding="utf-8").splitlines())
         for path in _production_python_files()
     )
-    # The main-sync adapter resolves semantic arms into the new per-control-part
-    # WorldState contract without weakening the independent runtime boundary.
     assert line_count <= 12_650, f"Action Engine production LOC grew to {line_count}"

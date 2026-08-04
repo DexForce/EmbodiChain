@@ -133,9 +133,7 @@ class LiveArrangementPlan:
         else:
             self.axis_index = 0 if self.axis in {"x", "world_x"} else 1
         self.perpendicular_index = 1 - self.axis_index
-        self.geometry = {
-            step.id: self._geometry(step.object_uid) for step in self.steps
-        }
+        self.geometry = {step.id: self._geometry(step) for step in self.steps}
         diameters = torch.stack(
             [self.geometry[step.id].radius * 2.0 for step in self.steps],
             dim=1,
@@ -150,18 +148,20 @@ class LiveArrangementPlan:
             ),
         )
         self.positions = self._make_slots()
-        self.assignments = {
-            step.id: torch.full(
-                (self.num_envs,),
-                int(step.goal.get("nominal_slot_index", index)),
-                dtype=torch.long,
-                device=self.device,
-            )
-            for index, step in enumerate(self.steps)
-        }
+        self.reassignment_reason: list[str | None] = [None] * self.num_envs
+        self.reassignment_cost = torch.full(
+            (self.num_envs,),
+            float("nan"),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.assignments = self._initial_slot_assignments()
         order_by = str(self.steps[0].goal.get("order_by", "explicit"))
         direction = str(self.steps[0].goal.get("order_direction", "given"))
-        if order_by == "size":
+        if order_by == "size" and not any(
+            step.goal.get("slot_constraint") == "free_reassignable"
+            for step in self.steps
+        ):
             for env_id in range(self.num_envs):
                 ordered = sorted(
                     self.steps,
@@ -179,8 +179,77 @@ class LiveArrangementPlan:
             for step in self.steps
         }
 
-    def _geometry(self, uid: str) -> _Geometry:
-        entity = _object(self.env, uid)
+    def _initial_slot_assignments(self) -> dict[str, torch.Tensor]:
+        """Match free-order objects to slots in their current spatial order."""
+        assignments = {
+            step.id: torch.full(
+                (self.num_envs,),
+                int(step.goal.get("nominal_slot_index", index)),
+                dtype=torch.long,
+                device=self.device,
+            )
+            for index, step in enumerate(self.steps)
+        }
+        free_steps = [
+            step
+            for step in self.steps
+            if step.goal.get("slot_constraint") == "free_reassignable"
+        ]
+        if not free_steps:
+            return assignments
+        required_slots = {
+            int(step.goal.get("nominal_slot_index", index))
+            for index, step in enumerate(self.steps)
+            if step.goal.get("slot_constraint") != "free_reassignable"
+        }
+        available_slots = [
+            slot_id
+            for slot_id in range(self.slot_count)
+            if slot_id not in required_slots
+        ]
+        if len(available_slots) != len(free_steps):
+            raise ValueError(
+                "Arrangement slot constraints do not define a one-to-one assignment."
+            )
+        axis_positions = {
+            step.id: _live_pose(self.env, step.object_uid)[:, self.axis_index, 3]
+            for step in free_steps
+        }
+        for env_id in range(self.num_envs):
+            ordered_steps = sorted(
+                free_steps,
+                key=lambda step: (
+                    float(axis_positions[step.id][env_id]),
+                    int(step.goal.get("nominal_slot_index", 0)),
+                    step.id,
+                ),
+            )
+            ordered_slots = sorted(
+                available_slots,
+                key=lambda slot_id: (
+                    float(self.positions[env_id, slot_id, self.axis_index]),
+                    slot_id,
+                ),
+            )
+            matching_cost = 0.0
+            changed = False
+            for step, slot_id in zip(ordered_steps, ordered_slots):
+                nominal = int(step.goal.get("nominal_slot_index", 0))
+                assignments[step.id][env_id] = slot_id
+                changed |= slot_id != nominal
+                matching_cost += abs(
+                    float(axis_positions[step.id][env_id])
+                    - float(self.positions[env_id, slot_id, self.axis_index])
+                )
+            if changed:
+                self.reassignment_reason[env_id] = (
+                    "free arrangement initialized from live spatial order"
+                )
+                self.reassignment_cost[env_id] = matching_cost
+        return assignments
+
+    def _geometry(self, step: SemanticStep) -> _Geometry:
+        entity = _object(self.env, step.object_uid)
         radii = []
         heights = []
         for env_id in range(self.num_envs):
@@ -188,9 +257,16 @@ class LiveArrangementPlan:
             half_extent = (
                 vertices.max(dim=0).values - vertices.min(dim=0).values
             ) * 0.5
-            # Use the two largest local extents so line slots remain safe even
-            # when an orientation policy lays a tall object onto its side.
-            radii.append(torch.linalg.vector_norm(torch.topk(half_extent, k=2).values))
+            if step.goal.get("orientation_goal", "preserve") == "preserve":
+                rotation = _live_pose(self.env, step.object_uid)[env_id, :3, :3]
+                rotated = vertices @ rotation.transpose(0, 1)
+                radii.append(torch.linalg.vector_norm(rotated[:, :2], dim=-1).max())
+            else:
+                # A non-preserve target may rotate the longest local dimension
+                # into the table plane, so retain the conservative bound.
+                radii.append(
+                    torch.linalg.vector_norm(torch.topk(half_extent, k=2).values)
+                )
             heights.append((vertices[:, 2].max() - vertices[:, 2].min()) * 0.5)
         return _Geometry(torch.stack(radii), torch.stack(heights))
 
@@ -337,6 +413,25 @@ class LiveArrangementPlan:
     def assign(self, env_id: int, assignment: Mapping[str, int]) -> None:
         for step_id, slot_id in assignment.items():
             self.assignments[step_id][env_id] = int(slot_id)
+
+    def metadata(self, step: SemanticStep, env_id: int) -> dict[str, Any]:
+        """Describe the live slot resolution used by one environment."""
+        nominal = int(step.goal.get("nominal_slot_index", 0))
+        resolved = int(self.assignments[step.id][env_id])
+        return {
+            "nominal_slot_index": nominal,
+            "resolved_slot_index": resolved,
+            "slot_constraint": str(step.goal.get("slot_constraint", "required")),
+            "slot_reassigned": resolved != nominal,
+            "reassignment_reason": self.reassignment_reason[env_id],
+            "matching_cost": (
+                float(self.reassignment_cost[env_id])
+                if torch.isfinite(self.reassignment_cost[env_id])
+                else None
+            ),
+            "spacing": float(self.spacing[env_id]),
+            "resolved_slot_position": self.positions[env_id, resolved].tolist(),
+        }
 
 
 class LivePlacementPlan:
@@ -502,6 +597,7 @@ class ActionGrounder:
         arm: str,
         state: WorldState,
         reference_eef_pose: torch.Tensor | None = None,
+        orientation_reference_pose: torch.Tensor | None = None,
     ) -> GroundedAction:
         action_class = str(action["atomic_action_class"])
         control = str(action.get("control", "arm"))
@@ -526,7 +622,12 @@ class ActionGrounder:
                 target: Any = GraspTarget(semantics=semantics)
             elif action_class == "CoordinatedPickment":
                 target_object_pose = self._semantic_target(
-                    step, object_pose, reference_pose, policy, phase="final"
+                    step,
+                    object_pose,
+                    reference_pose,
+                    policy,
+                    phase="final",
+                    orientation_reference_pose=orientation_reference_pose,
                 )
                 left_to_eef, right_to_eef = self._coordinated_grasps(
                     semantics, object_pose
@@ -555,7 +656,12 @@ class ActionGrounder:
         elif kind in {"semantic_goal", "coordinated_goal"}:
             phase = str(binding.get("phase", "final"))
             target_object_pose = self._semantic_target(
-                step, object_pose, reference_pose, policy, phase=phase
+                step,
+                object_pose,
+                reference_pose,
+                policy,
+                phase=phase,
+                orientation_reference_pose=orientation_reference_pose,
             )
             if action_class == "CoordinatedPickment":
                 semantics = self.semantics_factory(step.object_uid)
@@ -601,6 +707,7 @@ class ActionGrounder:
                 support_pose,
                 policy,
                 phase="final",
+                orientation_reference_pose=orientation_reference_pose,
             )
             target = CoordinatedPlacementTarget(
                 placing_object_target_pose=target_object_pose,
@@ -667,6 +774,7 @@ class ActionGrounder:
         policy: Mapping[str, Any],
         *,
         phase: str,
+        orientation_reference_pose: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if step.operator in {"arrange_line", "place_in_line"}:
             arrangement = self.arrangements.get(step.id)
@@ -678,7 +786,11 @@ class ActionGrounder:
                 phase=phase,
                 policy=policy,
             )
-            target[:, :3, :3] = self._target_rotation(step, object_pose)
+            target[:, :3, :3] = self._target_rotation(
+                step,
+                object_pose,
+                orientation_reference_pose=orientation_reference_pose,
+            )
             moved = _object(self.env, step.object_uid)
             for env_id in range(int(self.env.num_envs)):
                 bottom = self._rotated_local_z_min(
@@ -699,7 +811,11 @@ class ActionGrounder:
             target = placement.target(
                 step,
                 object_pose,
-                self._target_rotation(step, object_pose),
+                self._target_rotation(
+                    step,
+                    object_pose,
+                    orientation_reference_pose=orientation_reference_pose,
+                ),
                 surface_clearance=float(policy.get("surface_clearance", 0.003)),
             )
             if phase == "staging":
@@ -716,7 +832,11 @@ class ActionGrounder:
                 if initial is not None
                 else object_pose.clone()
             )
-            target[:, :3, :3] = self._target_rotation(step, target)
+            target[:, :3, :3] = self._target_rotation(
+                step,
+                target,
+                orientation_reference_pose=orientation_reference_pose,
+            )
             support_uid = str(step.goal.get("support_object", "table"))
             support = _object(self.env, support_uid)
             moved = _object(self.env, step.object_uid)
@@ -809,7 +929,11 @@ class ActionGrounder:
                     + vertices[:, :2].max(dim=0).values
                 ) * 0.5
 
-        target[:, :3, :3] = self._target_rotation(step, object_pose)
+        target[:, :3, :3] = self._target_rotation(
+            step,
+            object_pose,
+            orientation_reference_pose=orientation_reference_pose,
+        )
         if relation in {"on", "on_top", "on_top_of"} or root_stack_layer:
             support_uid = (
                 step.goal.get("reference_object")
@@ -859,9 +983,14 @@ class ActionGrounder:
         self,
         step: SemanticStep,
         object_pose: torch.Tensor,
+        *,
+        orientation_reference_pose: torch.Tensor | None = None,
     ) -> torch.Tensor:
         goal = str(step.goal.get("orientation_goal", "preserve"))
         if goal == "preserve":
+            if orientation_reference_pose is not None:
+                reference = _batched_pose(orientation_reference_pose, self.env)
+                return reference[:, :3, :3].clone()
             return object_pose[:, :3, :3].clone()
         if goal not in {"upright", "lay_flat", "axis_align"}:
             raise ValueError(f"Unsupported orientation_goal {goal!r}.")

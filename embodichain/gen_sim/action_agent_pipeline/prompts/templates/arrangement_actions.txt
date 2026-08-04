@@ -1,9 +1,0 @@
-### Atomic Action Class JSON Specs for $robot_display_name Line Arrangement
-
-The deterministic graph uses only the native atomic action class JSON specs
-shown below. Each object moves to an absolute collision-aware slot pose
-computed by the config-stage generator. Preserve-orientation steps move
-directly from the high pose to the final pose without a high alignment move.
-The non-active arm stays null for each object.
-
-$blocks

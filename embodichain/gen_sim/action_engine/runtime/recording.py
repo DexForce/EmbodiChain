@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -168,9 +169,12 @@ class RuntimeRecorder:
         *,
         observed: torch.Tensor | None,
         target: torch.Tensor | None,
+        metadata: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         if not self.enabled:
             return
+        if metadata is not None and len(metadata) != self.num_envs:
+            raise ValueError("Runtime step metadata must match num_envs.")
         for env_id in range(self.num_envs):
             event = {
                 "event": "semantic_step",
@@ -180,6 +184,8 @@ class RuntimeRecorder:
                 "target_position": _jsonable(target, env_id),
                 "time_utc": datetime.now(timezone.utc).isoformat(),
             }
+            if metadata is not None:
+                event.update(_jsonable(dict(metadata[env_id])))
             self.events[env_id].append(event)
             self._write_step_checkpoint(env_id, step, event)
 

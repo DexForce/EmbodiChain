@@ -21,7 +21,6 @@ from __future__ import annotations
 from .executor import ProgramExecutor
 from .loader import load_agent_execution_program, load_execution_program
 from .models import ExecutionProgram, ExecutionResult
-from .pipeline_backend import execute_pipeline_program, lower_to_pipeline_seed
 from .predicates import PREDICATE_TYPES, evaluate_predicate
 
 __all__ = [
@@ -29,9 +28,7 @@ __all__ = [
     "PREDICATE_TYPES",
     "ExecutionResult",
     "ProgramExecutor",
-    "execute_pipeline_program",
     "evaluate_predicate",
     "load_agent_execution_program",
     "load_execution_program",
-    "lower_to_pipeline_seed",
 ]

@@ -1,2 +1,0 @@
-- Direct orientation-preserving Place:
-  $place_spec

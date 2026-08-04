@@ -1,7 +1,0 @@
-### Atomic Action Class JSON Specs for $robot_display_name Object Manipulation
-
-The deterministic graph uses only the native atomic action class JSON specs
-below. The final state keeps every listed object in a closed gripper. It does
-not use `Place` or return a holding arm to its initial qpos.
-
-$blocks

@@ -146,6 +146,32 @@ def _arm_values(
     return values[0], values[1]
 
 
+def _gripper_has_closed(
+    env: Any,
+    gripper: torch.Tensor,
+    *,
+    tolerance: float,
+) -> torch.Tensor:
+    """Check closure intent without requiring an impossible empty-gripper pose."""
+    gripper = gripper.to(device=env.device, dtype=torch.float32)
+    open_state = getattr(env, "open_state", None)
+    close_state = getattr(env, "close_state", None)
+    reference = open_state if open_state is not None else close_state
+    if reference is None:
+        return _constant(env, False)
+    expected = torch.as_tensor(
+        reference,
+        dtype=torch.float32,
+        device=env.device,
+    ).flatten()
+    repeats = (gripper.shape[-1] + expected.numel() - 1) // expected.numel()
+    expected = expected.repeat(repeats)[: gripper.shape[-1]]
+    distance = torch.linalg.vector_norm(gripper - expected, dim=-1)
+    if open_state is not None:
+        return distance > tolerance
+    return distance <= tolerance
+
+
 def _object_held(
     env: Any,
     uid: str,
@@ -162,14 +188,10 @@ def _object_held(
         return result
     eef_values = _arm_values(env, "xpos")
     gripper_values = _arm_values(env, "gripper_state")
-    close = getattr(env, "close_state", None)
-    if eef_values is None or gripper_values is None or close is None:
+    if eef_values is None or gripper_values is None:
         return result
 
     object_pose = _pose(env, uid)
-    expected_close = torch.as_tensor(
-        close, dtype=torch.float32, device=env.device
-    ).flatten()
     for arm_index, arm in enumerate(("left_arm", "right_arm")):
         if required_arm is not None and arm != required_arm:
             continue
@@ -197,12 +219,10 @@ def _object_held(
             )
             <= position_tolerance
         )
-        gripper = gripper.to(device=env.device, dtype=torch.float32)
-        expected = expected_close
-        repeats = (gripper.shape[-1] + expected.numel() - 1) // expected.numel()
-        expected = expected.repeat(repeats)[: gripper.shape[-1]]
-        closed = (
-            torch.linalg.vector_norm(gripper - expected, dim=-1) <= gripper_tolerance
+        closed = _gripper_has_closed(
+            env,
+            gripper,
+            tolerance=gripper_tolerance,
         )
         owned = torch.tensor(
             [item == arm for item in owners[uid]],
@@ -237,14 +257,10 @@ def _coordinated_held(
         return result
     eef_values = _arm_values(env, "xpos")
     gripper_values = _arm_values(env, "gripper_state")
-    close = getattr(env, "close_state", None)
-    if eef_values is None or gripper_values is None or close is None:
+    if eef_values is None or gripper_values is None:
         return result
 
     object_pose = _pose(env, uid)
-    expected_close = torch.as_tensor(
-        close, dtype=torch.float32, device=env.device
-    ).flatten()
     result = _constant(env, True)
     for arm_index, transform_name in enumerate(
         ("left_object_to_eef", "right_object_to_eef")
@@ -266,13 +282,10 @@ def _coordinated_held(
             )
             <= position_tolerance
         )
-        gripper = gripper.to(device=env.device, dtype=torch.float32)
-        repeats = (
-            gripper.shape[-1] + expected_close.numel() - 1
-        ) // expected_close.numel()
-        expected = expected_close.repeat(repeats)[: gripper.shape[-1]]
-        closed = (
-            torch.linalg.vector_norm(gripper - expected, dim=-1) <= gripper_tolerance
+        closed = _gripper_has_closed(
+            env,
+            gripper,
+            tolerance=gripper_tolerance,
         )
         result &= position_ok & closed
     return result

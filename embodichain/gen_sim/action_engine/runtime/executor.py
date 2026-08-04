@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import logging
 from threading import RLock
 from typing import Any
@@ -48,12 +48,18 @@ from .robot_parts import arm_control_part
 
 __all__ = ["ProgramExecutor"]
 
+_ARM_CROSSING_DEADBAND_RATIO = 0.08
+_ARM_PICKUP_CROSSING_WEIGHT = 1.0
+_ARM_PLACEMENT_CROSSING_WEIGHT = 1.5
+_ARM_MOTION_COST_SCALE = torch.pi
+
 
 @dataclass
 class _Candidate:
     feasible: torch.Tensor
     cost: torch.Tensor
     plans: dict[str, tuple[GroundedAction, ActionOutcome]]
+    score_components: dict[str, torch.Tensor] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
 
 
@@ -62,6 +68,41 @@ class _EdgeResult:
     actions: list[torch.Tensor]
     failed: torch.Tensor
     grounded: list[GroundedAction]
+
+
+def _score_arm_candidate(
+    *,
+    arm: str,
+    motion_cost: torch.Tensor,
+    source_pose: torch.Tensor,
+    target_pose: torch.Tensor | None,
+    workspace_center_y: torch.Tensor,
+    workspace_half_width: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    """Combine motion length with soft, table-normalized cross-zone costs."""
+    arm_sign = 1.0 if arm == "left_arm" else -1.0
+    deadband = workspace_half_width * _ARM_CROSSING_DEADBAND_RATIO
+
+    def crossing(pose: torch.Tensor | None, weight: float) -> torch.Tensor:
+        if pose is None:
+            return torch.zeros_like(motion_cost)
+        lateral = pose[:, 1, 3] - workspace_center_y
+        wrong_side_depth = torch.clamp(
+            -arm_sign * lateral - deadband,
+            min=0.0,
+        )
+        return weight * torch.square(wrong_side_depth / workspace_half_width)
+
+    normalized_motion = motion_cost / _ARM_MOTION_COST_SCALE
+    pickup_penalty = crossing(source_pose, _ARM_PICKUP_CROSSING_WEIGHT)
+    placement_penalty = crossing(target_pose, _ARM_PLACEMENT_CROSSING_WEIGHT)
+    return {
+        "motion_cost": motion_cost,
+        "normalized_motion_cost": normalized_motion,
+        "pickup_crossing_penalty": pickup_penalty,
+        "placement_crossing_penalty": placement_penalty,
+        "total_cost": normalized_motion + pickup_penalty + placement_penalty,
+    }
 
 
 _SPECULATIVE_LOG_LOCK = RLock()
@@ -178,6 +219,9 @@ class ProgramExecutor:
         self._candidate_diagnostics: dict[str, tuple[str, ...]] = {}
         self._reported_candidates: set[str] = set()
         self._targets: dict[str, torch.Tensor] = {}
+        self._target_poses: dict[str, torch.Tensor] = {}
+        self._orientation_references: dict[str, torch.Tensor] = {}
+        self._orientation_errors: dict[str, torch.Tensor] = {}
         self._policies: dict[str, dict[str, Any]] = {}
         self._payload_initial: dict[str, dict[str, torch.Tensor]] = {}
 
@@ -313,6 +357,11 @@ class ProgramExecutor:
                         step_success,
                         observed=observed,
                         target=self._targets.get(step.id),
+                        metadata=(
+                            self._step_runtime_metadata(step)
+                            if self.record_runtime
+                            else None
+                        ),
                     )
             record_dir = recorder.finalize(~aggregate_failed)
         except BaseException as exc:
@@ -355,6 +404,9 @@ class ProgramExecutor:
         self._candidate_diagnostics.clear()
         self._reported_candidates.clear()
         self._targets.clear()
+        self._target_poses.clear()
+        self._orientation_references.clear()
+        self._orientation_errors.clear()
         self._policies.clear()
         self._payload_initial.clear()
 
@@ -440,6 +492,7 @@ class ProgramExecutor:
         *,
         allow_rematch: bool = True,
     ) -> None:
+        self._capture_orientation_reference(step)
         if step.id in self._assignments:
             return
         mode = str(step.actor.get("mode", "auto"))
@@ -546,6 +599,8 @@ class ProgramExecutor:
         ):
             return
         steps = [self.steps[step_id] for step_id in step_ids]
+        for candidate_step in steps:
+            self._capture_orientation_reference(candidate_step)
         candidates = {
             (candidate_step.id, arm): self._candidate(candidate_step, arm, failed)
             for candidate_step in steps
@@ -620,14 +675,17 @@ class ProgramExecutor:
                 feasible=cached.feasible & ~failed,
                 cost=cached.cost,
                 plans=cached.plans,
+                score_components=cached.score_components,
                 warnings=cached.warnings,
             )
         feasible = ~failed.clone() & ~self._resource_conflicts(step, arm)
-        cost = torch.zeros(
+        motion_cost = torch.zeros(
             int(self.env.num_envs),
             dtype=torch.float32,
             device=self.env.device,
         )
+        source_pose = self._entity_pose(step.object_uid)
+        target_pose = None
         state = self._state_for(step, arm)
         reference_eef_pose = None
         plans: dict[str, tuple[GroundedAction, ActionOutcome]] = {}
@@ -646,6 +704,9 @@ class ProgramExecutor:
                         arm=arm,
                         state=state,
                         reference_eef_pose=reference_eef_pose,
+                        orientation_reference_pose=self._orientation_references.get(
+                            step.id
+                        ),
                     )
                     if grounded.action_class == "PickUp":
                         grounded = self._with_downstream_targets(
@@ -654,22 +715,43 @@ class ProgramExecutor:
                     outcome = self.adapter.plan(grounded, state)
                     plans[edge_id] = (grounded, outcome)
                     feasible &= outcome.success
-                    cost += outcome.cost
+                    motion_cost += outcome.cost
                     state = outcome.next_state
                     target = outcome.grounded.target_object_pose
                     if isinstance(target, torch.Tensor):
                         reference_eef_pose = self._eef_target(outcome)
+                        binding = edge.actions[0].get("target_binding", {})
+                        if (
+                            binding.get("kind")
+                            in {
+                                "semantic_goal",
+                                "coordinated_goal",
+                            }
+                            and binding.get("phase", "final") != "staging"
+                        ):
+                            target_pose = target
                     if not bool((feasible & ~failed).any()):
                         break
                 warnings.extend(captured)
         except Exception as exc:
             self._candidate_failures[(step.id, arm)] = f"{type(exc).__name__}: {exc}"
             feasible = torch.zeros_like(failed)
-            cost[:] = torch.inf
+            motion_cost[:] = torch.inf
+        center_y, half_width = self._arm_selection_workspace(step)
+        score_components = _score_arm_candidate(
+            arm=arm,
+            motion_cost=motion_cost,
+            source_pose=source_pose,
+            target_pose=target_pose,
+            workspace_center_y=center_y,
+            workspace_half_width=half_width,
+        )
+        cost = score_components["total_cost"]
         candidate = _Candidate(
             feasible=feasible,
             cost=cost,
             plans=plans,
+            score_components=score_components,
             warnings=tuple(warnings),
         )
         self._candidate_cache[(step.id, arm)] = candidate
@@ -677,8 +759,56 @@ class ProgramExecutor:
             feasible=feasible & ~failed,
             cost=cost,
             plans=plans,
+            score_components=score_components,
             warnings=tuple(warnings),
         )
+
+    def _arm_selection_workspace(
+        self,
+        step: SemanticStep,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the live table center and half-width along world-y."""
+        arrangement = self.arrangements.get(step.id)
+        if arrangement is not None:
+            minimum = arrangement.table_bounds[:, 0, 1]
+            maximum = arrangement.table_bounds[:, 1, 1]
+            return (minimum + maximum) * 0.5, (maximum - minimum) * 0.5
+        count = int(self.env.num_envs)
+        centers = torch.zeros(count, dtype=torch.float32, device=self.env.device)
+        half_widths = torch.full(
+            (count,),
+            0.5,
+            dtype=torch.float32,
+            device=self.env.device,
+        )
+        table = self.env.sim.get_rigid_object("table")
+        if table is None or not hasattr(table, "get_vertices"):
+            return centers, half_widths
+        table_pose = self._entity_pose("table")
+        for env_id in range(count):
+            value = table.get_vertices(env_ids=[env_id], scale=True)
+            if isinstance(value, (list, tuple)):
+                value = value[0]
+            vertices = torch.as_tensor(
+                value,
+                dtype=torch.float32,
+                device=self.env.device,
+            )
+            if vertices.ndim == 3 and vertices.shape[0] == 1:
+                vertices = vertices[0]
+            if vertices.ndim != 2 or vertices.shape[-1] != 3:
+                continue
+            world = (
+                vertices @ table_pose[env_id, :3, :3].transpose(0, 1)
+                + table_pose[env_id, :3, 3]
+            )
+            minimum = world[:, 1].min()
+            maximum = world[:, 1].max()
+            half_width = (maximum - minimum) * 0.5
+            if float(half_width) > 1.0e-6:
+                centers[env_id] = (minimum + maximum) * 0.5
+                half_widths[env_id] = half_width
+        return centers, half_widths
 
     def _report_candidates(
         self,
@@ -740,7 +870,13 @@ class ProgramExecutor:
             action = edge.actions[0]
             if action.get("atomic_action_class") != "MoveHeldObject":
                 continue
-            future = self.grounder.ground(action, step, arm=arm, state=state)
+            future = self.grounder.ground(
+                action,
+                step,
+                arm=arm,
+                state=state,
+                orientation_reference_pose=self._orientation_references.get(step.id),
+            )
             if future.target_object_pose is not None:
                 targets.append(future.target_object_pose)
         if not targets:
@@ -932,7 +1068,13 @@ class ProgramExecutor:
                 # Re-ground transport and placement from live simulator state;
                 # only the expensive, immediately executed PickUp is reusable.
                 grounded = self.grounder.ground(
-                    edge.actions[0], step, arm=arm, state=state
+                    edge.actions[0],
+                    step,
+                    arm=arm,
+                    state=state,
+                    orientation_reference_pose=self._orientation_references.get(
+                        step.id
+                    ),
                 )
                 outcome = self.adapter.plan(grounded, state)
             outcomes[arm] = outcome
@@ -1116,6 +1258,7 @@ class ProgramExecutor:
             step,
             arm="coordinated",
             state=state,
+            orientation_reference_pose=self._orientation_references.get(step.id),
         )
         outcome = self.adapter.plan(grounded, state)
         self._step_states[(step.id, "coordinated")] = outcome.next_state
@@ -1168,6 +1311,7 @@ class ProgramExecutor:
                 step,
                 arm=arm,
                 state=state,
+                orientation_reference_pose=self._orientation_references.get(step.id),
             )
             outcome = self.adapter.plan(grounded, state)
             outcomes[arm] = outcome
@@ -1189,6 +1333,8 @@ class ProgramExecutor:
         failed: torch.Tensor,
     ) -> tuple[dict[str, _EdgeResult], torch.Tensor]:
         steps = [self.step_by_edge[edge.id] for edge in edges]
+        for step in steps:
+            self._capture_orientation_reference(step)
         candidates = {
             (step.id, arm): self._candidate(step, arm, failed)
             for step in steps
@@ -1300,7 +1446,73 @@ class ProgramExecutor:
         target = grounded.target_object_pose
         if target is not None:
             self._targets[step.id] = target[:, :3, 3].clone()
+            self._target_poses[step.id] = target.clone()
             self._policies[step.id] = grounded.motion_policy
+
+    def _capture_orientation_reference(self, step: SemanticStep) -> None:
+        """Freeze preserve orientation before speculative pickup can disturb it."""
+        if (
+            step.goal.get("orientation_goal", "preserve") == "preserve"
+            and step.id not in self._orientation_references
+        ):
+            self._orientation_references[step.id] = self._entity_pose(
+                step.object_uid
+            ).clone()
+
+    def _step_runtime_metadata(self, step: SemanticStep) -> list[dict[str, Any]]:
+        """Expose the live grounding and allocation decisions for diagnosis."""
+        observed_pose = self._entity_pose(step.object_uid)
+        assignments = self._assignments.get(
+            step.id,
+            [None] * int(self.env.num_envs),
+        )
+        target_pose = self._target_poses.get(step.id)
+        orientation_reference = self._orientation_references.get(step.id)
+        orientation_error = self._orientation_errors.get(step.id)
+        arrangement = self.arrangements.get(step.id)
+        result = []
+        for env_id, assignment in enumerate(assignments):
+            physical_part = assignment
+            if assignment in {"left_arm", "right_arm"}:
+                physical_part = arm_control_part(self.env, assignment)
+            candidate_scores = {}
+            for arm in ("left_arm", "right_arm"):
+                candidate = self._candidate_cache.get((step.id, arm))
+                if candidate is None:
+                    candidate_scores[arm] = None
+                    continue
+                scores = {
+                    name: float(values[env_id])
+                    for name, values in candidate.score_components.items()
+                }
+                candidate_scores[arm] = {
+                    "feasible": bool(candidate.feasible[env_id]),
+                    **scores,
+                    "failure": self._candidate_failures.get((step.id, arm)),
+                }
+            item: dict[str, Any] = {
+                "assigned_arm": assignment,
+                "physical_control_part": physical_part,
+                "observed_object_pose": observed_pose[env_id],
+                "final_target_pose": (
+                    None if target_pose is None else target_pose[env_id]
+                ),
+                "orientation_reference_pose": (
+                    None
+                    if orientation_reference is None
+                    else orientation_reference[env_id]
+                ),
+                "orientation_error": (
+                    None
+                    if orientation_error is None
+                    else float(orientation_error[env_id])
+                ),
+                "candidate_scores": candidate_scores,
+            }
+            if arrangement is not None:
+                item["arrangement"] = arrangement.metadata(step, env_id)
+            result.append(item)
+        return result
 
     def _verify_step(
         self,
@@ -1314,7 +1526,12 @@ class ProgramExecutor:
         entity = self.env.sim.get_rigid_object(step.object_uid)
         if entity is None:
             raise ValueError(f"Unknown semantic object {step.object_uid!r}.")
-        observed = entity.get_local_pose(to_matrix=True)[:, :3, 3]
+        observed_pose = torch.as_tensor(
+            entity.get_local_pose(to_matrix=True),
+            dtype=torch.float32,
+            device=self.env.device,
+        )
+        observed = observed_pose[:, :3, 3]
         active = ~failed
         if not bool(active.any()):
             success = torch.zeros_like(failed)
@@ -1436,6 +1653,30 @@ class ProgramExecutor:
                 satisfied = (delta[:, arrangement.axis_index] <= axis_tolerance) & (
                     delta[:, arrangement.perpendicular_index] <= perpendicular_tolerance
                 )
+                orientation_reference = self._orientation_references.get(step.id)
+                if (
+                    step.goal.get("orientation_goal", "preserve") == "preserve"
+                    and orientation_reference is not None
+                ):
+                    reference_rotation = orientation_reference[:, :3, :3].to(
+                        device=observed_pose.device,
+                        dtype=observed_pose.dtype,
+                    )
+                    relative = torch.bmm(
+                        reference_rotation.transpose(1, 2),
+                        observed_pose[:, :3, :3],
+                    )
+                    cosine = (
+                        relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0
+                    ) * 0.5
+                    orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
+                    self._orientation_errors[step.id] = orientation_error
+                    satisfied &= orientation_error <= float(
+                        policy.get(
+                            "preserve_orientation_tolerance",
+                            torch.pi / 12,
+                        )
+                    )
             else:
                 satisfied = (
                     torch.linalg.vector_norm(observed - target, dim=-1) <= tolerance

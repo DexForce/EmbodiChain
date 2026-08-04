@@ -1,7 +1,0 @@
-### Atomic Action Class JSON Specs for $robot_display_name Stacking
-
-The deterministic graph uses only the native atomic action class JSON specs
-shown below. Each object moves to the configured stack target computed by the
-config-stage generator. The non-active arm stays null for each object.
-
-$blocks

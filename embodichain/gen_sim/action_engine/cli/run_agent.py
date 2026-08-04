@@ -69,12 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--runtime-backend",
-        choices=("pipeline", "independent"),
-        default="pipeline",
-        help=(
-            "Execution backend. The mature action-agent pipeline is the default; "
-            "independent is retained for explicit characterization only."
-        ),
+        choices=("independent",),
+        default="independent",
+        help="Execution backend. Action Engine owns the production runtime.",
     )
     return parser
 

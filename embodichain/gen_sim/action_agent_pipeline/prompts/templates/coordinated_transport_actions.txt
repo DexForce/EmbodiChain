@@ -1,6 +1,0 @@
-### Atomic Action Class JSON Specs for $robot_display_name Coordinated Transport
-
-Use exactly the existing atomic-action sequence below. No new atomic action
-class is required or allowed.
-
-$action_lines
