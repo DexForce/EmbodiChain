@@ -34,7 +34,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface impor
 )
 
 
-def _aabb(minimum_x: float, minimum_y: float, maximum_x: float, maximum_y: float) -> np.ndarray:
+def _aabb(
+    minimum_x: float, minimum_y: float, maximum_x: float, maximum_y: float
+) -> np.ndarray:
     return np.array(
         [
             [minimum_x, minimum_y],
@@ -50,7 +52,9 @@ def _layout(object_id: str, x: float, y: float) -> dict[str, object]:
     return {"id": object_id, "pos": [x, 0.0, -y]}
 
 
-def _top_mesh(vertices_xy: list[tuple[float, float]], faces: list[list[int]], z: float) -> trimesh.Trimesh:
+def _top_mesh(
+    vertices_xy: list[tuple[float, float]], faces: list[list[int]], z: float
+) -> trimesh.Trimesh:
     return trimesh.Trimesh(
         vertices=np.array([[x, y, z] for x, y in vertices_xy], dtype=float),
         faces=np.array(faces, dtype=int),
@@ -74,9 +78,7 @@ def test_support_detector_preserves_an_l_shaped_support_contour() -> None:
 
 
 def test_support_detector_prefers_main_tabletop_over_small_higher_piece() -> None:
-    main = _top_mesh(
-        [(0, 0), (2, 0), (2, 2), (0, 2)], [[0, 1, 2], [0, 2, 3]], z=1.0
-    )
+    main = _top_mesh([(0, 0), (2, 0), (2, 2), (0, 2)], [[0, 1, 2], [0, 2, 3]], z=1.0)
     decoration = _top_mesh(
         [(0.25, 0.25), (0.75, 0.25), (0.75, 0.75), (0.25, 0.75)],
         [[0, 1, 2], [0, 2, 3]],
@@ -148,8 +150,10 @@ def test_layout_optimizer_resolves_a_simple_pair_overlap() -> None:
 
     refined_offsets = np.array(
         [
-            [refined[index]["pos"][0] - optimizer.assets_layout[index]["pos"][0],  # type: ignore[index]
-             optimizer.assets_layout[index]["pos"][2] - refined[index]["pos"][2]]  # type: ignore[index]
+            [
+                refined[index]["pos"][0] - optimizer.assets_layout[index]["pos"][0],  # type: ignore[index]
+                optimizer.assets_layout[index]["pos"][2] - refined[index]["pos"][2],
+            ]  # type: ignore[index]
             for index in range(2)
         ]
     )

@@ -37,7 +37,9 @@ def _layout(object_id: str, y: float) -> dict[str, object]:
     }
 
 
-def test_group_table_aligner_preserves_relative_vertical_offsets(tmp_path: Path) -> None:
+def test_group_table_aligner_preserves_relative_vertical_offsets(
+    tmp_path: Path,
+) -> None:
     trimesh.creation.box(extents=(2.0, 1.0, 2.0)).export(tmp_path / "table.glb")
     trimesh.creation.box(extents=(0.5, 1.0, 0.5)).export(tmp_path / "first.glb")
     trimesh.creation.box(extents=(0.5, 1.0, 0.5)).export(tmp_path / "second.glb")
@@ -56,7 +58,9 @@ def test_group_table_aligner_preserves_relative_vertical_offsets(tmp_path: Path)
     )
 
 
-def test_group_table_aligner_returns_empty_assets_without_mesh_loading(tmp_path: Path) -> None:
+def test_group_table_aligner_returns_empty_assets_without_mesh_loading(
+    tmp_path: Path,
+) -> None:
     table_layout = _layout("table", 0.0)
 
     aligned_table, aligned_assets = AssetsGroupTableAligner(
