@@ -22,6 +22,8 @@ from pathlib import Path
 import shutil
 from typing import Any
 
+from PIL import Image
+
 from embodichain.gen_sim.scene_engine.core.asset import Asset
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.table import Table
@@ -125,7 +127,7 @@ def segment_scene(
         if asset.mask_path is None:
             raise ValueError(f"Asset {asset.id!r} has no validated mask path.")
         asset_mask_paths.append(asset.mask_path)
-    table_validation_image_path = render_image_without_masks(
+    table_validation_image_path, asset_union_mask = render_image_without_masks(
         image_path=resolved_image_path,
         mask_paths=asset_mask_paths,
         output_path=Path(debug_output_root) / "table_validation_base.png",
@@ -134,6 +136,7 @@ def segment_scene(
     _segment_table(
         image_path=resolved_image_path,
         validation_image_path=table_validation_image_path,
+        label_avoid_mask=asset_union_mask,
         debug_output_root=debug_output_root,
         masks_output_root=masks_output_root,
         scene=scene,
@@ -151,6 +154,7 @@ def segment_scene(
 def _segment_table(
     image_path: str | Path,
     validation_image_path: str | Path,
+    label_avoid_mask: Image.Image,
     debug_output_root: str | Path,
     masks_output_root: str | Path,
     scene: Scene,
@@ -191,6 +195,7 @@ def _segment_table(
         candidates_image_path = render_numbered_mask_candidates(
             image_path=validation_image_path,
             candidates=candidates,
+            label_avoid_mask=label_avoid_mask,
             output_path=(
                 Path(debug_output_root)
                 / f"table_candidates_{prompt_label}.png"  # Render with prompt label, for easily debug.

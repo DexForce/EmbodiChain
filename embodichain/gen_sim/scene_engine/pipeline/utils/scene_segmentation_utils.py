@@ -23,6 +23,8 @@ from typing import Any
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
+from embodichain.utils.logger import log_warning
+
 
 @dataclass(frozen=True)
 class MaskCandidate:
@@ -160,8 +162,8 @@ def render_image_without_masks(
     mask_paths: list[str | Path],
     output_path: str | Path,
     removed_color: tuple[int, int, int] = (128, 128, 128),
-) -> Path:
-    """Replace all the other masks with gray color."""
+) -> tuple[Path, Image.Image]:
+    """Gray masked regions and return the image path with their combined mask."""
     image = Image.open(image_path).convert("RGB")
     ignored_mask = Image.new("L", image.size, 0)
     for mask_path in mask_paths:
@@ -174,7 +176,7 @@ def render_image_without_masks(
     resolved_output_path = Path(output_path).expanduser().resolve()
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     result.save(resolved_output_path)
-    return resolved_output_path
+    return resolved_output_path, ignored_mask
 
 
 def render_numbered_mask_candidates(
@@ -183,11 +185,13 @@ def render_numbered_mask_candidates(
     candidates: list[MaskCandidate],
     output_path: str | Path,
     mask_style: str = "fill",
+    label_avoid_mask: Image.Image | None = None,
 ) -> Path:
     """Overlay numbered mask candidates on their source image.
     Notice that:
         - mask_style can be either "fill" or "outline".
         - The label font and its background scale with the source image resolution.
+        - label_avoid_mask keeps labels outside known occluding regions.
     """
     if mask_style not in {"fill", "outline"}:
         raise ValueError("mask_style must be 'fill' or 'outline'.")
@@ -221,18 +225,51 @@ def render_numbered_mask_candidates(
 
     draw = ImageDraw.Draw(overlay)  # Initialize a draw object.
     font = _load_label_font(image.size)
+    if label_avoid_mask is not None:
+        label_blocked_mask = label_avoid_mask.convert("L")
+        _require_image_size(label_blocked_mask, image.size)
+    else:
+        label_blocked_mask = None
+    label_occupied_mask = Image.new("L", image.size, 0)
     for candidate, mask in decoded_masks:
         bbox = mask.getbbox()
         if bbox is None:
             raise ValueError(
                 f"Image Segmentation Server candidate {candidate.index} has an empty mask."
             )
+        center = (
+            ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+            if label_blocked_mask is None
+            else _find_label_center_inside_bbox(
+                candidate_mask=mask,
+                candidate_bbox=bbox,
+                blocked_mask=ImageChops.lighter(
+                    label_blocked_mask, label_occupied_mask
+                ),
+                label=str(candidate.index),
+                font=font,
+            )
+        )
+        if center is None:
+            # Keep every candidate selectable even when its AABB is entirely
+            # occluded. This is preferable to silently omitting its number.
+            log_warning(
+                "Could not place table-candidate label %s outside masked objects "
+                "while keeping it inside the candidate AABB; using the AABB center.",
+                candidate.index,
+            )
+            center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+        label_bounds = _number_label_bounds(
+            draw=draw, label=str(candidate.index), center=center, font=font
+        )
         _draw_number_label(
             draw=draw,
             label=str(candidate.index),
-            center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+            center=center,
             font=font,
         )
+        if label_blocked_mask is not None:
+            ImageDraw.Draw(label_occupied_mask).rectangle(label_bounds, fill=255)
 
     resolved_output_path = Path(output_path).expanduser().resolve()
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -248,9 +285,67 @@ def _require_image_size(mask: Image.Image, image_size: tuple[int, int]) -> None:
         )
 
 
+def _find_label_center_inside_bbox(
+    *,
+    candidate_mask: Image.Image,
+    candidate_bbox: tuple[int, int, int, int],
+    blocked_mask: Image.Image,
+    label: str,
+    font: ImageFont.ImageFont,
+) -> tuple[float, float] | None:
+    """Find the nearest label centre that stays in a candidate AABB and avoids masks."""
+    probe_draw = ImageDraw.Draw(Image.new("RGBA", candidate_mask.size))
+    bounds_at_origin = _number_label_bounds(
+        draw=probe_draw, label=label, center=(0.0, 0.0), font=font
+    )
+    minimum_x = candidate_bbox[0] - bounds_at_origin[0]
+    maximum_x = candidate_bbox[2] - 1 - bounds_at_origin[2]
+    minimum_y = candidate_bbox[1] - bounds_at_origin[1]
+    maximum_y = candidate_bbox[3] - 1 - bounds_at_origin[3]
+    if minimum_x > maximum_x or minimum_y > maximum_y:
+        return None
+
+    # Expand each blocked region by the label's largest half-extent, so testing
+    # one candidate centre guarantees the complete label rectangle stays clear.
+    label_radius = max(
+        -bounds_at_origin[0],
+        bounds_at_origin[2],
+        -bounds_at_origin[1],
+        bounds_at_origin[3],
+    )
+    blocked_centres = blocked_mask.filter(ImageFilter.MaxFilter(2 * label_radius + 1))
+    bbox_center = (
+        (candidate_bbox[0] + candidate_bbox[2]) / 2,
+        (candidate_bbox[1] + candidate_bbox[3]) / 2,
+    )
+    for require_candidate_mask in (True, False):
+        for step in (max(1, round(min(candidate_mask.size) / 512)), 1):
+            best_center: tuple[float, float] | None = None
+            best_distance_squared = float("inf")
+            for y_coordinate in range(minimum_y, maximum_y + 1, step):
+                for x_coordinate in range(minimum_x, maximum_x + 1, step):
+                    if blocked_centres.getpixel((x_coordinate, y_coordinate)):
+                        continue
+                    if require_candidate_mask and not candidate_mask.getpixel(
+                        (x_coordinate, y_coordinate)
+                    ):
+                        continue
+                    distance_squared = (x_coordinate - bbox_center[0]) ** 2 + (
+                        y_coordinate - bbox_center[1]
+                    ) ** 2
+                    if distance_squared < best_distance_squared:
+                        best_center = (float(x_coordinate), float(y_coordinate))
+                        best_distance_squared = distance_squared
+            if best_center is not None:
+                return best_center
+    return None
+
+
 def _mask_outer_outline(mask: Image.Image, image_size: tuple[int, int]) -> Image.Image:
     """Use dilation and subtraction to get the outer outline of a binary mask."""
-    outline_width = max(1, round(min(image_size) / 400))
+    # Asset-candidate images use outlines only; keep them visible at common
+    # image resolutions without obscuring the original object appearance.
+    outline_width = max(2, round(min(image_size) / 200))
     dilated_mask = mask.filter(ImageFilter.MaxFilter(outline_width * 2 + 1))
     return ImageChops.subtract(dilated_mask, mask)
 
@@ -320,21 +415,40 @@ def _draw_number_label(
     font: ImageFont.ImageFont,
 ) -> None:
     """Draw a numbered label with red background and white text at the given center position."""
+    label_bounds = _number_label_bounds(
+        draw=draw, label=label, center=center, font=font
+    )
+    label_box = draw.textbbox((0, 0), label, font=font)
+    label_width = label_box[2] - label_box[0]
+    label_height = label_box[3] - label_box[1]
+    x = center[0] - label_width / 2
+    y = center[1] - label_height / 2
+    draw.rectangle(
+        label_bounds,
+        fill=(220, 0, 0, 255),
+        outline=(255, 255, 255, 255),
+        width=max(1, round(max(label_width, label_height) / 12)),
+    )
+    draw.text((x, y), label, fill=(255, 255, 255, 255), font=font)
+
+
+def _number_label_bounds(
+    *,
+    draw: ImageDraw.ImageDraw,
+    label: str,
+    center: tuple[float, float],
+    font: ImageFont.ImageFont,
+) -> tuple[int, int, int, int]:
+    """Return the red label rectangle bounds for a label centre."""
     label_box = draw.textbbox((0, 0), label, font=font)
     label_width = label_box[2] - label_box[0]
     label_height = label_box[3] - label_box[1]
     padding = max(4, round(max(label_width, label_height) / 4))
     x = center[0] - label_width / 2
     y = center[1] - label_height / 2
-    draw.rectangle(
-        (
-            x - padding,
-            y - padding,
-            x + label_width + padding,
-            y + label_height + padding,
-        ),
-        fill=(220, 0, 0, 255),
-        outline=(255, 255, 255, 255),
-        width=max(1, padding // 3),
+    return (
+        round(x - padding),
+        round(y - padding),
+        round(x + label_width + padding),
+        round(y + label_height + padding),
     )
-    draw.text((x, y), label, fill=(255, 255, 255, 255), font=font)
