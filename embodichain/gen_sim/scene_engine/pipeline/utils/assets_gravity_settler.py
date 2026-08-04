@@ -24,13 +24,18 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import trimesh
 
+from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_object import (
+    ObjectPhysics,
+    SceneObject,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
     load_glb_mesh,
     transform_matrix_to_layout_object,
 )
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils.logger import log_info
 
@@ -43,20 +48,21 @@ class AssetsGravitySettlerConfig:
     settle_steps: int = 300  # Fixed number of simulator steps to execute.
     physics_dt: float = 1.0 / 100.0  # Physics timestep in seconds.
     sim_device: str = "cpu"  # Simulation device requested from EmbodiChain Lab.
-    max_convex_hull_num: int = 32  # VHACD hull budget for each collision mesh.
 
 
 class AssetsGravitySettler:
-    """Settle all assets together on one static table in a z-up simulation."""
+    """Settle all assets together on one kinematic table in a z-up simulation."""
 
     def __init__(
         self,
         *,
+        scene: Scene,
         table_layout: dict[str, object],
         assets_layout: list[dict[str, object]],
         geometry_root: str | Path,
         config: AssetsGravitySettlerConfig | None = None,
     ) -> None:
+        self.scene = scene
         self.table_layout = table_layout
         self.assets_layout = assets_layout
         self.geometry_root = Path(geometry_root).expanduser().resolve()
@@ -69,8 +75,6 @@ class AssetsGravitySettler:
             raise ValueError("Gravity-settle settle_steps must be positive.")
         if self.config.physics_dt <= 0.0:
             raise ValueError("Gravity-settle physics_dt must be positive.")
-        if self.config.max_convex_hull_num <= 0:
-            raise ValueError("Gravity-settle max_convex_hull_num must be positive.")
 
     def settle(self) -> list[dict[str, object]]:
         """Run gravity settling and return the resulting y-up asset layouts."""
@@ -81,12 +85,22 @@ class AssetsGravitySettler:
             return self.settled_assets_layout
 
         table_id = self._require_layout_id(self.table_layout, name="Table")
+        table_object = self._require_scene_object(table_id, kind="table")
         asset_ids: set[str] = set()
+        asset_objects_by_id: dict[str, SceneObject] = {}
         for asset_layout in self.assets_layout:
             asset_id = self._require_layout_id(asset_layout, name="Asset")
             if asset_id in asset_ids:
                 raise ValueError(f"Asset layouts contain duplicate id {asset_id!r}.")
             asset_ids.add(asset_id)
+            asset_objects_by_id[asset_id] = self._require_scene_object(
+                asset_id, kind="asset"
+            )
+        expected_asset_ids = {asset.id for asset in self.scene.assets}
+        if asset_ids != expected_asset_ids:
+            raise ValueError(
+                "Gravity-settle layouts must contain exactly the scene asset ids."
+            )
 
         y_up_to_z_up_matrix = np.eye(4)
         y_up_to_z_up_matrix[:3, :3] = np.array(
@@ -127,8 +141,7 @@ class AssetsGravitySettler:
         log_info(
             "Gravity settling started: "
             f"assets={len(prepared_assets)}, steps={self.config.settle_steps}, "
-            f"physics_dt={self.config.physics_dt:.4f} s, "
-            f"max_convex_hulls={self.config.max_convex_hull_num}."
+            f"physics_dt={self.config.physics_dt:.4f} s."
         )
         sim = SimulationManager(
             SimulationManagerCfg(
@@ -148,8 +161,9 @@ class AssetsGravitySettler:
                         self._simulation_euler_xyz_degrees(table_info["rigid_layout"])
                     ),
                     body_scale=tuple(table_info["y_up_scale"]),
-                    body_type="static",
-                    max_convex_hull_num=self.config.max_convex_hull_num,
+                    attrs=self._rigid_body_attrs(table_object.physics),
+                    body_type=table_object.physics.body_type,
+                    max_convex_hull_num=table_object.physics.max_convex_hull_num,
                     acd_method="vhacd",
                 )
             )
@@ -166,8 +180,13 @@ class AssetsGravitySettler:
                             self._simulation_euler_xyz_degrees(rigid_layout)
                         ),
                         body_scale=tuple(asset_info["y_up_scale"]),
-                        body_type="dynamic",
-                        max_convex_hull_num=self.config.max_convex_hull_num,
+                        attrs=self._rigid_body_attrs(
+                            asset_objects_by_id[asset_id].physics
+                        ),
+                        body_type=asset_objects_by_id[asset_id].physics.body_type,
+                        max_convex_hull_num=(
+                            asset_objects_by_id[asset_id].physics.max_convex_hull_num
+                        ),
                         acd_method="vhacd",
                     )
                 )
@@ -235,6 +254,36 @@ class AssetsGravitySettler:
                 z_up_layout.get("scale"), field_name="scale"
             ),
         }
+
+    def _require_scene_object(self, object_id: str, *, kind: str) -> SceneObject:
+        """Return one physics-ready scene object with the expected semantic kind."""
+        matching_objects = [
+            scene_object
+            for scene_object in self.scene.objects
+            if scene_object.id == object_id
+        ]
+        if len(matching_objects) != 1:
+            raise ValueError(
+                f"Gravity settling requires exactly one scene object {object_id!r}."
+            )
+        scene_object = matching_objects[0]
+        if scene_object.kind != kind:
+            raise ValueError(
+                f"Scene object {object_id!r} must have kind {kind!r} before "
+                "gravity settling."
+            )
+        if scene_object.physics is None:
+            raise ValueError(
+                f"Scene object {object_id!r} has no SimReady physics settings."
+            )
+        return scene_object
+
+    @staticmethod
+    def _rigid_body_attrs(physics: ObjectPhysics | None) -> RigidBodyAttributesCfg:
+        """Convert persisted SceneObject physics attributes into Lab config."""
+        if physics is None:
+            raise ValueError("Gravity settling requires SimReady physics settings.")
+        return RigidBodyAttributesCfg(**physics.attrs)
 
     @staticmethod
     def _mesh_to_z_up_world_for_aabb(

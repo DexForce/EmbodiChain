@@ -18,19 +18,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from embodichain.gen_sim.scene_engine.core.asset import Asset
-from embodichain.gen_sim.scene_engine.core.table import Table
+from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 
 
 @dataclass
 class Scene:
-    """A scene containing a table and zero or more assets."""
+    """A scene containing one table object and zero or more asset objects."""
 
-    table: Table | None = None
-    assets: list[Asset] = field(default_factory=list)
+    objects: list[SceneObject] = field(default_factory=list)
+
+    @property
+    def table(self) -> SceneObject | None:
+        """Return the sole table object, or ``None`` before understanding."""
+        tables = [scene_object for scene_object in self.objects if scene_object.kind == "table"]
+        if len(tables) > 1:
+            raise ValueError("A scene may contain only one table object.")
+        return tables[0] if tables else None
+
+    @property
+    def assets(self) -> list[SceneObject]:
+        """Return movable asset objects in their scene order."""
+        return [scene_object for scene_object in self.objects if scene_object.kind == "asset"]
 
     def to_dict(self) -> dict[str, object]:
-        return {
-            "table": self.table.to_dict() if self.table is not None else None,
-            "assets": [asset.to_dict() for asset in self.assets],
-        }
+        """Serialize the canonical object collection for debugging artifacts."""
+        return {"objects": [scene_object.to_dict() for scene_object in self.objects]}

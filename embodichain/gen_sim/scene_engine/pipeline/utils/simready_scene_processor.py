@@ -28,7 +28,28 @@ from scipy.spatial.transform import Rotation
 import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_object import (
+    ObjectPhysics,
+    SceneObject,
+)
 from embodichain.utils.logger import log_info
+
+_TABLE_PHYSICS_ATTRS = {
+    "mass": 10.0,  # Keep the table heavy if a simulator treats it as movable.
+    "static_friction": 0.95,  # Resist lateral sliding at table contacts.
+    "dynamic_friction": 0.9,  # Maintain high friction during sliding contacts.
+    "restitution": 0.01,  # Prevent a table contact from producing visible bounce.
+}
+_ASSET_PHYSICS_ATTRS = {
+    "mass": 0.01,  # Use a lightweight default for unconstrained generated assets.
+    "contact_offset": 0.003,  # Start contact detection slightly before mesh contact.
+    "rest_offset": 0.001,  # Keep a small stable separation after contact resolution.
+    "restitution": 0.01,  # Prevent generated assets from bouncing on the table.
+    "max_depenetration_velocity": 10.0,  # Cap corrective separation speed.
+    "min_position_iters": 32,  # Use extra position iterations for stable contacts.
+    "min_velocity_iters": 8,  # Use extra velocity iterations for stable contacts.
+}
+_FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and export.
 
 
 @dataclass(frozen=True)
@@ -68,10 +89,7 @@ class SimReadySceneProcessor:
         """Process the required scene table and return its SimReady layout."""
         if self.scene.table is None:
             raise ValueError("Cannot SimReady a scene without a table.")
-        self.simready_table_layout = self._process_object(
-            object_id=self.scene.table.id,
-            object_role="table",
-        )
+        self.simready_table_layout = self._process_object(self.scene.table)
         return self.simready_table_layout
 
     def process_assets(self) -> list[dict[str, object]]:
@@ -82,14 +100,14 @@ class SimReadySceneProcessor:
             if asset.id in asset_ids:
                 raise ValueError(f"Scene assets contain duplicate id {asset.id!r}.")
             asset_ids.add(asset.id)
-            processed_assets.append(
-                self._process_object(object_id=asset.id, object_role="asset")
-            )
+            processed_assets.append(self._process_object(asset))
         self.simready_assets_layout = processed_assets
         return self.simready_assets_layout
 
-    def _process_object(self, *, object_id: str, object_role: str) -> dict[str, object]:
+    def _process_object(self, scene_object: SceneObject) -> dict[str, object]:
         """Canonicalize one coarse object and write its SimReady GLB."""
+        object_id = scene_object.id
+        object_role = scene_object.kind
         if object_role not in {"table", "asset"}:
             raise ValueError(f"Unsupported SimReady object role {object_role!r}.")
         coarse_layout = self.coarse_layout_by_id.get(object_id)
@@ -109,8 +127,27 @@ class SimReadySceneProcessor:
             raise FileNotFoundError(
                 f"SimReady {object_role} geometry was not written: {output_path}"
             )
+        scene_object.simready_glb_path = str(output_path)
+        scene_object.physics = self._fixed_physics_for_kind(object_role)
         log_info(f"Created SimReady {object_role}: {object_id!r}.")
         return {"id": object_id, **simready_transform}
+
+    @staticmethod
+    def _fixed_physics_for_kind(kind: str) -> ObjectPhysics:
+        """Create the fixed initial physics profile for one SimReady object."""
+        if kind == "table":
+            return ObjectPhysics(
+                body_type="kinematic",
+                attrs=dict(_TABLE_PHYSICS_ATTRS),
+                max_convex_hull_num=_FIXED_MAX_CONVEX_HULL_NUM,
+            )
+        if kind == "asset":
+            return ObjectPhysics(
+                body_type="dynamic",
+                attrs=dict(_ASSET_PHYSICS_ATTRS),
+                max_convex_hull_num=_FIXED_MAX_CONVEX_HULL_NUM,
+            )
+        raise ValueError(f"Unsupported SceneObject kind {kind!r} for physics.")
 
     def _canonicalize_object_mesh(
         self,

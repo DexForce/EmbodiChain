@@ -27,12 +27,8 @@ import trimesh
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
-from embodichain.gen_sim.scene_engine.core.asset import Asset
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.table import Table
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
-)
+from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
 )
@@ -46,7 +42,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_gravity_settler impo
     AssetsGravitySettler,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
-    export_baked_layout_object_glbs,
     layout_object_to_transform_matrix,
     load_glb_mesh,
     quaternion_wxyz_to_euler_xyz_degrees,
@@ -68,7 +63,6 @@ def generate_scene_and_refine(
     output_root: str | Path,
     scene: Scene,
     *,
-    vlm_client: OpenAICompatibleVLM,
     geometry_generation_client: GeometryGenerationClient,
 ) -> Scene:
 
@@ -98,18 +92,35 @@ def generate_scene_and_refine(
         debug_output_root=debug_output_root,
         coarse_geometry_output_root=coarse_geometry_output_root,
         scene=scene,  # Use the masks which are kept in the scene data structure.
-        vlm_client=vlm_client,
         geometry_generation_client=geometry_generation_client,
     )
 
-    # Geometries refinement and layout refinement.
-    _refine_geometries_and_layout(
-        image_path=resolved_image_path,
-        debug_output_root=debug_output_root,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
+    # Simready all the assets(includes table).
+    # Treat table and assets seperately.
+    coarse_layout = _load_layout(coarse_geometry_output_root / "coarse_layout.json")
+    coarse_layout_by_id = {
+        layout_object["id"]: layout_object for layout_object in coarse_layout
+    }
+    simready_processor = SimReadySceneProcessor(
         scene=scene,
-        vlm_client=vlm_client,
+        coarse_layout_by_id=coarse_layout_by_id,
+        coarse_geometry_root=coarse_geometry_output_root,
+        simready_geometry_root=simready_geometry_output_root,
+    )
+    simready_assets_layout = simready_processor.process_assets()
+    simready_table_layout = simready_processor.process_table()
+    # Concat then save the table info and the assets info in one JSON file.
+    simready_layout = [simready_table_layout, *simready_assets_layout]
+    (simready_geometry_output_root / "simready_layout.json").write_text(
+        json.dumps(simready_layout, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    # Layout refinement will start with the table.
+    refined_table_layout, refined_assets_layout = _layout_refinement(
+        scene=scene,  # Update this data structure internally.
+        simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
+        debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
     )
 
     # Write the Updated scene JSON for debugging.
@@ -126,7 +137,6 @@ def _generate_coarse_results_from_masks(
     coarse_geometry_output_root: str | Path,
     scene: Scene,
     *,
-    vlm_client: OpenAICompatibleVLM,
     geometry_generation_client: GeometryGenerationClient,
 ) -> None:
 
@@ -185,97 +195,6 @@ def _generate_coarse_results_from_masks(
     return None
 
 
-def _refine_geometries_and_layout(
-    image_path: str | Path,
-    debug_output_root: str | Path,
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-    scene: Scene,
-    *,
-    vlm_client: OpenAICompatibleVLM,
-) -> None:
-
-    # Simready all the assets(includes table).
-    # Treat table and assets seperately.
-    # Notice that, currently the simready process is only
-    # scale + canonicalize the glb (no real-world scale, no physical attributes).
-
-    # Load the coarse layout.
-    coarse_layout = _load_layout(
-        Path(coarse_geometry_output_root) / "coarse_layout.json"
-    )
-    coarse_layout_by_id = {
-        layout_object["id"]: layout_object for layout_object in coarse_layout
-    }
-
-    simready_processor = SimReadySceneProcessor(
-        scene=scene,
-        coarse_layout_by_id=coarse_layout_by_id,
-        coarse_geometry_root=coarse_geometry_output_root,
-        simready_geometry_root=simready_geometry_output_root,
-    )
-    simready_assets_layout = simready_processor.process_assets()
-    simready_table_layout = simready_processor.process_table()
-    # Concat then save the table info and the assets info in one JSON file.
-    simready_layout = [simready_table_layout, *simready_assets_layout]
-    (Path(simready_geometry_output_root) / "simready_layout.json").write_text(
-        json.dumps(simready_layout, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    # Update the scene data structure with the simready glb paths.
-    _update_scene_simready_glb_paths(
-        scene=scene,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
-
-    # Layout refinement will start with the table.
-    refined_table_layout, refined_assets_layout = _layout_refinement(
-        scene=scene,
-        simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
-        debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
-        vlm_client=vlm_client,  # For some cases the heuristic method still faces some undeterministic issues.
-    )
-    # Update the scene data structure with the final y-up layout values.
-    _update_scene_final_y_up_layout(
-        scene=scene,
-        table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
-    )
-
-    # Only for debugging.
-    # Save the refined layout JSON.
-    refined_layout = [refined_table_layout, *refined_assets_layout]
-    (Path(debug_output_root) / "refined_layout.json").write_text(
-        json.dumps(refined_layout, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    # Then use export_baked_layout_object_glbs to export it for debugging.
-    export_baked_layout_object_glbs(
-        layout=refined_layout,
-        geometry_root=simready_geometry_output_root,
-        output_root=Path(debug_output_root) / "refined_baked_geometries",
-    )
-
-    return None
-
-
-def _update_scene_simready_glb_paths(
-    *,
-    scene: Scene,
-    simready_geometry_output_root: str | Path,
-) -> None:
-    """Store the canonicalized GLB path for every scene object."""
-    if scene.table is None:
-        raise ValueError("Cannot update SimReady paths without a table.")
-
-    geometry_root = Path(simready_geometry_output_root).expanduser().resolve()
-    for scene_object in [scene.table, *scene.assets]:
-        glb_path = geometry_root / f"{scene_object.id}.glb"
-        if not glb_path.is_file():
-            raise FileNotFoundError(f"SimReady geometry not found: {glb_path}")
-        scene_object.simready_glb_path = str(glb_path)
-
-
 def _update_scene_final_y_up_layout(
     *,
     scene: Scene,
@@ -306,7 +225,7 @@ def _update_scene_final_y_up_layout(
 
 
 def _copy_y_up_layout_to_scene_object(
-    scene_object: Table | Asset,
+    scene_object: SceneObject,
     layout_object: dict[str, object],
 ) -> None:
     """Copy one y-up layout object after validating its id and numeric vectors."""
@@ -335,7 +254,6 @@ def _layout_refinement(
     scene: Scene,
     simready_geometry_output_root: str | Path,
     debug_output_root: str | Path,
-    vlm_client: OpenAICompatibleVLM,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
 
     # 1. All layouts and geometries below are SimReady outputs. Do not mix a
@@ -482,12 +400,19 @@ def _layout_refinement(
     # Notice that: we do not consider the assets like a bottle, which should be standing on the table but laid down
     # after the simulation.
     gravity_settler = AssetsGravitySettler(
+        scene=scene,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
     refined_assets_layout = gravity_settler.settle()
 
+    # Update the scene data structure with the final y-up layout values.
+    _update_scene_final_y_up_layout(
+        scene=scene,
+        table_layout=refined_table_layout,
+        assets_layout=refined_assets_layout,
+    )
     return refined_table_layout, refined_assets_layout
 
 

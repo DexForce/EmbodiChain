@@ -100,59 +100,6 @@ def load_glb_mesh(glb_path: str | Path) -> trimesh.Trimesh:
     raise ValueError(f"GLB geometry is not a mesh: {resolved_glb_path}")
 
 
-def export_baked_layout_object_glbs(
-    layout: list[dict[str, object]],
-    geometry_root: str | Path,
-    output_root: str | Path,
-) -> list[Path]:
-    """Bake a layout into each object GLB and export them separately."""
-    if not layout:
-        raise ValueError("Cannot export objects without layout objects.")
-
-    resolved_geometry_root = Path(geometry_root).expanduser().resolve()
-    resolved_output_root = Path(output_root).expanduser().resolve()
-    resolved_output_root.mkdir(parents=True, exist_ok=True)
-    output_paths: list[Path] = []
-    for layout_object in layout:
-        object_id = layout_object.get("id")
-        if not isinstance(object_id, str) or not object_id:
-            raise ValueError("Layout object id must be a non-empty string.")
-        mesh_path = resolved_geometry_root / f"{object_id}.glb"
-        if not mesh_path.is_file():
-            raise FileNotFoundError(f"Geometry not found: {mesh_path}")
-
-        loaded_mesh = trimesh.load(mesh_path, process=False)
-        if isinstance(loaded_mesh, trimesh.Scene):
-            mesh = loaded_mesh.dump(concatenate=True)
-        elif isinstance(loaded_mesh, trimesh.Trimesh):
-            mesh = loaded_mesh
-        else:
-            raise ValueError(f"Coarse geometry is not a mesh: {mesh_path}")
-
-        mesh.apply_transform(layout_object_to_transform_matrix(layout_object))
-        output_path = resolved_output_root / f"{object_id}.glb"
-        mesh.export(output_path, file_type="glb")
-        if not output_path.is_file():
-            raise FileNotFoundError(
-                f"Baked coarse object was not written: {output_path}"
-            )
-        output_paths.append(output_path)
-    return output_paths
-
-
-def export_baked_coarse_object_glbs(
-    coarse_layout: list[dict[str, object]],
-    coarse_geometry_root: str | Path,
-    output_root: str | Path,
-) -> list[Path]:
-    """Bake the coarse layout into each object GLB and export them separately."""
-    return export_baked_layout_object_glbs(
-        layout=coarse_layout,
-        geometry_root=coarse_geometry_root,
-        output_root=output_root,
-    )
-
-
 def _three_floats(value: object, *, field_name: str) -> list[float]:
 
     # Validate whether the value is a list of three numeric values.
