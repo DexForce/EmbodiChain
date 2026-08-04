@@ -53,7 +53,8 @@ def cli_scene_engine(
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="embodichain scene-engine",
-        description="embodichain.gen_sim.scene_engine Scene Engine Pipeline",
+        description="Generate a Scene Engine export from one input image.",
+        epilog="Service settings are read from embodichain/gen_sim/.env.",
     )
     parser.add_argument(
         "--image",
