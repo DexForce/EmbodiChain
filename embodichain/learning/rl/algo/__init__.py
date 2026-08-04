@@ -23,13 +23,19 @@ from typing import Any, Dict, Tuple, Type
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from embodichain.learning.rl.utils import (
+    coerce_lr_scheduler_cfg,
+    coerce_optimizer_cfg,
+)
+
 from .apg import APG, APGCfg, segmented_discounted_return
-from .base import BaseAlgorithm
+from .base import BaseAlgorithm, RolloutKind
 from .common import compute_gae
 from .grpo import GRPO, GRPOCfg
 from .ppo import PPO, PPOCfg
 
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
+    "apg": (APGCfg, APG),
     "ppo": (PPOCfg, PPO),
     "grpo": (GRPOCfg, GRPO),
 }
@@ -37,6 +43,16 @@ _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
 
 def get_registered_algo_names() -> list[str]:
     return list(_ALGO_REGISTRY.keys())
+
+
+def _normalize_algo_cfg_kwargs(cfg_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce nested optimizer/scheduler mappings from YAML/JSON."""
+    normalized = dict(cfg_kwargs)
+    if "optimizer" in normalized:
+        normalized["optimizer"] = coerce_optimizer_cfg(normalized["optimizer"])
+    if "lr_scheduler" in normalized:
+        normalized["lr_scheduler"] = coerce_lr_scheduler_cfg(normalized["lr_scheduler"])
+    return normalized
 
 
 def build_algo(
@@ -48,20 +64,17 @@ def build_algo(
     distributed: bool = False,
 ):
     key = name.lower()
-    if key == "apg":
-        raise ValueError(
-            "APG uses differentiable rollouts and is not supported by the "
-            "standard build_algo()/train.py path. Construct APG with "
-            "DifferentiableTrainer directly, or use the experimental Newton "
-            "training entry point."
-        )
     if key not in _ALGO_REGISTRY:
         raise ValueError(
             f"Algorithm '{name}' not found. Available: {get_registered_algo_names()}"
         )
     CfgCls, AlgoCls = _ALGO_REGISTRY[key]
-    cfg = CfgCls(device=str(device), **cfg_kwargs)
+    cfg = CfgCls(device=str(device), **_normalize_algo_cfg_kwargs(cfg_kwargs))
     if distributed:
+        if AlgoCls.rollout_kind is RolloutKind.DIFFERENTIABLE:
+            raise ValueError(
+                "Differentiable algorithms do not support distributed training."
+            )
         if not (
             torch.distributed.is_available() and torch.distributed.is_initialized()
         ):
@@ -79,6 +92,7 @@ def build_algo(
 
 __all__ = [
     "BaseAlgorithm",
+    "RolloutKind",
     "APGCfg",
     "APG",
     "segmented_discounted_return",

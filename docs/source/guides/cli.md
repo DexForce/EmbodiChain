@@ -80,6 +80,11 @@ embodichain preview-asset \
 embodichain preview-asset \
     --asset_path /path/to/asset.usda \
     --headless
+
+# Control articulation joints in Viser
+embodichain preview-asset \
+    --asset_path /path/to/robot.urdf \
+    --viser
 ```
 
 ### Arguments
@@ -98,6 +103,12 @@ embodichain preview-asset \
 | ``--headless`` | ``False`` | Run without rendering window |
 | ``--renderer`` | ``hybrid`` | Renderer backend: ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |
+| ``--joint-control`` / ``--no-joint-control`` | ``True`` | Enable or disable articulation joint controls in Viser previews |
+
+The Viser articulation panel displays rotational joints in degrees and
+prismatic joints in meters. It excludes mimic joints, leaves articulations with
+unsupported multi-DOF mappings read-only, and provides per-articulation reset
+buttons. The native DexSim window does not yet expose these controls.
 
 ### Preview Mode
 
@@ -114,11 +125,12 @@ When ``--preview`` is enabled, an interactive REPL is available:
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
 
 Task environments are **auto-discovered**: any installed package that declares
-an ``embodichain.tasks`` entry point (e.g. the official ``embodichain_tasks``
-package) is imported at startup, registering its environments via
-``@register_env``. Make sure your task package is pip-installed
-(``pip install -e .``) so its tasks are visible to the CLI. The task to launch
-is selected by the ``"id"`` field of the gym config.
+an ``embodichain.tasks`` entry point is imported at startup, registering its
+environments via ``@register_env``. The main ``embodichain`` distribution
+already includes and registers the official ``embodichain_tasks`` import
+package, so no separate task installation is needed. Repository-style task
+config paths resolve from the source checkout or installed wheel. The task to
+launch is selected by the ``"id"`` field of the gym config.
 
 ```bash
 # Run an environment with a gym config file
@@ -351,8 +363,10 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agent
 |---|---|---|
 | ``--config`` | *(required)* | Path to the RL training config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
+| ``--profile`` | ``False`` | Same as ``run-env --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
+| ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
 
-Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
+See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
 
 ---
 

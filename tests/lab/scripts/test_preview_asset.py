@@ -20,10 +20,14 @@ import argparse
 
 from unittest.mock import Mock
 
+import pytest
+
 from embodichain.lab.scripts.preview_asset import (
     _create_parser,
     _publish_loaded_assets,
     _run_preview_mode,
+    _setup_viser_joint_control,
+    _step_preview_simulation,
     build_sim_cfg,
 )
 
@@ -55,6 +59,16 @@ def test_viser_arguments_enable_headless_browser_visualization() -> None:
     assert sim_cfg.visualization.viser_server.port == VISER_PORT
 
 
+def test_joint_control_is_enabled_by_default_and_can_be_disabled() -> None:
+    enabled = _create_parser().parse_args(["--asset_path", ASSET_PATH, "--viser"])
+    disabled = _create_parser().parse_args(
+        ["--asset_path", ASSET_PATH, "--viser", "--no-joint-control"]
+    )
+
+    assert enabled.joint_control is True
+    assert disabled.joint_control is False
+
+
 def test_loaded_assets_are_published_immediately_in_viser() -> None:
     """Assets added after manager construction should be captured before waiting."""
     sim = Mock()
@@ -73,6 +87,32 @@ def test_loaded_assets_are_not_published_without_viser() -> None:
     _publish_loaded_assets(sim, args)
 
     sim.capture_visualization_safely.assert_not_called()
+
+
+def test_viser_joint_controller_is_registered_before_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.scripts import preview_joint_control
+    from embodichain.lab.sim.objects import Articulation
+
+    controller = Mock(has_controls=True)
+    factory = Mock(return_value=controller)
+    monkeypatch.setattr(
+        preview_joint_control,
+        "ArticulationPreviewController",
+        factory,
+    )
+    runtime = Mock()
+    sim = Mock(visualization_runtime=runtime)
+    articulation = Mock(spec=Articulation)
+    args = argparse.Namespace(viser=True, joint_control=True)
+
+    result = _setup_viser_joint_control(sim, [object(), articulation], args)
+
+    assert result is controller
+    factory.assert_called_once_with([articulation], runtime)
+    controller.update.assert_called_once_with()
+    runtime.set_joint_control_provider.assert_called_once_with(controller)
 
 
 def test_viser_preview_stays_alive_when_simulation_is_headless() -> None:
@@ -94,3 +134,17 @@ def test_headless_check_exits_without_starting_update_loop() -> None:
     _run_preview_mode(sim, [], args)
 
     sim.update.assert_not_called()
+
+
+def test_joint_control_is_applied_before_each_preview_step() -> None:
+    events: list[str] = []
+    sim = Mock()
+    controller = Mock()
+    sim.update.side_effect = lambda **_: events.append("sim")
+    controller.update.side_effect = lambda: events.append("joint")
+
+    _step_preview_simulation(sim, controller, step=3)
+
+    assert events == ["joint", "sim", "joint", "sim", "joint", "sim"]
+    assert sim.update.call_count == 3
+    assert controller.update.call_count == 3

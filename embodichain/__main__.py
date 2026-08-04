@@ -54,7 +54,7 @@ COMMANDS = (
     Command(
         name="scene-engine",
         target="embodichain.gen_sim.scene_engine.cli.start:main",
-        help="Generate a scene export from an input image.",
+        help="Generate a scene export from an input image using gen_sim/.env.",
     ),
     Command(
         name="preview-scene",

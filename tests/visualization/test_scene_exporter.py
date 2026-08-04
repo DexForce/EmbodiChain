@@ -21,6 +21,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from embodichain.lab.visualization import (
+    JointControlSpec,
+    JointControlState,
     PointCloudOverlay,
     SceneExporter,
     SceneOverlays,
@@ -281,6 +283,38 @@ class _EmptySimulation:
         raise AssertionError(f"Unexpected sensor lookup: {uid}")
 
 
+class _JointControlProvider:
+    def __init__(self) -> None:
+        self.specs = tuple(
+            JointControlSpec(
+                control_id=f"joint-{env_id}",
+                articulation_uid="door",
+                env_id=env_id,
+                joint_id=0,
+                joint_name="hinge",
+                joint_type="revolute",
+                lower=-1.0,
+                upper=1.0,
+                step=0.01,
+                initial_value=0.0,
+            )
+            for env_id in range(2)
+        )
+
+    def joint_control_specs(self) -> tuple[JointControlSpec, ...]:
+        return self.specs
+
+    def joint_control_states(self) -> tuple[JointControlState, ...]:
+        return tuple(
+            JointControlState(
+                control_id=spec.control_id,
+                value=0.25 + spec.env_id,
+                applied_sequence=spec.env_id + 1,
+            )
+            for spec in self.specs
+        )
+
+
 class _Gizmo:
     target = SimpleNamespace(cfg=SimpleNamespace(uid="cube"))
     target_type = "rigid_object"
@@ -467,6 +501,23 @@ def test_empty_scene_can_publish_a_current_frame() -> None:
     assert manifest.nodes == ()
     assert result.frame.scene_revision == 1
     assert result.frame.positions.shape == (0, 3)
+
+
+def test_joint_control_provider_is_filtered_and_captured() -> None:
+    exporter = SceneExporter(
+        _EmptySimulation(),
+        VisualizationCfg(backend="viser", env_ids=[0]),
+        run_id="joint-run",
+    )
+    exporter.set_joint_control_provider(_JointControlProvider())
+
+    manifest = exporter.build_manifest()
+    result = exporter.capture(sim_step=1, sim_time=0.01)
+
+    assert [control.control_id for control in manifest.joint_controls] == ["joint-0"]
+    assert result.frame.joint_controls == (
+        JointControlState("joint-0", value=0.25, applied_sequence=1),
+    )
 
 
 def test_gizmo_manifest_and_authoritative_pose_are_exported() -> None:

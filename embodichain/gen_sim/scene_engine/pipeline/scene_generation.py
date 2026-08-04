@@ -22,29 +22,38 @@ from pathlib import Path
 import shutil
 
 import numpy as np
+import trimesh
 
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
-from embodichain.gen_sim.scene_engine.core.asset import Asset
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.table import Table
-from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
-    OpenAICompatibleVLM,
+from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
+    AssetsGroupSupportClamp,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner import (
+    AssetsGroupTableAligner,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
+    AssetsSupportLayoutOptimizer,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.assets_gravity_settler import (
+    AssetsGravitySettler,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
-    align_assets_group_to_table_aabb_top,
-    align_assets_to_table_aabb_top,  # Currently be replaced by align_assets_group_to_table_aabb_top.
-    export_baked_layout_object_glbs,
-    gravity_settle_assets_on_table,
-    heuristic_table_largest_internal_rectangle,
-    heuristic_table_support_surface,
     layout_object_to_transform_matrix,
-    make_assets_2d_aabb_inside_table_largest_rectangle,
+    load_glb_mesh,
     quaternion_wxyz_to_euler_xyz_degrees,
-    simready_object_glb,
     transform_matrix_to_layout_object,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_scene_processor import (
+    SimReadySceneProcessor,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
+    TableSupportSurfaceDetector,
+)
+from embodichain.utils.logger import log_info
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
@@ -54,7 +63,6 @@ def generate_scene_and_refine(
     output_root: str | Path,
     scene: Scene,
     *,
-    vlm_client: OpenAICompatibleVLM,
     geometry_generation_client: GeometryGenerationClient,
 ) -> Scene:
 
@@ -84,18 +92,35 @@ def generate_scene_and_refine(
         debug_output_root=debug_output_root,
         coarse_geometry_output_root=coarse_geometry_output_root,
         scene=scene,  # Use the masks which are kept in the scene data structure.
-        vlm_client=vlm_client,
         geometry_generation_client=geometry_generation_client,
     )
 
-    # Geometries refinement and layout refinement.
-    _refine_geometries_and_layout(
-        image_path=resolved_image_path,
-        debug_output_root=debug_output_root,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
+    # Simready all the assets(includes table).
+    # Treat table and assets seperately.
+    coarse_layout = _load_layout(coarse_geometry_output_root / "coarse_layout.json")
+    coarse_layout_by_id = {
+        layout_object["id"]: layout_object for layout_object in coarse_layout
+    }
+    simready_processor = SimReadySceneProcessor(
         scene=scene,
-        vlm_client=vlm_client,
+        coarse_layout_by_id=coarse_layout_by_id,
+        coarse_geometry_root=coarse_geometry_output_root,
+        simready_geometry_root=simready_geometry_output_root,
+    )
+    simready_assets_layout = simready_processor.process_assets()
+    simready_table_layout = simready_processor.process_table()
+    # Concat then save the table info and the assets info in one JSON file.
+    simready_layout = [simready_table_layout, *simready_assets_layout]
+    (simready_geometry_output_root / "simready_layout.json").write_text(
+        json.dumps(simready_layout, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    # Layout refinement will start with the table.
+    refined_table_layout, refined_assets_layout = _layout_refinement(
+        scene=scene,  # Update this data structure internally.
+        simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
+        debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
     )
 
     # Write the Updated scene JSON for debugging.
@@ -112,7 +137,6 @@ def _generate_coarse_results_from_masks(
     coarse_geometry_output_root: str | Path,
     scene: Scene,
     *,
-    vlm_client: OpenAICompatibleVLM,
     geometry_generation_client: GeometryGenerationClient,
 ) -> None:
 
@@ -171,104 +195,6 @@ def _generate_coarse_results_from_masks(
     return None
 
 
-def _refine_geometries_and_layout(
-    image_path: str | Path,
-    debug_output_root: str | Path,
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-    scene: Scene,
-    *,
-    vlm_client: OpenAICompatibleVLM,
-) -> None:
-
-    # Simready all the assets(includes table).
-    # Treat table and assets seperately.
-    # Notice that, currently the simready process is only
-    # scale + canonicalize the glb (no real-world scale, no physical attributes).
-
-    # Load the coarse layout.
-    coarse_layout = _load_layout(
-        Path(coarse_geometry_output_root) / "coarse_layout.json"
-    )
-    coarse_layout_by_id = {
-        layout_object["id"]: layout_object for layout_object in coarse_layout
-    }
-
-    # Simready all the assets.
-    simready_assets_layout = _simready_assets(
-        scene=scene,
-        coarse_layout_by_id=coarse_layout_by_id,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
-
-    # Simready the table.
-    simready_table_layout = _simready_table(
-        scene=scene,
-        coarse_layout_by_id=coarse_layout_by_id,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
-    # Concat then save the table info and the assets info in one JSON file.
-    simready_layout = [simready_table_layout, *simready_assets_layout]
-    (Path(simready_geometry_output_root) / "simready_layout.json").write_text(
-        json.dumps(simready_layout, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    # Update the scene data structure with the simready glb paths.
-    _update_scene_simready_glb_paths(
-        scene=scene,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
-
-    # Layout refinement will start with the table.
-    refined_table_layout, refined_assets_layout = _layout_refinement(
-        scene=scene,
-        simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
-        debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
-        vlm_client=vlm_client,  # For some cases the heuristic method still faces some undeterministic issues.
-    )
-    # Update the scene data structure with the final y-up layout values.
-    _update_scene_final_y_up_layout(
-        scene=scene,
-        table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
-    )
-
-    # Only for debugging.
-    # Save the refined layout JSON.
-    refined_layout = [refined_table_layout, *refined_assets_layout]
-    (Path(debug_output_root) / "refined_layout.json").write_text(
-        json.dumps(refined_layout, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    # Then use export_baked_layout_object_glbs to export it for debugging.
-    export_baked_layout_object_glbs(
-        layout=refined_layout,
-        geometry_root=simready_geometry_output_root,
-        output_root=Path(debug_output_root) / "refined_baked_geometries",
-    )
-
-    return None
-
-
-def _update_scene_simready_glb_paths(
-    *,
-    scene: Scene,
-    simready_geometry_output_root: str | Path,
-) -> None:
-    """Store the canonicalized GLB path for every scene object."""
-    if scene.table is None:
-        raise ValueError("Cannot update SimReady paths without a table.")
-
-    geometry_root = Path(simready_geometry_output_root).expanduser().resolve()
-    for scene_object in [scene.table, *scene.assets]:
-        glb_path = geometry_root / f"{scene_object.id}.glb"
-        if not glb_path.is_file():
-            raise FileNotFoundError(f"SimReady geometry not found: {glb_path}")
-        scene_object.simready_glb_path = str(glb_path)
-
-
 def _update_scene_final_y_up_layout(
     *,
     scene: Scene,
@@ -299,7 +225,7 @@ def _update_scene_final_y_up_layout(
 
 
 def _copy_y_up_layout_to_scene_object(
-    scene_object: Table | Asset,
+    scene_object: SceneObject,
     layout_object: dict[str, object],
 ) -> None:
     """Copy one y-up layout object after validating its id and numeric vectors."""
@@ -328,7 +254,6 @@ def _layout_refinement(
     scene: Scene,
     simready_geometry_output_root: str | Path,
     debug_output_root: str | Path,
-    vlm_client: OpenAICompatibleVLM,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
 
     # 1. All layouts and geometries below are SimReady outputs. Do not mix a
@@ -397,151 +322,161 @@ def _layout_refinement(
     # the table. This preserves the initial relative poses for the later
     # gravity simulation, which can settle individual assets physically.
 
-    # refined_table_layout, refined_assets_layout = align_assets_to_table_aabb_top(
-    #     table_layout=refined_table_layout,
-    #     assets_layout=refined_assets_layout,
-    #     geometry_root=simready_geometry_output_root,
-    # )
-    refined_table_layout, refined_assets_layout = align_assets_group_to_table_aabb_top(
+    group_table_aligner = AssetsGroupTableAligner(
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
+    refined_table_layout, refined_assets_layout = group_table_aligner.align()
+    if not refined_assets_layout:
+        log_info("Scene has no movable assets; skipping support-region clamping.")
+        return refined_table_layout, []
 
-    # 4.1. Get the table's support surface info.
-    # Return value format: in z-up world, the 2D convex-hull boundary coordinates.
+    # 4. Detect the actual upward support triangles instead of projecting the
+    # entire table mesh to one convex hull.  The result retains concavities
+    # (for example, an L-shaped tabletop) and is the only boundary used for
+    # placement below.
     (
-        table_support_surface_2d_z_up_world_boundary,
+        table_world_mesh_z_up,
         assets_aabb_2d_z_up_world_corners_by_id,
-        table_mesh_2d_z_up_world_projection,
-    ) = heuristic_table_support_surface(
+    ) = _measure_table_and_assets_in_z_up_world(
         table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,  # Render each asset's 2D AABB with its own id for checking whether any asset's AABB is outside the table's support surface.
-        geometry_root=simready_geometry_output_root,
-        debug_output_root=debug_output_root,  # Keep the support surface rendered image(s) for debugging.
-    )
-
-    # 4.2. Find the table's largest internal biggest rectangle. (AABB-aligned largest rectangle.)
-    # Notice that, this heuristic method assumes that the table does not have some big rotation angle around z-axis in z-up world.
-    # Render one image for debugging.
-    # This rectange is axis-aligned with the z-up world coordinate system.
-    table_largest_internal_rectangle_2d_z_up_world = heuristic_table_largest_internal_rectangle(
-        table_support_surface_2d_z_up_world_boundary=table_support_surface_2d_z_up_world_boundary,  # For computing the largest internal rectangle + rendering.
-        assets_aabb_2d_z_up_world_corners_by_id=assets_aabb_2d_z_up_world_corners_by_id,  # Only for rendering.
-        table_mesh_2d_z_up_world_projection=table_mesh_2d_z_up_world_projection,  # Only for rendering.
-        debug_output_root=debug_output_root,
-    )
-
-    # 6. Use the table's largest internal AABB-aligned rectange as boundary to do 2D AABB optimization,
-    # to let all the projected 2D AABBs of the assets inside this boundary, and keep them have no overlap
-    # with each other. (prepare for the next step: gravity simulation.)
-    # The assets layout will only update their x-y pos, and keep their z pos and rot unchanged. (do not forget the
-    # differences between y-up and z-up!)
-    refined_assets_layout = make_assets_2d_aabb_inside_table_largest_rectangle(
-        table_id=scene.table.id,
-        table_support_surface_2d_z_up_world_boundary=(
-            table_support_surface_2d_z_up_world_boundary
-        ),
-        table_mesh_2d_z_up_world_projection=table_mesh_2d_z_up_world_projection,
-        table_largest_internal_rectangle_2d_z_up_world=table_largest_internal_rectangle_2d_z_up_world,
-        assets_aabb_2d_z_up_world_corners_by_id=assets_aabb_2d_z_up_world_corners_by_id,
-        debug_output_root=debug_output_root,
         assets_layout=refined_assets_layout,
+        geometry_root=simready_geometry_output_root,
     )
+    support_detector = TableSupportSurfaceDetector(
+        table_world_mesh=table_world_mesh_z_up,
+        debug_output_root=debug_output_root,
+    )
+    table_support_region = support_detector.detect()
+    support_detector.save_support_surface_debug_images()
+
+    # 5. Keep the complete clutter rigid in the table plane.  A successful
+    # result applies one shared z-up XY delta to every AABB, so it preserves
+    # all existing asset-to-asset relations.  It is *not* an asset packing
+    # pass: pre-existing overlap is deliberately left to a later optimizer.
+    group_clamp = AssetsGroupSupportClamp(
+        support_region=table_support_region.support_polygon,
+        assets_aabb_2d_z_up_world_corners_by_id=(
+            assets_aabb_2d_z_up_world_corners_by_id
+        ),
+        assets_layout=refined_assets_layout,
+        debug_output_root=debug_output_root,
+    )
+    refined_assets_layout = group_clamp.clamp()
+    group_clamp.save_group_clamp_debug_images()
+
+    # The clamp returns y-up layouts; measure their resulting z-up AABBs again
+    # so the following independent optimizer consumes the same world-frame
+    # geometry as every other stage.
+    _, clamped_assets_aabb_2d_z_up_world_corners_by_id = (
+        _measure_table_and_assets_in_z_up_world(
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=simready_geometry_output_root,
+        )
+    )
+
+    # 6. Restore the previous pairwise AABB separation stage, but constrain
+    # every candidate with the actual support polygon rather than the legacy
+    # largest internal rectangle.  Assets may now move independently only as
+    # much as needed to remove overlap; every resulting AABB remains on the
+    # L-shaped, circular, or otherwise non-convex support region.
+    overlap_optimizer = AssetsSupportLayoutOptimizer(
+        support_region=table_support_region.support_polygon,
+        assets_aabb_2d_z_up_world_corners_by_id=(
+            clamped_assets_aabb_2d_z_up_world_corners_by_id
+        ),
+        assets_layout=refined_assets_layout,
+        debug_output_root=debug_output_root,
+    )
+    # Render this stage separately from the rigid group clamp.  The latter
+    # intentionally preserves pre-existing overlaps, while this figure shows
+    # whether independent AABB separation actually resolved them.
+    refined_assets_layout = overlap_optimizer.optimize()
+    overlap_optimizer.save_overlap_optimization_debug_images()
 
     # 7. Gravity simulation, to let all the assets to be stable and placed well on the table's support surface.
     # Notice that: we do not consider the assets like a bottle, which should be standing on the table but laid down
     # after the simulation.
-    refined_assets_layout = gravity_settle_assets_on_table(
+    gravity_settler = AssetsGravitySettler(
+        scene=scene,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
         geometry_root=simready_geometry_output_root,
     )
+    refined_assets_layout = gravity_settler.settle()
 
+    # Update the scene data structure with the final y-up layout values.
+    _update_scene_final_y_up_layout(
+        scene=scene,
+        table_layout=refined_table_layout,
+        assets_layout=refined_assets_layout,
+    )
     return refined_table_layout, refined_assets_layout
 
 
-def _simready_assets(
+def _measure_table_and_assets_in_z_up_world(
     *,
-    scene: Scene,
-    coarse_layout_by_id: dict[str, dict[str, object]],
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> list[dict[str, object]]:
-    # Batch process all the assets in the scene.
-    return [
-        _simready_asset(
-            asset_id=asset.id,
-            coarse_layout=coarse_layout_by_id.get(asset.id),
-            coarse_geometry_output_root=coarse_geometry_output_root,
-            simready_geometry_output_root=simready_geometry_output_root,
+    table_layout: dict[str, object],
+    assets_layout: list[dict[str, object]],
+    geometry_root: str | Path,
+) -> tuple[trimesh.Trimesh, dict[str, np.ndarray]]:
+    """Measure a table mesh and asset AABBs in one shared z-up world frame.
+
+    Scene layouts and SimReady GLBs are y-up.  The support detector and the
+    group clamp both operate in z-up world XY, so this conversion is performed
+    once here and the exact same measured AABBs are passed to the clamp.
+    """
+    table_id = table_layout.get("id")
+    if not isinstance(table_id, str) or not table_id:
+        raise ValueError("Table layout must contain a non-empty string id.")
+
+    y_up_to_z_up_matrix = np.eye(4)
+    y_up_to_z_up_matrix[:3, :3] = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    z_up_to_y_up_matrix = np.linalg.inv(y_up_to_z_up_matrix)
+    resolved_geometry_root = Path(geometry_root).expanduser().resolve()
+
+    def _mesh_in_z_up_world(layout_object: dict[str, object]) -> trimesh.Trimesh:
+        object_id = layout_object.get("id")
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError("Layout object must contain a non-empty string id.")
+        mesh = load_glb_mesh(resolved_geometry_root / f"{object_id}.glb")
+        z_up_layout = transform_matrix_to_layout_object(
+            object_id,
+            y_up_to_z_up_matrix
+            @ layout_object_to_transform_matrix(layout_object)
+            @ z_up_to_y_up_matrix,
         )
-        for asset in scene.assets
-    ]
+        mesh.apply_transform(y_up_to_z_up_matrix)
+        mesh.apply_transform(layout_object_to_transform_matrix(z_up_layout))
+        return mesh
 
-
-def _simready_asset(
-    *,
-    asset_id: str,
-    coarse_layout: dict[str, object] | None,
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> dict[str, object]:
-    # Hard code some asset like bottle, treat their z-axis carefully.
-    # For the table, treat it with the same strategy for now.
-    # Add asset-id-specific SimReady processing here before the generic path.
-    return _simready_object(
-        asset_id=asset_id,
-        coarse_layout=coarse_layout,
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
-
-
-def _simready_object(
-    *,
-    asset_id: str,
-    coarse_layout: dict[str, object] | None,
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> dict[str, object]:
-    if coarse_layout is None:
-        raise ValueError(f"Coarse layout does not contain object {asset_id!r}.")
-    simready_mesh, simready_transform = simready_object_glb(
-        Path(coarse_geometry_output_root) / f"{asset_id}.glb",
-        object_id=asset_id,
-        rot=coarse_layout.get("rot"),
-        pos=coarse_layout.get("pos"),
-        scale=coarse_layout.get("scale"),
-    )
-    output_path = Path(simready_geometry_output_root) / f"{asset_id}.glb"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    simready_mesh.export(output_path, file_type="glb")
-    if not output_path.is_file():
-        raise FileNotFoundError(
-            f"SimReady object geometry was not written: {output_path}"
+    table_world_mesh_z_up = _mesh_in_z_up_world(table_layout)
+    asset_aabbs_by_id: dict[str, np.ndarray] = {}
+    for asset_layout in assets_layout:
+        asset_id = asset_layout.get("id")
+        if not isinstance(asset_id, str) or not asset_id:
+            raise ValueError("Each asset layout must contain a non-empty string id.")
+        if asset_id in asset_aabbs_by_id:
+            raise ValueError(f"Asset layouts contain duplicate id {asset_id!r}.")
+        asset_bounds_xy = _mesh_in_z_up_world(asset_layout).bounds[:, :2]
+        asset_aabbs_by_id[asset_id] = np.array(
+            [
+                [asset_bounds_xy[0, 0], asset_bounds_xy[0, 1]],
+                [asset_bounds_xy[1, 0], asset_bounds_xy[0, 1]],
+                [asset_bounds_xy[1, 0], asset_bounds_xy[1, 1]],
+                [asset_bounds_xy[0, 0], asset_bounds_xy[1, 1]],
+            ],
+            dtype=float,
         )
-    return {"id": asset_id, **simready_transform}
-
-
-def _simready_table(
-    *,
-    scene: Scene,
-    coarse_layout_by_id: dict[str, dict[str, object]],
-    coarse_geometry_output_root: str | Path,
-    simready_geometry_output_root: str | Path,
-) -> dict[str, object]:
-    # There must be a table in one scene.
-    if scene.table is None:
-        raise ValueError("Cannot SimReady a scene without a table.")
-
-    # Using the same strategy as the normal assets first.
-    return _simready_object(
-        asset_id=scene.table.id,
-        coarse_layout=coarse_layout_by_id.get(scene.table.id),
-        coarse_geometry_output_root=coarse_geometry_output_root,
-        simready_geometry_output_root=simready_geometry_output_root,
-    )
+    return table_world_mesh_z_up, asset_aabbs_by_id
 
 
 def _load_layout(layout_path: str | Path) -> list[dict[str, object]]:

@@ -2102,17 +2102,34 @@ class WorkspaceAnalyzer:
             robot_name = Path(fpath).stem
         else:
             robot_name = config_class.removesuffix("Cfg")
+
+        def serialize_parameter(value):
+            if isinstance(value, Enum):
+                return value.value
+            if isinstance(value, np.ndarray):
+                return value.tolist()
+            if isinstance(value, dict):
+                return {
+                    serialize_parameter(key): serialize_parameter(item)
+                    for key, item in value.items()
+                }
+            if isinstance(value, (list, tuple)):
+                return [serialize_parameter(item) for item in value]
+            return value
+
         robot_parameters = {}
         for parameter_name in (
             "robot_type",
             "version",
-            "arm_kind",
             "with_default_eef",
+            "hand_types",
+            "hand_versions",
+            "hand_attach_xposes",
         ):
             if not hasattr(self.robot.cfg, parameter_name):
                 continue
             value = getattr(self.robot.cfg, parameter_name)
-            robot_parameters[parameter_name] = getattr(value, "value", value)
+            robot_parameters[parameter_name] = serialize_parameter(value)
         robot_info = {
             "name": robot_name,
             "config_class": config_class,

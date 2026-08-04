@@ -55,7 +55,7 @@ class GRPO(BaseAlgorithm[TensorDict]):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
+        self._setup_optimization(cfg, policy.parameters())
         if self.cfg.kl_coef > 0.0:
             raw_policy = getattr(policy, "module", policy)
             self.ref_policy = deepcopy(raw_policy).to(self.device).eval()
@@ -198,8 +198,10 @@ class GRPO(BaseAlgorithm[TensorDict]):
                 total_kl += kl.item() * weight
                 total_weight += weight
 
+        self._step_scheduler()
         return {
             "actor_loss": total_actor_loss / max(1.0, total_weight),
             "entropy": total_entropy / max(1.0, total_weight),
             "approx_ref_kl": total_kl / max(1.0, total_weight),
+            "learning_rate": self.current_learning_rate(),
         }

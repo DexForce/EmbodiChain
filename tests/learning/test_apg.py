@@ -39,6 +39,7 @@ from embodichain.learning.rl.collector import (
     DifferentiableTransition,
 )
 from embodichain.learning.rl.models import ActorOnly
+from embodichain.learning.rl.utils import LRSchedulerCfg, OptimizerCfg
 
 
 class _LinearDifferentiableEnv:
@@ -109,14 +110,17 @@ def _objective_at(weight: float) -> float:
     return segmented_discounted_return(rollout, gamma=0.9).mean().detach().item()
 
 
-def test_apg_is_not_registered_with_standard_trainer() -> None:
-    assert "apg" not in get_registered_algo_names()
-    with pytest.raises(ValueError, match="differentiable rollouts"):
+def test_apg_is_registered_with_differentiable_rollout_kind() -> None:
+    assert "apg" in get_registered_algo_names()
+    algorithm = build_algo("apg", {}, _make_policy(), torch.device("cpu"))
+    assert algorithm.rollout_kind.value == "differentiable"
+    with pytest.raises(ValueError, match="do not support distributed"):
         build_algo(
             "apg",
             {},
             _make_policy(),
             torch.device("cpu"),
+            distributed=True,
         )
 
 
@@ -200,7 +204,12 @@ def test_apg_update_improves_deterministic_objective() -> None:
     env = _LinearDifferentiableEnv()
     policy = _make_policy()
     algorithm = APG(
-        APGCfg(device="cpu", learning_rate=0.05, gamma=0.9, max_grad_norm=100.0),
+        APGCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(learning_rate=0.05),
+            gamma=0.9,
+            max_grad_norm=100.0,
+        ),
         policy,
     )
     collector = DifferentiableCollector(env, policy, env.device)
@@ -229,3 +238,65 @@ def test_apg_skips_nonfinite_update_without_changing_policy() -> None:
 
     assert metrics["skipped_update"] == 1.0
     assert torch.equal(policy.actor.weight, initial_weight)
+
+
+def test_apg_optimizer_is_configurable() -> None:
+    policy = _make_policy()
+    algorithm = APG(
+        APGCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(
+                name="adamw",
+                learning_rate=3e-4,
+                kwargs={"weight_decay": 1e-4},
+            ),
+        ),
+        policy,
+    )
+
+    assert isinstance(algorithm.optimizer, torch.optim.AdamW)
+    assert algorithm.optimizer.defaults["weight_decay"] == pytest.approx(1e-4)
+
+
+def test_apg_rejects_unknown_optimizer() -> None:
+    with pytest.raises(ValueError, match="Unsupported optimizer"):
+        APG(
+            APGCfg(
+                device="cpu",
+                optimizer=OptimizerCfg(name="not-an-optimizer"),
+            ),
+            _make_policy(),
+        )
+
+
+def test_apg_linear_scheduler_decays_on_valid_updates_only() -> None:
+    env = _LinearDifferentiableEnv()
+    policy = _make_policy()
+    algorithm = APG(
+        APGCfg(
+            device="cpu",
+            optimizer=OptimizerCfg(learning_rate=0.1),
+            lr_scheduler=LRSchedulerCfg(name="linear"),
+            gamma=0.9,
+            max_grad_norm=100.0,
+        ),
+        policy,
+    )
+    algorithm.bind_schedule(total_updates=4)
+    collector = DifferentiableCollector(env, policy, env.device)
+    initial_lr = algorithm.current_learning_rate()
+
+    algorithm.update(collector.collect(num_steps=2, deterministic=True))
+    after_valid = algorithm.current_learning_rate()
+    assert after_valid < initial_lr
+
+    skip_env = _NonFiniteRewardEnv()
+    lr_before_skip = algorithm.current_learning_rate()
+    skip_metrics = algorithm.update(
+        DifferentiableCollector(skip_env, policy, env.device).collect(
+            num_steps=1,
+            deterministic=True,
+        )
+    )
+    assert skip_metrics["skipped_update"] == 1.0
+    assert algorithm.current_learning_rate() == pytest.approx(lr_before_skip)

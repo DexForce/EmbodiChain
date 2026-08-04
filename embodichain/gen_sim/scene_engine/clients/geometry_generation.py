@@ -25,8 +25,8 @@ from typing import Any
 
 import requests
 
-_DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[1] / "configs" / "scene_engine_config.json"
+from embodichain.gen_sim.scene_engine.configs.environment import (
+    read_scene_engine_env_values,
 )
 
 
@@ -51,11 +51,9 @@ class GeometryGenerationClient:
         self._session = session or requests.Session()
 
     @classmethod
-    def from_config(
-        cls,
-        config_path: str | Path | None = None,
-    ) -> "GeometryGenerationClient":
-        return cls(**_load_config(config_path))
+    def from_dotenv(cls) -> "GeometryGenerationClient":
+        """Create a client from its required ``gen_sim/.env`` settings."""
+        return cls(**_load_dotenv_config())
 
     def check_health(self) -> None:
         last_error: Exception | None = None
@@ -96,9 +94,9 @@ class GeometryGenerationClient:
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Generate objects through the geometry server's mask-list endpoint.
 
-        The SAM3D service represents both one-object and multi-object jobs as one
+        The service represents both one-object and multi-object jobs as one
         image plus a multipart ``masks`` list. The number of list items is the
-        only difference, so keeping one implementation prevents the two client
+        only difference, so keeping one implementation prevents the client
         paths from drifting apart.
         """
 
@@ -123,7 +121,7 @@ class GeometryGenerationClient:
                 )
             resolved_object_masks.append((object_id, resolved_mask_path))
 
-        # Send one multipart image + masks request, matching test_sam3d_client.py.
+        # Send one multipart image + masks request.
         response_data, response_objects = self._request_objects(
             image_path=resolved_image_path,
             object_masks=resolved_object_masks,
@@ -141,7 +139,17 @@ class GeometryGenerationClient:
             resolved_object_masks,
             response_objects,
         ):
-            output_path = resolved_output_root / f"{object_id}.glb"
+            safe_object_id = Path(object_id).name
+            if (
+                safe_object_id != object_id
+                or "\\" in object_id
+                or object_id in {"", ".", ".."}
+            ):
+                raise ValueError(
+                    "Geometry generation object_id is not safe for a filename: "
+                    f"{object_id!r}"
+                )
+            output_path = resolved_output_root / f"{safe_object_id}.glb"
             self._download_glb(response_object["mesh"], output_path)
         return response_data, response_objects
 
@@ -208,7 +216,7 @@ class GeometryGenerationClient:
         ) from last_error
 
     def _wait_for_task_if_needed(self, response_data: object) -> dict[str, Any]:
-        """Poll a queued SAM3D job until it returns its final result."""
+        """Poll a queued geometry-generation job until it returns its result."""
         if not isinstance(response_data, dict):
             raise RuntimeError(
                 "Geometry Generation Server response must be a JSON object."
@@ -390,69 +398,51 @@ def _image_content_type(image_path: Path) -> str:
     return "image/png"
 
 
-def _load_config(config_path: str | Path | None) -> dict[str, Any]:
-    resolved_config_path = Path(config_path or _DEFAULT_CONFIG_PATH).expanduser()
-    resolved_config_path = resolved_config_path.resolve()
-    if not resolved_config_path.is_file():
-        raise FileNotFoundError(f"Config not found: {resolved_config_path}")
-
-    try:
-        config_data = json.loads(resolved_config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Config is not valid JSON: {resolved_config_path}") from exc
-
-    config = config_data.get("geometry_generation")
-    if not isinstance(config, dict):
-        raise ValueError("Config key geometry_generation must be an object.")
-
-    required_keys = (
-        "base_url",
-        "timeout_s",
-        "max_attempts",
-        "health_path",
-        "generate_objects_path",
+def _load_dotenv_config() -> dict[str, Any]:
+    values = read_scene_engine_env_values(
+        "SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH",
     )
-    missing = [key for key in required_keys if key not in config]
-    if missing:
-        raise ValueError(f"Missing Geometry Generation Server config keys: {missing}")
-
     try:
-        timeout_s = int(config["timeout_s"])
+        timeout_s = int(values["SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S"])
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            "Geometry Generation Server config timeout_s must be an integer."
+            "SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S must be an integer."
         ) from exc
     if timeout_s < 1:
         raise ValueError(
-            "Geometry Generation Server config timeout_s must be at least 1."
+            "SCENE_ENGINE_GEOMETRY_GENERATION_TIMEOUT_S must be at least 1."
         )
 
     try:
-        max_attempts = int(config["max_attempts"])
+        max_attempts = int(values["SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS"])
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            "Geometry Generation Server config max_attempts must be an integer."
+            "SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS must be an integer."
         ) from exc
     if max_attempts < 1:
         raise ValueError(
-            "Geometry Generation Server config max_attempts must be at least 1."
+            "SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS must be at least 1."
         )
 
     string_keys = (
-        "base_url",
-        "health_path",
-        "generate_objects_path",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH",
+        "SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH",
     )
     for key in string_keys:
-        if not isinstance(config[key], str) or not config[key].strip():
-            raise ValueError(
-                f"Geometry Generation Server config key {key} must be a non-empty string."
-            )
+        if not values[key].strip():
+            raise ValueError(f"Scene Engine .env key {key} must be a non-empty string.")
 
     return {
-        "base_url": config["base_url"].strip(),
+        "base_url": values["SCENE_ENGINE_GEOMETRY_GENERATION_BASE_URL"].strip(),
         "timeout_s": timeout_s,
         "max_attempts": max_attempts,
-        "health_path": config["health_path"].strip(),
-        "generate_objects_path": config["generate_objects_path"].strip(),
+        "health_path": values["SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH"].strip(),
+        "generate_objects_path": values[
+            "SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH"
+        ].strip(),
     }

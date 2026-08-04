@@ -34,6 +34,7 @@ from embodichain.learning.rl.differentiable_trainer import (
     DifferentiableTrainerCfg,
 )
 from embodichain.learning.rl.models import ActorOnly, MLP
+from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.utils import configclass
 
 from .planar_reach import NewtonPlanarReachEnv, NewtonPlanarReachEnvCfg
@@ -115,7 +116,7 @@ def train_planar_reach(
     algorithm = APG(
         APGCfg(
             device=cfg.device,
-            learning_rate=cfg.learning_rate,
+            optimizer=OptimizerCfg(learning_rate=cfg.learning_rate),
             gamma=0.99,
             max_grad_norm=10.0,
         ),

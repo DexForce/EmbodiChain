@@ -22,10 +22,6 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
-from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
-    ImageSegmentationClient,
-)
-
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
@@ -33,89 +29,59 @@ from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
 from embodichain.gen_sim.scene_engine.pipeline.scene_understanding import (
     understand_scene,
 )
-from embodichain.gen_sim.scene_engine.pipeline.scene_segmentation import (
-    segment_scene,
-)
-from embodichain.gen_sim.scene_engine.utils.logger import log_stage_end, log_stage_start
+from embodichain.utils.logger import log_info
 
 from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
     generate_scene_and_refine,
 )
-from embodichain.gen_sim.scene_engine.pipeline.scene_export import export_scene
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 
 
 def generate_scene_from_image(
     image_path: str | Path,
     output_root: str | Path,
-    *,
-    llm_config_path: str | Path | None = None,
-    image_segmentation_config_path: str | Path | None = None,
-    geometry_generation_config_path: str | Path | None = None,
 ) -> Scene:
     """Generate the initial core scene state from an input image."""
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
     # Initialize the VLM client and the Scene data structure.
-    vlm_client = OpenAICompatibleVLM.from_config(llm_config_path)
+    vlm_client = OpenAICompatibleVLM.from_dotenv()
     scene = Scene()
 
     # 1. Scene Understanding
-    log_stage_start("Scene Understanding")
+    log_info("Starting Scene Understanding")
     scene = understand_scene(
         scene=scene,
         image_path=image_path,
         output_root=resolved_output_root,
         vlm_client=vlm_client,
     )
-    log_stage_end("Scene Understanding")
+    log_info("Completed Scene Understanding")
 
-    # 2. Scene Segmentation
-    log_stage_start("Scene Segmentation")
-    # Load the config and fail if the Image Segmentation Server is unavailable.
-    image_segmentation_client = ImageSegmentationClient.from_config(
-        image_segmentation_config_path
-    )
-    try:
-        image_segmentation_client.check_health()  # Error raising will happen internally.
-        scene = segment_scene(
-            image_path=image_path,
-            output_root=resolved_output_root,
-            scene=scene,
-            vlm_client=vlm_client,
-            image_segmentation_client=image_segmentation_client,
-        )
-    finally:
-        image_segmentation_client.close()  # Kill the session to avoid resource leaks.
-    log_stage_end("Scene Segmentation")
-
-    # 3. Objects + Coarse Layout Generation
-    log_stage_start("Objects + Coarse Layout Generation")
-    # Load the config and fail if the Geometry Generation Server is unavailable.
-    geometry_generation_client = GeometryGenerationClient.from_config(
-        geometry_generation_config_path
-    )
+    # 2. Objects + Coarse Layout Generation
+    log_info("Starting Objects + Coarse Layout Generation")
+    # Load .env settings and fail if the Geometry Generation Server is unavailable.
+    geometry_generation_client = GeometryGenerationClient.from_dotenv()
     try:
         geometry_generation_client.check_health()  # Error raising will happen internally.
         scene = generate_scene_and_refine(
             image_path=image_path,
             output_root=resolved_output_root,
             scene=scene,
-            vlm_client=vlm_client,
             geometry_generation_client=geometry_generation_client,
         )
     finally:
         geometry_generation_client.close()  # Kill the session to avoid resource leaks.
-    log_stage_end("Objects + Coarse Layout Generation")
+    log_info("Completed Objects + Coarse Layout Generation")
 
-    # 4. Scene Export
-    log_stage_start("Scene Export")
-    export_scene(
+    # 3. Scene Export
+    log_info("Starting Scene Export")
+    scene_exporter = SceneExporter(
         scene=scene,
         output_root=resolved_output_root,
-        table_max_convex_hull_num=16,
-        asset_max_convex_hull_num=16,
     )
-    log_stage_end("Scene Export")
+    scene_exporter.export()
+    log_info("Completed Scene Export")
 
     return scene

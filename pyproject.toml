@@ -52,9 +52,27 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+scene-engine = [
+  "requests",
+  "Pillow",
+  "numpy",
+  "scipy",
+  "shapely",
+  "trimesh",
+  "open3d",
+  "matplotlib"
+]
 gensim = [
   "bpy",
-  "pyrender==0.1.45"
+  "pyrender==0.1.45",
+  "requests",
+  "Pillow",
+  "numpy",
+  "scipy",
+  "shapely",
+  "trimesh",
+  "open3d",
+  "matplotlib"
 ]
 # cuRobo V2 is distributed from its source repository and provides separate
 # dependency sets for CUDA 12 and CUDA 13. Keep it optional so CPU-only and
@@ -83,6 +101,9 @@ curobo-cu13-torch = [
 # workspace cache management.
 embodichain = "embodichain.__main__:main"
 
+[project.entry-points."embodichain.tasks"]
+embodichain_tasks = "embodichain_tasks"
+
 [tool.uv.sources]
 bpy = { index = "blender" }
 
@@ -93,9 +114,8 @@ url = "https://download.blender.org/pypi/"
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }
 
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["docs"]
+[tool.setuptools]
+include-package-data = false
 
 [tool.black]
 

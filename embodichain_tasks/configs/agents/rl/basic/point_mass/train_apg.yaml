@@ -1,0 +1,44 @@
+trainer:
+  exp_name: point_mass_apg
+  learning_env:
+    name: PointMassRL
+    cfg:
+      max_episode_steps: 100
+      success_threshold: 0.03
+  seed: 42
+  device: cuda:0
+  num_envs: 64
+  iterations: 500
+  segment_length: 100
+  update_horizon: 100
+  enable_eval: true
+  eval_freq: 32000
+  num_eval_envs: 32
+  num_eval_episodes: 128
+  eval_seed: 10042
+  best_eval_metric: eval/success_rate
+  best_eval_mode: max
+  save_frequency_updates: 50
+  use_wandb: false
+  wandb_project_name: embodichain-point-mass
+
+policy:
+  name: actor_only
+  initial_log_std: -2.0
+  actor:
+    type: mlp
+    network_cfg:
+      hidden_sizes: [64, 64]
+      activation: tanh
+      last_activation: tanh
+      orthogonal_init: [1.414, 1.414, 0.01]
+
+algorithm:
+  name: apg
+  cfg:
+    optimizer:
+      name: adam
+      learning_rate: 0.00025
+    gamma: 0.99
+    max_grad_norm: 0.5
+    ent_coef: 0.0
