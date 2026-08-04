@@ -27,6 +27,7 @@ from embodichain.lab.sim.robots.dexforce_w1.types import (
 from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
     get_default_w1_hand_version,
     get_w1_hand_spec,
+    normalize_w1_hand_mappings,
 )
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import URDFCfg
@@ -204,10 +205,11 @@ def build_dexforce_w1_assembly_urdf_cfg(
     """
 
     version = DexforceW1Version.parse(version)
-    hand_versions = {
-        DexforceW1ArmSide.parse(side): DexforceW1HandVersion.parse(hand_version)
-        for side, hand_version in (hand_versions or {}).items()
-    }
+    hand_types, hand_versions, hand_attach_xposes = normalize_w1_hand_mappings(
+        hand_types=hand_types,
+        hand_versions=hand_versions,
+        hand_attach_xposes=hand_attach_xposes,
+    )
 
     if fname is None:
         fname = get_w1_version_spec(version).assembly_name
@@ -360,10 +362,10 @@ def build_dexforce_w1_control_parts(
 ) -> dict[str, list[str]]:
     """Build control-part joint lists for a complete dual-arm W1."""
     version = DexforceW1Version.parse(version)
-    hand_versions = {
-        DexforceW1ArmSide.parse(side): DexforceW1HandVersion.parse(hand_version)
-        for side, hand_version in (hand_versions or {}).items()
-    }
+    hand_types, hand_versions, _ = normalize_w1_hand_mappings(
+        hand_types=hand_types,
+        hand_versions=hand_versions,
+    )
 
     arm_joints = {}
     for arm_side in DexforceW1ArmSide:

@@ -39,6 +39,10 @@ from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
     get_w1_hand_spec,
 )
 from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
+from embodichain.lab.sim.robots.dexforce_w1.utils import (
+    build_dexforce_w1_assembly_urdf_cfg,
+    build_dexforce_w1_control_parts,
+)
 from embodichain.lab.sim.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -76,6 +80,64 @@ def test_dexforce_w1_solver_cfg_is_srs_and_set_once():
 def test_dexforce_w1_rejects_unknown_fields():
     with pytest.raises(ValueError, match="Unknown DexforceW1 configuration fields"):
         DexforceW1Cfg.from_dict({"unsupported_variant": "value"})
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["hand_types", "hand_versions", "hand_attach_xposes"],
+)
+def test_w1_optional_hand_mapping_accepts_none(field_name):
+    cfg = DexforceW1Cfg.from_dict({field_name: None})
+
+    assert cfg.hand_types == {}
+    assert cfg.hand_versions == {
+        DexforceW1ArmSide.LEFT: DexforceW1HandVersion.V021,
+        DexforceW1ArmSide.RIGHT: DexforceW1HandVersion.V021,
+    }
+    assert cfg.hand_attach_xposes == {}
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["hand_types", "hand_versions", "hand_attach_xposes"],
+)
+def test_w1_optional_hand_mapping_rejects_non_mapping(field_name):
+    with pytest.raises(TypeError, match=f"{field_name} must be a mapping or None"):
+        DexforceW1Cfg.from_dict({field_name: []})
+
+
+def test_w1_builders_normalize_string_hand_mappings(monkeypatch, tmp_path):
+    _mock_w1_asset_paths(monkeypatch, tmp_path)
+    attach_xpos = np.eye(4)
+    attach_xpos[0, 3] = 0.123
+    hand_types = {"left": "DH_PGC_GRIPPER"}
+    hand_versions = {"left": "v021"}
+
+    urdf_cfg = build_dexforce_w1_assembly_urdf_cfg(
+        version="v025",
+        hand_types=hand_types,
+        hand_versions=hand_versions,
+        hand_attach_xposes={"left": attach_xpos},
+    )
+    control_parts = build_dexforce_w1_control_parts(
+        version="v025",
+        hand_types=hand_types,
+        hand_versions=hand_versions,
+        include_hand=True,
+    )
+
+    left_hand = urdf_cfg.components["left_hand"]
+    assert "DH_PGC_140_50" in left_hand["urdf_path"]
+    np.testing.assert_allclose(
+        left_hand["transform"],
+        get_w1_version_spec("v025").compose_eef_attach_xpos(
+            DexforceW1ArmSide.LEFT, attach_xpos
+        ),
+    )
+    assert control_parts["left_eef"] == [
+        "LEFT_FINGER1_JOINT",
+        "LEFT_FINGER2_JOINT",
+    ]
 
 
 @pytest.mark.parametrize(

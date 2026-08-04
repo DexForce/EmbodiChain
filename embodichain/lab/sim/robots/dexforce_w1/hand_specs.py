@@ -36,6 +36,7 @@ __all__ = [
     "W1HandSpec",
     "get_default_w1_hand_version",
     "get_w1_hand_spec",
+    "normalize_w1_hand_mappings",
 ]
 
 
@@ -82,6 +83,36 @@ class W1HandSpec:
                 f"Hand {self.brand.value} {self.version.value} has no "
                 f"{side.value} asset registered"
             ) from exc
+
+
+def normalize_w1_hand_mappings(
+    hand_types: Mapping | None = None,
+    hand_versions: Mapping | None = None,
+    hand_attach_xposes: Mapping | None = None,
+) -> tuple[dict, dict, dict]:
+    """Normalize optional side-keyed hand configuration mappings."""
+    fields = {
+        "hand_types": hand_types,
+        "hand_versions": hand_versions,
+        "hand_attach_xposes": hand_attach_xposes,
+    }
+    for field_name, value in fields.items():
+        if value is not None and not isinstance(value, Mapping):
+            raise TypeError(f"{field_name} must be a mapping or None")
+
+    normalized_types = {
+        DexforceW1ArmSide.parse(side): DexforceW1HandBrand.parse(brand)
+        for side, brand in (hand_types or {}).items()
+    }
+    normalized_versions = {
+        DexforceW1ArmSide.parse(side): DexforceW1HandVersion.parse(version)
+        for side, version in (hand_versions or {}).items()
+    }
+    normalized_attach_xposes = {
+        DexforceW1ArmSide.parse(side): np.asarray(transform, dtype=float)
+        for side, transform in (hand_attach_xposes or {}).items()
+    }
+    return normalized_types, normalized_versions, normalized_attach_xposes
 
 
 def _brainco_side(side: DexforceW1ArmSide) -> W1HandSideSpec:
