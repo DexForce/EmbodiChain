@@ -41,7 +41,7 @@ from embodichain.utils.logger import log_info
 from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
     generate_scene_and_refine,
 )
-from embodichain.gen_sim.scene_engine.pipeline.scene_export import export_scene
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 
 
 def generate_scene_from_image(
@@ -110,12 +110,11 @@ def generate_scene_from_image(
 
     # 4. Scene Export
     log_info("Starting Scene Export")
-    export_scene(
+    scene_exporter = SceneExporter(
         scene=scene,
         output_root=resolved_output_root,
-        table_max_convex_hull_num=16,
-        asset_max_convex_hull_num=16,
     )
+    scene_exporter.export()
     log_info("Completed Scene Export")
 
     return scene
