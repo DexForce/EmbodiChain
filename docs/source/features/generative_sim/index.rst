@@ -7,4 +7,3 @@ Generative Simulation collects EmbodiChain features for generating simulation-re
    :maxdepth: 2
 
    SimReady Asset Pipeline <simready_pipeline.md>
-   Scene Engine <scene_engine.md>
