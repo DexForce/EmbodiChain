@@ -23,6 +23,11 @@ from typing import Any
 
 import torch
 
+from embodichain.gen_sim.action_engine.config import (
+    RuntimePolicyCfg,
+    generation_defaults,
+    resolve_agent_runtime_policy,
+)
 from embodichain.gen_sim.action_engine.protocol import ACTION_ENGINE_ENV_ID
 from embodichain.gen_sim.action_engine.runtime import (
     ProgramExecutor,
@@ -37,7 +42,7 @@ from embodichain.lab.gym.utils.registration import register_env
 
 __all__ = ["ACTION_ENGINE_ENV_ID", "ActionEngineEnv"]
 
-_MAX_EPISODE_STEPS = 2000
+_MAX_EPISODE_STEPS = int(generation_defaults()["task"]["max_episode_steps"])
 
 
 @register_env(ACTION_ENGINE_ENV_ID, max_episode_steps=_MAX_EPISODE_STEPS)
@@ -49,6 +54,7 @@ class ActionEngineEnv(EmbodiedEnv):
         task_name = kwargs.pop("task_name", None)
         agent_config_path = kwargs.pop("agent_config_path", None)
         runtime_backend = kwargs.pop("runtime_backend", "independent")
+        runtime_policy = kwargs.pop("runtime_policy", None)
         if not isinstance(agent_config, Mapping):
             raise ValueError("ActionEngineEnv requires an agent_config mapping.")
         if not isinstance(task_name, str) or not task_name:
@@ -58,6 +64,11 @@ class ActionEngineEnv(EmbodiedEnv):
         self.agent_config = dict(agent_config)
         self.agent_config_path = agent_config_path
         self.task_name = task_name
+        if runtime_policy is None:
+            runtime_policy = resolve_agent_runtime_policy(self.agent_config)
+        if not isinstance(runtime_policy, RuntimePolicyCfg):
+            raise TypeError("ActionEngineEnv runtime_policy must be RuntimePolicyCfg.")
+        self.runtime_policy = runtime_policy
         if runtime_backend != "independent":
             raise ValueError(
                 "ActionEngineEnv only supports its independent runtime, got "
@@ -329,10 +340,19 @@ class ActionEngineEnv(EmbodiedEnv):
         executor = ProgramExecutor(
             program,
             self,
-            max_transitions=int(getattr(self, "action_engine_max_transitions", 1000)),
-            settle_steps=int(getattr(self, "action_engine_settle_steps", 10)),
+            max_transitions=(
+                int(self.action_engine_max_transitions)
+                if hasattr(self, "action_engine_max_transitions")
+                else None
+            ),
+            settle_steps=(
+                int(self.action_engine_settle_steps)
+                if hasattr(self, "action_engine_settle_steps")
+                else None
+            ),
             record_runtime=bool(getattr(self, "action_engine_record_runtime", True)),
             record_root=getattr(self, "action_engine_record_root", None),
+            runtime_policy=self.runtime_policy,
         )
         self.last_execution = executor.run(
             run_id=kwargs.get("runtime_run_id"),

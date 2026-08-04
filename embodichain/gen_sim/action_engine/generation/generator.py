@@ -25,6 +25,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_engine.config import (
+    generation_defaults,
+    resolve_agent_runtime_policy,
+)
 from embodichain.gen_sim.action_engine.protocol import (
     ACTION_ENGINE_CONFIG_SCHEMA,
     EXECUTION_PROGRAM_FILENAME,
@@ -39,6 +43,11 @@ from .source_scene import prepare_scene
 
 __all__ = ["generate_action_engine_config"]
 
+_GENERATION_DEFAULTS = generation_defaults()
+_TASK_DEFAULTS = _GENERATION_DEFAULTS["task"]
+_SCENE_DEFAULTS = _GENERATION_DEFAULTS["scene"]
+_DEFAULT_BODY_SCALE = tuple(float(value) for value in _SCENE_DEFAULTS["body_scale"])
+
 
 def generate_action_engine_config(
     gym_project: str | Path,
@@ -47,14 +56,14 @@ def generate_action_engine_config(
     task_name: str,
     task_description: str | None = None,
     task_agent: Mapping[str, Any] | str | Path | None = None,
-    robot_profile: str = "ur10",
+    robot_profile: str = str(_TASK_DEFAULTS["default_robot_profile"]),
     llm_model: str | None = None,
     source_scene_z_rotation_degrees: float | None = None,
-    body_scale_policy: str = "preserve",
-    body_scale: Sequence[float] = (1.0, 1.0, 1.0),
+    body_scale_policy: str = str(_SCENE_DEFAULTS["body_scale_policy"]),
+    body_scale: Sequence[float] = _DEFAULT_BODY_SCALE,
     overwrite: bool = False,
-    max_episodes: int = 1,
-    max_episode_steps: int = 2000,
+    max_episodes: int = int(_TASK_DEFAULTS["max_episodes"]),
+    max_episode_steps: int = int(_TASK_DEFAULTS["max_episode_steps"]),
     randomize_scene: bool = False,
     randomize_table_material: bool = False,
 ) -> GeneratedConfigPaths:
@@ -225,6 +234,7 @@ def _validate_agent_config(config: Mapping[str, Any]) -> None:
         raise ValueError("Agent config must point to the canonical Task Agent.")
     if config.get("execution_program") != EXECUTION_PROGRAM_FILENAME:
         raise ValueError("Agent config must point to the canonical Execution Program.")
+    resolve_agent_runtime_policy(config)
 
 
 def _raise_if_outputs_exist(output_dir: str | Path, *, overwrite: bool) -> None:

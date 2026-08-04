@@ -134,16 +134,27 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert config["robot"]["init_pos"][2] == pytest.approx(0.35)
     assert config["sensor"][0]["uid"] == "cam_high"
     assert config["env"]["extensions"]["agent_robot_profile"] == "dual_franka"
-    assert config["env"]["extensions"]["agent_grasp_runtime_defaults"][
-        "finger_length"
-    ] == pytest.approx(0.13)
+    assert "agent_grasp_runtime_defaults" not in config["env"]["extensions"]
+    assert config["env"]["extensions"]["arm_aim_yaw_offset"]["left"] == (
+        pytest.approx(3.141592653589793)
+    )
     assert config["env"]["extensions"]["action_engine"]["execution_program"] == (
         "seed_task_graph.json"
+    )
+    assert (
+        config["env"]["extensions"]["action_engine"]["defaults_schema_version"]
+        == "action_engine_defaults_v1"
     )
     registry = config["env"]["events"]["register_info_to_env"]["params"]["registry"]
     assert [entry["entity_cfg"]["uid"] for entry in registry] == ["interact_can"]
     assert "randomize_interact_can_pose" in config["env"]["events"]
     assert "randomize_table_height" in config["env"]["events"]
+    object_length = config["env"]["events"]["prepare_extra_attr"]["params"]["attrs"][0]
+    assert object_length["func_kwargs"]["sample_points"] == 5000
+    assert (
+        config["env"]["dataset"]["lerobot"]["params"]["robot_meta"]["control_freq"]
+        == 25
+    )
     assert config["env"]["observations"]["norm_robot_eef_joint"]["params"][
         "joint_ids"
     ] == list(range(14, 26))
@@ -357,6 +368,10 @@ def test_generation_calls_planner_compiler_and_renderer_once(
     assert agent_config["task_agent"] == "task_agent.json"
     assert agent_config["execution_program"] == "seed_task_graph.json"
     assert len(agent_config["execution_program_hash"]) == 64
+    assert agent_config["runtime_policy"]["schema_version"] == (
+        "action_engine_runtime_policy_v2"
+    )
+    assert len(agent_config["runtime_policy_hash"]) == 64
     assert "png" not in json.dumps(agent_config).lower()
 
 
@@ -371,6 +386,12 @@ def test_agent_config_uses_relative_program_paths(gym_export: Path) -> None:
     )
     assert config["task_agent"] == "task_agent.json"
     assert config["execution_program"] == "seed_task_graph.json"
+    assert config["runtime_policy"]["arm_selection"]["pickup_crossing_weight"] == 1.0
+    assert config["runtime_policy"]["motion_policies"]["default_pickup"][
+        "lift_height"
+    ] == pytest.approx(0.30)
+    assert config["runtime_policy"]["grasp"]["max_open_length"] == pytest.approx(0.115)
+    assert len(config["runtime_policy_hash"]) == 64
 
 
 def test_documented_cli_accepts_franka_profile() -> None:

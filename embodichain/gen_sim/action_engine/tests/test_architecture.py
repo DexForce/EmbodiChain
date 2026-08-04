@@ -91,8 +91,9 @@ def test_acceptance_manifest_covers_twenty_supported_tasks() -> None:
 def test_recovery_branch_stays_inside_temporary_physical_line_ceiling() -> None:
     # Keep the owned planner, compiler, and runtime bounded as mature behavior
     # is consolidated without copying the legacy route-level implementation.
+    # The additional allowance covers package-owned generation/runtime policy.
     line_count = sum(
         len(path.read_text(encoding="utf-8").splitlines())
         for path in _production_python_files()
     )
-    assert line_count <= 12_650, f"Action Engine production LOC grew to {line_count}"
+    assert line_count <= 13_250, f"Action Engine production LOC grew to {line_count}"

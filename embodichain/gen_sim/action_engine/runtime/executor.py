@@ -28,6 +28,12 @@ from typing import Any
 import numpy as np
 import torch
 
+from embodichain.gen_sim.action_engine.config import (
+    ArmSelectionPolicyCfg,
+    RuntimePolicyCfg,
+    default_runtime_policy,
+    runtime_policy_hash,
+)
 from embodichain.lab.sim.atomic_actions import WorldState
 from embodichain.utils import logger as project_logger
 from embodichain.utils.logger import log_info, log_warning
@@ -47,11 +53,6 @@ from .recording import RuntimeRecorder
 from .robot_parts import arm_control_part
 
 __all__ = ["ProgramExecutor"]
-
-_ARM_CROSSING_DEADBAND_RATIO = 0.08
-_ARM_PICKUP_CROSSING_WEIGHT = 1.0
-_ARM_PLACEMENT_CROSSING_WEIGHT = 1.5
-_ARM_MOTION_COST_SCALE = torch.pi
 
 
 @dataclass
@@ -78,10 +79,11 @@ def _score_arm_candidate(
     target_pose: torch.Tensor | None,
     workspace_center_y: torch.Tensor,
     workspace_half_width: torch.Tensor,
+    policy: ArmSelectionPolicyCfg,
 ) -> dict[str, torch.Tensor]:
     """Combine motion length with soft, table-normalized cross-zone costs."""
     arm_sign = 1.0 if arm == "left_arm" else -1.0
-    deadband = workspace_half_width * _ARM_CROSSING_DEADBAND_RATIO
+    deadband = workspace_half_width * float(policy.crossing_deadband_ratio)
 
     def crossing(pose: torch.Tensor | None, weight: float) -> torch.Tensor:
         if pose is None:
@@ -93,9 +95,12 @@ def _score_arm_candidate(
         )
         return weight * torch.square(wrong_side_depth / workspace_half_width)
 
-    normalized_motion = motion_cost / _ARM_MOTION_COST_SCALE
-    pickup_penalty = crossing(source_pose, _ARM_PICKUP_CROSSING_WEIGHT)
-    placement_penalty = crossing(target_pose, _ARM_PLACEMENT_CROSSING_WEIGHT)
+    normalized_motion = motion_cost / float(policy.motion_cost_scale)
+    pickup_penalty = crossing(source_pose, float(policy.pickup_crossing_weight))
+    placement_penalty = crossing(
+        target_pose,
+        float(policy.placement_crossing_weight),
+    )
     return {
         "motion_cost": motion_cost,
         "normalized_motion_cost": normalized_motion,
@@ -135,17 +140,32 @@ class ProgramExecutor:
         program: ExecutionProgram,
         env: Any,
         *,
-        max_transitions: int = 1000,
-        settle_steps: int = 10,
+        max_transitions: int | None = None,
+        settle_steps: int | None = None,
         record_runtime: bool = True,
         record_root: str | None = None,
+        runtime_policy: RuntimePolicyCfg | None = None,
     ) -> None:
         self.program = program
         self.env = env
-        self.max_transitions = int(max_transitions)
-        self.settle_steps = int(settle_steps)
         self.record_runtime = bool(record_runtime)
         self.record_root = record_root
+        if runtime_policy is None:
+            profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+            runtime_policy = default_runtime_policy(profile)
+        if not isinstance(runtime_policy, RuntimePolicyCfg):
+            raise TypeError("ProgramExecutor runtime_policy must be RuntimePolicyCfg.")
+        self.runtime_policy = runtime_policy
+        self.env.runtime_policy = runtime_policy
+        execution = runtime_policy.execution
+        self.max_transitions = int(
+            execution["max_transitions"] if max_transitions is None else max_transitions
+        )
+        self.settle_steps = int(
+            execution["semantic_step_settle_steps"]
+            if settle_steps is None
+            else settle_steps
+        )
         self.edges = {edge.id: edge for edge in program.edges}
         self.steps = {step.id: step for step in program.semantic_steps}
         self.step_by_edge = {
@@ -172,8 +192,18 @@ class ProgramExecutor:
         arrangement_groups: dict[str, list[SemanticStep]] = {}
         for step in arrangement_steps:
             arrangement_groups.setdefault(step.parent_step_id, []).append(step)
+        arrangement_policy = runtime_policy.grounding["arrangement"]
         plans = [
-            LiveArrangementPlan(env, steps) for steps in arrangement_groups.values()
+            LiveArrangementPlan(
+                env,
+                steps,
+                slot_margin=float(arrangement_policy["slot_margin"]),
+                minimum_spacing=float(arrangement_policy["minimum_spacing"]),
+                clearance=float(arrangement_policy["layout_clearance"]),
+                row_search_step=float(arrangement_policy["row_search_step"]),
+                row_search_radius=float(arrangement_policy["row_search_radius"]),
+            )
+            for steps in arrangement_groups.values()
         ]
         self.arrangements = {step.id: plan for plan in plans for step in plan.steps}
         # Retain the singular attribute as a convenient introspection hook for
@@ -191,20 +221,25 @@ class ProgramExecutor:
                     [],
                 ).append(step)
         placement_plans = [
-            LivePlacementPlan(env, steps)
+            LivePlacementPlan(
+                env,
+                steps,
+                clearance=float(runtime_policy.grounding["placement"]["clearance"]),
+            )
             for steps in placement_groups.values()
             if len(steps) > 1
         ]
         self.placements = {
             step.id: plan for plan in placement_plans for step in plan.steps
         }
-        self.adapter = AtomicActionAdapter(env)
+        self.adapter = AtomicActionAdapter(env, grasp_policy=runtime_policy.grasp)
         self.grounder = ActionGrounder(
             program,
             env,
             self.adapter.semantics,
             self.arrangements,
             self.placements,
+            runtime_policy=runtime_policy,
         )
         self._step_states: dict[tuple[str, str], WorldState] = {}
         self._object_states: dict[tuple[str, str], WorldState] = {}
@@ -240,6 +275,8 @@ class ProgramExecutor:
             episode_index=episode_index,
             output_root=self.record_root,
             enabled=self.record_runtime,
+            runtime_policy=self.runtime_policy.as_mapping(),
+            runtime_policy_hash=runtime_policy_hash(self.runtime_policy),
         )
         aggregate_failed = torch.zeros(
             int(self.env.num_envs),
@@ -481,7 +518,10 @@ class ProgramExecutor:
         if pose.ndim == 2:
             pose = pose.unsqueeze(0)
         y = float(pose[min(env_id, pose.shape[0] - 1), 1, 3])
-        if abs(y) <= 0.02:
+        if (
+            abs(y)
+            <= self.runtime_policy.arm_selection.orient_object_preferred_arm_deadband
+        ):
             return None
         return "left_arm" if y > 0.0 else "right_arm"
 
@@ -745,6 +785,7 @@ class ProgramExecutor:
             target_pose=target_pose,
             workspace_center_y=center_y,
             workspace_half_width=half_width,
+            policy=self.runtime_policy.arm_selection,
         )
         cost = score_components["total_cost"]
         candidate = _Candidate(
@@ -777,7 +818,7 @@ class ProgramExecutor:
         centers = torch.zeros(count, dtype=torch.float32, device=self.env.device)
         half_widths = torch.full(
             (count,),
-            0.5,
+            float(self.runtime_policy.arm_selection.fallback_workspace_half_width),
             dtype=torch.float32,
             device=self.env.device,
         )
@@ -1147,7 +1188,9 @@ class ProgramExecutor:
             {
                 "type": "object_held",
                 "object": uid,
-                "position_tolerance": 0.05,
+                "position_tolerance": self.runtime_policy.predicate_fallbacks[
+                    "position_tolerance"
+                ],
             },
             held_owners={**self._object_owners, uid: owners},
             held_states=states,
@@ -1201,7 +1244,9 @@ class ProgramExecutor:
             {
                 "type": "object_held",
                 "object": uid,
-                "position_tolerance": 0.05,
+                "position_tolerance": self.runtime_policy.predicate_fallbacks[
+                    "position_tolerance"
+                ],
                 "arm": arm,
             },
             held_owners=self._object_owners,
@@ -1604,13 +1649,16 @@ class ProgramExecutor:
                 anchor_pose[:, :2, 3] if anchor_pose.ndim == 3 else anchor_pose[:, :2]
             )
             policy = self._policies.get(step.id, {})
+            fallbacks = self.runtime_policy.predicate_fallbacks
             upright = evaluate_predicate(
                 self.env,
                 {
                     "type": "object_upright",
                     "object": step.object_uid,
                     "local_axis": policy.get("upright_local_axis", "long_axis"),
-                    "max_tilt": float(policy.get("upright_max_tilt", torch.pi / 12)),
+                    "max_tilt": float(
+                        policy.get("upright_max_tilt", fallbacks["upright_max_tilt"])
+                    ),
                 },
             )
             xy_near_initial = evaluate_predicate(
@@ -1619,7 +1667,9 @@ class ProgramExecutor:
                     "type": "object_xy_near",
                     "object": step.object_uid,
                     "target_xy": target_xy,
-                    "tolerance": float(policy.get("upright_xy_tolerance", 0.05)),
+                    "tolerance": float(
+                        policy.get("upright_xy_tolerance", fallbacks["xy_tolerance"])
+                    ),
                 },
             )
             satisfied = upright & xy_near_initial
@@ -1629,11 +1679,9 @@ class ProgramExecutor:
                 dtype=observed.dtype,
             )
             policy = self._policies.get(step.id, {})
+            fallbacks = self.runtime_policy.predicate_fallbacks
             tolerance = float(
-                policy.get(
-                    "postcondition_tolerance",
-                    0.05,
-                )
+                policy.get("postcondition_tolerance", fallbacks["position_tolerance"])
             )
             arrangement = self.arrangements.get(step.id)
             if arrangement is not None:
@@ -1642,12 +1690,15 @@ class ProgramExecutor:
                 # must not invalidate an otherwise correct row placement.
                 delta = torch.abs(observed - target)
                 axis_tolerance = float(
-                    policy.get("line_axis_tolerance", max(tolerance, 0.06))
+                    policy.get(
+                        "line_axis_tolerance",
+                        fallbacks["line_axis_tolerance"],
+                    )
                 )
                 perpendicular_tolerance = float(
                     policy.get(
                         "line_perpendicular_tolerance",
-                        max(tolerance, 0.06),
+                        fallbacks["line_perpendicular_tolerance"],
                     )
                 )
                 satisfied = (delta[:, arrangement.axis_index] <= axis_tolerance) & (
@@ -1674,7 +1725,7 @@ class ProgramExecutor:
                     satisfied &= orientation_error <= float(
                         policy.get(
                             "preserve_orientation_tolerance",
-                            torch.pi / 12,
+                            fallbacks["preserve_orientation_tolerance"],
                         )
                     )
             else:
@@ -1713,20 +1764,20 @@ class ProgramExecutor:
         carrier = self._entity_pose(step.object_uid)
         initial_up = record["carrier_rotation"][:, :3, 2]
         live_up = carrier[:, :3, 2]
-        tilt_ok = torch.sum(initial_up * live_up, dim=-1) >= 0.94
+        fallbacks = self.runtime_policy.predicate_fallbacks
+        tilt_ok = torch.sum(initial_up * live_up, dim=-1) >= float(
+            fallbacks["payload_minimum_upright_cosine"]
+        )
         result = tilt_ok
         carrier_entity = self.env.sim.get_rigid_object(step.object_uid)
         for payload in step.goal["payloads"]:
             uid = str(payload["object"])
             expected = torch.bmm(carrier, record[uid])
             observed = self._entity_pose(uid)
-            drift_ok = (
-                torch.linalg.vector_norm(
-                    observed[:, :3, 3] - expected[:, :3, 3],
-                    dim=-1,
-                )
-                <= 0.08
-            )
+            drift_ok = torch.linalg.vector_norm(
+                observed[:, :3, 3] - expected[:, :3, 3],
+                dim=-1,
+            ) <= float(fallbacks["payload_position_tolerance"])
             support_ok = torch.ones_like(drift_ok)
             for env_id in range(int(self.env.num_envs)):
                 vertices = carrier_entity.get_vertices(
@@ -1745,8 +1796,9 @@ class ProgramExecutor:
                     + carrier[env_id, :3, 3]
                 )
                 position = observed[env_id, :2, 3]
-                lower = world[:, :2].min(dim=0).values - 0.015
-                upper = world[:, :2].max(dim=0).values + 0.015
+                margin = float(fallbacks["payload_support_margin"])
+                lower = world[:, :2].min(dim=0).values - margin
+                upper = world[:, :2].max(dim=0).values + margin
                 support_ok[env_id] = bool(
                     torch.all(position >= lower) and torch.all(position <= upper)
                 )

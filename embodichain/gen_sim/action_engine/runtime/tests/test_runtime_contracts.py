@@ -28,6 +28,10 @@ import numpy as np
 import pytest
 import torch
 
+from embodichain.gen_sim.action_engine.config import (
+    default_runtime_policy,
+    runtime_policy_hash,
+)
 from embodichain.gen_sim.action_engine.compiler import compile_task_agent
 from embodichain.gen_sim.action_engine.cli.run_agent import (
     build_parser as build_run_parser,
@@ -288,12 +292,15 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
     )
     original_seed = deepcopy(program.raw)
+    runtime_policy = default_runtime_policy("dual_ur10")
     recorder = RuntimeRecorder(
         program,
         num_envs=2,
         run_id="run-1",
         episode_index=3,
         output_root=tmp_path,
+        runtime_policy=runtime_policy.as_mapping(),
+        runtime_policy_hash=runtime_policy_hash(runtime_policy),
     )
     step = program.semantic_steps[0]
     recorder.edge(
@@ -366,6 +373,10 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         assert document["edges"] == original_seed["edges"]
         assert document["runtime"]["status"] == expected_status
         assert document["runtime"]["execution_program_hash"] == expected_hash
+        assert document["runtime"]["runtime_policy"] == runtime_policy.as_mapping()
+        assert document["runtime"]["runtime_policy_hash"] == runtime_policy_hash(
+            runtime_policy
+        )
         assert (env_dir / "task_graph.png").read_bytes().startswith(b"\x89PNG")
     assert len(rendered_documents) == 2
     assert not list(episode_dir.rglob("*.tmp"))
@@ -1039,6 +1050,7 @@ def test_arm_candidate_score_softly_penalizes_cross_zone_motion() -> None:
         "target_pose": target,
         "workspace_center_y": torch.tensor([0.0]),
         "workspace_half_width": torch.tensor([0.40]),
+        "policy": default_runtime_policy("dual_ur10").arm_selection,
     }
 
     left = _score_arm_candidate(arm="left_arm", **kwargs)

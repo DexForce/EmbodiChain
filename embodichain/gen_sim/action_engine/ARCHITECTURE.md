@@ -41,6 +41,11 @@ runtime can resolve arms against each environment's live state.
 Graph in memory. The regenerated hash must match the hash shared by the gym and
 agent configs.
 
+The agent config also snapshots the effective Action Engine runtime policy and
+its independent hash. Runtime policy is execution configuration, not semantic
+task intent, so it is deliberately excluded from the coordinate-free Execution
+Program and its hash.
+
 ## Capability Boundary
 
 The capability registry is the shared contract between planning and
@@ -103,6 +108,19 @@ in planner routes. Generation defaults to `dual_ur10` and preserves the
 exported scene deterministically. Pose and table-height randomization require
 the explicit `--randomize-scene` flag.
 
+Package-owned defaults centralize generation policy and execution-sensitive
+runtime policy without moving coordinates into the Seed Graph. Generation
+policy covers scene preservation, physics, randomization, environment wiring,
+dataset settings, and runner limits and is materialized into
+`fast_gym_config.json`. Runtime policy covers scheduling, grounding clearances,
+soft arm allocation, grasp sampling, named motion policies, and predicate
+fallbacks. It supports canonical robot-profile overrides and is snapshotted
+with an independent hash in `agent_config.json`.
+Runtime consumes the snapshot rather than silently picking up later package
+changes. Existing configs without a snapshot still resolve package defaults;
+the earlier arm-selection-only v1 snapshot is migrated onto the complete
+profile policy after its original hash is verified.
+
 Persisted legacy Action Agent artifacts are not accepted as Action Engine
 inputs. Callers must use `--overwrite` to regenerate the four canonical v1 artifacts:
 `task_agent.json`, `seed_task_graph.json`, `agent_config.json`, and
@@ -114,7 +132,9 @@ Generation renders `seed_task_graph.png` from the same validated in-memory
 Execution Program serialized as `seed_task_graph.json`. Runtime writes semantic
 checkpoints and a final task graph with observed actions, resolved arms,
 targets, statuses, and failures. Graphs and records are review outputs and are
-never execution inputs.
+never execution inputs. Runtime metadata records the effective policy snapshot
+and hash so grounding, grasp, motion, allocation, and verification decisions
+remain reproducible after package defaults change.
 
 ## Invariants
 

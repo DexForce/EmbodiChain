@@ -80,6 +80,8 @@ class RuntimeRecorder:
         episode_index: int = 0,
         output_root: str | Path | None = None,
         enabled: bool = True,
+        runtime_policy: Mapping[str, Any] | None = None,
+        runtime_policy_hash: str | None = None,
     ) -> None:
         self.enabled = enabled
         self.num_envs = int(num_envs)
@@ -116,6 +118,11 @@ class RuntimeRecorder:
             "program_schema_version": program.raw.get("schema_version"),
             "execution_program_hash": self.program_hash,
         }
+        if runtime_policy is not None:
+            if not isinstance(runtime_policy_hash, str) or not runtime_policy_hash:
+                raise ValueError("Recorded runtime policy requires a non-empty hash.")
+            self.program_metadata["runtime_policy"] = deepcopy(dict(runtime_policy))
+            self.program_metadata["runtime_policy_hash"] = runtime_policy_hash
 
     def edge(
         self,

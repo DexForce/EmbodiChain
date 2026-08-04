@@ -21,11 +21,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from embodichain.gen_sim.action_engine.config import generation_defaults
 from embodichain.gen_sim.action_engine.generation import (
     generate_action_engine_config,
 )
 
 __all__ = ["build_parser", "cli"]
+
+_GENERATION_DEFAULTS = generation_defaults()
+_TASK_DEFAULTS = _GENERATION_DEFAULTS["task"]
+_SCENE_DEFAULTS = _GENERATION_DEFAULTS["scene"]
 
 _ROBOT_PROFILE_CHOICES = (
     "ur5",
@@ -83,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--robot-profile",
         "--robot_profile",
         choices=_ROBOT_PROFILE_CHOICES,
-        default="ur10",
+        default=str(_TASK_DEFAULTS["default_robot_profile"]),
         help="Robot template used in fast_gym_config.json.",
     )
     parser.add_argument(
@@ -105,14 +110,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--body-scale-policy",
         choices=("preserve", "multiply", "absolute"),
-        default="preserve",
+        default=str(_SCENE_DEFAULTS["body_scale_policy"]),
         help="How the requested xyz scale combines with source body_scale.",
     )
     parser.add_argument(
         "--body-scale",
         type=float,
         nargs=3,
-        default=(1.0, 1.0, 1.0),
+        default=tuple(float(value) for value in _SCENE_DEFAULTS["body_scale"]),
         metavar=("X", "Y", "Z"),
         help="Positive xyz scale used by multiply or absolute policy.",
     )
@@ -120,14 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--max_episodes",
         "--max-episodes",
         type=int,
-        default=1,
+        default=int(_TASK_DEFAULTS["max_episodes"]),
         help="Episode count written to fast_gym_config.json.",
     )
     parser.add_argument(
         "--max_episode_steps",
         "--max-episode-steps",
         type=int,
-        default=2000,
+        default=int(_TASK_DEFAULTS["max_episode_steps"]),
         help="Per-episode step limit written to fast_gym_config.json.",
     )
     parser.add_argument(

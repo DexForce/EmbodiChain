@@ -24,6 +24,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from embodichain.gen_sim.action_engine.config import (
+    ACTION_ENGINE_DEFAULTS_SCHEMA,
+    default_runtime_policy,
+    generation_defaults,
+    runtime_policy_hash,
+)
 from embodichain.gen_sim.action_engine.protocol import (
     ACTION_ENGINE_CONFIG_SCHEMA,
     ACTION_ENGINE_ENV_ID,
@@ -41,15 +47,13 @@ __all__ = [
 ]
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
-_VIEWER_CAMERA_UID = "cam_high"
-_DEFAULT_TABLETOP_Z = 0.7
+_GENERATION_DEFAULTS = generation_defaults()
+_DEFAULT_TABLETOP_Z = float(_GENERATION_DEFAULTS["scene"]["default_tabletop_z"])
 
 _ARM_SLOTS = {
     "left": {"arm": "right_arm", "eef": "right_eef"},
     "right": {"arm": "left_arm", "eef": "left_eef"},
 }
-_GRIPPER_OPEN_STATE = [0.0] * 6
-_GRIPPER_CLOSE_STATE = [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
 
 
 def canonical_robot_profile(profile: str) -> str:
@@ -76,13 +80,17 @@ def build_agent_config(
     uid_map: dict[str, str],
 ) -> dict[str, Any]:
     """Build the small manifest consumed by ``run_agent``."""
+    profile = canonical_robot_profile(robot_profile)
+    runtime_policy = default_runtime_policy(profile)
     return {
         "schema_version": ACTION_ENGINE_CONFIG_SCHEMA,
         "task_name": task_name,
-        "robot_profile": canonical_robot_profile(robot_profile),
+        "robot_profile": profile,
         "task_agent": TASK_AGENT_FILENAME,
         "execution_program": EXECUTION_PROGRAM_FILENAME,
         "execution_program_hash": execution_program_hash,
+        "runtime_policy": runtime_policy.as_mapping(),
+        "runtime_policy_hash": runtime_policy_hash(runtime_policy),
         "source": {
             "gym_config": source_config_path.as_posix(),
             "uid_map": dict(sorted(uid_map.items())),
@@ -119,12 +127,15 @@ def build_fast_gym_config(
     sensors = _load_template("default_sensors.json")
     if not isinstance(sensors, list) or not sensors:
         raise ValueError("Default sensor template must define at least one camera.")
-    sensors[0]["uid"] = _VIEWER_CAMERA_UID
+    environment_policy = _GENERATION_DEFAULTS["environment"]
+    viewer_camera_uid = str(environment_policy["viewer_camera_uid"])
+    sensors[0]["uid"] = viewer_camera_uid
     light = _load_template("default_lights.json")
 
     rigid_uids = [str(config["uid"]) for config in scene.rigid_objects]
     engine_extension = {
         "schema_version": "action_engine_runtime_v2",
+        "defaults_schema_version": ACTION_ENGINE_DEFAULTS_SCHEMA,
         "task_name": task_name,
         "robot_profile": profile,
         "task_agent": TASK_AGENT_FILENAME,
@@ -144,14 +155,11 @@ def build_fast_gym_config(
         "agent_arm_slots": deepcopy(_ARM_SLOTS),
         "gripper_open_state": list(profile_config["gripper_open_state"]),
         "gripper_close_state": list(profile_config["gripper_close_state"]),
-        "arm_aim_yaw_offset": {"left": 3.141592653589793, "right": 0.0},
-        "agent_grasp_runtime_defaults": {
-            "max_open_length": 0.115,
-            "min_open_length": 0.01,
-            "finger_length": 0.13,
-        },
-        "ignore_terminations_during_agent": True,
-        "viewer_camera_uid": _VIEWER_CAMERA_UID,
+        "arm_aim_yaw_offset": deepcopy(environment_policy["arm_aim_yaw_offset"]),
+        "ignore_terminations_during_agent": bool(
+            environment_policy["ignore_terminations_during_agent"]
+        ),
+        "viewer_camera_uid": viewer_camera_uid,
     }
 
     config: dict[str, Any] = {
@@ -223,6 +231,8 @@ def validate_fast_gym_config(config: dict[str, Any]) -> None:
             )
 
     action_engine = config.get("env", {}).get("extensions", {}).get("action_engine", {})
+    if action_engine.get("defaults_schema_version") != ACTION_ENGINE_DEFAULTS_SCHEMA:
+        raise ValueError("Gym config has an unexpected defaults schema version.")
     if action_engine.get("task_agent") != TASK_AGENT_FILENAME:
         raise ValueError("Gym config points to an unexpected Task Agent artifact.")
     if action_engine.get("execution_program") != EXECUTION_PROGRAM_FILENAME:
@@ -360,7 +370,11 @@ def _make_events(
                         "func_name": "compute_object_length",
                         "func_kwargs": {
                             "is_svd_frame": True,
-                            "sample_points": 5000,
+                            "sample_points": int(
+                                _GENERATION_DEFAULTS["scene"][
+                                    "object_length_sample_points"
+                                ]
+                            ),
                         },
                     }
                 ]
@@ -387,35 +401,32 @@ def _make_events(
         },
     }
     if randomize_table_material:
+        material = _GENERATION_DEFAULTS["randomization"]["table_material"]
         events["randomize_table_material"] = {
             "func": "randomize_visual_material",
             "mode": "reset",
             "params": {
                 "entity_cfg": {"uid": "table"},
-                "random_texture_prob": 0.0,
-                "base_color_range": [
-                    [0.55, 0.55, 0.55],
-                    [0.95, 0.95, 0.95],
-                ],
-                "metallic_range": [0.0, 0.15],
-                "roughness_range": [0.45, 0.95],
+                "random_texture_prob": float(material["random_texture_prob"]),
+                "base_color_range": deepcopy(material["base_color_range"]),
+                "metallic_range": list(material["metallic_range"]),
+                "roughness_range": list(material["roughness_range"]),
             },
         }
     if randomize_scene:
+        randomization = _GENERATION_DEFAULTS["randomization"]
         for uid in sorted(rigid_uids):
             events[f"randomize_{uid}_pose"] = {
                 "func": "randomize_rigid_object_pose",
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": uid},
-                    "position_range": [
-                        [-0.04, -0.04, 0.0],
-                        [0.04, 0.04, 0.0],
-                    ],
-                    "rotation_range": [
-                        [0.0, 0.0, -30.0],
-                        [0.0, 0.0, 30.0],
-                    ],
+                    "position_range": deepcopy(
+                        randomization["rigid_object_position_range"]
+                    ),
+                    "rotation_range": deepcopy(
+                        randomization["rigid_object_rotation_range"]
+                    ),
                     "relative_position": True,
                     "relative_rotation": True,
                 },
@@ -425,7 +436,9 @@ def _make_events(
             "mode": "reset",
             "params": {
                 "anchor_uid": "table",
-                "height_delta_range": [[-0.05], [0.05]],
+                "height_delta_range": deepcopy(
+                    randomization["table_height_delta_range"]
+                ),
             },
         }
     return events
@@ -459,15 +472,16 @@ def _make_dataset(
     source_config_path: Path,
     robot_type: str,
 ) -> dict[str, Any]:
+    dataset_policy = _GENERATION_DEFAULTS["dataset"]
     return {
         "lerobot": {
             "func": "LeRobotRecorder",
             "mode": "save",
-            "save_failed_episodes": True,
+            "save_failed_episodes": bool(dataset_policy["save_failed_episodes"]),
             "params": {
                 "robot_meta": {
                     "robot_type": robot_type,
-                    "control_freq": 25,
+                    "control_freq": int(dataset_policy["control_frequency"]),
                 },
                 "instruction": {"lang": task_description},
                 "extra": {
@@ -476,7 +490,7 @@ def _make_dataset(
                     "task_description": task_description,
                     "data_type": "sim",
                 },
-                "use_videos": True,
+                "use_videos": bool(dataset_policy["use_videos"]),
             },
         }
     }

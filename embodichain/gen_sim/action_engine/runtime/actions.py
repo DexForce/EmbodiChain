@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 import torch
@@ -44,6 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressCfg,
     WorldState,
 )
+from embodichain.gen_sim.action_engine.config import default_runtime_policy
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalSamplerCfg,
@@ -93,10 +95,23 @@ def _as_hand_qpos(value: Any, dof: int, device: Any) -> torch.Tensor:
 class AtomicActionAdapter:
     """Own primitive construction, grasp semantics, and trajectory execution."""
 
-    def __init__(self, env: Any) -> None:
+    def __init__(
+        self,
+        env: Any,
+        *,
+        grasp_policy: Mapping[str, Any] | None = None,
+    ) -> None:
         self.env = env
         self.num_envs = int(env.num_envs)
         self.device = env.device
+        if grasp_policy is None:
+            profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+            grasp_policy = default_runtime_policy(profile).grasp
+            grasp_policy = {
+                **grasp_policy,
+                **(getattr(env, "agent_grasp_runtime_defaults", {}) or {}),
+            }
+        self.grasp_policy = deepcopy(dict(grasp_policy))
         self._motion_generator: MotionGenerator | None = None
         self._semantics: dict[str, ObjectSemantics] = {}
 
@@ -127,26 +142,24 @@ class AtomicActionAdapter:
             raise ValueError(f"Object {uid!r} has invalid mesh vertices.")
         if triangles.ndim != 2 or triangles.shape[-1] != 3 or triangles.numel() == 0:
             raise ValueError(f"Object {uid!r} has invalid mesh triangles.")
-        grasp_options = getattr(self.env, "agent_grasp_runtime_defaults", {}) or {}
+        grasp_options = self.grasp_policy
         sampler = AntipodalSamplerCfg(
-            n_sample=int(grasp_options.get("antipodal_n_sample", 10000)),
-            max_angle=float(grasp_options.get("antipodal_max_angle", torch.pi / 12)),
-            max_length=float(grasp_options.get("max_open_length", 0.115)),
-            min_length=float(grasp_options.get("min_open_length", 0.01)),
+            n_sample=int(grasp_options["antipodal_n_sample"]),
+            max_angle=float(grasp_options["antipodal_max_angle"]),
+            max_length=float(grasp_options["max_open_length"]),
+            min_length=float(grasp_options["min_open_length"]),
         )
         generator = GraspGeneratorCfg(
-            viser_port=int(grasp_options.get("viser_port", 11801)),
+            viser_port=int(grasp_options["viser_port"]),
             antipodal_sampler_cfg=sampler,
-            max_deviation_angle=float(
-                grasp_options.get("max_deviation_angle", torch.pi / 9)
-            ),
+            max_deviation_angle=float(grasp_options["max_deviation_angle"]),
             n_deviated_approach_directions=1,
         )
-        max_hulls = int(grasp_options.get("max_decomposition_hulls", 16))
+        max_hulls = int(grasp_options["max_decomposition_hulls"])
         collision = GripperCollisionCfg(
-            max_open_length=float(grasp_options.get("max_open_length", 0.115)),
-            finger_length=float(grasp_options.get("finger_length", 0.13)),
-            point_sample_dense=float(grasp_options.get("point_sample_dense", 0.012)),
+            max_open_length=float(grasp_options["max_open_length"]),
+            finger_length=float(grasp_options["finger_length"]),
+            point_sample_dense=float(grasp_options["point_sample_dense"]),
             max_decomposition_hulls=max_hulls,
         )
         # The shared checker otherwise creates the same cache key with CoACD.
@@ -173,9 +186,7 @@ class AtomicActionAdapter:
                 mesh_triangles=triangles,
                 generator_cfg=generator,
                 gripper_collision_cfg=collision,
-                force_reannotate=bool(
-                    grasp_options.get("force_grasp_reannotate", False)
-                ),
+                force_reannotate=bool(grasp_options["force_grasp_reannotate"]),
             ),
         )
         self._semantics[uid] = semantics

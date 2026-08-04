@@ -24,6 +24,10 @@ from typing import Any
 
 import torch
 
+from embodichain.gen_sim.action_engine.config import (
+    RuntimePolicyCfg,
+    default_runtime_policy,
+)
 from embodichain.lab.sim.atomic_actions import (
     CoordinatedPickmentTarget,
     CoordinatedPlacementTarget,
@@ -100,9 +104,11 @@ class LiveArrangementPlan:
         env: Any,
         steps: Sequence[SemanticStep],
         *,
-        slot_margin: float = 0.08,
-        minimum_spacing: float = 0.07,
-        clearance: float = 0.025,
+        slot_margin: float | None = None,
+        minimum_spacing: float | None = None,
+        clearance: float | None = None,
+        row_search_step: float | None = None,
+        row_search_radius: float | None = None,
     ) -> None:
         if not steps:
             raise ValueError("An arrangement plan requires at least one step.")
@@ -113,7 +119,23 @@ class LiveArrangementPlan:
         self.device = env.device
         self.slot_count = len(steps)
         self.axis = str(steps[0].goal.get("axis", "world_x"))
-        self.clearance = float(clearance)
+        profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+        defaults = default_runtime_policy(profile).grounding["arrangement"]
+        slot_margin = defaults["slot_margin"] if slot_margin is None else slot_margin
+        minimum_spacing = (
+            defaults["minimum_spacing"] if minimum_spacing is None else minimum_spacing
+        )
+        self.clearance = float(
+            defaults["layout_clearance"] if clearance is None else clearance
+        )
+        self.row_search_step = float(
+            defaults["row_search_step"] if row_search_step is None else row_search_step
+        )
+        self.row_search_radius = float(
+            defaults["row_search_radius"]
+            if row_search_radius is None
+            else row_search_radius
+        )
 
         table = _object(env, "table")
         bounds = []
@@ -292,8 +314,10 @@ class LiveArrangementPlan:
         slot_radii = radii.max(dim=1).values[:, None].repeat(1, self.slot_count)
         obstacles = self._obstacle_bounds()
         search_offsets = [0.0]
-        for index in range(1, 11):
-            search_offsets.extend((0.025 * index, -0.025 * index))
+        steps = int(self.row_search_radius / self.row_search_step)
+        for index in range(1, steps + 1):
+            offset = self.row_search_step * index
+            search_offsets.extend((offset, -offset))
         for env_id in range(self.num_envs):
             chosen = None
             for perpendicular in search_offsets:
@@ -387,11 +411,11 @@ class LiveArrangementPlan:
         final_z = (
             self.table_top
             + self.geometry[step.id].half_height
-            + float(policy.get("surface_clearance", 0.003))
+            + float(policy["surface_clearance"])
         )
         target[:, 2, 3] = final_z
         if phase == "staging":
-            target[:, 2, 3] = final_z + float(policy.get("transport_clearance", 0.10))
+            target[:, 2, 3] = final_z + float(policy["transport_clearance"])
         return target
 
     def mark_completed(self, step_id: str, success: torch.Tensor) -> None:
@@ -442,7 +466,7 @@ class LivePlacementPlan:
         env: Any,
         steps: Sequence[SemanticStep],
         *,
-        clearance: float = 0.012,
+        clearance: float | None = None,
     ) -> None:
         if not steps:
             raise ValueError("A placement plan requires at least one step.")
@@ -453,7 +477,11 @@ class LivePlacementPlan:
         self.steps = tuple(steps)
         self.reference_uid = str(next(iter(references)))
         self.num_envs = int(env.num_envs)
-        self.clearance = float(clearance)
+        profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+        default_clearance = default_runtime_policy(profile).grounding["placement"][
+            "clearance"
+        ]
+        self.clearance = float(default_clearance if clearance is None else clearance)
         self.positions = self._make_slots()
 
     def _make_slots(self) -> dict[str, torch.Tensor]:
@@ -562,11 +590,15 @@ class ActionGrounder:
             LiveArrangementPlan | Mapping[str, LiveArrangementPlan] | None
         ) = None,
         placements: Mapping[str, LivePlacementPlan] | None = None,
+        runtime_policy: RuntimePolicyCfg | None = None,
     ) -> None:
         self.program = program
         self.env = env
         self.semantics_factory = semantics_factory
         self.robot_profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+        self.runtime_policy = runtime_policy or default_runtime_policy(
+            self.robot_profile
+        )
         if isinstance(arrangement, Mapping):
             self.arrangements = dict(arrangement)
         elif arrangement is None:
@@ -585,9 +617,14 @@ class ActionGrounder:
         return resolve_motion_policy(
             self.robot_profile,
             name,
+            policies=self.runtime_policy.motion_policies,
             program_overrides=self.program.motion_policies.get(name),
             inline_overrides=inline if isinstance(inline, Mapping) else None,
         )
+
+    def _policy_value(self, policy: Mapping[str, Any], key: str) -> Any:
+        defaults = self.runtime_policy.grounding["semantic_defaults"]
+        return policy[key] if key in policy else defaults[key]
 
     def ground(
         self,
@@ -800,11 +837,11 @@ class ActionGrounder:
                 )
                 target[env_id, 2, 3] = (
                     arrangement.table_top[env_id]
-                    + float(policy.get("surface_clearance", 0.003))
+                    + float(policy["surface_clearance"])
                     - bottom
                 )
             if phase == "staging":
-                target[:, 2, 3] += float(policy.get("transport_clearance", 0.10))
+                target[:, 2, 3] += float(policy["transport_clearance"])
             return target
         placement = self.placements.get(step.id)
         if placement is not None:
@@ -816,10 +853,10 @@ class ActionGrounder:
                     object_pose,
                     orientation_reference_pose=orientation_reference_pose,
                 ),
-                surface_clearance=float(policy.get("surface_clearance", 0.003)),
+                surface_clearance=float(policy["surface_clearance"]),
             )
             if phase == "staging":
-                target[:, 2, 3] += float(policy.get("transport_clearance", 0.10))
+                target[:, 2, 3] += float(policy["transport_clearance"])
             return target
         if step.operator == "orient_object":
             initial = None
@@ -848,10 +885,10 @@ class ActionGrounder:
                     env_id,
                 )
                 target[env_id, 2, 3] = (
-                    support_top + float(policy.get("surface_clearance", 0.003)) - bottom
+                    support_top + float(policy["surface_clearance"]) - bottom
                 )
             if phase == "staging":
-                target[:, 2, 3] += float(policy.get("staging_lift_height", 0.12))
+                target[:, 2, 3] += float(policy["staging_lift_height"])
             return target
         target = object_pose.clone()
         if reference_pose is not None:
@@ -860,7 +897,7 @@ class ActionGrounder:
         # direction-only coordinated transport) must preserve the live origin
         # instead of being silently projected onto a synthetic table support.
         relation = str(step.goal.get("relation", "none"))
-        distance = float(policy.get("relation_distance", 0.16))
+        distance = float(self._policy_value(policy, "relation_distance"))
         offsets = {
             "left": (0.0, distance, 0.0),
             "left_of": (0.0, distance, 0.0),
@@ -879,11 +916,11 @@ class ActionGrounder:
             "back_left_of": (-distance, distance, 0.0),
             "back_right": (-distance, -distance, 0.0),
             "back_right_of": (-distance, -distance, 0.0),
-            "above": (0.0, 0.0, float(policy.get("hover_height", 0.10))),
+            "above": (0.0, 0.0, float(self._policy_value(policy, "hover_height"))),
             "held_above_initial": (
                 0.0,
                 0.0,
-                float(policy.get("hover_height", 0.10)),
+                float(self._policy_value(policy, "hover_height")),
             ),
         }
         offset = offsets.get(relation)
@@ -950,7 +987,9 @@ class ActionGrounder:
                     env_id,
                 )
                 target[env_id, 2, 3] = (
-                    support_top + float(policy.get("surface_clearance", 0.003)) - bottom
+                    support_top
+                    + float(self._policy_value(policy, "surface_clearance"))
+                    - bottom
                 )
         elif relation == "inside" and reference_pose is not None:
             # Preserve the object's live height while centering it in container XY.
@@ -958,7 +997,7 @@ class ActionGrounder:
         if phase == "staging":
             # Staging is a runtime waypoint, not a persisted coordinate. This
             # keeps in-place orientation robust to the object's live height.
-            target[:, 2, 3] += float(policy.get("transport_clearance", 0.10))
+            target[:, 2, 3] += float(self._policy_value(policy, "transport_clearance"))
         return target
 
     def _upright_local_direction(self, step: SemanticStep) -> torch.Tensor:
@@ -1161,7 +1200,7 @@ class ActionGrounder:
         target = self._current_eef_pose(arm).clone()
         target[:, :2, 3] = object_pose[:, :2, 3]
         entity = _object(self.env, uid)
-        depth = float(policy.get("press_depth", 0.004))
+        depth = float(self._policy_value(policy, "press_depth"))
         for env_id in range(int(self.env.num_envs)):
             top = _world_vertices(entity, self.env, env_id)[:, 2].max()
             target[env_id, 2, 3] = top - depth
@@ -1180,8 +1219,8 @@ class ActionGrounder:
         if pose is None:
             raise ValueError("Retreat grounding requires a live end-effector pose.")
         target = _batched_pose(pose, self.env).clone()
-        desired = float(policy.get("retreat_height", 0.10))
-        ceiling = float(policy.get("maximum_eef_height", 0.80))
+        desired = float(self._policy_value(policy, "retreat_height"))
+        ceiling = float(self._policy_value(policy, "maximum_eef_height"))
         height = torch.clamp(ceiling - target[:, 2, 3], min=0.0, max=desired)
         target[:, 2, 3] += height
         return target
@@ -1275,7 +1314,11 @@ class ActionGrounder:
         upper = vertices.max(dim=0).values
         axis = int(torch.argmax(upper[:2] - lower[:2]).item())
         center = (lower + upper) * 0.5
-        inset = max(0.01, float((upper[axis] - lower[axis]) * 0.15))
+        grasp_policy = self.runtime_policy.grounding["coordinated_grasp"]
+        inset = max(
+            float(grasp_policy["minimum_inset"]),
+            float((upper[axis] - lower[axis]) * grasp_policy["inset_fraction"]),
+        )
         left = torch.eye(4, dtype=torch.float32, device=self.env.device)
         right = left.clone()
         left[:3, 3] = center

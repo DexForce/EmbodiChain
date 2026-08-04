@@ -19,10 +19,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import math
 from typing import Any
 
 import torch
+
+from embodichain.gen_sim.action_engine.config import default_runtime_policy
 
 from .robot_parts import arm_control_part
 
@@ -52,6 +53,13 @@ PREDICATE_TYPES = frozenset(
         "pressed",
     }
 )
+_DEFAULT_PREDICATE_FALLBACKS = default_runtime_policy("dual_ur10").predicate_fallbacks
+
+
+def _predicate_fallbacks(env: Any) -> Mapping[str, Any]:
+    policy = getattr(env, "runtime_policy", None)
+    value = getattr(policy, "predicate_fallbacks", None)
+    return value if isinstance(value, Mapping) else _DEFAULT_PREDICATE_FALLBACKS
 
 
 def _constant(env: Any, value: bool) -> torch.Tensor:
@@ -305,6 +313,7 @@ def evaluate_predicate(
         "held_states": held_states,
         "coordinated_state": coordinated_state,
     }
+    defaults = _predicate_fallbacks(env)
     if spec is None:
         return _constant(env, True)
     if isinstance(spec, Sequence) and not isinstance(spec, (str, bytes, Mapping)):
@@ -342,8 +351,12 @@ def evaluate_predicate(
             _object(spec),
             owners=held_owners,
             states=held_states,
-            position_tolerance=float(spec.get("position_tolerance", 0.06)),
-            gripper_tolerance=float(spec.get("gripper_tolerance", 0.01)),
+            position_tolerance=float(
+                spec.get("position_tolerance", defaults["held_position_tolerance"])
+            ),
+            gripper_tolerance=float(
+                spec.get("gripper_tolerance", defaults["held_gripper_tolerance"])
+            ),
             required_arm=str(required_arm) if required_arm else None,
         )
     if kind in {"held_by_both_grippers", "object_held_by_both_grippers"}:
@@ -351,8 +364,12 @@ def evaluate_predicate(
             env,
             _object(spec),
             coordinated_state,
-            position_tolerance=float(spec.get("position_tolerance", 0.06)),
-            gripper_tolerance=float(spec.get("gripper_tolerance", 0.01)),
+            position_tolerance=float(
+                spec.get("position_tolerance", defaults["held_position_tolerance"])
+            ),
+            gripper_tolerance=float(
+                spec.get("gripper_tolerance", defaults["held_gripper_tolerance"])
+            ),
         )
     if kind in {"object_position_near", "position_near"}:
         position = _position(env, _object(spec))
@@ -364,7 +381,7 @@ def evaluate_predicate(
         if target.ndim == 1:
             target = target.unsqueeze(0)
         return torch.linalg.vector_norm(position - target, dim=-1) <= float(
-            spec.get("tolerance", 0.05)
+            spec.get("tolerance", defaults["position_tolerance"])
         )
     if kind in {"object_xy_near", "xy_near"}:
         position = _position(env, _object(spec))[:, :2]
@@ -374,7 +391,7 @@ def evaluate_predicate(
             device=position.device,
         ).reshape(-1, 2)
         return torch.linalg.vector_norm(position - target, dim=-1) <= float(
-            spec.get("tolerance", 0.05)
+            spec.get("tolerance", defaults["xy_tolerance"])
         )
     if kind in {"object_in_container", "inside"}:
         position = _position(env, _object(spec))
@@ -384,9 +401,9 @@ def evaluate_predicate(
         xy = torch.linalg.vector_norm(position[:, :2] - container[:, :2], dim=-1)
         z = position[:, 2] - container[:, 2]
         return (
-            (xy <= float(spec.get("xy_radius", 0.20)))
-            & (z >= float(spec.get("min_z_offset", -0.05)))
-            & (z <= float(spec.get("max_z_offset", 0.35)))
+            (xy <= float(spec.get("xy_radius", defaults["container_xy_radius"])))
+            & (z >= float(spec.get("min_z_offset", defaults["container_min_z_offset"])))
+            & (z <= float(spec.get("max_z_offset", defaults["container_max_z_offset"])))
         )
     if kind in {"object_on_object", "on"}:
         position = _position(env, _object(spec))
@@ -402,14 +419,16 @@ def evaluate_predicate(
         xy = torch.linalg.vector_norm(position[:, :2] - support[:, :2], dim=-1)
         z = position[:, 2] - support[:, 2]
         return (
-            (xy <= float(spec.get("xy_radius", 0.08)))
-            & (z >= float(spec.get("min_z_offset", 0.02)))
-            & (z <= float(spec.get("max_z_offset", 0.35)))
+            (xy <= float(spec.get("xy_radius", defaults["support_xy_radius"])))
+            & (z >= float(spec.get("min_z_offset", defaults["support_min_z_offset"])))
+            & (z <= float(spec.get("max_z_offset", defaults["support_max_z_offset"])))
         )
     if kind == "object_not_fallen":
         axis = _pose(env, _object(spec))[:, :3, 2]
         cosine = axis[:, 2].clamp(-1.0, 1.0)
-        return torch.arccos(cosine) <= float(spec.get("max_tilt", math.radians(45.0)))
+        return torch.arccos(cosine) <= float(
+            spec.get("max_tilt", defaults["not_fallen_max_tilt"])
+        )
     if kind == "object_upright":
         uid = _object(spec)
         local_axis = spec.get("local_axis", "long_axis")
@@ -422,7 +441,9 @@ def evaluate_predicate(
         cosine = axis[:, 2].clamp(-1.0, 1.0)
         if str(local_axis).lower() in {"long", "long_axis", "longest"}:
             cosine = cosine.abs()
-        return torch.arccos(cosine) <= float(spec.get("max_tilt", math.radians(15.0)))
+        return torch.arccos(cosine) <= float(
+            spec.get("max_tilt", defaults["upright_max_tilt"])
+        )
     if kind in {"object_axis_offset_near", "object_axis_near"}:
         object_position = _position(env, _object(spec))
         axis = _axis_index(spec.get("axis", "x"))
@@ -443,7 +464,9 @@ def evaluate_predicate(
             dtype=values.dtype,
             device=values.device,
         )
-        return torch.abs(values - target_value) <= float(spec.get("tolerance", 0.03))
+        return torch.abs(values - target_value) <= float(
+            spec.get("tolerance", defaults["axis_tolerance"])
+        )
     if kind in {"objects_collinear", "collinear"}:
         positions = torch.stack(
             [_position(env, uid) for uid in _objects(spec)],
@@ -452,7 +475,7 @@ def evaluate_predicate(
         axis = 0 if str(spec.get("axis", "x")) in {"x", "world_x"} else 1
         values = positions[:, :, 1 - axis]
         return values.max(dim=1).values - values.min(dim=1).values <= float(
-            spec.get("tolerance", 0.03)
+            spec.get("tolerance", defaults["collinearity_tolerance"])
         )
     if kind in {"objects_ordered", "ordered"}:
         positions = torch.stack(
@@ -461,7 +484,7 @@ def evaluate_predicate(
         )
         axis = 0 if str(spec.get("axis", "x")) in {"x", "world_x"} else 1
         differences = torch.diff(positions[:, :, axis], dim=1)
-        tolerance = float(spec.get("tolerance", 0.02))
+        tolerance = float(spec.get("tolerance", defaults["ordering_tolerance"]))
         if str(spec.get("direction", "ascending")) == "descending":
             return torch.all(differences <= tolerance, dim=1)
         return torch.all(differences >= -tolerance, dim=1)
@@ -476,12 +499,15 @@ def evaluate_predicate(
                 raise ValueError("object_lifted requires an initial object pose.")
             initial = initial_pose[:, 2, 3]
         initial = torch.as_tensor(initial, device=position.device)
-        return position >= initial + float(spec.get("min_height", 0.08))
+        return position >= initial + float(
+            spec.get("min_height", defaults["minimum_lift_height"])
+        )
     if kind in {"both_arms_at_initial_qpos", "arms_home"}:
         current = env.robot.get_qpos()
         initial = getattr(env, "init_qpos", current)
         return torch.all(
-            torch.abs(current - initial) <= float(spec.get("tolerance", 0.05)),
+            torch.abs(current - initial)
+            <= float(spec.get("tolerance", defaults["arm_initial_qpos_tolerance"])),
             dim=-1,
         )
     if kind in {"both_grippers_open", "grippers_open"}:
@@ -500,7 +526,7 @@ def evaluate_predicate(
                 value = value.unsqueeze(0).repeat(int(env.num_envs), 1)
             results.append(
                 torch.linalg.vector_norm(value - expected, dim=-1)
-                <= float(spec.get("tolerance", 0.001))
+                <= float(spec.get("tolerance", defaults["gripper_state_tolerance"]))
             )
         return results[0] & results[1]
     if kind == "grippers_clear_of_object":
@@ -508,7 +534,12 @@ def evaluate_predicate(
         if eef_values is None:
             return _constant(env, False)
         object_position = _position(env, _object(spec))
-        clearance = float(spec.get("min_distance", spec.get("clearance", 0.08)))
+        clearance = float(
+            spec.get(
+                "min_distance",
+                spec.get("clearance", defaults["gripper_clear_min_distance"]),
+            )
+        )
         result = _constant(env, True)
         for eef in eef_values:
             if eef is None:

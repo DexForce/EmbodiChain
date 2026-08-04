@@ -34,6 +34,8 @@ import re
 from typing import Any
 import warnings
 
+from embodichain.gen_sim.action_engine.config import generation_defaults
+
 from .models import PreparedScene
 
 __all__ = [
@@ -48,27 +50,22 @@ _UID_SUFFIX_RE = re.compile(r"_0$")
 _UID_INVALID_RE = re.compile(r"[^0-9A-Za-z_.-]+")
 _CONTAINER_HINTS = ("basket", "bin", "bowl", "box", "container", "drawer", "tray")
 
+_GENERATION_DEFAULTS = generation_defaults()
+_SCENE_DEFAULTS = _GENERATION_DEFAULTS["scene"]
+_PHYSICS_DEFAULTS = _GENERATION_DEFAULTS["physics"]
+_BACKGROUND_POLICY = _PHYSICS_DEFAULTS["background"]
+_RIGID_POLICY = _PHYSICS_DEFAULTS["rigid_object"]
 _BACKGROUND_ATTRS = {
-    "mass": 10.0,
-    "static_friction": 0.95,
-    "dynamic_friction": 0.9,
-    "restitution": 0.01,
+    key: value
+    for key, value in _BACKGROUND_POLICY.items()
+    if key != "max_convex_hull_num"
 }
 _RIGID_ATTRS = {
-    "mass": 0.1,
-    "static_friction": 0.95,
-    "dynamic_friction": 0.9,
-    "linear_damping": 0.9,
-    "angular_damping": 0.9,
-    "contact_offset": 0.003,
-    "rest_offset": 0.001,
-    "restitution": 0.05,
-    "max_depenetration_velocity": 0.8,
-    "max_linear_velocity": 5.0,
-    "max_angular_velocity": 5.0,
-    "min_position_iters": 32,
-    "min_velocity_iters": 8,
+    key: value
+    for key, value in _RIGID_POLICY.items()
+    if key not in {"max_convex_hull_num", "acd_method"}
 }
+_DEFAULT_BODY_SCALE = tuple(float(value) for value in _SCENE_DEFAULTS["body_scale"])
 
 
 def resolve_gym_config_path(gym_project: str | Path) -> Path:
@@ -126,8 +123,8 @@ def prepare_scene(
     gym_project: str | Path,
     *,
     z_rotation_degrees: float | None = None,
-    body_scale_policy: str = "preserve",
-    body_scale: Sequence[float] = (1.0, 1.0, 1.0),
+    body_scale_policy: str = str(_SCENE_DEFAULTS["body_scale_policy"]),
+    body_scale: Sequence[float] = _DEFAULT_BODY_SCALE,
 ) -> PreparedScene:
     """Load a source gym config and return planner/runtime views of one scene."""
     scale_policy = str(body_scale_policy).strip().lower()
@@ -146,7 +143,7 @@ def prepare_scene(
     table_source_uid = _find_table_source_uid(source_entries)
     uid_map = _make_uid_map(source_entries, table_source_uid=table_source_uid)
     rotation = (
-        -90.0
+        float(_SCENE_DEFAULTS["prompt2scene_z_rotation_degrees"])
         if z_rotation_degrees is None and is_prompt2scene_export(source_path)
         else float(z_rotation_degrees or 0.0)
     )
@@ -433,16 +430,20 @@ def _runtime_object(config: Mapping[str, Any], *, role: str) -> dict[str, Any]:
     if role == "background":
         result["attrs"] = {**source_attrs, **_BACKGROUND_ATTRS}
         result["body_type"] = "kinematic"
-        result["max_convex_hull_num"] = 1
+        result["max_convex_hull_num"] = int(_BACKGROUND_POLICY["max_convex_hull_num"])
     else:
         result["attrs"] = {**source_attrs, **_RIGID_ATTRS}
         result["body_type"] = "dynamic"
-        max_hulls = max(1, min(int(config.get("max_convex_hull_num", 16)), 16))
+        hull_limit = int(_RIGID_POLICY["max_convex_hull_num"])
+        max_hulls = max(
+            1,
+            min(int(config.get("max_convex_hull_num", hull_limit)), hull_limit),
+        )
         result["max_convex_hull_num"] = max_hulls
-        result["acd_method"] = "vhacd"
+        result["acd_method"] = str(_RIGID_POLICY["acd_method"])
         shape = result.get("shape")
         if isinstance(shape, dict):
-            shape.setdefault("acd_method", "vhacd")
+            shape.setdefault("acd_method", str(_RIGID_POLICY["acd_method"]))
             shape.setdefault("max_convex_hull_num", max_hulls)
     return result
 

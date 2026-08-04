@@ -26,6 +26,7 @@ import gymnasium
 import numpy as np
 import torch
 
+from embodichain.gen_sim.action_engine.config import generation_defaults
 from embodichain.gen_sim.action_engine.environment import (  # noqa: F401
     ACTION_ENGINE_ENV_ID,
 )
@@ -39,6 +40,8 @@ from embodichain.utils.logger import log_info, log_warning
 from embodichain.utils.utility import load_config
 
 __all__ = ["build_parser", "cli"]
+
+_DEFAULT_MAX_EPISODES = int(generation_defaults()["task"]["max_episodes"])
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,7 +138,7 @@ def cli() -> None:
         runtime_backend=args.runtime_backend,
     )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    episodes = int(gym_config.get("max_episodes", 1))
+    episodes = int(gym_config.get("max_episodes", _DEFAULT_MAX_EPISODES))
     try:
         for episode_index in range(episodes):
             episode_seed = None if args.seed is None else int(args.seed) + episode_index
