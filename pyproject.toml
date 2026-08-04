@@ -52,16 +52,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-scene-engine = [
-  "requests",
-  "Pillow",
-  "numpy",
-  "scipy",
-  "shapely",
-  "trimesh",
-  "open3d",
-  "matplotlib"
-]
 gensim = [
   "bpy",
   "pyrender==0.1.45",
@@ -72,7 +62,7 @@ gensim = [
   "shapely",
   "trimesh",
   "open3d",
-  "matplotlib"
+  "matplotlib",
 ]
 # cuRobo V2 is distributed from its source repository and provides separate
 # dependency sets for CUDA 12 and CUDA 13. Keep it optional so CPU-only and
