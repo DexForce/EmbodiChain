@@ -47,6 +47,7 @@ from random_input import (
     parse_task_id,
 )
 from app_config import *  # noqa: F403 - services intentionally consume central config.
+from app_env import SCENE_ENGINE_VISER_PORT, configure_direct_network_env
 from app_processes import (
     build_pipeline_env,
     build_run_agent_command,

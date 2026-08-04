@@ -42,7 +42,7 @@ from typing import Any
 
 import gradio as gr
 
-from app_config import (
+from app_env import (
     ARTICRAFT_CONDA_ENV,
     ARTICRAFT_OUTPUT_ROOT,
     ARTICRAFT_REPOSITORY_URL,

@@ -35,11 +35,8 @@ import gradio as gr
 import trimesh
 
 from app_articraft import build_articraft_panel
-from app_config import (
-    DEBUG_ASSET_ENGINE_ROOT,
-    EMBODICHAIN_ROOT,
-    SIMREADY_MESH_SUFFIXES,
-)
+from app_config import DEBUG_ASSET_ENGINE_ROOT, SIMREADY_MESH_SUFFIXES
+from app_env import EMBODICHAIN_ROOT
 from app_processes import read_process_output, start_pipeline
 
 

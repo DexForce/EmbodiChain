@@ -28,10 +28,8 @@ from app_config import (
     ASSETS_DIR,
     DEBUG_ENGINE_ROOT,
     DEFAULT_CONCURRENCY_LIMIT,
-    EMBODICHAIN_ROOT,
-    SERVER_NAME,
-    SERVER_PORT,
 )
+from app_env import EMBODICHAIN_ROOT, SERVER_NAME, SERVER_PORT
 from app_processes import force_stop_all_child_processes
 from app_services import build_demo
 

@@ -14,104 +14,29 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Shared settings and helpers for the Gradio application.
+"""Static settings and helpers for the Gradio application.
 
-Deployment-specific values are read from ``embodichain/gen_sim/.env``; this
-module keeps UI constants, path derivation, and CLI command definitions close
-to the application code.
+Deployment-specific settings live in :mod:`app_env`, which reads the shared
+``embodichain/gen_sim/.env`` file. This module keeps UI constants, path
+derivation, and CLI command definitions close to the application code.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any
 
-from embodichain.gen_sim.env import load_gen_sim_env
-
-load_gen_sim_env()
-
-PROXY_ENV_KEYS = (
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "FTP_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "ftp_proxy",
-)
-DIRECT_NO_PROXY_VALUE = "*"
-
-
-def _getenv(name: str, default: str) -> str:
-    """Read a non-empty shared ``.env`` value, falling back to ``default``."""
-    return os.environ.get(name) or default
-
-
-# SimReady uses an OpenAI-compatible multimodal endpoint.  Configure these
-# values here for a local deployment, or provide the matching SIMREADY_* env
-# vars before launch.  Keep the API key out of commits; an empty value leaves
-# any inherited OPENAI_* variables and SimReady's own JSON configuration intact.
-SIMREADY_OPENAI_API_KEY = _getenv("SIMREADY_OPENAI_API_KEY", "")
-SIMREADY_OPENAI_MODEL = _getenv("SIMREADY_OPENAI_MODEL", "")
-SIMREADY_OPENAI_BASE_URL = _getenv("SIMREADY_OPENAI_BASE_URL", "")
-
-
-def configure_direct_network_env(env: Any = None) -> None:
-    """Disable proxy inheritance for local pipeline and Gradio processes."""
-    if env is None:
-        env = os.environ
-    for key in PROXY_ENV_KEYS:
-        env.pop(key, None)
-    env["NO_PROXY"] = DIRECT_NO_PROXY_VALUE
-    env["no_proxy"] = DIRECT_NO_PROXY_VALUE
-    env.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
-
-
-def configure_simready_llm_env(env: Any = None) -> None:
-    """Map app-level SimReady settings to the upstream CLI's environment."""
-    if env is None:
-        env = os.environ
-    configured_values = {
-        "OPENAI_API_KEY": SIMREADY_OPENAI_API_KEY,
-        "OPENAI_MODEL": SIMREADY_OPENAI_MODEL,
-        "OPENAI_BASE_URL": SIMREADY_OPENAI_BASE_URL,
-    }
-    for key, value in configured_values.items():
-        if value:
-            env[key] = value
-
+import app_env
 
 APP_ROOT = Path(__file__).resolve().parent
-EMBODICHAIN_ROOT = Path(
-    _getenv("EMBODICHAIN_ROOT", str(Path(__file__).resolve().parents[3]))
-).expanduser()
 ASSETS_DIR = APP_ROOT / "assets"
 DEXFORCE_LOGO = ASSETS_DIR / "dexforce.png"
 INTERACT_RANDOM_PREVIEW_DIR = APP_ROOT / ".gradio_previews"
 DEBUG_ENGINE_ROOT = APP_ROOT / ".debug_engine"
 DEBUG_ASSET_ENGINE_ROOT = DEBUG_ENGINE_ROOT / "assets"
-ARTICRAFT_ROOT = Path(
-    _getenv("ARTICRAFT_ROOT", str(APP_ROOT / ".articraft"))
-).expanduser()
-ARTICRAFT_REPOSITORY_URL = _getenv(
-    "ARTICRAFT_REPOSITORY_URL", "https://github.com/mattzh72/articraft.git"
-)
-ARTICRAFT_CONDA_ENV = _getenv("ARTICRAFT_CONDA_ENV", "articraft")
-# Keep every Articraft record, copied reference image, log, and downloadable
-# result bundle under one app-owned directory rather than the source checkout.
-ARTICRAFT_OUTPUT_ROOT = Path(
-    _getenv("ARTICRAFT_OUTPUT_ROOT", str(DEBUG_ENGINE_ROOT / "articraft"))
-).expanduser()
 DEBUG_SCENE_ENGINE_ROOT = DEBUG_ENGINE_ROOT / "scenes"
-SCENE_ENGINE_VISER_PORT = int(_getenv("SCENE_ENGINE_VISER_PORT", "8080"))
-# Articulation previews run as a separate Viser process from scene previews,
-# so they need their own externally configurable port.
-ARTICRAFT_VISER_PORT = int(_getenv("ARTICRAFT_VISER_PORT", "8081"))
 SCENE_ID = "current"
 
-GYM_PROJECT_ROOT = EMBODICHAIN_ROOT / "gym_project"
+GYM_PROJECT_ROOT = app_env.EMBODICHAIN_ROOT / "gym_project"
 ACTION_AGENT_ROOT = GYM_PROJECT_ROOT / "action_agent_pipeline"
 IMAGE_DIR = ACTION_AGENT_ROOT / "images"
 AUTO_LOG_DIR = ACTION_AGENT_ROOT / "auto_logs"
@@ -119,7 +44,7 @@ IMAGE_PATH = IMAGE_DIR / f"{SCENE_ID}.png"
 PROMPT2SCENE_ROOT = GYM_PROJECT_ROOT / SCENE_ID
 CONFIG_DIR = ACTION_AGENT_ROOT / "configs" / SCENE_ID
 FAST_GYM_CONFIG = CONFIG_DIR / "fast_gym_config.json"
-OUTPUTS_DIR = EMBODICHAIN_ROOT / "outputs"
+OUTPUTS_DIR = app_env.EMBODICHAIN_ROOT / "outputs"
 CURRENT_GYM_EXPORT_DIR = PROMPT2SCENE_ROOT / "gym_export"
 CURRENT_GYM_EXPORT_CONFIG = CURRENT_GYM_EXPORT_DIR / "gym_config.json"
 GRADIO_SCENE_DIR = CONFIG_DIR / "gradio_scene"
@@ -305,6 +230,4 @@ TIMING_PHASE_ORDER = (
     "action_graph_execution",
 )
 
-SERVER_NAME = _getenv("GRADIO_SERVER_NAME", "0.0.0.0")
-SERVER_PORT = int(_getenv("GRADIO_SERVER_PORT", "7860"))
 DEFAULT_CONCURRENCY_LIMIT = 1

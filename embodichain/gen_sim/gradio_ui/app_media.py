@@ -32,6 +32,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from app_config import *  # noqa: F403 - media paths and limits are configuration.
+from app_env import EMBODICHAIN_ROOT
 from app_state import format_timing_lines, runtime, runtime_lock, snapshot_timing_locked
 
 

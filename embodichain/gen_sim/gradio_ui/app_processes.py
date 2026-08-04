@@ -27,7 +27,12 @@ import threading
 import time
 from pathlib import Path
 
-from app_config import *  # noqa: F403 - process settings are central configuration.
+from app_config import COMMANDS, PROCESS_STOP_TIMEOUT_S
+from app_env import (
+    EMBODICHAIN_ROOT,
+    configure_direct_network_env,
+    configure_simready_llm_env,
+)
 from app_state import PHASES
 
 __all__ = [

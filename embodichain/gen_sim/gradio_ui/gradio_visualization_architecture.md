@@ -21,6 +21,7 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
     ├──────────────► app_state.py      共享 RuntimeState、锁和计时
     ├──────────────► app_media.py      视频、数据集预览和日志归档
     └──────────────► app_config.py     UI 常量、路径推导和命令定义
+    └──────────────► app_env.py        部署配置读取
                          └──────────► ../.env  部署路径、端口和服务凭据
 ```
 
@@ -35,7 +36,8 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
 | `app_state.py` | `RuntimeState`、互斥锁、进度阶段、运行 token 和耗时统计。 |
 | `app_commands.py` | prompt2scene、动作配置和 `run_agent` 的参数构造。 |
 | `app_media.py` | 观众视频、LeRobot 数据预览、组合视频和运行日志归档。 |
-| `app_config.py` | UI 文案、引擎模式、路径推导和 CLI 固定参数；部署值从 `.env` 读取。 |
+| `app_config.py` | UI 文案、引擎模式、路径推导和 CLI 固定参数。 |
+| `app_env.py` | 从 `.env` 读取 Gradio、Articraft 和 SimReady 的部署值，并保留未配置时的默认值。 |
 | `../.env` | Gradio 与 Scene Engine 共用的路径、端口、LLM 和服务端点配置；不提交凭据。 |
 
 ## 启动、路径和网络环境
@@ -257,7 +259,7 @@ Articulation 还需要 Git（首次 clone）、Conda、`ARTICRAFT_CONDA_ENV` 和
 
 ```bash
 python -m py_compile \
-  gradio_app.py app_config.py app_state.py app_commands.py \
+  gradio_app.py app_config.py app_env.py app_state.py app_commands.py \
   app_processes.py app_media.py app_workflows.py app_ui.py \
   app_asset_engine.py app_articraft.py app_services.py
 
