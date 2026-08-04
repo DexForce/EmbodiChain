@@ -54,7 +54,12 @@ COMMANDS = (
     Command(
         name="scene-engine",
         target="embodichain.gen_sim.scene_engine.cli.start:main",
-        help="Generate a scene from an input image using configured services.",
+        help="Generate a scene export from an input image.",
+    ),
+    Command(
+        name="preview-scene",
+        target="embodichain.gen_sim.scene_engine.cli.preview:main",
+        help="Preview a generated Scene Engine scene export.",
     ),
     Command(
         name="preview-asset",
@@ -90,11 +95,6 @@ COMMANDS = (
         name="workspace-cache",
         target="embodichain.workspace_cache_cli:main",
         help="Inspect and clean workspace analyzer caches.",
-    ),
-    Command(
-        name="analyze-workspace",
-        target="embodichain.lab.scripts.analyze_workspace:cli",
-        help="Analyze a robot's reachable workspace from a URDF/USD asset.",
     ),
 )
 

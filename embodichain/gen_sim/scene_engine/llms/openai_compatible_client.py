@@ -36,9 +36,11 @@ class OpenAICompatibleVLM:
         self._config = config
 
     @classmethod
-    def from_env(cls) -> "OpenAICompatibleVLM":
-        """Create a client from the shared GenSim ``.env`` configuration."""
-        return cls(load_llm_config())
+    def from_config(
+        cls, config_path: str | Path | None = None
+    ) -> "OpenAICompatibleVLM":
+        """Create a client from the scene-engine LLM configuration."""
+        return cls(load_llm_config(config_path))
 
     def complete(
         self,
