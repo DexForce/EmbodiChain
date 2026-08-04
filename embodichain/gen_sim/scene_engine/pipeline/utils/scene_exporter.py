@@ -116,7 +116,11 @@ class SceneExporter:
     ) -> str:
         """Copy one referenced SimReady GLB and return its config-relative path."""
         object_id = scene_object.id
-        if Path(object_id).name != object_id or object_id in {"", ".", ".."}:
+        if (
+            Path(object_id).name != object_id
+            or "\\" in object_id
+            or object_id in {"", ".", ".."}
+        ):
             raise ValueError(
                 f"Scene object id is not safe for a GLB filename: {object_id!r}"
             )
