@@ -1,4 +1,4 @@
-{
+{   
     "id": "PourWaterAgent-v3",
     "max_episodes": 5,
     "env": {
@@ -9,7 +9,7 @@
                 "params": {
                     "entity_cfg": {"uid": "table"},
                     "position_range": [[0.0, 0.0, -0.04], [0.0, 0.0, 0.04]],
-                    "relative_position": true
+                    "relative_position": true                
                 }
             },
             "init_bottle_pose": {
@@ -18,7 +18,7 @@
                 "params": {
                     "entity_cfg": {"uid": "bottle"},
                     "position_range": [[-0.08, -0.12, 0.0], [0.08, 0.04, 0.0]],
-                    "relative_position": true
+                    "relative_position": true                
                 }
             },
             "init_cup_pose": {
@@ -27,7 +27,7 @@
                 "params": {
                     "entity_cfg": {"uid": "cup"},
                     "position_range": [[-0.08, -0.04, 0.0], [0.04, 0.06, 0.0]],
-                    "relative_position": true
+                    "relative_position": true                
                 }
             },
             "prepare_extra_attr": {

@@ -1,4 +1,4 @@
-{
+{   
     "id": "RearrangementAgent-v3",
     "max_episodes": 10,
     "env": {
@@ -9,7 +9,7 @@
                 "params": {
                     "entity_cfg": {"uid": "table"},
                     "position_range": [[0.0, 0.0, -0.04], [0.0, 0.0, 0.04]],
-                    "relative_position": true
+                    "relative_position": true                
                 }
             },
             "init_fork_pose": {
@@ -19,8 +19,8 @@
                     "entity_cfg": {"uid": "fork"},
                     "position_range": [[0.0, -0.05, 0.0], [0.1, 0.05, 0.0]],
                     "rotation_range": [[0, 0, -45], [0, 0, 45]],
-                    "relative_position": true,
-                    "relative_rotation": true
+                    "relative_position": true,                
+                    "relative_rotation": true               
                 }
             },
             "init_spoon_pose": {
