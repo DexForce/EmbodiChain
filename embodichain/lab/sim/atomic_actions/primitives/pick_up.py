@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -38,12 +39,31 @@ from ..core import (
     ActionCfg,
     ActionResult,
     AtomicAction,
-    GraspTarget,
     HeldObjectState,
     ObjectSemantics,
     WorldState,
+    _validate_pose_tensor,
 )
+from ..targets import ObjectActionTarget
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class GraspTarget(ObjectActionTarget):
+    """Pickup target with an affordance-selected or supplied grasp pose."""
+
+    grasp_xpos: torch.Tensor | None = None
+    """Optional end-effector grasp pose.
+
+    When omitted, :class:`PickUp` selects a grasp from the target affordance.
+    Supplying a pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)`` skips grasp
+    sampling.
+    """
+
+    def __post_init__(self) -> None:
+        ObjectActionTarget.__post_init__(self)
+        if self.grasp_xpos is not None:
+            _validate_pose_tensor(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
 
 
 @configclass
@@ -65,6 +85,9 @@ class PickUpCfg(ActionCfg):
 
     hand_close_qpos: torch.Tensor | None = None
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+
+    pick_object_part: str = "center"
+    """Name of the object part to pick up (used for grasp pose generation). Currently support [center | top | bottom]."""
 
     lift_height: float = 0.1
     """Height (m) to lift the end-effector after closing the gripper."""
@@ -88,7 +111,7 @@ class PickUpCfg(ActionCfg):
     """Optional rotation (radians) about the grasp x-axis to apply after grasp selection."""
 
 
-class PickUp(AtomicAction):
+class PickUp(AtomicAction[GraspTarget]):
     """Approach a grasp pose, close the gripper, lift."""
 
     TargetType: ClassVar[type] = GraspTarget
@@ -131,37 +154,12 @@ class PickUp(AtomicAction):
                 ValueError,
             )
 
-    def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
-        sem = target.semantics
-        if target.grasp_xpos is None and not isinstance(
-            sem.affordance, AntipodalAffordance
-        ):
-            logger.log_error(
-                "PickUp requires an AntipodalAffordance when grasp_xpos is not set.",
-                ValueError,
-            )
-        if sem.entity is None:
-            logger.log_error(
-                "PickUp requires an entity on the target semantics.", ValueError
-            )
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
-        )
-        if target.grasp_xpos is None:
-            is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
-        else:
-            grasp_xpos = self.builder.resolve_pose_target(
-                target.grasp_xpos, n_envs=self.n_envs
-            )
-            if self.cfg.rotate_upright is not None:
-                self._apply_upright_rotation(sem, grasp_xpos)
-            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
-        if not self.builder.all_envs_success(is_success):
-            logger.log_warning("PickUp failed to resolve a grasp pose.")
-            return self._fail(state)
+    def _get_full_pickup_trajectory(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_arm_qpos: torch.Tensor,
+        last_qpos: torch.Tensor,
+    ):
         pre_grasp_xpos = self.builder.apply_local_offset(
             grasp_xpos, -self.approach_direction * self.cfg.pre_grasp_distance
         )
@@ -206,15 +204,11 @@ class PickUp(AtomicAction):
             arm_dof=self.arm_dof,
             cfg=self.cfg,
         )
-        success = approach_success & lift_success
+        is_success = approach_success & lift_success
 
         hand_close_path = self.builder.interpolate_hand_qpos(
             self.hand_open_qpos, self.hand_close_qpos, n_waypoints=n_close
         )
-
-        # Allocate from the actually-returned phase lengths so collision-aware
-        # planners (which preserve their own sample count) are not forced into
-        # the requested n_approach / n_lift counts.
         n_approach_actual = approach_arm.shape[1]
         n_lift_actual = lift_arm.shape[1]
         full = torch.empty(
@@ -222,7 +216,7 @@ class PickUp(AtomicAction):
             dtype=torch.float32,
             device=self.device,
         )
-        full[:, :, :] = state.last_qpos.unsqueeze(1)
+        full[:, :, :] = last_qpos.unsqueeze(1)
         full[:, :n_approach_actual, self.arm_joint_ids] = approach_arm
         full[:, :n_approach_actual, self.hand_joint_ids] = self.hand_open_qpos
         full[:, n_approach_actual : n_approach_actual + n_close, self.arm_joint_ids] = (
@@ -235,19 +229,63 @@ class PickUp(AtomicAction):
         full[:, n_approach_actual + n_close :, self.hand_joint_ids] = (
             self.hand_close_qpos
         )
+        return is_success, full
+
+    def execute(self, target: GraspTarget, state: WorldState) -> ActionResult:
+        sem = target.semantics
+        if target.grasp_xpos is None and not isinstance(
+            sem.affordance, AntipodalAffordance
+        ):
+            logger.log_error(
+                "PickUp requires an AntipodalAffordance when grasp_xpos is not set.",
+                ValueError,
+            )
+        if sem.entity is None:
+            logger.log_error(
+                "PickUp requires an entity on the target semantics.", ValueError
+            )
+        start_arm_qpos = self.builder.resolve_start_qpos(
+            arm_qpos_from_state(state, self.arm_joint_ids),
+            n_envs=self.n_envs,
+            arm_dof=self.arm_dof,
+            control_part=self.cfg.control_part,
+        )
+        if target.grasp_xpos is None:
+            is_success, grasp_xpos = self._resolve_grasp_pose(sem, start_arm_qpos)
+        else:
+            grasp_xpos = self.builder.resolve_pose_target(
+                target.grasp_xpos, n_envs=self.n_envs
+            )
+            if self.cfg.rotate_upright is not None:
+                self._apply_upright_rotation(sem, grasp_xpos)
+            is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
+        if not self.builder.all_envs_success(is_success):
+            logger.log_warning("PickUp failed to resolve a grasp pose.")
+            return self._fail(state)
+
+        is_success, full = self._get_full_pickup_trajectory(
+            grasp_xpos, start_arm_qpos, state.last_qpos
+        )
 
         obj_poses = sem.entity.get_local_pose(to_matrix=True)
         object_to_eef = torch.bmm(pose_inv(obj_poses), grasp_xpos)
         held = HeldObjectState(
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
+        held_objects = dict(state.held_objects)
+        held_objects[self.cfg.control_part] = held
+        coordinated_held_objects = {
+            key: value
+            for key, value in state.coordinated_held_objects.items()
+            if self.cfg.control_part not in key
+        }
         return ActionResult(
-            success=success,
+            success=is_success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=held,
-                coordinated_held_object=state.coordinated_held_object,
+                held_objects=held_objects,
+                coordinated_held_objects=coordinated_held_objects,
             ),
         )
 
@@ -269,6 +307,7 @@ class PickUp(AtomicAction):
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=obj_poses,
             approach_direction=self.approach_direction,
+            object_part=self.cfg.pick_object_part,
         )
         n_envs = obj_poses.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)
@@ -322,9 +361,8 @@ class PickUp(AtomicAction):
         )
 
         pre_grasp_variants = grasp_variants.clone()
-        pre_grasp_variants[..., :3, 3] -= (
-            self.approach_direction * self.cfg.pre_grasp_distance
-        )
+        pre_grasp_z = pre_grasp_variants[..., :3, 2]
+        pre_grasp_variants[..., :3, 3] -= pre_grasp_z * self.cfg.pre_grasp_distance
         lift_variants = grasp_variants.clone()
         lift_variants[..., :3, 3] += torch.tensor(
             [0.0, 0.0, self.cfg.lift_height],
@@ -483,4 +521,4 @@ class PickUp(AtomicAction):
         return adjusted_grasp_xpos
 
 
-__all__ = ["PickUp", "PickUpCfg"]
+__all__ = ["GraspTarget", "PickUp", "PickUpCfg"]

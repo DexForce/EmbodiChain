@@ -3,14 +3,23 @@
 
 .. automodule:: embodichain.lab
 
-   .. rubric:: Submodules
+Overview
+--------
 
-   .. autosummary::
+The ``lab`` package is EmbodiChain's simulation laboratory. It bundles the
+simulation core (``sim``), the Gymnasium-compatible environment framework
+(``gym``), real-device controllers (``devices``), and the browser
+visualization stack (``visualization``). Most user code interacts with ``lab``
+through the environment classes and the simulation manager.
 
-      devices
-      gym
-      sim
-      visualization
+.. rubric:: Submodules
+
+.. autosummary::
+
+   devices
+   gym
+   sim
+   visualization
 
 Browser Visualization
 ---------------------
@@ -22,6 +31,9 @@ Browser Visualization
 
 Device Management
 -----------------
+
+Real-device controllers that mirror the simulation ``Robot`` API for deploying
+policies on physical hardware.
 
 .. automodule:: embodichain.lab.devices
    :members:

@@ -37,6 +37,28 @@ until `Ctrl+C`, so dynamic assets continue moving and their poses update in the
 browser. Assets are published immediately after loading because the Viser
 server starts together with `SimulationManager`.
 
+### Articulation Joint Controls
+
+For articulation previews, `--viser` adds an **Articulation joints** panel by
+default. Each articulation has its own folder:
+
+- joints with two finite position limits use sliders;
+- joints with one or both limits missing use numeric inputs;
+- rotational values are displayed in degrees and prismatic values in meters;
+- mimic joints are omitted, and reset buttons restore the pose captured when
+  the asset was loaded.
+
+Commands are validated and applied on the simulation thread before every
+physics step. The preview controller writes both the current and target joint
+positions, and clears velocity and effort, so the selected pose remains stable
+even when the asset has no configured joint drive. Articulations whose active
+joint names do not map one-to-one to scalar DOFs are left read-only.
+
+Disable the panel with `--no-joint-control`. Joint controls are currently a
+Viser-only preview feature; the native DexSim window remains unchanged until it
+provides a GUI integration point. When `--preview` is also active, queued
+browser changes are applied the next time the REPL executes `s <N>`.
+
 Combine `--viser` with `--preview` to retain the interactive REPL:
 
 ```bash
@@ -105,6 +127,7 @@ asset.set_root_pose(pos=[0, 0, 1.0], rot=[0, 0, 0])
 | `--headless`         | Run without rendering window                                       | `False`              |
 | `--renderer`         | Renderer backend: `hybrid`, `fast-rt` or `rt`            | `hybrid`             |
 | `--preview`          | Enter interactive embed mode after loading                         | `False`              |
+| `--joint-control` / `--no-joint-control` | Enable or disable Viser articulation controls       | `True`               |
 | `--viser`            | Enable the headless Viser browser preview                           | `False`              |
 | `--viser-host`       | Viser bind host                                                     | `127.0.0.1`          |
 | `--viser-port`       | Viser bind port                                                     | `8080`               |

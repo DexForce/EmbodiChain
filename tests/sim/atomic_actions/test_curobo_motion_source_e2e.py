@@ -45,12 +45,14 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine  # noqa: E402
+from embodichain.lab.sim.atomic_actions import (  # noqa: E402
+    AtomicActionEngine,
+    EndEffectorPoseTarget,
+)
 from embodichain.lab.sim.atomic_actions.actions import (  # noqa: E402
     MoveEndEffector,
     MoveEndEffectorCfg,
 )
-from embodichain.lab.sim.atomic_actions.core import EndEffectorPoseTarget  # noqa: E402
 
 ROBOT_UID = "curobo_franka"
 CONTROL_PART = "arm"

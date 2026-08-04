@@ -73,6 +73,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     make_ur5_solver_cfg,
     prepare_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
 )
 
 DEFAULT_MESH_FRAME_CORRECTION_EULER_DEG = (-90.0, 0.0, 0.0)
@@ -871,7 +872,7 @@ def run_coordinated_placement_demo(
         return
     left_pick_traj = left_pick_result.trajectory
     state = left_pick_result.next_state
-    bread_held_state = state.held_object
+    bread_held_state = state.get_held_object("left_arm")
     if bread_held_state is None:
         raise RuntimeError("PickUp did not produce a held state for the bread.")
     log_action_plan(robot, "left_pick_up", left_pick_traj, full_joint_ids)
@@ -898,7 +899,7 @@ def run_coordinated_placement_demo(
         return
     right_pick_traj = right_pick_result.trajectory
     state = right_pick_result.next_state
-    pan_held_state = state.held_object
+    pan_held_state = state.get_held_object("right_arm")
     if pan_held_state is None:
         raise RuntimeError("PickUp did not produce a held state for the pan.")
     log_action_plan(robot, "right_pick_up", right_pick_traj, full_joint_ids)
@@ -965,6 +966,10 @@ def run_coordinated_placement_demo(
             "right_arm",
             sim.device,
         )
+        held_objects = dict(state.held_objects)
+        held_objects["left_arm"] = bread_held_state
+        held_objects["right_arm"] = pan_held_state
+        state = state.with_updates(held_objects=held_objects)
 
     support_target_pose = build_support_object_target_pose(pan_pose, sim.device)
     placing_target_pose = build_placing_object_target_pose(
@@ -994,8 +999,6 @@ def run_coordinated_placement_demo(
         support_object_target_pose=broadcast_pose_batch(
             support_target_pose, num_envs=n_envs
         ),
-        placing_held_object=bread_held_state,
-        support_held_object=pan_held_state,
         placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
         support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
         release=True,
@@ -1071,4 +1074,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

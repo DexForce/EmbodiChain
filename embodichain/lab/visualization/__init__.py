@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Browser-based visualization of simulation scenes via Viser.
+
+``SceneExporter`` produces backend-neutral snapshots, ``VisualizationRuntime`` pushes them to a Viser backend, with gizmo overlays, camera preview, and CLI helpers.
+"""
+
 from __future__ import annotations
 
 from .cli import add_viser_args_to_parser, visualization_cfg_from_args
@@ -27,6 +32,10 @@ from .protocol import (
     GizmoCommand,
     GizmoSpec,
     GizmoState,
+    JointControlCommand,
+    JointControlProvider,
+    JointControlSpec,
+    JointControlState,
     MeshGeometry,
     PointCloudOverlay,
     SceneFrame,
@@ -39,6 +48,7 @@ from .protocol import (
 )
 from .runtime import (
     GizmoCommandQueue,
+    JointControlCommandQueue,
     LatestFrameQueue,
     RuntimeHealth,
     RuntimeStats,
@@ -58,6 +68,11 @@ __all__ = [
     "GizmoCommandQueue",
     "GizmoSpec",
     "GizmoState",
+    "JointControlCommand",
+    "JointControlCommandQueue",
+    "JointControlProvider",
+    "JointControlSpec",
+    "JointControlState",
     "LatestFrameQueue",
     "MeshGeometry",
     "PointCloudOverlay",

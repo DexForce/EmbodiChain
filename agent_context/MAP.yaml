@@ -314,6 +314,9 @@ topics:
       - rl training
       - reinforcement learning
       - ppo
+      - apg
+      - analytic policy gradient
+      - differentiable training
       - rl agent
       - actor critic
       - rollout buffer
@@ -323,6 +326,8 @@ topics:
       - rl
       - reinforcement
       - ppo
+      - apg
+      - differentiable
       - actor
       - critic
       - buffer
@@ -335,11 +340,17 @@ topics:
     paths:
       - topics/rl-learning/rl-learning.md
     source_of_truth:
+      - embodichain/learning/rl/env.py
+      - embodichain/learning/rl/evaluation.py
+      - embodichain/learning/rl/routing.py
+      - embodichain/learning/rl/differentiable_trainer.py
+      - embodichain/learning/rl/experimental/newton/
       - embodichain/learning/rl/train.py
       - embodichain/learning/rl/algo/
       - embodichain/learning/rl/buffer/
       - embodichain/learning/rl/models/
       - embodichain/learning/rl/collector/
+      - embodichain_tasks/embodichain_tasks/rl/basic/point_mass.py
     related_topics:
       - env-framework
       - manager-functor
@@ -414,6 +425,7 @@ topics:
       - motion primitive
       - action primitive
       - AtomicAction
+      - ActionTarget
       - AtomicActionEngine
       - TrajectoryBuilder
       - 原子动作
@@ -425,6 +437,11 @@ topics:
       - TrajectoryBuilder
       - ActionResult
       - WorldState
+      - held_objects
+      - ObjectActionTarget
+      - PlaceTarget
+      - PressTarget
+      - target ownership
       - ActionCfg
       - motion_source
       - plan_arm_traj
@@ -433,6 +450,7 @@ topics:
       - topics/atomic-actions/atomic-actions.md
     source_of_truth:
       - embodichain/lab/sim/atomic_actions/core.py
+      - embodichain/lab/sim/atomic_actions/targets.py
       - embodichain/lab/sim/atomic_actions/engine.py
       - embodichain/lab/sim/atomic_actions/trajectory.py
       - embodichain/lab/sim/atomic_actions/primitives/

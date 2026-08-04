@@ -1,0 +1,24 @@
+name: point_mass
+env_id: PointMassRL
+success_threshold: 0.95
+base_config:
+  trainer:
+    learning_env:
+      name: PointMassRL
+      cfg:
+        max_episode_steps: 100
+        success_threshold: 0.03
+    exp_name: point_mass
+    device: cuda:0
+    headless: true
+    num_envs: 64
+    iterations: 500
+    buffer_size: 256
+    segment_length: 100
+    update_horizon: 100
+    enable_eval: true
+    num_eval_envs: 32
+    num_eval_episodes: 128
+    best_eval_metric: eval/success_rate
+    best_eval_mode: max
+    use_wandb: false

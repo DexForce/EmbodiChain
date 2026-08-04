@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""EmbodiChain's simulation core.
+
+Organized around the ``SimulationManager`` (the DexSim scene handle), the scene-object hierarchy, sensors, IK solvers, motion planners, the atomic-action layer, and shared configuration types.
+"""
+
 from __future__ import annotations
 
 from .material import (
@@ -23,6 +28,7 @@ from .material import (
     ReuseSegmentState,
 )
 from .common import BatchEntity
+from .profiler import Profiler, ProfilerCfg
 
 from .sim_manager import *
 
@@ -32,6 +38,8 @@ __all__ = [
     "VisualMaterialInst",
     "ReuseSegmentState",
     "BatchEntity",
+    "Profiler",
+    "ProfilerCfg",
     "SimulationManager",
     "SimulationManagerCfg",
     "SIM_CACHE_DIR",

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from typing import Dict
 
 import torch
@@ -24,6 +26,8 @@ from embodichain.learning.rl.utils import AlgorithmCfg
 from embodichain.utils import configclass
 from .common import compute_gae
 from .base import BaseAlgorithm
+
+__all__ = ["PPO", "PPOCfg"]
 
 
 @configclass
@@ -36,15 +40,14 @@ class PPOCfg(AlgorithmCfg):
     vf_coef: float = 0.5
 
 
-class PPO(BaseAlgorithm):
+class PPO(BaseAlgorithm[TensorDict]):
     """PPO algorithm consuming TensorDict rollouts."""
 
     def __init__(self, cfg: PPOCfg, policy):
         self.cfg = cfg
         self.policy = policy
         self.device = torch.device(cfg.device)
-        self.optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
-        # no per-rollout aggregation for dense logging
+        self._setup_optimization(cfg, policy.parameters())
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""
@@ -105,8 +108,10 @@ class PPO(BaseAlgorithm):
                 total_entropy += (-entropy_loss.item()) * bs
                 total_steps += bs
 
+        self._step_scheduler()
         return {
             "actor_loss": total_actor_loss / max(1, total_steps),
             "value_loss": total_value_loss / max(1, total_steps),
             "entropy": total_entropy / max(1, total_steps),
+            "learning_rate": self.current_learning_rate(),
         }

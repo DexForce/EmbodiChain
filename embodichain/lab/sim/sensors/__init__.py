@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Sensors attached to the simulation scene.
+
+``Camera``, ``StereoCamera``, and ``ContactSensor`` all derive from ``BaseSensor`` and expose batched ``TensorDict`` data buffers.
+"""
+
 from .base_sensor import BaseSensor, SensorCfg
 from .camera import Camera, CameraCfg
 from .stereo import StereoCamera, StereoCameraCfg

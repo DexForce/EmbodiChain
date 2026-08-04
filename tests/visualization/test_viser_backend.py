@@ -27,6 +27,8 @@ from embodichain.lab.visualization import (
     DynamicMeshUpdate,
     GizmoSpec,
     GizmoState,
+    JointControlSpec,
+    JointControlState,
     MeshGeometry,
     SceneFrame,
     SceneManifest,
@@ -82,15 +84,33 @@ class _Dropdown:
         return callback
 
 
+class _ValueControl(_Handle):
+    def on_update(self, callback: object) -> object:
+        self.callback = callback
+        return callback
+
+
+class _Button(_Handle):
+    def on_click(self, callback: object) -> object:
+        self.callback = callback
+        return callback
+
+
 class _Gui:
     def __init__(self) -> None:
         self.checkboxes: dict[str, _Checkbox] = {}
         self.dropdowns: dict[str, _Dropdown] = {}
+        self.sliders: dict[str, _ValueControl] = {}
+        self.numbers: dict[str, _ValueControl] = {}
+        self.buttons: dict[str, _Button] = {}
         self.image_handles: list[_Handle] = []
 
     def reset(self) -> None:
         self.checkboxes.clear()
         self.dropdowns.clear()
+        self.sliders.clear()
+        self.numbers.clear()
+        self.buttons.clear()
         self.image_handles.clear()
 
     def add_markdown(self, content: str) -> _Handle:
@@ -113,6 +133,57 @@ class _Gui:
         dropdown = _Dropdown(options, initial_value)
         self.dropdowns[label] = dropdown
         return dropdown
+
+    def add_slider(
+        self,
+        label: str,
+        *,
+        min: float,
+        max: float,
+        step: float,
+        initial_value: float,
+        marks: tuple[object, ...],
+        disabled: bool,
+        hint: str,
+    ) -> _ValueControl:
+        slider = _ValueControl(
+            value=initial_value,
+            min=min,
+            max=max,
+            step=step,
+            marks=marks,
+            disabled=disabled,
+            hint=hint,
+        )
+        self.sliders[label] = slider
+        return slider
+
+    def add_number(
+        self,
+        label: str,
+        *,
+        initial_value: float,
+        min: float | None,
+        max: float | None,
+        step: float,
+        disabled: bool,
+        hint: str,
+    ) -> _ValueControl:
+        number = _ValueControl(
+            value=initial_value,
+            min=min,
+            max=max,
+            step=step,
+            disabled=disabled,
+            hint=hint,
+        )
+        self.numbers[label] = number
+        return number
+
+    def add_button(self, label: str) -> _Button:
+        button = _Button(label=label)
+        self.buttons[label] = button
+        return button
 
     def add_image(self, image: np.ndarray, **kwargs: object) -> _Handle:
         handle = _Handle(image=image, removed=False, **kwargs)
@@ -583,3 +654,133 @@ def test_viser_backend_keeps_gizmos_read_only_without_command_permission() -> No
 
     assert not server.scene.transform_controls
     backend.stop()
+
+
+def test_viser_backend_controls_articulation_joints_in_display_units() -> None:
+    server = _Server()
+    commands = []
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    backend.set_joint_control_command_sink(commands.append)
+    revolute = JointControlSpec(
+        control_id="door-hinge",
+        articulation_uid="door",
+        env_id=0,
+        joint_id=0,
+        joint_name="base_to_lower_arm",
+        joint_type="revolute",
+        lower=-np.pi / 2.0,
+        upper=np.pi / 2.0,
+        step=np.pi / 180.0,
+        initial_value=0.0,
+    )
+    prismatic = JointControlSpec(
+        control_id="door-slide",
+        articulation_uid="door",
+        env_id=0,
+        joint_id=1,
+        joint_name="slide",
+        joint_type="prismatic",
+        lower=0.0,
+        upper=None,
+        step=0.001,
+        initial_value=0.2,
+    )
+
+    def frame(
+        sequence: int,
+        hinge_value: float,
+        applied_sequence: int,
+    ) -> SceneFrame:
+        return SceneFrame(
+            run_id="run",
+            scene_revision=1,
+            sequence=sequence,
+            sim_step=sequence,
+            sim_time=sequence * 0.01,
+            node_ids=(),
+            positions=np.empty((0, 3), dtype=np.float32),
+            wxyz=np.empty((0, 4), dtype=np.float32),
+            visible=np.empty((0,), dtype=np.bool_),
+            joint_controls=(
+                JointControlState(
+                    "door-hinge",
+                    value=hinge_value,
+                    applied_sequence=applied_sequence,
+                ),
+                JointControlState("door-slide", value=0.2),
+            ),
+        )
+
+    backend.start()
+    backend.publish_manifest(
+        SceneManifest(
+            "run",
+            1,
+            (),
+            (),
+            joint_controls=(revolute, prismatic),
+        )
+    )
+    assert backend.publish_frame(frame(1, -1.0e-9, 0))
+
+    hinge = server.gui.sliders["lower arm (°)"]
+    slide = server.gui.numbers["slide (m)"]
+    assert hinge.min == -90.0
+    assert hinge.max == 90.0
+    assert hinge.step == 1.0
+    assert hinge.value == 0.0
+    assert not np.signbit(hinge.value)
+    assert hinge.marks == ()
+    assert "base_to_lower_arm" in hinge.hint
+    assert "range -90.00 … 90.00 °" in hinge.hint
+    assert slide.min == 0.0
+    assert slide.max is None
+
+    hinge.value = 45.0
+    hinge.callback(SimpleNamespace(client_id="client-a", target=hinge))
+    backend.poll()
+
+    assert len(commands) == 1
+    assert commands[0].control_id == "door-hinge"
+    np.testing.assert_allclose(commands[0].value, np.pi / 4.0)
+
+    assert backend.publish_frame(frame(2, 0.0, 0))
+    assert hinge.value == 45.0
+    assert backend.publish_frame(frame(3, np.pi / 6.0, commands[0].sequence))
+    np.testing.assert_allclose(hinge.value, 30.0)
+
+    reset = server.gui.buttons["Reset articulation"]
+    reset.callback(SimpleNamespace(client_id="client-a"))
+    backend.poll()
+    assert commands[-2].control_id == "door-hinge"
+    assert commands[-2].value == 0.0
+    assert commands[-1].control_id == "door-slide"
+    assert commands[-1].value == 0.2
+    backend.stop()
+
+
+def test_viser_backend_disambiguates_compact_joint_labels() -> None:
+    specs = tuple(
+        JointControlSpec(
+            control_id=f"arm-{joint_id}",
+            articulation_uid="robot",
+            env_id=0,
+            joint_id=joint_id,
+            joint_name=joint_name,
+            joint_type="revolute",
+            lower=-1.0,
+            upper=1.0,
+            step=np.pi / 180.0,
+            initial_value=0.0,
+        )
+        for joint_id, joint_name in enumerate(("base_to_arm", "shoulder_to_arm"))
+    )
+
+    assert ViserBackend._joint_control_labels(specs) == {
+        "arm-0": "arm [0] (°)",
+        "arm-1": "arm [1] (°)",
+    }

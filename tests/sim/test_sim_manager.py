@@ -24,12 +24,18 @@ import pytest
 import torch
 
 import embodichain.lab.sim.sim_manager as sim_manager_module
+from embodichain.lab.sim.profiler import Profiler
 from embodichain.lab.sim.sim_manager import (
     SimulationManager,
     SimulationManagerCfg,
     _WindowRecordState,
 )
-from embodichain.lab.visualization import GizmoCommand, VisualizationCfg
+from embodichain.lab.visualization import (
+    GizmoCommand,
+    PointCloudOverlay,
+    SceneOverlays,
+    VisualizationCfg,
+)
 
 DEFAULT_LOOK_AT = (
     (2.6, -2.2, 1.6),
@@ -178,10 +184,12 @@ def _make_visualization_sim_manager() -> (
         visualization=SimpleNamespace(backend="viser"),
     )
     sim.device = SimpleNamespace(type="cpu")
+    sim.profiler = Profiler(None, torch.device("cpu"))
     sim._is_initialized_gpu_physics = False
     sim._world = FakeWorld()
     sim._window_record_state = None
     sim._visualization_runtime = runtime
+    sim._visualization_overlays = None
     sim._visualization_topology_revision = 2
     sim._visualization_manifest_topology_revision = 1
     sim._visualization_sim_step = 0
@@ -203,6 +211,29 @@ def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -
         False,
         True,
     ]
+    assert all(call["overlays"] is None for call in runtime.capture_calls)
+
+
+def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    overlays = SceneOverlays(
+        point_clouds=(
+            PointCloudOverlay(
+                "workspace",
+                np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
+            ),
+        )
+    )
+
+    sim.set_visualization_overlays(overlays)
+    sim.update(step=1)
+
+    assert sim.visualization_overlays is overlays
+    assert runtime.capture_calls[-1]["overlays"] is overlays
+
+    sim.set_visualization_overlays(None)
+    assert sim.visualization_overlays is None
+    assert runtime.capture_calls[-1]["overlays"] is None
 
 
 def test_sim_manager_routes_viser_gizmo_commands_in_local_arena_frame() -> None:
