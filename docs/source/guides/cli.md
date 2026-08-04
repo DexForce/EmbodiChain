@@ -125,11 +125,12 @@ When ``--preview`` is enabled, an interactive REPL is available:
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
 
 Task environments are **auto-discovered**: any installed package that declares
-an ``embodichain.tasks`` entry point (e.g. the official ``embodichain_tasks``
-package) is imported at startup, registering its environments via
-``@register_env``. Make sure your task package is pip-installed
-(``pip install -e .``) so its tasks are visible to the CLI. The task to launch
-is selected by the ``"id"`` field of the gym config.
+an ``embodichain.tasks`` entry point is imported at startup, registering its
+environments via ``@register_env``. The main ``embodichain`` distribution
+already includes and registers the official ``embodichain_tasks`` import
+package, so no separate task installation is needed. Repository-style task
+config paths resolve from the source checkout or installed wheel. The task to
+launch is selected by the ``"id"`` field of the gym config.
 
 ```bash
 # Run an environment with a gym config file

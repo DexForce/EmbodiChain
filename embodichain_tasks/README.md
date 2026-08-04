@@ -2,23 +2,41 @@
 
 Official task environments for [EmbodiChain](https://github.com/DexForce/EmbodiChain).
 
-This package contains the tableware, reinforcement-learning, and special task
-environments that used to live inside the core `embodichain` package. It is a
-separate, pip-installable package that depends on `embodichain` and registers
-itself as a task package through the `embodichain.tasks` entry point.
+This source tree contains the tableware, reinforcement-learning, and special
+task environments that used to live inside the core `embodichain` import
+package. It is bundled into the main `embodichain` wheel as the separate
+`embodichain_tasks` import package and registered through the
+`embodichain.tasks` entry point. It has no independent distribution metadata or
+version.
 
 ## Installation
 
-Install EmbodiChain first, then this package, both in development mode:
+Install the main EmbodiChain distribution. It includes both the core and
+official task import packages:
 
 ```bash
 cd EmbodiChain
-
-pip install -e embodichain_tasks/
+pip install -e .
 ```
 
-Installing `embodichain_tasks` registers its `embodichain.tasks` entry point so
-the unified `embodichain` CLI can discover every task it ships.
+The published wheel is installed with the same single-package command:
+
+```bash
+pip install embodichain
+```
+
+When upgrading a development environment that previously installed this source
+tree separately, remove the legacy editable distribution once:
+
+```bash
+pip uninstall -y embodichain_tasks
+pip install -e .
+```
+
+Installing `embodichain` registers the bundled `embodichain_tasks` entry point
+so the unified CLI can discover every official task it ships. Repository-style
+paths beginning with `embodichain_tasks/configs/` resolve from either a source
+checkout or the installed wheel.
 
 ## Running a task
 

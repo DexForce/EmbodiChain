@@ -91,7 +91,7 @@ class DifferentiableVecEnv(LearningVecEnv, Protocol):
 def _is_nested_package_shadow(existing: Any, candidate: Any) -> bool:
     """Return True when ``candidate`` is an editable-install nested duplicate.
 
-    Editable installs can expose both ``embodichain_tasks.rl...`` and
+    Legacy editable installs can expose both ``embodichain_tasks.rl...`` and
     ``embodichain_tasks.embodichain_tasks.rl...``. Prefer the shorter canonical
     module path already registered.
     """

@@ -78,6 +78,13 @@ class TestLoadConfig:
 
         assert load_config(path) == sample_config
 
+    def test_load_packaged_official_task_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        loaded = load_config("embodichain_tasks/configs/gym/cobotmagic.json")
+
+        assert "id" in loaded
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

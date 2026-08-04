@@ -151,6 +151,28 @@ pip install embodichain \
 
 This pulls in `dexsim_engine` (Python package `dexsim`) and the rest of the core dependencies declared in `pyproject.toml`.
 
+### 3. Official task environments
+
+The main `embodichain` distribution includes the official task environments as
+the `embodichain_tasks` import package, together with their JSON/YAML configs.
+Both a published-wheel install and `pip install -e .` register the
+`embodichain.tasks` entry point automatically; do not install
+`embodichain_tasks/` separately.
+
+If an older checkout was installed with `pip install -e embodichain_tasks/`,
+remove that legacy editable distribution once before reinstalling the main
+project:
+
+```bash
+pip uninstall -y embodichain_tasks
+pip install -e .
+```
+
+Commands can continue to use repository-style paths such as
+`embodichain_tasks/configs/gym/pour_water/gym_config.json`. EmbodiChain resolves
+these paths from the checkout when present and otherwise from the installed
+wheel.
+
 ## Optional: cuRobo V2 motion planning
 
 Install a cuRobo extra to use EmbodiChain's CUDA-accelerated, collision-aware
