@@ -163,8 +163,6 @@ class PhysicsCfg:
         args = {
             "gravity": self.gravity.tolist(),
             "bounce_threshold": self.bounce_threshold,
-            "enable_pcm": True,
-            "enable_tgs": True,
             "enable_ccd": self.enable_ccd,
             "enable_enhanced_determinism": False,
             "enable_friction_every_iteration": True,
