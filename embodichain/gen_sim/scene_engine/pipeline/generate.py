@@ -40,17 +40,13 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import Scene
 def generate_scene_from_image(
     image_path: str | Path,
     output_root: str | Path,
-    *,
-    llm_config_path: str | Path | None = None,
-    image_segmentation_config_path: str | Path | None = None,
-    geometry_generation_config_path: str | Path | None = None,
 ) -> Scene:
     """Generate the initial core scene state from an input image."""
     resolved_output_root = Path(output_root).expanduser().resolve()
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
     # Initialize the VLM client and the Scene data structure.
-    vlm_client = OpenAICompatibleVLM.from_config(llm_config_path)
+    vlm_client = OpenAICompatibleVLM.from_dotenv()
     scene = Scene()
 
     # 1. Scene Understanding
@@ -60,16 +56,13 @@ def generate_scene_from_image(
         image_path=image_path,
         output_root=resolved_output_root,
         vlm_client=vlm_client,
-        image_segmentation_config_path=image_segmentation_config_path,
     )
     log_info("Completed Scene Understanding")
 
     # 2. Objects + Coarse Layout Generation
     log_info("Starting Objects + Coarse Layout Generation")
-    # Load the config and fail if the Geometry Generation Server is unavailable.
-    geometry_generation_client = GeometryGenerationClient.from_config(
-        geometry_generation_config_path
-    )
+    # Load .env settings and fail if the Geometry Generation Server is unavailable.
+    geometry_generation_client = GeometryGenerationClient.from_dotenv()
     try:
         geometry_generation_client.check_health()  # Error raising will happen internally.
         scene = generate_scene_and_refine(

@@ -149,7 +149,6 @@ def understand_scene(
     output_root: str | Path,
     *,
     vlm_client: OpenAICompatibleVLM,
-    image_segmentation_config_path: str | Path | None = None,
     json_max_attempts: int = 3,
 ) -> Scene:
 
@@ -168,10 +167,8 @@ def understand_scene(
         json_max_attempts=json_max_attempts,
     )
 
-    # Load the config and fail if the Image Segmentation Server is unavailable.
-    image_segmentation_client = ImageSegmentationClient.from_config(
-        image_segmentation_config_path
-    )
+    # Load .env settings and fail if the Image Segmentation Server is unavailable.
+    image_segmentation_client = ImageSegmentationClient.from_dotenv()
     try:
         image_segmentation_client.check_health()  # Error raising will happen internally.
         _segment_scene(

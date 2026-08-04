@@ -30,7 +30,11 @@ class Scene:
     @property
     def table(self) -> SceneObject | None:
         """Return the sole table object, or ``None`` before understanding."""
-        tables = [scene_object for scene_object in self.objects if scene_object.kind == "table"]
+        tables = [
+            scene_object
+            for scene_object in self.objects
+            if scene_object.kind == "table"
+        ]
         if len(tables) > 1:
             raise ValueError("A scene may contain only one table object.")
         return tables[0] if tables else None
@@ -38,7 +42,11 @@ class Scene:
     @property
     def assets(self) -> list[SceneObject]:
         """Return movable asset objects in their scene order."""
-        return [scene_object for scene_object in self.objects if scene_object.kind == "asset"]
+        return [
+            scene_object
+            for scene_object in self.objects
+            if scene_object.kind == "asset"
+        ]
 
     def to_dict(self) -> dict[str, object]:
         """Serialize the canonical object collection for debugging artifacts."""
