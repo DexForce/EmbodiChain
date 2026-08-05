@@ -1122,6 +1122,39 @@ def init_rollout_buffer_from_gym_space(
             "rewards": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.float32, device=device
             ),
+            "valid": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "episode_step": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_step": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_start": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_end": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "terminated": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "truncated": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
         },
         batch_size=[num_envs, max_episode_steps],
         device=device,
@@ -1314,6 +1347,39 @@ def init_rollout_buffer_from_config(
             ),
             "rewards": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.float32, device=device
+            ),
+            "valid": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "episode_step": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_step": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_start": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_end": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "terminated": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "truncated": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
             ),
         },
         batch_size=[batch_size, max_episode_steps],

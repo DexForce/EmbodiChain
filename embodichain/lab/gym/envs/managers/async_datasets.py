@@ -26,6 +26,7 @@ so the simulator can keep stepping.
 
 from __future__ import annotations
 
+import copy
 import queue
 import threading
 from typing import TYPE_CHECKING, Dict, Optional, Union
@@ -33,6 +34,7 @@ from typing import TYPE_CHECKING, Dict, Optional, Union
 import torch
 
 from embodichain.utils import logger
+from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS
 from .datasets import LeRobotRecorder
 
 if TYPE_CHECKING:
@@ -67,8 +69,9 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
 
     1. Reads each env's rollout-buffer slice (``obs``/``actions``).
     2. **Clones** the slice to CPU (detached from the live buffer).
-    3. Pushes ``(env_id, obs_clone, action_clone)`` onto a queue.
-    4. Returns immediately - the sim is free to reset and keep stepping.
+    3. Clones frame annotations and episode/segment metadata with the payload.
+    4. Pushes the detached payload onto a queue.
+    5. Returns immediately - the sim is free to reset and keep stepping.
 
     A single daemon worker thread drains the queue and runs the standard
     :meth:`LeRobotRecorder._save_single_episode` on each cloned payload.
@@ -133,9 +136,15 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
             if item is None:
                 # Sentinel: finalize() is draining. Exit the worker.
                 break
-            env_id, obs_clone, action_clone = item
+            env_id, obs_clone, action_clone, annotations, episode_metadata = item
             try:
-                self._save_single_episode(env_id, obs_clone, action_clone)
+                self._save_single_episode(
+                    env_id,
+                    obs_clone,
+                    action_clone,
+                    annotations=annotations,
+                    episode_metadata=episode_metadata,
+                )
             except Exception as e:  # noqa: BLE001 - worker must not die
                 logger.log_error(
                     f"[AsyncLeRobotRecorder] Background worker failed on "
@@ -180,8 +189,8 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
         if len(env_ids) == 0:
             return
 
-        step = env.current_rollout_step
         for env_id in env_ids.cpu().tolist():
+            step = self._episode_length(env_id)
             obs_view = env.rollout_buffer["obs"][env_id, :step]
             action_view = env.rollout_buffer["actions"][env_id, :step]
             # Clone in the caller thread: the rollout buffer is cleared and
@@ -189,7 +198,26 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
             # a view into it.
             obs_clone = obs_view.clone().cpu()
             action_clone = action_view.clone().cpu()
-            self._save_queue.put((env_id, obs_clone, action_clone))
+            annotations = {
+                key: env.rollout_buffer[key][env_id, :step].clone().cpu()
+                for key in DEMO_ANNOTATION_KEYS
+                if key in env.rollout_buffer.keys()
+            }
+            metadata_getter = getattr(env, "get_demo_episode_metadata", None)
+            episode_metadata = (
+                copy.deepcopy(metadata_getter(env_id))
+                if metadata_getter is not None
+                else None
+            )
+            self._save_queue.put(
+                (
+                    env_id,
+                    obs_clone,
+                    action_clone,
+                    annotations,
+                    episode_metadata,
+                )
+            )
 
     def finalize(self) -> Optional[str]:
         """Drain the background worker, then finalize the dataset.

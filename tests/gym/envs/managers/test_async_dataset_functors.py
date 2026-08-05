@@ -102,10 +102,35 @@ class _MockEnv:
             batch_size=[num_envs, steps],
         )
         actions = torch.zeros(num_envs, steps, num_joints)
+        episode_step = torch.arange(steps).repeat(num_envs, 1)
         self.rollout_buffer = TensorDict(
-            {"obs": obs, "actions": actions}, batch_size=[num_envs, steps]
+            {
+                "obs": obs,
+                "actions": actions,
+                "valid": torch.ones(num_envs, steps, dtype=torch.bool),
+                "episode_step": episode_step,
+                "segment_id": torch.zeros(num_envs, steps, dtype=torch.long),
+                "segment_step": episode_step.clone(),
+                "segment_start": episode_step == 0,
+                "segment_end": episode_step == steps - 1,
+                "terminated": torch.zeros(num_envs, steps, dtype=torch.bool),
+                "truncated": torch.zeros(num_envs, steps, dtype=torch.bool),
+            },
+            batch_size=[num_envs, steps],
         )
         self.current_rollout_step = steps
+        self.episode_metadata = {
+            "segments": [
+                {
+                    "start_step": 0,
+                    "end_step": steps,
+                    "instruction": "original segment task",
+                }
+            ]
+        }
+
+    def get_demo_episode_metadata(self, env_id: int):
+        return self.episode_metadata
 
 
 def _make_recorder(env: _MockEnv, mock_dataset: _MockDataset) -> AsyncLeRobotRecorder:
@@ -190,6 +215,8 @@ class TestAsyncLeRobotRecorder:
         # Corrupt the live buffer after enqueue (simulates reset reuse).
         env.rollout_buffer["obs"][0, :3] = 999.0
         env.rollout_buffer["actions"][0, :3] = 999.0
+        env.rollout_buffer["segment_id"][0, :3] = 999
+        env.episode_metadata["segments"][0]["instruction"] = "corrupted"
 
         recorder.finalize()
 
@@ -197,6 +224,8 @@ class TestAsyncLeRobotRecorder:
         for frame in mock_ds.add_frame_calls:
             assert (frame[LeRobotKey.OBS_STATE.value] == 0).all()
             assert (frame[LeRobotKey.ACTION.value] == 0).all()
+            assert frame["annotation.segment_id"].tolist() == [0]
+            assert frame["task"] == "original segment task"
 
     def test_finalize_drains_and_finalizes_dataset(self):
         """finalize() must drain the worker then call dataset.finalize()."""

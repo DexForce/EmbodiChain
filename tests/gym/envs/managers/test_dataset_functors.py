@@ -247,6 +247,11 @@ class TestLeRobotRecorderFeatures:
         # Check shapes
         assert features[LeRobotKey.OBS_STATE.value]["shape"] == (6,)
         assert features[LeRobotKey.ACTION.value]["shape"] == (6,)
+        assert features["annotation.segment_id"] == {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": ["segment_id"],
+        }
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -645,12 +650,27 @@ class TestLeRobotRecorderFrameConversion:
         # Create mock action
         action = torch.zeros(6)
 
-        frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
+        frame = recorder._convert_frame_to_lerobot(
+            obs,
+            action,
+            "test_task",
+            annotations={
+                "episode_step": 4,
+                "segment_id": 2,
+                "segment_step": 1,
+                "segment_start": False,
+                "segment_end": True,
+                "terminated": False,
+                "truncated": False,
+            },
+        )
 
         assert "task" in frame
         assert frame["task"] == "test_task"
         assert LeRobotKey.OBS_STATE.value in frame
         assert LeRobotKey.ACTION.value in frame
+        assert frame["annotation.segment_id"].tolist() == [2]
+        assert frame["annotation.segment_end"].tolist() == [1]
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_convert_frame_with_depth_and_mask(self, mock_lerobot_dataset):

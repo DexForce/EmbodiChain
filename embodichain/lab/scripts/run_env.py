@@ -22,13 +22,15 @@ import select
 import sys
 import time
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import gymnasium
 import numpy as np
 import torch
 import tqdm
 
+from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -42,47 +44,53 @@ from embodichain.lab.gym.utils.registration import (
 from embodichain.utils.logger import log_warning, log_info, log_error
 
 
-def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
+def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]:
+    """Wrap a segment action iterable in the run-env progress bar."""
+    return tqdm.tqdm(actions, desc=description, unit="step")
 
-    action_list = env.get_wrapper_attr("create_demo_action_list")(
-        action_sentence=idx, **kwargs
+
+def generate_and_execute_action_list(
+    env: Any, idx: int, debug_mode: bool, **kwargs: Any
+) -> bool:
+    """Execute one legacy planner result through the common episode executor.
+
+    This compatibility helper now represents one complete task episode. New
+    multi-object tasks should implement ``create_demo_segments`` instead of
+    calling this function repeatedly.
+    """
+    result = execute_demo_episode(
+        env,
+        episode_index=idx,
+        progress=_progress_wrapper,
+        action_sentence=idx,
+        **kwargs,
     )
-
-    if action_list is None or len(action_list) == 0:
-        log_warning("Action is invalid. Skip to next generation.")
+    if not result.completed or not result.all_success:
+        log_warning(
+            f"Demo episode {idx} is invalid ({result.terminal_reason}); it will not be saved."
+        )
         return False
-
-    for action in tqdm.tqdm(
-        action_list, desc=f"Executing action list #{idx}", unit="step"
-    ):
-        # Step the environment with the current action
-        # The environment will automatically detect truncation based on action_length
-        obs, reward, terminated, truncated, info = env.step(action)
-
-    # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
-    # but truncation is useful to improve the generation efficiency.
-
     return True
 
 
 def generate_function(
-    env,
-    num_traj,
+    env: Any,
+    num_traj: int | None = None,
     time_id: int = 0,
     save_path: str = "",
     save_video: bool = False,
     debug_mode: bool = False,
-    **kwargs,
-):
-    """Generate and execute a sequence of actions in the environment.
+    **kwargs: Any,
+) -> bool:
+    """Generate, execute, and transactionally save one task episode.
 
-    This function resets the environment, generates and executes action trajectories,
-    collects data, and optionally saves videos of the episodes. It supports both online
-    and offline data generation modes.
+    A task owns its segment count through ``create_demo_segments``. The legacy
+    ``num_traj`` parameter is accepted only as ``None`` or ``1`` so callers do
+    not accidentally repeat a one-grasp planner inside the same episode.
 
     Args:
         env: The environment instance.
-        num_traj (int): Number of trajectories to generate per episode.
+        num_traj: Deprecated compatibility value. Must be ``None`` or ``1``.
         time_id (int, optional): Identifier for the current time step or episode.
         save_path (str, optional): Path to save generated videos.
         save_video (bool, optional): Whether to save episode videos.
@@ -90,30 +98,42 @@ def generate_function(
         **kwargs: Additional keyword arguments for data generation.
 
     Returns:
-        bool: True if data generation is successful, False otherwise.
+        True if a successful episode was committed, otherwise False.
     """
+    if num_traj not in (None, 1):
+        raise ValueError(
+            "num_traj no longer controls sub-trajectories. Implement "
+            "create_demo_segments() in the task to define multiple segments."
+        )
 
-    valid = True
-    _, _ = env.reset()
-    while True:
-        ret = []
-        for trajectory_idx in range(num_traj):
-            valid = generate_and_execute_action_list(
-                env, trajectory_idx, debug_mode, **kwargs
-            )
+    max_attempts = int(kwargs.pop("max_attempts", 3))
+    reset_before = bool(kwargs.pop("reset_before", True))
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
 
-            if not valid:
-                # Failed execution: reset without saving invalid data
-                _, _ = env.reset(options={"save_data": False})
-                break
+    if reset_before:
+        env.reset(options={"save_data": False})
 
-        if valid:
-            break
-        else:
-            log_warning("Reset valid flag to True.")
-            valid = True
+    for attempt in range(1, max_attempts + 1):
+        result: DemoEpisodeResult = execute_demo_episode(
+            env,
+            episode_index=time_id,
+            progress=_progress_wrapper,
+            **kwargs,
+        )
+        if result.completed and result.all_success:
+            # reset() is the commit boundary: dataset functors consume the
+            # whole episode once, then buffers and scene state are reset.
+            env.reset()
+            return True
 
-    return True
+        log_warning(
+            f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
+            f"{result.terminal_reason}. Discarding {result.length} frames."
+        )
+        env.reset(options={"save_data": False})
+
+    return False
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
@@ -371,22 +391,26 @@ def main(args, env, gym_config):
         return
 
     log_info("Start offline data generation.", color="green")
-    # TODO: Support multiple trajectories per episode generation.
-    num_traj = 1
     try:
+        # Prepare one clean scene. Every successful generate_function call
+        # commits via reset(), leaving the next episode ready to plan.
+        env.reset(options={"save_data": False})
         for i in range(gym_config.get("max_episodes", 1)):
-            generate_function(
+            generated = generate_function(
                 env,
-                num_traj,
-                i,
+                time_id=i,
                 save_path=getattr(args, "save_path", ""),
                 save_video=getattr(args, "save_video", False),
                 debug_mode=getattr(args, "debug_mode", False),
                 regenerate=getattr(args, "regenerate", False),
+                max_attempts=gym_config.get("demo_max_attempts", 3),
+                reset_before=False,
             )
-
-        # Final reset (saves the last completed episode).
-        _, _ = env.reset()
+            if not generated:
+                raise RuntimeError(
+                    f"Failed to generate episode {i} after "
+                    f"{gym_config.get('demo_max_attempts', 3)} attempts."
+                )
 
         # Log the trajectory save location BEFORE env.close() (in the finally
         # below) tears down the sim and, by default, os._exit()s the process.

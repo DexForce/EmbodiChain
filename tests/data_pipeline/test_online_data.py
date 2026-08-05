@@ -104,6 +104,8 @@ def _make_fake_engine(
             "obs": torch.randn(buffer_size, max_episode_steps, OBS_DIM),
             "actions": torch.randn(buffer_size, max_episode_steps, ACTION_DIM),
             "rewards": torch.randn(buffer_size, max_episode_steps, 1),
+            "valid": torch.ones(buffer_size, max_episode_steps, dtype=torch.bool),
+            "segment_id": torch.zeros(buffer_size, max_episode_steps, dtype=torch.long),
         },
         batch_size=[buffer_size, max_episode_steps],
     )
@@ -119,8 +121,7 @@ def _make_fake_engine(
     engine._init_signal.set()  # mark as initialised
     engine._close_signal = engine._mp_ctx.Event()
     engine._sample_count = engine._mp_ctx.Value("i", 0)
-
-    engine.start()
+    engine._sim_process = None
 
     return engine
 
@@ -196,6 +197,53 @@ class TestOnlineDataEngine:
         #     self.engine.sample_batch(batch_size=1, chunk_size=MAX_EPISODE_STEPS + 1)
         with pytest.raises(ValueError):
             self.engine.sample_batch(batch_size=1, chunk_size=MAX_EPISODE_STEPS + 1)
+
+    def test_sample_batch_never_reads_invalid_tail(self) -> None:
+        """Variable-length rows never expose padding or stale tail frames."""
+        self.engine.shared_buffer["valid"][:, 7:] = False
+        self.engine.shared_buffer["obs"][:, 7:] = 999.0
+
+        for _ in range(20):
+            result = self.engine.sample_batch(batch_size=4, chunk_size=5)
+            assert result["valid"].all()
+            assert not (result["obs"] == 999.0).any()
+
+    def test_segment_sampling_never_crosses_boundary(self) -> None:
+        """Segment mode keeps every sampled chunk inside one subtask."""
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["segment_id"][:, midpoint:] = 1
+
+        result = self.engine.sample_batch(
+            batch_size=32,
+            chunk_size=10,
+            sampling_mode="segment",
+        )
+
+        assert (result["segment_id"] == result["segment_id"][:, :1]).all()
+
+    def test_boundary_sampling_crosses_segment_boundary(self) -> None:
+        """Boundary mode returns chunks containing both adjacent segments."""
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["segment_id"][:, midpoint:] = 1
+
+        result = self.engine.sample_batch(
+            batch_size=16,
+            chunk_size=8,
+            sampling_mode="boundary",
+        )
+
+        assert (
+            (result["segment_id"][:, 1:] != result["segment_id"][:, :-1])
+            .any(dim=1)
+            .all()
+        )
+
+    def test_no_valid_window_raises(self) -> None:
+        """Sampling fails clearly when all real episodes are too short."""
+        self.engine.shared_buffer["valid"][:, 3:] = False
+
+        with pytest.raises(RuntimeError, match="No unlocked valid chunk"):
+            self.engine.sample_batch(batch_size=1, chunk_size=4)
 
     def test_refill_triggered_after_threshold(self) -> None:
         """_fill_signal is set once accumulated sample count exceeds the threshold."""
@@ -311,6 +359,21 @@ class TestOnlineDataset:
         assert (
             sample["rewards"].abs().max().item() > 1.0
         ), "scaled rewards should have large absolute values"
+
+    def test_sampling_mode_is_forwarded_to_engine(self) -> None:
+        """OnlineDataset exposes segment-aware engine sampling."""
+        midpoint = MAX_EPISODE_STEPS // 2
+        self.engine.shared_buffer["segment_id"][:, midpoint:] = 1
+        dataset = OnlineDataset(
+            self.engine,
+            chunk_size=12,
+            batch_size=16,
+            sampling_mode="segment",
+        )
+
+        sample = next(iter(dataset))
+
+        assert (sample["segment_id"] == sample["segment_id"][:, :1]).all()
 
     def test_dataloader_item_mode(self) -> None:
         """DataLoader with batch_size=4 produces [4, chunk_size] batches."""

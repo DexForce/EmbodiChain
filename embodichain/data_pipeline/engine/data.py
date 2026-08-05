@@ -20,6 +20,7 @@ import time
 import torch
 import multiprocessing as mp
 
+from typing import Literal
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from multiprocessing.synchronize import Event as MpEvent
 from tensordict import TensorDict
@@ -61,6 +62,9 @@ class OnlineDataEngineCfg:
     amortising the cost of environment simulation over many training steps.
     """
 
+    max_generation_attempts: int = 3
+    """Maximum planning/execution attempts for each buffer write transaction."""
+
 
 # ---------------------------------------------------------------------------
 # Subprocess entry point (module-level so it can be pickled by multiprocessing)
@@ -100,6 +104,7 @@ def _sim_worker_fn(
         config_to_cfg,
         get_manager_modules,
     )
+    from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.utils.logger import log_info, log_warning, log_error
 
@@ -165,27 +170,37 @@ def _sim_worker_fn(
                     return
 
                 tmp_buffer = shared_buffer[lock_index[0] : lock_index[1], :]
-                env.get_wrapper_attr("set_rollout_buffer")(tmp_buffer)
-
-                _, _ = env.reset()
-                action_list = env.get_wrapper_attr("create_demo_action_list")()
-
-                if action_list is None or len(action_list) == 0:
-                    log_warning(
-                        f"[Simulation Process] Rollout {rollout_idx + 1}/{num_rollouts_per_fill}: "
-                        "action list is empty, skipping episode."
+                result = None
+                for attempt in range(1, cfg.max_generation_attempts + 1):
+                    # set_rollout_buffer invalidates the locked rows before
+                    # reuse, so stale tail frames can never become sampleable
+                    # after a shorter replacement episode.
+                    env.get_wrapper_attr("set_rollout_buffer")(tmp_buffer)
+                    env.reset(options={"save_data": False})
+                    result = execute_demo_episode(
+                        env,
+                        episode_index=rollout_idx,
+                        should_stop=close_signal.is_set,
+                        progress=lambda actions, description: tqdm(
+                            actions,
+                            desc=description,
+                            unit="step",
+                            leave=False,
+                        ),
                     )
-                    continue
+                    if result.completed and result.all_success:
+                        break
+                    log_warning(
+                        f"[Simulation Process] Rollout {rollout_idx + 1}/{num_rollouts_per_fill} "
+                        f"attempt {attempt}/{cfg.max_generation_attempts} failed: "
+                        f"{result.terminal_reason}."
+                    )
 
-                for action in tqdm(
-                    action_list,
-                    desc=f"[Sim] rollout {rollout_idx + 1}/{num_rollouts_per_fill}",
-                    unit="step",
-                    leave=False,
-                ):
-                    if close_signal.is_set():
-                        return
-                    env.step(action)
+                if result is None or not (result.completed and result.all_success):
+                    raise RuntimeError(
+                        f"Failed to generate rollout {rollout_idx + 1} after "
+                        f"{cfg.max_generation_attempts} attempts."
+                    )
 
                 rollout_idx += 1
 
@@ -286,6 +301,12 @@ class OnlineDataEngine:
 
     def __init__(self, cfg: OnlineDataEngineCfg) -> None:
         self.cfg = cfg
+
+        if cfg.max_generation_attempts < 1:
+            raise ValueError(
+                "max_generation_attempts must be at least 1, "
+                f"got {cfg.max_generation_attempts}."
+            )
 
         # Allocate the shared buffer (shape: [buffer_size, max_episode_steps, ...]).
         self.shared_buffer: TensorDict = self._create_buffer()
@@ -412,14 +433,19 @@ class OnlineDataEngine:
     # Sampling
     # -----------------------------------------------------------------------
 
-    def sample_batch(self, batch_size: int, chunk_size: int) -> TensorDict:
+    def sample_batch(
+        self,
+        batch_size: int,
+        chunk_size: int,
+        sampling_mode: Literal["episode", "segment", "boundary"] = "episode",
+    ) -> TensorDict:
         """Sample a batch of trajectory chunks from the shared rollout buffer.
 
-        Randomly draws *batch_size* environment trajectories from the portion
-        of the buffer that has been written at least once, skipping any rows
-        currently being overwritten by the simulation subprocess.  For each
-        selected trajectory a contiguous window of *chunk_size* timesteps is
-        chosen at a uniformly random offset.
+        Only fully valid windows are candidates, so padding or stale tail
+        frames are never returned. ``episode`` mode allows a window to cross
+        segment boundaries, ``segment`` keeps every window inside one segment,
+        and ``boundary`` deliberately samples windows crossing an internal
+        segment boundary.
 
         After sampling the internal :attr:`_sample_count` is incremented by
         *batch_size*; if the count exceeds
@@ -429,47 +455,86 @@ class OnlineDataEngine:
         Args:
             batch_size: Number of trajectory chunks to include in the batch.
             chunk_size: Number of consecutive timesteps in each chunk.
+            sampling_mode: Segment-boundary policy for candidate windows.
 
         Returns:
             TensorDict with batch size ``[batch_size, chunk_size]``.
 
         Raises:
-            ValueError: If ``chunk_size`` exceeds ``max_episode_steps``.
+            ValueError: If an argument is invalid.
+            RuntimeError: If no unlocked valid window satisfies the policy.
         """
         max_steps: int = self.shared_buffer.batch_size[1]
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, got {batch_size}.")
         if chunk_size > max_steps:
             log_error(
                 f"chunk_size ({chunk_size}) exceeds max_episode_steps ({max_steps}).",
                 error_type=ValueError,
             )
+        if chunk_size < 1:
+            raise ValueError(f"chunk_size must be at least 1, got {chunk_size}.")
+        if sampling_mode not in {"episode", "segment", "boundary"}:
+            raise ValueError(
+                "sampling_mode must be 'episode', 'segment', or 'boundary', "
+                f"got {sampling_mode!r}."
+            )
+        if sampling_mode == "boundary" and chunk_size < 2:
+            raise ValueError("boundary sampling requires chunk_size >= 2.")
 
         # Build the set of rows that are safe to sample from: all valid rows
         # minus the slice currently being written by the subprocess.
         lock_start: int = self._lock_index[0]
         lock_end: int = self._lock_index[1]
 
-        all_valid = torch.arange(self.buffer_size)
-        is_locked = (all_valid >= lock_start) & (all_valid < lock_end)
-        available = all_valid[~is_locked]
-
-        if len(available) == 0:
-            # Edge case: the entire valid region is locked. Sampling a batch
-            # is not possible in this state and will result in a hard failure.
-            log_error(
-                "[OnlineDataEngine] All valid buffer rows are currently locked. "
-                "Cannot sample a batch at this time; sampling fails because no "
-                "unlocked rows are available.",
-                error_type=RuntimeError,
+        if "valid" in self.shared_buffer.keys():
+            valid = self.shared_buffer["valid"].bool()
+        else:
+            # Schema-v1 buffers are one fully valid segment per row.
+            valid = torch.ones(
+                self.buffer_size,
+                max_steps,
+                dtype=torch.bool,
+                device=self.shared_buffer.device,
             )
 
-        # Sample row indices and chunk start offsets.
-        row_sample_idx = torch.randint(0, len(available), (batch_size,))
-        row_indices = available[row_sample_idx]
+        all_rows = torch.arange(self.buffer_size, device=valid.device)
+        is_locked = (all_rows >= lock_start) & (all_rows < lock_end)
+        valid_windows = valid.unfold(1, chunk_size, 1).all(dim=-1)
+        valid_windows[is_locked] = False
 
-        max_start = max_steps - chunk_size
-        start_indices = torch.randint(0, max_start + 1, (batch_size,))
+        segment_ids = self.shared_buffer.get("segment_id", None)
+        if segment_ids is None:
+            segment_ids = torch.zeros_like(valid, dtype=torch.int64)
 
-        time_offsets = torch.arange(chunk_size)
+        if sampling_mode == "segment":
+            segment_windows = segment_ids.unfold(1, chunk_size, 1)
+            same_segment = (segment_windows == segment_windows[..., :1]).all(dim=-1) & (
+                segment_windows[..., 0] >= 0
+            )
+            valid_windows &= same_segment
+        elif sampling_mode == "boundary":
+            segment_windows = segment_ids.unfold(1, chunk_size, 1)
+            crosses_boundary = (
+                segment_windows[..., 1:] != segment_windows[..., :-1]
+            ).any(dim=-1)
+            valid_windows &= crosses_boundary
+
+        candidates = valid_windows.nonzero(as_tuple=False)
+        if candidates.numel() == 0:
+            raise RuntimeError(
+                "[OnlineDataEngine] No unlocked valid chunk satisfies "
+                f"sampling_mode={sampling_mode!r} and chunk_size={chunk_size}."
+            )
+
+        sampled_candidate_ids = torch.randint(
+            0, candidates.shape[0], (batch_size,), device=candidates.device
+        )
+        selected = candidates[sampled_candidate_ids]
+        row_indices = selected[:, 0]
+        start_indices = selected[:, 1]
+
+        time_offsets = torch.arange(chunk_size, device=start_indices.device)
         time_indices = start_indices[:, None] + time_offsets[None, :]
 
         result = self.shared_buffer[row_indices[:, None], time_indices]

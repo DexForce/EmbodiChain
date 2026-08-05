@@ -18,6 +18,10 @@
 
 from __future__ import annotations
 
+import json
+import threading
+
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -37,6 +41,7 @@ from embodichain.data_pipeline.depth_video import (
     detect_depth_encoder,
 )
 from embodichain.lab.sim.sensors import Camera, ContactSensor
+from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERSION
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
 
@@ -58,6 +63,16 @@ CAMERA_MASK_FRAMES = {
 }
 CAMERA_AUXILIARY_FRAMES = CAMERA_DEPTH_FRAMES | CAMERA_MASK_FRAMES
 
+DEMO_FRAME_FEATURES = {
+    "episode_step": "annotation.episode_step",
+    "segment_id": "annotation.segment_id",
+    "segment_step": "annotation.segment_step",
+    "segment_start": "annotation.segment_start",
+    "segment_end": "annotation.segment_end",
+    "terminated": "annotation.terminated",
+    "truncated": "annotation.truncated",
+}
+
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
@@ -75,6 +90,7 @@ class LeRobotRecorder(Functor):
     """Functor for recording episodes in LeRobot format.
 
     This functor handles:
+
     - Recording observation-action pairs during episodes
     - Converting data to LeRobot format
     - Saving episodes when they complete
@@ -146,6 +162,7 @@ class LeRobotRecorder(Functor):
         # Tracking
         self.total_time: float = 0.0
         self.curr_episode: int = 0
+        self._metadata_lock = threading.Lock()
 
         # Initialize dataset
         self._initialize_dataset()
@@ -208,17 +225,43 @@ class LeRobotRecorder(Functor):
         clone the slice and defer the actual conversion/disk-write to a
         background worker without racing the buffer reuse on reset.
         """
-        step = self._env.current_rollout_step
         for env_id in env_ids.cpu().tolist():
+            step = self._episode_length(env_id)
             obs_list = self._env.rollout_buffer["obs"][env_id, :step]
             action_list = self._env.rollout_buffer["actions"][env_id, :step]
-            self._save_single_episode(env_id, obs_list, action_list)
+            annotations = {
+                key: self._env.rollout_buffer[key][env_id, :step]
+                for key in DEMO_ANNOTATION_KEYS
+                if key in self._env.rollout_buffer.keys()
+            }
+            metadata_getter = getattr(self._env, "get_demo_episode_metadata", None)
+            episode_metadata = (
+                metadata_getter(env_id) if metadata_getter is not None else None
+            )
+            self._save_single_episode(
+                env_id,
+                obs_list,
+                action_list,
+                annotations=annotations,
+                episode_metadata=episode_metadata,
+            )
+
+    def _episode_length(self, env_id: int) -> int:
+        """Return the valid buffered length for one environment."""
+        rollout_steps = getattr(self._env, "rollout_steps", None)
+        if rollout_steps is not None:
+            return int(rollout_steps[env_id].item())
+        if "valid" in self._env.rollout_buffer.keys():
+            return int(self._env.rollout_buffer["valid"][env_id].sum().item())
+        return int(self._env.current_rollout_step)
 
     def _save_single_episode(
         self,
         env_id: int,
         obs_list: Any,
         action_list: Any,
+        annotations: Mapping[str, Any] | None = None,
+        episode_metadata: Mapping[str, Any] | None = None,
     ) -> bool:
         """Convert and persist one episode already sliced from the buffer.
 
@@ -231,6 +274,8 @@ class LeRobotRecorder(Functor):
             env_id: Environment id (used for logging only).
             obs_list: Per-frame observations for the episode.
             action_list: Per-frame actions for the episode.
+            annotations: Optional per-frame segment and terminal annotations.
+            episode_metadata: Optional episode/segment sidecar metadata.
 
         Returns:
             True if the episode was saved successfully, False otherwise.
@@ -248,6 +293,13 @@ class LeRobotRecorder(Functor):
         # Align obs and action (obs may be one longer than action)
         if len(obs_list) > len(action_list):
             obs_list = obs_list[:-1]
+        episode_length = min(len(obs_list), len(action_list))
+        obs_list = obs_list[:episode_length]
+        action_list = action_list[:episode_length]
+        if annotations is not None:
+            annotations = {
+                key: values[:episode_length] for key, values in annotations.items()
+            }
 
         # Update metadata
         extra_info = self.extra.copy() if self.extra else {}
@@ -264,12 +316,37 @@ class LeRobotRecorder(Functor):
                 self._depth_manager.start_episode(
                     self.curr_episode, list(self._depth_sensor_specs.keys())
                 )
-            for obs, action in tqdm.tqdm(
-                zip(obs_list, action_list),
-                total=len(obs_list),
-                desc=f"Converting env {env_id} episode to LeRobot format",
+            for frame_index, (obs, action) in enumerate(
+                tqdm.tqdm(
+                    zip(obs_list, action_list),
+                    total=len(obs_list),
+                    desc=f"Converting env {env_id} episode to LeRobot format",
+                )
             ):
-                frame = self._convert_frame_to_lerobot(obs, action, task)
+                frame_annotations = {
+                    "episode_step": frame_index,
+                    "segment_id": 0,
+                    "segment_step": frame_index,
+                    "segment_start": frame_index == 0,
+                    "segment_end": frame_index == len(obs_list) - 1,
+                    "terminated": False,
+                    "truncated": False,
+                }
+                if annotations is not None:
+                    frame_annotations.update(
+                        {
+                            key: values[frame_index]
+                            for key, values in annotations.items()
+                            if key in DEMO_FRAME_FEATURES
+                        }
+                    )
+                frame_task = self._task_for_frame(task, episode_metadata, frame_index)
+                frame = self._convert_frame_to_lerobot(
+                    obs,
+                    action,
+                    frame_task,
+                    annotations=frame_annotations,
+                )
                 # Offload depth to the sidecar writer and drop it from the frame
                 # so LeRobot's RGB-only image/video path never sees it. With
                 # ``keep_numeric_fallback`` the numeric feature is retained too.
@@ -286,6 +363,39 @@ class LeRobotRecorder(Functor):
             if self._depth_manager is not None:
                 self._depth_manager.end_episode(self.curr_episode)
 
+            sidecar_metadata = dict(episode_metadata or {})
+            if not sidecar_metadata.get("segments"):
+                sidecar_metadata["segments"] = [
+                    {
+                        "segment_id": 0,
+                        "name": "legacy",
+                        "start_step": 0,
+                        "end_step": len(obs_list),
+                        "success": True,
+                        "target_uid": None,
+                        "instruction": task,
+                        "failure_reason": None,
+                        "metadata": {},
+                    }
+                ]
+            sidecar_metadata.update(episode_extra_info)
+            sidecar_metadata.update(
+                {
+                    "schema_version": DEMO_SCHEMA_VERSION,
+                    "lerobot_episode_index": self.curr_episode,
+                    "env_id": env_id,
+                    "length": len(obs_list),
+                    "instruction": task,
+                }
+            )
+            try:
+                self._write_episode_metadata(sidecar_metadata)
+            except OSError as error:
+                logger.log_warning(
+                    "Saved the LeRobot episode but could not append EmbodiChain "
+                    f"segment metadata: {error}"
+                )
+
             logger.log_info(
                 f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
                 f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
@@ -299,11 +409,57 @@ class LeRobotRecorder(Functor):
                 self._depth_manager.abort_episode()
             return False
 
+    @staticmethod
+    def _task_for_frame(
+        default_task: str,
+        episode_metadata: Mapping[str, Any] | None,
+        frame_index: int,
+    ) -> str:
+        """Resolve a segment-specific instruction for one LeRobot frame."""
+        if episode_metadata is None:
+            return default_task
+        for segment in episode_metadata.get("segments", []):
+            if (
+                int(segment.get("start_step", 0))
+                <= frame_index
+                < int(segment.get("end_step", 0))
+            ):
+                return str(segment.get("instruction") or default_task)
+        return default_task
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        """Convert common tensor/array values for metadata serialization."""
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().tolist()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        return str(value)
+
+    def _write_episode_metadata(self, metadata: Mapping[str, Any]) -> None:
+        """Append one episode record to EmbodiChain's LeRobot sidecar."""
+        if self.dataset_full_path is None:
+            return
+        metadata_dir = self.dataset_full_path / "meta"
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        metadata_path = metadata_dir / "embodichain_episodes.jsonl"
+        with self._metadata_lock, metadata_path.open("a", encoding="utf-8") as stream:
+            json.dump(dict(metadata), stream, default=self._json_default)
+            stream.write("\n")
+
     def finalize(self) -> Optional[str]:
         """Finalize the dataset."""
         # Save any remaining episodes
-        if self._env.current_rollout_step > 0:
+        rollout_steps = getattr(self._env, "rollout_steps", None)
+        if rollout_steps is not None:
+            active_env_ids = (rollout_steps > 0).nonzero(as_tuple=False).squeeze(-1)
+        elif self._env.current_rollout_step > 0:
             active_env_ids = torch.arange(self._env.num_envs, device=self._env.device)
+        else:
+            active_env_ids = torch.empty(0, dtype=torch.long, device=self._env.device)
+        if len(active_env_ids) > 0:
             self._save_episodes(active_env_ids)
 
         try:
@@ -488,6 +644,13 @@ class LeRobotRecorder(Functor):
             "shape": (action_dim,),
             "names": joint_names,
         }
+
+        for feature_key in DEMO_FRAME_FEATURES.values():
+            features[feature_key] = {
+                "dtype": "int64",
+                "shape": (1,),
+                "names": [feature_key.rsplit(".", 1)[-1]],
+            }
 
         # Setup sensor observation features based env.observation.sensor
         if self._env.has_sensors:
@@ -682,7 +845,11 @@ class LeRobotRecorder(Functor):
                         )
 
     def _convert_frame_to_lerobot(
-        self, obs: TensorDict, action: TensorDict | torch.Tensor, task: str
+        self,
+        obs: TensorDict,
+        action: TensorDict | torch.Tensor,
+        task: str,
+        annotations: Mapping[str, Any] | None = None,
     ) -> Dict:
         """Convert a single frame to LeRobot format.
 
@@ -690,6 +857,7 @@ class LeRobotRecorder(Functor):
             obs: Single environment observation (already extracted from batch)
             action: Single environment action (already extracted from batch)
             task: Task name
+            annotations: Optional segment and terminal fields for this frame.
 
         Returns:
             Frame dict in LeRobot format with numpy arrays
@@ -765,6 +933,13 @@ class LeRobotRecorder(Functor):
                 action_data = action_tensor.cpu()
 
         frame[LeRobotKey.ACTION.value] = action_data
+
+        if annotations is not None:
+            for annotation_key, feature_key in DEMO_FRAME_FEATURES.items():
+                if annotation_key not in annotations:
+                    continue
+                value = torch.as_tensor(annotations[annotation_key]).item()
+                frame[feature_key] = torch.tensor([int(value)], dtype=torch.int64)
 
         return frame
 

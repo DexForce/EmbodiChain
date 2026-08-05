@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -23,7 +25,7 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Sequence, Tuple, Any, List, Optional
+from typing import Dict, Union, Sequence, Tuple, Any, Iterable, List, Optional
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
@@ -43,6 +45,12 @@ from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
+from embodichain.lab.gym.envs.demo import (
+    DEMO_SCHEMA_VERSION,
+    DemoEpisodeResult,
+    DemoSegment,
+    DemoSegmentResult,
+)
 from embodichain.lab.gym.envs.managers import (
     EventManager,
     ObservationManager,
@@ -339,7 +347,27 @@ class EmbodiedEnv(BaseEnv):
                 self.num_envs, dtype=torch.long, device=self.device
             )
 
+        self.rollout_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._demo_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
         self.current_rollout_step = 0
+
+        # Segment recording is intentionally separate from task planning. The
+        # common demo executor updates this context while the regular rollout
+        # writer turns it into per-frame annotations.
+        self._demo_episode_index = 0
+        self._demo_active_segment_id = 0
+        self._demo_active_segment_ids = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._demo_active_segment_start_steps = self._demo_steps.clone()
+        self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+        self._demo_episode_metadata: list[dict[str, Any]] = [
+            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
+        ]
 
         self.episode_success_status: torch.Tensor = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -358,6 +386,12 @@ class EmbodiedEnv(BaseEnv):
                 transition-only fields is reserved as padding. Expert buffers
                 keep the legacy `[num_envs, time]` batch layout.
         """
+        if rollout_buffer.shape[0] != self.num_envs:
+            raise ValueError(
+                "Rollout buffer rows must match env.num_envs: "
+                f"got {rollout_buffer.shape[0]} rows for {self.num_envs} envs."
+            )
+
         self.rollout_buffer = rollout_buffer
         self._rollout_buffer_mode = self._infer_rollout_buffer_mode(rollout_buffer)
         if self._rollout_buffer_mode == "rl":
@@ -376,7 +410,12 @@ class EmbodiedEnv(BaseEnv):
                     f"Invalid rollout buffer shape: {rollout_buffer.shape}. The expected shape is (num_envs, max_episode_steps) for each key."
                 )
             self._max_rollout_steps = self.rollout_buffer.shape[1]
+        self.rollout_steps.zero_()
         self.current_rollout_step = 0
+        if self._rollout_buffer_mode != "rl":
+            self._clear_expert_rollout_rows(
+                torch.arange(self.num_envs, device=self.device)
+            )
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -492,8 +531,8 @@ class EmbodiedEnv(BaseEnv):
         # TODO: We may make the data collection customizable for rollout buffer.
         if self.rollout_buffer is not None:
             with self._profiler.section("rollout_write"):
-                if self.current_rollout_step < self._max_rollout_steps:
-                    if self._rollout_buffer_mode == "rl":
+                if self._rollout_buffer_mode == "rl":
+                    if self.current_rollout_step < self._max_rollout_steps:
                         self._write_rl_rollout_step(
                             obs=obs,
                             rewards=rewards,
@@ -502,17 +541,23 @@ class EmbodiedEnv(BaseEnv):
                             truncateds=kwargs.get("truncateds"),
                         )
                     else:
-                        self._write_episode_rollout_step(
-                            obs=obs,
-                            action=action,
-                            rewards=rewards,
+                        logger.log_warning(
+                            f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. "
+                            "Data will not be recorded in the rollout buffer."
                         )
+                    self.current_rollout_step += 1
                 else:
-                    logger.log_warning(
-                        f"Current rollout step {self.current_rollout_step} exceeds max rollout steps {self._max_rollout_steps}. \
-                            Data will not be recorded in the rollout buffer."
+                    self._write_episode_rollout_step(
+                        obs=obs,
+                        action=action,
+                        rewards=rewards,
+                        terminateds=kwargs.get("terminateds"),
+                        truncateds=kwargs.get("truncateds"),
                     )
-                self.current_rollout_step += 1
+
+        demo_steps = getattr(self, "_demo_steps", None)
+        if demo_steps is not None:
+            demo_steps += 1
 
         with self._profiler.section("trajectory_write"):
             self._write_trajectory_step()
@@ -608,10 +653,6 @@ class EmbodiedEnv(BaseEnv):
                         if isinstance(functor_cfg.func, record_camera_data):
                             functor_cfg.func.save_and_clear()
 
-        # Clear episode buffers and reset success status for environments being reset
-        if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
-            self.current_rollout_step = 0
-
         # Auto-save + reset the per-env trajectory buffer for environments being
         # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
         # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
@@ -626,6 +667,27 @@ class EmbodiedEnv(BaseEnv):
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
             _traj_steps[env_ids_to_process] = 0
+
+        # Clear episode buffers only after every recorder has consumed them.
+        if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
+            self._clear_expert_rollout_rows(env_ids_to_process)
+            rollout_steps = getattr(self, "rollout_steps", None)
+            if rollout_steps is not None:
+                rollout_ids = env_ids_to_process.to(rollout_steps.device)
+                rollout_steps[rollout_ids] = 0
+                self.current_rollout_step = int(rollout_steps.max().item())
+
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if episode_metadata is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                episode_metadata[env_id] = self._new_demo_episode_metadata(env_id)
+        active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
+        if active_segment_ids is not None:
+            demo_ids = env_ids_to_process.to(active_segment_ids.device)
+            active_segment_ids[demo_ids] = 0
+            self._demo_active_segment_start_steps[demo_ids] = 0
+            self._demo_active_rollout_start_steps[demo_ids] = 0
+            self._demo_steps[demo_ids] = 0
 
         self.episode_success_status[env_ids_to_process] = False
 
@@ -653,6 +715,139 @@ class EmbodiedEnv(BaseEnv):
             with self._profiler.section("dataset_reset"):
                 self.dataset_manager.reset(env_ids=env_ids)
 
+    def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
+        """Invalidate selected expert-buffer rows without clearing large frames."""
+        if self.rollout_buffer is None or len(env_ids) == 0:
+            return
+        buffer_ids = env_ids.to(self.rollout_buffer.device, dtype=torch.long)
+        if "valid" not in self.rollout_buffer.keys():
+            # Preserve schema-v1 behavior for external buffers that have no
+            # validity mask and therefore cannot hide a stale tail.
+            for key in self.rollout_buffer.keys(include_nested=True, leaves_only=True):
+                self.rollout_buffer[key][buffer_ids] = 0
+            return
+
+        for key in (
+            "valid",
+            "segment_start",
+            "segment_end",
+            "terminated",
+            "truncated",
+        ):
+            if key in self.rollout_buffer.keys():
+                self.rollout_buffer[key][buffer_ids] = False
+        for key in ("episode_step", "segment_id", "segment_step"):
+            if key in self.rollout_buffer.keys():
+                self.rollout_buffer[key][buffer_ids] = -1
+
+    def _new_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
+        """Create an empty metadata record for one environment row."""
+        return {
+            "schema_version": DEMO_SCHEMA_VERSION,
+            "episode_index": int(getattr(self, "_demo_episode_index", 0)),
+            "env_id": env_id,
+            "length": 0,
+            "completed": False,
+            "success": False,
+            "terminated": False,
+            "truncated": False,
+            "terminal_reason": "unknown",
+            "segments": [],
+        }
+
+    def _begin_demo_episode_recording(self, episode_index: int = 0) -> None:
+        """Start annotation metadata for a new demonstration episode."""
+        self._demo_episode_index = episode_index
+        self._demo_active_segment_id = 0
+        self._demo_active_segment_ids.zero_()
+        self._demo_active_segment_start_steps = self._demo_steps.clone()
+        self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+        self._demo_episode_metadata = [
+            self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
+        ]
+
+    def _begin_demo_segment_recording(
+        self, segment_id: int, segment: DemoSegment
+    ) -> None:
+        """Set the segment context used by subsequent rollout writes."""
+        self._demo_active_segment_id = segment_id
+        self._demo_active_segment_ids.fill_(segment_id)
+        self._demo_active_segment_start_steps = self._demo_steps.clone()
+        self._demo_active_rollout_start_steps = self.rollout_steps.clone()
+
+    def _end_demo_segment_recording(self, result: DemoSegmentResult) -> None:
+        """Close the active segment span and mark its final valid frame."""
+        for env_id in range(self.num_envs):
+            start = int(self._demo_active_segment_start_steps[env_id].item())
+            end = int(self._demo_steps[env_id].item())
+            rollout_start = int(self._demo_active_rollout_start_steps[env_id].item())
+            rollout_end = int(self.rollout_steps[env_id].item())
+            if (
+                self.rollout_buffer is not None
+                and "segment_end" in self.rollout_buffer.keys()
+                and rollout_end > rollout_start
+            ):
+                self.rollout_buffer["segment_end"][env_id, rollout_end - 1] = True
+
+            metadata = result.to_metadata()
+            metadata["start_step"] = start
+            metadata["end_step"] = end
+            self._demo_episode_metadata[env_id]["segments"].append(metadata)
+
+    def _end_demo_episode_recording(self, result: DemoEpisodeResult) -> None:
+        """Finalize per-environment metadata after demonstration execution."""
+        for env_id in range(self.num_envs):
+            metadata = self._demo_episode_metadata[env_id]
+            metadata.update(
+                {
+                    "episode_index": result.episode_index,
+                    "length": int(self._demo_steps[env_id].item()),
+                    "completed": result.completed,
+                    "success": result.success[env_id],
+                    "terminated": result.terminated[env_id],
+                    "truncated": result.truncated[env_id],
+                    "terminal_reason": result.terminal_reason,
+                }
+            )
+
+    def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
+        """Return segment-aware metadata for one buffered episode.
+
+        Legacy collection paths that do not use the common executor are
+        represented as one segment spanning every valid frame.
+
+        Args:
+            env_id: Parallel environment row.
+
+        Returns:
+            A JSON-compatible metadata dictionary.
+        """
+        metadata = dict(self._demo_episode_metadata[env_id])
+        metadata["segments"] = [
+            dict(segment)
+            for segment in self._demo_episode_metadata[env_id].get("segments", [])
+        ]
+        length = int(self._demo_steps[env_id].item())
+        metadata["length"] = length
+        if length > 0 and not metadata["segments"]:
+            metadata["segments"] = [
+                {
+                    "segment_id": 0,
+                    "name": "legacy",
+                    "start_step": 0,
+                    "end_step": length,
+                    "success": bool(
+                        self.episode_success_status[env_id]
+                        or self._task_success[env_id]
+                    ),
+                    "target_uid": None,
+                    "instruction": None,
+                    "failure_reason": None,
+                    "metadata": {},
+                }
+            ]
+        return metadata
+
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
         """Infer whether the rollout buffer is expert recording or RL training data."""
         if {
@@ -672,11 +867,25 @@ class EmbodiedEnv(BaseEnv):
         obs: EnvObs,
         action: EnvAction,
         rewards: torch.Tensor,
+        terminateds: torch.Tensor | None = None,
+        truncateds: torch.Tensor | None = None,
     ) -> None:
-        """Write one step into the legacy episode recording rollout buffer."""
+        """Write one expert step at each environment's independent cursor."""
         buffer_device = self.rollout_buffer.device
-        self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
-            obs.to(buffer_device), non_blocking=True
+        active = self.rollout_steps < self._max_rollout_steps
+        if not bool(active.any()):
+            logger.log_warning(
+                "All expert rollout rows reached max_episode_steps; new frames are dropped."
+            )
+            return
+
+        env_ids = active.nonzero(as_tuple=False).squeeze(-1)
+        step_ids = self.rollout_steps[env_ids]
+        buffer_env_ids = env_ids.to(buffer_device)
+        buffer_step_ids = step_ids.to(buffer_device)
+
+        self.rollout_buffer["obs"][buffer_env_ids, buffer_step_ids] = obs[env_ids].to(
+            buffer_device
         )
         if isinstance(action, TensorDict):
             action_to_store = (
@@ -693,12 +902,69 @@ class EmbodiedEnv(BaseEnv):
             )
             action_to_store = None
         if action_to_store is not None:
-            self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                action_to_store.to(buffer_device), non_blocking=True
+            self.rollout_buffer["actions"][buffer_env_ids, buffer_step_ids] = (
+                action_to_store[env_ids].to(buffer_device)
             )
-        self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
-            rewards.to(buffer_device), non_blocking=True
-        )
+        self.rollout_buffer["rewards"][buffer_env_ids, buffer_step_ids] = rewards[
+            env_ids
+        ].to(buffer_device)
+
+        segment_start_steps = getattr(
+            self,
+            "_demo_active_rollout_start_steps",
+            self._demo_active_segment_start_steps,
+        )[env_ids]
+        segment_steps = step_ids - segment_start_steps
+        buffer_keys = set(self.rollout_buffer.keys())
+        if "valid" in buffer_keys:
+            self.rollout_buffer["valid"][buffer_env_ids, buffer_step_ids] = True
+        if "episode_step" in buffer_keys:
+            self.rollout_buffer["episode_step"][
+                buffer_env_ids, buffer_step_ids
+            ] = buffer_step_ids
+        if "segment_id" in buffer_keys:
+            active_segment_ids = getattr(self, "_demo_active_segment_ids", None)
+            segment_ids = (
+                active_segment_ids[env_ids].to(buffer_device)
+                if active_segment_ids is not None
+                else self._demo_active_segment_id
+            )
+            self.rollout_buffer["segment_id"][
+                buffer_env_ids, buffer_step_ids
+            ] = segment_ids
+        if "segment_step" in buffer_keys:
+            self.rollout_buffer["segment_step"][buffer_env_ids, buffer_step_ids] = (
+                segment_steps.to(buffer_device)
+            )
+        if "segment_start" in buffer_keys:
+            self.rollout_buffer["segment_start"][buffer_env_ids, buffer_step_ids] = (
+                segment_steps.to(buffer_device) == 0
+            )
+
+        if terminateds is None:
+            terminateds = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        if truncateds is None:
+            truncateds = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        terminal = terminateds | truncateds
+        if "terminated" in buffer_keys:
+            self.rollout_buffer["terminated"][buffer_env_ids, buffer_step_ids] = (
+                terminateds[env_ids].to(buffer_device)
+            )
+        if "truncated" in buffer_keys:
+            self.rollout_buffer["truncated"][buffer_env_ids, buffer_step_ids] = (
+                truncateds[env_ids].to(buffer_device)
+            )
+        if "segment_end" in buffer_keys:
+            self.rollout_buffer["segment_end"][buffer_env_ids, buffer_step_ids] = (
+                terminal[env_ids].to(buffer_device)
+            )
+
+        self.rollout_steps[env_ids] += 1
+        self.current_rollout_step = int(self.rollout_steps.max().item())
 
     def _write_trajectory_step(self) -> None:
         """Write one step of per-env ``states`` + pre-process ``action`` into ``_traj_buffer``."""
@@ -1177,6 +1443,26 @@ class EmbodiedEnv(BaseEnv):
             "The method 'create_demo_action_list' must be implemented in subclasses."
         )
 
+    def create_demo_segments(self, *args, **kwargs) -> Iterable[DemoSegment] | None:
+        """Create the semantic segments that make up one task episode.
+
+        The default adapter preserves existing tasks by wrapping their single
+        ``create_demo_action_list`` result in one segment. Multi-object tasks
+        should override this method and may return a lazy generator so each
+        segment can be planned from the scene state left by the previous one.
+
+        Args:
+            *args: Positional arguments forwarded to the legacy planner.
+            **kwargs: Keyword arguments forwarded to the legacy planner.
+
+        Returns:
+            Segment sequence, or ``None`` when planning fails.
+        """
+        actions = self.create_demo_action_list(*args, **kwargs)
+        if actions is None:
+            return None
+        return (DemoSegment(actions=actions, name="task"),)
+
     def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
         """Save recorded trajectory (states + actions) to a ``.pt`` file.
 
@@ -1214,6 +1500,9 @@ class EmbodiedEnv(BaseEnv):
             },
             "rigid_object_uids": list(self.sim._rigid_objects.keys()),
             "env_ids": [int(e) for e in env_ids],
+            "demo_episodes": [
+                self.get_demo_episode_metadata(int(env_id)) for env_id in env_ids
+            ],
         }
         torch.save({"states": states, "actions": actions, "meta": meta}, path)
         return path
