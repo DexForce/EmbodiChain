@@ -2232,6 +2232,7 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     preview_command = [
         sys.executable,
         COMMANDS["scene_engine"]["preview_script"],
+        "--output_root",
         str(output_root),
         "--viser",
         "--viser-host",
