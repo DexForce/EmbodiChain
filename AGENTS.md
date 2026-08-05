@@ -21,15 +21,18 @@ the agent should:
 3. Load only the matched Markdown files under `agent_context/`
 4. Avoid reading `docs/source/` unless the user explicitly asks for the Sphinx documentation
 
-Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `motion-planning`, `atomic-actions`, `rl-learning`, `configclass-pattern`, `randomization`.
+Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`, `configclass-pattern`, `randomization`.
 
 ---
 
 ## Package Name
 
-**IMPORTANT**: The Python package name is `embodichain` (all lowercase, one word).
+**IMPORTANT**: The distribution and primary Python package name is `embodichain`
+(all lowercase, one word). The same wheel also bundles the official tasks under
+the `embodichain_tasks` import package.
 - Repository folder: `EmbodiChain` (PascalCase)
-- Python package: `embodichain` (lowercase)
+- Distribution/core package: `embodichain` (lowercase)
+- Bundled task import package: `embodichain_tasks`
 
 ## Project Structure
 
@@ -49,11 +52,12 @@ EmbodiChain/
 │   │   └── rl/                   # RL: PPO/GRPO algo, rollout buffer, collectors, policies
 │   ├── data/                     # Assets, datasets, constants, enums
 │   ├── lab/                      # Simulation lab
+│   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
 │   │   │   ├── envs/             # BaseEnv, EmbodiedEnv
 │   │   │   │   ├── managers/     # Observation, event, reward, record, dataset managers
 │   │   │   │   │   └── randomization/  # Physics, geometry, spatial, visual randomizers
-│   │   │   │   ├── tasks/        # Task implementations (tableware, RL, special)
+│   │   │   │   ├── tasks/        # Deprecated import shim for official tasks
 │   │   │   │   ├── action_bank/  # Configurable action primitives
 │   │   │   │   └── wrapper/      # Env wrappers (e.g. no_fail)
 │   │   │   └── utils/            # Gym registration, misc helpers
@@ -73,7 +77,7 @@ EmbodiChain/
 │       ├── logger.py             # Project logger
 │       ├── math/                 # Tensor math helpers
 │       └── warp/kinematics/      # GPU kinematics via Warp
-├── configs/                      # Agent configs and task prompts (text/YAML)
+├── embodichain_tasks/            # Official tasks/configs bundled in the main wheel as an import package
 ├── docs/                         # Sphinx documentation source + build
 │   └── source/                   # .md doc pages (overview, quick_start, features, resources)
 ├── tests/                        # Test suite

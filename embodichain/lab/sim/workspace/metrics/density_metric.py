@@ -1,0 +1,165 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from typing import Dict, Any
+import numpy as np
+from embodichain.lab.sim.workspace.metrics.base_metric import (
+    BaseMetric,
+)
+from embodichain.lab.sim.workspace.configs.metric_config import (
+    DensityConfig,
+)
+
+
+class DensityMetric(BaseMetric):
+    """Density metric for workspace analysis.
+
+    Computes point density and workspace distribution statistics.
+    """
+
+    def __init__(self, config: DensityConfig | None = None):
+        """Initialize density metric.
+
+        Args:
+            config: Density configuration.
+        """
+        super().__init__(config or DensityConfig())
+
+    def compute(
+        self,
+        workspace_points: np.ndarray,
+        joint_configurations: np.ndarray | None = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Compute density metrics.
+
+        Args:
+            workspace_points: Workspace points in Cartesian space, shape (N, 3).
+            joint_configurations: Joint configurations, shape (N, num_joints).
+            **kwargs: Additional arguments.
+
+        Returns:
+            Dictionary containing:
+                - mean_density: Average local density
+                - std_density: Standard deviation
+                - min_density: Minimum density
+                - max_density: Maximum density
+                - density_distribution: Histogram of density values (if enabled)
+        """
+        points = self._to_numpy(workspace_points)
+
+        if len(points) < 2:
+            return {
+                "mean_density": 0.0,
+                "std_density": 0.0,
+                "min_density": 0.0,
+                "max_density": 0.0,
+            }
+
+        # Compute local density for each point
+        densities = self._compute_local_density(points)
+
+        self.results = {
+            "mean_density": float(densities.mean()),
+            "std_density": float(densities.std()),
+            "min_density": float(densities.min()),
+            "max_density": float(densities.max()),
+        }
+
+        # Compute distribution statistics if requested
+        if self.config.compute_distribution:
+            hist, bin_edges = np.histogram(densities, bins=10)
+            self.results["density_distribution"] = {
+                "histogram": hist.tolist(),
+                "bin_edges": bin_edges.tolist(),
+            }
+
+        return self.results
+
+    def _compute_local_density(self, points: np.ndarray) -> np.ndarray:
+        """Compute local density for each point.
+
+        Uses scipy.spatial.cKDTree for O(N log N) performance instead of
+        the O(N^2) brute-force approach. Falls back to brute-force if
+        scipy is unavailable.
+
+        Args:
+            points: Point cloud, shape (N, 3).
+
+        Returns:
+            Local densities, shape (N,).
+        """
+        radius = self.config.radius
+        volume = (4.0 / 3.0) * np.pi * (radius**3)
+
+        try:
+            from scipy.spatial import cKDTree
+
+            tree = cKDTree(points)
+            # Count neighbors within radius for all points at once
+            counts = tree.query_ball_point(points, r=radius, return_length=True)
+            # Subtract 1 to exclude self
+            densities = (counts - 1) / volume if volume > 0 else np.zeros(len(points))
+            return densities
+        except ImportError:
+            # Fallback: brute-force O(N^2)
+            n_points = len(points)
+            densities = np.zeros(n_points)
+            for i in range(n_points):
+                distances = np.linalg.norm(points - points[i], axis=1)
+                num_neighbors = np.sum(distances <= radius) - 1
+                densities[i] = num_neighbors / volume if volume > 0 else 0.0
+            return densities
+
+    def _compute_knn_density(self, points: np.ndarray) -> np.ndarray:
+        """Compute k-nearest neighbors density.
+
+        Uses scipy.spatial.cKDTree for O(N log N) performance.
+
+        Args:
+            points: Point cloud, shape (N, 3).
+
+        Returns:
+            Local densities, shape (N,).
+        """
+        n_points = len(points)
+        k = min(self.config.k_neighbors, n_points - 1)
+
+        if k <= 0:
+            return np.zeros(n_points)
+
+        try:
+            from scipy.spatial import cKDTree
+
+            tree = cKDTree(points)
+            # Query k+1 nearest (includes self)
+            distances, _ = tree.query(points, k=k + 1)
+            # Use the k-th nearest distance (index k, since 0 is self)
+            max_distances = distances[:, -1]
+            max_distances = np.maximum(max_distances, 1e-10)
+            volumes = (4.0 / 3.0) * np.pi * (max_distances**3)
+            densities = k / volumes
+            return densities
+        except ImportError:
+            densities = np.zeros(n_points)
+            for i in range(n_points):
+                distances = np.linalg.norm(points - points[i], axis=1)
+                distances[i] = np.inf
+                knn_distances = np.partition(distances, k)[:k]
+                max_distance = knn_distances.max()
+                volume = (4.0 / 3.0) * np.pi * (max_distance**3)
+                densities[i] = k / volume if volume > 0 else 0.0
+            return densities

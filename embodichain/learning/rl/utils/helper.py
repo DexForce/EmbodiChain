@@ -56,12 +56,13 @@ def flatten_dict_observation(obs: TensorDict) -> torch.Tensor:
 
 
 def dict_to_tensordict(
-    obs_dict: TensorDict | Mapping[str, Any], device: torch.device | str
+    obs_dict: torch.Tensor | TensorDict | Mapping[str, Any],
+    device: torch.device | str,
 ) -> TensorDict:
     """Convert an environment observation mapping into a TensorDict.
 
     Args:
-        obs_dict: Environment observation returned by `reset()` or `step()`.
+        obs_dict: Tensor or mapping returned by ``reset()`` or ``step()``.
         device: Target device for the resulting TensorDict.
 
     Returns:
@@ -69,8 +70,13 @@ def dict_to_tensordict(
     """
     if isinstance(obs_dict, TensorDict):
         return obs_dict.to(device)
+    if isinstance(obs_dict, torch.Tensor):
+        tensor = obs_dict.to(device)
+        batch_size = [tensor.shape[0]] if tensor.ndim > 1 else []
+        return TensorDict({"obs": tensor}, batch_size=batch_size, device=device)
     if not isinstance(obs_dict, Mapping):
         raise TypeError(
-            f"Expected observation mapping or TensorDict, got {type(obs_dict)!r}."
+            f"Expected tensor, observation mapping, or TensorDict, "
+            f"got {type(obs_dict)!r}."
         )
     return TensorDict.from_dict(dict(obs_dict), device=device)

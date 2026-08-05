@@ -949,6 +949,26 @@ class BaseRigidObjectTest:
             vel_partial[1], torch.zeros(6, device=self.sim.device), atol=1e-5
         ), "Env 1 should still have non-zero velocity after partial clear_dynamics"
 
+    def test_multi_mesh_geometry_is_combined(self):
+        """GLB render meshes are exported as one complete indexed geometry."""
+        render_body = self.chair._entities[0].get_render_body()
+        expected_vertex_count = sum(
+            render_body.get_vertices(mesh_id).shape[0]
+            for mesh_id in range(render_body.get_mesh_count())
+        )
+        expected_triangle_count = sum(
+            render_body.get_triangles(mesh_id).shape[0]
+            for mesh_id in range(render_body.get_mesh_count())
+        )
+
+        vertices = self.chair.get_vertices(env_ids=[0])
+        triangles = self.chair.get_triangles(env_ids=[0])
+
+        assert vertices.shape == (1, expected_vertex_count, 3)
+        assert triangles.shape == (1, expected_triangle_count, 3)
+        assert int(triangles.min()) == 0
+        assert int(triangles.max()) < expected_vertex_count
+
     def teardown_method(self):
         """Clean up resources after each test method."""
         self.sim.destroy()

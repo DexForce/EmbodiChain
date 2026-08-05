@@ -14,12 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 import gymnasium as gym
 
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.lab.sim.types import EnvAction, EnvObs
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
@@ -47,8 +50,9 @@ class RandomReachEnv(BaseEnv):
         device="cpu",
         renderer="hybrid",
         physics_cfg="default",
+        visualization: VisualizationCfg | None = None,
         **kwargs,
-    ):
+    ) -> None:
         env_cfg = EnvCfg(
             sim_cfg=SimulationManagerCfg(
                 headless=headless,
@@ -56,6 +60,7 @@ class RandomReachEnv(BaseEnv):
                 device=device,
                 render_cfg=RenderCfg(renderer=renderer),
                 physics_cfg=physics_cfg_for_backend(physics_cfg),
+                visualization=visualization or VisualizationCfg(),
             ),
             num_envs=num_envs,
         )
@@ -121,6 +126,7 @@ if __name__ == "__main__":
     import time
 
     from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+    from embodichain.lab.visualization import visualization_cfg_from_args
 
     parser = argparse.ArgumentParser(
         description="Demo for running a random reach environment."
@@ -135,6 +141,7 @@ if __name__ == "__main__":
         device=args.device,
         renderer=args.renderer,
         physics_cfg=args.physics,
+        visualization=visualization_cfg_from_args(args),
     )
 
     for episode in range(10):

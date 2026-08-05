@@ -45,7 +45,7 @@ Define workspace boundaries using min/max bounds:
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Basic workspace boundaries
 checker = WorkspaceConstraintChecker(
@@ -61,7 +61,7 @@ Avoid specified rectangular obstacle regions (simple collision avoidance):
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Workspace with exclusion zones
 checker = WorkspaceConstraintChecker(
@@ -82,8 +82,8 @@ Use DimensionConstraint for easy configuration:
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Create configuration
 config = DimensionConstraint(
@@ -105,7 +105,7 @@ checker = WorkspaceConstraintChecker.from_config(config)
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.workspace.configs.dimension_constraint import DimensionConstraint
 
 # TODO: These parameters exist in DimensionConstraint but are not implemented
 config = DimensionConstraint(
@@ -135,7 +135,7 @@ config = DimensionConstraint(
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Create constraint checker
 checker = WorkspaceConstraintChecker(
@@ -165,7 +165,7 @@ print(f"Filtered points shape: {valid_points.shape}")  # (2, 3)
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Workspace with exclusion zones
 checker = WorkspaceConstraintChecker(
@@ -197,8 +197,8 @@ print(f"Safe points: {len(safe_points)} out of {len(test_points)}")
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Create configuration object
 config = DimensionConstraint(
@@ -227,7 +227,7 @@ print(f"Total exclusion zones: {checker.get_num_exclude_zones()}")
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Add and remove obstacles dynamically
 checker = WorkspaceConstraintChecker(
@@ -252,8 +252,8 @@ print(f"After clearing: {checker.get_num_exclude_zones()} zones")
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Define workspace constraints
 constraints = DimensionConstraint(
@@ -282,7 +282,7 @@ print(f"Coverage: {len(valid_points)/len(workspace_points)*100:.1f}%")
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Conservative workspace bounds
 def create_safe_bounds(robot_reach, safety_margin=0.1):
@@ -368,7 +368,7 @@ Configuration dataclass for constraints.
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Simple boundary constraints
 checker = WorkspaceConstraintChecker(
@@ -381,7 +381,7 @@ checker = WorkspaceConstraintChecker(
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Workspace with exclusion zones
 checker = WorkspaceConstraintChecker(
@@ -398,8 +398,8 @@ checker = WorkspaceConstraintChecker(
 
 ```python
 import numpy as np
-from embodichain.lab.sim.utility.workspace_analyzer.configs.dimension_constraint import DimensionConstraint
-from embodichain.lab.sim.utility.workspace_analyzer.constraints import WorkspaceConstraintChecker
+from embodichain.lab.sim.workspace.configs.dimension_constraint import DimensionConstraint
+from embodichain.lab.sim.workspace.constraints import WorkspaceConstraintChecker
 
 # Create config
 config = DimensionConstraint(

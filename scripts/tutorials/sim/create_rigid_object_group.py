@@ -18,6 +18,8 @@
 This script demonstrates how to create a rigid object group using SimulationManager.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 
@@ -28,6 +30,7 @@ from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
 )
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import (
     RigidObjectGroup,
@@ -59,6 +62,7 @@ def main():
         physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=args.num_envs,
         arena_space=3.0,
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance

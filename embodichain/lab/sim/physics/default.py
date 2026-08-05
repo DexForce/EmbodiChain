@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import dexsim
 
-from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+from embodichain.lab.sim.cfg import PhysicsCfg
 from embodichain.utils import logger
 
 from .base import PhysicsBackend
@@ -46,7 +46,7 @@ class DefaultPhysicsBackend(PhysicsBackend):
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
         cfg = sim_config.physics_cfg
-        assert isinstance(cfg, DefaultPhysicsCfg)
+        assert isinstance(cfg, PhysicsCfg)
         world_config.length_tolerance = cfg.length_tolerance
         world_config.speed_tolerance = cfg.speed_tolerance
         if self._manager.device.type == "cuda":
@@ -55,7 +55,7 @@ class DefaultPhysicsBackend(PhysicsBackend):
 
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         cfg = sim_config.physics_cfg
-        assert isinstance(cfg, DefaultPhysicsCfg)
+        assert isinstance(cfg, PhysicsCfg)
         dexsim.set_physics_config(**cfg.to_dexsim_args())
         dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory.to_dict())
 

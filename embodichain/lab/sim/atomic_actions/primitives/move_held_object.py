@@ -18,25 +18,40 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    HeldObjectPoseTarget,
     WorldState,
-)
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix,
+    _validate_pose_tensor,
 )
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectPoseTarget(ActionTarget):
+    """Desired pose for the object held by this action's control part."""
+
+    object_target_pose: torch.Tensor
+    """Target object pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+
+    def __post_init__(self) -> None:
+        _validate_pose_tensor(
+            self.object_target_pose,
+            "object_target_pose",
+            allow_waypoints=False,
+        )
 
 
 @configclass
@@ -54,13 +69,13 @@ class MoveHeldObjectCfg(ActionCfg):
     """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
 
     obj_upright_direction: torch.Tensor | None = None
-    """Optional object local direction to align with world up after grasping. By dafault we will use (0, 0, 1)."""
+    """Optional object-local direction to align with world up while moving."""
 
     pick_rotate_upright: float | None = None
-    """Optional rotation (radians) about the grasp y-axis to apply to the grasp pose"""
+    """Optional rotation in radians used by the legacy upright transport mode."""
 
 
-class MoveHeldObject(AtomicAction):
+class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
     """Move the held object to a target object pose; keep the gripper closed."""
 
     TargetType: ClassVar[type] = HeldObjectPoseTarget
@@ -85,9 +100,11 @@ class MoveHeldObject(AtomicAction):
         self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
 
     def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
-        if state.held_object is None:
+        held_object = state.get_held_object(self.cfg.control_part)
+        if held_object is None:
             logger.log_error(
-                "MoveHeldObject requires WorldState.held_object - run PickUp first.",
+                "MoveHeldObject requires an object held by control part "
+                f"{self.cfg.control_part!r} - run PickUp first.",
                 ValueError,
             )
         object_target_pose = resolve_object_target(
@@ -99,37 +116,24 @@ class MoveHeldObject(AtomicAction):
             arm_dof=self.arm_dof,
             control_part=self.cfg.control_part,
         )
+        end_arm_xpos = self.robot.compute_fk(
+            start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+        )
         if self.cfg.pick_rotate_upright is not None:
-            held_eef_xpos = self.robot.compute_fk(
-                qpos=start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+            self._apply_configured_upright_rotation(
+                object_target_pose,
+                end_arm_xpos,
+                held_object.semantics.entity.get_local_pose(to_matrix=True),
             )
-            held_obj_xpos = state.held_object.semantics.entity.get_local_pose(
-                to_matrix=True
-            )
-            if self.cfg.obj_upright_direction is None:
-                upright_direction = torch.tensor([0, 0, 1], device=self.device)
-            else:
-                upright_direction = self.cfg.obj_upright_direction.to(self.device)
-            obj_upright = (upright_direction * held_obj_xpos[:, :3, :3]).sum(axis=2)
-
-            grasp_ry = held_eef_xpos[:, :3, 1]
-            dot_result = (grasp_ry * obj_upright).sum(axis=1)
-            # revert flag is -1 if the dot product is negative, 1 if positive
-            revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
-            grasp_rx = held_eef_xpos[:, :3, 0]
-            # rotate util upright
-            rota_axis_angle = -0.5 * torch.pi * revert_flag * grasp_rx
-            gripper_rotate_offset = axis_angle_to_rotation_matrix(rota_axis_angle)
-            # modified target xpos rotation
-            object_target_pose[:, :3, :3] = torch.bmm(
-                gripper_rotate_offset, held_obj_xpos[:, :3, :3]
-            )
-        object_to_eef = state.held_object.object_to_eef.to(
+        object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
         if object_to_eef.shape == (4, 4):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
+
+        if self.cfg.pick_rotate_upright is None:
+            self._apply_automatic_transport_rotation(move_eef_xpos, end_arm_xpos)
 
         target_states_list = [
             [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
@@ -156,11 +160,88 @@ class MoveHeldObject(AtomicAction):
         return ActionResult(
             success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
             ),
+        )
+
+    def _apply_configured_upright_rotation(
+        self,
+        object_target_pose: torch.Tensor,
+        end_arm_xpos: torch.Tensor,
+        held_object_xpos: torch.Tensor,
+    ) -> None:
+        if self.cfg.obj_upright_direction is None:
+            upright_direction = torch.tensor(
+                [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
+            )
+        else:
+            upright_direction = self.cfg.obj_upright_direction.to(
+                device=self.device, dtype=torch.float32
+            )
+        object_upright = torch.matmul(held_object_xpos[:, :3, :3], upright_direction)
+        dot_result = torch.sum(end_arm_xpos[:, :3, 1] * object_upright, dim=-1)
+        revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
+        axis_angle = (
+            -float(self.cfg.pick_rotate_upright)
+            * revert_flag.unsqueeze(-1)
+            * end_arm_xpos[:, :3, 0]
+        )
+        rotation_offset = axis_angle_to_rotation_matrix(axis_angle)
+        object_target_pose[:, :3, :3] = torch.bmm(
+            rotation_offset, held_object_xpos[:, :3, :3]
+        )
+
+    def _apply_automatic_transport_rotation(
+        self,
+        move_eef_xpos: torch.Tensor,
+        end_arm_xpos: torch.Tensor,
+    ) -> None:
+        down_z = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=torch.float32)
+        arm_dot_angle = torch.acos(
+            torch.clamp(torch.sum(end_arm_xpos[:, :3, 2] * down_z, dim=-1), -1.0, 1.0)
+        )
+        adjust_mask = arm_dot_angle > torch.pi * 0.25
+        if not adjust_mask.any():
+            return
+
+        revert_flag = torch.where(end_arm_xpos[:, 2, 1] > 0, 1.0, -1.0)
+        rotation_axis = torch.tensor(
+            [1.0, 0.0, 0.0], device=self.device, dtype=torch.float32
+        ).repeat(self.n_envs, 1)
+        axis_angle = (
+            (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1)
+            * rotation_axis
+            * revert_flag.unsqueeze(-1)
+        )
+        rotation_offset = axis_angle_to_rotation_matrix(axis_angle)
+        template_rotation_a = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
+            device=self.device,
+            dtype=torch.float32,
+        ).repeat(self.n_envs, 1, 1)
+        template_rotation_b = torch.tensor(
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+            device=self.device,
+            dtype=torch.float32,
+        ).repeat(self.n_envs, 1, 1)
+        target_rotation_a = torch.bmm(template_rotation_a, rotation_offset)
+        target_rotation_b = torch.bmm(template_rotation_b, rotation_offset)
+        relative_rotation_a = get_relative_rotation(
+            target_rotation_a, end_arm_xpos[:, :3, :3]
+        )
+        relative_rotation_b = get_relative_rotation(
+            target_rotation_b, end_arm_xpos[:, :3, :3]
+        )
+        target_rotation = torch.where(
+            (relative_rotation_a < relative_rotation_b)[:, None, None],
+            target_rotation_a,
+            target_rotation_b,
+        )
+        move_eef_xpos[:, :3, :3] = torch.where(
+            adjust_mask[:, None, None],
+            target_rotation,
+            move_eef_xpos[:, :3, :3],
         )
 
     def _fail(self, state: WorldState) -> ActionResult:
@@ -175,4 +256,4 @@ class MoveHeldObject(AtomicAction):
         )
 
 
-__all__ = ["MoveHeldObject", "MoveHeldObjectCfg"]
+__all__ = ["HeldObjectPoseTarget", "MoveHeldObject", "MoveHeldObjectCfg"]

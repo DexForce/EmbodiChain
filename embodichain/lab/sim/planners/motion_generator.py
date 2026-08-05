@@ -30,6 +30,9 @@ from embodichain.lab.sim.planners import (
     NeuralPlanner,
     NeuralPlannerCfg,
     NeuralPlanOptions,
+    CuroboPlanner,
+    CuroboPlannerCfg,
+    CuroboPlanOptions,
 )
 from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 from embodichain.utils import logger, configclass
@@ -67,7 +70,11 @@ class MotionGenOptions:
     """Options to pass to the underlying planner during the planning phase."""
 
     is_interpolate: bool = False
-    """Whether to perform interpolation before planning. 
+    """Whether to allow interpolation before planning when the backend needs it.
+
+    Joint-only backends use this to convert Cartesian targets into joint
+    waypoints. Backends that accept Cartesian targets directly receive the
+    original targets unchanged.
     
     Note:
         - The pre-interpolation only works for PlanState with MoveType.EEF_MOVE or MoveType.JOINT_MOVE.
@@ -101,6 +108,7 @@ class MotionGenerator:
     _support_planner_dict = {
         "toppra": (ToppraPlanner, ToppraPlannerCfg),
         "neural": (NeuralPlanner, NeuralPlannerCfg),
+        "curobo": (CuroboPlanner, CuroboPlannerCfg),
     }
 
     def __init__(self, cfg: MotionGenCfg) -> None:
@@ -156,14 +164,14 @@ class MotionGenerator:
         Returns:
             PlanResult containing the planned trajectory details.
         """
-        if options.is_interpolate and isinstance(self.planner, NeuralPlanner):
-            logger.log_warning(
-                "is_interpolate=True is not supported with NeuralPlanner; "
-                "disabling interpolation."
-            )
-            options.is_interpolate = False
+        move_types = {state.move_type for state in target_states}
+        should_preinterpolate = (
+            options.is_interpolate
+            and not self.planner.supports_move_type(MoveType.EEF_MOVE)
+            and self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        )
 
-        if options.is_interpolate:
+        if should_preinterpolate:
             move_type = target_states[0].move_type
             if move_type == MoveType.EEF_MOVE:
                 for s in target_states:
@@ -226,21 +234,31 @@ class MotionGenerator:
         else:
             target_plan_states = target_states
 
-        if options.plan_opts is None:
-            if hasattr(self.planner, "default_plan_options"):
-                options.plan_opts = self.planner.default_plan_options()
-            else:
-                options.plan_opts = PlanOptions()
+        unsupported_move_types = {
+            move_type
+            for move_type in move_types
+            if not self.planner.supports_move_type(move_type)
+        }
+        if not should_preinterpolate and unsupported_move_types:
+            unsupported_names = sorted(
+                move_type.name for move_type in unsupported_move_types
+            )
+            supported_names = sorted(
+                move_type.name for move_type in self.planner.supported_move_types
+            )
+            logger.log_error(
+                f"{type(self.planner).__name__} does not support move types "
+                f"{unsupported_names}; supported types are {supported_names}.",
+                ValueError,
+            )
 
-        # Propagate MotionGenOptions fields into NeuralPlanOptions so that callers
-        # can set control_part/start_qpos at the MotionGenerator level.
-        if isinstance(self.planner, NeuralPlanner) and isinstance(
-            options.plan_opts, NeuralPlanOptions
-        ):
-            if options.plan_opts.control_part is None:
-                options.plan_opts.control_part = options.control_part
-            if options.plan_opts.start_qpos is None:
-                options.plan_opts.start_qpos = options.start_qpos
+        if options.plan_opts is None:
+            options.plan_opts = self.planner.default_plan_options()
+        options.plan_opts = self.planner.with_motion_context(
+            options.plan_opts,
+            start_qpos=options.start_qpos,
+            control_part=options.control_part,
+        )
 
         return self.planner.plan(
             target_states=target_plan_states, options=options.plan_opts

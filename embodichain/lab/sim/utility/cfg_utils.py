@@ -84,7 +84,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
     """
 
     # Only parse keys the base RobotCfg recognizes, so subclass-only variant
-    # fields (version, arm_kind, ...) set by _build_defaults don't trigger
+    # fields (version, ...) set by _build_defaults don't trigger
     # spurious "Key not found in RobotCfg" warnings from the base from_dict.
     # NOTE: check RobotCfg.__dataclass_fields__ (not hasattr(base_cfg, k))
     # because base_cfg is the subclass instance which has subclass-only fields,
@@ -104,9 +104,12 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
             #   2. Part dict lacks "class_type" → attribute overrides for an
             #      existing solver part (e.g. {"tcp": ..., "stiffness": ...}).
             provided_solver_cfg = override_cfg_dict.get("solver_cfg")
-            if provided_solver_cfg and isinstance(provided_solver_cfg, dict):
+            if isinstance(provided_solver_cfg, dict):
                 if base_cfg.solver_cfg is None:
                     base_cfg.solver_cfg = {}
+                if not provided_solver_cfg:
+                    base_cfg.solver_cfg = {}
+                    continue
                 for part, item in provided_solver_cfg.items():
                     if isinstance(item, dict) and "class_type" in item:
                         # New or replacement solver part — use the deserialized
@@ -217,7 +220,7 @@ def merge_robot_cfg(base_cfg: RobotCfg, override_cfg_dict: dict[str, any]) -> Ro
                 )
         else:
             # Only apply keys the base RobotCfg.from_dict recognized.
-            # Subclass-only variant fields (e.g. version, arm_kind) are not
+            # Subclass-only variant fields (e.g. version) are not
             # present on a plain RobotCfg and are already set by _build_defaults;
             # skip them instead of raising AttributeError.
             if hasattr(robot_cfg, key):

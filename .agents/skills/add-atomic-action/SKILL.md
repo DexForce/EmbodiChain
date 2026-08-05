@@ -52,12 +52,14 @@ There is **no** `validate` method, **no** `**kwargs`, **no** `start_qpos` parame
 **no** `updates_held_object_state` flag, and **no** `get_held_object_state`. The
 `WorldState` is the single channel for inter-action state.
 
-`ActionCfg` (and therefore every action cfg) carries two motion-source fields used
+`ActionCfg` (and therefore every action cfg) carries one motion-source field used
 by `TrajectoryBuilder.plan_arm_traj`:
 - `motion_source: str = "ik_interp"` — `"ik_interp"` (batched IK + interpolation)
   or `"motion_gen"` (delegates to the batched `MotionGenerator`).
-- `planner_type: str | None = None` — `"toppra"` or `"neural"`; required when
-  `motion_source="motion_gen"`.
+
+The `MotionGenerator` owns exactly one planner, selected by
+`MotionGenCfg.planner_cfg`; action configs do not repeat or override that planner
+type.
 
 ## Steps
 
@@ -207,7 +209,7 @@ class Push(AtomicAction):
 - `execute()` returns an `ActionResult` — never a bare tuple.
 - `trajectory` shape is always `(n_envs, n_waypoints, robot.dof)` (full robot DoF).
 - Pass `cfg=self.cfg` to every `self.builder.plan_arm_traj(...)` call so the builder
-  reads `motion_source` / `planner_type` from the action config.
+  reads `motion_source` and per-action planning options from the action config.
 - Use `self.builder.<helper>` for all trajectory math (`resolve_pose_target`,
   `resolve_joint_target`, `resolve_start_qpos`, `apply_local_offset`, `plan_arm_traj`,
   `plan_joint_traj`, `split_three_phase`, `interpolate_hand_qpos`). Do not reimplement
@@ -320,7 +322,7 @@ def test_push_action_returns_full_dof_trajectory():
 | `execute(target, start_qpos=None, **kwargs)` | Signature is `execute(self, target, state: WorldState) -> ActionResult`. No `**kwargs`, no `start_qpos`. |
 | Reimplementing IK / interpolation inline | Use `self.builder.plan_arm_traj(...)`, `self.builder.plan_joint_traj(...)`, and friends. |
 | Returning arm-only or arm+hand trajectory | Always embed into full `robot.dof` before returning. |
-| Forgetting `cfg=self.cfg` in `plan_arm_traj` | The builder defaults to `motion_source="ik_interp"`; pass `cfg=self.cfg` to opt into `motion_gen` / `planner_type`. |
+| Forgetting `cfg=self.cfg` in `plan_arm_traj` | The builder defaults to `motion_source="ik_interp"`; pass `cfg=self.cfg` to opt into `motion_gen` and per-action planning options. |
 | Treating `ActionResult.success` as a scalar | It is `(n_envs,)` for batched actions; use `.success_all` or `.success.all()` for a single bool. |
 | `name` not matching the engine registration key | Keep `cfg.name` identical to the key passed to `engine.register(...)` / `register_action(...)`. |
 | Forgetting to export from `__init__.py` | Users import from the public API — missing exports cause `ImportError`. |

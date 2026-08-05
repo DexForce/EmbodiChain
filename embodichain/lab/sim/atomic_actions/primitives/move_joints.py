@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import ClassVar
 
 import torch
@@ -25,14 +26,54 @@ import torch
 from embodichain.utils import configclass, logger
 
 from ..core import (
+    ActionTarget,
     ActionCfg,
     ActionResult,
     AtomicAction,
-    JointPositionTarget,
-    NamedJointPositionTarget,
     WorldState,
 )
 from ..trajectory import TrajectoryBuilder
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class JointPositionTarget(ActionTarget):
+    """Joint-space target for a configured robot control part."""
+
+    qpos: torch.Tensor
+    """Target joint positions.
+
+    Accepts:
+
+    - ``(control_dof,)`` or ``(n_envs, control_dof)`` — a single waypoint.
+    - ``(n_envs, n_waypoint, control_dof)`` — a multi-waypoint trajectory;
+      waypoints are visited in order.
+    """
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.qpos, torch.Tensor):
+            raise TypeError(
+                f"qpos must be a torch.Tensor, got {type(self.qpos).__name__}."
+            )
+        if self.qpos.dim() not in (1, 2, 3) or self.qpos.shape[-1] == 0:
+            raise ValueError(
+                "qpos must have shape (control_dof,), (n_envs, control_dof), "
+                "or (n_envs, n_waypoint, control_dof), "
+                f"got {tuple(self.qpos.shape)}."
+            )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class NamedJointPositionTarget(ActionTarget):
+    """Named joint-space target resolved from :class:`MoveJointsCfg`."""
+
+    name: str
+    """Name of a joint-position target in ``MoveJointsCfg.named_joint_positions``."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str):
+            raise TypeError(f"name must be a str, got {type(self.name).__name__}.")
+        if not self.name.strip():
+            raise ValueError("name must not be empty.")
 
 
 @configclass
@@ -47,7 +88,7 @@ class MoveJointsCfg(ActionCfg):
     """Optional named joint targets resolved by ``NamedJointPositionTarget``."""
 
 
-class MoveJoints(AtomicAction):
+class MoveJoints(AtomicAction[JointPositionTarget | NamedJointPositionTarget]):
     """Plan a joint-space move for the configured control part.
 
     The :class:`JointPositionTarget` may carry either a single waypoint
@@ -92,17 +133,20 @@ class MoveJoints(AtomicAction):
             arm_dof=self.joint_dof,
             control_part=self.cfg.control_part,
         )
-        joint_traj = self.builder.plan_joint_traj(
-            start_qpos, target_qpos, self.cfg.sample_interval
+        success, joint_traj = self.builder.plan_joint_motion(
+            start_qpos,
+            target_qpos,
+            self.cfg.sample_interval,
+            control_part=self.cfg.control_part,
+            arm_dof=self.joint_dof,
+            cfg=self.cfg,
         )
         full = self._embed(joint_traj, state.last_qpos)
         return ActionResult(
-            success=torch.ones(self.n_envs, dtype=torch.bool, device=self.device),
+            success=success,
             trajectory=full,
-            next_state=WorldState(
+            next_state=state.with_updates(
                 last_qpos=full[:, -1, :].clone(),
-                held_object=state.held_object,
-                coordinated_held_object=state.coordinated_held_object,
             ),
         )
 
@@ -133,4 +177,9 @@ class MoveJoints(AtomicAction):
         return full
 
 
-__all__ = ["MoveJoints", "MoveJointsCfg"]
+__all__ = [
+    "JointPositionTarget",
+    "MoveJoints",
+    "MoveJointsCfg",
+    "NamedJointPositionTarget",
+]

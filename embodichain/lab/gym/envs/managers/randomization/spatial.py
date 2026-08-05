@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Literal, Sequence
 
 from embodichain.lab.sim.objects import (
     RigidObject,
@@ -40,6 +40,7 @@ __all__ = [
     "randomize_robot_qpos",
     "randomize_articulation_root_pose",
     "randomize_target_pose",
+    "sample_rigid_object_pose_from_workspace",
     "planner_grid_cell_sampler",
     "randomize_anchor_height",
 ]
@@ -436,6 +437,143 @@ def randomize_target_pose(
 
     target_poses = getattr(env, store_key)
     target_poses[env_ids] = pose
+
+
+class sample_rigid_object_pose_from_workspace(Functor):
+    """Place a rigid object at a position sampled from a robot workspace.
+
+    The workspace supplies kinematically reachable end-effector samples. This
+    functor consumes their Cartesian positions for object placement while
+    leaving scene collision and motion-planning validation to task-specific
+    logic.
+    """
+
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+        """Initialize the workspace object sampler.
+
+        Args:
+            cfg: Functor configuration.
+            env: Environment instance.
+        """
+        super().__init__(cfg, env)
+        robot_cfg: SceneEntityCfg = cfg.params["robot_cfg"]
+        entity_cfg: SceneEntityCfg = cfg.params["entity_cfg"]
+        self._robot = env.sim.get_robot(robot_cfg.uid)
+        self._rigid_object = env.sim.get_rigid_object(entity_cfg.uid)
+        self._control_part = self._resolve_control_part(
+            cfg.params.get("control_part"), robot_cfg.control_parts
+        )
+        # Load and validate the cache once when the EventManager initializes
+        # this stateful functor.
+        self._robot.get_workspace(self._control_part)
+
+    @staticmethod
+    def _resolve_control_part(
+        control_part: str | None,
+        configured_parts: str | list[str] | None,
+    ) -> str | None:
+        """Resolve one control part from explicit and scene-entity settings."""
+        if control_part is not None:
+            return control_part
+        if isinstance(configured_parts, str):
+            return configured_parts
+        if configured_parts is not None:
+            if len(configured_parts) != 1:
+                raise ValueError(
+                    "Workspace object sampling requires exactly one control part; "
+                    f"got {configured_parts}."
+                )
+            return configured_parts[0]
+        return None
+
+    def __call__(
+        self,
+        env: EmbodiedEnv,
+        env_ids: torch.Tensor | list[int] | None,
+        robot_cfg: SceneEntityCfg,
+        entity_cfg: SceneEntityCfg,
+        control_part: str | None = None,
+        strategy: Literal["point_uniform", "voxel_uniform"] | None = None,
+        position_bounds: tuple[Sequence[float], Sequence[float]] | None = None,
+        reference_height: float | None = None,
+        use_workspace_orientation: bool = False,
+        rotation_range: tuple[list[float], list[float]] | None = None,
+        relative_rotation: bool = False,
+        min_score: float | None = None,
+        max_attempts: int = 64,
+        physics_update_step: int = -1,
+    ) -> None:
+        """Sample workspace positions and place a rigid object.
+
+        Args:
+            env: Environment instance.
+            env_ids: Target environment IDs. Defaults to all environments.
+            robot_cfg: Scene entity identifying the robot.
+            entity_cfg: Scene entity identifying the rigid object.
+            control_part: Robot control part. If omitted, it is resolved from
+                ``robot_cfg.control_parts`` or the robot's single workspace.
+            strategy: Optional runtime workspace sampling strategy.
+            position_bounds: Optional arena-frame Cartesian bounds.
+            reference_height: Optional fixed object z-coordinate.
+            use_workspace_orientation: Whether to copy the sampled EEF
+                orientation to the object.
+            rotation_range: Optional Euler-angle rotation range in degrees.
+            relative_rotation: Apply ``rotation_range`` relative to the selected
+                object orientation.
+            min_score: Optional minimum cached reachability score.
+            max_attempts: Maximum sampled candidates per environment.
+            physics_update_step: Physics steps after placement; negative values
+                skip the update.
+        """
+        del robot_cfg, entity_cfg, control_part
+
+        if env_ids is None:
+            env_ids = torch.arange(env.num_envs, device=env.device)
+        elif isinstance(env_ids, slice):
+            env_ids = torch.arange(env.num_envs, device=env.device)[env_ids]
+        elif not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+        else:
+            env_ids = env_ids.to(device=env.device, dtype=torch.long)
+
+        samples = self._robot.sample_reachable_pose(
+            name=self._control_part,
+            env_ids=env_ids,
+            num_samples=1,
+            strategy=strategy,
+            position_bounds=position_bounds,
+            min_score=min_score,
+            max_attempts=max_attempts,
+        )
+        valid = samples.valid[:, 0]
+        if not valid.any():
+            logger.log_warning(
+                "Workspace sampling found no valid object positions; "
+                "leaving the object poses unchanged."
+            )
+            return
+
+        pose = self._rigid_object.get_local_pose(to_matrix=True)[env_ids].clone()
+        sampled_pose = samples.eef_pose[:, 0]
+        pose[valid, :3, 3] = sampled_pose[valid, :3, 3]
+        if reference_height is not None:
+            pose[valid, 2, 3] = reference_height
+        if use_workspace_orientation:
+            pose[valid, :3, :3] = sampled_pose[valid, :3, :3]
+
+        if rotation_range is not None:
+            randomized_pose = get_random_pose(
+                init_pos=pose[:, :3, 3],
+                init_rot=pose[:, :3, :3],
+                rotation_range=rotation_range,
+                relative_rotation=relative_rotation,
+            )
+            pose[valid, :3, :3] = randomized_pose[valid, :3, :3]
+
+        self._rigid_object.set_local_pose(pose, env_ids=env_ids)
+        self._rigid_object.clear_dynamics()
+        if physics_update_step > 0:
+            env.sim.update(step=physics_update_step)
 
 
 class planner_grid_cell_sampler(Functor):

@@ -4,9 +4,13 @@ on:
   push:
     branches: [main]
     tags:
-      - 'v*'  # Match tags starting with v, e.g., v1.0.0
+      - 'v*'
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   lint:
@@ -41,13 +45,13 @@ jobs:
           fi
 
   build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     needs: lint
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DISABLE_REQUIRE: 1
-      DOCS_MAX_VERSIONS: 5
     container: *container_template
     steps:
       - uses: actions/checkout@v4
@@ -80,14 +84,10 @@ jobs:
         shell: bash
         run: |
           SITE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          SKIP_VERSION="main"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            SKIP_VERSION="${GITHUB_REF_NAME}"
-          fi
           python3 ${GITHUB_WORKSPACE}/docs/scripts/merge_published_site.py \
             --build-dir ${GITHUB_WORKSPACE}/docs/build/html \
             --site-base-url "${SITE_URL}" \
-            --skip-version "${SKIP_VERSION}"
+            --skip-version main
 
       - name: Build docs
         shell: bash
@@ -102,28 +102,11 @@ jobs:
           pip uninstall pymeshlab -y
           pip install pymeshlab==2023.12.post3
 
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-            echo "Building docs for release tag ${VERSION}..."
-            sphinx-build source build/html/${VERSION}
-
-            cd build/html
-
-            # Prune old release versions beyond the window
-            mapfile -t TAG_DIRS < <(ls -d v*/ 2>/dev/null | sort -V)
-            while [[ ${#TAG_DIRS[@]} -gt ${DOCS_MAX_VERSIONS:-5} ]]; do
-              echo "Pruning old version: ${TAG_DIRS[0]}"
-              rm -rf "${TAG_DIRS[0]}"
-              TAG_DIRS=("${TAG_DIRS[@]:1}")
-            done
-
-          else
-            echo "Building dev docs for main branch..."
-            # Only rebuild main/ — other versions come from cache + live Pages merge
-            rm -rf build/html/main
-            sphinx-build source build/html/main
-            cd build/html
-          fi
+          echo "Building dev docs for main branch..."
+          # Only rebuild main/ — other versions come from cache + live Pages merge
+          rm -rf build/html/main
+          sphinx-build source build/html/main
+          cd build/html
 
           # Regenerate versions.json and root index.html from all present dirs
           python3 ${GITHUB_WORKSPACE}/docs/scripts/generate_versions_json.py \
@@ -158,18 +141,23 @@ jobs:
       - uses: ./.github/actions/activate-conda
       - name: Install test package
         run: |
-          pip install -e ".[gensim]" \
+          pip install -e ".[gensim, curobo-cu12]" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
           pip install pytest-xdist
+
+      - name: Verify Scene Engine gensim installation
+        run: |
+          python -c "import matplotlib, numpy, open3d, requests, scipy, shapely, trimesh; from PIL import Image; import embodichain.gen_sim.scene_engine.pipeline.generate"
+          pytest tests/gen_sim/scene_engine -q
 
       - name: Run default tests
         run: |
           echo "Default test suite (GPU-marked tests are skipped)"
           export HF_ENDPOINT=https://hf-mirror.com
           pytest tests/docs -q --confcutdir=tests/docs
-          pytest tests
+          pytest tests --ignore=tests/docs
 
       - name: Run GPU tests serially
         run: |
@@ -180,36 +168,98 @@ jobs:
   release-build:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: lint
-    runs-on: Linux
-
-    container: *container_template
-
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/activate-conda
 
-      - name: (Release) Install build tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate release versions
+        shell: bash
+        run: |
+          release_version="${GITHUB_REF_NAME#v}"
+          core_version="$(tr -d '[:space:]' < VERSION)"
+
+          if [[ "${core_version}" != "${release_version}" ]]; then
+            echo "VERSION=${core_version} does not match tag ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+
+      - name: Build and validate distributions
         run: |
           python -m pip install --upgrade pip
-          pip install build
-
-      - name: (Release) Build sdist and wheel
-        run: |
+          python -m pip install build twine
           python -m build
+          python -m twine check dist/*
 
-      # - name: (Release) Create GitHub Release (draft)
-      #   uses: softprops/action-gh-release@v2
-      #   with:
-      #     draft: true
-      #     generate_release_notes: true
-      #     files: |
-      #       dist/*
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate wheel contents
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
 
-      - name: (Release) Upload distributions
+          version = Path("VERSION").read_text(encoding="utf-8").strip()
+          wheels = list(Path("dist").glob(f"embodichain-{version}-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"Expected one EmbodiChain wheel, found: {wheels}")
+
+          dist_info = f"embodichain-{version}.dist-info/"
+          required = {
+              "embodichain/VERSION",
+              "embodichain/gen_sim/simready_pipeline/configs/gen_config.json",
+              "embodichain_tasks/__init__.py",
+              "embodichain_tasks/configs/gym/cobotmagic.json",
+          }
+          with ZipFile(wheels[0]) as wheel:
+              members = set(wheel.namelist())
+              entry_points = wheel.read(f"{dist_info}entry_points.txt").decode()
+
+          source_task_configs = {
+              path.as_posix()
+              for path in Path("embodichain_tasks/configs").rglob("*")
+              if path.suffix in {".json", ".yaml", ".yml"}
+          }
+          wheel_task_configs = {
+              member
+              for member in members
+              if member.startswith("embodichain_tasks/configs/")
+              and member.endswith((".json", ".yaml", ".yml"))
+          }
+          unexpected = sorted(
+              member
+              for member in members
+              if not member.startswith(
+                  ("embodichain/", "embodichain_tasks/", dist_info)
+              )
+              or "__pycache__" in member
+              or member.endswith((".pyc", ".pyo"))
+          )
+          missing = sorted(required - members)
+          missing_task_configs = sorted(source_task_configs - wheel_task_configs)
+          unexpected_task_configs = sorted(wheel_task_configs - source_task_configs)
+          task_entry_point = "embodichain_tasks = embodichain_tasks"
+          if (
+              unexpected
+              or missing
+              or missing_task_configs
+              or unexpected_task_configs
+              or task_entry_point not in entry_points
+          ):
+              raise SystemExit(
+                  "Invalid wheel contents; "
+                  f"unexpected={unexpected}, missing={missing}, "
+                  f"missing_task_configs={missing_task_configs}, "
+                  f"unexpected_task_configs={unexpected_task_configs}, "
+                  f"task_entry_point={task_entry_point in entry_points}"
+              )
+          PY
+
+      - name: Upload validated distributions
         uses: actions/upload-artifact@v4
         with:
           name: python-distributions

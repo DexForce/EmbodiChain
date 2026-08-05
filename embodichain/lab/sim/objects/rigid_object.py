@@ -25,7 +25,8 @@ from typing import List, Sequence, Union
 from functools import cached_property
 
 from dexsim.models import MeshObject
-from dexsim.engine import PhysicsScene
+from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
+from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
 from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
 from embodichain.lab.sim.objects.backends import (
     DefaultRigidBodyView,
@@ -38,13 +39,25 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim import (
     VisualMaterial,
     VisualMaterialInst,
+    ReuseSegmentState,
     BatchEntity,
+)
+from embodichain.lab.sim.material import (
+    _capture_render_materials,
+    _restore_render_materials,
+    _set_render_material,
+    _wrap_first_render_material,
+)
+from ._mesh_utils import (
+    get_combined_triangles,
+    get_combined_vertices,
 )
 from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
 
 _UINT64_MAX = (1 << 64) - 1
+__all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
 
 
 @dataclass
@@ -254,6 +267,8 @@ class RigidObject(BatchEntity):
             )
 
         super().__init__(cfg, entities, device, auto_reset=False)
+
+        self._initialize_existing_visual_material()
 
         # set default collision filter
         self._set_default_collision_filter()
@@ -1109,6 +1124,129 @@ class RigidObject(BatchEntity):
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return [self._visual_material[i] for i in ids]
 
+    def _initialize_existing_visual_material(self) -> None:
+        """Wrap asset-parsed materials during rigid-object construction.
+
+        The public material list stores one representative material per
+        environment. For a multi-segment render body, the first segment with a
+        valid material is registered. Segment-specific materials remain
+        available through :meth:`get_existing_visual_material`.
+        """
+        self._original_visual_material = [[] for _ in self._entities]
+        self._original_visual_material_inst = [None] * len(self._entities)
+        for env_idx, entity in enumerate(self._entities):
+            render_body = entity.get_render_body()
+            if render_body is None:
+                continue
+            original_materials = _capture_render_materials(render_body)
+            self._original_visual_material[env_idx] = original_materials
+            wrapped = _wrap_first_render_material(original_materials)
+            if wrapped is not None:
+                self._visual_material[env_idx] = wrapped
+                self._original_visual_material_inst[env_idx] = wrapped
+
+    def restore_visual_material(self, env_ids: Sequence[int] | None = None) -> None:
+        """Restore the visual materials captured when the rigid object was created.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are restored.
+        """
+        if not hasattr(self, "_original_visual_material"):
+            return
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        for env_idx in local_env_ids:
+            render_body = self._entities[env_idx].get_render_body()
+            if render_body is None:
+                continue
+            _restore_render_materials(
+                render_body, self._original_visual_material[env_idx]
+            )
+            self._visual_material[env_idx] = self._original_visual_material_inst[
+                env_idx
+            ]
+        self.is_shared_visual_material = False
+
+    def get_existing_visual_material(
+        self,
+        env_ids: Sequence[int] | None = None,
+        shared: bool = False,
+    ) -> List[List[ReuseSegmentState]]:
+        """Build reuse state from the material dexsim parsed onto each env's render body.
+
+        For each env (first only if ``shared``), every render-body segment's existing
+        ``MaterialInst`` is captured as an immutable original. One working instance is
+        shared by all segments so randomized updates have constant material-update cost.
+
+        Args:
+            env_ids: Environment indices. If None, all instances are used.
+            shared: If True, build state for the first env only (caller applies it to all).
+
+        Returns:
+            Per-env list of per-segment :obj:`ReuseSegmentState` (length 1 if ``shared``).
+
+        Raises:
+            ValueError: If a segment has no material or no retrievable template.
+        """
+        if shared:
+            local_env_ids = [self._all_indices[0]]
+        else:
+            local_env_ids = self._all_indices if env_ids is None else list(env_ids)
+
+        if not hasattr(self, "_original_visual_material"):
+            self._original_visual_material = [None] * len(self._entities)
+        for env_idx in local_env_ids:
+            if self._original_visual_material[env_idx] is None:
+                self._original_visual_material[env_idx] = _capture_render_materials(
+                    self._entities[env_idx].get_render_body()
+                )
+
+        per_env: List[List[ReuseSegmentState]] = []
+        for env_idx in local_env_ids:
+            segments: List[ReuseSegmentState] = []
+            working_inst = None
+            for mesh_id, original_inst in enumerate(
+                self._original_visual_material[env_idx]
+            ):
+                if original_inst is None:
+                    raise ValueError(
+                        f"RigidObject '{self.uid}' env {env_idx} segment {mesh_id} has no material."
+                    )
+                template = original_inst.get_template()
+                if template is None:
+                    raise ValueError(
+                        f"RigidObject '{self.uid}' segment {mesh_id} material has no template."
+                    )
+                if working_inst is None:
+                    working_name = f"{self.uid}_reuse_{env_idx}"
+                    template.create_inst(working_name)
+                    working_inst = VisualMaterialInst(working_name, template)
+                segments.append(
+                    ReuseSegmentState(
+                        mesh_id=mesh_id,
+                        original_inst=original_inst,
+                        working_inst=working_inst,
+                    )
+                )
+            per_env.append(segments)
+        return per_env
+
+    def apply_render_material_inst(
+        self,
+        env_idx: int,
+        mat_inst: MaterialInst,
+        mesh_id: int = 0,
+    ) -> None:
+        """Swap a dexsim MaterialInst onto a render-body segment for the given env.
+
+        Args:
+            env_idx: Environment index.
+            mat_inst: dexsim ``MaterialInst`` to attach.
+            mesh_id: Render-body segment index.
+        """
+        _set_render_material(
+            self._entities[env_idx].get_render_body(), mesh_id, mat_inst
+        )
+
     def share_visual_material_inst(self, mat_insts: List[VisualMaterialInst]) -> None:
         """Share material instances for the rigid object.
 
@@ -1237,21 +1375,24 @@ class RigidObject(BatchEntity):
     def get_vertices(
         self, env_ids: Sequence[int] | None = None, scale: bool = False
     ) -> torch.Tensor:
-        """
-        Retrieve the vertices of the rigid objects.
+        """Retrieve the combined visual-mesh vertices of the rigid objects.
+
+        Assets such as GLB files can contain multiple render meshes. Their
+        vertices are concatenated in render-mesh order so the result represents
+        the complete object instead of only the first mesh.
 
         Args:
-            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve vertices.
-                                                If None, retrieves vertices for all instances.
-            scale (bool): Whether to multiply the vertices by the body scale. Defaults to False.
+            env_ids: Environment IDs for which to retrieve vertices. If ``None``,
+                retrieves vertices for all instances.
+            scale: Whether to multiply the vertices by the body scale.
 
         Returns:
-            torch.Tensor: A tensor containing the user IDs of the specified rigid objects with shape (N, num_verts, 3).
+            Combined vertices with shape ``(N, num_vertices, 3)``.
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         verts = torch.as_tensor(
             np.array(
-                [self._entities[id].get_vertices() for id in ids],
+                [get_combined_vertices(self._entities[id]) for id in ids],
             ),
             dtype=torch.float32,
             device=self.device,
@@ -1261,20 +1402,22 @@ class RigidObject(BatchEntity):
         return verts
 
     def get_triangles(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:
-        """
-        Retrieve the triangle indices of the rigid objects.
+        """Retrieve triangle indices for the combined visual meshes.
+
+        Face indices from each render mesh are offset to reference the
+        concatenated vertex array returned by :meth:`get_vertices`.
 
         Args:
-            env_ids (Sequence[int] | None): A sequence of environment IDs for which to retrieve triangle indices.
-                                                If None, retrieves triangle indices for all instances.
+            env_ids: Environment IDs for which to retrieve triangle indices. If
+                ``None``, retrieves triangle indices for all instances.
 
         Returns:
-            torch.Tensor: A tensor containing the triangle indices of the specified rigid objects with shape (N, num_tris, 3).
+            Triangle indices with shape ``(N, num_triangles, 3)``.
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
             np.array(
-                [self._entities[id].get_triangles() for id in ids],
+                [get_combined_triangles(self._entities[id]) for id in ids],
             ),
             dtype=torch.int32,
             device=self.device,
@@ -1435,6 +1578,8 @@ class RigidObject(BatchEntity):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        self.restore_visual_material(env_ids=local_env_ids)
 
         # TODO: support attributes setter for newton.
         if not is_newton_scene(self._ps):

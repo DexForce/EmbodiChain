@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import argparse
 import os
 import time
 import numpy as np
@@ -24,16 +28,25 @@ from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import MarkerCfg
+from embodichain.lab.visualization import (
+    VisualizationCfg,
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 
 
-def main():
+def main(visualization: VisualizationCfg | None = None) -> None:
     # Set print options for better readability
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Initialize simulation
     device = "cpu"
-    config = SimulationManagerCfg(headless=False, device=device)
+    config = SimulationManagerCfg(
+        headless=False,
+        device=device,
+        visualization=visualization or VisualizationCfg(),
+    )
     sim = SimulationManager(config)
     sim.set_manual_update(False)
 
@@ -119,8 +132,11 @@ def main():
     else:
         robot.set_qpos(qpos=ik_qpos, joint_ids=robot.get_joint_ids(arm_name))
 
+    sim.capture_visualization(force=True)
     embed(header="Test PinocchioSolver example. Press Ctrl+D to exit.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
+    main(visualization=visualization_cfg_from_args(parser.parse_args()))

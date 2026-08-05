@@ -19,7 +19,7 @@ from __future__ import annotations
 import torch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Literal, TYPE_CHECKING
+from typing import Any, ClassVar, Generic, Mapping, TYPE_CHECKING, TypeVar
 
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import configclass
@@ -62,143 +62,47 @@ class ObjectSemantics:
 
 
 # =============================================================================
-# Typed targets
+# Target foundation
 # =============================================================================
 
 
-@dataclass(frozen=True)
-class EndEffectorPoseTarget:
-    """End-effector pose target. Used by MoveEndEffector, Place, and Press."""
+class ActionTarget:
+    """Open marker base for atomic-action target value objects.
 
-    xpos: torch.Tensor
-    """Target end-effector homogeneous transform.
-
-    Accepts:
-
-    - ``(4, 4)`` or ``(n_envs, 4, 4)`` — a single waypoint.
-    - ``(n_envs, n_waypoint, 4, 4)`` — a multi-waypoint trajectory; waypoints
-      are visited in order. (Consumed as multi-waypoint by MoveEndEffector and
-      Place.)
+    Third-party actions should define a target dataclass that inherits from this
+    class. The engine performs the action-specific runtime check using
+    :attr:`AtomicAction.TargetType`; the marker keeps the public engine contract
+    open to targets outside the built-in set.
     """
 
-    tcp_symmetry: Literal["none", "z_roll_180"] = "none"
-    """Optional TCP-frame symmetry allowed by the target semantics.
-
-    ``"none"`` preserves the pose exactly. ``"z_roll_180"`` lets supporting
-    actions choose between the pose and its TCP z-roll 180 equivalent, which
-    flips TCP x/y while preserving TCP z and translation.
-    """
-
-    def __post_init__(self) -> None:
-        if self.tcp_symmetry not in ("none", "z_roll_180"):
-            raise ValueError(
-                "tcp_symmetry must be one of 'none' or 'z_roll_180', "
-                f"but got {self.tcp_symmetry!r}"
-            )
+    __slots__ = ()
 
 
-@dataclass(frozen=True)
-class JointPositionTarget:
-    """Joint-space target for a configured robot control part."""
-
-    qpos: torch.Tensor
-    """Target joint positions.
-
-    Accepts:
-
-    - ``(control_dof,)`` or ``(n_envs, control_dof)`` — a single waypoint.
-    - ``(n_envs, n_waypoint, control_dof)`` — a multi-waypoint trajectory;
-      waypoints are visited in order.
-    """
+TargetT = TypeVar("TargetT", bound=ActionTarget)
 
 
-@dataclass(frozen=True)
-class NamedJointPositionTarget:
-    """Named joint-space target resolved from ``MoveJointsCfg``."""
-
-    name: str
-    """Name of a joint-position target in ``MoveJointsCfg.named_joint_positions``."""
-
-
-@dataclass(frozen=True)
-class GraspTarget:
-    """Pickup target with an affordance-selected or explicitly supplied grasp pose."""
-
-    semantics: ObjectSemantics
-
-    grasp_xpos: torch.Tensor | None = None
-    """Optional end-effector grasp pose.
-
-    When omitted, :class:`PickUp` selects a grasp from the target affordance.
-    Supplying a pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)`` skips grasp
-    sampling, which is useful when perception or task geometry has already
-    selected a grasp.
-    """
+def _validate_pose_tensor(
+    value: torch.Tensor,
+    name: str,
+    *,
+    allow_waypoints: bool,
+) -> None:
+    """Validate the environment-independent part of a pose tensor contract."""
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{name} must be a torch.Tensor, got {type(value).__name__}.")
+    valid_dims = {2, 3, 4} if allow_waypoints else {2, 3}
+    if value.dim() not in valid_dims or value.shape[-2:] != (4, 4):
+        supported = "(4, 4), (n_envs, 4, 4)"
+        if allow_waypoints:
+            supported += ", or (n_envs, n_waypoint, 4, 4)"
+        raise ValueError(
+            f"{name} must have shape {supported}, got {tuple(value.shape)}."
+        )
 
 
-@dataclass(frozen=True)
-class HeldObjectPoseTarget:
-    """Move the currently-held object to a desired object pose."""
-
-    object_target_pose: torch.Tensor
-    """(4, 4) or (n_envs, 4, 4) target pose for the held object."""
-
-
-@dataclass(frozen=True)
-class CoordinatedPickmentTarget:
-    """Object-centric target for picking and moving one object with two hands."""
-
-    object_target_pose: torch.Tensor
-    """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
-
-    object_semantics: ObjectSemantics
-    """Semantic description of the shared object."""
-
-    left_object_to_eef: torch.Tensor
-    """Transform from object frame to left end-effector frame."""
-
-    right_object_to_eef: torch.Tensor
-    """Transform from object frame to right end-effector frame."""
-
-    object_initial_pose: torch.Tensor | None = None
-    """Optional initial object pose. Defaults to ``object_semantics.entity`` pose."""
-
-
-@dataclass(frozen=True)
-class CoordinatedPlacementTarget:
-    """Object-centric target for dual-arm coordinated placement."""
-
-    placing_object_target_pose: torch.Tensor
-    """Target pose for the object released by the placing arm."""
-
-    support_object_target_pose: torch.Tensor
-    """Target pose for the object held by the support arm."""
-
-    placing_held_object: HeldObjectState
-    """Held-object state for the placing arm."""
-
-    support_held_object: HeldObjectState
-    """Held-object state for the support arm."""
-
-    placing_height_offset: float | None = None
-    """World-Z offset above the placing object target pose."""
-
-    support_height_offset: float | None = None
-    """World-Z offset above the support object target pose."""
-
-    release: bool | None = None
-    """Whether the placing hand releases. ``None`` uses the action config."""
-
-
-Target = (
-    EndEffectorPoseTarget
-    | JointPositionTarget
-    | NamedJointPositionTarget
-    | GraspTarget
-    | HeldObjectPoseTarget
-    | CoordinatedPickmentTarget
-    | CoordinatedPlacementTarget
-)
+# ``Target`` used to be a closed union of built-in target classes. Keep the
+# public name as an open compatibility alias so extension targets are accepted.
+Target = ActionTarget
 
 
 # =============================================================================
@@ -206,7 +110,7 @@ Target = (
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True, eq=False)
 class HeldObjectState:
     """State of an object currently held by the robot."""
 
@@ -220,7 +124,7 @@ class HeldObjectState:
     """Batched end-effector pose used to grasp the object, shape [n_envs, 4, 4]."""
 
 
-@dataclass
+@dataclass(slots=True, eq=False)
 class CoordinatedHeldObjectState:
     """State of a single object jointly held by two robot hands."""
 
@@ -240,21 +144,59 @@ class CoordinatedHeldObjectState:
     """Right end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
 
 
-@dataclass
+@dataclass(slots=True, eq=False)
 class WorldState:
     """State the engine threads through a sequence of actions."""
 
     last_qpos: torch.Tensor
     """Robot joint positions at the start of the next action, shape [n_envs, robot.dof]."""
 
-    held_object: HeldObjectState | None = None
-    """Object currently held by the gripper, or None."""
+    held_objects: dict[str, HeldObjectState] = field(default_factory=dict)
+    """Objects held by individual control parts, keyed by control-part name."""
 
-    coordinated_held_object: CoordinatedHeldObjectState | None = None
-    """Object currently held by two grippers, or None."""
+    coordinated_held_objects: dict[tuple[str, str], CoordinatedHeldObjectState] = field(
+        default_factory=dict
+    )
+    """Objects jointly held by two control parts, keyed by their ordered pair."""
+
+    def get_held_object(self, control_part: str) -> HeldObjectState | None:
+        """Return the object held by ``control_part``, if any."""
+        return self.held_objects.get(control_part)
+
+    def get_coordinated_held_object(
+        self,
+        first_control_part: str,
+        second_control_part: str,
+    ) -> CoordinatedHeldObjectState | None:
+        """Return the object jointly held by an ordered control-part pair."""
+        return self.coordinated_held_objects.get(
+            (first_control_part, second_control_part)
+        )
+
+    def with_updates(
+        self,
+        *,
+        last_qpos: torch.Tensor | None = None,
+        held_objects: Mapping[str, HeldObjectState] | None = None,
+        coordinated_held_objects: (
+            Mapping[tuple[str, str], CoordinatedHeldObjectState] | None
+        ) = None,
+    ) -> WorldState:
+        """Return a successor state without aliasing held-state dictionaries."""
+        return WorldState(
+            last_qpos=self.last_qpos if last_qpos is None else last_qpos,
+            held_objects=dict(
+                self.held_objects if held_objects is None else held_objects
+            ),
+            coordinated_held_objects=dict(
+                self.coordinated_held_objects
+                if coordinated_held_objects is None
+                else coordinated_held_objects
+            ),
+        )
 
 
-@dataclass
+@dataclass(slots=True, eq=False)
 class ActionResult:
     """Return value of every AtomicAction.execute call."""
 
@@ -303,9 +245,14 @@ class ActionCfg:
     motion_source: str = "ik_interp"
     """Trajectory source: 'ik_interp' (default, batched IK + linear interp)
     or 'motion_gen' (batched MotionGenerator)."""
-    planner_type: str | None = None
-    """Planner type for motion_source='motion_gen': 'toppra' | 'neural'.
-    Required when motion_source='motion_gen'."""
+
+    def __post_init__(self) -> None:
+        valid_sources = {"ik_interp", "motion_gen"}
+        if self.motion_source not in valid_sources:
+            raise ValueError(
+                f"motion_source must be one of {sorted(valid_sources)}, "
+                f"but got {self.motion_source!r}."
+            )
 
 
 # =============================================================================
@@ -313,7 +260,7 @@ class ActionCfg:
 # =============================================================================
 
 
-class AtomicAction(ABC):
+class AtomicAction(Generic[TargetT], ABC):
     """Abstract base for atomic actions.
 
     Subclasses declare ``TargetType`` to advertise the concrete target dataclass
@@ -321,7 +268,7 @@ class AtomicAction(ABC):
     dropped from the contract in this redesign.
     """
 
-    TargetType: ClassVar[type | tuple[type, ...]]
+    TargetType: ClassVar[type[ActionTarget] | tuple[type[ActionTarget], ...]]
     """Concrete target dataclass or dataclasses accepted by ``execute``."""
 
     def __init__(
@@ -336,7 +283,7 @@ class AtomicAction(ABC):
         self.control_part = self.cfg.control_part
 
     @abstractmethod
-    def execute(self, target: Target, state: WorldState) -> ActionResult:
+    def execute(self, target: TargetT, state: WorldState) -> ActionResult:
         """Plan and return a full-DoF trajectory for this action.
 
         Args:
@@ -349,19 +296,14 @@ class AtomicAction(ABC):
 
 
 __all__ = [
+    "ActionTarget",
     "ActionCfg",
     "ActionResult",
     "AtomicAction",
     "CoordinatedHeldObjectState",
-    "CoordinatedPickmentTarget",
-    "CoordinatedPlacementTarget",
-    "GraspTarget",
     "HeldObjectState",
-    "HeldObjectPoseTarget",
-    "JointPositionTarget",
-    "NamedJointPositionTarget",
     "ObjectSemantics",
-    "EndEffectorPoseTarget",
     "Target",
+    "TargetT",
     "WorldState",
 ]

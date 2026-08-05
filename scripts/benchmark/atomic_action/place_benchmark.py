@@ -18,7 +18,7 @@
 
 Measures Place-only planning latency and memory usage once a held-object state
 has been produced by the PickUp action.
-Run: python -m scripts.benchmark.atomic_action.place_benchmark
+Run: embodichain benchmark atomic-action --action place
 """
 
 from __future__ import annotations
@@ -217,7 +217,7 @@ def _prepare_held_state(
     is_success, traj, state = atomic_engine.run(
         steps=[("pick_up", GraspTarget(semantics=semantics))]
     )
-    if not is_success or state.held_object is None:
+    if not is_success or state.get_held_object("arm") is None:
         raise RuntimeError("Failed to prepare held-object state for Place benchmark.")
     robot.set_qpos(state.last_qpos)
     return state, hand_open, hand_close, traj
@@ -242,9 +242,9 @@ def _run_case(
     """Run one Place benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
-        EndEffectorPoseTarget,
         Place,
         PlaceCfg,
+        PlaceTarget,
     )
     from scripts.tutorials.atomic_action.place import (
         compute_pick_close_end_step,
@@ -299,7 +299,7 @@ def _run_case(
         place_pose = _make_place_pose(sim.device, case.xyz)
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.run(
-                steps=[("place", EndEffectorPoseTarget(xpos=place_pose))],
+                steps=[("place", PlaceTarget(xpos=place_pose))],
                 state=state,
             )
         )
@@ -357,7 +357,7 @@ def _run_case(
             reset_robot(robot, initial_qpos)
             reset_rigid_object(obj, initial_obj_pose)
 
-        released = bool(is_success and final_state.held_object is None)
+        released = bool(is_success and final_state.get_held_object("arm") is None)
         physical_pick_success = bool(
             object_lift_delta_m is not None
             and object_lift_delta_m >= PHYSICAL_PICK_MIN_LIFT_M

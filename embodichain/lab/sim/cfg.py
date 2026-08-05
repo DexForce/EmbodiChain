@@ -15,10 +15,13 @@
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations
+
 from collections.abc import Mapping
 import enum
 import json
 import os
+
+import dexsim
 import numpy as np
 import torch
 
@@ -26,7 +29,9 @@ from typing import Sequence, Dict, Literal, List, Any, Optional, TYPE_CHECKING
 from dataclasses import field, MISSING
 
 from dexsim.types import (
+    DenoiserType,
     Renderer,
+    ToneMappingType,
     PhysicalAttr,
     ActorType,
     AxisArrowType,
@@ -43,6 +48,7 @@ from embodichain.utils import logger
 from embodichain.utils.utility import key_in_nested_dict
 
 from .shapes import ShapeCfg, MeshCfg
+from .workspace.cfg import RobotWorkspaceCfg
 
 if TYPE_CHECKING:
     from dexsim.engine.newton_physics.solvers_cfg import NewtonSolverCfg
@@ -78,7 +84,23 @@ class RenderCfg:
     spp: int = 64
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
 
-    def to_dexsim_flags(self):
+    tone_mapping_enabled: bool = False
+    """Whether to map HDR RGB output with the modified Reinhard curve."""
+
+    tone_mapping_exposure: float = 1.0
+    """Fixed linear exposure multiplier applied before tone mapping."""
+
+    def __post_init__(self) -> None:
+        """Validate rendering parameters."""
+        if self.spp < 1:
+            logger.log_error("RenderCfg.spp must be at least 1.", ValueError)
+        if self.tone_mapping_exposure < 0.0:
+            logger.log_error(
+                "RenderCfg.tone_mapping_exposure must be non-negative.", ValueError
+            )
+
+    def to_dexsim_flags(self) -> Renderer:
+        """Convert the renderer name to DexSim's renderer enum."""
         if self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
@@ -97,6 +119,25 @@ class RenderCfg:
             logger.log_error(
                 f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
             )
+
+    def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
+        """Apply rendering settings to a DexSim world configuration.
+
+        Args:
+            world_config: DexSim world configuration to update in place.
+        """
+        world_config.renderer = self.to_dexsim_flags()
+        world_config.raytrace_config.render_iterations_per_frame = self.spp
+        world_config.raytrace_config.open_denoise = self.enable_denoiser
+        if self.enable_denoiser:
+            world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
+        world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
+        world_config.postprocess_config.tone_mapping_type = (
+            ToneMappingType.MODIFIED_REINHARD
+        )
+        world_config.postprocess_config.tone_mapping_exposure = (
+            self.tone_mapping_exposure
+        )
 
 
 @configclass
@@ -125,7 +166,12 @@ class GPUMemoryCfg:
 
 @configclass
 class PhysicsCfg:
-    """Base configuration for DexSim physics backends."""
+    """Configuration for the DexSim default (PhysX) physics backend.
+
+    ``DefaultPhysicsCfg`` is the explicit backend-selecting subclass used by
+    new code. This base name remains concrete for compatibility with existing
+    configurations that instantiate ``PhysicsCfg`` directly.
+    """
 
     physics_dt: float = 1.0 / 100.0
     """The time step for the physics simulation."""
@@ -133,31 +179,14 @@ class PhysicsCfg:
     device: str | torch.device = "cpu"
     """The device for the physics simulation. Can be 'cpu', 'cuda', or a torch.device object."""
 
-
-@configclass
-class DefaultPhysicsCfg(PhysicsCfg):
-    """Configuration for the DexSim default (PhysX) physics backend."""
-
     gravity: np.ndarray = field(default_factory=lambda: np.array([0, 0, -9.81]))
     """Gravity vector for the simulation environment."""
 
     bounce_threshold: float = 2.0
     """The speed threshold below which collisions will not produce bounce effects."""
 
-    enable_pcm: bool = True
-    """Enable persistent contact manifold (PCM) for improved collision handling."""
-
-    enable_tgs: bool = True
-    """Enable temporal gauss-seidel (TGS) solver for better stability."""
-
     enable_ccd: bool = False
     """Enable continuous collision detection (CCD) for fast-moving objects."""
-
-    enable_enhanced_determinism: bool = False
-    """Enable enhanced determinism for consistent simulation results."""
-
-    enable_friction_every_iteration: bool = True
-    """Enable friction calculations at every solver iteration."""
 
     length_tolerance: float = 0.05
     """The length tolerance for the simulation.
@@ -174,22 +203,32 @@ class DefaultPhysicsCfg(PhysicsCfg):
     """GPU memory configuration for GPU physics simulation."""
 
     def to_dexsim_args(self) -> Dict[str, Any]:
-        """Convert to dexsim physics args dictionary."""
+        """Convert to DexSim physics arguments.
+
+        Solver implementation details that are not exposed by :class:`PhysicsCfg`
+        retain their established defaults here.
+        """
         args = {
             "gravity": self.gravity.tolist(),
             "bounce_threshold": self.bounce_threshold,
-            "enable_pcm": self.enable_pcm,
-            "enable_tgs": self.enable_tgs,
             "enable_ccd": self.enable_ccd,
-            "enable_enhanced_determinism": self.enable_enhanced_determinism,
-            "enable_friction_every_iteration": self.enable_friction_every_iteration,
+            "enable_enhanced_determinism": False,
+            "enable_friction_every_iteration": True,
         }
         return args
 
 
 @configclass
-class NewtonPhysicsCfg(PhysicsCfg):
+class DefaultPhysicsCfg(PhysicsCfg):
+    """Explicit configuration selector for the default physics backend."""
+
+
+@configclass
+class NewtonPhysicsCfg:
     """Configuration for DexSim Newton physics backend."""
+
+    physics_dt: float = 1.0 / 100.0
+    """The time step for the physics simulation."""
 
     device: str | torch.device = "cuda:0"
     """The device for Newton physics simulation (e.g. ``cuda:0``)."""
@@ -401,7 +440,7 @@ class WindowRecordCfg:
 
 def physics_cfg_for_backend(
     backend: Literal["default", "newton"],
-) -> DefaultPhysicsCfg | NewtonPhysicsCfg:
+) -> PhysicsCfg | NewtonPhysicsCfg:
     """Return a default physics configuration instance for the given backend."""
     if backend == "newton":
         return NewtonPhysicsCfg()
@@ -409,20 +448,20 @@ def physics_cfg_for_backend(
 
 
 def physics_backend_from_cfg(
-    physics_cfg: PhysicsCfg,
+    physics_cfg: PhysicsCfg | NewtonPhysicsCfg,
 ) -> Literal["default", "newton"]:
     """Infer the physics backend name from a physics configuration instance."""
     if isinstance(physics_cfg, NewtonPhysicsCfg):
         return "newton"
-    if isinstance(physics_cfg, DefaultPhysicsCfg):
+    if isinstance(physics_cfg, PhysicsCfg):
         return "default"
     logger.log_error(
         f"Unsupported physics_cfg type '{type(physics_cfg).__name__}'. "
-        "Expected DefaultPhysicsCfg or NewtonPhysicsCfg."
+        "Expected PhysicsCfg, DefaultPhysicsCfg, or NewtonPhysicsCfg."
     )
 
 
-def validate_physics_cfg(physics_cfg: PhysicsCfg) -> None:
+def validate_physics_cfg(physics_cfg: PhysicsCfg | NewtonPhysicsCfg) -> None:
     """Validate that ``physics_cfg`` is a supported backend configuration."""
     physics_backend_from_cfg(physics_cfg)
 
@@ -1610,8 +1649,7 @@ class URDFCfg:
     """Case normalization policy applied to joint/link names during URDF assembly.
 
     Supported values per key are ``"upper"``, ``"lower"`` or ``"original"``
-    (legacy alias ``"none"``). The default upper-cases joints and lower-cases
-    links. Set ``{"joint": "original"}`` to preserve the source URDF casing.
+    (legacy alias ``"none"``). The default preserves source URDF casing.
     """
 
     def __init__(
@@ -2093,6 +2131,9 @@ class RobotCfg(ArticulationCfg):
     """Solver is used to compute forward and inverse kinematics for the robot.
     """
 
+    workspace_cfg: Dict[str, RobotWorkspaceCfg] | None = None
+    """Runtime workspace cache configuration keyed by control-part name."""
+
     @classmethod
     def from_dict(cls, init_dict: Dict[str, str | float | tuple]) -> RobotCfg:
         """Initialize the configuration from a dictionary."""
@@ -2113,6 +2154,19 @@ class RobotCfg(ArticulationCfg):
                     from embodichain.lab.sim.cfg import URDFCfg
 
                     setattr(cfg, key, URDFCfg.from_dict(value))
+                elif key == "workspace_cfg" and isinstance(value, dict):
+                    setattr(
+                        cfg,
+                        key,
+                        {
+                            part: (
+                                part_cfg
+                                if isinstance(part_cfg, RobotWorkspaceCfg)
+                                else RobotWorkspaceCfg(**part_cfg)
+                            )
+                            for part, part_cfg in value.items()
+                        },
+                    )
                 elif key == "fpath":
                     setattr(cfg, key, get_data_path(value))
                 elif is_configclass(attr):
@@ -2174,6 +2228,8 @@ class RobotCfg(ArticulationCfg):
         def serialize(obj, _visited=None):
             if _visited is None:
                 _visited = set()
+            if isinstance(obj, enum.Enum):
+                return obj.value
             if isinstance(obj, (dict, object)) and not isinstance(
                 obj, (str, int, float, bool, type(None))
             ):
@@ -2182,12 +2238,15 @@ class RobotCfg(ArticulationCfg):
                     return None
                 _visited.add(obj_id)
 
-            if isinstance(obj, enum.Enum):
-                return obj.value
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
             if isinstance(obj, dict):
-                return {str(k): serialize(v, _visited) for k, v in obj.items()}
+                return {
+                    (k.value if isinstance(k, enum.Enum) else str(k)): serialize(
+                        v, _visited
+                    )
+                    for k, v in obj.items()
+                }
             if isinstance(obj, (list, tuple)):
                 return [serialize(v, _visited) for v in obj]
             if hasattr(obj, "to_dict") and obj is not self:

@@ -14,6 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
 
 import cv2
 import pickle
@@ -374,13 +375,30 @@ def _config_format_from_path(path: str | Path) -> str:
     )
 
 
+def _resolve_config_path(path: str | Path) -> Path:
+    """Resolve repository-style official-task paths from an installed wheel."""
+    resolved_path = Path(path).expanduser()
+    if resolved_path.exists() or resolved_path.is_absolute():
+        return resolved_path
+
+    task_prefix = ("embodichain_tasks", "configs")
+    if resolved_path.parts[: len(task_prefix)] != task_prefix:
+        return resolved_path
+
+    from embodichain_tasks.configs import get_config_path
+
+    relative_path = Path(*resolved_path.parts[len(task_prefix) :])
+    return get_config_path(relative_path)
+
+
 def load_config(path: str | Path) -> Dict[str, Any]:
     """Load a gym or agent config file into a dictionary.
 
     Supports JSON (``.json``) and YAML (``.yaml`` / ``.yml``) formats.
 
     Args:
-        path: Path to the config file.
+        path: Path to the config file. Repository-style paths beginning with
+            ``embodichain_tasks/configs`` also resolve from an installed wheel.
 
     Returns:
         The parsed config dictionary.
@@ -389,7 +407,7 @@ def load_config(path: str | Path) -> Dict[str, Any]:
         ValueError: If the file extension is not supported.
         TypeError: If the parsed YAML root is not a mapping.
     """
-    path = Path(path)
+    path = _resolve_config_path(path)
     config_format = _config_format_from_path(path)
 
     if config_format == "json":

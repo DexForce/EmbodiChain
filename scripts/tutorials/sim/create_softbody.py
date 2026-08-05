@@ -19,11 +19,14 @@ This script demonstrates how to create a simulation scene using SimulationManage
 It shows the basic setup of simulation context, adding objects, lighting, and sensors.
 """
 
+from __future__ import annotations
+
 import argparse
 import time
 from dexsim.utility.path import get_resources_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     physics_cfg_for_backend,
@@ -59,6 +62,7 @@ def main():
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
         physics_cfg=physics_cfg_for_backend(args.physics),
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create the simulation instance

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -25,6 +27,7 @@ from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
     LightCfg,
 )
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.objects import RigidObject, Light
 from embodichain.lab.sim.sensors import (
@@ -45,6 +48,7 @@ def main(args):
         arena_space=2,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
+        visualization=visualization_cfg_from_args(args),
     )
     sim = SimulationManager(config)
 
@@ -59,7 +63,7 @@ def main(args):
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
 
-    if args.headless is False:
+    if not args.headless:
         sim.open_window()
 
     import torch

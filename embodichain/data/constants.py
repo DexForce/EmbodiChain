@@ -13,13 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
+from __future__ import annotations
 
 
 import os
 from pathlib import Path
 
+__all__ = [
+    "EMBODICHAIN_DOWNLOAD_PREFIX",
+    "EMBODICHAIN_DEFAULT_DATA_ROOT",
+    "EMBODICHAIN_DEFAULT_DATASET_ROOT",
+    "EMBODICHAIN_DEFAULT_DATABASE_ROOT",
+]
+
 EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://hf-mirror.com/datasets/dexforce/embodichain_data/resolve/main/"
+    "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/"
 )
 EMBODICHAIN_DEFAULT_DATA_ROOT = os.environ.get(
     "EMBODICHAIN_DATA_ROOT", str(Path.home() / ".cache" / "embodichain_data")

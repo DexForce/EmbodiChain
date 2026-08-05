@@ -14,21 +14,25 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import glob
+from __future__ import annotations
+
 import logging
 import os
 import shutil
 import sys
-import argparse
-from os import path as osp
 from pathlib import Path
 
-from setuptools import Command, find_packages, setup
+from setuptools import Command, find_namespace_packages, setup
+
+__all__ = ["get_package_dir", "get_packages", "get_version"]
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 logger = logging.getLogger()
 
 THIS_DIR = Path(__file__).resolve().parent
+CORE_PACKAGE_PATTERNS = ["embodichain", "embodichain.*"]
+TASKS_PROJECT_DIR = THIS_DIR / "embodichain_tasks"
+TASKS_PACKAGE_PATTERNS = ["embodichain_tasks", "embodichain_tasks.*"]
 
 # Defer importing torch until it's actually needed (when building extensions).
 # This prevents `setup.py` from failing at import time in environments where
@@ -49,7 +53,12 @@ class CleanCommand(Command):
         pass
 
     def run(self):
-        for d in ["build", "dist", "embodichain.egg-info"]:
+        for d in [
+            "build",
+            "dist",
+            "embodichain.egg-info",
+            "embodichain_tasks/embodichain_tasks.egg-info",
+        ]:
             rm_path = THIS_DIR / d
             if not rm_path.exists():
                 continue
@@ -72,30 +81,27 @@ class CleanCommand(Command):
                     logger.info(f"removed '{rm_path}'")
 
 
-def get_data_files_of_a_directory(source_dir, target_dir=None, ignore_py=False):
-    if target_dir is None:
-        target_dir = source_dir
-
-    base_dir = os.sep + "embodichain" + os.sep
-
-    filelist = []
-    for parent_dir, dirnames, filenames in os.walk(source_dir):
-        for filename in filenames:
-            if ignore_py and filename.endswith(".py"):
-                continue
-            filelist.append(
-                (
-                    os.path.join(
-                        base_dir, parent_dir.replace(source_dir, target_dir, 1)
-                    ),
-                    [os.path.join(parent_dir, filename)],
-                )
-            )
-
-    return filelist
+def get_packages() -> list[str]:
+    """Return the core and official-task packages shipped in the main wheel."""
+    core_packages = find_namespace_packages(
+        where=str(THIS_DIR), include=CORE_PACKAGE_PATTERNS
+    )
+    task_packages = find_namespace_packages(
+        where=str(TASKS_PROJECT_DIR), include=TASKS_PACKAGE_PATTERNS
+    )
+    return sorted(set([*core_packages, *task_packages, "embodichain_tasks.configs"]))
 
 
-def get_version():
+def get_package_dir() -> dict[str, str]:
+    """Map the task package and configs without moving their source paths."""
+    return {
+        "embodichain_tasks": "embodichain_tasks/embodichain_tasks",
+        "embodichain_tasks.configs": "embodichain_tasks/configs",
+    }
+
+
+def get_version() -> str:
+    """Read the normalized package version from the repository version file."""
     with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
         full_version = f.read().strip()
         version = ".".join(full_version.split(".")[:3])
@@ -106,9 +112,12 @@ def main():
     # Extract version
     version = get_version()
 
-    data_files = []
-    data_files += get_data_files_of_a_directory("embodichain", ignore_py=False)
-    data_files += get_data_files_of_a_directory("configs", target_dir="configs")
+    # Make the version available as an explicit runtime package resource.
+    src_version = THIS_DIR / "VERSION"
+    dst_version = THIS_DIR / "embodichain" / "VERSION"
+    if src_version.exists():
+        shutil.copyfile(src_version, dst_version)
+        logger.info(f"Copied VERSION to {dst_version}")
 
     cmdclass = {"clean": CleanCommand}
     if BuildExtension is not None:
@@ -120,19 +129,16 @@ def main():
         url="https://github.com/DexForce/EmbodiChain",
         author="EmbodiChain Developers",
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
-        packages=find_packages(exclude=["docs"]),
-        data_files=data_files,
-        entry_points={},
+        packages=get_packages(),
+        package_dir=get_package_dir(),
+        package_data={
+            "embodichain": ["VERSION"],
+            "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain_tasks.configs": ["**/*.json", "**/*.yaml", "**/*.yml"],
+        },
         cmdclass=cmdclass,
-        include_package_data=True,
+        include_package_data=False,
     )
-
-    # Copy VERSION file into the package directory for wheel/sdist
-    src_version = os.path.join(THIS_DIR, "VERSION")
-    dst_version = os.path.join(THIS_DIR, "embodichain", "VERSION")
-    if os.path.exists(src_version):
-        shutil.copyfile(src_version, dst_version)
-        logger.info(f"Copied VERSION to {dst_version}")
 
 
 if __name__ == "__main__":

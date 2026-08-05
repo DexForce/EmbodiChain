@@ -18,6 +18,8 @@ This script demonstrates how to use the Gizmo class for interactive camera contr
 It shows how to create a gizmo attached to a camera for real-time pose manipulation.
 """
 
+from __future__ import annotations
+
 import argparse
 import cv2
 import numpy as np
@@ -27,6 +29,7 @@ import torch
 torch.set_printoptions(precision=4, sci_mode=False)
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
 from embodichain.lab.sim.cfg import (
     RigidObjectCfg,
@@ -53,10 +56,12 @@ def main():
     sim_cfg = SimulationManagerCfg(
         width=1920,
         height=1080,
+        headless=True,
         physics_dt=1.0 / 100.0,
         device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
         physics_cfg=physics_cfg_for_backend(args.physics),
+        visualization=visualization_cfg_from_args(args),
     )
 
     # Create simulation context
@@ -102,44 +107,61 @@ def main():
     # Wait for initialization
     time.sleep(0.2)
 
-    # Enable gizmo for interactive camera control using the new unified API
-    sim.enable_gizmo(uid="gizmo_camera")
-    if not sim.has_gizmo("gizmo_camera"):
-        logger.log_error("Failed to enable gizmo for camera!")
-        return
-
-    # Open simulation window (if not headless)
+    native_window_opened = False
     if not args.headless:
-        sim.open_window()
+        native_window_opened = sim.open_window()
+
+    # Enable gizmo for interactive camera control using the new unified API
+    if native_window_opened or args.viser:
+        sim.enable_gizmo(
+            uid="gizmo_camera",
+            enable_native=native_window_opened,
+        )
+        if not sim.has_gizmo("gizmo_camera"):
+            logger.log_error("Failed to enable gizmo for camera!")
+            return
+    else:
+        logger.log_warning(
+            "Gizmo interaction is disabled in headless mode without Viser."
+        )
 
     logger.log_info("Gizmo-Camera tutorial started!")
-    logger.log_info(
-        "Use the gizmo to interactively control the camera position and orientation"
-    )
-    logger.log_info(
-        "The camera will follow the gizmo pose for dynamic viewpoint control"
-    )
+    if native_window_opened or args.viser:
+        logger.log_info(
+            "Use the gizmo to interactively control the camera position and orientation"
+        )
+        logger.log_info(
+            "The camera will follow the gizmo pose for dynamic viewpoint control"
+        )
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     # Run simulation loop
-    run_simulation(sim, camera)
+    run_simulation(sim, camera, show_camera_window=native_window_opened)
 
 
-def run_simulation(sim, camera):
+def run_simulation(
+    sim: SimulationManager,
+    camera: Camera,
+    *,
+    show_camera_window: bool,
+) -> None:
     """Run the simulation loop with gizmo updates."""
     step_count = 0
     last_time = time.time()
     last_step = 0
 
-    logger.log_info("Camera view window will open. Press Ctrl+C or 'q' to exit")
-    logger.log_info(
-        "Use the gizmo in the 3D view to control camera position and orientation"
-    )
+    if show_camera_window:
+        logger.log_info("Camera view window will open. Press Ctrl+C or 'q' to exit")
+    if sim.has_gizmo("gizmo_camera"):
+        logger.log_info(
+            "Use the gizmo in the 3D view to control camera position and orientation"
+        )
 
     try:
         while True:
             # Update all gizmos managed by sim (including camera gizmo)
             sim.update_gizmos()
+            sim.capture_visualization_safely()
 
             # Update camera to get latest sensor data
             camera.update()
@@ -151,7 +173,9 @@ def run_simulation(sim, camera):
             step_count += 1
 
             # Display camera view in separate window
-            if step_count % 5 == 0:  # Update display every 5 steps for performance
+            if (
+                show_camera_window and step_count % 5 == 0
+            ):  # Update display every 5 steps for performance
                 data = camera.get_data()
                 if "color" in data:
                     # Get RGB image and convert for OpenCV display
@@ -211,7 +235,8 @@ def run_simulation(sim, camera):
         logger.log_info("\nStopping simulation...")
     finally:
         # Clean up resources
-        cv2.destroyAllWindows()
+        if show_camera_window:
+            cv2.destroyAllWindows()
         # Disable gizmo if it exists
         if sim.has_gizmo("gizmo_camera"):
             sim.disable_gizmo("gizmo_camera")

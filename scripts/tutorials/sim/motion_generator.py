@@ -26,6 +26,7 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
+from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.planners import (
     MotionGenCfg,
@@ -230,6 +231,7 @@ def main() -> None:
             render_cfg=RenderCfg(renderer=args.renderer),
             num_envs=args.num_envs,
             arena_space=args.arena_space,
+            visualization=visualization_cfg_from_args(args),
         )
     )
 

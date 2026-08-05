@@ -14,6 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Managers that orchestrate collections of functors (observation, reward, event, action, dataset) running at specific points in the environment step loop.
+
+Each manager owns a typed ``@configclass`` config whose attributes are ``FunctorCfg`` instances; the config attribute name becomes the functor's unique identifier.
+"""
+
 from .cfg import (
     FunctorCfg,
     SceneEntityCfg,
@@ -30,3 +35,23 @@ from .reward_manager import RewardManager
 from .action_manager import *
 from .actions import *
 from .dataset_manager import DatasetManager
+from .datasets import LeRobotRecorder
+from .async_datasets import AsyncLeRobotRecorder
+
+__all__ = [
+    "FunctorCfg",
+    "SceneEntityCfg",
+    "EventCfg",
+    "ObservationCfg",
+    "RewardCfg",
+    "ActionTermCfg",
+    "DatasetFunctorCfg",
+    "Functor",
+    "ManagerBase",
+    "EventManager",
+    "ObservationManager",
+    "RewardManager",
+    "DatasetManager",
+    "LeRobotRecorder",
+    "AsyncLeRobotRecorder",
+]

@@ -64,7 +64,6 @@ class BaseRobotTest:
             {
                 "uid": "dexforce_w1",
                 "version": "v021",
-                "arm_kind": "anthropomorphic",
             }
         )
 
@@ -410,7 +409,6 @@ class BaseRobotTest:
             {
                 "uid": "dexforce_w1_solver_limit_sync",
                 "version": "v021",
-                "arm_kind": "anthropomorphic",
                 "qpos_limits": {"LEFT_J[1-7]": configured_limits},
             }
         )

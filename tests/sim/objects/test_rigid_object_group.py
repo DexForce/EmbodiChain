@@ -101,6 +101,19 @@ class BaseRigidObjectGroupTest:
             f"expected ({NUM_ARENAS}, {self.obj_group.num_objects})"
         )
 
+    def test_get_object_mesh_geometry(self):
+        """Test constituent render geometry used by external visualizers."""
+        vertices = self.obj_group.get_object_vertices(
+            0,
+            env_ids=[0],
+            scale=True,
+        )
+        triangles = self.obj_group.get_object_triangles(0, env_ids=[0])
+
+        assert vertices.ndim == 3 and vertices.shape[0] == 1
+        assert triangles.ndim == 3 and triangles.shape[0] == 1
+        assert int(triangles.max()) < vertices.shape[1]
+
     def test_remove(self):
         self.sim.remove_asset(self.obj_group.uid)
 

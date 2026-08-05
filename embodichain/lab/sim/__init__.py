@@ -14,10 +14,40 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .material import VisualMaterialCfg, VisualMaterial, VisualMaterialInst
+"""EmbodiChain's simulation core.
+
+Organized around the ``SimulationManager`` (the DexSim scene handle), the scene-object hierarchy, sensors, IK solvers, motion planners, the atomic-action layer, and shared configuration types.
+"""
+
+from __future__ import annotations
+
+from .material import (
+    VisualMaterialCfg,
+    VisualMaterial,
+    VisualMaterialInst,
+    ReuseSegmentState,
+)
 from .common import BatchEntity
+from .profiler import Profiler, ProfilerCfg
 
 from .sim_manager import *
+
+__all__ = [
+    "VisualMaterialCfg",
+    "VisualMaterial",
+    "VisualMaterialInst",
+    "ReuseSegmentState",
+    "BatchEntity",
+    "Profiler",
+    "ProfilerCfg",
+    "SimulationManager",
+    "SimulationManagerCfg",
+    "SIM_CACHE_DIR",
+    "MATERIAL_CACHE_DIR",
+    "CONVEX_DECOMP_DIR",
+    "REACHABLE_XPOS_DIR",
+]
+
 
 from .utility.dynamic_pybind import init_dynamic_pybind
 

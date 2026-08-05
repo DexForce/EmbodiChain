@@ -15,6 +15,7 @@
 | `embodichain/lab/gym/envs/tasks/__init__.py` | All concrete task imports (forces registration on import) |
 | `embodichain/lab/gym/envs/managers/__init__.py` | Manager re-exports: `EventManager`, `ObservationManager`, `RewardManager`, `ActionManager`, `DatasetManager` |
 | `embodichain/lab/gym/envs/wrapper/no_fail.py` | `NoFailWrapper` — forces `is_task_success() → True` |
+| `embodichain/lab/gym/envs/wrapper/replay.py` | `ReplayWrapper` — record-and-replay trajectories (kinematic/dynamic/control) |
 
 ---
 
@@ -248,6 +249,105 @@ class MyTaskEnv(EmbodiedEnv):
 |---|---|---|
 | `NoFailWrapper` | `envs/wrapper/no_fail.py` | Forces `is_task_success() → True` |
 | `TimeLimitWrapper` | `utils/registration.py` | Batched truncation via `elapsed_steps >= max_episode_steps` |
+| `ReplayWrapper` | `envs/wrapper/replay.py` | Replays a recorded trajectory: `kinematic` (physics off, set states), `dynamic` (feed recorded actions, physics on), `control` (interactive scrubber via `go_to_step`) |
+
+---
+
+## Recording & Replay
+
+`EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
+
+- **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
+  `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
+  rigid objects; `actions` = the **pre-process** action) is written each step via
+  `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
+  `self._traj_steps` counter means **async parallel envs** (different reset times)
+  don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
+  are recorded.
+- **Persistence**: `env.save_trajectory(path, env_ids=None)` writes a `.pt` with
+  `states`, `actions`, and `meta` (incl. per-env `lengths`). With
+  `cfg.trajectory_auto_save = True` (default), trajectories auto-save to
+  `<EMBODICHAIN_DEFAULT_DATA_ROOT>/trajectories/<run_id>/` at episode end and on
+  `close()` (best-effort: IO errors warn + skip, never crash the episode).
+- **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
+  `kinematic` disables physics and writes recorded states (obs only, exact
+  reproduction); `dynamic` feeds recorded actions through `env.step` so the
+  `ActionManager` re-applies the transform (faithful even with delta/eef_pose
+  actions); `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay
+  env must use the same robot/objects/`actions` config as the recording env.
+- **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
+  shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
+  `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
+- **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
+
+---
+
+## Profiling
+
+`BaseEnv` carries an `EnvProfiler` (`self._profiler`) that records per-section
+**wall time** of the reset/step pipeline. It is a no-op (zero overhead) when
+disabled, so the instrumentation stays in place unconditionally.
+
+.. note::
+   Only wall time is profiled. GPU-memory profiling has been temporarily
+   removed (entry parameter, recording, and report output).
+
+### Config
+
+`EnvCfg.profiler: EnvProfilerCfg | None = None` (None = off). Fields:
+
+| Field | Default | Purpose |
+|---|---|---|
+| `enable_time` | `True` | Per-section mean/min/max/std wall time |
+| `sync_cuda` | `False` | `torch.cuda.synchronize()` at section boundaries for accurate GPU time (higher overhead) |
+| `warmup_steps` | `5` | Discard first N top-level step/reset samples |
+| `nvtx` | `False` | Also push NVTX ranges (named in `nsys` timelines) |
+| `output_path` | `None` | Dump JSON report to this path on `report()` |
+
+CLI: `run-env --profile [--profile_output prof.json]`. In code:
+`cfg.profiler = EnvProfilerCfg(enable_time=True, ...)`.
+
+### Instrumented sections
+
+Section names are hierarchical (built from the active call stack); a parent's
+time includes its children.
+
+- **step** → `preprocess_action`, `step_action`, `sim_update`, `update_sim_state`
+  (`event_interval`), `get_obs` (`proprio`, `sensor` (`render_camera_group`,
+  `sensor_fetch`), `extend` (`obs_compute`)), `get_info`, `reward`
+  (`reward_compute`), `postprocess_action`, `hook_after` (`rollout_write`,
+  `trajectory_write`), `auto_reset`
+- **reset** → `is_task_success`, `reset_objects_state`, `initialize_episode`
+  (`dataset_save`, `record_camera_save`, `trajectory_save`, `event_reset`,
+  `obs_reset`, `reward_reset`, `dataset_reset`), `get_obs`
+
+`reset()` called during step's auto-reset does **not** open a duplicate root;
+its children attribute to `step.auto_reset.*`.
+
+### Per-functor breakdown
+
+Every registered **event** and **observation** functor is additionally timed by
+name via `ManagerBase._call_functor` (centralized in the base manager; the
+event/obs `apply`/`compute` loops call through it). Each functor's section is
+its config attribute name, nesting under the manager call site:
+
+- `step.update_sim_state.event_interval.<functor>` (e.g. `record_camera`)
+- `reset.initialize_episode.event_reset.<functor>` (e.g. `init_bottle_pose`)
+- `step.get_obs.extend.obs_compute.<functor>` (e.g. `norm_robot_eef_joint`)
+
+`calls` reflects the firing count -- interval event functors fire every
+`interval_step` (so a `interval_step=10` functor shows `calls = num_steps / 10`).
+The same obs functor appears under both `step.get_obs.*` and `reset.get_obs.*`.
+Zero overhead when profiling is disabled. Reward/action/dataset functors are not
+yet wired through the helper.
+
+### Report
+
+`env._profiler.report()` prints a tree (calls / mean / min / max / std / total /
+`%par` of parent, sorted by total within each parent; `(other)` = parent total
+minus measured children). It is also flushed automatically in `close()` **before
+`sim.destroy()`** (which exits the process). `%par` is relative to the immediate
+parent; the first `warmup_steps` samples are discarded.
 
 ---
 
