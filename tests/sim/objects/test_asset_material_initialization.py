@@ -53,6 +53,9 @@ def _make_asset(asset_type, materials):
 
     entity = MagicMock(name="entity")
     entity.get_render_body.return_value = render_body
+    entity.set_material.side_effect = lambda *args: materials.__setitem__(
+        slice(None), [args[-1]] * len(materials)
+    )
 
     asset = asset_type.__new__(asset_type)
     asset._entities = [entity]
@@ -124,6 +127,24 @@ def test_asset_restores_original_material_after_replacement(asset_type):
     ]
     assert _registered_material(asset).mat is originals[0]
     assert asset.is_shared_visual_material is False
+
+
+@pytest.mark.parametrize("asset_type", (RigidObject, Articulation))
+def test_asset_can_update_default_visual_material(asset_type):
+    current = [_material("original")]
+    asset, render_body = _make_asset(asset_type, current)
+    asset._initialize_existing_visual_material()
+    replacement = _replacement_material()
+
+    asset.set_visual_material(replacement, update_default=True)
+    replacement_inst = replacement.create_instance.return_value
+    current[0] = _material("temporary")
+    render_body.set_material.reset_mock()
+
+    asset.restore_visual_material()
+
+    render_body.set_material.assert_called_once_with(0, replacement_inst.mat)
+    assert _registered_material(asset) is replacement_inst
 
 
 def test_asset_restores_empty_original_assignment(asset_type):

@@ -1242,7 +1242,7 @@ class SimulationManager:
 
         if cfg.shape.visual_material:
             mat = self.create_visual_material(cfg.shape.visual_material)
-            rigid_obj.set_visual_material(mat)
+            rigid_obj.set_visual_material(mat, update_default=True)
 
         self._rigid_objects[uid] = rigid_obj
         self.notify_visualization_topology_changed()

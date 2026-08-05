@@ -42,7 +42,26 @@ from embodichain.lab.gym.utils.registration import (
 from embodichain.utils.logger import log_warning, log_info, log_error
 
 
-def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
+def generate_and_execute_action_list(
+    env: gymnasium.Env,
+    idx: int,
+    debug_mode: bool,
+    *,
+    episode_idx: int = 0,
+    **kwargs: object,
+) -> bool:
+    """Generate and execute one demonstration action list.
+
+    Args:
+        env: Environment used to generate and execute the actions.
+        idx: Index of the action list within the current episode.
+        debug_mode: Whether debug mode is enabled.
+        episode_idx: Index of the current episode.
+        **kwargs: Additional arguments forwarded to action generation.
+
+    Returns:
+        Whether a non-empty action list was generated and executed.
+    """
 
     action_list = env.get_wrapper_attr("create_demo_action_list")(
         action_sentence=idx, **kwargs
@@ -53,7 +72,9 @@ def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
         return False
 
     for action in tqdm.tqdm(
-        action_list, desc=f"Executing action list #{idx}", unit="step"
+        action_list,
+        desc=f"Executing episode #{episode_idx}, action list #{idx}",
+        unit="step",
     ):
         # Step the environment with the current action
         # The environment will automatically detect truncation based on action_length
@@ -99,7 +120,11 @@ def generate_function(
         ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(
-                env, trajectory_idx, debug_mode, **kwargs
+                env,
+                trajectory_idx,
+                debug_mode,
+                episode_idx=time_id,
+                **kwargs,
             )
 
             if not valid:
