@@ -39,6 +39,8 @@ from embodichain.data import get_data_path
 
 NUM_ENVS = 2
 
+pytestmark = pytest.mark.requires_sim
+
 urdf_path = get_data_path("UniversalRobots/UR5/UR5.urdf")
 METADATA = {
     "id": "EmbodiedEnv-v1",

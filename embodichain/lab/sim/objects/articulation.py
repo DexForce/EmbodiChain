@@ -1683,23 +1683,27 @@ class Articulation(BatchEntity):
         cache_env_ids = self._resolve_env_ids(env_ids)
         cache_joint_ids = self._resolve_joint_ids(joint_ids)
 
+        def _drive_arg(value: torch.Tensor, index: int) -> float | np.ndarray:
+            result = value[index].detach().cpu().numpy()
+            return result.item() if result.size == 1 else result
+
         for i, env_idx in enumerate(local_env_ids):
             drive_args = {
                 "drive_type": get_dexsim_drive_type(drive_type),
                 "joint_ids": local_joint_ids,
             }
             if stiffness is not None:
-                drive_args["stiffness"] = stiffness[i].cpu().numpy()
+                drive_args["stiffness"] = _drive_arg(stiffness, i)
             if damping is not None:
-                drive_args["damping"] = damping[i].cpu().numpy()
+                drive_args["damping"] = _drive_arg(damping, i)
             if max_effort is not None:
-                drive_args["max_force"] = max_effort[i].cpu().numpy()
+                drive_args["max_force"] = _drive_arg(max_effort, i)
             if max_velocity is not None:
-                drive_args["max_velocity"] = max_velocity[i].cpu().numpy()
+                drive_args["max_velocity"] = _drive_arg(max_velocity, i)
             if friction is not None:
-                drive_args["joint_friction"] = friction[i].cpu().numpy()
+                drive_args["joint_friction"] = _drive_arg(friction, i)
             if armature is not None:
-                drive_args["armature"] = armature[i].cpu().numpy()
+                drive_args["armature"] = _drive_arg(armature, i)
             self._entities[env_idx].set_drive(**drive_args)
 
         if max_velocity is not None:
