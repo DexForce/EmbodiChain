@@ -120,9 +120,14 @@ When ``--preview`` is enabled, an interactive REPL is available:
 
 ---
 
+(cli-run-environment)=
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
+
+For an end-to-end explanation of mode selection, preview, the differences
+between dataset/video/trajectory recording, and all three replay modes, see
+{doc}`run_env`.
 
 Task environments are **auto-discovered**: any installed package that declares
 an ``embodichain.tasks`` entry point is imported at startup, registering its
@@ -220,6 +225,10 @@ When ``--preview`` is enabled, an interactive REPL is available:
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
 
+See {doc}`run_env` for examples of inspecting and stepping ``env`` from the
+embedded session, and for the distinction between interactive preview and the
+Viser browser backend.
+
 ### Replay Mode
 
 When ``--replay`` is enabled (with ``--replay_trajectory <path>``), the env loads a recorded ``.pt`` trajectory and drives it via ``ReplayWrapper``. The replay env must use the same gym config (robot/objects/ActionManager) as the recording env.
@@ -243,6 +252,10 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
   Dataset saving is disabled automatically in this mode.
 
 ``--replay`` and ``--preview`` are mutually exclusive.
+
+See {doc}`run_env` for the recorded file contents, environment compatibility
+requirements, vectorized replay behavior, and a complete record/replay
+workflow.
 
 ### Profiling
 

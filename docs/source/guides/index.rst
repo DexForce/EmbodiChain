@@ -11,4 +11,5 @@ Practical guides for common tasks in EmbodiChain.
    configuration
    agent_skills
    add_robot
+   run_env
    cli
