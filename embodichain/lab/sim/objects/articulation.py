@@ -2175,6 +2175,7 @@ class Articulation(BatchEntity):
         env_ids: Sequence[int] | None = None,
         link_names: List[str] | None = None,
         shared: bool = False,
+        update_default: bool = False,
     ) -> None:
         """Set visual material for the rigid object.
 
@@ -2183,6 +2184,8 @@ class Articulation(BatchEntity):
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
             link_names (List[str] | None, optional): List of link names to apply the material to. If None, applies to all links.
             shared (bool, optional): Whether to share the material instance across links and environments. Defaults to False.
+            update_default: Whether the assigned material should become the baseline
+                restored by :meth:`reset`. Defaults to False.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         link_names = self.link_names if link_names is None else link_names
@@ -2196,6 +2199,15 @@ class Articulation(BatchEntity):
                 for i, env_idx in enumerate(local_env_ids):
                     self._entities[env_idx].set_material(link_name, mat_inst.mat)
                     self._visual_material[env_idx][link_name] = mat_inst
+                    if update_default:
+                        self._original_visual_material[env_idx][link_name] = (
+                            _capture_render_materials(
+                                self._entities[env_idx].get_render_body(link_name)
+                            )
+                        )
+                        self._original_visual_material_inst[env_idx][
+                            link_name
+                        ] = mat_inst
             self.is_shared_visual_material = True
         else:
             for i, env_idx in enumerate(local_env_ids):
@@ -2205,6 +2217,15 @@ class Articulation(BatchEntity):
                     )
                     self._entities[env_idx].set_material(link_name, mat_inst.mat)
                     self._visual_material[env_idx][link_name] = mat_inst
+                    if update_default:
+                        self._original_visual_material[env_idx][link_name] = (
+                            _capture_render_materials(
+                                self._entities[env_idx].get_render_body(link_name)
+                            )
+                        )
+                        self._original_visual_material_inst[env_idx][
+                            link_name
+                        ] = mat_inst
             self.is_shared_visual_material = False
 
     def get_visual_material_inst(

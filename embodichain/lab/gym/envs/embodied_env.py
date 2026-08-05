@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -413,9 +415,13 @@ class EmbodiedEnv(BaseEnv):
         from embodichain.utils.module_utils import get_all_exported_items_from_module
         from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
-        functors_to_remove = get_all_exported_items_from_module(
-            "embodichain.lab.gym.envs.managers.randomization.visual"
-        )
+        functors_to_remove = {
+            name
+            for name in get_all_exported_items_from_module(
+                "embodichain.lab.gym.envs.managers.randomization.visual"
+            )
+            if name.startswith("randomize_")
+        }
         if self.cfg.filter_visual_rand and self.cfg.events:
             # Iterate through all attributes of the events object
             for attr_name in dir(self.cfg.events):

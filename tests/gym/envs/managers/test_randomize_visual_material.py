@@ -27,8 +27,13 @@ from embodichain.lab.gym.envs.managers import FunctorCfg
 from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_visual_material,
+    set_rigid_object_visual_material,
 )
-from embodichain.lab.sim.material import ReuseSegmentState, VisualMaterialInst
+from embodichain.lab.sim.material import (
+    ReuseSegmentState,
+    VisualMaterialCfg,
+    VisualMaterialInst,
+)
 from embodichain.lab.sim.objects.articulation import Articulation
 from embodichain.lab.sim.objects.rigid_object import RigidObject
 
@@ -126,6 +131,25 @@ def _segment(mesh_id: int = 0, original=None) -> ReuseSegmentState:
     )
 
 
+def test_deterministic_material_setter_updates_reset_baseline():
+    env = _MockEnv()
+    obj = env.sim.get_asset("obj")
+    material = MagicMock(name="material")
+    env.sim.create_visual_material = MagicMock(return_value=material)
+    env.sim.get_rigid_object_uid_list = MagicMock(return_value=["obj"])
+    env.sim.get_rigid_object = MagicMock(return_value=obj)
+
+    set_rigid_object_visual_material(
+        env,
+        None,
+        SceneEntityCfg(uid="obj"),
+        VisualMaterialCfg(uid="fixed"),
+    )
+
+    _, kwargs = obj.set_visual_material.call_args
+    assert kwargs["update_default"] is True
+
+
 def _make_rigid_functor(
     params: dict | None = None,
     *,
@@ -196,6 +220,26 @@ def test_reuse_init_degrades_to_legacy_on_failure():
     assert env.sim.created_visual_materials == ["obj_random_mat"]
 
 
+def test_automatic_legacy_fallback_reuses_bounded_texture_pool():
+    env = _MockEnv()
+    env.sim.get_asset("obj").get_existing_visual_material.side_effect = ValueError(
+        "no material"
+    )
+    palette_size = 2
+    functor = randomize_visual_material(
+        _make_cfg({"random_texture_prob": 0.0, "solid_texture_count": palette_size}),
+        env,
+    )
+    created_at_init = env.sim.env.create_color_texture.call_count
+
+    for _ in range(1025):
+        _run(functor, env)
+
+    assert created_at_init == palette_size
+    assert env.sim.env.create_color_texture.call_count == created_at_init
+    env.sim.env.clean_materials.assert_not_called()
+
+
 def test_reuse_call_reattaches_without_cleaning():
     env, obj, functor = _make_rigid_functor()
     _force_tier(functor, tier=2)
@@ -245,16 +289,39 @@ def test_articulation_samples_tier_per_link():
     assert solid_call.kwargs["texture_obj"] in functor._solid_textures
 
 
-def test_default_plane_randomizes_in_place_without_cleaning():
+def test_default_plane_reuses_bounded_texture_pool_without_cleaning():
     env = _MockEnv()
-    functor = randomize_visual_material(_make_cfg(uid="default_plane"), env)
+    palette_size = 2
+    functor = randomize_visual_material(
+        _make_cfg(
+            {"random_texture_prob": 0.0, "solid_texture_count": palette_size},
+            uid="default_plane",
+        ),
+        env,
+    )
+    created_at_init = env.sim.env.create_color_texture.call_count
     env.sim.env.clean_materials.reset_mock()
 
-    _run(functor, env)
+    for _ in range(1025):
+        _run(functor, env)
 
     assert functor._new_mode is False
     assert env.sim.created_visual_materials == []
+    assert created_at_init == palette_size
+    assert env.sim.env.create_color_texture.call_count == created_at_init
     env.sim.env.clean_materials.assert_not_called()
+
+
+def test_legacy_library_randomization_binds_precreated_texture():
+    env = _MockEnv()
+    functor = randomize_visual_material(_make_cfg({"fallback_to_new": True}), env)
+    texture = MagicMock(name="library_texture")
+    functor._library_textures = [texture]
+    mat_inst = MagicMock(spec=VisualMaterialInst)
+
+    functor._randomize_mat_inst(mat_inst, {}, random_texture_prob=1.0)
+
+    mat_inst.set_base_color_texture.assert_called_once_with(texture_obj=texture)
 
 
 @pytest.mark.parametrize(
