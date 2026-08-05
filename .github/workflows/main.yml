@@ -147,6 +147,11 @@ jobs:
             --extra-index-url https://download.blender.org/pypi/
           pip install pytest-xdist
 
+      - name: Verify Scene Engine gensim installation
+        run: |
+          python -c "import matplotlib, numpy, open3d, requests, scipy, shapely, trimesh; from PIL import Image; import embodichain.gen_sim.scene_engine.pipeline.generate"
+          pytest tests/gen_sim/scene_engine -q
+
       - name: Run default tests
         run: |
           echo "Default test suite (GPU-marked tests are skipped)"

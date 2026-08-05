@@ -54,7 +54,11 @@ dependencies = [
 [project.optional-dependencies]
 gensim = [
   "bpy",
-  "pyrender==0.1.45"
+  "pyrender==0.1.45",
+  "requests",
+  "Pillow",
+  "scipy",
+  "matplotlib",
 ]
 # cuRobo V2 is distributed from its source repository and provides separate
 # dependency sets for CUDA 12 and CUDA 13. Keep it optional so CPU-only and
