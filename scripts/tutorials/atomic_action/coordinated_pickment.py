@@ -56,14 +56,10 @@ from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_ur5_robot,
     add_support_surface,
-    compute_local_bounds,
     compute_world_bounds,
-    create_manual_object_semantics,
     get_local_vertices,
-    invert_pose,
     log_action_plan,
     make_dual_ur5_solver_cfg,
-    normalize_vector,
     resolve_cached_data_path,
     rotate_pose_about_world_z,
     settle_object,
@@ -71,6 +67,7 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
+    create_antipodal_semantics,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
@@ -108,12 +105,9 @@ class PickmentObjectPreset:
     init_rot: tuple[float, float, float]
     surface_clearance: float
     body_scale: tuple[float, float, float]
-    grasp_end_margin_ratio: float
-    grasp_z_clearance: float
     target_translation: tuple[float, float, float]
     target_world_yaw_deg: float
     hand_close_qpos: float
-    grasp_z_ratio: float | None = None
 
 
 OBJECT_PRESETS = {
@@ -125,9 +119,7 @@ OBJECT_PRESETS = {
         init_rot=(90.0, 0.0, 0.0),
         surface_clearance=0.008,
         body_scale=(2.0, 2.0, 2.0),
-        grasp_end_margin_ratio=0.12,
-        grasp_z_clearance=0.015,
-        target_translation=(-0.22, -0.04, 0.16),
+        target_translation=(0.22, -0.04, 0.16),
         target_world_yaw_deg=0.0,
         hand_close_qpos=0.026,
     ),
@@ -138,12 +130,9 @@ OBJECT_PRESETS = {
         init_rot=(-90.0, 90.0, 0.0),
         surface_clearance=0.008,
         body_scale=(2.0, 2.0, 2.0),
-        grasp_end_margin_ratio=0.08,
-        grasp_z_clearance=0.01,
         target_translation=(-0.12, -0.03, 0.12),
         target_world_yaw_deg=0.0,
         hand_close_qpos=0.026,
-        grasp_z_ratio=0.55,
     ),
 }
 PICKMENT_SAMPLE_INTERVAL = 96
@@ -162,6 +151,7 @@ def parse_arguments() -> argparse.Namespace:
         features=(
             "debug_state",
             "diagnose_plan",
+            "grasp_sampling",
             "headless_play",
             "visualize_axes",
         ),
@@ -248,63 +238,32 @@ def compute_supported_init_pos(
     return (preset.init_xy[0], preset.init_xy[1], z)
 
 
-def build_object_grasp_poses(
-    object_pose: torch.Tensor,
-    local_vertices: torch.Tensor,
-    preset: PickmentObjectPreset,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build left/right TCP poses that pinch opposite sides of the object."""
-    local_min, local_max = compute_local_bounds(local_vertices)
-    extents = local_max - local_min
-    long_axis_idx = int(torch.argmax(extents).item())
-    axis_local = torch.zeros(3, dtype=torch.float32, device=device)
-    axis_local[long_axis_idx] = 1.0
-    long_axis = normalize_vector(
-        object_pose[:3, :3] @ axis_local,
-        torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device),
-    )
+def compute_left_to_right_arm_direction(
+    robot: Robot,
+    device: torch.device | str,
+) -> torch.Tensor:
+    """World-frame unit direction from the left arm base to the right arm base.
 
-    local_center = 0.5 * (local_min + local_max)
-    margin = extents[long_axis_idx] * preset.grasp_end_margin_ratio
-    left_local = local_center.clone()
-    right_local = local_center.clone()
-    left_local[long_axis_idx] = local_min[long_axis_idx] + margin
-    right_local[long_axis_idx] = local_max[long_axis_idx] - margin
+    The affordance sampler projects the object mesh onto this direction to split
+    it into left/right grasp regions, so it must share the frame of the object
+    pose (the local arena frame). Reading the two arm base links keeps the
+    direction correct regardless of the arms' joint configuration.
 
-    world_min, world_max = compute_world_bounds(object_pose, local_vertices)
-    left_position = object_pose[:3, 3] + object_pose[:3, :3] @ left_local.to(device)
-    right_position = object_pose[:3, 3] + object_pose[:3, :3] @ right_local.to(device)
-    if preset.grasp_z_ratio is None:
-        grasp_z = world_max[2] + preset.grasp_z_clearance
-    else:
-        grasp_z = (
-            world_min[2]
-            + (world_max[2] - world_min[2]) * preset.grasp_z_ratio
-            + preset.grasp_z_clearance
-        )
-    left_position[2] = grasp_z
-    right_position[2] = grasp_z
+    Args:
+        robot: Dual-arm robot whose arms define the left/right sides.
+        device: Device on which the returned direction should live.
 
-    z_axis = torch.tensor([0.0, 0.0, -1.0], dtype=torch.float32, device=device)
-    x_axis = normalize_vector(
-        torch.cross(long_axis, z_axis, dim=0),
-        torch.tensor([1.0, 0.0, 0.0], dtype=torch.float32, device=device),
-    )
-    y_axis = normalize_vector(torch.cross(z_axis, x_axis, dim=0), long_axis)
-
-    left_pose = torch.eye(4, dtype=torch.float32, device=device)
-    left_pose[:3, 0] = x_axis
-    left_pose[:3, 1] = y_axis
-    left_pose[:3, 2] = z_axis
-    left_pose[:3, 3] = left_position
-
-    right_pose = torch.eye(4, dtype=torch.float32, device=device)
-    right_pose[:3, 0] = -x_axis
-    right_pose[:3, 1] = -y_axis
-    right_pose[:3, 2] = z_axis
-    right_pose[:3, 3] = right_position
-    return left_pose, right_pose
+    Returns:
+        A normalized ``(3,)`` direction vector.
+    """
+    left_base = robot.get_link_pose(
+        link_name="left_base_link", env_ids=[0], to_matrix=True
+    )[0, :3, 3]
+    right_base = robot.get_link_pose(
+        link_name="right_base_link", env_ids=[0], to_matrix=True
+    )[0, :3, 3]
+    direction = (right_base - left_base).to(device=device, dtype=torch.float32)
+    return direction / direction.norm().clamp_min(1e-6)
 
 
 def build_object_target_pose(
@@ -330,48 +289,33 @@ def log_scene_targets(
     object_label: str,
     object_pose: torch.Tensor,
     target_pose: torch.Tensor,
-    left_grasp_pose: torch.Tensor,
-    right_grasp_pose: torch.Tensor,
 ) -> None:
-    """Log compact object and grasp target positions."""
+    """Log compact object and target positions."""
     logger.log_info(
         "pickment scene: "
         f"object={object_label}, "
         f"object_origin={format_tensor(object_pose[:3, 3])}, "
-        f"target_origin={format_tensor(target_pose[:3, 3])}, "
-        f"left_grasp={format_tensor(left_grasp_pose[:3, 3])}, "
-        f"right_grasp={format_tensor(right_grasp_pose[:3, 3])}"
+        f"target_origin={format_tensor(target_pose[:3, 3])}"
     )
 
 
 def draw_pickment_target_axes(
     sim: SimulationManager,
     object_target_pose: torch.Tensor,
-    left_grasp_pose: torch.Tensor,
-    right_grasp_pose: torch.Tensor,
     num_envs: int,
 ) -> None:
-    """Draw semantic axes for the target object pose and two grasp TCP poses."""
+    """Draw the semantic axis for the target object pose.
+
+    Left/right grasp poses are sampled inside the action from the antipodal
+    affordance, so only the object-centric target axis is drawn ahead of
+    planning.
+    """
     draw_axis_marker(
         sim,
         "coordinated_pickment_object_target_axis",
         broadcast_pose_batch(object_target_pose, num_envs=num_envs),
         axis_len=0.12,
         axis_size=0.005,
-    )
-    draw_axis_marker(
-        sim,
-        "coordinated_pickment_left_grasp_axis",
-        broadcast_pose_batch(left_grasp_pose, num_envs=num_envs),
-        axis_len=0.07,
-        axis_size=0.0035,
-    )
-    draw_axis_marker(
-        sim,
-        "coordinated_pickment_right_grasp_axis",
-        broadcast_pose_batch(right_grasp_pose, num_envs=num_envs),
-        axis_len=0.07,
-        axis_size=0.0035,
     )
 
 
@@ -408,7 +352,13 @@ def run_coordinated_pickment_demo(
     object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
     n_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
-    object_semantics = create_manual_object_semantics(obj, preset.label)
+    object_semantics = create_antipodal_semantics(
+        obj,
+        label=preset.label,
+        n_sample=args.n_sample,
+        force_reannotate=args.force_reannotate,
+    )
+    left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
     motion_gen = create_toppra_motion_generator(robot)
 
     left_open, left_close = get_hand_open_close_qpos(
@@ -427,6 +377,7 @@ def run_coordinated_pickment_demo(
         hand_interp_steps=PICKMENT_HAND_INTERP_STEPS,
         hold_steps=PICKMENT_HOLD_STEPS,
         object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
+        left_to_right_arm_direction=left_to_right_arm_direction,
     )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -445,47 +396,19 @@ def run_coordinated_pickment_demo(
     if not isinstance(pickment_action, CoordinatedPickment):
         raise RuntimeError("Unexpected coordinated_pickment implementation.")
 
-    left_grasp_pose, right_grasp_pose = build_object_grasp_poses(
-        object_pose,
-        object_vertices,
-        preset,
-        sim.device,
-    )
     target_pose = build_object_target_pose(
         object_pose,
         object_vertices,
         preset,
         sim.device,
     )
-    log_scene_targets(
-        preset.label,
-        object_pose,
-        target_pose,
-        left_grasp_pose,
-        right_grasp_pose,
-    )
+    log_scene_targets(preset.label, object_pose, target_pose)
     if not args.no_vis_eef_axis:
-        draw_pickment_target_axes(
-            sim,
-            target_pose,
-            left_grasp_pose,
-            right_grasp_pose,
-            num_envs=n_envs,
-        )
+        draw_pickment_target_axes(sim, target_pose, num_envs=n_envs)
 
-    left_object_to_eef = torch.bmm(
-        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
-        broadcast_pose_batch(left_grasp_pose, num_envs=n_envs),
-    )
-    right_object_to_eef = torch.bmm(
-        broadcast_pose_batch(invert_pose(object_pose.unsqueeze(0)), num_envs=n_envs),
-        broadcast_pose_batch(right_grasp_pose, num_envs=n_envs),
-    )
     pickment_target = CoordinatedPickGoal(
         semantics=object_semantics,
         object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
-        left_object_to_eef=left_object_to_eef,
-        right_object_to_eef=right_object_to_eef,
         object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
     )
 

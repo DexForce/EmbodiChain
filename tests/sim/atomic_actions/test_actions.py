@@ -343,6 +343,21 @@ def _dual_binding(
     )
 
 
+def _stub_dual_arm_grasp_poses(affordance: AntipodalAffordance) -> None:
+    """Stub affordance dual-arm grasp sampling with identity grasp poses."""
+
+    def _sample(obj_poses: torch.Tensor, **_kwargs: object) -> list[dict]:
+        arm = {
+            "is_success": True,
+            "grasp_poses": torch.eye(4, dtype=torch.float32).unsqueeze(0),
+            "open_lengths": torch.tensor([0.0], dtype=torch.float32),
+            "total_cost": torch.tensor([0.0], dtype=torch.float32),
+        }
+        return [{"left": arm, "right": arm} for _ in range(obj_poses.shape[0])]
+
+    affordance.get_dual_arm_valid_grasp_poses = Mock(side_effect=_sample)
+
+
 def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert MoveEndEffector.GoalType is EndEffectorPoseGoal
     assert MoveJoints.GoalType is JointPositionGoal
@@ -791,16 +806,16 @@ def test_coordinated_pick_returns_full_dof_plan_and_projected_relation() -> None
             ),
         ),
     )
+    affordance = AntipodalAffordance()
+    _stub_dual_arm_grasp_poses(affordance)
     semantics = ObjectSemantics(
-        affordance=AntipodalAffordance(), geometry={}, label="coordinated-object"
+        affordance=affordance, geometry={}, label="coordinated-object"
     )
     invocation = ActionInvocation(
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
             semantics=semantics,
             object_target_pose=torch.eye(4),
-            left_object_to_eef=torch.eye(4),
-            right_object_to_eef=torch.eye(4),
             object_initial_pose=torch.eye(4),
         ),
         binding=_dual_binding("left", "right"),
@@ -855,15 +870,13 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
     )
     target_pose = torch.eye(4)
     target_pose[0, 3] = 0.3
+    affordance = AntipodalAffordance()
+    _stub_dual_arm_grasp_poses(affordance)
     invocation = ActionInvocation(
         skill_id="coordinated_pickment",
         goal=CoordinatedPickGoal(
-            semantics=ObjectSemantics(
-                affordance=AntipodalAffordance(), geometry={}, label="tray"
-            ),
+            semantics=ObjectSemantics(affordance=affordance, geometry={}, label="tray"),
             object_target_pose=target_pose,
-            left_object_to_eef=torch.eye(4),
-            right_object_to_eef=torch.eye(4),
             object_initial_pose=torch.eye(4),
         ),
         binding=_dual_binding("left", "right"),
@@ -883,6 +896,56 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
     held = projected.get_coordinated_held_object("left_arm", "right_arm")
     assert held is not None
     assert held.env_mask.tolist() == [True, False]
+
+
+def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
+    generator = _dual_motion_generator()
+    action = _bind_action(
+        generator,
+        CoordinatedPickment(
+            default_options=CoordinatedPickmentOptions(
+                hand_interp_steps=4,
+                hold_steps=2,
+                object_motion_keyframes=3,
+            ),
+        ),
+    )
+    affordance = AntipodalAffordance()
+    affordance.get_dual_arm_valid_grasp_poses = Mock(
+        return_value=[
+            None,
+            {
+                "left": {
+                    "is_success": False,
+                    "grasp_poses": torch.eye(4, dtype=torch.float32),
+                    "open_lengths": torch.tensor([0.0], dtype=torch.float32),
+                    "total_cost": torch.tensor([torch.inf], dtype=torch.float32),
+                },
+                "right": {
+                    "is_success": True,
+                    "grasp_poses": torch.eye(4, dtype=torch.float32).unsqueeze(0),
+                    "open_lengths": torch.tensor([0.0], dtype=torch.float32),
+                    "total_cost": torch.tensor([0.0], dtype=torch.float32),
+                },
+            },
+        ]
+    )
+    semantics = ObjectSemantics(affordance=affordance, geometry={}, label="object")
+    invocation = ActionInvocation(
+        skill_id="coordinated_pickment",
+        goal=CoordinatedPickGoal(
+            semantics=semantics,
+            object_target_pose=torch.eye(4),
+            object_initial_pose=torch.eye(4),
+        ),
+        binding=_dual_binding("left", "right"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+
+    plan = _plan_action(action, invocation, _dual_context())
+
+    assert plan.plan_success.tolist() == [False, False]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 0, DUAL_ROBOT_DOF)
 
 
 def test_coordinated_placement_projects_release_and_support_attachment() -> None:
@@ -944,8 +1007,6 @@ def test_coordinated_actions_reject_curobo_motion_generation() -> None:
                 affordance=AntipodalAffordance(), geometry={}, label="object"
             ),
             object_target_pose=torch.eye(4),
-            left_object_to_eef=torch.eye(4),
-            right_object_to_eef=torch.eye(4),
             object_initial_pose=torch.eye(4),
         ),
         binding=_dual_binding("left", "right"),

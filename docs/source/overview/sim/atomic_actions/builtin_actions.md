@@ -160,7 +160,7 @@ it does not make the two maps interchangeable.
 | `primary` | Single-participant skills | Principal participant for this invocation; it has no inherent left/right or default-robot meaning |
 | `source` | `hand_over` | Participant that initially holds and transfers the object |
 | `destination` | `hand_over` | Participant that receives the object |
-| `left`, `right` | `coordinated_pickment` | Participants associated with the goal's left/right grasp transforms |
+| `left`, `right` | `coordinated_pickment` | Participants on whose sides the affordance samples left/right grasps |
 | `placing` | `coordinated_placement` | Participant that aligns and optionally releases the placing object |
 | `support` | `coordinated_placement` | Participant that keeps holding and positioning the support object |
 
@@ -455,9 +455,18 @@ both hands -> lift -> move object -> hold**.
 | Skill ID | `coordinated_pickment` |
 | Goal | `CoordinatedPickGoal` |
 | Binding | manipulator + end effector roles `left` and `right` |
-| Goal geometry | shared-object target pose plus left/right `object_to_eef` transforms; optional initial object pose |
+| Precondition | `ObjectSemantics.entity` is set and the affordance is an `AntipodalAffordance` |
+| Goal geometry | shared-object target pose and optional initial object pose; left/right grasps are sampled from the affordance |
 | Effect | clear individual left/right attachments and create `CoordinatedHeldObjectState[(left, right)]` |
 | Verification | coordinated attachment must be externally verified |
+
+The left/right grasp poses are not supplied by the caller. At planning time the
+action calls `AntipodalAffordance.get_dual_arm_valid_grasp_poses` with the
+`approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
+options to partition the object into left/right grasp regions and select the
+lowest-cost grasp on each side. The derived `object_to_eef` transforms are
+stored in the projected `CoordinatedHeldObjectState` and reused by later
+object-centric skills.
 
 The object target and optional initial pose may use `SceneEntityPose`. When no
 initial pose is supplied, `ObjectSemantics.entity` provides the object's current
@@ -467,7 +476,9 @@ Both bound end-effector profiles must provide `open` and `grasp`. Important
 `CoordinatedPickmentOptions` fields group into:
 
 - `pre_grasp_distance` and `lift_height`;
-- `object_motion_keyframes`, `hand_interp_steps`, and `hold_steps`.
+- `object_motion_keyframes`, `hand_interp_steps`, and `hold_steps`;
+- `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
+  for affordance-based left/right grasp sampling.
 
 The left/right arms and hands come exclusively from the corresponding binding
 roles. Coordinated dual-arm planning with `motion_source="motion_gen"` is not

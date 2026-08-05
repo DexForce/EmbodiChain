@@ -24,8 +24,9 @@ from typing import ClassVar
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import matrix_from_quat, quat_from_matrix
+from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
+from ..affordance import AntipodalAffordance
 from ..bindings import ResolvedControlPart
 from ..control import GRASP_COMMAND, OPEN_COMMAND
 from ..core import AtomicAction, ObjectSemantics
@@ -35,7 +36,6 @@ from ..goals import (
     PoseGoalValue,
     resolve_pose_goal,
     validate_pose_goal,
-    validate_pose_tensor,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
@@ -44,18 +44,18 @@ from ..state import CoordinatedHeldObjectState, PlanningContext
 
 @dataclass(frozen=True, slots=True, eq=False)
 class CoordinatedPickGoal(ObjectActionGoal):
-    """Object-centric target for picking and moving one object with two hands."""
+    """Object-centric target for picking and moving one object with two hands.
+
+    The left/right grasp poses are not supplied by the caller; they are sampled
+    from :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses` at planning
+    time using the dual-arm direction and approach direction declared on
+    :class:`CoordinatedPickmentOptions`.
+    """
 
     goal_kind: ClassVar[str] = "coordinated_pick"
 
     object_target_pose: PoseGoalValue
     """Target pose for the shared object, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
-
-    left_object_to_eef: torch.Tensor
-    """Transform from object frame to left end-effector frame."""
-
-    right_object_to_eef: torch.Tensor
-    """Transform from object frame to right end-effector frame."""
 
     object_initial_pose: PoseGoalValue | None = None
     """Optional initial object pose. Defaults to ``semantics.entity`` pose."""
@@ -65,16 +65,6 @@ class CoordinatedPickGoal(ObjectActionGoal):
         validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
-            allow_waypoints=False,
-        )
-        validate_pose_tensor(
-            self.left_object_to_eef,
-            "left_object_to_eef",
-            allow_waypoints=False,
-        )
-        validate_pose_tensor(
-            self.right_object_to_eef,
-            "right_object_to_eef",
             allow_waypoints=False,
         )
         if self.object_initial_pose is not None:
@@ -87,7 +77,13 @@ class CoordinatedPickGoal(ObjectActionGoal):
 
 @dataclass(frozen=True, slots=True, eq=False)
 class CoordinatedPickmentOptions(ActionOptions):
-    """Per-invocation coordinated pickup behavior."""
+    """Per-invocation coordinated pickup behavior.
+
+    Left/right grasps are sampled from the target affordance using
+    :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses`. The dual-arm
+    direction splits the object into left/right grasp regions and the approach
+    direction filters the sampled antipodal pairs.
+    """
 
     object_motion_keyframes: int = 6
     """Number of object-pose keyframes solved by IK before joint-space interpolation."""
@@ -104,6 +100,22 @@ class CoordinatedPickmentOptions(ActionOptions):
     hold_steps: int = 4
     """Number of waypoints to hold the final object target pose."""
 
+    approach_direction: torch.Tensor = torch.tensor(
+        [0.0, 0.0, -1.0], dtype=torch.float32
+    )
+    """World-frame direction used to sample and approach both grasps, shape ``(3,)``."""
+
+    left_to_right_arm_direction: torch.Tensor = torch.tensor(
+        [1.0, 0.0, 0.0], dtype=torch.float32
+    )
+    """World-frame direction from the left arm base to the right arm base, shape
+    ``(3,)``. It partitions the object into left/right grasp regions and should be
+    a finite, non-zero vector; it is normalized at planning time."""
+
+    middle_empty_ratio: float = 0.4
+    """Fraction of the object's left-to-right extent left grasp-free in the middle
+    so the two grippers pinch opposite ends. Must be in ``[0, 1]``."""
+
     def __post_init__(self) -> None:
         if self.object_motion_keyframes < 2:
             raise ValueError("object_motion_keyframes must be at least 2.")
@@ -114,6 +126,17 @@ class CoordinatedPickmentOptions(ActionOptions):
         for name in ("hand_interp_steps", "hold_steps"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be non-negative.")
+        for name in ("approach_direction", "left_to_right_arm_direction"):
+            value = getattr(self, name)
+            if value.shape != (3,):
+                raise ValueError(f"{name} must have shape (3,).")
+            if not torch.isfinite(value).all():
+                raise ValueError(f"{name} must contain finite values.")
+            if torch.linalg.vector_norm(value) <= 1.0e-6:
+                raise ValueError(f"{name} must be non-zero.")
+            object.__setattr__(self, name, value.clone())
+        if not 0.0 <= self.middle_empty_ratio <= 1.0:
+            raise ValueError("middle_empty_ratio must be in [0, 1].")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -456,6 +479,7 @@ class CoordinatedPickment(
         self,
         target: CoordinatedPickGoal,
         context: PlanningContext,
+        options: CoordinatedPickmentOptions,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -464,6 +488,7 @@ class CoordinatedPickment(
         torch.Tensor,
         torch.Tensor,
         CoordinatedHeldObjectState,
+        torch.Tensor,
     ]:
         object_initial_pose = self._resolve_object_initial_pose(target, context)
         object_target_pose = self._resolve_pose(
@@ -474,15 +499,13 @@ class CoordinatedPickment(
             ),
             "object_target_pose",
         )
-        left_object_to_eef = self._resolve_pose(
-            target.left_object_to_eef, "left_object_to_eef"
+        left_grasp_xpos, right_grasp_xpos, grasp_success = (
+            self._resolve_dual_arm_grasp_poses(
+                target.semantics, object_initial_pose, options
+            )
         )
-        right_object_to_eef = self._resolve_pose(
-            target.right_object_to_eef, "right_object_to_eef"
-        )
-
-        left_grasp_xpos = torch.bmm(object_initial_pose, left_object_to_eef)
-        right_grasp_xpos = torch.bmm(object_initial_pose, right_object_to_eef)
+        left_object_to_eef = torch.bmm(pose_inv(object_initial_pose), left_grasp_xpos)
+        right_object_to_eef = torch.bmm(pose_inv(object_initial_pose), right_grasp_xpos)
         left_target_xpos = torch.bmm(object_target_pose, left_object_to_eef)
         right_target_xpos = torch.bmm(object_target_pose, right_object_to_eef)
         held_state = CoordinatedHeldObjectState(
@@ -500,7 +523,104 @@ class CoordinatedPickment(
             left_target_xpos,
             right_target_xpos,
             held_state,
+            grasp_success,
         )
+
+    def _resolve_dual_arm_grasp_poses(
+        self,
+        semantics: ObjectSemantics,
+        object_poses: torch.Tensor,
+        options: CoordinatedPickmentOptions,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample left/right grasp poses from the target antipodal affordance.
+
+        Args:
+            semantics: Object semantics carrying an :class:`AntipodalAffordance`.
+            object_poses: Object poses with shape ``(n_envs, 4, 4)``.
+            options: Coordinated pickment options carrying the dual-arm and
+                approach directions used by the affordance sampler.
+
+        Returns:
+            ``(left_grasp_xpos, right_grasp_xpos, success_mask)``. The grasp poses
+            have shape ``(n_envs, 4, 4)`` and the success mask has shape
+            ``(n_envs,)``. Environments without a valid left or right grasp hold
+            the identity pose and are marked ``False``.
+        """
+        if not isinstance(semantics.affordance, AntipodalAffordance):
+            logger.log_error(
+                "CoordinatedPickment requires an AntipodalAffordance to sample "
+                "dual-arm grasps.",
+                ValueError,
+            )
+        n_envs = object_poses.shape[0]
+        identity = torch.eye(4, dtype=torch.float32, device=self.device)
+        left_grasp_xpos = identity.unsqueeze(0).repeat(n_envs, 1, 1)
+        right_grasp_xpos = identity.unsqueeze(0).repeat(n_envs, 1, 1)
+        success_mask = torch.zeros(n_envs, dtype=torch.bool, device=self.device)
+        approach_direction = options.approach_direction.to(
+            device=self.device, dtype=torch.float32
+        )
+        left_to_right_arm_direction = options.left_to_right_arm_direction.to(
+            device=self.device, dtype=torch.float32
+        )
+        left_to_right_arm_direction = left_to_right_arm_direction / (
+            torch.linalg.vector_norm(left_to_right_arm_direction).clamp_min(1.0e-6)
+        )
+        dual_results = semantics.affordance.get_dual_arm_valid_grasp_poses(
+            obj_poses=object_poses,
+            left_to_right_arm_direction=left_to_right_arm_direction,
+            approach_direction=approach_direction,
+            middle_empty_ratio=options.middle_empty_ratio,
+        )
+        for env_idx, result in enumerate(dual_results):
+            if result is None:
+                logger.log_warning(
+                    f"Failed to sample dual-arm grasps for environment {env_idx}."
+                )
+                continue
+            left_grasp = self._select_best_grasp(result["left"])
+            right_grasp = self._select_best_grasp(result["right"])
+            if left_grasp is None or right_grasp is None:
+                logger.log_warning(
+                    f"No valid left/right grasp for environment {env_idx}."
+                )
+                continue
+            left_grasp_xpos[env_idx] = left_grasp.to(
+                device=self.device, dtype=torch.float32
+            )
+            right_grasp_xpos[env_idx] = right_grasp.to(
+                device=self.device, dtype=torch.float32
+            )
+            success_mask[env_idx] = True
+        return left_grasp_xpos, right_grasp_xpos, success_mask
+
+    @staticmethod
+    def _select_best_grasp(arm_result: dict) -> torch.Tensor | None:
+        """Return the lowest-cost grasp pose from one arm's sampler result.
+
+        Args:
+            arm_result: One ``"left"``/``"right"`` entry of the dict returned by
+                :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses`.
+
+        Returns:
+            The selected ``(4, 4)`` grasp pose, or ``None`` when the sampler
+            reports no valid grasp for this arm.
+        """
+        if not arm_result.get("is_success", False):
+            return None
+        grasp_poses = arm_result["grasp_poses"].to(dtype=torch.float32)
+        costs = arm_result["total_cost"].to(dtype=torch.float32)
+        if grasp_poses.dim() == 2:
+            # The sampler returns a single eye(4) placeholder when it finds no
+            # valid pair; is_success should already cover this, but stay robust.
+            grasp_poses = grasp_poses.unsqueeze(0)
+            costs = costs.unsqueeze(0)
+        if grasp_poses.shape[0] == 0:
+            return None
+        best_idx = torch.argmin(costs)
+        if not torch.isfinite(costs[best_idx]):
+            return None
+        return grasp_poses[best_idx]
 
     def _compute_segment_lengths(
         self, sample_count: int, options: CoordinatedPickmentOptions
@@ -730,7 +850,15 @@ class CoordinatedPickment(
             left_target_xpos,
             right_target_xpos,
             held_state,
-        ) = self._resolve_target(target, context)
+            grasp_success,
+        ) = self._resolve_target(target, context, options)
+        if not grasp_success.any():
+            logger.log_warning("CoordinatedPickment failed to resolve dual-arm grasps.")
+            return self.failed_plan(
+                request,
+                context,
+                message="Failed to resolve dual-arm grasps.",
+            )
         left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(
             state, resources
         )
@@ -745,7 +873,7 @@ class CoordinatedPickment(
         right_approach_targets = torch.stack(
             [right_pre_grasp_xpos, right_grasp_xpos], dim=1
         )
-        success_mask = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
+        success_mask = grasp_success.clone()
         success_mask, left_approach_traj = self._plan_masked_arm_trajectory(
             resources.left_arm.name,
             left_start_qpos,
