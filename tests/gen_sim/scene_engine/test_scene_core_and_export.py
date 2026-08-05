@@ -24,7 +24,10 @@ import numpy as np
 import pytest
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.scene_object import ObjectPhysics, SceneObject
+from embodichain.gen_sim.scene_engine.core.scene_object import (
+    ObjectPhysics,
+    SceneObject,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter
 
 
@@ -124,7 +127,9 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     ).export()
     exported = json.loads(export_path.read_text(encoding="utf-8"))
 
-    assert (export_path.parent / "mesh_assets/table/table.glb").read_bytes() == b"glTF-table"
+    assert (
+        export_path.parent / "mesh_assets/table/table.glb"
+    ).read_bytes() == b"glTF-table"
     assert (export_path.parent / "mesh_assets/cup/cup.glb").read_bytes() == b"glTF-cup"
     entry = exported["rigid_object"][0]
     assert entry["uid"] == "cup"

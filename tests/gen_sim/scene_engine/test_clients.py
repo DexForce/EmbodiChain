@@ -44,7 +44,9 @@ class _Response:
 class _Session:
     """Capture HTTP calls without contacting an external service."""
 
-    def __init__(self, *, get_payload: object, post_payload: object | None = None) -> None:
+    def __init__(
+        self, *, get_payload: object, post_payload: object | None = None
+    ) -> None:
         self.get_payload = get_payload
         self.post_payload = post_payload
         self.get_calls: list[tuple[str, int]] = []
