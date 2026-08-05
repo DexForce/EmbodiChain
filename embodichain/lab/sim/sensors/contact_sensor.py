@@ -211,7 +211,9 @@ class ContactSensor(BaseSensor):
     def _build_sensor_from_config(self, config: ContactSensorCfg, device: torch.device):
         self._precompute_filter_ids(config)
         self._world: dexsim.World = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
         world_config = dexsim.get_world_config()
         self.is_use_gpu_physics = device.type == "cuda" and world_config.enable_gpu_sim
         if self.is_use_gpu_physics:

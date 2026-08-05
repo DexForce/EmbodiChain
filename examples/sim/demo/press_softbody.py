@@ -37,6 +37,7 @@ from embodichain.data import get_data_path
 from embodichain.utils import logger
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     SoftObjectCfg,
     SoftbodyVoxelAttributesCfg,
@@ -73,8 +74,9 @@ def initialize_simulation(args):
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device="cuda",
+        device="cuda",
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         visualization=visualization_cfg_from_args(args),

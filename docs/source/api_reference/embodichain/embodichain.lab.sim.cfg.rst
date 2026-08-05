@@ -25,6 +25,8 @@ Entity configs form a small inheritance hierarchy rooted at ``ObjectBaseCfg``
 
    RenderCfg
    PhysicsCfg
+   DefaultPhysicsCfg
+   NewtonPhysicsCfg
    MarkerCfg
    WindowRecordCfg
    WindowCameraPoseCfg

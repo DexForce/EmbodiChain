@@ -140,7 +140,7 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
         )
         robot = sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
@@ -243,7 +243,7 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
         )
         sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
@@ -301,7 +301,7 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
         )
         sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
@@ -367,7 +367,7 @@ class TestToppraNumericalRegression:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+            SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
         )
         sim.add_robot(
             cfg=CobotMagicCfg.from_dict(

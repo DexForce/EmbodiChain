@@ -29,6 +29,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RigidBodyAttributesCfg,
     LightCfg,
     RobotCfg,
@@ -119,8 +120,9 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         num_envs=args.num_envs,
         arena_space=10.0,
         visualization=visualization_cfg_from_args(args),

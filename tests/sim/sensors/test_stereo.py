@@ -42,7 +42,7 @@ class StereoCameraTest:
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=sim_device,
             num_envs=num_envs,
             render_cfg=RenderCfg(renderer=renderer),
         )

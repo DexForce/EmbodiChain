@@ -188,8 +188,8 @@ When a training config references a gym config (via `trainer.gym_config`), the n
             "height": 540,
             "width": 960
         }
-    ],
-    "env": {
+     ],
+     "env": {
         "control_parts": ["arm"],
         "actions": {
             "delta_qpos": {

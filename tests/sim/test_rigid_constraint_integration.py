@@ -64,12 +64,10 @@ class BaseRigidConstraintTest:
         pose_b = self.duck_b.get_local_pose(to_matrix=True)
         return float(pose_b[0, 2, 3] - pose_a[0, 2, 3])
 
-    def setup_simulation(self, sim_device: str) -> None:
-        if not _can_run_sim(sim_device):
-            pytest.skip(
-                f"Cannot run rigid-constraint integration test on {sim_device}."
-            )
-        config = SimulationManagerCfg(headless=True, sim_device=sim_device, num_envs=1)
+    def setup_simulation(self, device: str) -> None:
+        if not _can_run_sim(device):
+            pytest.skip(f"Cannot run rigid-constraint integration test on {device}.")
+        config = SimulationManagerCfg(headless=True, device=device, num_envs=1)
         self.sim = SimulationManager(config)
         self.sim.enable_physics(False)
 
@@ -99,7 +97,7 @@ class BaseRigidConstraintTest:
             ),
         )
 
-        if sim_device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
+        if device == "cuda" and getattr(self.sim, "is_use_gpu_physics", False):
             self.sim.init_gpu_physics()
         self.sim.enable_physics(True)
 

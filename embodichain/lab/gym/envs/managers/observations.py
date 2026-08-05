@@ -1157,14 +1157,9 @@ class get_articulation_joint_drive(Functor):
                 device=env.device,
             )
         else:
-            (
-                stiffness,
-                damping,
-                max_effort,
-                max_velocity,
-                friction,
-                armature,
-            ) = art.get_joint_drive()
+            stiffness, damping, max_effort, max_velocity, friction, armature = (
+                art.get_joint_drive()
+            )
             result = TensorDict(
                 {
                     "stiffness": stiffness,

@@ -130,7 +130,9 @@ class ClothObject(BatchEntity):
         device: torch.device = torch.device("cpu"),
     ) -> None:
         self._world: dexsim.World = dexsim.default_world()
-        self._ps = self._world.get_physics_scene()
+        from embodichain.lab.sim.sim_manager import get_physics_scene
+
+        self._ps = get_physics_scene()
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         self._data = ClothBodyData(entities=entities, ps=self._ps, device=device)
@@ -144,9 +146,10 @@ class ClothObject(BatchEntity):
         self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
         self.is_shared_visual_material = False
 
-        super().__init__(cfg=cfg, entities=entities, device=device)
+        super().__init__(cfg=cfg, entities=entities, device=device, auto_reset=False)
 
         self._initialize_existing_visual_material()
+        self.reset()
 
         self._set_default_collision_filter()
 

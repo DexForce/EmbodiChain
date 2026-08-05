@@ -253,7 +253,7 @@ class ToppraPlannerCfg(BasePlannerCfg):
     clears the inherited atexit registry and installs ``prctl(PR_SET_PDEATHSIG)``
     so workers are reaped when the parent dies (incl. the ``os._exit`` path).
     ``'spawn'`` is the safer choice when the parent has initialized CUDA
-    physics (``sim_device='cuda'``) — fork-after-CUDA-init is the officially
+    physics (``device='cuda'``) — fork-after-CUDA-init is the officially
     unsupported case — or if fork deadlocks are observed, at the cost of
     re-importing modules per worker.
     """

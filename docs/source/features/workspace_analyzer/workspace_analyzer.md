@@ -28,7 +28,7 @@ from embodichain.lab.sim.workspace import (
 )
 
 # Setup simulation
-sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
+sim = SimulationManager(SimulationManagerCfg(headless=False, device="cpu"))
 
 # Add robot
 robot = sim.add_robot(DexforceW1Cfg.from_dict({
@@ -170,7 +170,7 @@ from embodichain.lab.sim.workspace import (
 from embodichain.lab.sim.workspace.configs import VisualizationConfig
 
 # Setup simulation
-sim = SimulationManager(SimulationManagerCfg(headless=False, sim_device="cpu"))
+sim = SimulationManager(SimulationManagerCfg(headless=False, device="cpu"))
 
 # Add robot
 robot = sim.add_robot(DexforceW1Cfg.from_dict({

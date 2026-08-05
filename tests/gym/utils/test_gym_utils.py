@@ -40,6 +40,29 @@ from embodichain.lab.gym.utils.gym_utils import (
 from embodichain.utils.utility import load_config, save_config
 
 
+def test_env_launcher_args_include_physics():
+    """Test that launcher args expose the physics backend config selector."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+
+    default_args = parser.parse_args([])
+    assert default_args.physics == "default"
+
+    newton_args = parser.parse_args(["--physics", "newton"])
+    assert newton_args.physics == "newton"
+
+
+def test_merge_args_with_gym_config_includes_physics():
+    """Test that CLI physics config overrides the gym config."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser)
+    args = parser.parse_args(["--physics", "newton"])
+
+    merged_config = merge_args_with_gym_config(args, {})
+
+    assert merged_config["physics"] == "newton"
+
+
 class TestInitRolloutBufferFromConfig:
     """Tests for init_rollout_buffer_from_config function."""
 
@@ -270,6 +293,7 @@ def test_merge_args_with_gym_config_overrides_max_episodes():
         device="cpu",
         headless=False,
         renderer="auto",
+        physics="default",
         gpu_id=0,
         arena_space=5.0,
         max_episodes=12,
@@ -289,6 +313,7 @@ def test_merge_args_with_gym_config_keeps_default_max_episodes():
         device="cpu",
         headless=False,
         renderer="auto",
+        physics="default",
         gpu_id=0,
         arena_space=5.0,
         max_episodes=None,

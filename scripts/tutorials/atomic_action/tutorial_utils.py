@@ -31,7 +31,13 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     ObjectSemantics,
 )
-from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
+from embodichain.lab.sim.cfg import (
+    LightCfg,
+    MarkerCfg,
+    RenderCfg,
+    RobotCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator, ToppraPlannerCfg
 from embodichain.lab.sim.robots import URRobotCfg
@@ -116,7 +122,8 @@ def create_tutorial_simulation(
             height=height,
             headless=True,
             num_envs=args.num_envs,
-            sim_device=args.device,
+            device=args.device,
+            physics_cfg=physics_cfg_for_backend(args.physics),
             render_cfg=RenderCfg(renderer=args.renderer),
             physics_dt=1.0 / 100.0,
             arena_space=arena_space,

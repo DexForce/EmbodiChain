@@ -45,7 +45,7 @@ class TestMotionSourceReachEquivalence:
     POS_TOL = 0.02
 
     def _setup(self, motion_source: str):
-        sim = SimulationManager(SimulationManagerCfg(headless=True, sim_device="cpu"))
+        sim = SimulationManager(SimulationManagerCfg(headless=True, device="cpu"))
         robot = sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
                 {

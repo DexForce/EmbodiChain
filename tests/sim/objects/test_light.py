@@ -25,7 +25,7 @@ from embodichain.lab.sim.cfg import LightCfg
 class TestLight:
     def setup_method(self):
         # Setup SimulationManager
-        config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=10)
+        config = SimulationManagerCfg(headless=True, device="cpu", num_envs=10)
         self.sim = SimulationManager(config)
 
         # Create batch of lights
@@ -169,7 +169,7 @@ class TestLightTypes:
     @pytest.fixture(autouse=True)
     def setup(self):
         """Create a SimulationManager for each test."""
-        config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+        config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
         self.sim = SimulationManager(config)
         yield
         self.sim.destroy()

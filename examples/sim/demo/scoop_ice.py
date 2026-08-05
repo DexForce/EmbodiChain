@@ -33,6 +33,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject, RigidObjectGroup
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
     ArticulationCfg,
@@ -62,6 +63,7 @@ def initialize_simulation(args):
     config = SimulationManagerCfg(
         headless=True,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         visualization=visualization_cfg_from_args(args),
     )
