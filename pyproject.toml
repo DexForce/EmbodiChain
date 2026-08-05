@@ -57,11 +57,7 @@ gensim = [
   "pyrender==0.1.45",
   "requests",
   "Pillow",
-  "numpy",
   "scipy",
-  "shapely",
-  "trimesh",
-  "open3d",
   "matplotlib",
 ]
 # cuRobo V2 is distributed from its source repository and provides separate
