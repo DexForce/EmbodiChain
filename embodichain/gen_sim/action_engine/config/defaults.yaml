@@ -234,5 +234,10 @@ runtime:
   profiles:
     dual_franka: {}
     dual_ur3: {}
-    dual_ur5: {}
+    dual_ur5:
+      motion_policies:
+        upright_in_place_pickup:
+          lift_height: 0.12
+        upright_in_place_transport:
+          staging_lift_height: 0.12
     dual_ur10: {}

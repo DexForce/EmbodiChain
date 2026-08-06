@@ -1248,7 +1248,7 @@ class ProgramExecutor:
                 "type": "object_held",
                 "object": uid,
                 "position_tolerance": self.runtime_policy.predicate_fallbacks[
-                    "position_tolerance"
+                    "held_position_tolerance"
                 ],
             },
             held_owners={**self._object_owners, uid: owners},
@@ -1304,7 +1304,7 @@ class ProgramExecutor:
                 "type": "object_held",
                 "object": uid,
                 "position_tolerance": self.runtime_policy.predicate_fallbacks[
-                    "position_tolerance"
+                    "held_position_tolerance"
                 ],
                 "arm": arm,
             },

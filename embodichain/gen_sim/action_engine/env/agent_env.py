@@ -35,7 +35,8 @@ from embodichain.gen_sim.action_engine.runtime import (
     load_agent_execution_program,
 )
 from embodichain.gen_sim.action_engine.runtime.solver_compat import (
-    install_pytorch_solver_tcp_compat,
+    install_action_engine_solver_compat,
+    repair_action_engine_ur5_solver_cfg,
 )
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
@@ -77,8 +78,9 @@ class ActionEngineEnv(EmbodiedEnv):
         self.runtime_backend = str(runtime_backend)
         self.last_execution: Any | None = None
         self._runtime_state_ready = False
+        repair_action_engine_ur5_solver_cfg(getattr(cfg, "robot", None))
         super().__init__(cfg, **kwargs)
-        install_pytorch_solver_tcp_compat(self.robot)
+        install_action_engine_solver_compat(self.robot)
         if bool(getattr(self, "ignore_terminations_during_agent", False)):
             # Atomic trajectories execute online through env.step(). Prevent a
             # transient task signal from resetting an environment mid-program.

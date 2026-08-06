@@ -70,6 +70,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     WorldState,
 )
+from embodichain.lab.sim.solvers import URSolverCfg
 
 
 def _task_agent(*steps: dict[str, Any]) -> dict[str, Any]:
@@ -296,6 +297,20 @@ def test_documented_run_command_arguments_remain_compatible() -> None:
     assert args.headless is True
     assert args.seed == 17
     assert args.runtime_backend == "independent"
+
+
+def test_dual_ur5_policy_uses_short_reach_upright_lifts() -> None:
+    ur5 = default_runtime_policy("dual_ur5").motion_policies
+    ur10 = default_runtime_policy("dual_ur10").motion_policies
+
+    assert ur5["upright_in_place_pickup"]["lift_height"] == pytest.approx(0.12)
+    assert ur5["upright_in_place_transport"]["staging_lift_height"] == pytest.approx(
+        0.12
+    )
+    assert ur10["upright_in_place_pickup"]["lift_height"] == pytest.approx(0.30)
+    assert ur10["upright_in_place_transport"]["staging_lift_height"] == pytest.approx(
+        0.25
+    )
 
 
 def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
@@ -611,7 +626,7 @@ def test_physical_pickup_rebases_a_compliant_grasp_from_live_pose() -> None:
     env = _FakeEnv({"can": entity})
     env.robot._qpos[:, env.left_eef_joints] = env.close_state
     state = _held_state(env, entity)
-    entity._pose[:, 0, 3] += 0.02
+    entity._pose[:, 0, 3] += 0.055
     executor = ProgramExecutor(
         load_execution_program(
             compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
@@ -634,6 +649,31 @@ def test_physical_pickup_rebases_a_compliant_grasp_from_live_pose() -> None:
         state.get_held_object("physical_left_arm").object_to_eef,
     )
     assert torch.allclose(rebased_eef, left_eef)
+
+
+def test_physical_hold_accepts_configured_held_position_tolerance() -> None:
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    env = _FakeEnv({"can": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    state = _held_state(env, entity)
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        env,
+        record_runtime=False,
+    )
+    executor._object_owners["can"] = ["left_arm"]
+    entity._pose[:, 0, 3] += 0.055
+
+    held = executor._physical_hold(
+        "can",
+        "left_arm",
+        state,
+        torch.tensor([True]),
+    )
+
+    assert bool(held[0])
 
 
 def test_physical_pickup_rejects_large_grasp_slip() -> None:
@@ -1948,25 +1988,42 @@ def test_online_environment_preserves_result_and_disables_terminations(
     monkeypatch: Any,
 ) -> None:
     installed: list[Any] = []
+    initialization_order: list[tuple[str, Any]] = []
 
     def fake_super_init(self: Any, cfg: Any, **kwargs: Any) -> None:
         del kwargs
+        initialization_order.append(("super", cfg.robot))
         self.cfg = cfg
         self.robot = object()
         self.ignore_terminations_during_agent = True
 
+    def fake_repair(robot_cfg: Any) -> int:
+        initialization_order.append(("repair", robot_cfg))
+        return 1
+
+    def fake_install(robot: Any) -> int:
+        initialization_order.append(("install", robot))
+        installed.append(robot)
+        return 1
+
     monkeypatch.setattr(EmbodiedEnv, "__init__", fake_super_init)
     monkeypatch.setattr(
         env_module,
-        "install_pytorch_solver_tcp_compat",
-        lambda robot: installed.append(robot),
+        "repair_action_engine_ur5_solver_cfg",
+        fake_repair,
+    )
+    monkeypatch.setattr(
+        env_module,
+        "install_action_engine_solver_compat",
+        fake_install,
     )
     monkeypatch.setattr(
         env_module.ActionEngineEnv,
         "_capture_runtime_state",
         lambda self: None,
     )
-    cfg = SimpleNamespace(ignore_terminations=False)
+    robot_cfg = object()
+    cfg = SimpleNamespace(ignore_terminations=False, robot=robot_cfg)
     env = env_module.ActionEngineEnv(
         cfg,
         agent_config={"schema_version": "action_engine_config_v2"},
@@ -1981,7 +2038,39 @@ def test_online_environment_preserves_result_and_disables_terminations(
 
     assert cfg.ignore_terminations is True
     assert installed == [env.robot]
+    assert [name for name, _ in initialization_order] == [
+        "repair",
+        "super",
+        "install",
+    ]
+    assert initialization_order[0][1] is robot_cfg
     assert env._normalize_demo_action_list(result) is result
+
+
+def test_solver_compat_repairs_only_stale_action_engine_ur_dh_defaults() -> None:
+    stale_ur5 = URSolverCfg()
+    stale_ur5.ur_type = "ur5"
+    custom_ur5 = URSolverCfg(ur_type="ur5")
+    custom_ur5.d1 = 0.1
+    ur10 = URSolverCfg()
+    robot_cfg = SimpleNamespace(
+        solver_cfg={
+            "left": stale_ur5,
+            "left_alias": stale_ur5,
+            "custom": custom_ur5,
+            "right": ur10,
+        }
+    )
+    expected = URSolverCfg(ur_type="ur5")
+    dh_fields = ("d1", "a2", "a3", "d4", "d5", "d6")
+
+    assert solver_compat.repair_action_engine_ur5_solver_cfg(robot_cfg) == 1
+    assert tuple(getattr(stale_ur5, name) for name in dh_fields) == pytest.approx(
+        tuple(getattr(expected, name) for name in dh_fields)
+    )
+    assert custom_ur5.d1 == pytest.approx(0.1)
+    assert ur10.ur_type == "ur10"
+    assert solver_compat.repair_action_engine_ur5_solver_cfg(robot_cfg) == 0
 
 
 def test_solver_compat_uses_true_tcp_inverse_and_restores_solver(
@@ -2023,3 +2112,51 @@ def test_solver_compat_uses_true_tcp_inverse_and_restores_solver(
     )
     assert np.allclose(solver.tcp_xpos, original_tcp)
     assert solver_compat.install_pytorch_solver_tcp_compat(robot) == 0
+
+
+def test_solver_compat_aligns_ur5_analytic_ik_with_urdf_ee_frame(
+    monkeypatch: Any,
+) -> None:
+    class FakeSolver:
+        def __init__(self, ur_type: str) -> None:
+            self.cfg = SimpleNamespace(ur_type=ur_type)
+            self.device = torch.device("cpu")
+            self.tcp_xpos = np.array(
+                [
+                    [0.0, -1.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.2],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            )
+            self.received: torch.Tensor | None = None
+
+        def get_ik(
+            self,
+            target_xpos: torch.Tensor,
+            qpos_seed: torch.Tensor | None = None,
+            **kwargs: Any,
+        ) -> str:
+            del kwargs, qpos_seed
+            self.received = target_xpos
+            return "ok"
+
+    monkeypatch.setattr(solver_compat, "URSolver", FakeSolver)
+    ur5 = FakeSolver("ur5")
+    ur10 = FakeSolver("ur10")
+    robot = SimpleNamespace(_solvers={"left": ur5, "alias": ur5, "right": ur10})
+    target = torch.eye(4).unsqueeze(0)
+    target[:, :3, 3] = torch.tensor([0.3, -0.2, 0.8])
+    qpos_seed = torch.zeros((1, 6))
+
+    assert solver_compat.install_ur5_solver_frame_compat(robot) == 1
+    assert ur5.get_ik(target, qpos_seed) == "ok"
+
+    tcp = torch.as_tensor(ur5.tcp_xpos)
+    analytic_to_urdf = torch.eye(4)
+    analytic_to_urdf[0, 3] = -0.01
+    expected = target @ torch.linalg.inv(tcp) @ torch.linalg.inv(analytic_to_urdf) @ tcp
+    assert torch.allclose(ur5.received, expected)
+    assert ur10.received is None
+    assert solver_compat.install_ur5_solver_frame_compat(robot) == 0
