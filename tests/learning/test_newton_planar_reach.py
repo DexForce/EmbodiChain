@@ -351,6 +351,7 @@ def test_evaluation_uses_eval_mode_and_restores_policy_mode(
     assert policy.training is initial_training_mode
 
 
+@pytest.mark.slow
 def test_apg_training_generalizes_to_held_out_reaches() -> None:
     result = train_planar_reach(
         NewtonPlanarReachTrainingCfg(

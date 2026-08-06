@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import types
 
+import pytest
 import torch
 
 from embodichain.lab.sim import Profiler, ProfilerCfg, SimulationManager
+
+pytestmark = pytest.mark.no_sim
 
 
 class _WorldUpdateProbe:

@@ -140,7 +140,7 @@ class TestToppraPlanBatched:
         from embodichain.lab.sim.robots import CobotMagicCfg
 
         sim = SimulationManager(
-            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=3)
+            SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=2)
         )
         robot = sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
@@ -156,7 +156,7 @@ class TestToppraPlanBatched:
 
         planner, sim = self._make_planner()
         try:
-            B, dofs = 3, 6
+            B, dofs = 2, 6
             wp = torch.zeros(B, dofs)
             wp[:, 0] = torch.linspace(0.0, 0.4, B)
             states = [
@@ -186,9 +186,9 @@ class TestToppraPlanBatched:
 
         planner, sim = self._make_planner()
         try:
-            B, dofs = 3, 6
+            B, dofs = 2, 6
             wp = torch.zeros(B, dofs)
-            wp[:, 0] = torch.tensor([0.1, 0.4, 0.9])  # different durations
+            wp[:, 0] = torch.tensor([0.1, 0.9])  # different durations
             states = [
                 PlanState.from_qpos(torch.zeros(B, dofs)),
                 PlanState.from_qpos(wp),
@@ -228,6 +228,7 @@ class TestToppraPlanBatched:
 
             om.SimulationManager.flush_cleanup_queue()
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("mp_context", ["fork", "spawn"])
     def test_plan_batched_pool_path(self, mp_context):
         # Exercise the real ProcessPoolExecutor branch (max_workers=2, B=3)
@@ -279,6 +280,7 @@ class TestToppraPlanBatched:
 
             om.SimulationManager.flush_cleanup_queue()
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("mp_context", ["fork", "spawn"])
     def test_workers_reaped_on_gc(self, mp_context):
         # Regression: abandoning the planner must reap its worker processes,

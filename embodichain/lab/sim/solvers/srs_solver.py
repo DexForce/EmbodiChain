@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 import warp as wp
@@ -36,7 +38,7 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
 
 
-all = ["SRSSolver", "SRSSolverCfg"]
+__all__ = ["SRSSolver", "SRSSolverCfg"]
 
 
 @configclass
@@ -404,13 +406,16 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             return success_tensor, ik_qpos_tensor[:, :1, :]
 
     def _get_each_ik(
-        self, target_pose: np.ndarray, nsparam: float, config: np.ndarray
+        self,
+        target_pose: np.ndarray | torch.Tensor,
+        nsparam: float,
+        config: np.ndarray,
     ) -> tuple[bool, np.ndarray | None]:
         """
         Computes the inverse kinematics for a given target pose, normalization parameter, and configuration.
 
         Args:
-            target_pose (np.ndarray): 4x4 target pose matrix.
+            target_pose (np.ndarray | torch.Tensor): 4x4 target pose matrix.
             nsparam (float): Normalization parameter (angle).
             config (np.ndarray): Configuration index.
 
@@ -419,7 +424,10 @@ class _CPUSRSSolverImpl(_BaseSRSSolverImpl):
             np.ndarray: List of joint solutions (7) or None if no solution is found.
         """
         # Validate the target pose matrix
-        target_pose = np.array(target_pose)
+        if isinstance(target_pose, torch.Tensor):
+            target_pose = target_pose.detach().cpu().numpy()
+        else:
+            target_pose = np.asarray(target_pose)
         if target_pose.ndim == 3 and target_pose.shape[0] == 1:
             target_pose = target_pose[0]  # Extract the first matrix
         if target_pose.shape != (4, 4):

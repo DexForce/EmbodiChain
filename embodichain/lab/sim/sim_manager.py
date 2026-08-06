@@ -3151,19 +3151,33 @@ class SimulationManager:
         gc.collect()
 
     @staticmethod
-    def flush_cleanup_queue():
-        """Dequeue executor and synchronization barrier provided for top-level main loop / Pytest Fixture calls"""
+    def flush_cleanup_queue() -> None:
+        """Run pending destruction tasks and wait for their scenes to disappear.
+
+        An empty queue means that no manager requested destruction.  In that
+        case, returning immediately is important: other managers may still own
+        live worlds, and waiting for the global world count to reach zero would
+        block until the timeout even though there is nothing to clean up.
+        """
         import gc
 
-        while not SimulationManager._cleanup_queue.empty():
-            task = SimulationManager._cleanup_queue.get_nowait()
+        drained_task = False
+        while True:
+            try:
+                task = SimulationManager._cleanup_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            drained_task = True
             try:
                 task()
             except Exception as e:
                 from embodichain.utils import logger
 
                 logger.log_error(f"Error during delayed destruction: {e}")
-                pass
+
+        if not drained_task:
+            return
 
         # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
         gc.collect()

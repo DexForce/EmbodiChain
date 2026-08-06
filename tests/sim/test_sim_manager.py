@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+import gc
+import queue
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -42,6 +45,8 @@ DEFAULT_LOOK_AT = (
     (0.0, 0.0, 0.45),
     (0.0, 0.0, 1.0),
 )
+
+pytestmark = pytest.mark.no_sim
 
 
 class FakeCamera:
@@ -198,6 +203,45 @@ def _make_visualization_sim_manager() -> (
     return sim, runtime
 
 
+def test_flush_cleanup_queue_returns_immediately_when_no_destroy_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_queue: queue.Queue = queue.Queue()
+    collect = MagicMock()
+    wait_scene_destruction = MagicMock()
+    monkeypatch.setattr(SimulationManager, "_cleanup_queue", cleanup_queue)
+    monkeypatch.setattr(gc, "collect", collect)
+    monkeypatch.setattr(
+        SimulationManager, "wait_scene_destruction", wait_scene_destruction
+    )
+
+    SimulationManager.flush_cleanup_queue()
+
+    collect.assert_not_called()
+    wait_scene_destruction.assert_not_called()
+
+
+def test_flush_cleanup_queue_waits_after_running_pending_destroy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_queue: queue.Queue = queue.Queue()
+    destroy = MagicMock()
+    cleanup_queue.put(destroy)
+    collect = MagicMock()
+    wait_scene_destruction = MagicMock()
+    monkeypatch.setattr(SimulationManager, "_cleanup_queue", cleanup_queue)
+    monkeypatch.setattr(gc, "collect", collect)
+    monkeypatch.setattr(
+        SimulationManager, "wait_scene_destruction", wait_scene_destruction
+    )
+
+    SimulationManager.flush_cleanup_queue()
+
+    destroy.assert_called_once_with()
+    collect.assert_called_once_with()
+    wait_scene_destruction.assert_called_once_with()
+
+
 def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -> None:
     sim, runtime = _make_visualization_sim_manager()
 
@@ -308,7 +352,7 @@ def test_native_window_availability_depends_on_visualization_backend(
     runtime_active: bool,
     expected: bool,
 ) -> None:
-    sim = SimulationManager.__new__(SimulationManager)
+    sim = object.__new__(SimulationManager)
     sim.sim_config = SimpleNamespace(
         visualization=SimpleNamespace(backend=backend),
     )
@@ -318,7 +362,7 @@ def test_native_window_availability_depends_on_visualization_backend(
 
 
 def test_open_window_skips_viser_backend() -> None:
-    sim = SimulationManager.__new__(SimulationManager)
+    sim = object.__new__(SimulationManager)
     sim.sim_config = SimpleNamespace(
         visualization=SimpleNamespace(backend="viser"),
     )
@@ -332,7 +376,7 @@ def test_open_window_skips_viser_backend() -> None:
 
 
 def test_open_window_allows_native_backend() -> None:
-    sim = SimulationManager.__new__(SimulationManager)
+    sim = object.__new__(SimulationManager)
     sim.sim_config = SimpleNamespace(
         visualization=SimpleNamespace(backend="none"),
     )
@@ -352,7 +396,7 @@ def test_open_window_allows_native_backend() -> None:
 
 
 def test_open_window_is_idempotent() -> None:
-    sim = SimulationManager.__new__(SimulationManager)
+    sim = object.__new__(SimulationManager)
     sim.sim_config = SimpleNamespace(
         visualization=SimpleNamespace(backend="none"),
     )
@@ -367,7 +411,7 @@ def test_open_window_is_idempotent() -> None:
 
 
 def test_start_visualization_rejects_open_native_window() -> None:
-    sim = SimulationManager.__new__(SimulationManager)
+    sim = object.__new__(SimulationManager)
     sim.sim_config = SimpleNamespace(
         visualization=SimpleNamespace(backend="viser"),
     )
