@@ -157,8 +157,8 @@ jobs:
           export HF_ENDPOINT=https://hf-mirror.com
           pytest tests/docs -q --confcutdir=tests/docs
 
-          echo "Pure-Python tests (GPU hidden, four workers)"
-          CUDA_VISIBLE_DEVICES="" pytest tests --ignore=tests/docs \
+          echo "Non-simulation tests (four workers, CUDA available for native imports)"
+          pytest tests --ignore=tests/docs \
             -m "not requires_sim and not gpu" -n 4 --dist loadgroup
 
       - name: Run real-simulation tests serially
