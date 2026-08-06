@@ -150,20 +150,35 @@ jobs:
       - name: Verify Scene Engine gensim installation
         run: |
           python -c "import matplotlib, numpy, open3d, requests, scipy, shapely, trimesh; from PIL import Image; import embodichain.gen_sim.scene_engine.pipeline.generate"
-          pytest tests/gen_sim/scene_engine -q
 
       - name: Run default tests
         run: |
-          echo "Default test suite (GPU-marked tests are skipped)"
+          echo "Documentation tests"
           export HF_ENDPOINT=https://hf-mirror.com
           pytest tests/docs -q --confcutdir=tests/docs
-          pytest tests --ignore=tests/docs
 
-      - name: Run GPU tests serially
+          echo "Non-simulation tests (four workers, CUDA available for native imports)"
+          pytest tests --ignore=tests/docs \
+            -m "not requires_sim and not gpu" -n 4 --dist loadgroup
+
+      - name: Run real-simulation tests serially
+        run: |
+          echo "Real-simulation tests (one process, GPU tests excluded)"
+          export HF_ENDPOINT=https://hf-mirror.com
+          pytest tests --ignore=tests/docs -m "requires_sim and not gpu"
+
+      - name: Run distributed GPU tests in isolation
+        run: |
+          echo "Distributed GPU tests (isolated CUDA process tree)"
+          export HF_ENDPOINT=https://hf-mirror.com
+          pytest tests/learning/test_rl_distributed.py --run-gpu -m gpu
+
+      - name: Run remaining GPU tests serially
         run: |
           echo "Dedicated GPU test suite"
           export HF_ENDPOINT=https://hf-mirror.com
-          pytest tests --run-gpu -m gpu
+          pytest tests --ignore=tests/docs \
+            --ignore=tests/learning/test_rl_distributed.py --run-gpu -m gpu
 
   release-build:
     if: startsWith(github.ref, 'refs/tags/v')

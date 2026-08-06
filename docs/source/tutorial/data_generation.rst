@@ -143,7 +143,7 @@ The rollout script parses command-line arguments, loads the gym and action confi
 
 .. literalinclude:: ../../../embodichain/lab/scripts/run_env.py
    :language: python
-   :start-at: def cli():
+   :start-at: def cli(
    :end-at:     main(args, env, gym_config)
 
 Each rollout internally calls ``create_demo_action_list()``, validates the returned sequence, executes actions with ``env.step(action)``, and discards invalid rollouts by resetting with ``save_data=False``.
@@ -159,6 +159,10 @@ The recommended CLI entrypoint is:
 
 For interactive inspection, you can use preview mode: replace ``--headless`` with ``--preview``.
 When ``--preview`` is enabled, the script opens the environment in an interactive debugging mode. This mode is for inspection and does not save datasets.
+
+For a detailed comparison of preview, structured dataset recording, debug-video
+recording, trajectory recording, and the three replay modes, see
+:doc:`Run Environment </guides/run_env>`.
 
 
 Useful CLI arguments:

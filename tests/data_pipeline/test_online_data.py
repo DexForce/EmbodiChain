@@ -120,7 +120,10 @@ def _make_fake_engine(
     engine._close_signal = engine._mp_ctx.Event()
     engine._sample_count = engine._mp_ctx.Value("i", 0)
 
-    engine.start()
+    # Sampling tests intentionally bypass the simulation worker.  Starting it
+    # here would exercise unrelated environment setup and make teardown wait
+    # for the subprocess timeout when the synthetic config cannot run a task.
+    engine._sim_process = None
 
     return engine
 

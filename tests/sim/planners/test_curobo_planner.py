@@ -99,6 +99,20 @@ _NO_MIMIC_URDF = """\
 """
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_torch_precision_settings():
+    """Keep cuRobo's process-wide TF32 changes local to this test module."""
+    matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
+    matmul_precision = torch.get_float32_matmul_precision()
+
+    yield
+
+    torch.set_float32_matmul_precision(matmul_precision)
+    torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
+    torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+
+
 def _raise_module_not_found(*args, **kwargs):
     raise ModuleNotFoundError("curobo not installed")
 

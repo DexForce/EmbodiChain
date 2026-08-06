@@ -16,14 +16,17 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import inspect
 import os
+import re
 import pytest
 
 os.environ.setdefault("EMBODICHAIN_SIM_EXIT_PROCESS", "0")
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _discover_task_packages():
     """Discover all installed task packages once per test session.
 
@@ -43,6 +46,14 @@ def _discover_task_packages():
 
     discover_task_packages()
     execute_init_hooks()
+
+
+@pytest.fixture(autouse=True)
+def _discover_task_packages_for_marked_tests(request):
+    """Discover task packages only for tests that consume registered tasks."""
+    if request.node.get_closest_marker("requires_tasks") is not None:
+        request.getfixturevalue("_discover_task_packages")
+    yield
 
 
 def pytest_addoption(parser):
@@ -68,34 +79,78 @@ def pytest_configure(config):
                 f"Invalid renderer: {renderer}. Must be one of 'hybrid', 'fast-rt'"
             )
 
-        # Override the global default renderer in the simulation config
-        from embodichain.lab.sim import cfg
-
-        cfg.DEFAULT_RENDERER = renderer
-
         # DexSim initialization is intentionally deferred to the first real-simulation
         # test.  Most of the suite consists of pure-Python tests and should not acquire
         # a CUDA/Vulkan context merely because pytest has started.
 
 
-def _requires_real_sim(item):
-    """Return whether a test module creates a real SimulationManager."""
-    if item.get_closest_marker("requires_sim") is not None:
-        return True
-    module = getattr(item, "module", None)
-    if module is not None and "SimulationManager" in vars(module):
-        return True
+_SIMULATION_MANAGER_CONSTRUCTOR = re.compile(r"\bSimulationManager\s*\(")
 
-    # Some planner regression tests intentionally import the simulation manager
-    # inside the test body to keep their module import lightweight.
+
+@lru_cache(maxsize=None)
+def _source_constructs_real_sim(obj):
+    """Return whether an object's source directly constructs a simulation manager."""
     try:
-        return "SimulationManager" in inspect.getsource(item.obj)
+        return (
+            _SIMULATION_MANAGER_CONSTRUCTOR.search(inspect.getsource(obj)) is not None
+        )
     except (OSError, TypeError):
         return False
 
 
+def _callable_constructs_real_sim(obj):
+    """Check a callable and the module-level helpers it directly references."""
+    if _source_constructs_real_sim(obj):
+        return True
+
+    code = getattr(obj, "__code__", None)
+    module = inspect.getmodule(obj)
+    if code is None or module is None:
+        return False
+
+    for name in code.co_names:
+        helper = vars(module).get(name)
+        if inspect.isfunction(helper) and _source_constructs_real_sim(helper):
+            return True
+    return False
+
+
+def _requires_real_sim(item):
+    """Return whether a test item creates a real SimulationManager."""
+    if item.get_closest_marker("requires_sim") is not None:
+        return True
+    if item.get_closest_marker("no_sim") is not None:
+        return False
+
+    module = getattr(item, "module", None)
+    if module is not None and "SimulationManager" in vars(module):
+        return True
+
+    if _callable_constructs_real_sim(item.obj):
+        return True
+
+    test_class = getattr(item, "cls", None)
+    if test_class is not None:
+        for cls in test_class.__mro__:
+            if _source_constructs_real_sim(cls):
+                return True
+
+    fixture_info = getattr(item, "_fixtureinfo", None)
+    fixture_defs_by_name = getattr(fixture_info, "name2fixturedefs", {})
+    for fixture_defs in fixture_defs_by_name.values():
+        for fixture_def in fixture_defs:
+            if _callable_constructs_real_sim(fixture_def.func):
+                return True
+
+    return False
+
+
 def _initialize_sim_engine(renderer):
     """Initialize DexSim once, immediately before the first real-sim test."""
+    from embodichain.lab.sim import cfg
+
+    cfg.DEFAULT_RENDERER = renderer
+
     import dexsim
     import dexsim.types
 
@@ -113,6 +168,7 @@ def _initialize_sim_engine(renderer):
     dexsim.init_sim_engine(sim_config)
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """Classify real-simulation tests for fast and resource-aware test selection."""
     for item in items:
@@ -120,6 +176,12 @@ def pytest_collection_modifyitems(config, items):
         requires_sim = _requires_real_sim(item)
         if requires_sim:
             item.add_marker(pytest.mark.requires_sim)
+            item.add_marker(pytest.mark.xdist_group(name="simulation"))
+        else:
+            module_name = getattr(item.module, "__name__", "unknown")
+            item.add_marker(
+                pytest.mark.xdist_group(name=f"module-{module_name.replace('.', '-')}")
+            )
         if "cuda" in nodeid or "gpu" in nodeid:
             item.add_marker(pytest.mark.gpu)
         if requires_sim and (

@@ -146,3 +146,26 @@ def test_scene_export_requires_final_physics(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="no SimReady physics"):
         SceneExporter(scene=Scene(objects=[table]), output_root=tmp_path).export()
+
+
+def test_scene_export_rejects_backslash_in_object_id(tmp_path: Path) -> None:
+    glb_path = tmp_path / "table.glb"
+    glb_path.write_bytes(b"glTF")
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=glb_path,
+        physics=_physics("kinematic"),
+    )
+    unsafe_asset = _scene_object(
+        object_id=r"..\evil",
+        kind="asset",
+        glb_path=glb_path,
+        physics=_physics("dynamic"),
+    )
+
+    with pytest.raises(ValueError, match="not safe for a GLB filename"):
+        SceneExporter(
+            scene=Scene(objects=[table, unsafe_asset]),
+            output_root=tmp_path / "output",
+        ).export()

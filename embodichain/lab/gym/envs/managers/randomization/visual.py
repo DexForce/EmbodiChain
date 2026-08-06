@@ -100,7 +100,7 @@ def set_rigid_object_visual_material(
 
     mat = env.sim.create_visual_material(mat_cfg)
     obj: RigidObject = env.sim.get_rigid_object(entity_cfg.uid)
-    obj.set_visual_material(mat, env_ids=env_ids)
+    obj.set_visual_material(mat, env_ids=env_ids, update_default=True)
 
 
 def set_rigid_object_group_visual_material(
@@ -645,6 +645,14 @@ class randomize_visual_material(Functor):
                 self._new_mode = False
         if not self._new_mode:
             self._init_legacy(env)
+            # The legacy path used to upload a new Texture on every invocation.
+            # This is especially easy to hit for the default plane and for an
+            # automatic reuse-to-legacy fallback, where clean_materials() is not
+            # safe to call because live Python Material objects are retained.
+            # Reuse the same bounded texture pools as the existing-material path
+            # instead, so repeated randomization does not consume texture IDs.
+            self._build_library_textures(env)
+            self._build_solid_textures(env)
 
     def _init_reuse(self, env: EmbodiedEnv) -> None:
         """Init the reuse path: capture existing materials, pre-create textures, resolve tiers."""
@@ -810,10 +818,13 @@ class randomize_visual_material(Functor):
         return rgba
 
     def _randomize_texture(self, mat_inst: VisualMaterialInst) -> None:
-        if len(self.textures) > 0:
-            # Randomly select a texture from the preloaded textures
-            texture_idx = torch.randint(0, len(self.textures), (1,)).item()
-            mat_inst.set_base_color_texture(texture_data=self.textures[texture_idx])
+        if self._library_textures:
+            # Bind a pre-created Texture instead of uploading the same image on
+            # every randomization interval.
+            texture_idx = torch.randint(0, len(self._library_textures), (1,)).item()
+            mat_inst.set_base_color_texture(
+                texture_obj=self._library_textures[texture_idx]
+            )
 
     def _randomize_mat_inst(
         self,
@@ -823,7 +834,7 @@ class randomize_visual_material(Functor):
         idx: int = 0,
     ) -> None:
         # randomize texture or base color based on the probability.
-        if random.random() < random_texture_prob and len(self.textures) != 0:
+        if random.random() < random_texture_prob and self._library_textures:
             for key, value in plan.items():
                 if key == "base_color":
                     mat_inst.set_base_color(value[idx].tolist())
@@ -832,11 +843,12 @@ class randomize_visual_material(Functor):
 
             self._randomize_texture(mat_inst)
         else:
-            # set a random base color instead.
-            random_color_texture = (
-                randomize_visual_material.gen_random_base_color_texture(2, 2)
+            # Use the bounded solid-color palette. Uploading a generated tensor
+            # here would allocate a fresh DexSim texture ID on every call.
+            texture_idx = torch.randint(0, len(self._solid_textures), (1,)).item()
+            mat_inst.set_base_color_texture(
+                texture_obj=self._solid_textures[texture_idx]
             )
-            mat_inst.set_base_color_texture(texture_data=random_color_texture)
 
     def __call__(
         self,
