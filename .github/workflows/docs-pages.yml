@@ -29,6 +29,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Release-triggered deploys can report success while continuing to serve the
+  # previous artifact when the release reuses an already deployed commit SHA.
+  # Dispatching the build avoids that GitHub Pages failure mode:
+  # https://github.com/actions/deploy-pages/issues/383
+  redispatch-release:
+    if: >
+      github.event_name == 'release' &&
+      github.event.action == 'published' &&
+      startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch release docs build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh workflow run docs-pages.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "${DEFAULT_BRANCH}" \
+            -f ref="${RELEASE_TAG}"
+
   deploy-from-artifact:
     if: >
       (github.event_name == 'workflow_run' &&
@@ -50,6 +75,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ./docs-site
 
+      - name: Stamp Pages artifact
+        run: printf '%s\n' "${GITHUB_RUN_ID}" > ./docs-site/pages-deployment-id.txt
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -59,12 +87,26 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
+      - name: Verify deployed artifact
+        env:
+          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for attempt in {1..30}; do
+            marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
+            deployed_id="$(curl --fail --silent --show-error "${marker_url}" || true)"
+            if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
+              echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
+              exit 0
+            fi
+            echo "Waiting for Pages deployment ${EXPECTED_DEPLOYMENT_ID} (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "Pages did not serve deployment ${EXPECTED_DEPLOYMENT_ID}." >&2
+          exit 1
+
   build-and-deploy:
-    if: >
-      (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == '') ||
-      (github.event_name == 'release' &&
-       github.event.action == 'published' &&
-       startsWith(github.event.release.tag_name, 'v'))
+    if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
     runs-on: Linux
     env:
       NVIDIA_DRIVER_CAPABILITIES: all
@@ -152,11 +194,7 @@ jobs:
           path: ${{ github.workspace }}/docs/build/html
 
   deploy-manual-build:
-    if: >
-      (github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == '') ||
-      (github.event_name == 'release' &&
-       github.event.action == 'published' &&
-       startsWith(github.event.release.tag_name, 'v'))
+    if: github.event_name == 'workflow_dispatch' && inputs.artifact_run_id == ''
     needs: build-and-deploy
     runs-on: ubuntu-latest
     environment:
@@ -169,6 +207,9 @@ jobs:
           name: docs-site-manual
           path: ./docs-site
 
+      - name: Stamp Pages artifact
+        run: printf '%s\n' "${GITHUB_RUN_ID}" > ./docs-site/pages-deployment-id.txt
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -177,3 +218,21 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify deployed artifact
+        env:
+          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for attempt in {1..30}; do
+            marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
+            deployed_id="$(curl --fail --silent --show-error "${marker_url}" || true)"
+            if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
+              echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
+              exit 0
+            fi
+            echo "Waiting for Pages deployment ${EXPECTED_DEPLOYMENT_ID} (attempt ${attempt}/30)..."
+            sleep 10
+          done
+          echo "Pages did not serve deployment ${EXPECTED_DEPLOYMENT_ID}." >&2
+          exit 1
