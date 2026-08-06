@@ -112,7 +112,7 @@ class _MockEnv:
                 "segment_id": torch.zeros(num_envs, steps, dtype=torch.long),
                 "segment_step": episode_step.clone(),
                 "segment_start": episode_step == 0,
-                "segment_end": episode_step == steps - 1,
+                "segment_end": torch.zeros(num_envs, steps, dtype=torch.bool),
                 "terminated": torch.zeros(num_envs, steps, dtype=torch.bool),
                 "truncated": torch.zeros(num_envs, steps, dtype=torch.bool),
             },
@@ -226,6 +226,7 @@ class TestAsyncLeRobotRecorder:
             assert (frame[LeRobotKey.ACTION.value] == 0).all()
             assert frame["annotation.segment_id"].tolist() == [0]
             assert frame["task"] == "original segment task"
+        assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]
 
     def test_finalize_drains_and_finalizes_dataset(self):
         """finalize() must drain the worker then call dataset.finalize()."""

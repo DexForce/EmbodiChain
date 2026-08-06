@@ -181,6 +181,24 @@ immediately. It temporarily disables Gym auto-reset, so dataset recording is
 transactional: only the explicit reset after successful final validation
 saves the episode.
 
+Segment actions pass through the same action-dimension normalization used by
+legacy `create_demo_action_list()` tasks. A time-limit truncation is always an
+invalid expert rollout, including when it occurs on the planner's final
+action, so a task's `max_episode_steps` must be greater than the longest valid
+expert plan.
+
+In a vectorized environment, the shared executor currently treats the batch
+as one transaction: the first environment to terminate or truncate stops the
+batch, and every environment must pass final validation before the reset is
+committed. Tasks whose parallel environments finish asynchronously should use
+`num_envs: 1` for expert generation until masked per-environment execution is
+supported.
+
+Failed attempts use `reset(options={"save_data": False})`. This discards
+structured datasets, replay trajectories, and camera-video buffers; recorder
+options such as `save_failed_episodes` do not override the runner's expert
+transaction policy.
+
 ### Choose the recording output you need
 
 EmbodiChain uses "recording" for three related but distinct outputs:

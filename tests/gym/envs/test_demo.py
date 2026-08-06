@@ -148,10 +148,17 @@ def test_execute_demo_episode_never_accepts_truncated_rollout() -> None:
 
 
 class _LegacyEnv(_SegmentedEnv):
-    create_demo_segments = None
+    create_demo_segments = EmbodiedEnv.create_demo_segments
 
     def create_demo_action_list(self):
         return (3,)
+
+    def step(self, action: int):
+        obs, reward, terminated, truncated, info = super().step(action)
+        # Real EmbodiedEnv instances always expose compute_task_state() in
+        # info, while legacy expert tasks often only override is_task_success().
+        info["success"] = torch.tensor([False])
+        return obs, reward, terminated, truncated, info
 
 
 def test_execute_demo_episode_adapts_legacy_action_list() -> None:
@@ -163,6 +170,27 @@ def test_execute_demo_episode_adapts_legacy_action_list() -> None:
     assert result.all_success
     assert len(result.segments) == 1
     assert result.segments[0].name == "legacy"
+
+
+class _NormalizingSegmentedEnv(_SegmentedEnv):
+    def create_demo_segments(self):
+        return (DemoSegment(actions=(1, 2, 3), name="normalized"),)
+
+    def _normalize_demo_action(self, action: int) -> int:
+        return action + 10
+
+    def is_task_success(self) -> torch.Tensor:
+        return torch.tensor([self.state == 13])
+
+
+def test_execute_demo_episode_normalizes_segment_actions() -> None:
+    """New segment planners use the same action normalization hook as legacy plans."""
+    env = _NormalizingSegmentedEnv()
+
+    result = execute_demo_episode(env)
+
+    assert result.all_success
+    assert env.actions == [11, 12, 13]
 
 
 def _make_rollout_buffer(num_envs: int, steps: int) -> TensorDict:
@@ -237,3 +265,32 @@ def test_clear_expert_rows_preserves_unrelated_environment() -> None:
     assert env.rollout_buffer["valid"][1].all()
     assert (env.rollout_buffer["segment_id"][0] == -1).all()
     assert (env.rollout_buffer["segment_id"][1] == 5).all()
+
+
+def test_legacy_metadata_reports_consistent_episode_success() -> None:
+    """Fallback metadata agrees at the episode and segment levels."""
+    env = _RolloutWriterStub()
+    env._demo_episode_metadata = [
+        {
+            "schema_version": 2,
+            "episode_index": 0,
+            "env_id": env_id,
+            "length": 0,
+            "completed": False,
+            "success": False,
+            "terminated": False,
+            "truncated": False,
+            "terminal_reason": "unknown",
+            "segments": [],
+        }
+        for env_id in range(env.num_envs)
+    ]
+    env.episode_success_status = torch.tensor([False, True])
+    env._task_success = torch.tensor([False, False])
+
+    metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+
+    assert metadata["completed"]
+    assert metadata["success"]
+    assert metadata["terminal_reason"] == "success"
+    assert metadata["segments"][0]["success"]

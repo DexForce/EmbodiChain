@@ -258,6 +258,7 @@ def execute_demo_episode(
     begin_segment = _get_env_callable(env, "_begin_demo_segment_recording")
     end_segment = _get_env_callable(env, "_end_demo_segment_recording")
     end_episode = _get_env_callable(env, "_end_demo_episode_recording")
+    normalize_action = _get_env_callable(env, "_normalize_demo_action")
 
     if begin_episode is not None:
         begin_episode(episode_index=episode_index)
@@ -288,7 +289,9 @@ def execute_demo_episode(
                 actions = ()
             if progress is not None:
                 actions = progress(
-                    actions, f"Executing segment {segment_id}: {segment.name}"
+                    actions,
+                    f"Executing episode #{episode_index}, segment #{segment_id}: "
+                    f"{segment.name}",
                 )
 
             for action in actions:
@@ -298,6 +301,8 @@ def execute_demo_episode(
                     segment_reason = terminal_reason
                     break
 
+                if normalize_action is not None:
+                    action = normalize_action(action)
                 _, _, terminated_value, truncated_value, info = env.step(action)
                 action_count += 1
                 total_steps += 1
@@ -344,10 +349,21 @@ def execute_demo_episode(
             completed = False
             terminal_reason = "empty_plan"
 
-        success_source = last_info.get("success")
-        if success_source is None:
-            success_fn = _get_env_callable(env, "is_task_success")
-            success_source = success_fn() if success_fn is not None else completed
+        success_fn = _get_env_callable(env, "is_task_success")
+        if any(terminated) or any(truncated):
+            success_source = last_info.get("success")
+            if success_source is None:
+                success_source = success_fn() if success_fn is not None else False
+        else:
+            # Expert tasks historically validate the final planned state with
+            # is_task_success(). EmbodiedEnv.get_info() always contains a
+            # compute_task_state()-based success field, which remains false for
+            # legacy tasks that only implement the expert-policy hook.
+            success_source = (
+                success_fn()
+                if success_fn is not None
+                else last_info.get("success", completed)
+            )
         success = _as_bool_tuple(success_source, num_envs)
 
         if any(truncated):

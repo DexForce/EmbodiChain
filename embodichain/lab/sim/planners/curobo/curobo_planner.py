@@ -640,7 +640,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
 
     Raises:
         ImportError: If cuRobo V2 is not installed, with an actionable message
-            naming NVIDIA's CUDA-matched extras.
+            naming NVIDIA's CUDA-matched source variants.
     """
     _configure_curobo_logging(log_level)
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
@@ -652,10 +652,10 @@ def _require_curobo(log_level: str = "error") -> "Any":
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
-            "From the EmbodiChain repository root, install the CUDA-matched "
-            "extra, e.g. `pip install -e '.[curobo-cu12]'` for CUDA 12.x or "
-            "`pip install -e '.[curobo-cu13]'` for CUDA 13.x "
-            "(also `.[curobo-cu12-torch]` / `.[curobo-cu13-torch]`). "
+            "Install NVIDIA's CUDA-matched source package separately, e.g. "
+            "`pip install 'nvidia-curobo[cu12] @ "
+            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
     return SimpleNamespace(

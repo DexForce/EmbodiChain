@@ -17,6 +17,9 @@
 
 from __future__ import annotations
 
+import json
+import threading
+
 import numpy as np
 import pytest
 import torch
@@ -738,6 +741,26 @@ class TestLeRobotRecorderFrameConversion:
         assert torch.equal(frame["observation.mask.camera"], mask)
         assert frame["observation.depth.camera"].dtype == torch.float32
         assert frame["observation.mask.camera"].dtype == torch.int32
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
+    """The EmbodiChain sidecar is valid append-only JSONL."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder.dataset_full_path = tmp_path
+    recorder._metadata_lock = threading.Lock()
+
+    recorder._write_episode_metadata(
+        {"episode_index": 1, "segments": [{"name": "pick"}]}
+    )
+    recorder._write_episode_metadata(
+        {"episode_index": 2, "segments": [{"name": "place"}]}
+    )
+
+    metadata_path = tmp_path / "meta" / "embodichain_episodes.jsonl"
+    records = [json.loads(line) for line in metadata_path.read_text().splitlines()]
+    assert [record["episode_index"] for record in records] == [1, 2]
+    assert [record["segments"][0]["name"] for record in records] == ["pick", "place"]
 
 
 class TestDatasetFunctorCfg:

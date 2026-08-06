@@ -37,6 +37,8 @@ from embodichain.utils import logger
 from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS
 from .datasets import LeRobotRecorder
 
+__all__ = ["AsyncLeRobotRecorder"]
+
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 

@@ -30,6 +30,8 @@ from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 
+__all__ = ["OnlineDataEngine", "OnlineDataEngineCfg"]
+
 
 @configclass
 class OnlineDataEngineCfg:
@@ -115,6 +117,10 @@ def _sim_worker_fn(
     env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
     env_cfg.filter_dataset_saving = True
     env_cfg.init_rollout_buffer = False
+    # The environment must truncate at the exact capacity of the shared row.
+    # Otherwise a longer successful plan is silently clipped by the writer and
+    # published as if the complete episode had been stored.
+    env_cfg.max_episode_steps = int(shared_buffer.batch_size[1])
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config.get("headless", True),
         sim_device=gym_config.get("device", "cpu"),
@@ -161,15 +167,19 @@ def _sim_worker_fn(
             )
 
             # Reset write cursor to the beginning of the buffer.
-            lock_index[0] = 0
-            lock_index[1] = num_envs
+            with lock_index.get_lock():
+                lock_index[0] = 0
+                lock_index[1] = num_envs
 
             rollout_idx = 0
             while rollout_idx < num_rollouts_per_fill:
                 if close_signal.is_set():
                     return
 
-                tmp_buffer = shared_buffer[lock_index[0] : lock_index[1], :]
+                with lock_index.get_lock():
+                    write_start = lock_index[0]
+                    write_end = lock_index[1]
+                tmp_buffer = shared_buffer[write_start:write_end, :]
                 result = None
                 for attempt in range(1, cfg.max_generation_attempts + 1):
                     # set_rollout_buffer invalidates the locked rows before
@@ -190,6 +200,8 @@ def _sim_worker_fn(
                     )
                     if result.completed and result.all_success:
                         break
+                    if close_signal.is_set() or result.terminal_reason == "interrupted":
+                        return
                     log_warning(
                         f"[Simulation Process] Rollout {rollout_idx + 1}/{num_rollouts_per_fill} "
                         f"attempt {attempt}/{cfg.max_generation_attempts} failed: "
@@ -206,13 +218,13 @@ def _sim_worker_fn(
 
                 log_info(
                     f"[Simulation Process] Rollout {rollout_idx}/{num_rollouts_per_fill} done. "
-                    f"lock_index=[{lock_index[0]}, {lock_index[1]}], ",
+                    f"lock_index=[{write_start}, {write_end}], ",
                     color="cyan",
                 )
 
                 # Advance lock_index to the next write slice.
-                next_start = lock_index[0] + num_envs
-                next_end = lock_index[1] + num_envs
+                next_start = write_start + num_envs
+                next_end = write_end + num_envs
                 if next_start >= buffer_size:
                     # Wrap around to the start of the buffer.
                     next_start = 0
@@ -221,23 +233,26 @@ def _sim_worker_fn(
                     next_end = buffer_size
                     next_start = buffer_size - num_envs
 
-                lock_index[0] = next_start
-                lock_index[1] = next_end
+                # Samplers hold this same lock until their selected data has
+                # been copied. Publishing the next write window therefore
+                # cannot race a sample that selected rows under the old mask.
+                with lock_index.get_lock():
+                    lock_index[0] = next_start
+                    lock_index[1] = next_end
 
-            # # Signal that the buffer contains valid data for the first time.
-            # # is_set() is checked so subsequent refills do not redundantly set it.
+            # Unlock every row before publishing readiness to the parent.
+            with lock_index.get_lock():
+                lock_index[0] = -1
+                lock_index[1] = -1
+
+            # Signal that the buffer contains valid data for the first time.
+            # is_set() is checked so subsequent refills do not redundantly set it.
             if not init_signal.is_set():
                 init_signal.set()
                 log_info(
                     "[Simulation Process] Initial buffer fill complete. Engine is ready.",
                     color="cyan",
                 )
-
-            # # At this point the entire buffer has been filled with fresh data, and
-            # # all the data in the buffer is valid and safe to sample from.
-            lock_index[0] = -1
-            lock_index[1] = -1
-
     except KeyboardInterrupt:
         log_warning("[Simulation Process] Stopping (KeyboardInterrupt).")
     except Exception as e:
@@ -372,7 +387,19 @@ class OnlineDataEngine:
         self._fill_signal.set()
 
         while not self.is_init:
+            self._ensure_worker_alive()
             time.sleep(0.5)
+
+    def _ensure_worker_alive(self) -> None:
+        """Raise when a started simulation worker exits unexpectedly."""
+        if self._sim_process is None or self._sim_process.is_alive():
+            return
+
+        self._sim_process.join(timeout=0)
+        raise RuntimeError(
+            "OnlineDataEngine simulation worker exited unexpectedly "
+            f"(exit code {self._sim_process.exitcode})."
+        )
 
     # -----------------------------------------------------------------------
     # Buffer initialisation
@@ -464,6 +491,8 @@ class OnlineDataEngine:
             ValueError: If an argument is invalid.
             RuntimeError: If no unlocked valid window satisfies the policy.
         """
+        self._ensure_worker_alive()
+
         max_steps: int = self.shared_buffer.batch_size[1]
         if batch_size < 1:
             raise ValueError(f"batch_size must be at least 1, got {batch_size}.")
@@ -482,62 +511,74 @@ class OnlineDataEngine:
         if sampling_mode == "boundary" and chunk_size < 2:
             raise ValueError("boundary sampling requires chunk_size >= 2.")
 
-        # Build the set of rows that are safe to sample from: all valid rows
-        # minus the slice currently being written by the subprocess.
-        lock_start: int = self._lock_index[0]
-        lock_end: int = self._lock_index[1]
+        # Hold the producer's window lock through the final clone. The worker
+        # may continue writing its already-advertised window, which is excluded
+        # below, but cannot switch to one of our selected rows until the copy is
+        # complete.
+        with self._lock_index.get_lock():
+            lock_start: int = self._lock_index[0]
+            lock_end: int = self._lock_index[1]
 
-        if "valid" in self.shared_buffer.keys():
-            valid = self.shared_buffer["valid"].bool()
-        else:
-            # Schema-v1 buffers are one fully valid segment per row.
-            valid = torch.ones(
-                self.buffer_size,
-                max_steps,
-                dtype=torch.bool,
-                device=self.shared_buffer.device,
+            if "valid" in self.shared_buffer.keys():
+                valid = self.shared_buffer["valid"].bool()
+            else:
+                # Schema-v1 buffers are one fully valid segment per row.
+                valid = torch.ones(
+                    self.buffer_size,
+                    max_steps,
+                    dtype=torch.bool,
+                    device=self.shared_buffer.device,
+                )
+
+            all_rows = torch.arange(self.buffer_size, device=valid.device)
+            is_locked = (all_rows >= lock_start) & (all_rows < lock_end)
+            valid_windows = valid.unfold(1, chunk_size, 1).all(dim=-1)
+            valid_windows[is_locked] = False
+
+            segment_ids = self.shared_buffer.get("segment_id", None)
+            if segment_ids is None:
+                segment_ids = torch.zeros_like(valid, dtype=torch.int64)
+
+            if sampling_mode == "segment":
+                segment_windows = segment_ids.unfold(1, chunk_size, 1)
+                same_segment = (segment_windows == segment_windows[..., :1]).all(
+                    dim=-1
+                ) & (segment_windows[..., 0] >= 0)
+                valid_windows &= same_segment
+            elif sampling_mode == "boundary":
+                segment_windows = segment_ids.unfold(1, chunk_size, 1)
+                crosses_boundary = (
+                    segment_windows[..., 1:] != segment_windows[..., :-1]
+                ).any(dim=-1)
+                valid_windows &= crosses_boundary
+
+            candidate_rows = (
+                valid_windows.any(dim=1).nonzero(as_tuple=False).squeeze(-1)
             )
+            if candidate_rows.numel() == 0:
+                raise RuntimeError(
+                    "[OnlineDataEngine] No unlocked valid chunk satisfies "
+                    f"sampling_mode={sampling_mode!r} and chunk_size={chunk_size}."
+                )
 
-        all_rows = torch.arange(self.buffer_size, device=valid.device)
-        is_locked = (all_rows >= lock_start) & (all_rows < lock_end)
-        valid_windows = valid.unfold(1, chunk_size, 1).all(dim=-1)
-        valid_windows[is_locked] = False
-
-        segment_ids = self.shared_buffer.get("segment_id", None)
-        if segment_ids is None:
-            segment_ids = torch.zeros_like(valid, dtype=torch.int64)
-
-        if sampling_mode == "segment":
-            segment_windows = segment_ids.unfold(1, chunk_size, 1)
-            same_segment = (segment_windows == segment_windows[..., :1]).all(dim=-1) & (
-                segment_windows[..., 0] >= 0
+            # Preserve the historical episode-uniform sampling distribution:
+            # choose an eligible row uniformly, then a valid offset within it.
+            sampled_row_ids = torch.randint(
+                0,
+                candidate_rows.shape[0],
+                (batch_size,),
+                device=candidate_rows.device,
             )
-            valid_windows &= same_segment
-        elif sampling_mode == "boundary":
-            segment_windows = segment_ids.unfold(1, chunk_size, 1)
-            crosses_boundary = (
-                segment_windows[..., 1:] != segment_windows[..., :-1]
-            ).any(dim=-1)
-            valid_windows &= crosses_boundary
+            row_indices = candidate_rows[sampled_row_ids]
+            start_indices = torch.multinomial(
+                valid_windows[row_indices].to(dtype=torch.float32),
+                num_samples=1,
+                replacement=True,
+            ).squeeze(-1)
 
-        candidates = valid_windows.nonzero(as_tuple=False)
-        if candidates.numel() == 0:
-            raise RuntimeError(
-                "[OnlineDataEngine] No unlocked valid chunk satisfies "
-                f"sampling_mode={sampling_mode!r} and chunk_size={chunk_size}."
-            )
-
-        sampled_candidate_ids = torch.randint(
-            0, candidates.shape[0], (batch_size,), device=candidates.device
-        )
-        selected = candidates[sampled_candidate_ids]
-        row_indices = selected[:, 0]
-        start_indices = selected[:, 1]
-
-        time_offsets = torch.arange(chunk_size, device=start_indices.device)
-        time_indices = start_indices[:, None] + time_offsets[None, :]
-
-        result = self.shared_buffer[row_indices[:, None], time_indices]
+            time_offsets = torch.arange(chunk_size, device=start_indices.device)
+            time_indices = start_indices[:, None] + time_offsets[None, :]
+            result = self.shared_buffer[row_indices[:, None], time_indices].clone()
 
         # Update sample count and conditionally trigger a refill.
         self._trigger_refill_if_needed(batch_size)

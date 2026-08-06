@@ -17,12 +17,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import torch
 
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 from embodichain.lab.gym.envs.managers.dataset_manager import DatasetManager
+from embodichain.lab.gym.envs.managers.record import record_camera_data
 from embodichain.lab.gym.utils.profiler import EnvProfiler
 
 
@@ -142,3 +144,41 @@ def test_initialize_episode_saves_failed_reset_envs_when_enabled() -> None:
     EmbodiedEnv._initialize_episode(env, env_ids=[1, 2])
 
     assert torch.equal(manager.saved_env_ids, torch.tensor([1, 2]))
+
+
+def test_discard_reset_does_not_auto_save_trajectory() -> None:
+    """save_data=False clears trajectory state without writing a file."""
+    env, _ = make_env_for_episode_selection(
+        save_failed_episodes=False,
+        successful_env_ids=[],
+    )
+    env._traj_buffer = object()
+    env._traj_steps = torch.tensor([3, 2, 1])
+    env.cfg.trajectory_auto_save = True
+    env._save_trajectory_for_env = MagicMock()
+
+    EmbodiedEnv._initialize_episode(env, env_ids=[0], save_data=False)
+
+    env._save_trajectory_for_env.assert_not_called()
+    assert env._traj_steps.tolist() == [0, 2, 1]
+
+
+def test_discard_reset_clears_camera_frames_without_saving() -> None:
+    """save_data=False drops video frames through the recorder abort hook."""
+    env, _ = make_env_for_episode_selection(
+        save_failed_episodes=False,
+        successful_env_ids=[],
+    )
+    recorder = record_camera_data.__new__(record_camera_data)
+    recorder._frames = [object()]
+    recorder.save_and_clear = MagicMock()
+    env.cfg.events = object()
+    env.event_manager = SimpleNamespace(
+        _mode_functor_cfgs={"interval": [SimpleNamespace(func=recorder)]},
+        available_modes=[],
+    )
+
+    EmbodiedEnv._initialize_episode(env, env_ids=[0], save_data=False)
+
+    recorder.save_and_clear.assert_not_called()
+    assert recorder._frames == []

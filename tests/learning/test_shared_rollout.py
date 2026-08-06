@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -117,6 +118,7 @@ class _FakeEnv:
         )
 
 
+@pytest.mark.no_sim
 def test_shared_rollout_collects_policy_and_env_fields():
     device = torch.device("cpu")
     num_envs = 3
@@ -179,6 +181,8 @@ def test_shared_rollout_collects_policy_and_env_fields():
     )
 
 
+@pytest.mark.requires_sim
+@pytest.mark.requires_tasks
 def test_embodied_env_writes_next_fields_into_external_rollout():
     gym_config = load_json(
         "embodichain_tasks/configs/agents/rl/basic/cart_pole/gym_config.json"

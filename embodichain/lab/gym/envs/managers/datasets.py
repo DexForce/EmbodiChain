@@ -45,6 +45,8 @@ from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERS
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
 
+__all__ = ["LeRobotRecorder"]
+
 CAMERA_IMAGE_FRAMES = {
     "color": "",
     "color_right": "_right",
@@ -340,6 +342,10 @@ class LeRobotRecorder(Functor):
                             if key in DEMO_FRAME_FEATURES
                         }
                     )
+                if frame_index == len(obs_list) - 1:
+                    # Legacy/manual collection has no end-segment callback;
+                    # the last committed frame is still an episode boundary.
+                    frame_annotations["segment_end"] = True
                 frame_task = self._task_for_frame(task, episode_metadata, frame_index)
                 frame = self._convert_frame_to_lerobot(
                     obs,

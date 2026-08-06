@@ -30,6 +30,9 @@ Key ideas:
   sampleable.
 - **Variable lengths**: every frame has a `valid` flag. Sampling constructs
   windows only from real frames and never reads zero padding or a stale tail.
+- **Episode-uniform sampling**: an eligible episode row is selected uniformly,
+  then a valid start offset is selected within that row. Longer episodes do
+  not receive extra probability merely because they contain more windows.
 
 Each row stores one complete task episode. A row may contain multiple semantic
 segments. In addition to observations, actions, and rewards, the shared buffer
@@ -44,6 +47,10 @@ Tasks use the same `create_demo_segments()` protocol as `run-env`; legacy
 `create_demo_action_list()` tasks are treated as one segment. The worker checks
 termination after every action and retries a failed episode up to
 `max_generation_attempts` before reporting an error.
+
+If the simulation worker exits during initial fill, `start()` raises instead
+of waiting indefinitely. A later worker failure is reported on the next
+`sample_batch()` call rather than silently serving a permanently stale buffer.
 
 ### Minimal setup
 

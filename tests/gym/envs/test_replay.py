@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import torch
 
 from embodichain.data import get_data_path
@@ -32,6 +33,8 @@ from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RigidObjectCfg, Rob
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.gym.envs.managers.actions import DeltaQposTerm
 from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
+
+pytestmark = [pytest.mark.requires_sim, pytest.mark.slow]
 
 
 @register_env("ReplayTest-v1", max_episode_steps=100, override=True)

@@ -29,6 +29,8 @@ from embodichain.lab.sim.sensors.camera import CameraCfg, Camera
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
+__all__ = ["record_camera_data", "record_camera_data_async", "validation_cameras"]
+
 
 class record_camera_data(Functor):
     """Record camera data in the environment. The camera is usually setup with third-person view, and
@@ -139,6 +141,10 @@ class record_camera_data(Functor):
             self._current_episode += 1
             self._frames = []
 
+    def discard_and_clear(self) -> None:
+        """Discard recorded frames without creating an episode video."""
+        self._frames = []
+
     def __call__(
         self,
         env: EmbodiedEnv,
@@ -179,6 +185,13 @@ class record_camera_data_async(record_camera_data):
     def save_and_clear(self) -> None:
         """No-op for the async variant; saving is handled inside :meth:`__call__`."""
         pass
+
+    def discard_and_clear(self) -> None:
+        """Discard in-flight frames and pending invalid environment episodes."""
+        self._frames_list = [[] for _ in range(self._num_envs)]
+        pending = getattr(self, "_pending_env_episodes", None)
+        if pending is not None:
+            pending.clear()
 
     def __call__(
         self,

@@ -452,9 +452,13 @@ class EmbodiedEnv(BaseEnv):
         from embodichain.utils.module_utils import get_all_exported_items_from_module
         from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
-        functors_to_remove = get_all_exported_items_from_module(
-            "embodichain.lab.gym.envs.managers.randomization.visual"
-        )
+        functors_to_remove = {
+            name
+            for name in get_all_exported_items_from_module(
+                "embodichain.lab.gym.envs.managers.randomization.visual"
+            )
+            if name.startswith("randomize_")
+        }
         if self.cfg.filter_visual_rand and self.cfg.events:
             # Iterate through all attributes of the events object
             for attr_name in dir(self.cfg.events):
@@ -651,14 +655,19 @@ class EmbodiedEnv(BaseEnv):
                 for mode_cfgs in self.event_manager._mode_functor_cfgs.values():
                     for functor_cfg in mode_cfgs:
                         if isinstance(functor_cfg.func, record_camera_data):
-                            functor_cfg.func.save_and_clear()
+                            if save_data:
+                                functor_cfg.func.save_and_clear()
+                            else:
+                                functor_cfg.func.discard_and_clear()
 
         # Auto-save + reset the per-env trajectory buffer for environments being
         # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
         # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
         _traj_buffer = getattr(self, "_traj_buffer", None)
-        if _traj_buffer is not None and getattr(
-            self.cfg, "trajectory_auto_save", False
+        if (
+            save_data
+            and _traj_buffer is not None
+            and getattr(self.cfg, "trajectory_auto_save", False)
         ):
             with self._profiler.section("trajectory_save"):
                 for env_id in env_ids_to_process.tolist():
@@ -827,22 +836,60 @@ class EmbodiedEnv(BaseEnv):
             dict(segment)
             for segment in self._demo_episode_metadata[env_id].get("segments", [])
         ]
-        length = int(self._demo_steps[env_id].item())
+        rollout_steps = getattr(self, "rollout_steps", None)
+        length = int(
+            (
+                rollout_steps[env_id]
+                if rollout_steps is not None and self.rollout_buffer is not None
+                else self._demo_steps[env_id]
+            ).item()
+        )
         metadata["length"] = length
         if length > 0 and not metadata["segments"]:
+            success_status = getattr(self, "episode_success_status", None)
+            task_success = getattr(self, "_task_success", None)
+            success = bool(
+                (success_status is not None and success_status[env_id])
+                or (task_success is not None and task_success[env_id])
+            )
+            terminated = bool(
+                self.rollout_buffer is not None
+                and "terminated" in self.rollout_buffer.keys()
+                and self.rollout_buffer["terminated"][env_id, length - 1]
+            )
+            truncated = bool(
+                self.rollout_buffer is not None
+                and "truncated" in self.rollout_buffer.keys()
+                and self.rollout_buffer["truncated"][env_id, length - 1]
+            )
+            if truncated:
+                success = False
+                terminal_reason = "truncated"
+            elif success:
+                terminal_reason = "success"
+            elif terminated:
+                terminal_reason = "failure"
+            else:
+                terminal_reason = "task_incomplete"
+            metadata.update(
+                {
+                    "completed": success,
+                    "success": success,
+                    "terminated": terminated,
+                    "truncated": truncated,
+                    "terminal_reason": terminal_reason,
+                }
+            )
             metadata["segments"] = [
                 {
                     "segment_id": 0,
                     "name": "legacy",
                     "start_step": 0,
                     "end_step": length,
-                    "success": bool(
-                        self.episode_success_status[env_id]
-                        or self._task_success[env_id]
-                    ),
+                    "success": success,
                     "target_uid": None,
                     "instruction": None,
-                    "failure_reason": None,
+                    "failure_reason": None if success else terminal_reason,
                     "metadata": {},
                 }
             ]
@@ -1034,6 +1081,11 @@ class EmbodiedEnv(BaseEnv):
             : self.num_envs, self.current_rollout_step
         ].copy_(truncateds.to(buffer_device), non_blocking=True)
 
+    def _normalize_demo_action(self, action: EnvAction) -> EnvAction:
+        """Normalize one legacy or segment action to the environment action space."""
+        expected_dim = int(np.prod(self.single_action_space.shape))
+        return self._normalize_demo_action_tensor(action, expected_dim)
+
     def _normalize_demo_action_list(
         self, action_list: Sequence[EnvAction] | torch.Tensor | None
     ) -> Sequence[EnvAction] | torch.Tensor | None:
@@ -1057,8 +1109,7 @@ class EmbodiedEnv(BaseEnv):
             )
 
         normalized_action_list = [
-            self._normalize_demo_action_tensor(action, expected_dim)
-            for action in action_list
+            self._normalize_demo_action(action) for action in action_list
         ]
         return type(action_list)(normalized_action_list)
 
@@ -1461,7 +1512,7 @@ class EmbodiedEnv(BaseEnv):
         actions = self.create_demo_action_list(*args, **kwargs)
         if actions is None:
             return None
-        return (DemoSegment(actions=actions, name="task"),)
+        return (DemoSegment(actions=actions, name="legacy"),)
 
     def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
         """Save recorded trajectory (states + actions) to a ``.pt`` file.

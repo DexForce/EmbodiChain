@@ -16,14 +16,59 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
+from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import _create_parser, generate_function
 
 GYM_CONFIG_PATH = "task.yaml"
 GYM_ID = "Dummy-v0"
+EPISODE_INDEX = 3
+ACTION_LIST_INDEX = 0
+
+
+class _LegacyProgressEnv:
+    num_envs = 1
+
+    @property
+    def unwrapped(self):
+        return self
+
+    def get_wrapper_attr(self, name: str):
+        if name == "create_demo_action_list":
+            return lambda **kwargs: [object()]
+        raise AttributeError(name)
+
+    def step(self, action):
+        return None, None, False, False, {"success": False}
+
+    def is_task_success(self) -> bool:
+        return True
+
+
+def test_legacy_action_list_displays_episode_and_segment_indices(
+    monkeypatch,
+) -> None:
+    """Progress output distinguishes episodes from their local segments."""
+    env = _LegacyProgressEnv()
+    progress = MagicMock(side_effect=lambda actions, **kwargs: actions)
+    monkeypatch.setattr(run_env.tqdm, "tqdm", progress)
+
+    generated = run_env.generate_and_execute_action_list(
+        env,
+        ACTION_LIST_INDEX,
+        debug_mode=False,
+        episode_idx=EPISODE_INDEX,
+    )
+
+    assert generated
+    assert progress.call_args.kwargs["desc"] == (
+        f"Executing episode #{EPISODE_INDEX}, segment #{ACTION_LIST_INDEX}: legacy"
+    )
 
 
 def test_run_env_syncs_viser_images_each_step_by_default() -> None:
@@ -119,3 +164,17 @@ def test_generate_function_rejects_runner_owned_segment_count() -> None:
     """The task, not run-env, defines how many segments an episode contains."""
     with pytest.raises(ValueError, match="create_demo_segments"):
         generate_function(_ResetTrackingEnv(), num_traj=2)
+
+
+def test_generate_function_discards_partial_episode_on_exception(monkeypatch) -> None:
+    """Planner or step exceptions cannot be committed later by finalize()."""
+    env = _ResetTrackingEnv()
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("planner failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="planner failed"):
+        generate_function(env, reset_before=False)
+
+    assert env.reset_options == [{"save_data": False}]

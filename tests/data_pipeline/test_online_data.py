@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import unittest
+from unittest.mock import MagicMock
+
 import pytest
 
 import torch
@@ -121,6 +123,10 @@ def _make_fake_engine(
     engine._init_signal.set()  # mark as initialised
     engine._close_signal = engine._mp_ctx.Event()
     engine._sample_count = engine._mp_ctx.Value("i", 0)
+
+    # Sampling tests intentionally bypass the simulation worker.  Starting it
+    # here would exercise unrelated environment setup and make teardown wait
+    # for the subprocess timeout when the synthetic config cannot run a task.
     engine._sim_process = None
 
     return engine
@@ -136,6 +142,29 @@ class TestOnlineDataEngine:
 
     def setup_method(self) -> None:
         self.engine = _make_fake_engine()
+
+    def test_start_raises_if_worker_exits_before_initialization(self) -> None:
+        """A failed initial fill is reported instead of waiting forever."""
+        process = MagicMock(pid=1234, exitcode=1)
+        process.is_alive.return_value = False
+        process_context = MagicMock()
+        process_context.Process.return_value = process
+        self.engine._mp_ctx = process_context
+        self.engine._init_signal.clear()
+
+        with pytest.raises(RuntimeError, match="worker exited unexpectedly"):
+            self.engine.start()
+
+        process.join.assert_called_once_with(timeout=0)
+
+    def test_sampling_raises_after_worker_failure(self) -> None:
+        """A failed refill worker cannot silently serve stale data forever."""
+        process = MagicMock(exitcode=1)
+        process.is_alive.return_value = False
+        self.engine._sim_process = process
+
+        with pytest.raises(RuntimeError, match="worker exited unexpectedly"):
+            self.engine.sample_batch(batch_size=1, chunk_size=1)
 
     # -----------------------------------------------------------------------
 
@@ -153,43 +182,33 @@ class TestOnlineDataEngine:
             assert key in result, f"Missing key '{key}' in sample_batch result"
 
     def test_sample_batch_locks_respected(self) -> None:
-        """Rows in [lock_start, lock_end) never appear in sampled row indices.
-
-        We patch lock_index to lock rows 2–4 and verify the engine never picks
-        from that range across many calls.
-        """
+        """Rows in [lock_start, lock_end) never appear in sampled data."""
         LOCK_START, LOCK_END = 2, 5
         engine = _make_fake_engine(
             buffer_size=BUFFER_SIZE,
             lock_start=LOCK_START,
             lock_end=LOCK_END,
         )
-        locked_rows = set(range(LOCK_START, LOCK_END))
+        row_ids = torch.arange(BUFFER_SIZE, dtype=torch.float32)
+        engine.shared_buffer["obs"][..., 0] = row_ids[:, None]
 
-        # Draw many small batches and collect all sampled row indices.
-        # We cannot directly observe row indices from outside, but we can
-        # verify that each result slice is *not* identical to a locked row's
-        # data (which has a unique random fingerprint).
-        locked_obs = engine.shared_buffer["obs"][LOCK_START:LOCK_END]  # [3, 50, 10]
+        result = engine.sample_batch(batch_size=256, chunk_size=5)
+        sampled_rows = set(result["obs"][:, 0, 0].tolist())
 
-        for _ in range(20):
-            result = engine.sample_batch(batch_size=1, chunk_size=5)
-            sampled_obs_start = result["obs"][0, 0]  # first timestep of first chunk
-            # Check that this does not exactly match any locked row's first timestep.
-            for r in range(LOCK_END - LOCK_START):
-                matched = torch.allclose(
-                    sampled_obs_start, locked_obs[r, :5].mean(dim=-1, keepdim=True)
-                )
-                # The comparison above is a heuristic; the real guarantee is that
-                # available rows exclude locked ones.  We use a direct index check:
-                # reconstruct which row could produce this exact obs by brute-force.
-            # Reconstructed check: verify available indices exclude locked rows.
-            all_rows = torch.arange(BUFFER_SIZE)
-            is_locked = (all_rows >= LOCK_START) & (all_rows < LOCK_END)
-            available = all_rows[~is_locked]
-            assert len(available) != 0, "available must be non-empty"
-            for row in locked_rows:
-                assert row not in available.tolist()
+        assert sampled_rows.isdisjoint(range(LOCK_START, LOCK_END))
+
+    def test_sample_batch_keeps_episode_uniform_distribution(self) -> None:
+        """Short and long eligible episodes have equal row probability."""
+        engine = _make_fake_engine(buffer_size=2, max_episode_steps=10)
+        engine.shared_buffer["valid"][0, 1:] = False
+        engine.shared_buffer["obs"][0, :, 0] = 0
+        engine.shared_buffer["obs"][1, :, 0] = 1
+
+        sample_count = 2_000
+        result = engine.sample_batch(batch_size=sample_count, chunk_size=1)
+        long_episode_fraction = result["obs"][:, 0, 0].float().mean().item()
+
+        assert 0.4 < long_episode_fraction < 0.6
 
     def test_chunk_size_exceeds_max_steps_raises(self) -> None:
         """ValueError is raised when chunk_size > max_episode_steps."""

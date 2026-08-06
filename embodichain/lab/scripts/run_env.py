@@ -50,24 +50,40 @@ def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]
 
 
 def generate_and_execute_action_list(
-    env: Any, idx: int, debug_mode: bool, **kwargs: Any
+    env: gymnasium.Env,
+    idx: int,
+    debug_mode: bool,
+    *,
+    episode_idx: int = 0,
+    **kwargs: Any,
 ) -> bool:
     """Execute one legacy planner result through the common episode executor.
 
     This compatibility helper now represents one complete task episode. New
     multi-object tasks should implement ``create_demo_segments`` instead of
     calling this function repeatedly.
+
+    Args:
+        env: Environment used to generate and execute the actions.
+        idx: Index of the legacy action list within the current episode.
+        debug_mode: Whether debug mode is enabled.
+        episode_idx: Index of the current episode.
+        **kwargs: Additional arguments forwarded to action generation.
+
+    Returns:
+        Whether a complete, successful episode was executed.
     """
     result = execute_demo_episode(
         env,
-        episode_index=idx,
+        episode_index=episode_idx,
         progress=_progress_wrapper,
         action_sentence=idx,
         **kwargs,
     )
     if not result.completed or not result.all_success:
         log_warning(
-            f"Demo episode {idx} is invalid ({result.terminal_reason}); it will not be saved."
+            f"Demo episode {episode_idx} is invalid ({result.terminal_reason}); "
+            "it will not be saved."
         )
         return False
     return True
@@ -115,12 +131,18 @@ def generate_function(
         env.reset(options={"save_data": False})
 
     for attempt in range(1, max_attempts + 1):
-        result: DemoEpisodeResult = execute_demo_episode(
-            env,
-            episode_index=time_id,
-            progress=_progress_wrapper,
-            **kwargs,
-        )
+        try:
+            result: DemoEpisodeResult = execute_demo_episode(
+                env,
+                episode_index=time_id,
+                progress=_progress_wrapper,
+                **kwargs,
+            )
+        except Exception:
+            # Never let close()/finalize() commit a partially written rollout
+            # when planning, normalization, or stepping raises.
+            env.reset(options={"save_data": False})
+            raise
         if result.completed and result.all_success:
             # reset() is the commit boundary: dataset functors consume the
             # whole episode once, then buffers and scene state are reset.
