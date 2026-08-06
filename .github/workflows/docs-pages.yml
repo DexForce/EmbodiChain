@@ -25,7 +25,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: github-pages
+  # The release run waits for its dispatched deployment, so it must not hold
+  # the deployment concurrency group while the child workflow is queued.
+  group: ${{ github.event_name == 'release' && format('github-pages-release-{0}', github.run_id) || 'github-pages' }}
   cancel-in-progress: false
 
 jobs:
@@ -39,8 +41,10 @@ jobs:
       github.event.action == 'published' &&
       startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       actions: write
+      checks: read
       contents: read
     steps:
       - name: Dispatch release docs build
@@ -49,10 +53,21 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh workflow run docs-pages.yml \
+          dispatched_url="$(gh workflow run docs-pages.yml \
             --repo "${GITHUB_REPOSITORY}" \
             --ref "${DEFAULT_BRANCH}" \
-            -f ref="${RELEASE_TAG}"
+            -f ref="${RELEASE_TAG}")"
+          dispatched_run_id="${dispatched_url##*/}"
+          if [[ ! "${dispatched_run_id}" =~ ^[0-9]+$ ]]; then
+            echo "Could not determine dispatched workflow run ID from: ${dispatched_url}" >&2
+            exit 1
+          fi
+          echo "Waiting for dispatched docs workflow ${dispatched_run_id}."
+          gh run watch "${dispatched_run_id}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --compact \
+            --exit-status \
+            --interval 10
 
   deploy-from-artifact:
     if: >
