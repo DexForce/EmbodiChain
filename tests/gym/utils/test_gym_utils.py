@@ -508,6 +508,39 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    def test_action_mode_parses_from_gym_config(self):
+        """ActionManager post-processing mode is preserved by config parsing."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {
+                "events": {},
+                "observations": {},
+                "rewards": {},
+                "actions": {
+                    "normalize": {
+                        "func": "QposNormalizedTerm",
+                        "mode": "post",
+                        "params": {"range": [0.0, 1.0]},
+                    }
+                },
+            },
+            "robot": {
+                "uid": "TestRobot",
+                "urdf_cfg": {
+                    "components": [
+                        {
+                            "component_type": "arm",
+                            "urdf_path": "UniversalRobots/UR5/UR5.urdf",
+                        }
+                    ]
+                },
+            },
+        }
+
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert cfg.actions.normalize.mode == "post"
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",

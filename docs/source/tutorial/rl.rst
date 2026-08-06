@@ -140,6 +140,7 @@ The ``policy`` section defines the neural network policy:
 
 - **name**: Policy name (e.g., "actor_critic", "vla")
 - **action_dim**: Optional policy output action dimension. If omitted, it is inferred from ``env.action_space``.
+- **squash_actions**: Optional tanh bounding for built-in Gaussian policies. Simulator training enables it by default when the Action Manager uses ``[-1, 1]`` bounds; log probabilities include the tanh Jacobian correction.
 - **actor**: Actor network configuration (required for actor_critic)
 - **critic**: Critic network configuration (required for actor_critic)
 

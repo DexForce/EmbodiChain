@@ -169,10 +169,18 @@ def action_smoothness_penalty(
         }
         ```
     """
-    if isinstance(action, torch.Tensor):
-        current_action = action
-    else:
-        current_action = action["qpos"]
+    action_manager = getattr(env, "action_manager", None)
+    current_action = action_manager.raw_action if action_manager is not None else None
+    if current_action is None:
+        if isinstance(action, torch.Tensor):
+            current_action = action
+        else:
+            command_values = [
+                action[key] for key in ("qpos", "qvel", "qf") if key in action
+            ]
+            if not command_values:
+                return torch.zeros(env.num_envs, device=env.device)
+            current_action = torch.cat(command_values, dim=-1)
 
     buffer = getattr(env, "rollout_buffer", None)
     has_rl_prev_step = (

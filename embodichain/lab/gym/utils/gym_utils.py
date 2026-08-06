@@ -702,6 +702,7 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
             )
             action_term = ActionTermCfg(
                 func=term_func,
+                mode=term_params_modified.get("mode", "pre"),
                 params=term_params_modified.get("params", {}),
             )
             setattr(env_cfg.actions, term_name, action_term)

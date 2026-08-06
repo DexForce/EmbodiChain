@@ -92,6 +92,7 @@ def build_policy(
             device=device,
             actor=actor,
             critic=critic,
+            squash_actions=bool(policy_block.get("squash_actions", False)),
         )
     elif name == "actor_only":
         if actor is None:
@@ -103,6 +104,7 @@ def build_policy(
             action_dim=action_dim,
             device=device,
             actor=actor,
+            squash_actions=bool(policy_block.get("squash_actions", False)),
         )
 
     init_params = inspect.signature(policy_cls.__init__).parameters

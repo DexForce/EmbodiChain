@@ -40,6 +40,10 @@ class ActorCritic(Policy):
 
     Implements TensorDict-native interfaces while preserving `get_action()`
     compatibility for evaluation and legacy call-sites.
+
+    When ``squash_actions`` is enabled, Gaussian samples are transformed with
+    tanh into ``[-1, 1]`` and log probabilities include the transform's
+    Jacobian correction.
     """
 
     def __init__(
@@ -49,7 +53,8 @@ class ActorCritic(Policy):
         device: torch.device,
         actor: nn.Module,
         critic: nn.Module,
-    ):
+        squash_actions: bool = False,
+    ) -> None:
         super().__init__()
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -57,6 +62,7 @@ class ActorCritic(Policy):
 
         self.actor = actor
         self.critic = critic
+        self.squash_actions = squash_actions
         self.actor.to(self.device)
         self.critic.to(self.device)
 
@@ -69,6 +75,22 @@ class ActorCritic(Policy):
         log_std = self.log_std.clamp(self.log_std_min, self.log_std_max)
         std = log_std.exp().expand(mean.shape[0], -1)
         return Normal(mean, std)
+
+    def _action_log_prob(
+        self,
+        distribution: Normal,
+        action: torch.Tensor,
+        pre_squash_action: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute action log probability with the tanh Jacobian correction."""
+        if not self.squash_actions:
+            return distribution.log_prob(action).sum(dim=-1)
+        epsilon = torch.finfo(action.dtype).eps
+        bounded_action = action.clamp(-1.0 + epsilon, 1.0 - epsilon)
+        if pre_squash_action is None:
+            pre_squash_action = torch.atanh(bounded_action)
+        log_det_jacobian = torch.log(1.0 - bounded_action.square() + epsilon)
+        return (distribution.log_prob(pre_squash_action) - log_det_jacobian).sum(dim=-1)
 
     def forward(
         self, tensordict: TensorDict, deterministic: bool = False
@@ -100,13 +122,18 @@ class ActorCritic(Policy):
         dist = self._distribution(obs)
         mean = dist.mean
         if deterministic:
-            action = mean
+            pre_squash_action = mean
         elif reparameterized:
-            action = dist.rsample()
+            pre_squash_action = dist.rsample()
         else:
-            action = dist.sample()
+            pre_squash_action = dist.sample()
+        action = (
+            torch.tanh(pre_squash_action) if self.squash_actions else pre_squash_action
+        )
         tensordict["action"] = action
-        tensordict["sample_log_prob"] = dist.log_prob(action).sum(dim=-1)
+        tensordict["sample_log_prob"] = self._action_log_prob(
+            dist, action, pre_squash_action
+        )
         if reparameterized:
             tensordict["entropy"] = dist.entropy().sum(dim=-1)
         tensordict["value"] = self.critic(obs).squeeze(-1)
@@ -122,7 +149,7 @@ class ActorCritic(Policy):
         dist = self._distribution(obs)
         return TensorDict(
             {
-                "sample_log_prob": dist.log_prob(action).sum(dim=-1),
+                "sample_log_prob": self._action_log_prob(dist, action),
                 "entropy": dist.entropy().sum(dim=-1),
                 "value": self.critic(obs).squeeze(-1),
             },

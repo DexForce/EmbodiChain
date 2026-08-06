@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from math import log
+from collections.abc import Mapping
 from functools import wraps
 from datetime import datetime
 import os
@@ -25,7 +26,7 @@ import numpy as np
 import gymnasium as gym
 
 from dataclasses import MISSING
-from typing import Dict, Union, Sequence, Tuple, Any, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from tensordict import TensorDict
 
 from embodichain.lab.sim.cfg import (
@@ -290,6 +291,8 @@ class EmbodiedEnv(BaseEnv):
         self.reward_manager: RewardManager | None = None
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
+        self._last_raw_action: torch.Tensor | None = None
+        self._pending_direct_qf: torch.Tensor | None = None
 
         super().__init__(cfg, **kwargs)
 
@@ -325,7 +328,7 @@ class EmbodiedEnv(BaseEnv):
         # rollout_buffer so async parallel envs and ActionManager are supported.
         self._traj_buffer: TensorDict | None = None
         self._traj_steps: torch.Tensor | None = None
-        self._traj_raw_action: EnvAction | None = None
+        self._traj_raw_action: torch.Tensor | None = None
         self._traj_save_count = 0
         self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         if self.cfg.record_trajectory:
@@ -652,6 +655,14 @@ class EmbodiedEnv(BaseEnv):
             with self._profiler.section("reward_reset"):
                 self.reward_manager.reset(env_ids=env_ids)
 
+        action_manager = getattr(self, "action_manager", None)
+        if action_manager is not None and action_manager.get_terms_by_mode("pre"):
+            with self._profiler.section("action_reset"):
+                action_manager.reset(env_ids=env_ids)
+        self._last_raw_action = None
+        self._traj_raw_action = None
+        self._pending_direct_qf = None
+
         # Dataset saving can be disabled while the dataset configuration remains
         # present.  In that mode no DatasetManager is created in __init__, so
         # reset must not dereference the optional manager.
@@ -684,24 +695,26 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_buffer["obs"][:, self.current_rollout_step, ...].copy_(
             obs.to(buffer_device), non_blocking=True
         )
-        if isinstance(action, TensorDict):
-            action_to_store = (
-                action["qpos"]
-                if "qpos" in action
-                else (action["qvel"] if "qvel" in action else action["qf"])
-            )
-        elif isinstance(action, torch.Tensor):
+        action_to_store = self._last_raw_action
+        if action_to_store is None and isinstance(action, (TensorDict, torch.Tensor)):
             action_to_store = action
-        else:
+        if action_to_store is None:
             logger.log_warning(
                 f"Unexpected action type {type(action)} in _hook_after_sim_step; "
                 "skipping action storage in rollout buffer."
             )
-            action_to_store = None
         if action_to_store is not None:
-            self.rollout_buffer["actions"][:, self.current_rollout_step, ...].copy_(
-                action_to_store.to(buffer_device), non_blocking=True
-            )
+            destination = self.rollout_buffer["actions"][
+                :, self.current_rollout_step, ...
+            ]
+            if tuple(action_to_store.shape) != tuple(destination.shape):
+                logger.log_warning(
+                    "Raw action shape does not match the episode rollout buffer: "
+                    f"action={tuple(action_to_store.shape)}, "
+                    f"buffer={tuple(destination.shape)}. Skipping action storage."
+                )
+            else:
+                destination.copy_(action_to_store.to(buffer_device), non_blocking=True)
         self.rollout_buffer["rewards"][:, self.current_rollout_step].copy_(
             rewards.to(buffer_device), non_blocking=True
         )
@@ -738,7 +751,15 @@ class EmbodiedEnv(BaseEnv):
                         idx, st
                     ] = obj.get_local_pose()[idx]
         if self._traj_raw_action is not None:
-            self._traj_buffer["actions"][idx, st] = self._traj_raw_action[idx]
+            action_buffer = self._traj_buffer["actions"]
+            if self._traj_raw_action.shape[-1] == action_buffer.shape[-1]:
+                action_buffer[idx, st] = self._traj_raw_action[idx]
+            else:
+                logger.log_warning(
+                    "Raw action dimension does not match the trajectory buffer: "
+                    f"action={self._traj_raw_action.shape[-1]}, "
+                    f"buffer={action_buffer.shape[-1]}. Skipping action storage."
+                )
         self._traj_steps = (self._traj_steps + 1).clamp(max=max_steps)
 
     def _write_rl_rollout_step(
@@ -900,28 +921,103 @@ class EmbodiedEnv(BaseEnv):
         Returns:
             The action return.
         """
-        if isinstance(action, TensorDict):
-            # Support multiple control modes simultaneously
-            if "qpos" in action:
-                self.robot.set_qpos(
-                    qpos=action["qpos"].to(self.device), joint_ids=self.active_joint_ids
-                )
-            if "qvel" in action:
-                self.robot.set_qvel(
-                    qvel=action["qvel"].to(self.device), joint_ids=self.active_joint_ids
-                )
-            if "qf" in action:
-                self.robot.set_qf(
-                    qf=action["qf"].to(self.device), joint_ids=self.active_joint_ids
-                )
-        elif isinstance(action, torch.Tensor):
-            self.robot.set_qpos(
-                qpos=action.to(self.device), joint_ids=self.active_joint_ids
-            )
-        else:
-            logger.log_error(f"Unsupported action type: {type(action)}")
+        self._pending_direct_qf = None
+        if self.action_manager is not None and self.action_manager.get_terms_by_mode(
+            "pre"
+        ):
+            # Term-specific joint selections and command types are retained by
+            # the manager. Efforts are applied in _before_sim_step so they are
+            # held across every physics substep.
+            self.action_manager.apply_action(command_keys={"qpos", "qvel"})
+            return action
 
-        return action
+        if isinstance(action, (TensorDict, Mapping)):
+            unsupported_keys = set(action.keys()) - {"qpos", "qvel", "qf"}
+            if unsupported_keys:
+                raise KeyError(
+                    f"Unsupported direct control command keys: {sorted(unsupported_keys)}. "
+                    "Expected qpos, qvel and/or qf."
+                )
+            if not any(key in action for key in ("qpos", "qvel", "qf")):
+                raise ValueError("Direct control action contains no qpos, qvel or qf.")
+
+            commands = {}
+            for key in ("qpos", "qvel", "qf"):
+                if key not in action:
+                    continue
+                command = self._coerce_direct_command(action[key], key)
+                commands[key] = command
+                if key == "qpos":
+                    self.robot.set_qpos(qpos=command, joint_ids=self.active_joint_ids)
+                elif key == "qvel":
+                    self.robot.set_qvel(qvel=command, joint_ids=self.active_joint_ids)
+                else:
+                    self.robot.set_qf(qf=command, joint_ids=self.active_joint_ids)
+                    self._pending_direct_qf = command
+            return TensorDict(commands, batch_size=[self.num_envs], device=self.device)
+
+        command = self._coerce_direct_command(action, "qpos")
+        self.robot.set_qpos(qpos=command, joint_ids=self.active_joint_ids)
+        return command
+
+    def _before_sim_step(self, substep_index: int) -> None:
+        """Reapply effort commands across every physics substep.
+
+        Args:
+            substep_index: Zero-based physics substep index.
+        """
+        del substep_index
+        if self.action_manager is not None and self.action_manager.get_terms_by_mode(
+            "pre"
+        ):
+            self.action_manager.apply_action(command_keys={"qf"})
+        elif self._pending_direct_qf is not None:
+            self.robot.set_qf(
+                qf=self._pending_direct_qf, joint_ids=self.active_joint_ids
+            )
+
+    def _get_before_sim_step_callback(self) -> Callable[[int], None] | None:
+        """Enable substep callbacks only while an effort command is active."""
+        if self._pending_direct_qf is not None:
+            return self._before_sim_step
+        if self.action_manager is None:
+            return None
+        has_effort_term = any(
+            term.command_key == "qf"
+            for _, term in self.action_manager.get_terms_by_mode("pre")
+        )
+        return self._before_sim_step if has_effort_term else None
+
+    def _coerce_direct_command(self, value: Any, command_key: str) -> torch.Tensor:
+        """Convert and validate a direct physical robot command.
+
+        Args:
+            value: Tensor, NumPy array or sequence containing a batched command.
+            command_key: One of ``qpos``, ``qvel`` or ``qf``.
+
+        Returns:
+            Validated and limit-clipped command tensor.
+        """
+        command = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+        if command.ndim == 1 and self.num_envs == 1:
+            command = command.unsqueeze(0)
+        expected_shape = (self.num_envs, len(self.active_joint_ids))
+        if tuple(command.shape) != expected_shape:
+            raise ValueError(
+                f"Invalid {command_key} command shape: expected {expected_shape}, "
+                f"got {tuple(command.shape)}."
+            )
+        if not bool(torch.isfinite(command).all()):
+            raise ValueError(f"{command_key} command contains NaN or infinite values.")
+
+        if command_key == "qpos":
+            limits = self.robot.body_data.qpos_limits[:, self.active_joint_ids, :]
+            return command.clamp(limits[..., 0], limits[..., 1])
+        limit_name = "qvel_limits" if command_key == "qvel" else "qf_limits"
+        limits = getattr(self.robot.body_data, limit_name)[
+            :, self.active_joint_ids
+        ].abs()
+        return command.clamp(-limits, limits)
 
     def compute_task_state(
         self, **kwargs
@@ -975,23 +1071,57 @@ class EmbodiedEnv(BaseEnv):
         return eval_dict
 
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
-        """Delegate to ActionManager when configured; stash raw action for trajectory."""
+        """Convert policy action and retain the exact raw action for learning/recording."""
+        if self.action_manager is not None and self.action_manager.get_terms_by_mode(
+            "pre"
+        ):
+            processed = self.action_manager.process_action(action, mode="pre")
+            raw_action = self.action_manager.raw_action
+        else:
+            processed = super()._preprocess_action(action)
+            raw_action = self._coerce_raw_action(action)
+        self._last_raw_action = raw_action
         if self._traj_buffer is not None:
-            self._traj_raw_action = action
-        if self.action_manager is not None:
-            return self.action_manager.process_action(action, mode="pre")
-        return super()._preprocess_action(action)
+            self._traj_raw_action = raw_action
+        return processed
 
     def _postprocess_action(self, action):
         if self.action_manager is not None:
             return self.action_manager.process_action(action, mode="post")
         return super()._postprocess_action(action)
 
+    def _coerce_raw_action(self, action: EnvAction) -> torch.Tensor:
+        """Normalize an unmanaged raw action into a stable flat tensor."""
+        if isinstance(action, (TensorDict, Mapping)):
+            unsupported_keys = set(action.keys()) - {"qpos", "qvel", "qf"}
+            if unsupported_keys:
+                raise KeyError(
+                    f"Unsupported direct control command keys: {sorted(unsupported_keys)}."
+                )
+            command_values = []
+            for key in ("qpos", "qvel", "qf"):
+                if key not in action:
+                    continue
+                value = torch.as_tensor(
+                    action[key], dtype=torch.float32, device=self.device
+                )
+                if value.ndim == 1 and self.num_envs == 1:
+                    value = value.unsqueeze(0)
+                command_values.append(value)
+            if not command_values:
+                raise ValueError("Direct control action contains no qpos, qvel or qf.")
+            return torch.cat(command_values, dim=-1)
+        value = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+        if value.ndim == 1 and self.num_envs == 1:
+            value = value.unsqueeze(0)
+        return value
+
     def _setup_robot(self, **kwargs) -> Robot:
         """Setup the robot in the environment.
 
-        Currently, only joint position control is supported. Would be extended to support joint velocity and torque
-            control in the future.
+        The default action space uses joint positions. Configuring an
+        :class:`ActionManager` replaces it with the manager's flat policy action
+        space and enables position, velocity, effort or mixed control terms.
 
         Returns:
             Robot: The robot instance added to the scene.

@@ -14,15 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+
 import numpy as np
 import torch
 
-from typing import Sequence, Union
 from tensordict import TensorDict
 
-Array = Union[torch.Tensor, np.ndarray, Sequence]
-Device = Union[str, torch.device]
+__all__ = ["Array", "Device", "EnvObs", "EnvAction"]
 
-EnvObs = TensorDict[str, Union[torch.Tensor, TensorDict[str, torch.Tensor]]]
+Array = torch.Tensor | np.ndarray | Sequence
+Device = str | torch.device
 
-EnvAction = Union[torch.Tensor, TensorDict[str, torch.Tensor]]
+EnvObs = TensorDict[str, torch.Tensor | TensorDict[str, torch.Tensor]]
+
+EnvAction = (
+    torch.Tensor
+    | np.ndarray
+    | Sequence
+    | Mapping[str, Array]
+    | TensorDict[str, torch.Tensor]
+)

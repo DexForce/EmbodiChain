@@ -793,12 +793,21 @@ class SimulationManager:
 
         self._world.render_camera_group(group_ids)
 
-    def update(self, physics_dt: float | None = None, step: int = 10) -> None:
+    def update(
+        self,
+        physics_dt: float | None = None,
+        step: int = 10,
+        before_step_callback: Callable[[int], None] | None = None,
+    ) -> None:
         """Update the physics.
 
         Args:
             physics_dt (float | None, optional): the time step for physics simulation. Defaults to None.
             step (int, optional): the number of steps to update physics. Defaults to 10.
+            before_step_callback: Optional callback invoked immediately before
+                each physics substep with the zero-based substep index. This is
+                used by control environments to reapply effort commands across
+                action decimation.
         """
         with self.profiler.section("sim_update", is_root=True):
             with self.profiler.section("gpu_physics_check"):
@@ -816,6 +825,9 @@ class SimulationManager:
                         with self.profiler.section("resolve_physics_dt"):
                             physics_dt = self.sim_config.physics_dt
                     for i in range(step):
+                        if before_step_callback is not None:
+                            with self.profiler.section("before_step_callback"):
+                                before_step_callback(i)
                         with self.profiler.section("gizmo_update"):
                             self.update_gizmos()
                         with self.profiler.section("world_update"):
