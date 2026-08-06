@@ -2148,6 +2148,11 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
         "--output_root",
         str(output_root),
     ]
+    scene_engine_log = output_root / "scene_engine.log"
+    scene_engine_log.write_text(
+        "$ " + " ".join(command) + "\n",
+        encoding="utf-8",
+    )
     with runtime_lock:
         runtime.log_lines.append("$ " + " ".join(command))
     yield _scene_engine_updates(output_root, preview_html)
@@ -2166,7 +2171,9 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
 
     output_queue: queue.Queue[str] = queue.Queue()
     reader = threading.Thread(
-        target=read_process_output, args=(process, output_queue), daemon=True
+        target=read_process_output,
+        args=(process, output_queue, scene_engine_log),
+        daemon=True,
     )
     with runtime_lock:
         if runtime.run_token != token:

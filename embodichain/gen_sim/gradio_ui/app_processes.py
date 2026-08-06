@@ -329,8 +329,20 @@ def update_phase_from_log(line: str, current_key: str) -> str:
 def read_process_output(
     process: subprocess.Popen[str],
     output_queue: queue.Queue[str],
+    log_path: Path | None = None,
 ) -> None:
+    """Forward merged subprocess output to the UI queue and an optional log."""
     if process.stdout is None:
         return
-    for line in process.stdout:
-        output_queue.put(line.rstrip())
+    log_file = log_path.open("a", encoding="utf-8") if log_path is not None else None
+    try:
+        for line in process.stdout:
+            output_queue.put(line.rstrip())
+            if log_file is not None:
+                log_file.write(line)
+                if not line.endswith("\n"):
+                    log_file.write("\n")
+                log_file.flush()
+    finally:
+        if log_file is not None:
+            log_file.close()
