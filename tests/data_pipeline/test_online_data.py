@@ -32,6 +32,7 @@ import multiprocessing as mp
 import os
 import threading
 import unittest
+from queue import Empty
 from unittest.mock import MagicMock
 
 import pytest
@@ -65,6 +66,9 @@ MAX_EPISODE_STEPS = 50
 STATE_DIM = 6
 OBS_DIM = 10
 ACTION_DIM = 4
+CONSUMER_PROCESS_TIMEOUT = 60.0
+RESULT_QUEUE_TIMEOUT = 5.0
+PROCESS_CLEANUP_TIMEOUT = 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -436,10 +440,35 @@ class TestOnlineDataEngine:
         )
 
         process.start()
-        result = result_queue.get(timeout=10.0)
-        process.join(timeout=10.0)
+        try:
+            # A spawned consumer imports torch and the EmbodiChain package from
+            # scratch.  Under xdist load this can exceed the old 10-second
+            # queue timeout even though the consumer is making progress.
+            process.join(timeout=CONSUMER_PROCESS_TIMEOUT)
+            if process.is_alive():
+                pytest.fail(
+                    "consumer process did not exit within "
+                    f"{CONSUMER_PROCESS_TIMEOUT} seconds"
+                )
+            if process.exitcode != 0:
+                pytest.fail(
+                    "consumer process exited without sampling successfully "
+                    f"(exit code {process.exitcode})"
+                )
+            try:
+                result = result_queue.get(timeout=RESULT_QUEUE_TIMEOUT)
+            except Empty:
+                pytest.fail("consumer process exited without publishing a result")
+        finally:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=PROCESS_CLEANUP_TIMEOUT)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=PROCESS_CLEANUP_TIMEOUT)
+            result_queue.close()
+            result_queue.join_thread()
 
-        assert process.exitcode == 0
         assert result == ("ok", (1, 1))
         assert not self.engine._close_signal.is_set()
 
