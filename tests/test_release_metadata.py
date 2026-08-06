@@ -18,15 +18,38 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from zipfile import ZipFile
 
+import pytest
+from packaging.requirements import Requirement
+
+from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
 from setup import get_package_dir, get_packages
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_TEST_VERSION = "0.2.4"
 
 
 def _read_project_metadata() -> dict:
     with (_REPOSITORY_ROOT / "pyproject.toml").open("rb") as stream:
         return tomllib.load(stream)
+
+
+def _write_test_wheel(tmp_path: Path, requirements: list[str]) -> Path:
+    metadata_lines = [
+        "Metadata-Version: 2.4",
+        "Name: embodichain",
+        f"Version: {_TEST_VERSION}",
+        *(f"Requires-Dist: {requirement}" for requirement in requirements),
+        "",
+    ]
+    wheel_path = tmp_path / f"embodichain-{_TEST_VERSION}-py3-none-any.whl"
+    with ZipFile(wheel_path, "w") as wheel:
+        wheel.writestr(
+            f"embodichain-{_TEST_VERSION}.dist-info/METADATA",
+            "\n".join(metadata_lines),
+        )
+    return wheel_path
 
 
 def test_official_tasks_share_core_distribution_metadata() -> None:
@@ -55,3 +78,38 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
         "embodichain_tasks": "embodichain_tasks/embodichain_tasks",
         "embodichain_tasks.configs": "embodichain_tasks/configs",
     }
+
+
+def test_project_metadata_has_no_direct_dependencies() -> None:
+    project = _read_project_metadata()["project"]
+    requirements = list(project["dependencies"])
+    for optional_requirements in project["optional-dependencies"].values():
+        requirements.extend(optional_requirements)
+
+    direct_dependencies = [
+        requirement
+        for requirement in requirements
+        if Requirement(requirement).url is not None
+    ]
+
+    assert direct_dependencies == []
+
+
+def test_wheel_metadata_accepts_index_dependencies(tmp_path: Path) -> None:
+    wheel_path = _write_test_wheel(
+        tmp_path,
+        ["gymnasium>=0.29.1", 'viser==1.0.21; python_version >= "3.10"'],
+    )
+
+    validate_wheel(wheel_path)
+
+
+def test_wheel_metadata_rejects_direct_dependencies(tmp_path: Path) -> None:
+    direct_dependency = (
+        "nvidia-curobo[cu12] @ "
+        'git+https://github.com/NVlabs/curobo.git@v0.8.0; extra == "curobo-cu12"'
+    )
+    wheel_path = _write_test_wheel(tmp_path, [direct_dependency])
+
+    with pytest.raises(WheelMetadataError, match="nvidia-curobo"):
+        validate_wheel(wheel_path)
