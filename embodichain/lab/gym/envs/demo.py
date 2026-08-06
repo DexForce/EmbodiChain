@@ -64,6 +64,11 @@ class DemoSegment:
         target_uid: Optional scene entity manipulated by this segment.
         instruction: Optional language instruction specific to this segment.
         metadata: Additional JSON-compatible task metadata.
+        validator: Optional zero-argument callback that validates this segment
+            after its actions are exhausted. It must return one boolean per
+            parallel environment (or one scalar broadcast to every environment).
+            Gym ``terminated`` and ``truncated`` remain episode-level signals;
+            use this callback for subtask-level validation.
     """
 
     actions: Iterable[Any]
@@ -71,11 +76,32 @@ class DemoSegment:
     target_uid: str | None = None
     instruction: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    validator: Callable[[], Any] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
 class DemoSegmentResult:
-    """Execution result and half-open frame range for one segment."""
+    """Execution result and half-open frame range for one segment.
+
+    Scalar span and status fields are batch aggregates kept for compatibility.
+    The tuple fields preserve each vector-environment row independently.
+
+    Args:
+        segment_id: Zero-based segment index within the episode.
+        name: Stable segment name supplied by the task.
+        start_step: Earliest participating row start, inclusive.
+        end_step: Latest participating row end, exclusive.
+        success: Whether every participating row completed the segment.
+        target_uid: Optional manipulated scene entity.
+        instruction: Optional language instruction.
+        failure_reason: First aggregate failure reason, if any.
+        metadata: Additional JSON-compatible task metadata.
+        active: Participation mask captured at segment start.
+        start_steps: Per-environment inclusive starts.
+        end_steps: Per-environment exclusive ends.
+        successes: Per-environment segment status.
+        failure_reasons: Per-environment failure reasons.
+    """
 
     segment_id: int
     name: str
@@ -86,25 +112,78 @@ class DemoSegmentResult:
     instruction: str | None = None
     failure_reason: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    active: tuple[bool, ...] = ()
+    start_steps: tuple[int, ...] = ()
+    end_steps: tuple[int, ...] = ()
+    successes: tuple[bool, ...] = ()
+    failure_reasons: tuple[str | None, ...] = ()
 
-    def to_metadata(self) -> dict[str, Any]:
-        """Return a JSON-compatible representation."""
-        return {
+    def to_metadata(self, env_id: int | None = None) -> dict[str, Any]:
+        """Return a JSON-compatible aggregate or per-environment representation.
+
+        Args:
+            env_id: Optional parallel-environment index. When provided, scalar
+                spans and status are selected from the per-environment fields.
+
+        Returns:
+            JSON-compatible segment metadata.
+        """
+        metadata = {
             "segment_id": self.segment_id,
             "name": self.name,
-            "start_step": self.start_step,
-            "end_step": self.end_step,
-            "success": self.success,
             "target_uid": self.target_uid,
             "instruction": self.instruction,
-            "failure_reason": self.failure_reason,
             "metadata": dict(self.metadata),
         }
+        if env_id is not None and self.start_steps:
+            metadata.update(
+                {
+                    "start_step": self.start_steps[env_id],
+                    "end_step": self.end_steps[env_id],
+                    "success": self.successes[env_id],
+                    "failure_reason": self.failure_reasons[env_id],
+                }
+            )
+            return metadata
+
+        metadata.update(
+            {
+                "start_step": self.start_step,
+                "end_step": self.end_step,
+                "success": self.success,
+                "failure_reason": self.failure_reason,
+            }
+        )
+        if self.active:
+            metadata.update(
+                {
+                    "active": list(self.active),
+                    "start_steps": list(self.start_steps),
+                    "end_steps": list(self.end_steps),
+                    "successes": list(self.successes),
+                    "failure_reasons": list(self.failure_reasons),
+                }
+            )
+        return metadata
 
 
 @dataclass(frozen=True)
 class DemoEpisodeResult:
-    """Result of executing all planned segments for one batched episode."""
+    """Result of executing all planned segments for one batched episode.
+
+    Args:
+        episode_index: Logical episode identifier.
+        length: Maximum recorded row length.
+        completed: Whether every environment completed successfully.
+        success: Sticky per-environment success flags.
+        terminated: Sticky per-environment Gym termination flags.
+        truncated: Sticky per-environment Gym truncation flags.
+        terminal_reason: Aggregate terminal reason.
+        segments: Executed segment results.
+        lengths: Independent per-environment recorded lengths.
+        completed_by_env: Independent valid-completion flags.
+        terminal_reasons: Independent terminal reasons.
+    """
 
     episode_index: int
     length: int
@@ -114,6 +193,9 @@ class DemoEpisodeResult:
     truncated: tuple[bool, ...]
     terminal_reason: str
     segments: tuple[DemoSegmentResult, ...] = ()
+    lengths: tuple[int, ...] = ()
+    completed_by_env: tuple[bool, ...] = ()
+    terminal_reasons: tuple[str, ...] = ()
 
     @property
     def all_success(self) -> bool:
@@ -127,7 +209,7 @@ class DemoEpisodeResult:
 
     def to_metadata(self) -> dict[str, Any]:
         """Return a JSON-compatible representation."""
-        return {
+        metadata = {
             "schema_version": DEMO_SCHEMA_VERSION,
             "episode_index": self.episode_index,
             "length": self.length,
@@ -138,6 +220,15 @@ class DemoEpisodeResult:
             "terminal_reason": self.terminal_reason,
             "segments": [segment.to_metadata() for segment in self.segments],
         }
+        if self.lengths:
+            metadata.update(
+                {
+                    "lengths": list(self.lengths),
+                    "completed_by_env": list(self.completed_by_env),
+                    "terminal_reasons": list(self.terminal_reasons),
+                }
+            )
+        return metadata
 
 
 ProgressWrapper = Callable[[Iterable[Any], str], Iterable[Any]]
@@ -259,31 +350,71 @@ def execute_demo_episode(
     end_segment = _get_env_callable(env, "_end_demo_segment_recording")
     end_episode = _get_env_callable(env, "_end_demo_episode_recording")
     normalize_action = _get_env_callable(env, "_normalize_demo_action")
+    mask_action = _get_env_callable(env, "_mask_demo_action")
+    set_active_mask = _get_env_callable(env, "_set_demo_active_mask")
+    success_fn = _get_env_callable(env, "is_task_success")
+
+    active = [True] * num_envs
+
+    def publish_active_mask() -> None:
+        """Publish executor liveness to recording hooks and action masking."""
+        if set_active_mask is not None:
+            set_active_mask(tuple(active))
+            return
+        previous = getattr(target, "_demo_active_mask", None)
+        device = getattr(previous, "device", None)
+        setattr(
+            target,
+            "_demo_active_mask",
+            torch.tensor(active, dtype=torch.bool, device=device),
+        )
 
     if begin_episode is not None:
         begin_episode(episode_index=episode_index)
+    publish_active_mask()
 
     previous_no_auto_reset = bool(getattr(target, "_demo_no_auto_reset", False))
     setattr(target, "_demo_no_auto_reset", True)
 
-    total_steps = 0
+    lengths = [0] * num_envs
+    success = [False] * num_envs
+    completed_by_env = [False] * num_envs
+    terminated = [False] * num_envs
+    truncated = [False] * num_envs
+    terminal_reasons = ["pending"] * num_envs
     segment_results: list[DemoSegmentResult] = []
-    terminated = (False,) * num_envs
-    truncated = (False,) * num_envs
     last_info: Mapping[str, Any] = {}
-    terminal_reason = "completed"
-    completed = True
+    fatal_reason: str | None = None
 
     try:
         segment_count = 0
-        for segment_id, segment in enumerate(resolve_demo_segments(env, **plan_kwargs)):
+        segments = iter(resolve_demo_segments(env, **plan_kwargs))
+        while any(active):
+            if should_stop is not None and should_stop():
+                fatal_reason = "interrupted"
+                for env_id, is_active in enumerate(active):
+                    if is_active:
+                        terminal_reasons[env_id] = fatal_reason
+                        active[env_id] = False
+                publish_active_mask()
+                break
+            try:
+                segment = next(segments)
+            except StopIteration:
+                break
+
+            segment_id = segment_count
             segment_count += 1
-            start_step = total_steps
+            participants = tuple(active)
+            start_steps = tuple(lengths)
+            segment_successes = [False] * num_envs
+            segment_failure_reasons: list[str | None] = [None] * num_envs
+            segment_reason: str | None = None
             if begin_segment is not None:
                 begin_segment(segment_id=segment_id, segment=segment)
 
             action_count = 0
-            segment_reason: str | None = None
+            actions_exhausted = True
             actions: Iterable[Any] = segment.actions
             if actions is None:
                 actions = ()
@@ -296,99 +427,246 @@ def execute_demo_episode(
 
             for action in actions:
                 if should_stop is not None and should_stop():
-                    completed = False
-                    terminal_reason = "interrupted"
-                    segment_reason = terminal_reason
+                    actions_exhausted = False
+                    fatal_reason = "interrupted"
+                    segment_reason = fatal_reason
+                    for env_id, is_active in enumerate(active):
+                        if is_active:
+                            terminal_reasons[env_id] = fatal_reason
+                            segment_failure_reasons[env_id] = fatal_reason
+                            active[env_id] = False
+                    publish_active_mask()
                     break
 
                 if normalize_action is not None:
                     action = normalize_action(action)
+                if not all(active):
+                    if mask_action is None:
+                        raise RuntimeError(
+                            "A vector demo environment completed asynchronously but "
+                            "does not implement _mask_demo_action(action, active_mask)."
+                        )
+                    action = mask_action(action, tuple(active))
+
+                active_before_step = tuple(active)
                 _, _, terminated_value, truncated_value, info = env.step(action)
                 action_count += 1
-                total_steps += 1
                 last_info = info
-                terminated = _as_bool_tuple(terminated_value, num_envs)
-                truncated = _as_bool_tuple(truncated_value, num_envs)
+                for env_id, was_active in enumerate(active_before_step):
+                    if was_active:
+                        lengths[env_id] += 1
 
-                if any(terminated) or any(truncated):
-                    completed = False
-                    terminal_reason = "truncated" if any(truncated) else "terminated"
-                    segment_reason = terminal_reason
+                step_terminated = _as_bool_tuple(terminated_value, num_envs)
+                step_truncated = _as_bool_tuple(truncated_value, num_envs)
+                step_success_source = last_info.get("success")
+                if step_success_source is None and any(
+                    step_terminated[env_id]
+                    for env_id, was_active in enumerate(active_before_step)
+                    if was_active
+                ):
+                    step_success_source = (
+                        success_fn() if success_fn is not None else False
+                    )
+                step_success = _as_bool_tuple(step_success_source, num_envs)
+                step_failure = _as_bool_tuple(last_info.get("fail"), num_envs)
+
+                step_failed = False
+                active_step_truncated = False
+                for env_id, was_active in enumerate(active_before_step):
+                    if not was_active:
+                        continue
+                    # Preserve both raw Gym flags when an environment reports
+                    # terminated and truncated on the same transition.
+                    terminated[env_id] |= step_terminated[env_id]
+                    truncated[env_id] |= step_truncated[env_id]
+                    if step_truncated[env_id]:
+                        active_step_truncated = True
+                        success[env_id] = False
+                        terminal_reasons[env_id] = "truncated"
+                        segment_failure_reasons[env_id] = "truncated"
+                        active[env_id] = False
+                        step_failed = True
+                    elif step_failure[env_id]:
+                        success[env_id] = False
+                        terminal_reasons[env_id] = "failure"
+                        segment_failure_reasons[env_id] = "failure"
+                        active[env_id] = False
+                        step_failed = True
+                    elif step_terminated[env_id]:
+                        active[env_id] = False
+                        if step_success[env_id]:
+                            success[env_id] = True
+                            completed_by_env[env_id] = True
+                            terminal_reasons[env_id] = "success"
+                            segment_successes[env_id] = True
+                        else:
+                            success[env_id] = False
+                            terminal_reasons[env_id] = "failure"
+                            segment_failure_reasons[env_id] = "failure"
+                            step_failed = True
+
+                if step_failed:
+                    actions_exhausted = False
+                    fatal_reason = "truncated" if active_step_truncated else "failure"
+                    segment_reason = fatal_reason
+                    for env_id, is_active in enumerate(active):
+                        if is_active:
+                            terminal_reasons[env_id] = "batch_aborted"
+                            segment_failure_reasons[env_id] = "batch_aborted"
+                            active[env_id] = False
+                    publish_active_mask()
+                    break
+
+                publish_active_mask()
+                if not any(active):
+                    # Every row reached episode-level success. Stop this segment
+                    # and do not request another lazy segment.
+                    actions_exhausted = False
+                    break
+                if should_stop is not None and should_stop():
+                    actions_exhausted = False
+                    fatal_reason = "interrupted"
+                    segment_reason = fatal_reason
+                    for env_id, is_active in enumerate(active):
+                        if is_active:
+                            terminal_reasons[env_id] = fatal_reason
+                            segment_failure_reasons[env_id] = fatal_reason
+                            active[env_id] = False
+                    publish_active_mask()
                     break
 
             if action_count == 0 and segment_reason is None:
-                completed = False
-                terminal_reason = "empty_segment"
-                segment_reason = terminal_reason
+                fatal_reason = "empty_segment"
+                segment_reason = fatal_reason
+                for env_id, is_participant in enumerate(participants):
+                    if is_participant:
+                        terminal_reasons[env_id] = fatal_reason
+                        segment_failure_reasons[env_id] = fatal_reason
+                        active[env_id] = False
+                publish_active_mask()
 
-            segment_success = segment_reason is None
-            if segment_reason == "terminated":
-                segment_success = all(
-                    _as_bool_tuple(last_info.get("success"), num_envs)
+            if actions_exhausted and segment_reason is None:
+                validation = (
+                    _as_bool_tuple(segment.validator(), num_envs)
+                    if segment.validator is not None
+                    else (True,) * num_envs
                 )
+                validation_failed = False
+                for env_id, is_participant in enumerate(participants):
+                    if not is_participant:
+                        continue
+                    if completed_by_env[env_id] and success[env_id]:
+                        segment_successes[env_id] = True
+                    elif active[env_id] and validation[env_id]:
+                        segment_successes[env_id] = True
+                    elif active[env_id]:
+                        validation_failed = True
+                        segment_failure_reasons[env_id] = "segment_validation_failed"
+                        terminal_reasons[env_id] = "segment_validation_failed"
 
+                if validation_failed:
+                    fatal_reason = "segment_validation_failed"
+                    segment_reason = fatal_reason
+                    for env_id, is_active in enumerate(active):
+                        if is_active:
+                            if segment_failure_reasons[env_id] is None:
+                                segment_failure_reasons[env_id] = "batch_aborted"
+                                terminal_reasons[env_id] = "batch_aborted"
+                            segment_successes[env_id] = False
+                            active[env_id] = False
+                    publish_active_mask()
+
+            participant_ids = [
+                env_id
+                for env_id, is_participant in enumerate(participants)
+                if is_participant
+            ]
+            segment_ok = bool(participant_ids) and all(
+                segment_successes[env_id] for env_id in participant_ids
+            )
+            aggregate_failure = segment_reason or next(
+                (
+                    segment_failure_reasons[env_id]
+                    for env_id in participant_ids
+                    if segment_failure_reasons[env_id] is not None
+                ),
+                None,
+            )
+            end_steps = tuple(lengths)
             segment_result = DemoSegmentResult(
                 segment_id=segment_id,
                 name=segment.name,
-                start_step=start_step,
-                end_step=total_steps,
-                success=segment_success,
+                start_step=min(start_steps[env_id] for env_id in participant_ids),
+                end_step=max(end_steps[env_id] for env_id in participant_ids),
+                success=segment_ok,
                 target_uid=segment.target_uid,
                 instruction=segment.instruction,
-                failure_reason=None if segment_success else segment_reason,
+                failure_reason=aggregate_failure,
                 metadata=segment.metadata,
+                active=participants,
+                start_steps=start_steps,
+                end_steps=end_steps,
+                successes=tuple(segment_successes),
+                failure_reasons=tuple(segment_failure_reasons),
             )
             segment_results.append(segment_result)
             if end_segment is not None:
                 end_segment(result=segment_result)
 
-            if segment_reason is not None:
+            if segment_reason is not None or not any(active):
                 break
 
-        if segment_count == 0:
-            completed = False
-            terminal_reason = "empty_plan"
-
-        success_fn = _get_env_callable(env, "is_task_success")
-        if any(terminated) or any(truncated):
-            success_source = last_info.get("success")
-            if success_source is None:
-                success_source = success_fn() if success_fn is not None else False
-        else:
-            # Expert tasks historically validate the final planned state with
-            # is_task_success(). EmbodiedEnv.get_info() always contains a
-            # compute_task_state()-based success field, which remains false for
-            # legacy tasks that only implement the expert-policy hook.
+        if segment_count == 0 and fatal_reason is None:
+            fatal_reason = "empty_plan"
+            for env_id, is_active in enumerate(active):
+                if is_active:
+                    terminal_reasons[env_id] = fatal_reason
+                    active[env_id] = False
+            publish_active_mask()
+        elif fatal_reason is None and any(active):
+            # Normal plan exhaustion validates only rows that have not already
+            # reached sticky episode success. Legacy expert tasks use
+            # is_task_success() for this final validation.
             success_source = (
                 success_fn()
                 if success_fn is not None
-                else last_info.get("success", completed)
+                else last_info.get("success", True)
             )
-        success = _as_bool_tuple(success_source, num_envs)
+            final_success = _as_bool_tuple(success_source, num_envs)
+            for env_id, is_active in enumerate(active):
+                if not is_active:
+                    continue
+                success[env_id] = final_success[env_id]
+                completed_by_env[env_id] = final_success[env_id]
+                terminal_reasons[env_id] = (
+                    "success" if final_success[env_id] else "task_incomplete"
+                )
+                active[env_id] = False
+            publish_active_mask()
 
-        if any(truncated):
-            success = tuple(False for _ in success)
-            terminal_reason = "truncated"
-        elif any(terminated):
-            if all(success):
-                completed = True
-                terminal_reason = "success"
-            else:
-                terminal_reason = "failure"
+        completed = bool(completed_by_env) and all(completed_by_env)
+        if fatal_reason is not None:
+            terminal_reason = fatal_reason
         elif completed and all(success):
             terminal_reason = "success"
-        elif completed:
-            terminal_reason = "task_incomplete"
+        else:
+            terminal_reason = next(
+                (reason for reason in terminal_reasons if reason != "success"),
+                "task_incomplete",
+            )
 
         result = DemoEpisodeResult(
             episode_index=episode_index,
-            length=total_steps,
+            length=max(lengths, default=0),
             completed=completed,
-            success=success,
-            terminated=terminated,
-            truncated=truncated,
+            success=tuple(success),
+            terminated=tuple(terminated),
+            truncated=tuple(truncated),
             terminal_reason=terminal_reason,
             segments=tuple(segment_results),
+            lengths=tuple(lengths),
+            completed_by_env=tuple(completed_by_env),
+            terminal_reasons=tuple(terminal_reasons),
         )
         if end_episode is not None:
             end_episode(result=result)

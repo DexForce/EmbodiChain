@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import av
 import numpy as np
@@ -204,6 +205,20 @@ class TestDepthSidecarManager:
         mgr.finalize()
         meta = json.loads((tmp_path / "depth_meta.json").read_text())
         assert sorted(meta["sensors"]["camera"]["episodes"]) == ["0", "1", "2"]
+
+    def test_end_episode_surfaces_encoder_close_failure(self, tmp_path: Path):
+        """A missing committed depth video is a visible durability failure."""
+        mgr = self._make_manager(tmp_path)
+        writer = MagicMock()
+        writer.close.side_effect = OSError("encoder failed")
+        mgr._writers = {"camera": writer}
+        mgr._episode_sensors = ["camera"]
+
+        with pytest.raises(RuntimeError, match="encoder failed"):
+            mgr.end_episode(0)
+
+        writer.abort.assert_called_once_with()
+        assert mgr._writers == {}
 
 
 class TestCodec:

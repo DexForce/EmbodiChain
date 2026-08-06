@@ -16,13 +16,22 @@
 
 from __future__ import annotations
 
+import os
+import math
+import pickle
+import sys
+import threading
 import time
-import torch
 import multiprocessing as mp
 
+from dataclasses import dataclass
+from enum import Enum
+from types import TracebackType
 from typing import Literal
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from multiprocessing.synchronize import Event as MpEvent
+
+import torch
 from tensordict import TensorDict
 from tqdm import tqdm
 
@@ -30,7 +39,154 @@ from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 
-__all__ = ["OnlineDataEngine", "OnlineDataEngineCfg"]
+__all__ = [
+    "OnlineDataEngine",
+    "OnlineDataEngineCfg",
+    "OnlineDataEngineState",
+    "OnlineDataWorkerError",
+]
+
+_ERROR_BUFFER_SIZE = 64 * 1024
+
+
+class OnlineDataEngineState(str, Enum):
+    """Lifecycle states for :class:`OnlineDataEngine`."""
+
+    CREATED = "CREATED"
+    STARTING = "STARTING"
+    READY = "READY"
+    FAILED = "FAILED"
+    STOPPED = "STOPPED"
+
+
+_STATE_TO_CODE = {state: index for index, state in enumerate(OnlineDataEngineState)}
+_CODE_TO_STATE = {code: state for state, code in _STATE_TO_CODE.items()}
+
+
+class OnlineDataWorkerError(RuntimeError):
+    """Fallback error for a worker exception that cannot be reconstructed."""
+
+
+def _forced_shutdown_error() -> OnlineDataWorkerError:
+    """Build the error used when graceful worker durability is unknown."""
+    return OnlineDataWorkerError(
+        "OnlineDataEngine worker required terminate()/kill(); graceful close "
+        "and recorder durability could not be confirmed."
+    )
+
+
+@dataclass(frozen=True)
+class _WorkerErrorEnvelope:
+    """Stable, pickle-safe description of a worker exception."""
+
+    module: str
+    qualname: str
+    message: str
+    representation: str
+    exception_payload: bytes | None
+
+
+def _make_worker_error_envelope(error: BaseException) -> _WorkerErrorEnvelope:
+    """Create a stable envelope, retaining the exception when it is picklable."""
+    exception_payload = None
+    try:
+        candidate = pickle.dumps(error, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(candidate) < _ERROR_BUFFER_SIZE // 2:
+            exception_payload = candidate
+    except BaseException:
+        pass
+
+    return _WorkerErrorEnvelope(
+        module=type(error).__module__,
+        qualname=type(error).__qualname__,
+        message=str(error)[:4096],
+        representation=repr(error)[:4096],
+        exception_payload=exception_payload,
+    )
+
+
+def _error_from_envelope(envelope: _WorkerErrorEnvelope) -> BaseException:
+    """Reconstruct an original exception or return the stable fallback type."""
+    if envelope.exception_payload is not None:
+        try:
+            error = pickle.loads(envelope.exception_payload)
+        except BaseException as decode_error:
+            return OnlineDataWorkerError(
+                f"Worker raised {envelope.module}.{envelope.qualname}: "
+                f"{envelope.message} (exception reconstruction failed: "
+                f"{type(decode_error).__name__}: {decode_error})"
+            )
+        if isinstance(error, BaseException):
+            return error
+
+    return OnlineDataWorkerError(
+        f"Worker raised {envelope.module}.{envelope.qualname}: {envelope.message}"
+    )
+
+
+def _publish_worker_error(
+    error_buffer: SynchronizedArray,
+    error_length: Synchronized,
+    failed_signal: MpEvent,
+    state_value: Synchronized,
+    error: BaseException,
+) -> bool:
+    """Publish a worker exception once to every process sharing the engine."""
+    try:
+        envelope = _make_worker_error_envelope(error)
+        payload = pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(payload) > len(error_buffer):
+            envelope = _WorkerErrorEnvelope(
+                module=envelope.module,
+                qualname=envelope.qualname,
+                message=envelope.message[:1024],
+                representation=envelope.representation[:1024],
+                exception_payload=None,
+            )
+            payload = pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(payload) > len(error_buffer):
+            return False
+
+        with error_buffer.get_lock():
+            error_buffer[: len(payload)] = payload
+            error_length.value = len(payload)
+        failed_signal.set()
+        with state_value.get_lock():
+            state_value.value = _STATE_TO_CODE[OnlineDataEngineState.FAILED]
+    except BaseException:
+        return False
+    return True
+
+
+def _monitor_worker_process(
+    process: mp.Process,
+    close_signal: MpEvent,
+    error_buffer: SynchronizedArray,
+    error_length: Synchronized,
+    failed_signal: MpEvent,
+    state_value: Synchronized,
+) -> None:
+    """Broadcast hard worker exits without retaining the engine instance."""
+    try:
+        process.join()
+        if close_signal.is_set() or failed_signal.is_set():
+            return
+        error = RuntimeError(
+            "OnlineDataEngine simulation worker exited unexpectedly "
+            f"(exit code {process.exitcode})."
+        )
+    except BaseException as caught_error:
+        if close_signal.is_set():
+            return
+        error = caught_error
+
+    _publish_worker_error(
+        error_buffer,
+        error_length,
+        failed_signal,
+        state_value,
+        error,
+    )
 
 
 @configclass
@@ -67,19 +223,27 @@ class OnlineDataEngineCfg:
     max_generation_attempts: int = 3
     """Maximum planning/execution attempts for each buffer write transaction."""
 
+    initialization_timeout: float = 300.0
+    """Maximum seconds to wait for the worker's initial buffer fill."""
+
 
 # ---------------------------------------------------------------------------
 # Subprocess entry point (module-level so it can be pickled by multiprocessing)
 # ---------------------------------------------------------------------------
 
 
-def _sim_worker_fn(
+def _run_sim_worker(
     cfg: OnlineDataEngineCfg,
     shared_buffer: TensorDict,
     lock_index: SynchronizedArray,
     fill_signal: MpEvent,
     init_signal: MpEvent,
     close_signal: MpEvent,
+    error_buffer: SynchronizedArray,
+    error_length: Synchronized,
+    failed_signal: MpEvent,
+    state_value: Synchronized,
+    error_reported: list[bool],
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -108,7 +272,7 @@ def _sim_worker_fn(
     )
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.sim import SimulationManagerCfg
-    from embodichain.utils.logger import log_info, log_warning, log_error
+    from embodichain.utils.logger import log_info, log_warning
 
     gym_config: dict = cfg.gym_config
     action_config: dict = cfg.action_config
@@ -253,12 +417,63 @@ def _sim_worker_fn(
                     "[Simulation Process] Initial buffer fill complete. Engine is ready.",
                     color="cyan",
                 )
-    except KeyboardInterrupt:
-        log_warning("[Simulation Process] Stopping (KeyboardInterrupt).")
-    except Exception as e:
-        log_error(f"[Simulation Process] Unhandled error: {e}")
     finally:
+        error = sys.exc_info()[1]
+        if error is not None and not error_reported[0]:
+            error_reported[0] = _publish_worker_error(
+                error_buffer,
+                error_length,
+                failed_signal,
+                state_value,
+                error,
+            )
         env.close()
+
+
+def _sim_worker_fn(
+    cfg: OnlineDataEngineCfg,
+    shared_buffer: TensorDict,
+    lock_index: SynchronizedArray,
+    fill_signal: MpEvent,
+    init_signal: MpEvent,
+    close_signal: MpEvent,
+    error_buffer: SynchronizedArray,
+    error_length: Synchronized,
+    failed_signal: MpEvent,
+    state_value: Synchronized,
+) -> None:
+    """Run the simulation worker and publish a stable exception envelope.
+
+    Picklable exceptions are reconstructed with their original type and
+    message. Every consumer process reads the same shared snapshot; exceptions
+    that cannot be reconstructed are represented by
+    :class:`OnlineDataWorkerError`.
+    """
+    error_reported = [False]
+    try:
+        _run_sim_worker(
+            cfg,
+            shared_buffer,
+            lock_index,
+            fill_signal,
+            init_signal,
+            close_signal,
+            error_buffer,
+            error_length,
+            failed_signal,
+            state_value,
+            error_reported,
+        )
+    except BaseException as error:
+        if not error_reported[0]:
+            _publish_worker_error(
+                error_buffer,
+                error_length,
+                failed_signal,
+                state_value,
+                error,
+            )
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -296,12 +511,13 @@ class OnlineDataEngine:
     and the counter resets to zero.  This amortises the cost of GPU-accelerated
     simulation across many training iterations.
 
-    **Initialisation barrier**
+    **Lifecycle state**
 
-    The :attr:`is_init` property returns ``False`` until the subprocess
-    completes the very first full buffer fill, after which it becomes
-    permanently ``True``.  Training code should wait on this flag before
-    calling :meth:`sample_batch` to avoid drawing all-zero data.
+    Every instance starts in :attr:`OnlineDataEngineState.CREATED`, passes
+    through ``STARTING`` while the first fill is running, and only serves data
+    in ``READY``. Worker failures transition to ``FAILED`` and explicit cleanup
+    transitions to terminal ``STOPPED``; failed or stopped instances cannot be
+    restarted.
 
     Args:
         cfg: Engine configuration.
@@ -311,16 +527,30 @@ class OnlineDataEngine:
             ``[buffer_size, max_episode_steps, ...]``.
         buffer_size: Total number of trajectory slots in the shared buffer.
         device: Device of the shared buffer.
-        is_init: ``True`` once the buffer has been populated at least once.
+        state: Current :class:`OnlineDataEngineState`.
+        is_init: ``True`` only while the engine is ready to sample.
     """
 
     def __init__(self, cfg: OnlineDataEngineCfg) -> None:
+        self._owner_pid = os.getpid()
+        self._lifecycle_condition = threading.Condition(threading.RLock())
+        self._stop_requested = False
+        self._cleanup_complete = False
+        self._forced_shutdown_attempted = False
         self.cfg = cfg
 
         if cfg.max_generation_attempts < 1:
             raise ValueError(
                 "max_generation_attempts must be at least 1, "
                 f"got {cfg.max_generation_attempts}."
+            )
+        if (
+            not math.isfinite(cfg.initialization_timeout)
+            or cfg.initialization_timeout <= 0
+        ):
+            raise ValueError(
+                "initialization_timeout must be finite and greater than zero, "
+                f"got {cfg.initialization_timeout}."
             )
 
         # Allocate the shared buffer (shape: [buffer_size, max_episode_steps, ...]).
@@ -361,45 +591,266 @@ class OnlineDataEngine:
         # Accumulated sample count used by the refill criterion.
         self._sample_count: Synchronized = self._mp_ctx.Value("i", 0)
 
+        # State and worker failures are shared so every DataLoader consumer
+        # observes the same terminal state and exception snapshot.
+        self._state_value: Synchronized = self._mp_ctx.Value(
+            "i", _STATE_TO_CODE[OnlineDataEngineState.CREATED]
+        )
+        self._worker_failed_signal: MpEvent = self._mp_ctx.Event()
+        self._worker_error_buffer: SynchronizedArray = self._mp_ctx.Array(
+            "B", _ERROR_BUFFER_SIZE
+        )
+        self._worker_error_length: Synchronized = self._mp_ctx.Value("i", 0)
+
         # Handle to the simulation subprocess, set in start() and used in stop().
         self._sim_process: mp.Process | None = None
+        self._monitor_thread: threading.Thread | None = None
+        self._channel_error: BaseException | None = None
+        self._worker_error: BaseException | None = None
 
     def start(self) -> None:
-        self._sim_process: mp.Process = self._mp_ctx.Process(
-            target=_sim_worker_fn,
-            args=(
-                self.cfg,
-                self.shared_buffer,
-                self._lock_index,
-                self._fill_signal,
-                self._init_signal,
-                self._close_signal,
-            ),
-            daemon=True,
-        )
-        self._sim_process.start()
-        log_info(
-            f"[OnlineDataEngine] Simulation subprocess started (PID={self._sim_process.pid}).",
-            color="green",
-        )
+        """Start the worker and block until its first fill completes.
 
-        # Trigger the initial fill so data is ready before the first sample.
-        self._fill_signal.set()
+        Raises:
+            RuntimeError: If the engine was already started or stopped.
+            TimeoutError: If the first fill exceeds ``initialization_timeout``.
+            BaseException: The original exception raised by the worker.
+        """
+        self._require_owner_process("start")
+        with self._lifecycle_condition:
+            self._require_state(OnlineDataEngineState.CREATED, "start")
+            self._stop_requested = False
+            self._set_state(OnlineDataEngineState.STARTING)
 
-        while not self.is_init:
+        try:
+            with self._lifecycle_condition:
+                self._sim_process = self._mp_ctx.Process(
+                    target=_sim_worker_fn,
+                    args=(
+                        self.cfg,
+                        self.shared_buffer,
+                        self._lock_index,
+                        self._fill_signal,
+                        self._init_signal,
+                        self._close_signal,
+                        self._worker_error_buffer,
+                        self._worker_error_length,
+                        self._worker_failed_signal,
+                        self._state_value,
+                    ),
+                    # Some planners create their own process pool. A daemonic
+                    # producer would make those nested workers illegal.
+                    daemon=False,
+                )
+                self._sim_process.start()
+                process = self._sim_process
+                self._monitor_thread = threading.Thread(
+                    target=_monitor_worker_process,
+                    args=(
+                        process,
+                        self._close_signal,
+                        self._worker_error_buffer,
+                        self._worker_error_length,
+                        self._worker_failed_signal,
+                        self._state_value,
+                    ),
+                    name="online-data-worker-monitor",
+                    daemon=True,
+                )
+                self._monitor_thread.start()
+            log_info(
+                f"[OnlineDataEngine] Simulation subprocess started (PID={self._sim_process.pid}).",
+                color="green",
+            )
+
+            # Trigger the initial fill so data is ready before the first sample.
+            self._fill_signal.set()
+            deadline = time.monotonic() + self.cfg.initialization_timeout
+
+            while not self._init_signal.wait(timeout=0.1):
+                with self._lifecycle_condition:
+                    if self._stop_requested:
+                        raise RuntimeError(
+                            "OnlineDataEngine.start() was cancelled by stop()."
+                        )
+                self._ensure_worker_alive()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        "OnlineDataEngine initial buffer fill exceeded "
+                        f"{self.cfg.initialization_timeout} seconds."
+                    )
+
             self._ensure_worker_alive()
-            time.sleep(0.5)
+            with self._lifecycle_condition:
+                if self._stop_requested:
+                    raise RuntimeError(
+                        "OnlineDataEngine.start() was cancelled by stop()."
+                    )
+                self._set_state(OnlineDataEngineState.READY)
+                self._lifecycle_condition.notify_all()
+        except BaseException as error:
+            cleanup_error = None
+            forced_shutdown = False
+            with self._lifecycle_condition:
+                stop_requested = self._stop_requested
+                if not self._worker_failed_signal.is_set():
+                    self._worker_error = error
+                try:
+                    forced_shutdown = self._shutdown_worker()
+                except BaseException as caught_cleanup_error:
+                    cleanup_error = caught_cleanup_error
+                    error.add_note(
+                        f"Worker cleanup also failed: {caught_cleanup_error}"
+                    )
+                else:
+                    self._cleanup_complete = True
+
+                forced_shutdown = forced_shutdown or self._forced_shutdown_attempted
+
+                # The worker may only publish an env.close()/recorder failure
+                # while the join above is in progress. Keep the start error as
+                # primary, but never lose that late durability error.
+                channel_error = self._receive_worker_error()
+                if channel_error is not None and channel_error is not error:
+                    error.add_note(
+                        "Worker also failed during cleanup: "
+                        f"{type(channel_error).__name__}: {channel_error}"
+                    )
+
+                if forced_shutdown:
+                    durability_error = _forced_shutdown_error()
+                    if channel_error is None:
+                        self._record_worker_error(durability_error)
+                        channel_error = durability_error
+                    error.add_note(str(durability_error))
+
+                if (
+                    stop_requested
+                    and channel_error is None
+                    and cleanup_error is None
+                    and not forced_shutdown
+                ):
+                    self._set_state(OnlineDataEngineState.STOPPED)
+                else:
+                    self._set_state(OnlineDataEngineState.FAILED)
+                self._lifecycle_condition.notify_all()
+            raise
 
     def _ensure_worker_alive(self) -> None:
-        """Raise when a started simulation worker exits unexpectedly."""
-        if self._sim_process is None or self._sim_process.is_alive():
+        """Fail the engine immediately when its worker reports or exits."""
+        worker_error = self._receive_worker_error()
+        if worker_error is not None:
+            self._set_state(OnlineDataEngineState.FAILED)
+            raise worker_error
+
+        if not self._is_owner_process():
+            if self._close_signal.is_set():
+                raise RuntimeError(
+                    "OnlineDataEngine owner has stopped the simulation worker."
+                )
+            return
+
+        if self._sim_process is None:
+            error = RuntimeError("OnlineDataEngine simulation worker was not created.")
+            self._record_worker_error(error)
+            raise error
+        if self._sim_process.is_alive():
             return
 
         self._sim_process.join(timeout=0)
-        raise RuntimeError(
-            "OnlineDataEngine simulation worker exited unexpectedly "
-            f"(exit code {self._sim_process.exitcode})."
+        worker_error = self._receive_worker_error()
+        if worker_error is None:
+            worker_error = RuntimeError(
+                "OnlineDataEngine simulation worker exited unexpectedly "
+                f"(exit code {self._sim_process.exitcode})."
+            )
+            self._record_worker_error(worker_error)
+        self._set_state(OnlineDataEngineState.FAILED)
+        raise worker_error
+
+    def _receive_worker_error(self) -> BaseException | None:
+        """Return the broadcast worker exception when one has been published."""
+        if not self._worker_failed_signal.is_set():
+            return None
+        if self._channel_error is not None:
+            return self._channel_error
+
+        try:
+            with self._worker_error_buffer.get_lock():
+                payload_length = self._worker_error_length.value
+                payload = bytes(self._worker_error_buffer[:payload_length])
+            envelope = pickle.loads(payload)
+            if not isinstance(envelope, _WorkerErrorEnvelope):
+                raise TypeError(f"invalid envelope type {type(envelope).__name__}")
+            error = _error_from_envelope(envelope)
+        except BaseException as decode_error:
+            error = OnlineDataWorkerError(
+                "OnlineDataEngine could not decode the worker error channel: "
+                f"{type(decode_error).__name__}: {decode_error}"
+            )
+        self._channel_error = error
+        if self._worker_error is None:
+            self._worker_error = error
+        self._set_state(OnlineDataEngineState.FAILED)
+        return error
+
+    def _record_worker_error(self, error: BaseException) -> None:
+        """Publish an owner-detected worker failure to every consumer."""
+        if self._worker_failed_signal.is_set():
+            self._receive_worker_error()
+            return
+
+        self._channel_error = error
+        if self._worker_error is None:
+            self._worker_error = error
+        published = _publish_worker_error(
+            self._worker_error_buffer,
+            self._worker_error_length,
+            self._worker_failed_signal,
+            self._state_value,
+            error,
         )
+        if not published:
+            fallback = OnlineDataWorkerError(
+                "OnlineDataEngine worker error serialization failed for "
+                f"{type(error).__module__}.{type(error).__qualname__}."
+            )
+            _publish_worker_error(
+                self._worker_error_buffer,
+                self._worker_error_length,
+                self._worker_failed_signal,
+                self._state_value,
+                fallback,
+            )
+        self._set_state(OnlineDataEngineState.FAILED)
+
+    def _require_state(self, expected: OnlineDataEngineState, operation: str) -> None:
+        """Require an exact lifecycle state for a public operation."""
+        current_state = self.state
+        if current_state is expected:
+            return
+        raise RuntimeError(
+            f"OnlineDataEngine.{operation}() requires state {expected.value}; "
+            f"current state is {current_state.value}."
+        ) from self._worker_error
+
+    def _is_owner_process(self) -> bool:
+        """Whether the current process owns the producer lifecycle."""
+        return os.getpid() == self._owner_pid
+
+    def _require_owner_process(self, operation: str) -> None:
+        """Reject lifecycle operations from forked or spawned consumers."""
+        if self._is_owner_process():
+            return
+        raise RuntimeError(
+            f"OnlineDataEngine.{operation}() may only be called by owner process "
+            f"{self._owner_pid}; current process is {os.getpid()}."
+        )
+
+    def _set_state(self, state: OnlineDataEngineState) -> None:
+        """Publish a lifecycle transition to every sharing process."""
+        with self._state_value.get_lock():
+            self._state_value.value = _STATE_TO_CODE[state]
 
     # -----------------------------------------------------------------------
     # Buffer initialisation
@@ -440,21 +891,16 @@ class OnlineDataEngine:
     # -----------------------------------------------------------------------
 
     @property
+    def state(self) -> OnlineDataEngineState:
+        """Return the engine's current lifecycle state."""
+        with self._state_value.get_lock():
+            state_code = self._state_value.value
+        return _CODE_TO_STATE[state_code]
+
+    @property
     def is_init(self) -> bool:
-        """Whether the shared buffer has been fully populated at least once.
-
-        Returns ``True`` after the simulation subprocess completes its first
-        full buffer fill, ``False`` while that initial fill is still in
-        progress.  Callers that must not sample stale (all-zero) data can
-        poll or block on this property before entering their training loop::
-
-            while not engine.is_init:
-                time.sleep(0.5)
-
-        Returns:
-            ``True`` once the buffer contains valid trajectory data.
-        """
-        return self._init_signal.is_set()
+        """Whether the engine is ready to serve initialized data."""
+        return self.state is OnlineDataEngineState.READY
 
     # -----------------------------------------------------------------------
     # Sampling
@@ -491,7 +937,12 @@ class OnlineDataEngine:
             ValueError: If an argument is invalid.
             RuntimeError: If no unlocked valid window satisfies the policy.
         """
-        self._ensure_worker_alive()
+        with self._lifecycle_condition:
+            worker_error = self._receive_worker_error()
+            if worker_error is not None:
+                raise worker_error
+            self._require_state(OnlineDataEngineState.READY, "sample_batch")
+            self._ensure_worker_alive()
 
         max_steps: int = self.shared_buffer.batch_size[1]
         if batch_size < 1:
@@ -621,6 +1072,107 @@ class OnlineDataEngine:
     # Lifecycle
     # -----------------------------------------------------------------------
 
+    def _detect_preexisting_worker_exit(self) -> BaseException | None:
+        """Return and broadcast a worker exit observed before shutdown starts."""
+        process = self._sim_process
+        if process is None:
+            error = RuntimeError("OnlineDataEngine simulation worker was not created.")
+            self._record_worker_error(error)
+            return error
+
+        try:
+            if process.is_alive():
+                return None
+            process.join(timeout=0)
+            exit_code = process.exitcode
+        except BaseException as inspection_error:
+            error = RuntimeError(
+                "OnlineDataEngine could not inspect its simulation worker before "
+                f"shutdown: {type(inspection_error).__name__}: {inspection_error}"
+            )
+            self._record_worker_error(error)
+            return error
+
+        worker_error = self._receive_worker_error()
+        if worker_error is not None:
+            return worker_error
+
+        error = RuntimeError(
+            "OnlineDataEngine simulation worker exited unexpectedly "
+            f"before stop() (exit code {exit_code})."
+        )
+        self._record_worker_error(error)
+        return error
+
+    def _shutdown_worker(self) -> bool:
+        """Stop and reap the worker, returning whether force was required."""
+        self._require_owner_process("stop")
+        self._close_signal.set()
+        self._fill_signal.set()
+
+        process = self._sim_process
+        if process is None:
+            return False
+
+        forced_shutdown = False
+
+        try:
+            is_alive = process.is_alive()
+        except ValueError:
+            is_alive = False
+
+        try:
+            process.join(timeout=5.0 if is_alive else 0)
+        except (AssertionError, ValueError):
+            pass
+
+        try:
+            is_alive = process.is_alive()
+        except ValueError:
+            is_alive = False
+        if is_alive:
+            forced_shutdown = True
+            self._forced_shutdown_attempted = True
+            process.terminate()
+            process.join(timeout=3.0)
+
+        try:
+            is_alive = process.is_alive()
+        except ValueError:
+            is_alive = False
+        if is_alive and hasattr(process, "kill"):
+            forced_shutdown = True
+            self._forced_shutdown_attempted = True
+            process.kill()
+            process.join(timeout=1.0)
+
+        try:
+            is_alive = process.is_alive()
+        except ValueError:
+            is_alive = False
+        if is_alive:
+            raise RuntimeError(
+                "OnlineDataEngine simulation worker remained alive after "
+                "graceful shutdown, terminate(), and kill()."
+            )
+
+        monitor_thread = self._monitor_thread
+        if (
+            monitor_thread is not None
+            and monitor_thread is not threading.current_thread()
+        ):
+            monitor_thread.join(timeout=1.0)
+            if monitor_thread.is_alive():
+                raise RuntimeError(
+                    "OnlineDataEngine worker monitor did not stop after the worker exited."
+                )
+
+        if hasattr(process, "close"):
+            process.close()
+        self._sim_process = None
+        self._monitor_thread = None
+        return forced_shutdown
+
     def stop(self) -> None:
         """Terminate the simulation subprocess and release resources.
 
@@ -631,21 +1183,127 @@ class OnlineDataEngine:
         Safe to call multiple times — subsequent calls are no-ops if the
         subprocess has already been terminated.
         """
-        if self._sim_process is None or not self._sim_process.is_alive():
-            return
+        self._require_owner_process("stop")
+        with self._lifecycle_condition:
+            if self.state is OnlineDataEngineState.STOPPED:
+                return
+            if self.state is OnlineDataEngineState.FAILED and self._cleanup_complete:
+                # A successful join makes future publications impossible, but
+                # still decode anything already visible before honoring the
+                # idempotent stop contract.
+                self._receive_worker_error()
+                return
 
-        # Ask the subprocess to stop and unblock it if it is waiting on fill_signal.
-        self._close_signal.set()
-        self._fill_signal.set()
+            if self.state is OnlineDataEngineState.STARTING:
+                self._stop_requested = True
+                self._close_signal.set()
+                self._fill_signal.set()
+                while self.state is OnlineDataEngineState.STARTING:
+                    self._lifecycle_condition.wait(timeout=0.1)
+                if self.state is OnlineDataEngineState.STOPPED:
+                    return
 
-        # Allow time for a graceful exit (close_signal is checked between steps).
-        self._sim_process.join(timeout=5.0)
+            state_before_shutdown = self.state
+            worker_error = self._receive_worker_error()
+            if (
+                worker_error is None
+                and state_before_shutdown is OnlineDataEngineState.READY
+            ):
+                worker_error = self._detect_preexisting_worker_exit()
 
-        if self._sim_process.is_alive():
-            self._sim_process.terminate()
-            self._sim_process.join(timeout=3.0)
+            forced_shutdown = False
+            try:
+                forced_shutdown = self._shutdown_worker()
+            except BaseException as cleanup_error:
+                # The worker can fail while handling the close signal (for
+                # example, while flushing a recorder in ``env.close()``).
+                # Re-read the shared channel after waiting for it so that a
+                # durability failure is not hidden behind the cleanup path.
+                worker_error = worker_error or self._receive_worker_error()
+                if self._forced_shutdown_attempted:
+                    durability_error = _forced_shutdown_error()
+                    if worker_error is None:
+                        self._record_worker_error(durability_error)
+                        worker_error = durability_error
+                    else:
+                        worker_error.add_note(str(durability_error))
+                self._set_state(OnlineDataEngineState.FAILED)
+                self._lifecycle_condition.notify_all()
+                if worker_error is not None:
+                    worker_error.add_note(
+                        f"Worker cleanup also failed: {cleanup_error}"
+                    )
+                    raise worker_error
+                self._worker_error = cleanup_error
+                raise
 
-        log_info("[OnlineDataEngine] Simulation subprocess terminated.", color="green")
+            # ``_shutdown_worker`` joins the producer, so any exception raised
+            # during its final ``env.close()`` has now been published.
+            worker_error = worker_error or self._receive_worker_error()
+            forced_shutdown = forced_shutdown or self._forced_shutdown_attempted
+            if forced_shutdown:
+                durability_error = _forced_shutdown_error()
+                if worker_error is None:
+                    self._record_worker_error(durability_error)
+                    worker_error = durability_error
+                else:
+                    worker_error.add_note(str(durability_error))
+
+            self._cleanup_complete = True
+            if worker_error is not None:
+                self._set_state(OnlineDataEngineState.FAILED)
+                self._lifecycle_condition.notify_all()
+                raise worker_error
+
+            self._set_state(OnlineDataEngineState.STOPPED)
+            self._lifecycle_condition.notify_all()
+        log_info("[OnlineDataEngine] Engine stopped.", color="green")
+
+    def __enter__(self) -> "OnlineDataEngine":
+        """Start the engine and return it for a managed lifecycle block."""
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        """Stop the engine while preserving any exception from the block."""
+        try:
+            self.stop()
+        except BaseException as cleanup_error:
+            if exc_value is None:
+                raise
+            exc_value.add_note(
+                "OnlineDataEngine cleanup also failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        return None
+
+    def __getstate__(self) -> dict:
+        """Serialize only consumer-safe fields for spawned DataLoader workers."""
+        state = self.__dict__.copy()
+        state["_sim_process"] = None
+        state["_monitor_thread"] = None
+        state["_lifecycle_condition"] = None
+        state["_channel_error"] = None
+        state["_worker_error"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore process-local synchronization after consumer deserialization."""
+        self.__dict__.update(state)
+        self._lifecycle_condition = threading.Condition(threading.RLock())
 
     def __del__(self) -> None:
-        self.stop()
+        try:
+            if getattr(self, "_owner_pid", None) != os.getpid():
+                return
+            if self.state is not OnlineDataEngineState.STOPPED:
+                self.stop()
+        except BaseException:
+            # Destructors run during partially initialized objects and interpreter
+            # shutdown, where cleanup must never mask the original exception.
+            pass

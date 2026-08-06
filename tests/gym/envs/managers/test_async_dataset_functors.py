@@ -237,7 +237,59 @@ class TestAsyncLeRobotRecorder:
         recorder(env, env_ids=torch.tensor([0]))
         env.current_rollout_step = 0  # mirror post-save reset
 
-        recorder.finalize()
+        first_path = recorder.finalize()
+        second_path = recorder.close()
 
         assert mock_ds.save_episode_calls == 1
         assert mock_ds.finalize_calls == 1
+        assert first_path == second_path == recorder.dataset_path
+
+    def test_finalize_does_not_enqueue_uncommitted_live_rollout(self):
+        """A rollout not explicitly passed to the recorder is discarded on close."""
+        env = _MockEnv(num_envs=1, steps=2)
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+
+        recorder.finalize()
+
+        assert mock_ds.save_episode_calls == 0
+        assert mock_ds.finalize_calls == 1
+
+    def test_finalize_aggregates_background_failures_after_draining(self):
+        """All queued commits run and their failures surface at the barrier."""
+        env = _MockEnv(num_envs=2, steps=2)
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+
+        def fail_save(env_id, *args, **kwargs):
+            if env_id == 0:
+                return False
+            raise OSError("disk unavailable")
+
+        recorder._save_single_episode = Mock(side_effect=fail_save)
+        recorder(env, env_ids=torch.tensor([0, 1]))
+
+        with pytest.raises(RuntimeError) as error_info:
+            recorder.finalize()
+
+        message = str(error_info.value)
+        assert "2 committed episode(s)" in message
+        assert "env 0" in message
+        assert "env 1" in message
+        assert "disk unavailable" in message
+        assert recorder._save_single_episode.call_count == 2
+        assert mock_ds.finalize_calls == 1
+
+        with pytest.raises(RuntimeError, match="2 committed episode"):
+            recorder.close()
+        assert recorder._save_single_episode.call_count == 2
+        assert mock_ds.finalize_calls == 1
+
+    def test_call_after_finalize_is_rejected(self):
+        """No commit may be queued behind the shutdown sentinel."""
+        env = _MockEnv(num_envs=1, steps=1)
+        recorder = _make_recorder(env, _MockDataset())
+        recorder.finalize()
+
+        with pytest.raises(RuntimeError, match="already finalized"):
+            recorder(env, env_ids=torch.tensor([0]))

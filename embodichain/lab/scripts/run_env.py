@@ -49,6 +49,11 @@ def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]
     return tqdm.tqdm(actions, desc=description, unit="step")
 
 
+def _abort_pending_episode(env: Any) -> None:
+    """Discard buffered data before retrying or closing an environment."""
+    env.reset(options={"save_data": False})
+
+
 def generate_and_execute_action_list(
     env: gymnasium.Env,
     idx: int,
@@ -128,9 +133,10 @@ def generate_function(
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
 
     if reset_before:
-        env.reset(options={"save_data": False})
+        _abort_pending_episode(env)
 
     for attempt in range(1, max_attempts + 1):
+        commit_succeeded = False
         try:
             result: DemoEpisodeResult = execute_demo_episode(
                 env,
@@ -138,28 +144,32 @@ def generate_function(
                 progress=_progress_wrapper,
                 **kwargs,
             )
-        except Exception:
-            # Never let close()/finalize() commit a partially written rollout
-            # when planning, normalization, or stepping raises.
-            env.reset(options={"save_data": False})
-            raise
-        if result.completed and result.all_success:
-            # reset() is the commit boundary: dataset functors consume the
-            # whole episode once, then buffers and scene state are reset.
-            env.reset()
-            return True
+            if result.completed and result.all_success:
+                # reset() is the commit boundary: dataset functors consume the
+                # whole episode once, then buffers and scene state are reset.
+                env.reset()
+                commit_succeeded = True
+                return True
+        finally:
+            # ``finally`` also covers KeyboardInterrupt, SystemExit, and
+            # GeneratorExit. A failed commit is aborted as well, so close()
+            # can never implicitly persist the pending partial episode.
+            if not commit_succeeded:
+                _abort_pending_episode(env)
 
         log_warning(
             f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
             f"{result.terminal_reason}. Discarding {result.length} frames."
         )
-        env.reset(options={"save_data": False})
 
     return False
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
     """Replay a recorded trajectory.
+
+    The caller retains ownership of ``env``. Wrapper-specific replay state is
+    restored before returning, but the environment is not closed here.
 
     Args:
         env: The environment built from the same config that recorded the
@@ -183,7 +193,12 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
         else:
             replay_auto(replay_env, mode)
     finally:
-        replay_env.close()
+        # ReplayWrapper.close() also closes its wrapped environment. Restore
+        # its local state here and leave the single close() to cli().
+        try:
+            replay_env.env.sim.enable_physics(True)
+        finally:
+            replay_env.env._replay_no_auto_reset = False
 
 
 def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
@@ -395,7 +410,8 @@ def replay_control(replay_env: ReplayWrapper) -> None:
         _run_replay_control_loop(replay_env, control_input)
 
 
-def main(args, env, gym_config):
+def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
+    """Run the selected workflow without taking ownership of ``env``."""
     if getattr(args, "replay", False):
         log_info("Replay mode.", color="green")
         replay(
@@ -413,56 +429,45 @@ def main(args, env, gym_config):
         return
 
     log_info("Start offline data generation.", color="green")
-    try:
-        # Prepare one clean scene. Every successful generate_function call
-        # commits via reset(), leaving the next episode ready to plan.
-        env.reset(options={"save_data": False})
-        for i in range(gym_config.get("max_episodes", 1)):
-            generated = generate_function(
-                env,
-                time_id=i,
-                save_path=getattr(args, "save_path", ""),
-                save_video=getattr(args, "save_video", False),
-                debug_mode=getattr(args, "debug_mode", False),
-                regenerate=getattr(args, "regenerate", False),
-                max_attempts=gym_config.get("demo_max_attempts", 3),
-                reset_before=False,
+    # Prepare one clean scene. Every successful generate_function call commits
+    # via reset(), leaving the next episode ready to plan.
+    _abort_pending_episode(env)
+    for i in range(gym_config.get("max_episodes", 1)):
+        generated = generate_function(
+            env,
+            time_id=i,
+            save_path=getattr(args, "save_path", ""),
+            save_video=getattr(args, "save_video", False),
+            debug_mode=getattr(args, "debug_mode", False),
+            regenerate=getattr(args, "regenerate", False),
+            max_attempts=gym_config.get("demo_max_attempts", 3),
+            reset_before=False,
+        )
+        if not generated:
+            raise RuntimeError(
+                f"Failed to generate episode {i} after "
+                f"{gym_config.get('demo_max_attempts', 3)} attempts."
             )
-            if not generated:
-                raise RuntimeError(
-                    f"Failed to generate episode {i} after "
-                    f"{gym_config.get('demo_max_attempts', 3)} attempts."
-                )
 
-        # Log the trajectory save location BEFORE env.close() (in the finally
-        # below) tears down the sim and, by default, os._exit()s the process.
-        if getattr(args, "record_trajectory", False):
-            save_dir = args.trajectory_save_dir
-            if save_dir is None:
-                import os
+    # Log the trajectory save location before cli() tears down the sim and, by
+    # default, os._exit()s the process.
+    if getattr(args, "record_trajectory", False):
+        save_dir = args.trajectory_save_dir
+        if save_dir is None:
+            import os
 
-                from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+            from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
-                save_dir = os.path.join(
-                    EMBODICHAIN_DEFAULT_DATA_ROOT,
-                    "trajectories",
-                    env.unwrapped._traj_run_id,
-                )
-            log_info(
-                f"Trajectories recorded to: {save_dir} "
-                "(replay with --replay --replay_trajectory <path>)",
-                color="green",
+            save_dir = os.path.join(
+                EMBODICHAIN_DEFAULT_DATA_ROOT,
+                "trajectories",
+                env.unwrapped._traj_run_id,
             )
-    finally:
-        # Drain the dataset recorder and finalize the LeRobot dataset before
-        # the process exits. This is REQUIRED for AsyncLeRobotRecorder: its
-        # background worker only *enqueues* episodes during reset, so without
-        # close() the worker is killed at exit and no data reaches disk.
-        # env.close() -> dataset_manager.finalize() drains the worker + flushes
-        # meta/stats, then sim.destroy() tears down the sim. sim.destroy() exits
-        # the process without returning, so this MUST be the last thing main()
-        # does.
-        env.close()
+        log_info(
+            f"Trajectories recorded to: {save_dir} "
+            "(replay with --replay --replay_trajectory <path>)",
+            color="green",
+        )
 
 
 def preview(env: gymnasium.Env) -> None:
@@ -507,7 +512,7 @@ def preview(env: gymnasium.Env) -> None:
         elif txt == "q":
             end = True
 
-    exit(0)
+    return
 
 
 def _create_parser() -> argparse.ArgumentParser:
@@ -540,6 +545,45 @@ def _create_parser() -> argparse.ArgumentParser:
         "control (interactive scrubber).",
     )
     return parser
+
+
+def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
+    """Abort pending data, then close the environment exactly once.
+
+    Args:
+        env: Gym environment or wrapper.
+        exit_process: Optional process-exit policy for ``EmbodiedEnv.close``.
+            An abort failure always forces ``False`` so the error can propagate.
+    """
+    abort_error: BaseException | None = None
+    close_error: BaseException | None = None
+    try:
+        _abort_pending_episode(env)
+    except BaseException as error:
+        abort_error = error
+    try:
+        if exit_process is None and abort_error is None:
+            env.close()
+        else:
+            target = getattr(env, "unwrapped", env)
+            target.close(
+                exit_process=False if abort_error is not None else exit_process
+            )
+    except BaseException as error:
+        close_error = error
+
+    # Recorder finalization is a durability barrier. Never turn a failed flush
+    # into a warning that lets an apparently successful data-generation run
+    # continue.
+    if close_error is not None:
+        if abort_error is not None:
+            close_error.add_note(
+                "Pending episode abort also failed: "
+                f"{type(abort_error).__name__}: {abort_error}"
+            )
+        raise close_error
+    if abort_error is not None:
+        raise abort_error
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
@@ -586,19 +630,41 @@ def cli(argv: Sequence[str] | None = None) -> None:
     # to skip the unsafe teardown entirely. When that env var is disabled (e.g.
     # dev/test), ``flush_cleanup_queue`` drains the queue and runs the deferred
     # destruction + GC + scene-barrier so we still exit cleanly.
+    body_error: BaseException | None = None
     try:
         main(args, env, gym_config)
+    except BaseException as error:
+        body_error = error
+        raise
     finally:
         try:
-            env.close()
-        except Exception as e:
-            log_warning(f"Failed to close environment: {e}")
-        try:
-            from embodichain.lab.sim.sim_manager import SimulationManager
+            # close() may auto-save trajectory state and finalizes asynchronous
+            # dataset writers. Resolve the pending transaction as an abort
+            # first, including when main() exits via an interrupt or SystemExit.
+            _abort_and_close_env(
+                env,
+                # Successful CLI runs keep the existing fast-exit default.
+                # While unwinding, cleanup must return so the original error
+                # (including Ctrl-C) remains observable to the caller/shell.
+                exit_process=False if body_error is not None else None,
+            )
+        except BaseException as cleanup_error:
+            if body_error is None:
+                raise
+            if isinstance(body_error, SystemExit) and body_error.code in (None, 0):
+                # A nominal zero exit must not hide a failed recorder barrier.
+                raise cleanup_error
+            body_error.add_note(
+                "Environment cleanup also failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        finally:
+            try:
+                from embodichain.lab.sim.sim_manager import SimulationManager
 
-            SimulationManager.flush_cleanup_queue()
-        except Exception as e:
-            log_warning(f"Failed to flush simulation cleanup queue: {e}")
+                SimulationManager.flush_cleanup_queue()
+            except Exception as error:
+                log_warning(f"Failed to flush simulation cleanup queue: {error}")
 
 
 if __name__ == "__main__":

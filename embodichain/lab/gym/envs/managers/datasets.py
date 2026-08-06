@@ -165,6 +165,10 @@ class LeRobotRecorder(Functor):
         self.total_time: float = 0.0
         self.curr_episode: int = 0
         self._metadata_lock = threading.Lock()
+        self._finalize_lock = threading.Lock()
+        self._finalized = False
+        self._finalize_result: Optional[str] = None
+        self._finalize_error: Optional[str] = None
 
         # Initialize dataset
         self._initialize_dataset()
@@ -205,15 +209,19 @@ class LeRobotRecorder(Functor):
                 ``DatasetManager.apply`` via ``**functor_cfg.params``. They are
                 read in :meth:`__init__` and ignored here.
         """
-        # If env_ids is None, check all environments for completed episodes
-        if env_ids is None:
-            env_ids = torch.arange(env.num_envs, device=env.device)
-        elif isinstance(env_ids, (list, range)):
-            env_ids = torch.tensor(list(env_ids), device=env.device)
+        with self._finalize_lock:
+            if self._finalized:
+                raise RuntimeError("LeRobotRecorder is already finalized")
 
-        # Save episodes for specified environments
-        if len(env_ids) > 0:
-            self._save_episodes(env_ids)
+            # If env_ids is None, check all environments for completed episodes
+            if env_ids is None:
+                env_ids = torch.arange(env.num_envs, device=env.device)
+            elif isinstance(env_ids, (list, range)):
+                env_ids = torch.tensor(list(env_ids), device=env.device)
+
+            # Save episodes for specified environments
+            if len(env_ids) > 0:
+                self._save_episodes(env_ids)
 
     def _save_episodes(
         self,
@@ -240,13 +248,17 @@ class LeRobotRecorder(Functor):
             episode_metadata = (
                 metadata_getter(env_id) if metadata_getter is not None else None
             )
-            self._save_single_episode(
+            saved = self._save_single_episode(
                 env_id,
                 obs_list,
                 action_list,
                 annotations=annotations,
                 episode_metadata=episode_metadata,
             )
+            if not saved:
+                raise RuntimeError(
+                    f"Committed episode for env {env_id} was not persisted."
+                )
 
     def _episode_length(self, env_id: int) -> int:
         """Return the valid buffered length for one environment."""
@@ -309,14 +321,17 @@ class LeRobotRecorder(Functor):
         current_episode_time = len(obs_list) / fps if fps > 0 else 0
 
         episode_extra_info = extra_info.copy()
+        previous_total_time = self.total_time
         self.total_time += current_episode_time
         episode_extra_info["total_time"] = self.total_time
 
         depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
+        episode_index = self.curr_episode
+        dataset_committed = False
         try:
             if self._depth_manager is not None:
                 self._depth_manager.start_episode(
-                    self.curr_episode, list(self._depth_sensor_specs.keys())
+                    episode_index, list(self._depth_sensor_specs.keys())
                 )
             for frame_index, (obs, action) in enumerate(
                 tqdm.tqdm(
@@ -366,8 +381,13 @@ class LeRobotRecorder(Functor):
                 self.dataset.add_frame(frame)
 
             self.dataset.save_episode()
+            # LeRobot has committed this index. Advance immediately so a later
+            # depth/metadata failure cannot make the next queued episode reuse
+            # and overwrite the same sidecar filename.
+            dataset_committed = True
+            self.curr_episode += 1
             if self._depth_manager is not None:
-                self._depth_manager.end_episode(self.curr_episode)
+                self._depth_manager.end_episode(episode_index)
 
             sidecar_metadata = dict(episode_metadata or {})
             if not sidecar_metadata.get("segments"):
@@ -388,32 +408,32 @@ class LeRobotRecorder(Functor):
             sidecar_metadata.update(
                 {
                     "schema_version": DEMO_SCHEMA_VERSION,
-                    "lerobot_episode_index": self.curr_episode,
+                    "lerobot_episode_index": episode_index,
                     "env_id": env_id,
                     "length": len(obs_list),
                     "instruction": task,
                 }
             )
-            try:
-                self._write_episode_metadata(sidecar_metadata)
-            except OSError as error:
-                logger.log_warning(
-                    "Saved the LeRobot episode but could not append EmbodiChain "
-                    f"segment metadata: {error}"
-                )
+            self._write_episode_metadata(sidecar_metadata)
 
             logger.log_info(
                 f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
-                f"  Episode {self.curr_episode} (env {env_id}): {len(obs_list)} frames"
+                f"  Episode {episode_index} (env {env_id}): {len(obs_list)} frames"
             )
 
-            self.curr_episode += 1
             return True
-        except Exception as e:
-            logger.log_error(f"Failed to save episode {env_id}: {e}")
-            if self._depth_manager is not None:
-                self._depth_manager.abort_episode()
-            return False
+        except Exception as error:
+            if not dataset_committed:
+                self.total_time = previous_total_time
+            if self._depth_manager is not None and not dataset_committed:
+                try:
+                    self._depth_manager.abort_episode()
+                except Exception as abort_error:  # noqa: BLE001 - preserve primary
+                    error.add_note(
+                        "Depth sidecar abort also failed: "
+                        f"{type(abort_error).__name__}: {abort_error}"
+                    )
+            raise
 
     @staticmethod
     def _task_for_frame(
@@ -456,40 +476,71 @@ class LeRobotRecorder(Functor):
             stream.write("\n")
 
     def finalize(self) -> Optional[str]:
-        """Finalize the dataset."""
-        # Save any remaining episodes
-        rollout_steps = getattr(self._env, "rollout_steps", None)
-        if rollout_steps is not None:
-            active_env_ids = (rollout_steps > 0).nonzero(as_tuple=False).squeeze(-1)
-        elif self._env.current_rollout_step > 0:
-            active_env_ids = torch.arange(self._env.num_envs, device=self._env.device)
-        else:
-            active_env_ids = torch.empty(0, dtype=torch.long, device=self._env.device)
-        if len(active_env_ids) > 0:
-            self._save_episodes(active_env_ids)
+        """Finalize resources without implicitly committing a partial episode.
 
-        try:
+        Episodes are committed only when :meth:`__call__` is invoked by an
+        explicit ``reset(save_data=True)``. Closing the environment therefore
+        leaves any still-live rollout buffer uncommitted.
+
+        Returns:
+            The finalized dataset path, or ``None`` when no dataset exists.
+
+        Raises:
+            RuntimeError: If one or more dataset resources cannot be finalized.
+        """
+        with self._finalize_lock:
+            if self._finalized:
+                if self._finalize_error is not None:
+                    raise RuntimeError(self._finalize_error)
+                return self._finalize_result
+
+            errors: list[str] = []
             if self.dataset is not None:
                 # Flush + stop the async image writer (if enabled) so every
-                # queued PNG write lands on disk before metadata is finalized.
+                # explicitly committed frame lands on disk before metadata is
+                # finalized.
                 if self.dataset.image_writer is not None:
-                    self.dataset.stop_image_writer()
-                self.dataset.finalize()
-                # Finalize the depth sidecar metadata (depth videos are already
-                # written per episode; this flushes depth_meta.json).
-                if self._depth_manager is not None:
+                    try:
+                        self.dataset.stop_image_writer()
+                    except Exception as error:  # noqa: BLE001 - aggregate cleanup
+                        errors.append(f"image writer: {error}")
+                try:
+                    self.dataset.finalize()
+                except Exception as error:  # noqa: BLE001 - aggregate cleanup
+                    errors.append(f"LeRobot dataset: {error}")
+
+            # Depth videos are written per committed episode; this only flushes
+            # their metadata and must still be attempted if LeRobot cleanup fails.
+            if self._depth_manager is not None:
+                try:
                     self._depth_manager.finalize()
+                except Exception as error:  # noqa: BLE001 - aggregate cleanup
+                    errors.append(f"depth sidecar: {error}")
+
+            self._finalize_result = (
+                self.dataset_path if self.dataset is not None else None
+            )
+            self._finalized = True
+
+            if errors:
+                self._finalize_error = (
+                    "LeRobotRecorder failed to finalize "
+                    f"{len(errors)} resource(s): {'; '.join(errors)}"
+                )
+                raise RuntimeError(self._finalize_error)
+
+            if self.dataset is not None:
                 logger.log_info(
                     f"[LeRobotRecorder] Dataset finalized successfully\n"
                     f"  Path: {self.dataset_path}\n"
                     f"  Total episodes: {self.curr_episode}\n"
                     f"  Total time: {self.total_time:.2f}s"
                 )
-                return self.dataset_path
-        except Exception as e:
-            logger.log_error(f"[LeRobotRecorder] Failed to finalize dataset: {e}")
+            return self._finalize_result
 
-        return None
+    def close(self) -> Optional[str]:
+        """Finalize the recorder; repeated calls are safe."""
+        return self.finalize()
 
     def _parse_depth_video_cfg(self, params: Dict) -> DepthVideoCfg:
         """Parse the optional ``depth_video`` parameter into a config.

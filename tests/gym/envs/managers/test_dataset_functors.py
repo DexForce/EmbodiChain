@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -213,6 +214,38 @@ class TestLeRobotRecorderInitialization:
         recorder = LeRobotRecorder(cfg, env)
 
         assert recorder.use_videos == True
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_finalize_is_idempotent_and_does_not_commit_live_rollout(
+        self, mock_lerobot_dataset, tmp_path
+    ):
+        """Closing finalizes storage but never turns a partial rollout into an episode."""
+        env = MockEnvForDataset(num_envs=2)
+        env.current_rollout_step = 3
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.image_writer = None
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+            }
+        )
+        recorder = LeRobotRecorder(cfg, env)
+        recorder._save_episodes = Mock()
+
+        first_path = recorder.finalize()
+        second_path = recorder.close()
+
+        assert first_path == second_path == recorder.dataset_path
+        recorder._save_episodes.assert_not_called()
+        mock_dataset_instance.finalize.assert_called_once_with()
+        with pytest.raises(RuntimeError, match="already finalized"):
+            recorder(env, torch.tensor([0]))
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -761,6 +794,28 @@ def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
     records = [json.loads(line) for line in metadata_path.read_text().splitlines()]
     assert [record["episode_index"] for record in records] == [1, 2]
     assert [record["segments"][0]["name"] for record in records] == ["pick", "place"]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
+    """A sidecar failure after LeRobot commit advances the global index first."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder.instruction = None
+    recorder.extra = {}
+    recorder.total_time = 0.0
+    recorder.curr_episode = 0
+    recorder.dataset_full_path = Path("/tmp/test_dataset")
+    recorder.dataset = MagicMock()
+    recorder.dataset.meta.info = {"fps": 30}
+    recorder._depth_manager = None
+    recorder._convert_frame_to_lerobot = MagicMock(return_value={})
+    recorder._write_episode_metadata = MagicMock(side_effect=OSError("disk full"))
+
+    with pytest.raises(OSError, match="disk full"):
+        recorder._save_single_episode(0, [object()], [object()])
+
+    recorder.dataset.save_episode.assert_called_once_with()
+    assert recorder.curr_episode == 1
 
 
 class TestDatasetFunctorCfg:

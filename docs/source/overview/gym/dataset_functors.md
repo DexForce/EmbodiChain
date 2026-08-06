@@ -221,6 +221,14 @@ The sync stall grows **linearly** with ``num_envs`` (each reset saves N envs ser
 ```{attention}
 - ``AsyncLeRobotRecorder`` clones each finished episode (including camera frames) to CPU before enqueuing. For very high resolutions or many envs, monitor RSS — the worker normally keeps up, but a slow disk can let the queue grow.
 - A single background worker touches the ``LeRobotDataset`` (which is not thread-safe), so episode order is preserved FIFO. Always let ``env.close()`` / ``dataset_manager.finalize()`` run so the worker drains before the dataset is finalized.
+- Finalization is a durability barrier for episodes already submitted through
+  ``mode="save"``. It does not turn a live rollout into an episode; pending
+  frames are discarded. Background and storage failures are raised to the
+  caller, and repeated finalization is safe.
+- Depth video and EmbodiChain metadata sidecars are part of the same durability
+  result: encoder-close or metadata-write failures are surfaced even when the
+  corresponding LeRobot episode has already committed, and its episode index
+  is never reused by a later queued write.
 - ``env.close()`` calls ``sim.destroy()``, which exits the process without returning to Python. In scripts that build multiple envs, run each in its own subprocess and write results before closing.
 ```
 
@@ -260,15 +268,15 @@ dataset = {
 1. **Initialization**: The Dataset Manager initializes the functor with the configured parameters
 2. **Data Collection**: During episode rollout, the functor receives observations and actions
 3. **Save Trigger**: When an episode completes, call the functor with `mode="save"`
-4. **Finalization**: After all episodes, call `finalize()` to save any remaining data
+4. **Finalization**: After all episodes, call `finalize()` to drain committed writes and finalize storage metadata
 
 ```python
 # Inside environment loop
 if episode_done:
     dataset_manager.apply(mode="save", env_ids=completed_env_ids)
 
-# After training completes
-dataset_manager.apply(mode="finalize")
+# After collection completes. This raises if a committed write failed.
+dataset_manager.finalize()
 ```
 
 ### Parallel Collection (async recorder)
@@ -293,7 +301,9 @@ dataset = {
 }
 ```
 
-The async recorder drains its background worker during ``finalize()``, so make sure ``env.close()`` (or ``dataset_manager.finalize()`) runs at the end of collection.
+The async recorder drains its background worker during ``finalize()``, so make
+sure ``env.close()`` (or ``dataset_manager.finalize()``) runs at the end of
+collection. No new episode can be submitted after finalization begins.
 
 ### Compressed depth recording
 
@@ -334,6 +344,6 @@ dataset = {
 The Dataset Manager supports the following modes:
 
 - ``save``: Save completed episodes for specified environment IDs
-- ``finalize``: Finalize the dataset and save any remaining data
+- ``finalize``: Drain explicitly committed writes and finalize dataset resources
 
 See {class}`~managers.dataset_manager.DatasetManager` for more details.

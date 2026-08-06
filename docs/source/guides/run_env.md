@@ -173,13 +173,23 @@ def create_demo_segments(self):
             name="pick_and_place",
             target_uid=object_uid,
             instruction=f"Place {object_uid} in its target bin",
+            # Segment validation is separate from Gym episode termination.
+            validator=lambda uid=object_uid: self.is_object_placed(uid),
         )
 ```
 
-The executor checks `terminated` and `truncated` after every action and stops
-immediately. It temporarily disables Gym auto-reset, so dataset recording is
-transactional: only the explicit reset after successful final validation
-saves the episode.
+Gym `terminated` and `truncated` always describe the whole episode, never an
+individual segment. A segment normally ends when its action iterable is
+exhausted; its optional zero-argument `validator` then returns one boolean per
+parallel environment. A failed validator aborts the batch. Episode-level
+success termination stops the remaining lazy plan without requesting another
+segment.
+
+The executor checks terminal signals after every action and temporarily
+disables Gym auto-reset. Dataset recording is transactional: only the explicit
+reset after successful final validation saves the episode. Exceptions,
+interrupts, failed attempts, and closing an environment with a live rollout
+abort pending structured data, videos, and trajectories.
 
 Segment actions pass through the same action-dimension normalization used by
 legacy `create_demo_action_list()` tasks. A time-limit truncation is always an
@@ -187,12 +197,13 @@ invalid expert rollout, including when it occurs on the planner's final
 action, so a task's `max_episode_steps` must be greater than the longest valid
 expert plan.
 
-In a vectorized environment, the shared executor currently treats the batch
-as one transaction: the first environment to terminate or truncate stops the
-batch, and every environment must pass final validation before the reset is
-committed. Tasks whose parallel environments finish asynchronously should use
-`num_envs: 1` for expert generation until masked per-environment execution is
-supported.
+In a vectorized environment, segments and actions remain on one shared planner
+clock, but completion is tracked independently. When one environment reports
+success, its terminal result and recording cursor become sticky; subsequent
+shared actions use a safe hold/no-op command for that row while unfinished rows
+continue. Consequently, rollout and trajectory lengths may differ by row.
+The commit remains batch-atomic: every row must eventually succeed, while any
+failure or truncation aborts the whole attempt.
 
 Failed attempts use `reset(options={"save_data": False})`. This discards
 structured datasets, replay trajectories, and camera-video buffers; recorder
@@ -251,8 +262,9 @@ embodichain run-env \
 The recorder stores the robot root pose and complete joint position, the raw
 action before ActionManager preprocessing, and the pose or joint state of scene
 rigid objects and articulations. Each environment in a vectorized rollout is
-tracked independently. A trajectory is auto-saved at episode reset and again
-on close if an unfinished buffer still contains steps.
+tracked independently. A trajectory is saved only at an explicit successful
+episode reset. `close()` is a durability barrier for already committed writes,
+not an implicit commit, so an unfinished trajectory is discarded.
 
 Files are named like `traj_env0_000000.pt`. When
 `--trajectory_save_dir` is omitted, they are written below:
