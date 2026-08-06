@@ -137,8 +137,12 @@ def test_build_dual_arm_ur_solver_is_per_arm_and_arm_local():
         assert solver.ur_type == "ur5"
         # URSolverCfg pins urdf_path to the single-arm URDF in __post_init__, so
         # the engine keeps link names UNPREFIXED to match that URDF (arm-local).
-        assert solver.root_link_name == "base_link"
-        assert solver.end_link_name == "ee_link"
+        if side == "left_arm":
+            assert solver.root_link_name == "left_base_link"
+            assert solver.end_link_name == "left_ee_link"
+        elif side == "right_arm":
+            assert solver.root_link_name == "right_base_link"
+            assert solver.end_link_name == "right_ee_link"
 
 
 def test_build_dual_arm_ur_urdf_components():

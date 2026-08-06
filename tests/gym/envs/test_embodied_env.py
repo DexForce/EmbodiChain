@@ -17,14 +17,21 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
+
 import torch
 import pytest
 import numpy as np
 import gymnasium as gym
 
 from embodichain.lab.sim.cfg import RenderCfg
-from embodichain.lab.gym.envs import EmbodiedEnvCfg
+from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.gym.envs.managers.cfg import EventCfg
+from embodichain.lab.gym.envs.managers.randomization.visual import (
+    randomize_visual_material,
+    set_rigid_object_visual_material,
+)
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, DEFAULT_MANAGER_MODULES
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
@@ -117,6 +124,20 @@ METADATA = {
         }
     ],
 }
+
+
+def test_visual_randomization_filter_keeps_deterministic_material_events():
+    events = SimpleNamespace(
+        random_material=EventCfg(func=randomize_visual_material),
+        set_material=EventCfg(func=set_rigid_object_visual_material),
+    )
+    env = EmbodiedEnv.__new__(EmbodiedEnv)
+    env.cfg = SimpleNamespace(filter_visual_rand=True, events=events)
+
+    env._apply_functor_filter()
+
+    assert events.random_material is None
+    assert events.set_material is not None
 
 
 class EmbodiedEnvTest:

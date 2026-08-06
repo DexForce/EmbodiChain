@@ -18,9 +18,9 @@
 
 This module provides a unified interface for the atomic motion primitives
 (``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``),
-with typed targets, a ``WorldState`` threaded across sequenced actions, and
-extensible custom action registration.
+``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``,
+``hand_over``), with typed targets, a ``WorldState`` threaded across sequenced
+actions, and extensible custom action registration.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from __future__ import annotations
 from .affordance import (
     Affordance,
     AntipodalAffordance,
+    AssembleAffordance,
     InteractionPoints,
 )
 from .core import (
@@ -49,6 +50,7 @@ from .engine import (
 )
 from .targets import ObjectActionTarget
 from .primitives import (
+    AssembleTarget,
     CoordinatedPickTarget,
     CoordinatedPickment,
     CoordinatedPickmentCfg,
@@ -58,6 +60,8 @@ from .primitives import (
     CoordinatedPlacementTarget,
     EndEffectorPoseTarget,
     GraspTarget,
+    HandOver,
+    HandOverCfg,
     HeldObjectPoseTarget,
     JointPositionTarget,
     MoveEndEffector,
@@ -88,6 +92,7 @@ BuiltinTarget = (
     | PressTarget
     | CoordinatedPickTarget
     | CoordinatedPlacementTarget
+    | AssembleTarget
 )
 """Union of target types shipped by EmbodiChain.
 
@@ -99,6 +104,7 @@ __all__ = [
     "ActionTarget",
     "Affordance",
     "AntipodalAffordance",
+    "AssembleAffordance",
     "InteractionPoints",
     "ObjectSemantics",
     "ObjectActionTarget",
@@ -113,6 +119,7 @@ __all__ = [
     "CoordinatedPickTarget",
     "CoordinatedPickmentTarget",
     "CoordinatedPlacementTarget",
+    "AssembleTarget",
     "GraspTarget",
     "Target",
     "BuiltinTarget",
@@ -123,6 +130,7 @@ __all__ = [
     # Action implementations
     "CoordinatedPickment",
     "CoordinatedPlacement",
+    "HandOver",
     "MoveEndEffector",
     "MoveJoints",
     "MoveHeldObject",
@@ -131,6 +139,7 @@ __all__ = [
     "Press",
     "CoordinatedPickmentCfg",
     "CoordinatedPlacementCfg",
+    "HandOverCfg",
     "MoveEndEffectorCfg",
     "MoveJointsCfg",
     "MoveHeldObjectCfg",

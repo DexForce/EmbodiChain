@@ -28,6 +28,7 @@ from .material import (
     ReuseSegmentState,
 )
 from .common import BatchEntity
+from .profiler import Profiler, ProfilerCfg
 
 from .sim_manager import *
 
@@ -37,6 +38,8 @@ __all__ = [
     "VisualMaterialInst",
     "ReuseSegmentState",
     "BatchEntity",
+    "Profiler",
+    "ProfilerCfg",
     "SimulationManager",
     "SimulationManagerCfg",
     "SIM_CACHE_DIR",

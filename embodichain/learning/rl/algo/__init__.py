@@ -18,17 +18,24 @@
 
 from __future__ import annotations
 
-from typing import Dict, Tuple, Type, Any
+from typing import Any, Dict, Tuple, Type
+
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from .base import BaseAlgorithm
-from .common import compute_gae
-from .ppo import PPOCfg, PPO
-from .grpo import GRPOCfg, GRPO
+from embodichain.learning.rl.utils import (
+    coerce_lr_scheduler_cfg,
+    coerce_optimizer_cfg,
+)
 
-# name -> (CfgClass, AlgoClass)
+from .apg import APG, APGCfg, segmented_discounted_return
+from .base import BaseAlgorithm, RolloutKind
+from .common import compute_gae
+from .grpo import GRPO, GRPOCfg
+from .ppo import PPO, PPOCfg
+
 _ALGO_REGISTRY: Dict[str, Tuple[Type[Any], Type[Any]]] = {
+    "apg": (APGCfg, APG),
     "ppo": (PPOCfg, PPO),
     "grpo": (GRPOCfg, GRPO),
 }
@@ -38,9 +45,19 @@ def get_registered_algo_names() -> list[str]:
     return list(_ALGO_REGISTRY.keys())
 
 
+def _normalize_algo_cfg_kwargs(cfg_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce nested optimizer/scheduler mappings from YAML/JSON."""
+    normalized = dict(cfg_kwargs)
+    if "optimizer" in normalized:
+        normalized["optimizer"] = coerce_optimizer_cfg(normalized["optimizer"])
+    if "lr_scheduler" in normalized:
+        normalized["lr_scheduler"] = coerce_lr_scheduler_cfg(normalized["lr_scheduler"])
+    return normalized
+
+
 def build_algo(
     name: str,
-    cfg_kwargs: Dict[str, float],
+    cfg_kwargs: Dict[str, Any],
     policy,
     device: torch.device,
     *,
@@ -52,8 +69,12 @@ def build_algo(
             f"Algorithm '{name}' not found. Available: {get_registered_algo_names()}"
         )
     CfgCls, AlgoCls = _ALGO_REGISTRY[key]
-    cfg = CfgCls(device=str(device), **cfg_kwargs)
+    cfg = CfgCls(device=str(device), **_normalize_algo_cfg_kwargs(cfg_kwargs))
     if distributed:
+        if AlgoCls.rollout_kind is RolloutKind.DIFFERENTIABLE:
+            raise ValueError(
+                "Differentiable algorithms do not support distributed training."
+            )
         if not (
             torch.distributed.is_available() and torch.distributed.is_initialized()
         ):
@@ -71,6 +92,10 @@ def build_algo(
 
 __all__ = [
     "BaseAlgorithm",
+    "RolloutKind",
+    "APGCfg",
+    "APG",
+    "segmented_discounted_return",
     "PPOCfg",
     "PPO",
     "GRPOCfg",

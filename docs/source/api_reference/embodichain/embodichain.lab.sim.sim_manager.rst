@@ -8,10 +8,10 @@ Overview
 
 :class:`SimulationManager` is the central handle around the DexSim scene. It
 owns the physics world and the object/sensor registry, drives the simulation
-step, and exposes capture hooks and visualization configuration. Downstream
-components (environments, planners, IK solvers, the visualization runtime)
-look up the active manager through its class-level instance registry instead
-of passing it around explicitly.
+step, owns its profiler, and exposes capture hooks and visualization
+configuration. Downstream components (environments, planners, IK solvers, the
+visualization runtime) look up the active manager through its class-level
+instance registry instead of passing it around explicitly.
 
 .. rubric:: Classes
 

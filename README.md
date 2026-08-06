@@ -42,12 +42,15 @@ To get started with EmbodiChain, follow these steps:
 
 ## Task Environments
 
-EmbodiChain's task environments are decoupled from the core framework: the
-official tasks (tableware, RL, special) ship in the separate
-[embodichain_tasks package](https://github.com/DexForce/EmbodiChain/tree/main/embodichain_tasks),
-and any installed package
-declaring an `embodichain.tasks` entry point is auto-discovered. Launch any
-registered task with the unified CLI:
+EmbodiChain's task environments are decoupled from the core framework at the
+import-package level. The official tableware, RL, and special tasks live in the
+[embodichain_tasks source tree](https://github.com/DexForce/EmbodiChain/tree/main/embodichain_tasks)
+and are included in the main `embodichain` wheel. Both `pip install embodichain`
+and editable `pip install -e .` therefore install
+`embodichain` and `embodichain_tasks`; no second installation command or
+independent task version is required. Third-party packages declaring an
+`embodichain.tasks` entry point are also auto-discovered. Launch any registered
+task with the unified CLI:
 
 ```bash
 embodichain run-env --gym_config path/to/gym_config.json

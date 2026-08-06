@@ -17,6 +17,17 @@
 """Collectors that step vectorized environments and assemble rollout data into a preallocated ``TensorDict`` layout."""
 
 from .base import BaseCollector
+from .differentiable import (
+    DifferentiableCollector,
+    DifferentiableRollout,
+    DifferentiableTransition,
+)
 from .sync_collector import SyncCollector
 
-__all__ = ["BaseCollector", "SyncCollector"]
+__all__ = [
+    "BaseCollector",
+    "DifferentiableCollector",
+    "DifferentiableRollout",
+    "DifferentiableTransition",
+    "SyncCollector",
+]

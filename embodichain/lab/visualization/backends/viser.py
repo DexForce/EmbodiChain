@@ -19,8 +19,8 @@ from __future__ import annotations
 import queue
 import threading
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 
@@ -33,6 +33,9 @@ from ..protocol import (
     GizmoCommand,
     GizmoSpec,
     GizmoState,
+    JointControlCommand,
+    JointControlSpec,
+    JointControlState,
     MeshGeometry,
     PickCommand,
     PointCloudOverlay,
@@ -70,6 +73,12 @@ class _DynamicMesh:
 class _GizmoHandle:
     handle: object
     spec: GizmoSpec
+
+
+@dataclass
+class _JointControlHandle:
+    handle: object
+    spec: JointControlSpec
 
 
 @dataclass(frozen=True)
@@ -136,6 +145,11 @@ class ViserBackend(VisualizationBackend):
         self._frame_wxyz: np.ndarray | None = None
         self._frame_visible: np.ndarray | None = None
         self._pointer_handler: object | None = None
+        self._joint_control_handles: dict[str, _JointControlHandle] = {}
+        self._joint_control_specs: dict[str, JointControlSpec] = {}
+        self._joint_control_states: dict[str, JointControlState] = {}
+        self._joint_control_pending_sequences: dict[str, int] = {}
+        self._joint_control_sequence = 0
         self._world_handle: object | None = None
         self._ground_grid_handle: object | None = None
         self._camera_handles: dict[str, object] = {}
@@ -241,13 +255,14 @@ class ViserBackend(VisualizationBackend):
         )
         if self.allow_commands:
             self._server.gui.add_markdown(
-                "⚠️ **Interactive Gizmos enabled.** Dragging a transform control "
-                "mutates the simulation."
+                "⚠️ **Interactive controls enabled.** Gizmos and articulation "
+                "joint controls may mutate the simulation."
             )
         env_ids = sorted(
             {node.env_id for node in manifest.nodes}
             | {camera.env_id for camera in manifest.cameras}
             | {gizmo.env_id for gizmo in manifest.gizmos}
+            | {control.env_id for control in manifest.joint_controls}
         )
         if self._selected_scene_env not in env_ids:
             self._selected_scene_env = env_ids[0] if env_ids else None
@@ -308,6 +323,7 @@ class ViserBackend(VisualizationBackend):
                         )
 
         self._register_camera_controls(manifest)
+        self._register_joint_controls(manifest)
 
         with self._server.gui.add_folder("Overlays"):
             for category, label in (
@@ -455,6 +471,245 @@ class ViserBackend(VisualizationBackend):
                 client_id=client_id,
                 position=np.asarray(target.position, dtype=np.float32).copy(),
                 wxyz=np.asarray(target.wxyz, dtype=np.float32).copy(),
+            )
+        )
+
+    @staticmethod
+    def _joint_display_scale(spec: JointControlSpec) -> float:
+        if spec.joint_type in {"revolute", "continuous"}:
+            return 180.0 / np.pi
+        return 1.0
+
+    @staticmethod
+    def _joint_display_unit(spec: JointControlSpec) -> str:
+        if spec.joint_type in {"revolute", "continuous"}:
+            return "°"
+        return "m"
+
+    @staticmethod
+    def _joint_display_precision(display_step: float) -> int:
+        """Return compact decimal precision that still represents a GUI step."""
+        tolerance = max(abs(display_step) * 1.0e-9, 1.0e-12)
+        for precision in range(8):
+            if abs(display_step - round(display_step, precision)) <= tolerance:
+                return precision
+        return 7
+
+    @classmethod
+    def _joint_display_value(
+        cls,
+        spec: JointControlSpec,
+        value: float,
+    ) -> float:
+        scale = cls._joint_display_scale(spec)
+        precision = cls._joint_display_precision(spec.step * scale)
+        rounded = round(value * scale, precision)
+        return 0.0 if rounded == 0.0 else float(rounded)
+
+    @classmethod
+    def _joint_display_step(cls, spec: JointControlSpec) -> float:
+        """Return a concise positive step without losing very small steps."""
+        raw_step = spec.step * cls._joint_display_scale(spec)
+        precision = cls._joint_display_precision(raw_step)
+        rounded_step = round(raw_step, precision)
+        return float(rounded_step if rounded_step > 0.0 else raw_step)
+
+    @classmethod
+    def _joint_control_labels(
+        cls,
+        specs: Sequence[JointControlSpec],
+    ) -> dict[str, str]:
+        """Build compact, unique labels suitable for Viser's narrow sidebar."""
+        compact_names = {
+            spec.control_id: spec.joint_name.rsplit("_to_", maxsplit=1)[-1]
+            .replace("_", " ")
+            .strip()
+            for spec in specs
+        }
+        counts = defaultdict(int)
+        for name in compact_names.values():
+            counts[name] += 1
+
+        labels: dict[str, str] = {}
+        label_counts: defaultdict[str, int] = defaultdict(int)
+        for spec in specs:
+            name = compact_names[spec.control_id]
+            if counts[name] > 1:
+                name = f"{name} [{spec.joint_id}]"
+            unit = cls._joint_display_unit(spec)
+            base_label = f"{name} ({unit})"
+            label_counts[base_label] += 1
+            occurrence = label_counts[base_label]
+            label = base_label if occurrence == 1 else f"{name} · {occurrence} ({unit})"
+            labels[spec.control_id] = label
+        return labels
+
+    @classmethod
+    def _joint_control_hint(cls, spec: JointControlSpec) -> str:
+        """Describe the exact joint identity and limits in a hover tooltip."""
+        scale = cls._joint_display_scale(spec)
+        step_precision = cls._joint_display_precision(spec.step * scale)
+        precision = max(
+            step_precision,
+            2 if spec.joint_type in {"revolute", "continuous"} else 3,
+        )
+
+        def format_limit(value: float | None, fallback: str) -> str:
+            if value is None:
+                return fallback
+            rounded = round(value * scale, precision)
+            if rounded == 0.0:
+                rounded = 0.0
+            return f"{rounded:.{precision}f}"
+
+        lower = format_limit(spec.lower, "−∞")
+        upper = format_limit(spec.upper, "+∞")
+        return (
+            f"{spec.joint_name} · {spec.joint_type} · "
+            f"range {lower} … {upper} {cls._joint_display_unit(spec)}"
+        )
+
+    def _queue_joint_control_event(
+        self,
+        event: object,
+        *,
+        control_id: str,
+        value: float,
+    ) -> None:
+        client_id = self._event_client_id(event)
+        if client_id is None:
+            return
+        self._gui_events.put(
+            _GuiEvent(
+                category="joint_control",
+                value=(client_id, control_id, float(value)),
+            )
+        )
+
+    def _register_joint_controls(self, manifest: SceneManifest) -> None:
+        self._joint_control_handles.clear()
+        if not manifest.joint_controls:
+            return
+
+        controls_by_uid: dict[str, list[JointControlSpec]] = defaultdict(list)
+        for spec in manifest.joint_controls:
+            controls_by_uid[spec.articulation_uid].append(spec)
+
+        with self._server.gui.add_folder("Articulation joints"):
+            for articulation_uid, specs in controls_by_uid.items():
+                labels = self._joint_control_labels(specs)
+                with self._server.gui.add_folder(articulation_uid):
+                    for spec in specs:
+                        display_scale = self._joint_display_scale(spec)
+                        label = labels[spec.control_id]
+                        hint = self._joint_control_hint(spec)
+                        initial_value = self._joint_display_value(
+                            spec,
+                            spec.initial_value,
+                        )
+                        step = self._joint_display_step(spec)
+                        if spec.lower is not None and spec.upper is not None:
+                            handle = self._server.gui.add_slider(
+                                label,
+                                min=spec.lower * display_scale,
+                                max=spec.upper * display_scale,
+                                step=step,
+                                initial_value=initial_value,
+                                marks=(),
+                                disabled=not self.allow_commands,
+                                hint=hint,
+                            )
+                        else:
+                            handle = self._server.gui.add_number(
+                                label,
+                                initial_value=initial_value,
+                                min=(
+                                    None
+                                    if spec.lower is None
+                                    else spec.lower * display_scale
+                                ),
+                                max=(
+                                    None
+                                    if spec.upper is None
+                                    else spec.upper * display_scale
+                                ),
+                                step=step,
+                                disabled=not self.allow_commands,
+                                hint=hint,
+                            )
+                        self._joint_control_handles[spec.control_id] = (
+                            _JointControlHandle(
+                                handle=handle,
+                                spec=spec,
+                            )
+                        )
+                        if self.allow_commands:
+
+                            @handle.on_update
+                            def _(
+                                event: object,
+                                control_id: str = spec.control_id,
+                                scale: float = display_scale,
+                            ) -> None:
+                                self._queue_joint_control_event(
+                                    event,
+                                    control_id=control_id,
+                                    value=float(event.target.value) / scale,
+                                )
+
+                    if self.allow_commands:
+                        reset_button = self._server.gui.add_button("Reset articulation")
+
+                        @reset_button.on_click
+                        def _(
+                            event: object,
+                            articulation_specs: tuple[JointControlSpec, ...] = tuple(
+                                specs
+                            ),
+                        ) -> None:
+                            for spec in articulation_specs:
+                                self._queue_joint_control_event(
+                                    event,
+                                    control_id=spec.control_id,
+                                    value=spec.initial_value,
+                                )
+
+            if self.allow_commands and len(controls_by_uid) > 1:
+                reset_all_button = self._server.gui.add_button("Reset all")
+
+                @reset_all_button.on_click
+                def _(event: object) -> None:
+                    for spec in manifest.joint_controls:
+                        self._queue_joint_control_event(
+                            event,
+                            control_id=spec.control_id,
+                            value=spec.initial_value,
+                        )
+
+    def _publish_joint_control_command(
+        self,
+        client_id: str,
+        control_id: str,
+        value: float,
+    ) -> None:
+        sink = getattr(self, "_joint_control_command_sink", None)
+        if (
+            sink is None
+            or self._run_id is None
+            or control_id not in self._joint_control_specs
+        ):
+            return
+        self._joint_control_sequence += 1
+        sequence = self._joint_control_sequence
+        self._joint_control_pending_sequences[control_id] = sequence
+        sink(
+            JointControlCommand(
+                run_id=self._run_id,
+                scene_revision=self._scene_revision,
+                sequence=sequence,
+                client_id=client_id,
+                control_id=control_id,
+                value=value,
             )
         )
 
@@ -900,6 +1155,12 @@ class ViserBackend(VisualizationBackend):
                 spec=spec,
             )
 
+        self._joint_control_specs = {
+            control.control_id: control for control in manifest.joint_controls
+        }
+        self._joint_control_states.clear()
+        self._joint_control_pending_sequences.clear()
+
         self._run_id = manifest.run_id
         self._scene_revision = manifest.scene_revision
         self._register_visibility_controls(manifest)
@@ -961,6 +1222,19 @@ class ViserBackend(VisualizationBackend):
             elif event.category == "camera_rgb":
                 self._show_camera_rgb = bool(event.value)
                 camera_rgb_changed = True
+            elif event.category == "joint_control":
+                client_id, control_id, value = event.value
+                joint_handle = self._joint_control_handles.get(str(control_id))
+                if joint_handle is not None:
+                    joint_handle.handle.value = self._joint_display_value(
+                        joint_handle.spec,
+                        float(value),
+                    )
+                    self._publish_joint_control_command(
+                        str(client_id),
+                        str(control_id),
+                        float(value),
+                    )
             changed = True
         if not changed:
             return
@@ -1186,6 +1460,27 @@ class ViserBackend(VisualizationBackend):
                 gizmo_handle.handle.wxyz = state.wxyz
         self._apply_gizmo_visibility()
 
+        joint_control_states = {
+            control.control_id: control for control in frame.joint_controls
+        }
+        if set(joint_control_states) != set(self._joint_control_handles):
+            return False
+        self._joint_control_states = joint_control_states
+        for control_id, joint_handle in self._joint_control_handles.items():
+            state = joint_control_states[control_id]
+            pending_sequence = self._joint_control_pending_sequences.get(control_id)
+            if (
+                pending_sequence is not None
+                and state.applied_sequence < pending_sequence
+            ):
+                continue
+            joint_handle.handle.value = self._joint_display_value(
+                joint_handle.spec,
+                state.value,
+            )
+            if pending_sequence is not None:
+                self._joint_control_pending_sequences.pop(control_id, None)
+
         active_overlays: set[tuple[str, str]] = set()
         for overlay in frame.overlays.frames:
             self._update_frame_overlay("frames", overlay, active_overlays)
@@ -1257,6 +1552,11 @@ class ViserBackend(VisualizationBackend):
         self._gizmo_owners.clear()
         self._gizmo_drag_poses.clear()
         self._gizmo_sequence = 0
+        self._joint_control_handles.clear()
+        self._joint_control_specs.clear()
+        self._joint_control_states.clear()
+        self._joint_control_pending_sequences.clear()
+        self._joint_control_sequence = 0
         self._world_handle = None
         self._ground_grid_handle = None
         self._camera_handles.clear()

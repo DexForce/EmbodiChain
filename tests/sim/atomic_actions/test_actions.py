@@ -26,6 +26,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
 )
 from embodichain.lab.sim.atomic_actions import (
+    AssembleTarget,
     CoordinatedPickTarget,
     CoordinatedPlacementTarget,
     EndEffectorPoseTarget,
@@ -693,7 +694,8 @@ class TestPlaceAction:
         self.mg = _make_mock_motion_generator()
 
     def test_target_type_is_pose_target(self):
-        assert Place.TargetType is PlaceTarget
+        assert PlaceTarget in Place.TargetType
+        assert AssembleTarget in Place.TargetType
 
     def test_rejects_non_positive_cartesian_waypoint_count(self):
         with pytest.raises(Exception, match="cartesian_waypoint_count"):

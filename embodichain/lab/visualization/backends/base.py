@@ -22,6 +22,7 @@ from collections.abc import Callable
 from ..protocol import (
     CameraImageFrame,
     GizmoCommand,
+    JointControlCommand,
     PickCommand,
     SceneFrame,
     SceneManifest,
@@ -46,6 +47,13 @@ class VisualizationBackend(ABC):
     ) -> None:
         """Set the thread-safe sink used for browser click-pick commands."""
         self._pick_command_sink = sink
+
+    def set_joint_control_command_sink(
+        self,
+        sink: Callable[[JointControlCommand], None] | None,
+    ) -> None:
+        """Set the thread-safe sink used for browser joint commands."""
+        self._joint_control_command_sink = sink
 
     @property
     @abstractmethod
