@@ -76,25 +76,30 @@ jobs:
           path: ./docs-site
 
       - name: Stamp Pages artifact
-        run: printf '%s\n' "${GITHUB_RUN_ID}" > ./docs-site/pages-deployment-id.txt
+        env:
+          DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: printf '%s\n' "${DEPLOYMENT_ID}" > ./docs-site/pages-deployment-id.txt
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: ./docs-site
 
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
 
       - name: Verify deployed artifact
         env:
-          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}
+          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           for attempt in {1..30}; do
             marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
-            deployed_id="$(curl --fail --silent --show-error "${marker_url}" || true)"
+            deployed_id="$(curl --location --connect-timeout 5 --max-time 10 --fail --silent --show-error "${marker_url}" || true)"
             if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
               echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
               exit 0
@@ -208,25 +213,30 @@ jobs:
           path: ./docs-site
 
       - name: Stamp Pages artifact
-        run: printf '%s\n' "${GITHUB_RUN_ID}" > ./docs-site/pages-deployment-id.txt
+        env:
+          DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: printf '%s\n' "${DEPLOYMENT_ID}" > ./docs-site/pages-deployment-id.txt
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: ./docs-site
 
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
 
       - name: Verify deployed artifact
         env:
-          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}
+          EXPECTED_DEPLOYMENT_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           for attempt in {1..30}; do
             marker_url="${PAGE_URL%/}/pages-deployment-id.txt?run=${EXPECTED_DEPLOYMENT_ID}&attempt=${attempt}"
-            deployed_id="$(curl --fail --silent --show-error "${marker_url}" || true)"
+            deployed_id="$(curl --location --connect-timeout 5 --max-time 10 --fail --silent --show-error "${marker_url}" || true)"
             if [[ "${deployed_id}" == "${EXPECTED_DEPLOYMENT_ID}" ]]; then
               echo "Verified Pages deployment ${EXPECTED_DEPLOYMENT_ID}."
               exit 0
