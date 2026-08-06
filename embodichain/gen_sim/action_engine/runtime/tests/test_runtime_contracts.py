@@ -162,6 +162,20 @@ class _FakeRobot:
     def get_joint_ids(self, *, name: str) -> list[int]:
         return list(self._ids[name])
 
+    def get_control_part_base_pose(self, *, name: str, to_matrix: bool) -> torch.Tensor:
+        del name
+        assert to_matrix
+        return torch.eye(4).repeat(self._qpos.shape[0], 1, 1)
+
+    def get_solver(self, *, name: str) -> SimpleNamespace:
+        return SimpleNamespace(root_link_name=name.replace("_arm", "_base"))
+
+    def get_link_pose(self, *, link_name: str, to_matrix: bool) -> torch.Tensor:
+        assert to_matrix
+        pose = torch.eye(4).repeat(self._qpos.shape[0], 1, 1)
+        pose[:, 1, 3] = -0.3 if link_name == "physical_left_base" else 0.3
+        return pose
+
     def compute_fk(
         self,
         qpos: torch.Tensor,
@@ -1042,14 +1056,15 @@ def test_free_arrangement_matches_live_object_order_without_crossing() -> None:
 
 
 def test_arm_candidate_score_softly_penalizes_cross_zone_motion() -> None:
-    source = _pose(0.0, 0.30, 0.78)
-    target = _pose(0.0, 0.20, 0.78)
+    source = _pose(0.0, -0.30, 0.78)
+    target = _pose(0.0, -0.20, 0.78)
     kwargs = {
         "motion_cost": torch.tensor([torch.pi]),
         "source_pose": source,
         "target_pose": target,
-        "workspace_center_y": torch.tensor([0.0]),
+        "workspace_center_xy": torch.tensor([[0.0, 0.0]]),
         "workspace_half_width": torch.tensor([0.40]),
+        "robot_lateral_axis": torch.tensor([[0.0, -1.0]]),
         "policy": default_runtime_policy("dual_ur10").arm_selection,
     }
 
@@ -1750,20 +1765,76 @@ def test_long_axis_upright_is_undirected_but_explicit_axis_is_not() -> None:
     )
 
 
-def test_orient_object_maps_world_y_sides_to_robot_view_arms() -> None:
+def test_orient_object_uses_solver_roots_when_control_groups_share_root() -> None:
     entities = {
         "left_object": _FakeEntity(
             "left_object",
-            _pose(0.0, 0.20, 0.8),
+            _pose(0.0, -0.20, 0.8),
             _rect_vertices(0.02, 0.02, 0.08),
         ),
         "right_object": _FakeEntity(
             "right_object",
-            _pose(0.0, -0.20, 0.8),
+            _pose(0.0, 0.20, 0.8),
             _rect_vertices(0.02, 0.02, 0.08),
         ),
     }
     env = _FakeEnv(entities)
+    env.agent_initial_object_poses = {
+        uid: entity.get_local_pose(to_matrix=True) for uid, entity in entities.items()
+    }
+    execution = compile_task_agent(
+        _task_agent(
+            *[
+                {
+                    "id": uid,
+                    "operator": "orient_object",
+                    "object": uid,
+                    "actor": {"mode": "auto"},
+                    "goal": {
+                        "orientation_goal": "upright",
+                        "orientation_axis": "none",
+                    },
+                    "depends_on": [],
+                }
+                for uid in entities
+            ]
+        )
+    )
+    executor = ProgramExecutor(
+        load_execution_program(execution), env, record_runtime=False
+    )
+
+    torch.testing.assert_close(
+        env.robot.get_control_part_base_pose(name="physical_left_arm", to_matrix=True),
+        env.robot.get_control_part_base_pose(name="physical_right_arm", to_matrix=True),
+    )
+    assert executor._preferred_in_place_arm(executor.steps["left_object"], 0) == (
+        "left_arm"
+    )
+    assert executor._preferred_in_place_arm(executor.steps["right_object"], 0) == (
+        "right_arm"
+    )
+
+
+def test_orient_object_arm_preference_rotates_with_robot_view() -> None:
+    entities = {
+        "left_object": _FakeEntity(
+            "left_object",
+            _pose(0.20, 0.0, 0.8),
+            _rect_vertices(0.02, 0.02, 0.08),
+        ),
+        "right_object": _FakeEntity(
+            "right_object",
+            _pose(-0.20, 0.0, 0.8),
+            _rect_vertices(0.02, 0.02, 0.08),
+        ),
+    }
+    env = _FakeEnv(entities)
+    env.robot.get_link_pose = lambda *, link_name, to_matrix: _pose(
+        0.3 if link_name == "physical_left_base" else -0.3,
+        0.0,
+        0.0,
+    )
     env.agent_initial_object_poses = {
         uid: entity.get_local_pose(to_matrix=True) for uid, entity in entities.items()
     }

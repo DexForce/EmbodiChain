@@ -51,8 +51,8 @@ _GENERATION_DEFAULTS = generation_defaults()
 _DEFAULT_TABLETOP_Z = float(_GENERATION_DEFAULTS["scene"]["default_tabletop_z"])
 
 _ARM_SLOTS = {
-    "left": {"arm": "right_arm", "eef": "right_eef"},
-    "right": {"arm": "left_arm", "eef": "left_eef"},
+    "left": {"arm": "left_arm", "eef": "left_eef"},
+    "right": {"arm": "right_arm", "eef": "right_eef"},
 }
 
 
@@ -277,7 +277,7 @@ def _make_robot(
         for component in robot["urdf_cfg"]["components"]:
             if str(component.get("component_type", "")).endswith("_arm"):
                 component["urdf_path"] = f"UniversalRobots/{urdf_dir}/{urdf_dir}.urdf"
-                component["transform"][1][3] = float(profile["arm_base_y"])
+                component["transform"][0][3] = float(profile["arm_base_x"])
                 component["transform"][2][3] = float(profile["arm_component_z"])
         for arm in ("left_arm", "right_arm"):
             robot["solver_cfg"][arm]["ur_type"] = family

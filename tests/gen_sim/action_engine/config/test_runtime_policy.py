@@ -61,9 +61,10 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         0.2617993877991494
     )
     assert generation["physics"]["rigid_object"]["mass"] == pytest.approx(0.1)
-    assert generation["environment"]["arm_aim_yaw_offset"]["left"] == pytest.approx(
-        3.141592653589793
-    )
+    assert generation["environment"]["arm_aim_yaw_offset"] == {
+        "left": pytest.approx(0.0),
+        "right": pytest.approx(0.0),
+    }
     assert generation["scene"]["object_length_sample_points"] == 5000
     assert generation["dataset"]["control_frequency"] == 25
     assert generation["randomization"]["table_height_delta_range"] == [

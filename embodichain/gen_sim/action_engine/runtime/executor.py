@@ -77,8 +77,9 @@ def _score_arm_candidate(
     motion_cost: torch.Tensor,
     source_pose: torch.Tensor,
     target_pose: torch.Tensor | None,
-    workspace_center_y: torch.Tensor,
+    workspace_center_xy: torch.Tensor,
     workspace_half_width: torch.Tensor,
+    robot_lateral_axis: torch.Tensor,
     policy: ArmSelectionPolicyCfg,
 ) -> dict[str, torch.Tensor]:
     """Combine motion length with soft, table-normalized cross-zone costs."""
@@ -88,7 +89,10 @@ def _score_arm_candidate(
     def crossing(pose: torch.Tensor | None, weight: float) -> torch.Tensor:
         if pose is None:
             return torch.zeros_like(motion_cost)
-        lateral = pose[:, 1, 3] - workspace_center_y
+        lateral = torch.sum(
+            (pose[:, :2, 3] - workspace_center_xy) * robot_lateral_axis,
+            dim=1,
+        )
         wrong_side_depth = torch.clamp(
             -arm_sign * lateral - deadband,
             min=0.0,
@@ -259,6 +263,7 @@ class ProgramExecutor:
         self._orientation_errors: dict[str, torch.Tensor] = {}
         self._policies: dict[str, dict[str, Any]] = {}
         self._payload_initial: dict[str, dict[str, torch.Tensor]] = {}
+        self._robot_lateral_axis_cache: torch.Tensor | None = None
 
     def run(
         self,
@@ -446,6 +451,7 @@ class ProgramExecutor:
         self._orientation_errors.clear()
         self._policies.clear()
         self._payload_initial.clear()
+        self._robot_lateral_axis_cache = None
 
     def _pack_ready_edges(
         self,
@@ -517,13 +523,17 @@ class ProgramExecutor:
         pose = torch.as_tensor(initial, device=self.env.device)
         if pose.ndim == 2:
             pose = pose.unsqueeze(0)
-        y = float(pose[min(env_id, pose.shape[0] - 1), 1, 3])
+        center, _, lateral_axis = self._arm_selection_workspace(step)
+        index = min(env_id, pose.shape[0] - 1)
+        lateral = float(
+            torch.sum((pose[index, :2, 3] - center[index]) * lateral_axis[index])
+        )
         if (
-            abs(y)
+            abs(lateral)
             <= self.runtime_policy.arm_selection.orient_object_preferred_arm_deadband
         ):
             return None
-        return "left_arm" if y > 0.0 else "right_arm"
+        return "left_arm" if lateral > 0.0 else "right_arm"
 
     def _ensure_assignment(
         self,
@@ -777,14 +787,15 @@ class ProgramExecutor:
             self._candidate_failures[(step.id, arm)] = f"{type(exc).__name__}: {exc}"
             feasible = torch.zeros_like(failed)
             motion_cost[:] = torch.inf
-        center_y, half_width = self._arm_selection_workspace(step)
+        center_xy, half_width, lateral_axis = self._arm_selection_workspace(step)
         score_components = _score_arm_candidate(
             arm=arm,
             motion_cost=motion_cost,
             source_pose=source_pose,
             target_pose=target_pose,
-            workspace_center_y=center_y,
+            workspace_center_xy=center_xy,
             workspace_half_width=half_width,
+            robot_lateral_axis=lateral_axis,
             policy=self.runtime_policy.arm_selection,
         )
         cost = score_components["total_cost"]
@@ -807,15 +818,19 @@ class ProgramExecutor:
     def _arm_selection_workspace(
         self,
         step: SemanticStep,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return the live table center and half-width along world-y."""
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return workspace geometry along the robot's live lateral axis."""
+        lateral_axis = self._robot_view_lateral_axis()
         arrangement = self.arrangements.get(step.id)
         if arrangement is not None:
-            minimum = arrangement.table_bounds[:, 0, 1]
-            maximum = arrangement.table_bounds[:, 1, 1]
-            return (minimum + maximum) * 0.5, (maximum - minimum) * 0.5
+            minimum = arrangement.table_bounds[:, 0, :2]
+            maximum = arrangement.table_bounds[:, 1, :2]
+            center = (minimum + maximum) * 0.5
+            half_extents = (maximum - minimum) * 0.5
+            half_width = torch.sum(torch.abs(lateral_axis) * half_extents, dim=1)
+            return center, half_width, lateral_axis
         count = int(self.env.num_envs)
-        centers = torch.zeros(count, dtype=torch.float32, device=self.env.device)
+        centers = torch.zeros((count, 2), dtype=torch.float32, device=self.env.device)
         half_widths = torch.full(
             (count,),
             float(self.runtime_policy.arm_selection.fallback_workspace_half_width),
@@ -824,7 +839,7 @@ class ProgramExecutor:
         )
         table = self.env.sim.get_rigid_object("table")
         if table is None or not hasattr(table, "get_vertices"):
-            return centers, half_widths
+            return centers, half_widths, lateral_axis
         table_pose = self._entity_pose("table")
         for env_id in range(count):
             value = table.get_vertices(env_ids=[env_id], scale=True)
@@ -843,13 +858,57 @@ class ProgramExecutor:
                 vertices @ table_pose[env_id, :3, :3].transpose(0, 1)
                 + table_pose[env_id, :3, 3]
             )
-            minimum = world[:, 1].min()
-            maximum = world[:, 1].max()
-            half_width = (maximum - minimum) * 0.5
+            minimum = world[:, :2].min(dim=0).values
+            maximum = world[:, :2].max(dim=0).values
+            center = (minimum + maximum) * 0.5
+            lateral = torch.sum((world[:, :2] - center) * lateral_axis[env_id], dim=1)
+            half_width = torch.max(torch.abs(lateral))
             if float(half_width) > 1.0e-6:
-                centers[env_id] = (minimum + maximum) * 0.5
+                centers[env_id] = center
                 half_widths[env_id] = half_width
-        return centers, half_widths
+        return centers, half_widths, lateral_axis
+
+    def _robot_view_lateral_axis(self) -> torch.Tensor:
+        """Return the normalized world-space axis pointing right-arm to left-arm."""
+        if self._robot_lateral_axis_cache is not None:
+            return self._robot_lateral_axis_cache
+        left_part = arm_control_part(self.env, "left_arm")
+        right_part = arm_control_part(self.env, "right_arm")
+        robot = self.env.robot
+        if hasattr(robot, "get_solver") and hasattr(robot, "get_link_pose"):
+            left_solver = robot.get_solver(name=left_part)
+            right_solver = robot.get_solver(name=right_part)
+            left_root = getattr(left_solver, "root_link_name", None)
+            right_root = getattr(right_solver, "root_link_name", None)
+            if left_root is None or right_root is None:
+                raise ValueError(
+                    "Arm selection requires solver root links for both arms."
+                )
+            left = robot.get_link_pose(link_name=left_root, to_matrix=True)
+            right = robot.get_link_pose(link_name=right_root, to_matrix=True)
+        elif hasattr(robot, "get_control_part_base_pose"):
+            left = robot.get_control_part_base_pose(name=left_part, to_matrix=True)
+            right = robot.get_control_part_base_pose(name=right_part, to_matrix=True)
+        elif hasattr(self.env, "get_current_xpos_agent"):
+            left, right = self.env.get_current_xpos_agent()
+        else:
+            raise ValueError(
+                "Arm selection requires live left/right arm-base or TCP poses."
+            )
+        left = torch.as_tensor(left, dtype=torch.float32, device=self.env.device)
+        right = torch.as_tensor(right, dtype=torch.float32, device=self.env.device)
+        if left.ndim == 2:
+            left = left.unsqueeze(0)
+        if right.ndim == 2:
+            right = right.unsqueeze(0)
+        lateral = left[:, :2, 3] - right[:, :2, 3]
+        norm = torch.linalg.vector_norm(lateral, dim=1, keepdim=True)
+        if bool((norm <= 1.0e-6).any()):
+            raise ValueError(
+                "Left and right arm bases must have distinct XY positions."
+            )
+        self._robot_lateral_axis_cache = lateral / norm
+        return self._robot_lateral_axis_cache
 
     def _report_candidates(
         self,

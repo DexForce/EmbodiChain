@@ -27,7 +27,7 @@ generation:
     viewer_camera_uid: cam_high
     ignore_terminations_during_agent: true
     arm_aim_yaw_offset:
-      left: 3.141592653589793
+      left: 0.0
       right: 0.0
   scene:
     prompt2scene_z_rotation_degrees: -90.0
@@ -80,8 +80,8 @@ runtime:
       max_transitions: 1000
       semantic_step_settle_steps: 10
 
-    # Positive world-y is robot-view left. Crossing remains a soft cost so an
-    # arm may cross when its same-side candidate is infeasible.
+    # Crossing is measured along the live right-to-left arm-base axis so the
+    # same-side preference follows the robot under arbitrary world transforms.
     arm_selection:
       crossing_deadband_ratio: 0.08
       pickup_crossing_weight: 1.0

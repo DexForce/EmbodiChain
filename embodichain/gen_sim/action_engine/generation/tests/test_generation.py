@@ -23,6 +23,7 @@ from pathlib import Path
 import sys
 from types import ModuleType
 
+import numpy as np
 import pytest
 
 from embodichain.gen_sim.action_engine.domain import (
@@ -135,9 +136,14 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert config["sensor"][0]["uid"] == "cam_high"
     assert config["env"]["extensions"]["agent_robot_profile"] == "dual_franka"
     assert "agent_grasp_runtime_defaults" not in config["env"]["extensions"]
-    assert config["env"]["extensions"]["arm_aim_yaw_offset"]["left"] == (
-        pytest.approx(3.141592653589793)
-    )
+    assert config["env"]["extensions"]["agent_arm_slots"] == {
+        "left": {"arm": "left_arm", "eef": "left_eef"},
+        "right": {"arm": "right_arm", "eef": "right_eef"},
+    }
+    assert config["env"]["extensions"]["arm_aim_yaw_offset"] == {
+        "left": pytest.approx(0.0),
+        "right": pytest.approx(0.0),
+    }
     assert config["env"]["extensions"]["action_engine"]["execution_program"] == (
         "seed_task_graph.json"
     )
@@ -190,6 +196,78 @@ def test_fast_gym_config_supports_all_robot_profiles(
     assert config["env"]["extensions"]["agent_robot_profile"] == profile
     if solver_type is not None:
         assert config["robot"]["solver_cfg"]["left_arm"]["ur_type"] == solver_type
+
+
+@pytest.mark.parametrize(
+    (
+        "profile",
+        "expected_position_xy",
+        "expected_rotation",
+        "expected_world_x",
+    ),
+    [
+        ("ur10", [2.0, 0.0], [0.0, 0.0, 0.0], 0.9),
+        ("franka", [-0.7, 0.0], [0.0, 0.0, 180.0], 0.55),
+    ],
+)
+def test_dual_robot_profiles_use_identity_mounts_and_same_side_arm_names(
+    gym_export: Path,
+    profile: str,
+    expected_position_xy: list[float],
+    expected_rotation: list[float],
+    expected_world_x: float,
+) -> None:
+    scene = prepare_scene(gym_export)
+    config = build_fast_gym_config(
+        scene,
+        task_name="dual_ur_frame_task",
+        task_description="Verify the Dual-UR world frame.",
+        robot_profile=profile,
+        execution_program_hash="c" * 64,
+        max_episodes=1,
+        max_episode_steps=20,
+    )
+
+    robot = config["robot"]
+    robot_yaw = np.deg2rad(float(robot["init_rot"][2]))
+    robot_rotation = np.array(
+        [
+            [np.cos(robot_yaw), -np.sin(robot_yaw), 0.0],
+            [np.sin(robot_yaw), np.cos(robot_yaw), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    robot_position = np.asarray(robot["init_pos"], dtype=np.float64)
+    components = {
+        component["component_type"]: np.asarray(
+            component["transform"], dtype=np.float64
+        )
+        for component in robot["urdf_cfg"]["components"]
+        if component["component_type"] in {"left_arm", "right_arm"}
+    }
+    world_transforms = {}
+    for side, component in components.items():
+        world = np.eye(4)
+        world[:3, :3] = robot_rotation @ component[:3, :3]
+        world[:3, 3] = robot_position + robot_rotation @ component[:3, 3]
+        world_transforms[side] = world
+
+    assert robot["init_pos"][:2] == pytest.approx(expected_position_xy)
+    assert robot["init_rot"] == pytest.approx(expected_rotation)
+    assert world_transforms["left_arm"][:3, 3] == pytest.approx(
+        [expected_world_x, -0.3, world_transforms["left_arm"][2, 3]]
+    )
+    assert world_transforms["right_arm"][:3, 3] == pytest.approx(
+        [expected_world_x, 0.3, world_transforms["right_arm"][2, 3]]
+    )
+    np.testing.assert_allclose(components["left_arm"][:3, :3], np.eye(3), atol=1.0e-12)
+    np.testing.assert_allclose(components["right_arm"][:3, :3], np.eye(3), atol=1.0e-12)
+    np.testing.assert_allclose(
+        world_transforms["left_arm"][:3, :3], robot_rotation, atol=1.0e-12
+    )
+    np.testing.assert_allclose(
+        world_transforms["right_arm"][:3, :3], robot_rotation, atol=1.0e-12
+    )
 
 
 def test_fast_gym_config_keeps_scene_deterministic_by_default(

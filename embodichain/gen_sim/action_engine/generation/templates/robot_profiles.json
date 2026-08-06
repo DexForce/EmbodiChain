@@ -5,7 +5,7 @@
     "robot_family": "franka",
     "tabletop_clearance": 0.05,
     "arm_component_z": 0.4,
-    "arm_base_y": -1.45,
+    "arm_base_x": -1.45,
     "gripper_open_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "gripper_close_state": [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
   },
@@ -15,7 +15,7 @@
     "robot_family": "ur3",
     "tabletop_clearance": 0.05,
     "arm_component_z": 0.4,
-    "arm_base_y": -1.45,
+    "arm_base_x": -1.45,
     "max_effort": 56.0,
     "gripper_open_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "gripper_close_state": [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
@@ -26,7 +26,7 @@
     "robot_family": "ur5",
     "tabletop_clearance": 0.05,
     "arm_component_z": 0.4,
-    "arm_base_y": -1.45,
+    "arm_base_x": -1.45,
     "max_effort": 10000.0,
     "gripper_open_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "gripper_close_state": [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
@@ -37,7 +37,7 @@
     "robot_family": "ur10",
     "tabletop_clearance": 0.05,
     "arm_component_z": 0.3,
-    "arm_base_y": -1.1,
+    "arm_base_x": -1.1,
     "max_effort": 330.0,
     "gripper_open_state": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "gripper_close_state": [0.7, -0.7, 0.7, -0.7, -0.7, 0.7]
