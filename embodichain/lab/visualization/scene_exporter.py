@@ -483,6 +483,26 @@ class SceneExporter:
                 )
             )
 
+    def resolve_node_target(self, node_id: str) -> tuple[str, str] | None:
+        """Map a published scene node id to its ``(uid, kind)``.
+
+        Used by the simulation thread to turn a Viser click-pick result into the
+        asset uid that :meth:`SimulationManager.enable_gizmo` expects.
+
+        Args:
+            node_id: Scene node id from the current manifest.
+
+        Returns:
+            ``(uid, kind)`` where ``kind`` is the asset kind (for example
+            ``"rigid"``, ``"robot"``, or ``"articulation"``), or ``None`` if the
+            node id is not part of the current scene.
+        """
+        for source in self._sources:
+            if source.node.node_id == node_id:
+                kind, uid = source.asset_key
+                return str(uid), str(kind)
+        return None
+
     def _append_rigid_object_groups(
         self,
         sources: list[_NodeSource],

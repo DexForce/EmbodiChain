@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
-"""
+"""Control a UR10 end effector with a native DexSim or Viser Gizmo."""
 
 from __future__ import annotations
 
@@ -27,6 +25,7 @@ import argparse
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.solvers import PytorchSolverCfg
+from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
     RobotCfg,
@@ -34,7 +33,6 @@ from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
 )
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
-from embodichain.lab.sim.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -120,9 +118,20 @@ def main():
 
     # Enable gizmo using the new API
     if native_window_opened or args.viser:
+        gizmo_cfg = GizmoCfg(
+            ik_root_link_name="base_link",
+            ik_end_link_name="ee_link",
+            ik_tcp_pose=[
+                [0.0, 1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.12],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        )
         sim.enable_gizmo(
             uid="ur10_gizmo_test",
             control_part="arm",
+            gizmo_cfg=gizmo_cfg,
             enable_native=native_window_opened,
         )
         if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
@@ -136,6 +145,8 @@ def main():
     logger.log_info("Gizmo-Robot example started!")
     if native_window_opened or args.viser:
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    if native_window_opened:
+        logger.log_info("Press I to show or hide the native robot IK Gizmo")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     run_simulation(sim)

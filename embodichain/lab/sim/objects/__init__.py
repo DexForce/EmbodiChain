@@ -19,6 +19,8 @@
 Covers lights, rigid bodies (and groups), articulations, robots, deformables (soft/cloth), gizmos, and rigid constraints; every object derives from ``BatchEntity``.
 """
 
+from __future__ import annotations
+
 from ..common import BatchEntity
 from .rigid_object import RigidObject, RigidBodyData, RigidObjectCfg
 from .rigid_object_group import (

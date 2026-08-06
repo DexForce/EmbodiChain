@@ -22,7 +22,8 @@ import select
 import sys
 import time
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
 import gymnasium
 import numpy as np
@@ -254,6 +255,22 @@ class _ReplayControlInput:
             raise EOFError
         return value.lower() if self.single_key else value.strip().lower()
 
+    @contextmanager
+    def suspend_terminal(self) -> Iterator[None]:
+        """Restore canonical terminal input while an embedded REPL is active."""
+        if self._term_attrs is None or self._fd is None:
+            yield
+            return
+
+        import termios
+        import tty
+
+        termios.tcsetattr(self._fd, termios.TCSADRAIN, self._term_attrs)
+        try:
+            yield
+        finally:
+            tty.setcbreak(self._fd)
+
 
 def _read_replay_control_command(
     control_input: _ReplayControlInput, initial: str | None = None
@@ -444,49 +461,187 @@ def main(args, env, gym_config):
         env.close()
 
 
-def preview(env: gymnasium.Env) -> None:
+def _enable_preview_ik_gizmos(
+    env: gymnasium.Env,
+) -> tuple[tuple[str, str], ...]:
+    """Create hidden native IK Gizmos for the preview robot.
+
+    Only control parts selected by the environment and backed by an IK solver
+    are enabled. Existing Gizmos are reused without changing their visibility.
+
+    Args:
+        env: Gymnasium environment being previewed.
+
+    Returns:
+        ``(robot_uid, control_part)`` pairs for the available IK Gizmos.
     """
-    Run the following code to create a demonstration and perform env steps.
+    base_env = env.unwrapped
+    sim = getattr(base_env, "sim", None)
+    robot = getattr(base_env, "robot", None)
+    if sim is None or robot is None:
+        log_warning("Preview IK Gizmo is unavailable because no robot was found.")
+        return ()
+    if not bool(getattr(sim, "is_window_opened", False)):
+        log_warning(
+            "Preview IK Gizmo requires a native DexSim window and is disabled "
+            "for headless or Viser preview."
+        )
+        return ()
 
-    ```
-    # Demo version of environment rollout
-    for i in range(10):
-        qpos = env.robot.get_qpos()
+    num_envs = getattr(base_env, "num_envs", None)
+    if num_envs is None:
+        num_envs = getattr(robot, "num_instances", 1)
+    if int(num_envs) != 1:
+        log_warning(
+            "Preview IK Gizmo supports exactly one environment; "
+            f"received num_envs={num_envs}."
+        )
+        return ()
 
-        obs, reward, terminated, truncated, info = env.step(qpos)
+    robot_uid = getattr(robot, "uid", None)
+    control_parts = getattr(robot, "control_parts", None) or {}
+    get_solver = getattr(robot, "get_solver", None)
+    if not isinstance(robot_uid, str) or not robot_uid or not callable(get_solver):
+        log_warning("Preview IK Gizmo requires a named robot with IK control parts.")
+        return ()
 
-    # reset the environment
-    env.reset()
-    ```
+    configured_parts = getattr(getattr(base_env, "cfg", None), "control_parts", None)
+    if configured_parts:
+        candidate_parts = tuple(
+            dict.fromkeys(part for part in configured_parts if part in control_parts)
+        )
+    else:
+        candidate_parts = tuple(control_parts)
+    ik_parts = tuple(part for part in candidate_parts if get_solver(part) is not None)
+    if not ik_parts:
+        log_warning(
+            f"Robot {robot_uid!r} has no active control part with an IK solver; "
+            "preview IK Gizmo was not enabled."
+        )
+        return ()
 
-    Run the following code to preview the sensor observations.
+    gizmo_keys: list[tuple[str, str]] = []
+    for control_part in ik_parts:
+        if sim.has_gizmo(robot_uid, control_part=control_part):
+            gizmo_keys.append((robot_uid, control_part))
+            continue
+        gizmo = sim.enable_gizmo(
+            uid=robot_uid,
+            control_part=control_part,
+            enable_native=True,
+        )
+        if gizmo is None:
+            continue
+        # Preview starts view-only. The native IKGizmoController owns the I
+        # hotkey and reveals all newly created targets on the first key press.
+        sim.set_gizmo_visibility(
+            robot_uid,
+            visible=False,
+            control_part=control_part,
+        )
+        gizmo_keys.append((robot_uid, control_part))
 
-    ```
-    env.preview_sensor_data("camera")
-    ```
+    if gizmo_keys:
+        part_names = ", ".join(part for _, part in gizmo_keys)
+        log_info(
+            f"Preview IK Gizmo ready for {robot_uid!r}: {part_names}. "
+            "Focus the DexSim window and press I to show or hide it.",
+            color="green",
+        )
+    else:
+        log_warning(f"Failed to initialize a preview IK Gizmo for {robot_uid!r}.")
+    return tuple(gizmo_keys)
+
+
+def _toggle_preview_ik_gizmos(
+    sim: object,
+    gizmo_keys: Sequence[tuple[str, str]],
+) -> tuple[bool, ...]:
+    """Toggle preview IK Gizmos from the terminal fallback command."""
+    states: list[bool] = []
+    for robot_uid, control_part in gizmo_keys:
+        visible = sim.toggle_gizmo_visibility(
+            robot_uid,
+            control_part=control_part,
+        )
+        if visible is not None:
+            states.append(bool(visible))
+    return tuple(states)
+
+
+def _run_preview_loop(
+    env: gymnasium.Env,
+    control_input: _ReplayControlInput,
+    gizmo_keys: Sequence[tuple[str, str]],
+) -> None:
+    """Run terminal commands while servicing interactive Gizmos."""
+    sim = env.unwrapped.sim
+    physics_dt = float(sim.sim_config.physics_dt)
+    visualization = getattr(sim.sim_config, "visualization", None)
+    service_interactions = bool(gizmo_keys) or (
+        getattr(visualization, "backend", "none") == "viser"
+    )
+
+    print("Preview controls:")
+    if gizmo_keys:
+        print("  DexSim window: I=show/hide IK Gizmo, drag Gizmo=move robot")
+        print("  Terminal: i=show/hide IK Gizmo")
+    print("  Terminal: p=IPython embed, q=quit")
+
+    while True:
+        try:
+            command = control_input.read_key(
+                timeout=physics_dt if service_interactions else None
+            )
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if command is not None:
+            command = command.strip().lower()
+            if command in {"q", "quit"}:
+                break
+            if command == "p":
+                try:
+                    from IPython import embed
+                except ImportError:
+                    log_error(
+                        "IPython is not installed. Preview embed mode requires "
+                        "IPython. Install it with `pip install ipython`."
+                    )
+                    continue
+                with control_input.suspend_terminal():
+                    embed()
+            elif command == "i" and gizmo_keys:
+                states = _toggle_preview_ik_gizmos(sim, gizmo_keys)
+                if states:
+                    state = "shown" if all(states) else "hidden"
+                    log_info(f"Preview IK Gizmo {state}.", color="green")
+            elif command:
+                print(f"Unknown preview command: {command!r}")
+
+        if service_interactions:
+            # SimulationManager.update() invokes update_gizmos() before the
+            # physics step, allowing native or Viser controllers to apply IK
+            # drive targets while the terminal remains responsive.
+            sim.update(physics_dt, step=1)
+
+
+def preview(env: gymnasium.Env) -> None:
+    """Run an interactive environment preview.
+
+    A native single-environment preview automatically creates hidden IK
+    Gizmos for the robot's active solver-backed control parts. Press ``I`` in
+    the DexSim window to show or hide the controls, then drag an end-effector
+    target to operate the robot. Terminal commands remain available for the
+    IPython embed session and shutdown.
+
+    Args:
+        env: Gymnasium environment to reset and preview.
     """
     _, _ = env.reset()
-
-    end = False
-    while end is False:
-        print("Press `p` to enter embed mode to interact with the environment.")
-        print("Press `q` to quit the simulation.")
-        txt = input()
-        if txt == "p":
-            try:
-                from IPython import embed
-            except ImportError:
-                log_error(
-                    "IPython is not installed. Preview mode requires IPython to be "
-                    "available. Please install it with `pip install ipython` and try again."
-                )
-                continue
-
-            embed()
-        elif txt == "q":
-            end = True
-
-    exit(0)
+    gizmo_keys = _enable_preview_ik_gizmos(env)
+    with _ReplayControlInput() as control_input:
+        _run_preview_loop(env, control_input, gizmo_keys)
 
 
 def _create_parser() -> argparse.ArgumentParser:
