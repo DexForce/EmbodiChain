@@ -39,6 +39,11 @@ from embodichain.lab.visualization import (
 )
 from embodichain.lab.visualization.backends.base import VisualizationBackend
 
+REPLAY_CURRENT_STEP = 6
+REPLAY_MAX_STEP = 9
+REPLAY_FIRST_SEEK = 2
+REPLAY_LATEST_SEEK = 8
+
 
 def _frame(sequence: int, scene_revision: int = 1) -> SceneFrame:
     return SceneFrame(
@@ -219,6 +224,7 @@ class _Backend(VisualizationBackend):
         self.published = published
         self.image_published = image_published
         self.thread_ids: list[int] = []
+        self.replay_states: list[tuple[int, int, bool]] = []
         self.stopped = False
 
     @property
@@ -247,6 +253,16 @@ class _Backend(VisualizationBackend):
         self._record_thread()
         self.image_published.set()
         return True
+
+    def publish_replay_control(
+        self,
+        *,
+        step: int,
+        max_step: int,
+        visible: bool,
+    ) -> None:
+        self._record_thread()
+        self.replay_states.append((step, max_step, visible))
 
     def poll(self) -> None:
         self._record_thread()
@@ -290,3 +306,51 @@ def test_runtime_keeps_backend_lifecycle_on_update_thread() -> None:
     assert runtime.stats.published_frames >= 1
     assert runtime.stats.captured_image_frames == 1
     assert runtime.stats.published_image_frames == 1
+
+
+def test_runtime_publishes_latest_replay_state_on_update_thread() -> None:
+    published = threading.Event()
+    backend = _Backend(published, threading.Event())
+    runtime = VisualizationRuntime(
+        _Exporter(published),
+        VisualizationCfg(backend="viser", allow_commands=True),
+        backend=backend,
+    )
+    runtime.start()
+    try:
+        runtime.publish_replay_control(step=1, max_step=REPLAY_MAX_STEP)
+        runtime.publish_replay_control(
+            step=REPLAY_CURRENT_STEP,
+            max_step=REPLAY_MAX_STEP,
+        )
+        deadline = monotonic() + 2.0
+        while not backend.replay_states and monotonic() < deadline:
+            sleep(0.01)
+    finally:
+        runtime.stop()
+
+    assert backend.replay_states[-1] == (
+        REPLAY_CURRENT_STEP,
+        REPLAY_MAX_STEP,
+        True,
+    )
+    assert len(set(backend.thread_ids)) == 1
+
+
+def test_runtime_keeps_only_latest_replay_seek() -> None:
+    published = threading.Event()
+    backend = _Backend(published, threading.Event())
+    runtime = VisualizationRuntime(
+        _Exporter(published),
+        VisualizationCfg(backend="viser", allow_commands=True),
+        backend=backend,
+    )
+    runtime.start()
+    try:
+        backend._replay_control_command_sink(REPLAY_FIRST_SEEK)
+        backend._replay_control_command_sink(REPLAY_LATEST_SEEK)
+
+        assert runtime.drain_replay_control_command() == REPLAY_LATEST_SEEK
+        assert runtime.drain_replay_control_command() is None
+    finally:
+        runtime.stop()
