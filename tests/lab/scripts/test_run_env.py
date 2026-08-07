@@ -16,11 +16,34 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
+from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import _create_parser
 
 GYM_CONFIG_PATH = "task.yaml"
 GYM_ID = "Dummy-v0"
+EPISODE_INDEX = 3
+ACTION_LIST_INDEX = 0
+
+
+def test_generate_function_displays_episode_and_action_list_indices(
+    monkeypatch,
+) -> None:
+    """Progress output distinguishes episodes from their local action lists."""
+    env = MagicMock()
+    env.reset.return_value = (None, {})
+    env.get_wrapper_attr.return_value.return_value = [object()]
+    env.step.return_value = (None, None, None, None, None)
+    progress = MagicMock(side_effect=lambda actions, **kwargs: actions)
+    monkeypatch.setattr(run_env.tqdm, "tqdm", progress)
+
+    run_env.generate_function(env, num_traj=1, time_id=EPISODE_INDEX)
+
+    assert progress.call_args.kwargs["desc"] == (
+        f"Executing episode #{EPISODE_INDEX}, action list #{ACTION_LIST_INDEX}"
+    )
 
 
 def test_run_env_syncs_viser_images_each_step_by_default() -> None:

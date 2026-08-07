@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 import os
 import threading
 import time
@@ -285,6 +286,15 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     planner_type: str = "curobo"
+
+    log_level: str = "error"
+    """Log level for cuRobo's Python logger.
+
+    Supported values are ``"debug"``, ``"info"``, ``"warning"`` (or
+    ``"warn"``), and ``"error"``. The setting is applied before cuRobo is
+    imported, so it also controls messages emitted during backend
+    initialization. It does not change EmbodiChain's own log level.
+    """
 
     world: CuroboWorldCfg = CuroboWorldCfg()
     """Collision-world configuration (auto-generated from ``RigidObject`` meshes)."""
@@ -592,8 +602,37 @@ def _get_capture_coordinator() -> "Any":
     return coordinator_mod.CaptureCoordinator.get()
 
 
-def _require_curobo() -> "Any":
+def _configure_curobo_logging(log_level: str) -> None:
+    """Set cuRobo's logger level without reconfiguring the root logger.
+
+    Args:
+        log_level: One of ``"debug"``, ``"info"``, ``"warning"``/``"warn"``,
+            or ``"error"``. Matching is case-insensitive.
+
+    Raises:
+        ValueError: If ``log_level`` is unsupported.
+    """
+    levels = {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warn": logging.WARNING,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+    }
+    normalized = str(log_level).lower()
+    if normalized not in levels:
+        raise ValueError(
+            "CuroboPlannerCfg.log_level must be one of "
+            f"{tuple(levels)}, got {log_level!r}."
+        )
+    logging.getLogger("curobo").setLevel(levels[normalized])
+
+
+def _require_curobo(log_level: str = "error") -> "Any":
     """Lazily import and bundle the cuRobo V2 public facade types.
+
+    Args:
+        log_level: cuRobo logger level applied before importing the backend.
 
     Returns:
         A namespace exposing ``MotionPlanner``, ``MotionPlannerCfg``,
@@ -601,8 +640,9 @@ def _require_curobo() -> "Any":
 
     Raises:
         ImportError: If cuRobo V2 is not installed, with an actionable message
-            naming NVIDIA's CUDA-matched extras.
+            naming NVIDIA's CUDA-matched source variants.
     """
+    _configure_curobo_logging(log_level)
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
     _ensure_warp_torch_compat()
     try:
@@ -612,10 +652,10 @@ def _require_curobo() -> "Any":
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
-            "From the EmbodiChain repository root, install the CUDA-matched "
-            "extra, e.g. `pip install -e '.[curobo-cu12]'` for CUDA 12.x or "
-            "`pip install -e '.[curobo-cu13]'` for CUDA 13.x "
-            "(also `.[curobo-cu12-torch]` / `.[curobo-cu13-torch]`). "
+            "Install NVIDIA's CUDA-matched source package separately, e.g. "
+            "`pip install 'nvidia-curobo[cu12] @ "
+            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
     return SimpleNamespace(
@@ -731,7 +771,7 @@ class CuroboPlanner(BasePlanner):
         # cuRobo and Warp contain a few current-device-sensitive initialization
         # paths, so select the dedicated planning GPU before importing them.
         torch.cuda.set_device(self._curobo_device)
-        self._bindings = _require_curobo()
+        self._bindings = _require_curobo(cfg.log_level)
         self._backend_cache: dict[tuple[str, int, bool, MoveType], "_CuroboBackend"] = (
             {}
         )

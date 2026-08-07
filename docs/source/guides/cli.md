@@ -80,6 +80,11 @@ embodichain preview-asset \
 embodichain preview-asset \
     --asset_path /path/to/asset.usda \
     --headless
+
+# Control articulation joints in Viser
+embodichain preview-asset \
+    --asset_path /path/to/robot.urdf \
+    --viser
 ```
 
 ### Arguments
@@ -98,6 +103,12 @@ embodichain preview-asset \
 | ``--headless`` | ``False`` | Run without rendering window |
 | ``--renderer`` | ``hybrid`` | Renderer backend: ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |
+| ``--joint-control`` / ``--no-joint-control`` | ``True`` | Enable or disable articulation joint controls in Viser previews |
+
+The Viser articulation panel displays rotational joints in degrees and
+prismatic joints in meters. It excludes mimic joints, leaves articulations with
+unsupported multi-DOF mappings read-only, and provides per-articulation reset
+buttons. The native DexSim window does not yet expose these controls.
 
 ### Preview Mode
 
@@ -109,16 +120,22 @@ When ``--preview`` is enabled, an interactive REPL is available:
 
 ---
 
+(cli-run-environment)=
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
 
+For an end-to-end explanation of mode selection, preview, the differences
+between dataset/video/trajectory recording, and all three replay modes, see
+{doc}`run_env`.
+
 Task environments are **auto-discovered**: any installed package that declares
-an ``embodichain.tasks`` entry point (e.g. the official ``embodichain_tasks``
-package) is imported at startup, registering its environments via
-``@register_env``. Make sure your task package is pip-installed
-(``pip install -e .``) so its tasks are visible to the CLI. The task to launch
-is selected by the ``"id"`` field of the gym config.
+an ``embodichain.tasks`` entry point is imported at startup, registering its
+environments via ``@register_env``. The main ``embodichain`` distribution
+already includes and registers the official ``embodichain_tasks`` import
+package, so no separate task installation is needed. Repository-style task
+config paths resolve from the source checkout or installed wheel. The task to
+launch is selected by the ``"id"`` field of the gym config.
 
 ```bash
 # Run an environment with a gym config file
@@ -208,6 +225,10 @@ When ``--preview`` is enabled, an interactive REPL is available:
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
 
+See {doc}`run_env` for examples of inspecting and stepping ``env`` from the
+embedded session, and for the distinction between interactive preview and the
+Viser browser backend.
+
 ### Replay Mode
 
 When ``--replay`` is enabled (with ``--replay_trajectory <path>``), the env loads a recorded ``.pt`` trajectory and drives it via ``ReplayWrapper``. The replay env must use the same gym config (robot/objects/ActionManager) as the recording env.
@@ -231,6 +252,10 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
   Dataset saving is disabled automatically in this mode.
 
 ``--replay`` and ``--preview`` are mutually exclusive.
+
+See {doc}`run_env` for the recorded file contents, environment compatibility
+requirements, vectorized replay behavior, and a complete record/replay
+workflow.
 
 ### Profiling
 

@@ -151,29 +151,60 @@ pip install embodichain \
 
 This pulls in `dexsim_engine` (Python package `dexsim`) and the rest of the core dependencies declared in `pyproject.toml`.
 
+### 3. Official task environments
+
+The main `embodichain` distribution includes the official task environments as
+the `embodichain_tasks` import package, together with their JSON/YAML configs.
+Both a published-wheel install and `pip install -e .` register the
+`embodichain.tasks` entry point automatically; do not install
+`embodichain_tasks/` separately.
+
+If an older checkout was installed with `pip install -e embodichain_tasks/`,
+remove that legacy editable distribution once before reinstalling the main
+project:
+
+```bash
+pip uninstall -y embodichain_tasks
+pip install -e .
+```
+
+Commands can continue to use repository-style paths such as
+`embodichain_tasks/configs/gym/pour_water/gym_config.json`. EmbodiChain resolves
+these paths from the checkout when present and otherwise from the installed
+wheel.
+
 ## Optional: cuRobo V2 motion planning
 
-Install a cuRobo extra to use EmbodiChain's CUDA-accelerated, collision-aware
-motion planner. cuRobo is intentionally not part of the core dependency set:
-select exactly one extra that matches the CUDA version reported by
-`nvidia-smi`.
+Install cuRobo separately to use EmbodiChain's CUDA-accelerated,
+collision-aware motion planner. cuRobo is intentionally not part of the core
+dependency set, and its Git source requirement cannot be included in metadata
+published to PyPI. Select exactly one command that matches the CUDA version
+reported by `nvidia-smi`.
 
 The normal EmbodiChain environment already provides PyTorch, so prefer one of
-the non-`torch` extras:
+the non-`torch` variants:
 
-| CUDA | Published package | Source checkout |
-|------|-------------------|-----------------|
-| 12.x | `uv pip install "embodichain[curobo-cu12]" ${PIP_EXTRA_ARGS}` | `uv pip install -e ".[curobo-cu12]" ${PIP_EXTRA_ARGS}` |
-| 13.x | `uv pip install "embodichain[curobo-cu13]" ${PIP_EXTRA_ARGS}` | `uv pip install -e ".[curobo-cu13]" ${PIP_EXTRA_ARGS}` |
+```bash
+# CUDA 12.x
+uv pip install \
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+  ${PIP_EXTRA_ARGS}
+
+# CUDA 13.x
+uv pip install \
+  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+  ${PIP_EXTRA_ARGS}
+```
 
 For a fresh environment that also needs cuRobo to select and install PyTorch,
-use `curobo-cu12-torch` or `curobo-cu13-torch` instead. The same extras work
-with `pip`; replace `uv pip install` with `pip install`.
+replace `cu12` or `cu13` with `cu12-torch` or `cu13-torch`. The same source
+requirements work with `pip`; replace `uv pip install` with `pip install`.
 
 **Recommended for the current CUDA 12.x EmbodiChain stack:**
 
 ```bash
-uv pip install -e ".[curobo-cu12]" \
+uv pip install \
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
   --extra-index-url http://pyp.open3dv.site:2345/simple/ \
   --trusted-host pyp.open3dv.site
 
@@ -277,7 +308,7 @@ Press `Ctrl+C` to stop; the script cleans up the simulation on exit.
 | Docker Vulkan / EGL warnings from `docker_run.sh` | Install host NVIDIA drivers and Vulkan user-space packages; paths must be files under `/etc` or `/usr/share`, not directories. |
 | Viewer does not open | Export `DISPLAY`, allow X11 access (`xhost +local:` on the host), and ensure `~/.Xauthority` is mounted (the run script does this by default). |
 | PyTorch / CUDA errors at runtime | Reinstall a PyTorch build that matches your driver/CUDA from [pytorch.org](https://pytorch.org/get-started/locally/). |
-| `No module named 'curobo'` | Install exactly one CUDA-matched cuRobo extra, such as `uv pip install -e ".[curobo-cu12]"`, from the EmbodiChain repository root. |
+| `No module named 'curobo'` | Install the CUDA-matched cuRobo source requirement separately, such as `uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"`. |
 | `bpy` install fails | Include the Blender index (`https://download.blender.org/pypi/`) and use Python 3.10 or 3.11. |
 
 ## Next steps

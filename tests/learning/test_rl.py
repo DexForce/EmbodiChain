@@ -22,6 +22,12 @@ import pytest
 import tempfile
 from pathlib import Path
 
+pytestmark = [
+    pytest.mark.requires_sim,
+    pytest.mark.requires_tasks,
+    pytest.mark.slow,
+]
+
 
 class TestRLTraining:
     """Test suite for RL training pipeline."""

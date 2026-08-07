@@ -23,8 +23,7 @@ authors = [ { name = "EmbodiChain Developers" } ]
 requires-python = ">=3.10"
 dynamic = ["version"]
 
-# Core install dependencies (kept from requirements.txt). Some VCS links are
-# specified using PEP 508 direct references where present.
+# Core install dependencies (kept from requirements.txt).
 dependencies = [
   "dexsim_engine==0.4.3",
   "setuptools>=78.1.1",
@@ -55,23 +54,11 @@ dependencies = [
 [project.optional-dependencies]
 gensim = [
   "bpy",
-  "pyrender==0.1.45"
-]
-# cuRobo V2 is distributed from its source repository and provides separate
-# dependency sets for CUDA 12 and CUDA 13. Keep it optional so CPU-only and
-# non-NVIDIA EmbodiChain installations do not pull in CUDA packages. Select
-# exactly one of these extras for the target environment.
-curobo-cu12 = [
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
-curobo-cu12-torch = [
-  "nvidia-curobo[cu12-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
-curobo-cu13 = [
-  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
-curobo-cu13-torch = [
-  "nvidia-curobo[cu13-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+  "pyrender==0.1.45",
+  "requests",
+  "Pillow",
+  "scipy",
+  "matplotlib",
 ]
 
 [project.scripts]
@@ -84,6 +71,9 @@ curobo-cu13-torch = [
 # workspace cache management.
 embodichain = "embodichain.__main__:main"
 
+[project.entry-points."embodichain.tasks"]
+embodichain_tasks = "embodichain_tasks"
+
 [tool.uv.sources]
 bpy = { index = "blender" }
 
@@ -94,20 +84,22 @@ url = "https://download.blender.org/pypi/"
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }
 
-[tool.setuptools.packages.find]
-where = ["."]
-exclude = ["docs"]
-
-[tool.setuptools.package-data]
-"scripts.benchmark.motion_generation" = ["suites/*.yaml"]
-"scripts.benchmark.rl" = ["suites/*.yaml", "tasks/*.yaml", "algorithms/*.yaml"]
+[tool.setuptools]
+include-package-data = false
 
 [tool.black]
 
 [tool.pytest.ini_options]
+addopts = ["-m", "not slow"]
+filterwarnings = [
+    "ignore:`torch\\.jit\\.script(_method)?` is deprecated.*:DeprecationWarning:torch\\.jit\\._script",
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "requires_sim: marks tests that require a real simulation backend",
+    "no_sim: marks mock-only tests that must not initialize a simulation backend",
+    "requires_tasks: marks tests that require installed task-package discovery",
     "gpu: marks tests that execute CUDA/GPU code (run serially)",
     "renderer: marks tests that exercise a rendering backend",
+    "xdist_group(name): keeps resource-sharing tests on one pytest-xdist worker",
 ]

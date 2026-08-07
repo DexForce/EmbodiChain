@@ -233,14 +233,11 @@ def register_env_function(cls, uid, override=False, max_episode_steps=None, **kw
 def _import_task_package(ep: importlib.metadata.EntryPoint):
     """Import a task package and ensure its auto-registration runs.
 
-    In editable ("development") installs, a task package that lives in a
-    subdirectory of another editable project can be shadowed by a same-named
-    namespace package. For example, when both ``embodichain`` and
-    ``embodichain_tasks`` are installed editable from the same checkout, the
-    ``embodichain`` editable finder exposes the repository root on the import
-    path; the ``embodichain_tasks/`` project container (which has no
-    ``__init__.py`` at its root) is then picked up as a namespace package
-    that shadows the real ``embodichain_tasks/embodichain_tasks/`` package.
+    Legacy editable installs from before official tasks were bundled in the
+    main distribution can expose two editable projects from the same checkout.
+    The repository-level ``embodichain_tasks/`` container may then be picked up
+    as a namespace package that shadows the real
+    ``embodichain_tasks/embodichain_tasks/`` package.
 
     A namespace package never executes ``__init__.py``, so the package's
     ``import_packages()`` call -- which triggers every ``@register_env`` --
