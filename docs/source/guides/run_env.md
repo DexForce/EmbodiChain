@@ -118,10 +118,12 @@ embodichain run-env \
     --viser-port 8080
 ```
 
-Use Viser to inspect selected environments, camera frustums, RGB previews, and
-overlays locally or remotely. Limit the published batch with
-`--viser-env-ids`, and tune scene, image, or soft-body publication rates with
-the corresponding `--viser-*-fps` options. See
+Use Viser to inspect selected environments, camera frustums, and all camera RGB
+previews locally or remotely. The expanded preview panel separates cameras
+created by `record_camera_data` under **Record cameras** from configured
+observation sensors under **Sensor cameras**.
+Limit the published batch with `--viser-env-ids`, and tune scene, image, or
+soft-body publication rates with the corresponding `--viser-*-fps` options. See
 {doc}`/overview/sim/viser_visualization` for browser controls and remote-access
 details.
 

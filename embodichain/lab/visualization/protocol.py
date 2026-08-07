@@ -198,6 +198,7 @@ class CameraSpec:
     aspect: float
     near: float
     far: float
+    role: Literal["sensor", "record"] = "sensor"
 
     def __post_init__(self) -> None:
         if self.env_id < 0:
@@ -208,6 +209,8 @@ class CameraSpec:
             raise ValueError("Camera aspect ratio must be greater than zero.")
         if self.near <= 0.0 or self.far <= self.near:
             raise ValueError("Camera clipping planes must satisfy 0 < near < far.")
+        if self.role not in {"sensor", "record"}:
+            raise ValueError("Camera role must be either 'sensor' or 'record'.")
 
 
 @dataclass(frozen=True)
