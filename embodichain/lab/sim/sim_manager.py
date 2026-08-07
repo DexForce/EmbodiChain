@@ -2183,7 +2183,7 @@ class SimulationManager:
         sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
 
         self._sensors[sensor_uid] = sensor
-        if sensor_type == "Camera":
+        if isinstance(sensor, Camera):
             self.notify_visualization_topology_changed()
 
         # Check if the sensor needs to change the parent frame.

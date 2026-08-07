@@ -508,6 +508,21 @@ def test_remove_asset_marks_visualization_topology_dirty() -> None:
     assert runtime.stopped
 
 
+def test_add_stereo_camera_marks_visualization_topology_dirty() -> None:
+    sim = object.__new__(SimulationManager)
+    sensor = object.__new__(sim_manager_module.StereoCamera)
+    sim.device = torch.device("cpu")
+    sim._sensors = {}
+    sim._visualization_topology_revision = 2
+    sim.SUPPORTED_SENSOR_TYPES = {
+        "StereoCamera": lambda cfg, device: sensor,
+    }
+    cfg = SimpleNamespace(sensor_type="StereoCamera", uid="cam_high")
+
+    assert sim.add_sensor(cfg) is sensor
+    assert sim._visualization_topology_revision == 3
+
+
 def test_window_camera_pose_to_look_at_uses_dexsim_world_up() -> None:
     """Captured look-at snippets preserve DexSim's default Z-up controls."""
     pose = np.eye(4, dtype=np.float32)

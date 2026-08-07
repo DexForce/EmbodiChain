@@ -21,11 +21,13 @@ import torch
 import dexsim.render as dr
 
 from functools import cached_property
-from typing import Tuple, Sequence, List
+from typing import List, Literal, Sequence, Tuple
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, look_at_to_pose
 from embodichain.utils import logger, configclass
+
+__all__ = ["Camera", "CameraCfg"]
 
 
 @configclass
@@ -55,6 +57,9 @@ class CameraCfg(SensorCfg):
                 return super().transformation
 
     sensor_type: str = "Camera"
+
+    visualization_role: Literal["sensor", "record"] = "sensor"
+    """Role used to group this camera in live visualization previews."""
 
     # Camera parameters
     width: int = 640

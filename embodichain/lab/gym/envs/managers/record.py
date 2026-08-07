@@ -29,6 +29,8 @@ from embodichain.lab.sim.sensors.camera import CameraCfg, Camera
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
+__all__ = ["record_camera_data", "record_camera_data_async", "validation_cameras"]
+
 
 class record_camera_data(Functor):
     """Record camera data in the environment. The camera is usually setup with third-person view, and
@@ -76,6 +78,7 @@ class record_camera_data(Functor):
                 height=resolution[1],
                 extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target, up=up),
                 intrinsics=intrinsics,
+                visualization_role="record",
             )
         )
 
