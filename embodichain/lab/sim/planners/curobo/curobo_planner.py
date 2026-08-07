@@ -839,6 +839,54 @@ class CuroboPlanner(BasePlanner):
             options.control_part = control_part
         return options
 
+    def prepare_backend(
+        self,
+        *,
+        control_part: str,
+        batch_size: int,
+        move_type: MoveType = MoveType.EEF_MOVE,
+    ) -> dict[str, object]:
+        """Materialize and warm one lazy cuRobo backend without planning a case.
+
+        This explicit lifecycle hook lets deployment tooling and benchmarks
+        separate one-time robot/world YAML generation, collision-sphere setup,
+        CUDA graph capture, and cuRobo warmup from the first real planning call.
+        Repeated calls for the same backend key reuse the cached backend.
+
+        Args:
+            control_part: Robot control part to prepare.
+            batch_size: Goal batch size used by the future planning calls.
+            move_type: Goal type whose cuRobo buffers and graph are prepared.
+
+        Returns:
+            Metadata describing the resolved backend and actual CUDA graph mode.
+
+        Raises:
+            ValueError: If the batch size or move type is unsupported.
+        """
+        if batch_size < 1:
+            logger.log_error("batch_size must be >= 1.", ValueError)
+        if move_type not in self.supported_move_types:
+            logger.log_error(
+                f"cuRobo cannot prepare unsupported move type {move_type}.",
+                ValueError,
+            )
+        robot_batch_size = int(getattr(self.robot, "num_instances", 1))
+        if batch_size not in (1, robot_batch_size):
+            logger.log_error(
+                f"batch_size={batch_size} must be 1 or robot.num_instances="
+                f"{robot_batch_size}.",
+                ValueError,
+            )
+        backend = self._get_backend(control_part, batch_size, move_type)
+        return {
+            "control_part": backend.control_part,
+            "batch_size": backend.batch_size,
+            "move_type": backend.planning_mode.name,
+            "multi_env": bool(self.cfg.world.multi_env),
+            "use_cuda_graph": backend.use_cuda_graph,
+        }
+
     @validate_plan_options(options_cls=CuroboPlanOptions)
     def plan(
         self,
