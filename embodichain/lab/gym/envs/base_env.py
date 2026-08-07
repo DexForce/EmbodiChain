@@ -20,7 +20,7 @@ import torch
 import numpy as np
 import gymnasium as gym
 
-from typing import Dict, List, Union, Tuple, Any, Sequence
+from typing import Any, Callable, Dict, List, Sequence, Tuple, Union
 from functools import cached_property
 from tensordict import TensorDict
 
@@ -589,6 +589,31 @@ class BaseEnv(gym.Env):
         """
         return action
 
+    def _before_sim_step(self, substep_index: int) -> None:
+        """Hook invoked immediately before every physics substep.
+
+        Args:
+            substep_index: Zero-based substep within the current environment
+                control step.
+
+        .. tip::
+            Override this hook for commands, such as generalized efforts, that
+            must be reapplied throughout action decimation.
+        """
+        del substep_index
+
+    def _get_before_sim_step_callback(self) -> Callable[[int], None] | None:
+        """Return an optional callback for physics-substep control updates.
+
+        Returns:
+            The overridden :meth:`_before_sim_step` hook, or ``None`` when the
+            hook is unchanged so ordinary environments do not pay a Python
+            callback cost during action decimation.
+        """
+        if type(self)._before_sim_step is BaseEnv._before_sim_step:
+            return None
+        return self._before_sim_step
+
     def _step_action(self, action: EnvAction) -> EnvAction:
         """Set action control command into simulation.
 
@@ -666,7 +691,11 @@ class BaseEnv(gym.Env):
                 action = self._step_action(action=action)
 
             with self._profiler.section("sim_update"):
-                self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
+                self.sim.update(
+                    self.sim_cfg.physics_dt,
+                    self.cfg.sim_steps_per_control,
+                    before_step_callback=self._get_before_sim_step_callback(),
+                )
             with self._profiler.section("update_sim_state"):
                 self._update_sim_state(**kwargs)
 

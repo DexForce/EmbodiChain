@@ -15,10 +15,12 @@ This module contains RL policy networks and related model implementations, suppo
 
 ### ActorCritic
 - Typical actor-critic policy, includes actor (action distribution) and critic (value function). Used with PPO.
+- Supports ``squash_actions`` for a tanh-bounded Gaussian. The sampled and reevaluated log probabilities include the tanh Jacobian correction required by PPO.
 
 ### ActorOnly
 - Actor-only policy without Critic. Used with GRPO (Group Relative Policy Optimization), which estimates advantages via group-level return comparison instead of a value function.
 - Supports Gaussian action distributions, learnable log_std, suitable for continuous action spaces.
+- Supports the same corrected ``squash_actions`` path as ``ActorCritic``.
 - Key methods:
     - `forward`: Actor network outputs mean, samples action, and writes policy outputs into a `TensorDict`.
     - `evaluate_actions`: Used for loss calculation in PPO/GRPO algorithms.
@@ -51,6 +53,12 @@ action = step_td["action"]
 log_prob = step_td["sample_log_prob"]
 value = step_td["value"]
 ```
+
+For simulator RL, training enables ``squash_actions`` automatically when an
+Action Manager exposes the standard ``[-1, 1]`` action range. Set it explicitly
+to ``false`` to retain an unbounded Gaussian. Custom Action Manager bounds do
+not enable automatic tanh squashing; use a policy distribution whose support
+matches those bounds.
 
 ## Extension and Customization
 - Supports custom network architectures (e.g., CNN, Transformer) by implementing the Policy interface.

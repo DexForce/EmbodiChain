@@ -291,6 +291,8 @@ The dataset manager is called automatically during {meth}`~envs.Env.step()`, ens
 For RL tasks, EmbodiChain uses the **Action Manager** integrated into {class}`~envs.EmbodiedEnv`:
 
 * **Action Preprocessing**: Configurable via ``actions`` in {class}`~envs.EmbodiedEnvCfg`. Supports DeltaQposTerm, QposTerm, QposDenormalizedTerm, EefPoseTerm, QvelTerm, QfTerm. For a complete list of available action terms, please refer to {doc}`action_functors`.
+* **Flat RL Interface**: The Action Manager concatenates all ``pre`` terms into one flat ``Box`` policy action space, then routes the slices to typed qpos, qvel, or qf commands on their selected joints.
+* **Command Safety**: Processed commands are checked for batch shape and finite values and are clipped to robot limits by default. Effort commands are held across every physics substep.
 * **Standardized Info Structure**: {class}`~envs.EmbodiedEnv` provides ``compute_task_state``, ``get_info``, and ``evaluate`` for task-specific success/failure and metrics.
 * **Episode Management**: Configurable episode length and truncation logic.
 
@@ -324,6 +326,29 @@ In a gym config file, use the ``actions`` section:
     }
 }
 ```
+
+Multiple terms may control disjoint joint groups. Their dimensions are
+concatenated in configuration order, so standard continuous-control policies
+still produce one tensor:
+
+```json
+"actions": {
+    "arm_velocity": {
+        "func": "QvelTerm",
+        "params": {"joint_ids": [0, 1, 2, 3, 4, 5], "scale": 1.5}
+    },
+    "gripper_effort": {
+        "func": "QfTerm",
+        "params": {"control_part": "gripper", "scale": 20.0}
+    }
+}
+```
+
+When no Action Manager is configured, a bare tensor passed to ``step`` remains
+a qpos command. A direct mapping such as ``{"qvel": value}`` or
+``{"qf": value}`` selects another physical command explicitly. For RL and
+trajectory recording, prefer the Action Manager because its flat action space
+and raw-action ordering are stable.
 
 
 ## Creating a Custom Task

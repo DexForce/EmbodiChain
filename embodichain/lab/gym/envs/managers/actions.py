@@ -37,6 +37,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import gymnasium as gym
+import numpy as np
 import torch
 from tensordict import TensorDict
 
@@ -94,10 +96,11 @@ class DeltaQposTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
+        return len(self.joint_ids)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        return action * self._scale + self._env.robot.get_qpos()
+        current_qpos = self._env.robot.get_qpos()[:, self.joint_ids]
+        return action * self._scale + current_qpos
 
 
 class QposTerm(ActionTerm):
@@ -127,7 +130,7 @@ class QposTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
+        return len(self.joint_ids)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
         qpos = action * self._scale
@@ -161,7 +164,6 @@ class QposDenormalizedTerm(ActionTerm):
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
         self._scale = cfg.params.get("scale", 1.0)
-        self._joint_ids = cfg.params.get("joint_ids", self._env.active_joint_ids)
         self._range = cfg.params.get("range", [-1.0, 1.0])
 
     @property
@@ -170,17 +172,31 @@ class QposDenormalizedTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
+        return len(self.joint_ids)
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        """Policy action space matching the configured normalized range."""
+        if len(self._range) != 2:
+            raise ValueError("QposDenormalizedTerm 'range' must contain [low, high].")
+        low = self._expand_action_bound(self._range[0], "low")
+        high = self._expand_action_bound(self._range[1], "high")
+        if np.any(low >= high):
+            raise ValueError(
+                "QposDenormalizedTerm policy range low must be smaller than high."
+            )
+        if not np.isfinite(low).all() or not np.isfinite(high).all():
+            raise ValueError("QposDenormalizedTerm policy range must be finite.")
+        return gym.spaces.Box(low=low, high=high, dtype=np.float32)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
         scaled = action * self._scale
-        qpos_limits = self._env.robot.body_data.qpos_limits[0, self._joint_ids]
-        low = qpos_limits[:, 0]
-        high = qpos_limits[:, 1]
-        scaled[:, self._joint_ids] = low + (
-            scaled[:, self._joint_ids] - self._range[0]
-        ) / (self._range[1] - self._range[0]) * (high - low)
-        return scaled
+        qpos_limits = self._env.robot.body_data.qpos_limits[:, self.joint_ids]
+        low = qpos_limits[..., 0]
+        high = qpos_limits[..., 1]
+        return low + (scaled - self._range[0]) / (self._range[1] - self._range[0]) * (
+            high - low
+        )
 
 
 class QposNormalizedTerm(ActionTerm):
@@ -203,7 +219,6 @@ class QposNormalizedTerm(ActionTerm):
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         super().__init__(cfg, env)
-        self._joint_ids = cfg.params.get("joint_ids", self._env.active_joint_ids)
         self._range = cfg.params.get("range", [0.0, 1.0])
 
     @property
@@ -212,16 +227,15 @@ class QposNormalizedTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
+        return len(self.joint_ids)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        qpos_limits = self._env.robot.body_data.qpos_limits[0, self._joint_ids]
-        low = qpos_limits[:, 0]
-        high = qpos_limits[:, 1]
-        action[:, self._joint_ids] = (action[:, self._joint_ids] - low) / (
-            high - low
-        ) * (self._range[1] - self._range[0]) + self._range[0]
-        return action
+        qpos_limits = self._env.robot.body_data.qpos_limits[:, self.joint_ids]
+        low = qpos_limits[..., 0]
+        high = qpos_limits[..., 1]
+        return (action - low) / (high - low) * (
+            self._range[1] - self._range[0]
+        ) + self._range[0]
 
 
 class EefPoseTerm(ActionTerm):
@@ -264,12 +278,16 @@ class EefPoseTerm(ActionTerm):
         return "eef_pose"
 
     @property
+    def command_key(self) -> str:
+        return "qpos"
+
+    @property
     def action_dim(self) -> int:
         return self._pose_dim
 
     def process_action(self, action: torch.Tensor) -> EnvAction:
         scaled = action * self._scale
-        current_qpos = self._env.robot.get_qpos()
+        current_qpos = self._env.robot.get_qpos()[:, self.joint_ids]
         batch_size = scaled.shape[0]
         target_pose = (
             torch.eye(4, device=self.device).unsqueeze(0).repeat(batch_size, 1, 1)
@@ -285,10 +303,14 @@ class EefPoseTerm(ActionTerm):
                 f"EEF pose action must be 6D or 7D, got {scaled.shape[-1]}D"
             )
         # Batch IK: robot.compute_ik supports (n_envs, 4, 4) pose and (n_envs, dof) seed
-        ret, qpos_ik = self._env.robot.compute_ik(
-            pose=target_pose,
-            joint_seed=current_qpos,
-        )
+        ik_kwargs = {
+            "pose": target_pose,
+            "joint_seed": current_qpos,
+        }
+        control_part = self.cfg.params.get("control_part")
+        if control_part is not None:
+            ik_kwargs["name"] = control_part
+        ret, qpos_ik = self._env.robot.compute_ik(**ik_kwargs)
         # Fallback to current_qpos where IK failed
         result_qpos = torch.where(
             ret.unsqueeze(-1).expand_as(qpos_ik), qpos_ik, current_qpos
@@ -327,7 +349,7 @@ class QvelTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
+        return len(self.joint_ids)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
         return action * self._scale
@@ -360,7 +382,7 @@ class QfTerm(ActionTerm):
 
     @property
     def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
+        return len(self.joint_ids)
 
     def process_action(self, action: torch.Tensor) -> torch.Tensor:
         return action * self._scale

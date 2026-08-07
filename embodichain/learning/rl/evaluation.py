@@ -39,15 +39,9 @@ def _flat_observation(observation: Any, device: torch.device) -> torch.Tensor:
 
 
 def _action_for_env(env: Any, action: torch.Tensor) -> Any:
-    action_manager = getattr(env, "action_manager", None)
-    if action_manager is None and hasattr(env, "get_wrapper_attr"):
-        try:
-            action_manager = env.get_wrapper_attr("action_manager")
-        except AttributeError:
-            action_manager = None
-    if action_manager is None:
-        return action
-    return action_manager.convert_policy_action_to_env_action(action)
+    """Pass policy action through; the environment owns action interpretation."""
+    del env
+    return action
 
 
 def _selected_values(value: Any, indices: torch.Tensor) -> list[float]:

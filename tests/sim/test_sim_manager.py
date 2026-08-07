@@ -258,6 +258,21 @@ def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -
     assert all(call["overlays"] is None for call in runtime.capture_calls)
 
 
+def test_sim_update_invokes_callback_before_every_physics_substep() -> None:
+    """Control callbacks run once per substep and before the world update."""
+    sim, _ = _make_visualization_sim_manager()
+    callback_events: list[tuple[int, int]] = []
+
+    sim.update(
+        step=3,
+        before_step_callback=lambda index: callback_events.append(
+            (index, len(sim._world.physics_updates))
+        ),
+    )
+
+    assert callback_events == [(0, 0), (1, 1), (2, 2)]
+
+
 def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
     sim, runtime = _make_visualization_sim_manager()
     overlays = SceneOverlays(
