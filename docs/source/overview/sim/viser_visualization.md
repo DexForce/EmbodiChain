@@ -220,6 +220,11 @@ The **Overlays** panel controls frames, trajectories, targets, and point clouds.
 Hiding an environment affects its static meshes, deformable meshes, and camera
 frustum together.
 
+When `run-env --replay --replay_mode control --viser` is active, the expanded
+**Replay control** panel adds an integer **Frame** slider. Browser seeks are
+coalesced and applied on the replay thread; dragging the slider pauses terminal
+auto-play, and terminal frame changes update the browser value.
+
 ## Configuration reference
 
 ### `VisualizationCfg`

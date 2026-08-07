@@ -16,16 +16,25 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import torch
 
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
-from embodichain.lab.scripts.run_env import _create_parser
+from embodichain.lab.scripts.run_env import (
+    _create_parser,
+    _run_replay_control_loop,
+)
 
 GYM_CONFIG_PATH = "task.yaml"
 GYM_ID = "Dummy-v0"
 EPISODE_INDEX = 3
 ACTION_LIST_INDEX = 0
+REPLAY_NUM_STEPS = 5
+REPLAY_TARGET_STEP = 3
+VISER_POLL_INTERVAL = 0.05
 
 
 def test_generate_function_displays_episode_and_action_list_indices(
@@ -87,3 +96,64 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
     )
 
     assert merged["visualization"]["sensor_image_fps"] == configured_fps
+
+
+def test_control_loop_consumes_viser_seek_while_paused() -> None:
+    """A browser slider seek is applied without waiting for terminal input."""
+
+    class FakeControlInput:
+        single_key = True
+
+        def __init__(self) -> None:
+            self.timeouts: list[float | None] = []
+
+        def read_key(self, timeout: float | None = None) -> str:
+            self.timeouts.append(timeout)
+            return "q"
+
+    class FakeReplayEnv:
+        def __init__(self) -> None:
+            self._lengths = torch.tensor([REPLAY_NUM_STEPS])
+            self.env = SimpleNamespace(
+                sim_cfg=SimpleNamespace(physics_dt=0.01),
+                cfg=SimpleNamespace(sim_steps_per_control=4),
+            )
+            self.visited_steps: list[int] = []
+
+        def go_to_step(self, step: int) -> None:
+            self.visited_steps.append(step)
+
+    class FakeVisualizationRuntime:
+        def __init__(self) -> None:
+            self.target_step: int | None = REPLAY_TARGET_STEP
+            self.states: list[tuple[int, int, bool]] = []
+
+        def drain_replay_control_command(self) -> int | None:
+            target_step, self.target_step = self.target_step, None
+            return target_step
+
+        def publish_replay_control(
+            self,
+            *,
+            step: int,
+            max_step: int,
+            visible: bool = True,
+        ) -> None:
+            self.states.append((step, max_step, visible))
+
+    replay_env = FakeReplayEnv()
+    control_input = FakeControlInput()
+    runtime = FakeVisualizationRuntime()
+    _run_replay_control_loop(
+        replay_env,
+        control_input,
+        visualization_runtime=runtime,
+    )
+
+    assert replay_env.visited_steps == [0, REPLAY_TARGET_STEP]
+    assert control_input.timeouts == [VISER_POLL_INTERVAL]
+    assert runtime.states[-1] == (
+        REPLAY_TARGET_STEP,
+        REPLAY_NUM_STEPS - 1,
+        False,
+    )

@@ -246,8 +246,15 @@ class VisualizationRuntime:
         self._backend.set_joint_control_command_sink(
             self._enqueue_joint_control_command
         )
+        self._backend.set_replay_control_command_sink(
+            self._enqueue_replay_control_command
+        )
         self._frames: LatestFrameQueue[SceneFrame] = LatestFrameQueue()
         self._camera_images: LatestFrameQueue[CameraImageFrame] = LatestFrameQueue()
+        self._replay_control_states: LatestFrameQueue[tuple[int, int, bool]] = (
+            LatestFrameQueue()
+        )
+        self._replay_control_commands: LatestFrameQueue[int] = LatestFrameQueue()
         self._manifests: queue.Queue[SceneManifest] = queue.Queue()
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
@@ -279,6 +286,48 @@ class VisualizationRuntime:
         if not self.cfg.allow_commands:
             return ()
         return self._joint_control_commands.drain()
+
+    def _enqueue_replay_control_command(self, step: int) -> None:
+        if self.cfg.allow_commands:
+            self._replay_control_commands.put_latest(step)
+
+    def drain_replay_control_command(self) -> int | None:
+        """Return the newest browser replay seek, if one is pending.
+
+        Returns:
+            Requested trajectory step, or ``None`` when no seek is pending.
+        """
+        if not self.cfg.allow_commands:
+            return None
+        try:
+            return self._replay_control_commands.get_nowait()
+        except queue.Empty:
+            return None
+
+    def publish_replay_control(
+        self,
+        *,
+        step: int,
+        max_step: int,
+        visible: bool = True,
+    ) -> None:
+        """Asynchronously publish trajectory replay progress to Viser.
+
+        Args:
+            step: Current trajectory step.
+            max_step: Largest valid trajectory step.
+            visible: Whether the replay control should be visible.
+
+        Raises:
+            RuntimeError: If the visualization runtime is not running.
+            ValueError: If the step range is invalid.
+        """
+        if not self.is_running:
+            raise RuntimeError("VisualizationRuntime.start() must be called first.")
+        if max_step < 0 or not 0 <= step <= max_step:
+            raise ValueError("Replay step must satisfy 0 <= step <= max_step.")
+        self._raise_worker_error()
+        self._replay_control_states.put_latest((step, max_step, visible))
 
     def set_joint_control_provider(
         self,
@@ -479,6 +528,17 @@ class VisualizationRuntime:
             image_upload_seconds=perf_counter() - started,
         )
 
+    def _publish_pending_replay_control(self) -> None:
+        try:
+            step, max_step, visible = self._replay_control_states.get_nowait()
+        except queue.Empty:
+            return
+        self._backend.publish_replay_control(
+            step=step,
+            max_step=max_step,
+            visible=visible,
+        )
+
     def _run(self, initial_manifest: SceneManifest) -> None:
         try:
             self._backend.start()
@@ -488,16 +548,19 @@ class VisualizationRuntime:
             while not self._stop_event.is_set():
                 self._publish_pending_manifests()
                 self._publish_pending_camera_images()
+                self._publish_pending_replay_control()
                 try:
                     frame = self._frames.get(timeout=0.05)
                 except queue.Empty:
                     self._publish_pending_camera_images()
+                    self._publish_pending_replay_control()
                     self._backend.poll()
                     continue
                 # A topology refresh and its first frame can be queued while this
                 # thread is blocked above. Publish the manifest before that frame.
                 self._publish_pending_manifests()
                 self._publish_pending_camera_images()
+                self._publish_pending_replay_control()
                 started = perf_counter()
                 accepted = self._backend.publish_frame(frame)
                 upload_seconds = perf_counter() - started
@@ -508,6 +571,7 @@ class VisualizationRuntime:
                 )
             self._publish_pending_manifests()
             self._publish_pending_camera_images()
+            self._publish_pending_replay_control()
             try:
                 final_frame = self._frames.get_nowait()
             except queue.Empty:
@@ -521,6 +585,7 @@ class VisualizationRuntime:
                     upload_seconds=perf_counter() - started,
                 )
             self._publish_pending_camera_images()
+            self._publish_pending_replay_control()
         except BaseException as error:
             self._worker_error = error
             self._ready_event.set()
@@ -543,6 +608,8 @@ class VisualizationRuntime:
         self._thread = None
         self._frames.clear()
         self._camera_images.clear()
+        self._replay_control_states.clear()
+        self._replay_control_commands.clear()
         self._gizmo_commands.clear()
         self._joint_control_commands.clear()
         self._raise_worker_error()
