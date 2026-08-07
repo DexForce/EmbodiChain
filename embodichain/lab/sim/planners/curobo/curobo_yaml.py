@@ -616,27 +616,124 @@ def visualize_curobo_robot_collision_model(
     return geometries
 
 
-def visualize_curobo_world_collision_model(
-    rigid_objects: Sequence[RigidObject],
-    world_scene: Any,
-    env_id: int = 0,
-    *,
-    draw: bool = True,
-) -> list[dict[str, Any]]:
-    """Visualize live obstacle meshes and cuRobo ESDF collision voxels.
+def _get_or_create_dexsim_material(
+    env: Any,
+    name: str,
+    color: list[float],
+) -> Any:
+    """Return a named DexSim material without accumulating duplicates."""
+    material = env.find_material(name)
+    if material is None:
+        return env.create_color_material(color, name, has_alpha=len(color) == 4)
+    material.set_base_color(color)
+    return material
 
-    Args:
-        rigid_objects: Live simulator obstacles represented by the cache.
-        world_scene: Tensor-backed scene mapping or a cuRobo ``Scene`` instance.
-        env_id: Simulator environment instance whose live meshes are shown.
-        draw: Open an Open3D window immediately. ``False`` returns draw entries
-            for composition with the robot collision model.
 
-    Returns:
-        Open3D geometry dictionaries suitable for :func:`open3d.visualization.draw`.
-    """
+def _create_open3d_sphere_mesh(
+    centers: torch.Tensor,
+    radii: torch.Tensor,
+) -> Any:
+    """Build one Open3D mesh containing all requested collision spheres."""
+    import numpy as np
     import open3d as o3d
 
+    centers = (
+        torch.as_tensor(centers, dtype=torch.float32).detach().cpu().reshape(-1, 3)
+    )
+    radii = torch.as_tensor(radii, dtype=torch.float32).detach().cpu().reshape(-1)
+    if centers.shape[0] != radii.shape[0]:
+        raise ValueError(
+            "Visualization sphere centers and radii must have the same length, got "
+            f"{centers.shape[0]} and {radii.shape[0]}."
+        )
+    if torch.any(radii <= 0.0):
+        raise ValueError("Visualization sphere radii must all be positive.")
+    if centers.shape[0] == 0:
+        raise ValueError("At least one visualization sphere is required.")
+
+    sphere_template = o3d.geometry.TriangleMesh.create_sphere(radius=1.0, resolution=8)
+    sphere_template.compute_vertex_normals()
+    template_vertices = np.asarray(sphere_template.vertices)
+    template_triangles = np.asarray(sphere_template.triangles)
+    template_normals = np.asarray(sphere_template.vertex_normals)
+    centers_np = centers.numpy()
+    radii_np = radii.numpy()
+
+    # Vectorized assembly avoids repeated ``combined_mesh += sphere`` reallocations,
+    # which become quadratic for a dense obstacle surface.
+    sphere_count = centers_np.shape[0]
+    vertices_per_sphere = template_vertices.shape[0]
+    vertices = (
+        template_vertices[None, :, :] * radii_np[:, None, None] + centers_np[:, None, :]
+    ).reshape(-1, 3)
+    triangle_offsets = (np.arange(sphere_count, dtype=np.int64) * vertices_per_sphere)[
+        :, None, None
+    ]
+    triangles = (template_triangles[None, :, :] + triangle_offsets).reshape(-1, 3)
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+    mesh.triangles = o3d.utility.Vector3iVector(triangles)
+    mesh.vertex_normals = o3d.utility.Vector3dVector(
+        np.tile(template_normals, (sphere_count, 1))
+    )
+    return mesh
+
+
+def _load_dexsim_sphere_mesh(
+    env: Any,
+    centers: torch.Tensor,
+    radii: torch.Tensor,
+    material: Any,
+) -> Any:
+    """Write one combined sphere mesh to ``/tmp`` and load it into DexSim."""
+    import os
+    import tempfile
+
+    import open3d as o3d
+
+    mesh = _create_open3d_sphere_mesh(centers, radii)
+    with tempfile.NamedTemporaryFile(
+        prefix="curobo_collision_spheres_",
+        suffix=".ply",
+        dir="/tmp",
+        delete=False,
+    ) as temp_file:
+        mesh_path = temp_file.name
+
+    actor = None
+    try:
+        if not o3d.io.write_triangle_mesh(mesh_path, mesh, write_ascii=False):
+            raise RuntimeError(
+                f"Could not write collision sphere mesh to {mesh_path!r}."
+            )
+        actor = env.load_actor(mesh_path)
+        if actor is None:
+            raise RuntimeError(f"DexSim could not load collision mesh {mesh_path!r}.")
+        actor.set_material(material)
+        return actor
+    except Exception:
+        if actor is not None:
+            env.remove_actor(actor)
+        raise
+    finally:
+        try:
+            os.unlink(mesh_path)
+        except FileNotFoundError:
+            pass
+
+
+def _remove_dexsim_visualization_actors(env: Any, actors: Sequence[Any]) -> None:
+    """Remove every temporary actor, continuing if an individual removal fails."""
+    for actor in reversed(actors):
+        try:
+            env.remove_actor(actor)
+        except Exception as exc:  # noqa: BLE001
+            logger.log_warning(f"Could not remove a cuRobo visualization actor: {exc}")
+
+
+def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return world-space centers and radii for the ESDF surface overlay."""
     if isinstance(world_scene, dict):
         voxel_entries = list(world_scene.get("voxel", {}).items())
     else:
@@ -646,27 +743,8 @@ def visualize_curobo_world_collision_model(
     if not voxel_entries:
         raise ValueError("The cuRobo world scene contains no voxel collision data.")
 
-    meshes: list[tuple[str, Any]] = []
-    for idx, obj in enumerate(rigid_objects):
-        name = getattr(obj, "uid", None) or f"obstacle_{idx}"
-        vertices = obj.get_vertices(env_ids=[env_id], scale=True)[0]
-        faces = obj.get_triangles(env_ids=[env_id])[0]
-        if vertices is None or faces is None or vertices.numel() == 0:
-            continue
-        pose = torch.as_tensor(
-            obj.get_local_pose(to_matrix=True)[env_id], dtype=torch.float32
-        ).cpu()
-        mesh = _to_open3d_legacy_mesh(vertices, faces, o3d)
-        mesh.transform(pose.numpy())
-        meshes.append((f"obstacle_mesh/{name}", mesh))
-
-    mesh_material = o3d.visualization.rendering.MaterialRecord()
-    mesh_material.shader = "defaultLit"
-    mesh_material.base_color = [0.45, 0.55, 0.45, 1.0]
-    geometries = [
-        {"name": name, "geometry": mesh, "material": mesh_material}
-        for name, mesh in meshes
-    ]
+    centers: list[torch.Tensor] = []
+    radii: list[torch.Tensor] = []
     for name, entry in voxel_entries:
         get_value = (
             entry.get if isinstance(entry, dict) else lambda key: getattr(entry, key)
@@ -674,22 +752,72 @@ def visualize_curobo_world_collision_model(
         features = torch.as_tensor(get_value("feature_tensor")).detach().cpu()
         voxel_size = float(get_value("voxel_size"))
         local_points = _voxel_grid_coordinates(tuple(features.shape), voxel_size)
-        occupied = features.reshape(-1) <= 0.5 * voxel_size
-        if not torch.any(occupied):
+        surface = torch.abs(features.reshape(-1)) <= 0.5 * voxel_size
+        if not torch.any(surface):
+            logger.log_warning(
+                f"Voxel collision entry {name!r} has no samples near its zero level set."
+            )
             continue
-        pose = torch.as_tensor(get_value("pose"), dtype=torch.float32)
+        pose = torch.as_tensor(get_value("pose"), dtype=torch.float32).detach().cpu()
         rotation = matrix_from_quat(pose[3:7])
-        world_points = local_points[occupied] @ rotation.T + pose[:3]
-        point_cloud = o3d.geometry.PointCloud()
-        point_cloud.points = o3d.utility.Vector3dVector(world_points.numpy())
-        point_cloud.paint_uniform_color([0.8, 0.15, 0.0])
-        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
-            point_cloud, voxel_size=voxel_size
+        world_points = local_points[surface] @ rotation.T + pose[:3]
+        centers.append(world_points)
+        radii.append(torch.full((world_points.shape[0],), 0.5 * voxel_size))
+
+    if not centers:
+        raise ValueError(
+            "The cuRobo world scene contains no visible collision surface."
         )
-        geometries.append({"name": f"obstacle_voxels/{name}", "geometry": voxel_grid})
-    if draw:
-        o3d.visualization.draw(geometries, title="cuRobo obstacle collision model")
-    return geometries
+    return torch.cat(centers), torch.cat(radii)
+
+
+def visualize_curobo_world_collision_model(
+    rigid_objects: Sequence[RigidObject],
+    world_scene: Any,
+    env_id: int = 0,
+    *,
+    env: Any | None = None,
+    material: Any | None = None,
+) -> list[Any]:
+    """Add the cuRobo ESDF collision surface to the DexSim scene.
+
+    The rigid objects are already present in the live DexSim scene, so this
+    function only adds an overlay for the voxel collision data consumed by
+    cuRobo. Voxels within half a voxel of the zero level set are rendered as
+    half-voxel-radius spheres. All spheres are merged into one Open3D mesh,
+    written temporarily under ``/tmp``, and imported as one DexSim actor.
+
+    Args:
+        rigid_objects: Live simulator obstacles represented by the cache.
+        world_scene: Tensor-backed scene mapping or a cuRobo ``Scene`` instance.
+        env_id: Simulator environment instance represented by ``world_scene``.
+            Retained for API consistency; world-scene poses are already in the
+            selected environment's world frame.
+        env: DexSim environment that receives the visualization actors. Uses
+            the environment of :func:`dexsim.default_world` when omitted.
+        material: Optional DexSim material for the collision-surface spheres.
+
+    Returns:
+        A one-element list containing the combined DexSim actor. The caller owns
+        this actor and must remove it with
+        :meth:`dexsim.environment.Env.remove_actor`.
+    """
+    import dexsim
+
+    # Keep these parameters in the public API because the collision cache is
+    # associated with the supplied live objects and simulator environment.
+    _ = rigid_objects, env_id
+    if env is None:
+        env = dexsim.default_world().get_env()
+    if material is None:
+        material = _get_or_create_dexsim_material(
+            env,
+            "curobo_world_collision_material",
+            [1.0, 0.0, 0.0, 0.45],
+        )
+
+    centers, radii = _world_collision_sphere_data(world_scene)
+    return [_load_dexsim_sphere_mesh(env, centers, radii, material)]
 
 
 def visualize_curobo_collision_models(
@@ -699,16 +827,87 @@ def visualize_curobo_collision_models(
     world_scene: Any | None = None,
     env_id: int = 0,
 ) -> None:
-    """Draw cached robot spheres and obstacle collision voxels together."""
-    import open3d as o3d
+    """Show robot and world collision models in DexSim until Enter is pressed.
 
-    geometries = visualize_curobo_robot_collision_model(
-        robot, robot_yaml_path, env_id, draw=False
+    Robot spheres are loaded from the generated cuRobo YAML and transformed by
+    the current simulator link poses. Obstacle spheres show the zero level set
+    of the ESDF voxel data passed to cuRobo. Robot and obstacle spheres are each
+    merged into one temporary DexSim actor so they can use blue and red
+    materials respectively. Both actors are removed before the function returns,
+    including when ``input`` is interrupted.
+    """
+    import dexsim
+    import yaml
+
+    world = dexsim.default_world()
+    env = world.get_env()
+    robot_material = _get_or_create_dexsim_material(
+        env,
+        "curobo_robot_collision_material",
+        [0.0, 0.0, 1.0, 0.45],
     )
-    if rigid_objects and world_scene is not None:
-        geometries.extend(
-            visualize_curobo_world_collision_model(
-                rigid_objects, world_scene, env_id, draw=False
+    obstacle_material = _get_or_create_dexsim_material(
+        env,
+        "curobo_world_collision_material",
+        [1.0, 0.0, 0.0, 0.45],
+    )
+
+    with open(robot_yaml_path, encoding="utf-8") as yaml_file:
+        data = yaml.safe_load(yaml_file)
+    kinematics = data["robot_cfg"]["kinematics"]
+    cached_spheres = kinematics.get("collision_spheres", {})
+    sphere_buffer = float(kinematics.get("collision_sphere_buffer", 0.0))
+
+    robot_center_batches: list[torch.Tensor] = []
+    robot_radius_batches: list[torch.Tensor] = []
+    visualization_actors: list[Any] = []
+    try:
+        for link_name, link_spheres in cached_spheres.items():
+            if not link_spheres:
+                continue
+            link_pose = (
+                torch.as_tensor(
+                    robot.get_link_pose(link_name, env_ids=[env_id], to_matrix=True)[0],
+                    dtype=torch.float32,
+                )
+                .detach()
+                .cpu()
             )
+            centers_local = torch.as_tensor(
+                [sphere["center"] for sphere in link_spheres], dtype=torch.float32
+            ).reshape(-1, 3)
+            centers_world = centers_local @ link_pose[:3, :3].T + link_pose[:3, 3]
+            radii = torch.as_tensor(
+                [float(sphere["radius"]) + sphere_buffer for sphere in link_spheres],
+                dtype=torch.float32,
+            )
+            robot_center_batches.append(centers_world)
+            robot_radius_batches.append(radii)
+
+        sphere_count = 0
+        if robot_center_batches:
+            robot_centers = torch.cat(robot_center_batches)
+            robot_radii = torch.cat(robot_radius_batches)
+            visualization_actors.append(
+                _load_dexsim_sphere_mesh(
+                    env, robot_centers, robot_radii, robot_material
+                )
+            )
+            sphere_count += robot_centers.shape[0]
+        if rigid_objects and world_scene is not None:
+            world_centers, world_radii = _world_collision_sphere_data(world_scene)
+            visualization_actors.append(
+                _load_dexsim_sphere_mesh(
+                    env, world_centers, world_radii, obstacle_material
+                )
+            )
+            sphere_count += world_centers.shape[0]
+        if not visualization_actors:
+            raise ValueError("The cuRobo caches contain no collision geometry.")
+
+        input(
+            f"Showing {sphere_count} cuRobo collision spheres in "
+            "DexSim. Press Enter to remove them and continue..."
         )
-    o3d.visualization.draw(geometries, title="cuRobo collision models")
+    finally:
+        _remove_dexsim_visualization_actors(env, visualization_actors)

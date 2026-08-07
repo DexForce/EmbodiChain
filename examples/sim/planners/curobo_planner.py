@@ -761,9 +761,9 @@ def main() -> None:
             )
         )
         if visualize_collision_models:
-            # This opens one blocking Open3D window. Robot spheres and obstacle
-            # voxels come from the exact caches consumed by cuRobo; close the
-            # window to continue with planner backend creation and execution.
+            # This overlays the exact cached robot spheres and obstacle ESDF
+            # surface used by cuRobo in the DexSim window. Press Enter in the
+            # terminal to remove the overlay and continue planner creation.
             motion_generator.planner.visualize_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
         engine.register(

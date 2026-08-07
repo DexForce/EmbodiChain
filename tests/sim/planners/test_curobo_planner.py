@@ -27,6 +27,7 @@ from __future__ import annotations
 import importlib
 import logging
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -52,6 +53,7 @@ from embodichain.lab.sim.planners.curobo.curobo_yaml import (
     _parse_mimic_joint_names,
     generate_curobo_robot_yaml,
     generate_curobo_world_scene,
+    visualize_curobo_collision_models,
     visualize_curobo_robot_collision_model,
     visualize_curobo_world_collision_model,
 )
@@ -694,20 +696,59 @@ def test_voxel_entry_rejects_invalid_settings(voxel_size, voxel_padding, match):
         )
 
 
-def test_obstacle_collision_visualization_reads_voxels():
-    class FakeVisualRigidObject(_FakeRigidObject):
-        def get_local_pose(self, to_matrix=False):
-            if not to_matrix:
-                return super().get_local_pose(to_matrix=False)
-            pose = torch.eye(4, dtype=torch.float32)
-            pose[:3, 3] = self._pose[:3]
-            return pose.unsqueeze(0)
+class _FakeDexsimMaterial:
+    def __init__(self, name, color):
+        self.name = name
+        self.color = color
 
-    rigid_object = FakeVisualRigidObject(
+    def set_base_color(self, color):
+        self.color = color
+
+
+class _FakeDexsimActor:
+    def __init__(self, mesh):
+        self.mesh = mesh
+        self.material = None
+
+    def set_material(self, material):
+        self.material = material
+
+
+class _FakeDexsimEnv:
+    def __init__(self):
+        self.materials = {}
+        self.actors = []
+        self.loaded_paths = []
+        self.removed_actors = []
+
+    def find_material(self, name):
+        return self.materials.get(name)
+
+    def create_color_material(self, color, name, has_alpha=False):  # noqa: ARG002
+        material = _FakeDexsimMaterial(name, color)
+        self.materials[name] = material
+        return material
+
+    def load_actor(self, mesh_path):
+        import open3d as o3d
+
+        self.loaded_paths.append(mesh_path)
+        actor = _FakeDexsimActor(o3d.io.read_triangle_mesh(mesh_path))
+        self.actors.append(actor)
+        return actor
+
+    def remove_actor(self, actor):
+        self.removed_actors.append(actor)
+
+
+def test_obstacle_collision_visualization_loads_one_combined_dexsim_actor():
+    rigid_object = _FakeRigidObject(
         "block", _unit_cube_vertices(), _cube_faces(), _identity_pose()
     )
+    env = _FakeDexsimEnv()
+
     features = torch.ones((3, 3, 3), dtype=torch.float16)
-    features[1, 1, 1] = -0.1
+    features[1, 1, 1] = 0.0
     world_scene = {
         "voxel": {
             "block": {
@@ -718,16 +759,89 @@ def test_obstacle_collision_visualization_reads_voxels():
             }
         }
     }
-    geometries = visualize_curobo_world_collision_model(
-        [rigid_object], world_scene, draw=False
+    actors = visualize_curobo_world_collision_model(
+        [rigid_object], world_scene, env=env
     )
 
-    assert [geometry["name"] for geometry in geometries] == [
-        "obstacle_mesh/block",
-        "obstacle_voxels/block",
-    ]
-    voxel_bounds = geometries[-1]["geometry"].get_axis_aligned_bounding_box()
-    assert voxel_bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
+    assert actors == env.actors
+    assert len(env.loaded_paths) == 1
+    assert not Path(env.loaded_paths[0]).exists()
+    bounds = actors[0].mesh.get_axis_aligned_bounding_box()
+    assert bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
+    assert bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
+    assert actors[0].material.name == "curobo_world_collision_material"
+    assert actors[0].material.color == [1.0, 0.0, 0.0, 0.45]
+
+
+def test_combined_collision_visualization_colors_and_cleans_two_actors(
+    tmp_path, monkeypatch
+):
+    import dexsim
+
+    robot_yaml_path = tmp_path / "robot_visual.yml"
+    robot_yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "collision_sphere_buffer": 0.01,
+                        "collision_spheres": {
+                            "hand": [{"center": [0.1, 0.0, 0.0], "radius": 0.1}]
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeRobot:
+        def get_link_pose(
+            self, link_name, env_ids=None, to_matrix=False  # noqa: ARG002
+        ):
+            pose = torch.eye(4, dtype=torch.float32)
+            pose[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+            return pose.unsqueeze(0)
+
+    env = _FakeDexsimEnv()
+    world = SimpleNamespace(get_env=lambda: env)
+    prompts = []
+    monkeypatch.setattr(dexsim, "default_world", lambda: world)
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
+
+    features = torch.ones((3, 3, 3), dtype=torch.float16)
+    features[1, 1, 1] = 0.0
+    world_scene = {
+        "voxel": {
+            "block": {
+                "pose": [2.0, 2.0, 3.0, 1.0, 0.0, 0.0, 0.0],
+                "voxel_size": 0.1,
+                "feature_tensor": features,
+            }
+        }
+    }
+    rigid_object = _FakeRigidObject(
+        "block", _unit_cube_vertices(), _cube_faces(), _identity_pose()
+    )
+    visualize_curobo_collision_models(
+        FakeRobot(), str(robot_yaml_path), [rigid_object], world_scene
+    )
+
+    assert len(env.actors) == 2
+    robot_actor, obstacle_actor = env.actors
+    robot_bounds = robot_actor.mesh.get_axis_aligned_bounding_box()
+    assert robot_bounds.get_center() == pytest.approx([1.1, 2.0, 3.0])
+    assert robot_bounds.get_extent() == pytest.approx([0.22, 0.22, 0.22])
+    assert robot_actor.material.name == "curobo_robot_collision_material"
+    assert robot_actor.material.color == [0.0, 0.0, 1.0, 0.45]
+    obstacle_bounds = obstacle_actor.mesh.get_axis_aligned_bounding_box()
+    assert obstacle_bounds.get_center() == pytest.approx([2.0, 2.0, 3.0])
+    assert obstacle_bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
+    assert obstacle_actor.material.name == "curobo_world_collision_material"
+    assert obstacle_actor.material.color == [1.0, 0.0, 0.0, 0.45]
+    assert env.removed_actors == list(reversed(env.actors))
+    assert all(not Path(path).exists() for path in env.loaded_paths)
+    assert "Showing 2 cuRobo collision spheres" in prompts[0]
 
 
 def test_generate_world_scene_supports_multiple_objects(monkeypatch):
