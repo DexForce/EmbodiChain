@@ -76,10 +76,12 @@ _CUROBO_INSTALL_URL = (
 )
 
 # Bumped whenever the auto-generated robot-YAML schema/logic changes so that
-# cached YAMLs from an older generator are regenerated instead of reused. v2:
-# exclude URDF mimic joints from cspace/lock_joints (cuRobo folds them into
-# their active joint and raises KeyError when locking one).
-_CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v2"
+# cached YAMLs from an older generator are regenerated instead of reused. v2
+# excluded URDF mimic joints from cspace/lock_joints; v3 switched both robot
+# and obstacle fitting to DexSim MorphIt with fixed convex-hull limits; v4
+# removes self-collision metadata because the backend temporarily disables
+# cuRobo self-collision checking.
+_CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v4-no-self-collision"
 
 # cuRobo 0.8 does not expose PyTorch's CUDA stream-capture error mode. The
 # temporary adapter below therefore replaces ``torch.cuda.graph`` only while
@@ -159,9 +161,11 @@ class CuroboWorldCfg:
     obstacle_representation: str = "sphere"
     """Collision representation used when generating the YAML from :attr:`rigid_objects`.
 
-    ``"sphere"`` (default) fits spheres with cuRobo's
-    ``fit_spheres_to_mesh`` (fast collision queries, approximate, and requires
-    CUDA + cuRobo + trimesh). ``"cuboid"`` emits a local-frame AABB per object,
+    ``"sphere"`` (default) fits spheres with DexSim's MorphIt implementation
+    (approximate, and requires CUDA + Open3D). cuRobo V2 can parse sphere
+    obstacles but omits their collision storage; EmbodiChain registers an
+    analytic sphere SDF with the generic Warp checker at backend creation.
+    ``"cuboid"`` emits a local-frame AABB per object,
     placed as an OBB via the object pose. ``"mesh"`` emits the full triangle
     mesh (exact, no CUDA).
     """
@@ -175,6 +179,8 @@ class CuroboWorldCfg:
     cuRobo V2 accepts integer ``cuboid`` and ``mesh`` capacities. A ``voxel``
     cache, when needed for dynamic voxel worlds, must instead be a dictionary
     with V2's ``layers``, ``dims``, and ``voxel_size`` fields.
+
+    Analytic sphere obstacles use a separate runtime cache sized from the scene.
     """
 
     dynamic_obstacle_names: list[str] = []
@@ -241,10 +247,6 @@ class CuroboAutoGenCfg:
     regenerates automatically.
     """
 
-    fit_type: str = "voxel"
-    """cuRobo sphere-fit strategy for auto-generation: ``"voxel"`` (default,
-    fast), ``"morphit"`` (best, slower), or ``"surface"`` (crude)."""
-
     num_spheres: int | None = None
     """Per-link sphere count. ``None`` auto-estimates from bounding-box volume
     scaled by :attr:`sphere_density`."""
@@ -253,17 +255,17 @@ class CuroboAutoGenCfg:
     """Multiplier on the auto-estimated per-link sphere count (ignored when
     :attr:`num_spheres` is set).
 
-    The cuRobo volume-based estimate over-fits at ``1.0`` (~668 spheres for a
+    The volume-based estimate over-fits at ``1.0`` (~668 spheres for a
     Franka Panda, making planning pathologically slow). ``0.1`` (default) yields
     ~50-100 spheres - enough coverage for collision-aware planning while keeping
     each plan fast. Increase for tighter coverage on complex robots.
     """
 
     surface_radius: float = 0.005
-    """Fixed radius used only by the ``surface`` strategy."""
+    """Fixed radius used if MorphIt falls back to surface sampling."""
 
     iterations: int = 200
-    """Adam iterations for the ``morphit`` strategy."""
+    """Adam iterations for MorphIt."""
 
     collision_sphere_buffer: float = 0.0
     """Padding added to every fitted sphere's radius (m)."""
@@ -628,6 +630,182 @@ def _configure_curobo_logging(log_level: str) -> None:
     logging.getLogger("curobo").setLevel(levels[normalized])
 
 
+def _enable_curobo_sphere_collision_support() -> None:
+    """Register analytic sphere obstacles with cuRobo V2's generic checker.
+
+    cuRobo 0.8 publishes ``Sphere`` as a scene type but omits sphere storage
+    from ``SceneData``. Its Warp checker is intentionally extensible through
+    ``OBSTACLE_SDF_MODULES``; register EmbodiChain's analytic sphere storage and
+    extend the aggregate scene container before importing the motion planner.
+    """
+    import sys
+
+    kernel_module_names = (
+        "curobo._src.geom.collision.wp_collision_kernel",
+        "curobo._src.geom.collision.wp_sweep_collision_kernel",
+    )
+    preloaded_kernel_modules = {
+        name for name in kernel_module_names if name in sys.modules
+    }
+    data_package = importlib.import_module("curobo._src.geom.data")
+    sphere_module_path = "embodichain.lab.sim.planners.curobo.curobo_sphere_data"
+    if sphere_module_path not in data_package.OBSTACLE_SDF_MODULES:
+        data_package.OBSTACLE_SDF_MODULES.append(sphere_module_path)
+    sphere_module = importlib.import_module(sphere_module_path)
+    scene_data_module = importlib.import_module("curobo._src.geom.data.data_scene")
+    scene_data_cls = scene_data_module.SceneData
+    if not getattr(scene_data_cls, "_embodichain_sphere_support", False):
+        original_from_scene = scene_data_cls.from_scene_cfg
+        original_from_batch = scene_data_cls.from_batch_scene_cfg
+        original_create_cache = scene_data_cls.create_cache
+        original_get_valid_data = scene_data_cls.get_valid_data
+        original_get_names = scene_data_cls.get_obstacle_names
+        original_load_scene = scene_data_cls.load_from_scene_cfg
+        original_update_pose = scene_data_cls.update_obstacle_pose
+        original_enable_obstacle = scene_data_cls.enable_obstacle
+        original_clear = scene_data_cls.clear
+
+        @classmethod
+        def from_scene_cfg_with_spheres(cls, scene_cfg, device_cfg, *args, **kwargs):
+            data = original_from_scene(scene_cfg, device_cfg, *args, **kwargs)
+            num_envs = kwargs.get("num_envs", args[0] if args else 1)
+            env_idx = kwargs.get("env_idx", args[1] if len(args) > 1 else 0)
+            data.spheres = (
+                sphere_module.SphereData.from_scene_cfg(
+                    scene_cfg,
+                    device_cfg,
+                    env_idx=env_idx,
+                    num_envs=num_envs,
+                )
+                if scene_cfg.sphere
+                else None
+            )
+            return data
+
+        @classmethod
+        def from_batch_scene_cfg_with_spheres(
+            cls, scene_cfg_list, device_cfg, *args, **kwargs
+        ):
+            data = original_from_batch(scene_cfg_list, device_cfg, *args, **kwargs)
+            data.spheres = (
+                sphere_module.SphereData.from_batch_scene_cfg(
+                    scene_cfg_list, device_cfg
+                )
+                if any(scene.sphere for scene in scene_cfg_list)
+                else None
+            )
+            return data
+
+        @classmethod
+        def create_cache_with_spheres(cls, *args, **kwargs):
+            data = original_create_cache(*args, **kwargs)
+            data.spheres = None
+            return data
+
+        def get_valid_data_with_spheres(self):
+            valid_data = original_get_valid_data(self)
+            spheres = getattr(self, "spheres", None)
+            if spheres is not None:
+                valid_data.append(spheres)
+            return valid_data
+
+        def get_obstacle_names_with_spheres(self, env_idx=0):
+            names = original_get_names(self, env_idx)
+            spheres = getattr(self, "spheres", None)
+            if spheres is not None:
+                names.extend(spheres.get_names(env_idx))
+            return names
+
+        def load_from_scene_cfg_with_spheres(
+            self, scene_cfg, env_idx=0, store_reference=True
+        ):
+            original_load_scene(self, scene_cfg, env_idx, store_reference)
+            if scene_cfg.sphere:
+                spheres = getattr(self, "spheres", None)
+                if spheres is None or len(scene_cfg.sphere) > spheres.max_n:
+                    self.spheres = sphere_module.SphereData.create_cache(
+                        len(scene_cfg.sphere), self.num_envs, self.device_cfg
+                    )
+                self.spheres.load_batch(scene_cfg.sphere, env_idx)
+
+        def update_obstacle_pose_with_spheres(self, name, pose, env_idx=0):
+            spheres = getattr(self, "spheres", None)
+            if spheres is not None and name in spheres.get_names(env_idx):
+                spheres.update_pose(name, pose, env_idx)
+                return
+            original_update_pose(self, name, pose, env_idx)
+
+        def enable_obstacle_with_spheres(self, name, enabled=True, env_idx=0):
+            spheres = getattr(self, "spheres", None)
+            if spheres is not None and name in spheres.get_names(env_idx):
+                spheres.set_enabled(name, enabled, env_idx)
+                return
+            original_enable_obstacle(self, name, enabled, env_idx)
+
+        def clear_with_spheres(self, env_idx=None):
+            original_clear(self, env_idx)
+            spheres = getattr(self, "spheres", None)
+            if spheres is not None:
+                spheres.clear(env_idx)
+
+        def has_spheres(self):
+            return getattr(self, "spheres", None) is not None
+
+        scene_data_cls.from_scene_cfg = from_scene_cfg_with_spheres
+        scene_data_cls.from_batch_scene_cfg = from_batch_scene_cfg_with_spheres
+        scene_data_cls.create_cache = create_cache_with_spheres
+        scene_data_cls.get_valid_data = get_valid_data_with_spheres
+        scene_data_cls.get_obstacle_names = get_obstacle_names_with_spheres
+        scene_data_cls.load_from_scene_cfg = load_from_scene_cfg_with_spheres
+        scene_data_cls.update_obstacle_pose = update_obstacle_pose_with_spheres
+        scene_data_cls.enable_obstacle = enable_obstacle_with_spheres
+        scene_data_cls.clear = clear_with_spheres
+        scene_data_cls.has_spheres = has_spheres
+        scene_data_cls._embodichain_sphere_support = True
+
+    collision_scene_module = importlib.import_module(
+        "curobo._src.geom.collision.collision_scene"
+    )
+    collision_scene_cls = collision_scene_module.SceneCollision
+    if not getattr(collision_scene_cls, "_embodichain_sphere_support", False):
+        original_collision_types = collision_scene_cls.collision_types.fget
+
+        def collision_types_with_spheres(self):
+            collision_types = original_collision_types(self)
+            collision_types["sphere"] = self.data.has_spheres()
+            return collision_types
+
+        collision_scene_cls.collision_types = property(collision_types_with_spheres)
+        collision_scene_cls._embodichain_sphere_support = True
+
+    # If another package imported the generic kernels first, add the sphere
+    # overloads to their existing Warp function sets as well.
+    import warp as wp
+
+    for module_name, include_sdf_only in (
+        ("curobo._src.geom.collision.wp_collision_kernel", False),
+        ("curobo._src.geom.collision.wp_sweep_collision_kernel", True),
+    ):
+        if module_name not in preloaded_kernel_modules:
+            continue
+        kernel_module = sys.modules.get(module_name)
+        if kernel_module is None:
+            continue
+        kernel_module.is_obs_enabled = wp.func(
+            sphere_module.is_obs_enabled, module=module_name
+        )
+        kernel_module.load_obstacle_transform = wp.func(
+            sphere_module.load_obstacle_transform, module=module_name
+        )
+        if include_sdf_only:
+            kernel_module.compute_local_sdf = wp.func(
+                sphere_module.compute_local_sdf, module=module_name
+            )
+        kernel_module.compute_local_sdf_with_grad = wp.func(
+            sphere_module.compute_local_sdf_with_grad, module=module_name
+        )
+
+
 def _require_curobo(log_level: str = "error") -> "Any":
     """Lazily import and bundle the cuRobo V2 public facade types.
 
@@ -646,8 +824,10 @@ def _require_curobo(log_level: str = "error") -> "Any":
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
     _ensure_warp_torch_compat()
     try:
+        _enable_curobo_sphere_collision_support()
         planner_mod = importlib.import_module("curobo.motion_planner")
         batch_mod = importlib.import_module("curobo.batch_motion_planner")
+        scene_mod = importlib.import_module("curobo.scene")
         types_mod = importlib.import_module("curobo.types")
     except ModuleNotFoundError as exc:
         raise ImportError(
@@ -666,6 +846,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
         Pose=types_mod.Pose,
         GoalToolPose=types_mod.GoalToolPose,
         DeviceCfg=types_mod.DeviceCfg,
+        Scene=scene_mod.Scene,
     )
 
 
@@ -731,7 +912,8 @@ class CuroboPlanner(BasePlanner):
 
     Cartesian (``EEF_MOVE``) targets are forwarded to cuRobo unchanged because
     the backend accepts them directly and performs its own collision-aware IK
-    and trajectory optimization.
+    and trajectory optimization. Robot-to-world collision checking remains
+    enabled, but robot self-collision checking is temporarily disabled.
     By default the returned collision-checked samples are arc-length resampled to
     the action's ``sample_interval`` waypoint count
     (``preserve_plan_samples=False``); set
@@ -1130,11 +1312,18 @@ class CuroboPlanner(BasePlanner):
         planning_mode: MoveType,
     ) -> "_CuroboBackend":
         """Construct and validate one cuRobo planner on the selected CUDA device."""
+        robot_config = self._load_runtime_robot_config(profile.robot_config_path)
+        (
+            runtime_scene_model,
+            runtime_collision_cache,
+            expected_sphere_names,
+        ) = self._prepare_runtime_scene_model(scene_model, collision_cache)
         with torch.cuda.device(self._curobo_device):
             planner_cfg = self._bindings.MotionPlannerCfg.create(
-                robot=profile.robot_config_path,
-                scene_model=scene_model,
-                collision_cache=collision_cache,
+                robot=robot_config,
+                scene_model=runtime_scene_model,
+                collision_cache=runtime_collision_cache,
+                self_collision_check=False,
                 device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
                 max_batch_size=batch_size,
                 multi_env=bool(self.cfg.world.multi_env),
@@ -1143,6 +1332,7 @@ class CuroboPlanner(BasePlanner):
                 ),
                 use_cuda_graph=use_cuda_graph,
             )
+            self._disable_curobo_self_collision_rollouts(planner_cfg)
             # cuRobo 0.8 reads interpolation_dt from the trajectory optimizer
             # config rather than accepting it in MotionPlannerCfg.create().
             planner_cfg.trajopt_solver_config.interpolation_dt = float(
@@ -1160,6 +1350,7 @@ class CuroboPlanner(BasePlanner):
             )
             self._validate_base_link_name(profile, planner)
             tool_frame = self._resolve_tool_frame(profile, planner)
+            self._validate_runtime_sphere_obstacles(planner, expected_sphere_names)
         except Exception:
             self._close_planner(planner)
             raise
@@ -1173,6 +1364,129 @@ class CuroboPlanner(BasePlanner):
             use_cuda_graph=use_cuda_graph,
             planning_mode=planning_mode,
         )
+
+    def _prepare_runtime_scene_model(
+        self,
+        scene_model: str | list[dict] | None,
+        collision_cache: dict[str, int | dict[str, int | float | list[float]]] | None,
+    ) -> tuple["Any", dict | None, list[list[str]]]:
+        """Inspect sphere obstacles before cuRobo constructs its runtime scene.
+
+        cuRobo V2 exposes ``Sphere`` in its public scene model, but its world
+        collision data omits sphere storage. EmbodiChain registers analytic
+        sphere storage with the generic Warp checker before this method runs;
+        this inspection records the names that must reach that storage.
+
+        Returns:
+            Runtime scene model, collision cache, and sphere names expected in
+            each collision environment.
+        """
+        if scene_model is None:
+            return None, collision_cache, []
+
+        raw_scene_model: "Any" = scene_model
+        if isinstance(scene_model, str):
+            scene_path = Path(scene_model)
+            if not scene_path.is_absolute():
+                content_mod = importlib.import_module("curobo.content")
+                scene_path = Path(content_mod.get_scene_configs_path()) / scene_path
+            try:
+                with scene_path.open(encoding="utf-8") as scene_file:
+                    raw_scene_model = yaml.safe_load(scene_file)
+            except (OSError, yaml.YAMLError) as exc:
+                raise ValueError(
+                    f"Unable to load cuRobo V2 scene configuration "
+                    f"'{scene_model}': {exc}"
+                ) from exc
+
+        raw_scenes = (
+            raw_scene_model if isinstance(raw_scene_model, list) else [raw_scene_model]
+        )
+        parsed_scenes = [
+            self._bindings.Scene.create(scene) if isinstance(scene, dict) else scene
+            for scene in raw_scenes
+        ]
+        expected_names = [
+            [sphere.name for sphere in (scene.sphere or [])] for scene in parsed_scenes
+        ]
+        if not any(expected_names):
+            return scene_model, collision_cache, []
+
+        sphere_count = sum(len(names) for names in expected_names)
+        logger.log_info(
+            f"Loaded {sphere_count} cuRobo scene sphere(s) into EmbodiChain's "
+            "analytic sphere collision storage."
+        )
+        return scene_model, collision_cache, expected_names
+
+    @staticmethod
+    def _validate_runtime_sphere_obstacles(
+        planner: "Any", expected_names: list[list[str]]
+    ) -> None:
+        """Ensure every sphere reached cuRobo's collision checker."""
+        if not expected_names:
+            return
+        checker = planner.scene_collision_checker
+        for env_idx, names in enumerate(expected_names):
+            loaded_names = set(checker.get_obstacle_names(env_idx))
+            missing = sorted(set(names) - loaded_names)
+            if missing:
+                raise RuntimeError(
+                    "cuRobo parsed sphere obstacles but did not register them "
+                    f"in environment {env_idx}: {missing}."
+                )
+
+    @staticmethod
+    def _load_runtime_robot_config(robot_config_path: str) -> dict:
+        """Load robot YAML and add cuRobo 0.8's required empty placeholders.
+
+        Self-collision metadata is intentionally absent from EmbodiChain's
+        generated cache. cuRobo 0.8 nevertheless builds internal sphere-pair
+        bookkeeping while loading robot spheres, even when
+        ``self_collision_check=False``, and assumes these two values are
+        mappings. Supplying empty runtime-only mappings avoids its ``None``
+        dereference without restoring self-collision checking or persisting
+        self-collision configuration.
+        """
+        with open(robot_config_path, encoding="utf-8") as robot_config_file:
+            robot_config = yaml.safe_load(robot_config_file)
+        kinematics = robot_config["robot_cfg"]["kinematics"]
+        kinematics["self_collision_buffer"] = {}
+        kinematics["self_collision_ignore"] = {}
+        return robot_config
+
+    @staticmethod
+    def _disable_curobo_self_collision_rollouts(planner_cfg: "Any") -> None:
+        """Disable self-collision in every cuRobo 0.8 rollout configuration.
+
+        cuRobo 0.8's ``MotionPlannerCfg.create(self_collision_check=False)``
+        disables the constraint in optimizer rollouts, but does not propagate
+        the flag to the IK/TrajOpt metrics rollouts or the PRM graph rollout.
+        Those metrics can therefore reject a converged solution as infeasible.
+        Apply the same public cost-manager switch to all rollout variants
+        before the planner materializes them.
+        """
+        rollouts: list[Any] = []
+        for solver_attr in ("ik_solver_config", "trajopt_solver_config"):
+            solver_cfg = getattr(planner_cfg, solver_attr, None)
+            core_cfg = getattr(solver_cfg, "core_cfg", None)
+            metrics_rollout = getattr(core_cfg, "metrics_rollout_config", None)
+            if metrics_rollout is not None:
+                rollouts.append(metrics_rollout)
+            rollouts.extend(getattr(core_cfg, "optimizer_rollout_configs", None) or [])
+
+        graph_cfg = getattr(planner_cfg, "graph_planner_config", None)
+        graph_rollout = getattr(graph_cfg, "rollout_config", None)
+        if graph_rollout is not None:
+            rollouts.append(graph_rollout)
+
+        visited: set[int] = set()
+        for rollout in rollouts:
+            if id(rollout) in visited:
+                continue
+            visited.add(id(rollout))
+            for cost_cfg in rollout.get_cost_manager_configs():
+                cost_cfg.disable_self_collision()
 
     def _warmup_backend(self, backend: "_CuroboBackend") -> None:
         """Warm one goal type without forcing cuRobo to reset captured graphs.
@@ -1468,7 +1782,6 @@ class CuroboPlanner(BasePlanner):
             cache_path,
             tool_frame=tool_frame,
             urdf_path=urdf_path,
-            fit_type=auto.fit_type,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
             surface_radius=auto.surface_radius,
@@ -1495,7 +1808,6 @@ class CuroboPlanner(BasePlanner):
             pass
         hasher.update(control_part.encode("utf-8"))
         hasher.update((tool_frame or "").encode("utf-8"))
-        hasher.update(auto.fit_type.encode("utf-8"))
         hasher.update(str(auto.num_spheres).encode("utf-8"))
         hasher.update(str(auto.sphere_density).encode("utf-8"))
         hasher.update(str(auto.surface_radius).encode("utf-8"))
@@ -1538,7 +1850,6 @@ class CuroboPlanner(BasePlanner):
             rigid_objects,
             cache_path,
             representation=world_cfg.obstacle_representation,
-            fit_type=auto.fit_type,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
             surface_radius=auto.surface_radius,
@@ -1557,7 +1868,7 @@ class CuroboPlanner(BasePlanner):
         hasher = hashlib.md5()
         hasher.update(world_cfg.obstacle_representation.encode("utf-8"))
         auto = self.cfg.auto_gen
-        hasher.update(auto.fit_type.encode("utf-8"))
+        hasher.update(_CUROBO_ROBOT_YAML_GENERATOR_VERSION.encode("utf-8"))
         hasher.update(str(auto.num_spheres).encode("utf-8"))
         hasher.update(str(auto.sphere_density).encode("utf-8"))
         hasher.update(str(auto.surface_radius).encode("utf-8"))
@@ -1575,6 +1886,49 @@ class CuroboPlanner(BasePlanner):
             hasher.update(faces.detach().to("cpu").numpy().tobytes())
             hasher.update(pose.detach().to("cpu").to(torch.float32).numpy().tobytes())
         return hasher.hexdigest()
+
+    def visualize_collision_models(
+        self,
+        control_part: str,
+        env_id: int = 0,
+    ) -> None:
+        """Visualize cached robot and obstacle spheres at their simulator poses.
+
+        This materializes the same content-addressed YAML caches used by the
+        planner, then reads sphere centers and radii back from those files. The
+        robot spheres are transformed by each link's live
+        :meth:`~embodichain.lab.sim.objects.Articulation.get_link_pose`; static
+        obstacle spheres retain the exact world positions serialized in the
+        world cache.
+
+        Args:
+            control_part: Robot control part whose cuRobo profile/cache is used.
+            env_id: Simulator environment instance to visualize.
+
+        Raises:
+            ValueError: If obstacles are configured with a non-sphere
+                representation.
+        """
+        from .curobo_yaml import visualize_curobo_collision_models
+
+        profile = self._materialize_profile(control_part)
+        world_cfg = self.cfg.world
+        rigid_objects = world_cfg.rigid_objects
+        world_yaml_path = None
+        if rigid_objects:
+            if world_cfg.obstacle_representation != "sphere":
+                raise ValueError(
+                    "Obstacle collision-model visualization requires "
+                    "CuroboWorldCfg.obstacle_representation='sphere'."
+                )
+            world_yaml_path = self._auto_generate_world_yaml(world_cfg)
+        visualize_curobo_collision_models(
+            self.robot,
+            profile.robot_config_path,
+            rigid_objects,
+            world_yaml_path,
+            env_id,
+        )
 
     def _resolve_sim_joint_names(self, control_part: str) -> list[str]:
         """Return simulator control-part joints in the robot's canonical order."""

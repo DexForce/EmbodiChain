@@ -27,6 +27,8 @@ from __future__ import annotations
 import importlib
 import logging
 import math
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -38,6 +40,7 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
+    _CuroboProfile,
     _configure_curobo_logging,
     _matrix_to_position_quaternion,
     _require_curobo,
@@ -48,8 +51,12 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
 from embodichain.lab.sim.planners.curobo.curobo_yaml import (
     _mesh_to_obstacle_entry,
     _parse_mimic_joint_names,
+    generate_curobo_robot_yaml,
     generate_curobo_world_yaml,
+    visualize_curobo_robot_collision_model,
+    visualize_curobo_world_collision_model,
 )
+from embodichain.lab.sim.planners.utils import MoveType
 
 _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
@@ -218,11 +225,113 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
     assert cfg.obstacle_representation == "sphere"
 
 
-def test_auto_gen_defaults_keep_sphere_count_low():
-    """The voxel sphere estimate must be scaled down so planning stays fast."""
+def test_auto_gen_defaults_keep_sphere_count_low_and_fit_type_fixed():
+    """MorphIt is fixed by the generator while density remains configurable."""
     auto = CuroboPlannerCfg(robot_uid="franka").auto_gen
-    assert auto.fit_type == "voxel"
     assert auto.sphere_density == 0.1
+    assert not hasattr(auto, "fit_type")
+
+
+def test_runtime_scene_records_spheres_without_changing_yaml_or_cache(tmp_path):
+    class FakeScene:
+        def __init__(self, *, sphere=None, mesh=None):
+            self.sphere = sphere or []
+            self.mesh = mesh or []
+
+        @classmethod
+        def create(cls, data):
+            return cls(
+                sphere=[SimpleNamespace(name=name) for name in data.get("sphere", {})],
+                mesh=[SimpleNamespace(name=name) for name in data.get("mesh", {})],
+            )
+
+    scene_path = tmp_path / "sphere_world.yml"
+    scene_path.write_text(
+        yaml.safe_dump(
+            {
+                "sphere": {
+                    "block_0": {"position": [0.0, 0.0, 0.0], "radius": 0.1},
+                    "block_1": {"position": [0.1, 0.0, 0.0], "radius": 0.1},
+                    "block_2": {"position": [0.2, 0.0, 0.0], "radius": 0.1},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner._bindings = SimpleNamespace(Scene=FakeScene)
+
+    runtime_scene, runtime_cache, expected_names = planner._prepare_runtime_scene_model(
+        str(scene_path), {"cuboid": 8, "mesh": 2}
+    )
+
+    assert runtime_scene == str(scene_path)
+    assert runtime_cache == {"cuboid": 8, "mesh": 2}
+    assert expected_names == [["block_0", "block_1", "block_2"]]
+
+
+def test_runtime_scene_records_independent_sphere_worlds():
+    class FakeScene:
+        def __init__(self, names):
+            self.sphere = [SimpleNamespace(name=name) for name in names]
+            self.mesh = []
+
+        @classmethod
+        def create(cls, data):
+            return cls(list(data.get("sphere", {})))
+
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner._bindings = SimpleNamespace(Scene=FakeScene)
+
+    runtime_scene, runtime_cache, expected_names = planner._prepare_runtime_scene_model(
+        [{"sphere": {"a": {}}}, {"sphere": {"b": {}, "c": {}}}],
+        {"mesh": 1},
+    )
+
+    assert runtime_scene == [
+        {"sphere": {"a": {}}},
+        {"sphere": {"b": {}, "c": {}}},
+    ]
+    assert runtime_cache == {"mesh": 1}
+    assert expected_names == [["a"], ["b", "c"]]
+
+
+def test_runtime_sphere_validation_rejects_missing_collision_objects():
+    checker = SimpleNamespace(
+        get_obstacle_names=lambda env_idx: ["block_0"] if env_idx == 0 else []
+    )
+    planner = SimpleNamespace(scene_collision_checker=checker)
+
+    with pytest.raises(RuntimeError, match="block_1"):
+        CuroboPlanner._validate_runtime_sphere_obstacles(
+            planner, [["block_0", "block_1"]]
+        )
+
+
+def test_analytic_sphere_storage_preserves_center_radius_and_name():
+    pytest.importorskip("curobo")
+    from curobo.scene import Scene
+    from curobo.types import DeviceCfg
+
+    from embodichain.lab.sim.planners.curobo.curobo_sphere_data import SphereData
+
+    scene = Scene.create(
+        {
+            "sphere": {
+                "block_0": {
+                    "position": [1.0, 2.0, 3.0],
+                    "radius": 0.4,
+                }
+            }
+        }
+    )
+    storage = SphereData.from_scene_cfg(scene, DeviceCfg(device="cpu"))
+
+    assert storage.get_names() == ["block_0"]
+    assert storage.radius[0, 0].item() == pytest.approx(0.4)
+    assert storage.inv_pose[0, 0, :7].tolist() == pytest.approx(
+        [-1.0, -2.0, -3.0, 1.0, 0.0, 0.0, 0.0]
+    )
 
 
 def test_curobo_planner_class_is_lazy_import_safe():
@@ -232,6 +341,150 @@ def test_curobo_planner_class_is_lazy_import_safe():
     sys.modules.pop("curobo", None)
     assert CuroboPlanner.__name__ == "CuroboPlanner"
     assert "curobo" not in sys.modules
+
+
+def test_backend_disables_curobo_self_collision(monkeypatch):
+    create_kwargs = {}
+
+    class FakeMotionPlannerCfg:
+        @staticmethod
+        def create(**kwargs):
+            create_kwargs.update(kwargs)
+            return SimpleNamespace(
+                trajopt_solver_config=SimpleNamespace(interpolation_dt=None)
+            )
+
+    class FakeMotionPlanner:
+        joint_names = ["joint"]
+
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        world=SimpleNamespace(multi_env=False),
+        collision_activation_distance=0.01,
+        interpolation_dt=0.025,
+    )
+    planner._curobo_device = torch.device("cuda:0")
+    planner._bindings = SimpleNamespace(
+        MotionPlannerCfg=FakeMotionPlannerCfg,
+        DeviceCfg=lambda device: device,
+        MotionPlanner=FakeMotionPlanner,
+        BatchMotionPlanner=FakeMotionPlanner,
+    )
+    planner._validate_profile_joint_names = lambda *args: None
+    planner._validate_base_link_name = lambda *args: None
+    planner._resolve_tool_frame = lambda *args: "tool"
+    planner._load_runtime_robot_config = lambda path: {
+        "robot_cfg": {
+            "kinematics": {
+                "source": path,
+                "self_collision_buffer": {},
+                "self_collision_ignore": {},
+            }
+        }
+    }
+    monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
+
+    planner._build_backend(
+        control_part="arm",
+        batch_size=1,
+        profile=_CuroboProfile(
+            robot_config_path="robot.yml",
+            sim_to_curobo_joint_names={"joint": "joint"},
+        ),
+        sim_joint_names=["joint"],
+        scene_model=None,
+        collision_cache=None,
+        use_cuda_graph=False,
+        planning_mode=MoveType.EEF_MOVE,
+    )
+
+    assert create_kwargs["self_collision_check"] is False
+    assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
+        "source": "robot.yml",
+        "self_collision_buffer": {},
+        "self_collision_ignore": {},
+    }
+
+
+def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_path):
+    config_path = tmp_path / "robot.yml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "base_link": "base",
+                        "collision_spheres": {
+                            "base": [{"center": [0.0, 0.0, 0.0], "radius": 0.1}]
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_config = CuroboPlanner._load_runtime_robot_config(str(config_path))
+    kinematics = runtime_config["robot_cfg"]["kinematics"]
+
+    assert kinematics["self_collision_buffer"] == {}
+    assert kinematics["self_collision_ignore"] == {}
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert "self_collision_buffer" not in persisted["robot_cfg"]["kinematics"]
+    assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
+
+
+def test_disable_self_collision_reaches_all_curobo_rollouts():
+    class FakeCostCfg:
+        def __init__(self):
+            self.disable_calls = 0
+
+        def disable_self_collision(self):
+            self.disable_calls += 1
+
+    class FakeRollout:
+        def __init__(self):
+            self.cost_cfg = FakeCostCfg()
+
+        def get_cost_manager_configs(self):
+            return [self.cost_cfg]
+
+    ik_metrics = FakeRollout()
+    ik_optimizer = FakeRollout()
+    trajopt_metrics = FakeRollout()
+    trajopt_optimizer = FakeRollout()
+    graph_rollout = FakeRollout()
+    planner_cfg = SimpleNamespace(
+        ik_solver_config=SimpleNamespace(
+            core_cfg=SimpleNamespace(
+                metrics_rollout_config=ik_metrics,
+                optimizer_rollout_configs=[ik_optimizer],
+            )
+        ),
+        trajopt_solver_config=SimpleNamespace(
+            core_cfg=SimpleNamespace(
+                metrics_rollout_config=trajopt_metrics,
+                optimizer_rollout_configs=[trajopt_optimizer],
+            )
+        ),
+        graph_planner_config=SimpleNamespace(rollout_config=graph_rollout),
+    )
+
+    CuroboPlanner._disable_curobo_self_collision_rollouts(planner_cfg)
+
+    assert all(
+        rollout.cost_cfg.disable_calls == 1
+        for rollout in (
+            ik_metrics,
+            ik_optimizer,
+            trajopt_metrics,
+            trajopt_optimizer,
+            graph_rollout,
+        )
+    )
 
 
 def test_cpu_sim_resolves_current_cuda_device(monkeypatch):
@@ -296,6 +549,109 @@ def test_parse_mimic_joint_names_returns_empty_without_mimic(tmp_path):
 
 def test_parse_mimic_joint_names_handles_missing_file(tmp_path):
     assert _parse_mimic_joint_names(str(tmp_path / "does_not_exist.urdf")) == set()
+
+
+def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
+    pytest.importorskip("curobo")
+    import dexsim.kit.meshproc as meshproc
+
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(
+        '<?xml version="1.0"?><robot name="test"><link name="base"/></robot>',
+        encoding="utf-8",
+    )
+
+    class FakeRobot:
+        cfg = type(
+            "Cfg",
+            (),
+            {"fpath": str(urdf_path), "init_qpos": [], "base_link_name": "base"},
+        )()
+        joint_names = []
+        control_parts = {"arm": []}
+
+        def get_link_names(self):
+            return ["base"]
+
+        def get_link_vert_face(self, link_name):  # noqa: ARG002
+            return _unit_cube_vertices(), _cube_faces()
+
+        def get_control_part_link_names(self, control_part):  # noqa: ARG002
+            return ["base"]
+
+    calls = []
+
+    def fake_sphere_fit(mesh, **kwargs):
+        calls.append((mesh, kwargs))
+        return (
+            True,
+            torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+            torch.tensor([0.25], dtype=torch.float32),
+        )
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(meshproc, "sphere_fit", fake_sphere_fit)
+    output_path = tmp_path / "robot.yml"
+
+    generate_curobo_robot_yaml(
+        FakeRobot(),
+        "arm",
+        str(output_path),
+        urdf_path=str(urdf_path),
+        device="cuda:0",
+    )
+
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["fit_type"] is meshproc.SphereFitType.MORPHIT
+    assert kwargs["max_convex_hull_num"] == 2
+    kinematics = yaml.safe_load(output_path.read_text(encoding="utf-8"))["robot_cfg"][
+        "kinematics"
+    ]
+    assert kinematics["collision_spheres"]["base"][0]["radius"] == pytest.approx(0.25)
+    assert "self_collision_buffer" not in kinematics
+    assert "self_collision_ignore" not in kinematics
+
+
+def test_robot_collision_visualization_reads_cache_and_live_link_pose(tmp_path):
+    robot_yaml_path = tmp_path / "robot_visual.yml"
+    robot_yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "collision_sphere_buffer": 0.0,
+                        "collision_spheres": {
+                            "base": [{"center": [0.0, 0.0, 0.0], "radius": 0.1}]
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeRobot:
+        def get_link_vert_face(self, link_name):  # noqa: ARG002
+            return _unit_cube_vertices(), _cube_faces()
+
+        def get_link_pose(
+            self, link_name, env_ids=None, to_matrix=False  # noqa: ARG002
+        ):
+            pose = torch.eye(4, dtype=torch.float32)
+            pose[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+            return pose.unsqueeze(0)
+
+    geometries = visualize_curobo_robot_collision_model(
+        FakeRobot(), str(robot_yaml_path), draw=False
+    )
+
+    assert [geometry["name"] for geometry in geometries] == [
+        "robot_mesh/base",
+        "robot_spheres",
+    ]
+    sphere_bounds = geometries[-1]["geometry"].get_axis_aligned_bounding_box()
+    assert sphere_bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
 
 
 # World YAML generation
@@ -471,6 +827,71 @@ def test_empty_mesh_raises_for_cuboid():
             _identity_pose(),
             representation="cuboid",
         )
+
+
+def test_sphere_obstacle_uses_dexsim_morphit_with_sixteen_hulls(monkeypatch):
+    import dexsim.kit.meshproc as meshproc
+
+    calls = []
+
+    def fake_sphere_fit(mesh, **kwargs):
+        calls.append((mesh, kwargs))
+        return (
+            True,
+            torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+            torch.tensor([0.25], dtype=torch.float32),
+        )
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(meshproc, "sphere_fit", fake_sphere_fit)
+
+    entries = _mesh_to_obstacle_entry(
+        "block",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+        representation="sphere",
+        device="cuda:0",
+    )
+
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["fit_type"] is meshproc.SphereFitType.MORPHIT
+    assert kwargs["max_convex_hull_num"] == 16
+    assert entries[0][0:2] == ("sphere", "block_0")
+    assert entries[0][2]["position"] == pytest.approx([0.45, 0.0, 0.18])
+
+
+def test_obstacle_collision_visualization_reads_cached_spheres(tmp_path):
+    world_yaml_path = tmp_path / "world_visual.yml"
+    world_yaml_path.write_text(
+        yaml.safe_dump(
+            {"sphere": {"block_0": {"position": [1.0, 2.0, 3.0], "radius": 0.1}}}
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeVisualRigidObject(_FakeRigidObject):
+        def get_local_pose(self, to_matrix=False):
+            if not to_matrix:
+                return super().get_local_pose(to_matrix=False)
+            pose = torch.eye(4, dtype=torch.float32)
+            pose[:3, 3] = self._pose[:3]
+            return pose.unsqueeze(0)
+
+    rigid_object = FakeVisualRigidObject(
+        "block", _unit_cube_vertices(), _cube_faces(), _identity_pose()
+    )
+    geometries = visualize_curobo_world_collision_model(
+        [rigid_object], str(world_yaml_path), draw=False
+    )
+
+    assert [geometry["name"] for geometry in geometries] == [
+        "obstacle_mesh/block",
+        "obstacle_spheres",
+    ]
+    sphere_bounds = geometries[-1]["geometry"].get_axis_aligned_bounding_box()
+    assert sphere_bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
 
 
 def test_generate_cuboid_world_yaml_assembles_schema(tmp_path):

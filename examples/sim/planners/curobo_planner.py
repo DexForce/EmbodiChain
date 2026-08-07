@@ -457,11 +457,23 @@ def _build_scene(
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
     target_xpos = _resolve_batched_target(target_xpos, robot.num_instances)
-    if robot_type == "w1":
-        # Keep the W1-specific IK diagnostic batched so it remains useful when
-        # checking solver and cuRobo reachability across multiple environments.
-        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
-        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
+    # if robot_type == "w1":
+    # Keep the W1-specific IK diagnostic batched so it remains useful when
+    # checking solver and cuRobo reachability across multiple environments.
+    # import ipdb; ipdb.set_trace()
+    init_qpos = torch.tensor(
+        robot.cfg.init_qpos, dtype=torch.float32, device=robot.device
+    )
+    arm_init_qpos = (
+        init_qpos[robot.get_joint_ids(control_part)]
+        .unsqueeze(0)
+        .expand(num_envs, -1)
+        .clone()
+    )
+    is_success, ik_qpos = robot.compute_ik(
+        pose=target_xpos, name=control_part, joint_seed=arm_init_qpos
+    )
+    print(f"robot target xpos ik success: {is_success}, ik_qpos: {ik_qpos}")
 
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
@@ -710,6 +722,7 @@ def main() -> None:
             seed=args.seed,
         )
         use_independent_worlds = args.num_envs > 1
+        visualize_collision_models = not args.headless and not use_independent_worlds
         if use_independent_worlds:
             for name, poses in obstacle_poses.items():
                 yaw_deg = torch.rad2deg(torch.atan2(poses[:, 1, 0], poses[:, 0, 0]))
@@ -733,7 +746,7 @@ def main() -> None:
                     robot_uid=robot.uid,
                     world=CuroboWorldCfg(
                         rigid_objects=obstacles,
-                        obstacle_representation="cuboid",
+                        obstacle_representation=("sphere"),
                         dynamic_obstacle_names=(
                             [obstacle.uid for obstacle in obstacles]
                             if use_independent_worlds
@@ -747,6 +760,11 @@ def main() -> None:
                 )
             )
         )
+        if visualize_collision_models:
+            # This opens one blocking Open3D window. The spheres are loaded from
+            # the exact robot/world YAML caches consumed by cuRobo; close the
+            # window to continue with planner backend creation and execution.
+            motion_generator.planner.visualize_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
         engine.register(
             MoveEndEffector(

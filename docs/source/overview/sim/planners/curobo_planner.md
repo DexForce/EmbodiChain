@@ -89,9 +89,15 @@ different planning GPU. A CPU value is rejected because cuRobo itself has no
 CPU backend.
 
 The robot configuration must be a cuRobo V2 robot profile with collision
-spheres and self-collision data; the adapter generates this from the robot's
-URDF automatically. A plain URDF alone is not sufficient for collision planning
-without that sphere-fitting step.
+spheres; the adapter generates this from the robot's URDF automatically. A plain
+URDF alone is not sufficient for robot-to-world collision planning without that
+sphere-fitting step.
+
+:::{warning}
+cuRobo self-collision checking is temporarily disabled in this backend.
+Robot-to-world collision checking remains enabled, but planned trajectories
+are not currently rejected when two robot links collide with each other.
+:::
 
 The adapter automatically rebases simulator-world Cartesian goals and dynamic
 obstacle poses through the live simulator control-part base, so parallel arena
@@ -138,9 +144,16 @@ The collision world is always auto-generated from live `RigidObject` meshes via
 `CuroboWorldCfg.rigid_objects`: the adapter reads each object's mesh
 (`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and writes a
 cached cuRobo scene YAML on the first plan, using
-`CuroboWorldCfg.obstacle_representation` (`"sphere"` by default for fast
-collision queries; use `"cuboid"` for a local-frame AABB placed as an OBB via
-the object pose, or `"mesh"` for the exact triangle mesh).
+`CuroboWorldCfg.obstacle_representation` (`"sphere"` by default; use
+`"cuboid"` for a local-frame AABB placed as an OBB via the object pose, or
+`"mesh"` for the exact triangle mesh). Sphere worlds remain sphere-based in
+the generated YAML, cache, collision-model visualization, and runtime checker.
+cuRobo V2 can parse those spheres but omits sphere storage from its generic
+world checker. EmbodiChain registers an analytic sphere obstacle type with that
+checker before constructing the backend; its signed distance is evaluated as
+the center distance minus the obstacle radius. The runtime sphere cache is
+sized automatically from the scene, and backend initialization verifies that
+no fitted sphere was silently dropped.
 Generated poses are authored in the cuRobo base/world frame, so this is exact
 when the robot base sits at the simulator world origin. For obstacles that move
 or live in an offset base frame, also declare their names in
@@ -225,11 +238,17 @@ robot's URDF and solver, so nothing robot-specific needs to be hardcoded:
 The generated YAML is cached on disk (default `$XDG_CACHE_HOME/embodichain_curobo`
 or `~/.cache/embodichain_curobo`) keyed by the URDF path, URDF content, control
 part, tool frame, and fit parameters, so editing the URDF or changing the fit
-settings regenerates automatically and subsequent inits reuse the cache. Tune the
-fit with `CuroboPlannerCfg.auto_gen` (`fit_type="voxel"` by default for fast
-first-generation; `"morphit"` for best quality; `force=True` to bypass the cache).
-The default `sphere_density=0.1` keeps the per-link sphere count low (~80 for a
-Panda) so planning stays fast; raise it for tighter collision coverage.
+settings regenerates automatically and subsequent inits reuse the cache. Sphere
+fitting always uses DexSim's `SphereFitType.MORPHIT`, with at most 2 convex hulls
+per robot link and 16 per obstacle. The default `sphere_density=0.1` keeps the
+per-link sphere count low (~80 for a Panda) so planning stays fast; raise it for
+tighter collision coverage, or set `force=True` to bypass the cache.
+
+For an Open3D overlay of the live robot/obstacle meshes and the exact spheres
+read back from those YAML caches, call
+`planner.visualize_collision_models(control_part)`. Robot sphere centers are
+transformed by the simulator's live link poses. The interactive cuRobo example
+calls this once after planner initialization; close the Open3D window to continue.
 
 ## Generate a motion
 
