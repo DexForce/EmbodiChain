@@ -732,7 +732,7 @@ def main() -> None:
                     robot_uid=robot.uid,
                     world=CuroboWorldCfg(
                         rigid_objects=obstacles,
-                        obstacle_representation="cuboid",
+                        obstacle_representation="sphere",
                         dynamic_obstacle_names=(
                             [obstacle.uid for obstacle in obstacles]
                             if use_independent_worlds
@@ -746,6 +746,9 @@ def main() -> None:
                 )
             )
         )
+        # visualize arm collision
+        # motion_generator.planner.visualize_collision_models("arm")
+        # motion_generator.planner.visualize_obstacle_collision_model()
         engine = AtomicActionEngine(motion_generator)
         engine.register(
             MoveEndEffector(

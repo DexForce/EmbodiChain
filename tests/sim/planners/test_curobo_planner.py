@@ -205,10 +205,13 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
 
 
 def test_auto_gen_defaults_keep_sphere_count_low():
-    """The voxel sphere estimate must be scaled down so planning stays fast."""
+    """Sphere fitting is MorphIt-only; density stays low so planning stays fast."""
     auto = CuroboPlannerCfg(robot_uid="franka").auto_gen
-    assert auto.fit_type == "voxel"
     assert auto.sphere_density == 0.1
+    assert auto.iterations == 200
+    # fit_type / surface_radius were removed: MorphIt is the only strategy now.
+    assert not hasattr(auto, "fit_type")
+    assert not hasattr(auto, "surface_radius")
 
 
 def test_curobo_planner_class_is_lazy_import_safe():

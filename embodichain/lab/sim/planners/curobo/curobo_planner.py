@@ -46,7 +46,7 @@ import torch
 import yaml
 
 from embodichain.utils import configclass, logger
-from embodichain.utils.math import pose_inv, quat_from_matrix
+from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
@@ -78,8 +78,11 @@ _CUROBO_INSTALL_URL = (
 # Bumped whenever the auto-generated robot-YAML schema/logic changes so that
 # cached YAMLs from an older generator are regenerated instead of reused. v2:
 # exclude URDF mimic joints from cspace/lock_joints (cuRobo folds them into
-# their active joint and raises KeyError when locking one).
-_CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v2"
+# their active joint and raises KeyError when locking one). v3: switch robot and
+# world sphere fitting to dexsim's MorphIt ``sphere_fit`` (max_convex_hull_num=4
+# for robot links, 16 for obstacles) and drop the now-dead fit_type /
+# surface_radius config.
+_CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v3"
 
 # cuRobo 0.8 does not expose PyTorch's CUDA stream-capture error mode. The
 # temporary adapter below therefore replaces ``torch.cuda.graph`` only while
@@ -159,9 +162,9 @@ class CuroboWorldCfg:
     obstacle_representation: str = "sphere"
     """Collision representation used when generating the YAML from :attr:`rigid_objects`.
 
-    ``"sphere"`` (default) fits spheres with cuRobo's
-    ``fit_spheres_to_mesh`` (fast collision queries, approximate, and requires
-    CUDA + cuRobo + trimesh). ``"cuboid"`` emits a local-frame AABB per object,
+    ``"sphere"`` (default) fits spheres with dexsim's
+    ``sphere_fit`` (MorphIt; fast collision queries, approximate, and requires
+    CUDA + dexsim + trimesh). ``"cuboid"`` emits a local-frame AABB per object,
     placed as an OBB via the object pose. ``"mesh"`` emits the full triangle
     mesh (exact, no CUDA).
     """
@@ -241,10 +244,6 @@ class CuroboAutoGenCfg:
     regenerates automatically.
     """
 
-    fit_type: str = "voxel"
-    """cuRobo sphere-fit strategy for auto-generation: ``"voxel"`` (default,
-    fast), ``"morphit"`` (best, slower), or ``"surface"`` (crude)."""
-
     num_spheres: int | None = None
     """Per-link sphere count. ``None`` auto-estimates from bounding-box volume
     scaled by :attr:`sphere_density`."""
@@ -253,17 +252,14 @@ class CuroboAutoGenCfg:
     """Multiplier on the auto-estimated per-link sphere count (ignored when
     :attr:`num_spheres` is set).
 
-    The cuRobo volume-based estimate over-fits at ``1.0`` (~668 spheres for a
-    Franka Panda, making planning pathologically slow). ``0.1`` (default) yields
+    The volume-based estimate over-fits at ``1.0`` (~668 spheres for a Franka
+    Panda, making planning pathologically slow). ``0.1`` (default) yields
     ~50-100 spheres - enough coverage for collision-aware planning while keeping
     each plan fast. Increase for tighter coverage on complex robots.
     """
 
-    surface_radius: float = 0.005
-    """Fixed radius used only by the ``surface`` strategy."""
-
     iterations: int = 200
-    """Adam iterations for the ``morphit`` strategy."""
+    """Adam iterations for the MorphIt fit."""
 
     collision_sphere_buffer: float = 0.0
     """Padding added to every fitted sphere's radius (m)."""
@@ -705,6 +701,94 @@ def _resolve_curobo_device(
             f"torch reports {device_count} CUDA device(s)."
         )
     return device
+
+
+# =============================================================================
+# Collision-model visualization (Open3D)
+# =============================================================================
+#
+# Mirrors dexsim's ``sphere_fit_visual``: reference meshes are drawn opaque
+# (``defaultLit``) and collision spheres as a single semi-transparent geometry
+# (``defaultLitSSR``). Open3D / NumPy are imported lazily so the planner module
+# stays importable without them.
+
+
+def _pose7_to_matrix(pose: torch.Tensor) -> torch.Tensor:
+    """Convert a ``(7,)`` ``(x, y, z, qw, qx, qy, qz)`` pose to a ``(4, 4)`` matrix."""
+    pose = torch.as_tensor(pose, dtype=torch.float32, device="cpu")
+    matrix = torch.eye(4, dtype=torch.float32)
+    matrix[:3, :3] = matrix_from_quat(pose[3:7])
+    matrix[:3, 3] = pose[:3]
+    return matrix
+
+
+def _o3d_sphere_material(rgb: tuple[float, float, float]) -> "Any":
+    """Translucent sphere material mirroring dexsim's :func:`sphere_fit_visual`."""
+    import open3d as o3d
+
+    mat = o3d.visualization.rendering.MaterialRecord()
+    mat.shader = "defaultLitSSR"
+    mat.base_color = [float(rgb[0]), float(rgb[1]), float(rgb[2]), 0.5]
+    mat.base_roughness = 0.05
+    mat.base_reflectance = 0.0
+    mat.base_clearcoat = 1.0
+    mat.thickness = 1.0
+    mat.transmission = 0.2
+    mat.absorption_distance = 10
+    mat.absorption_color = [float(rgb[0]), float(rgb[1]), float(rgb[2])]
+    return mat
+
+
+def _o3d_opaque_material(rgb: tuple[float, float, float]) -> "Any":
+    """Opaque lit material for reference meshes."""
+    import open3d as o3d
+
+    mat = o3d.visualization.rendering.MaterialRecord()
+    mat.shader = "defaultLit"
+    mat.base_color = [float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0]
+    return mat
+
+
+def _o3d_spheres_mesh(centers, radii) -> "Any":
+    """Merge spheres (centers ``(N, 3)``, radii ``(N,)``) into one TriangleMesh."""
+    import numpy as np
+    import open3d as o3d
+
+    mesh = o3d.geometry.TriangleMesh()
+    for center, radius in zip(np.asarray(centers), np.asarray(radii)):
+        sphere = o3d.geometry.TriangleMesh.create_sphere(float(radius))
+        sphere.translate(np.asarray(center, dtype=np.float64))
+        mesh += sphere
+    mesh.compute_vertex_normals()
+    return mesh
+
+
+def _o3d_mesh_from_arrays(vertices, faces) -> "Any":
+    """Build an Open3D ``TriangleMesh`` from ``(V, 3)`` verts and ``(F, 3)`` faces."""
+    import numpy as np
+    import open3d as o3d
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(np.asarray(vertices, dtype=np.float64))
+    mesh.triangles = o3d.utility.Vector3iVector(
+        np.asarray(faces, dtype=np.int64).reshape(-1, 3)
+    )
+    mesh.compute_vertex_normals()
+    return mesh
+
+
+def _o3d_box_mesh(dims) -> "Any":
+    """Build a centered (origin) box TriangleMesh of the given ``(3,)`` dims."""
+    import numpy as np
+    import open3d as o3d
+
+    dims = np.asarray(dims, dtype=np.float64)
+    box = o3d.geometry.TriangleMesh.create_box(
+        float(dims[0]), float(dims[1]), float(dims[2])
+    )
+    box.translate(-dims / 2.0)
+    box.compute_vertex_normals()
+    return box
 
 
 # =============================================================================
@@ -1468,10 +1552,8 @@ class CuroboPlanner(BasePlanner):
             cache_path,
             tool_frame=tool_frame,
             urdf_path=urdf_path,
-            fit_type=auto.fit_type,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
-            surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
             device=str(self._curobo_device),
@@ -1495,10 +1577,8 @@ class CuroboPlanner(BasePlanner):
             pass
         hasher.update(control_part.encode("utf-8"))
         hasher.update((tool_frame or "").encode("utf-8"))
-        hasher.update(auto.fit_type.encode("utf-8"))
         hasher.update(str(auto.num_spheres).encode("utf-8"))
         hasher.update(str(auto.sphere_density).encode("utf-8"))
-        hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
         return hasher.hexdigest()
@@ -1538,10 +1618,8 @@ class CuroboPlanner(BasePlanner):
             rigid_objects,
             cache_path,
             representation=world_cfg.obstacle_representation,
-            fit_type=auto.fit_type,
             num_spheres=auto.num_spheres,
             sphere_density=auto.sphere_density,
-            surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
             device=str(self._curobo_device),
@@ -1557,10 +1635,8 @@ class CuroboPlanner(BasePlanner):
         hasher = hashlib.md5()
         hasher.update(world_cfg.obstacle_representation.encode("utf-8"))
         auto = self.cfg.auto_gen
-        hasher.update(auto.fit_type.encode("utf-8"))
         hasher.update(str(auto.num_spheres).encode("utf-8"))
         hasher.update(str(auto.sphere_density).encode("utf-8"))
-        hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
         for idx, obj in enumerate(world_cfg.rigid_objects or []):
@@ -2248,6 +2324,247 @@ class CuroboPlanner(BasePlanner):
         xpos = self._tcp_to_tool_pose(xpos, backend)
         return xpos
 
+    # ------------------------------------------------------------------
+    # Collision-model visualization (Open3D)
+    # ------------------------------------------------------------------
+
+    def _robot_collision_geometries(self, control_part: str, env_id: int) -> list[dict]:
+        """Build Open3D geometries for the robot's cached collision spheres.
+
+        Reads the per-link collision spheres from the cached cuRobo robot YAML
+        (generated from the URDF link meshes via dexsim MorphIt) and places each
+        link's spheres at its live world pose (``robot.get_link_pose``). Each
+        link mesh is drawn opaque as reference, so the sphere placement is
+        visible -- mirroring dexsim's :func:`sphere_fit_visual`.
+
+        Args:
+            control_part: Control part whose cached robot YAML to read.
+            env_id: Simulator environment index to read link poses from.
+
+        Returns:
+            A list of ``{"name", "geometry", "material"}`` draw entries.
+        """
+        import numpy as np
+
+        robot = self.robot
+        assert robot is not None, "cuRobo planner has no robot."
+        profile = self._materialize_profile(control_part)
+        with open(profile.robot_config_path, "r") as fh:
+            data = yaml.safe_load(fh)
+        kin = data["robot_cfg"]["kinematics"]
+        collision_spheres = kin.get("collision_spheres", {}) or {}
+        buffer = float(kin.get("collision_sphere_buffer", 0.0))
+
+        geoms: list[dict] = []
+        all_centers: list[np.ndarray] = []
+        all_radii: list[float] = []
+        for link_name, entries in collision_spheres.items():
+            try:
+                link_pose = torch.as_tensor(
+                    robot.get_link_pose(link_name, env_ids=[env_id], to_matrix=True)[0],
+                    dtype=torch.float32,
+                ).cpu()
+            except Exception as exc:  # noqa: BLE001
+                logger.log_warning(
+                    f"get_link_pose failed for link {link_name!r}: {exc}"
+                )
+                continue
+            pose_np = link_pose.numpy().astype(np.float64)
+            rotation = pose_np[:3, :3]
+            translation = pose_np[:3, 3]
+            # Reference link mesh (opaque), transformed into the link's world frame.
+            try:
+                verts, faces = robot.get_link_vert_face(link_name)
+                verts_np = (
+                    torch.as_tensor(verts).detach().to(torch.float32).cpu().numpy()
+                )
+                faces_np = torch.as_tensor(faces).detach().to(torch.int64).cpu().numpy()
+                link_mesh = _o3d_mesh_from_arrays(verts_np, faces_np)
+                link_mesh.transform(pose_np)
+                geoms.append(
+                    {
+                        "name": f"robot_link:{link_name}",
+                        "geometry": link_mesh,
+                        "material": _o3d_opaque_material((0.5, 0.5, 0.5)),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.log_warning(
+                    f"get_link_vert_face failed for link {link_name!r}: {exc}"
+                )
+            for entry in entries:
+                local_center = np.asarray(entry["center"], dtype=np.float64)
+                radius = float(entry["radius"]) + buffer
+                all_centers.append(rotation @ local_center + translation)
+                all_radii.append(radius)
+
+        if all_centers:
+            geoms.append(
+                {
+                    "name": "robot_collision_spheres",
+                    "geometry": _o3d_spheres_mesh(
+                        np.array(all_centers), np.array(all_radii)
+                    ),
+                    "material": _o3d_sphere_material((0.0, 0.2, 0.8)),
+                }
+            )
+        return geoms
+
+    def _obstacle_collision_geometries(self, env_id: int) -> list[dict]:
+        """Build Open3D geometries for the cached obstacle collision world.
+
+        Reads the cached cuRobo world YAML (``sphere`` / ``cuboid`` / ``mesh``)
+        and draws the collision geometries together with the original
+        ``RigidObject`` meshes (opaque reference). Positions in the YAML are in
+        the simulator world frame -- exact when the robot base sits at the world
+        origin (the common auto-generated case).
+
+        Args:
+            env_id: Simulator environment index to read object meshes/poses from.
+
+        Returns:
+            A list of ``{"name", "geometry", "material"}`` draw entries.
+        """
+        import numpy as np
+
+        world_cfg = self.cfg.world
+        rigid_objects = world_cfg.rigid_objects or []
+        if not rigid_objects:
+            logger.log_warning(
+                "CuroboWorldCfg.rigid_objects is empty; no obstacle model to read."
+            )
+            return []
+        world_path = self._auto_generate_world_yaml(world_cfg)
+        with open(world_path, "r") as fh:
+            data = yaml.safe_load(fh) or {}
+
+        geoms: list[dict] = []
+        # Reference: original RigidObject meshes (opaque), in the world frame.
+        for idx, obj in enumerate(rigid_objects):
+            name = getattr(obj, "uid", None) or f"obstacle_{idx}"
+            try:
+                verts = obj.get_vertices(env_ids=[env_id], scale=True)[0]
+                faces = obj.get_triangles(env_ids=[env_id])[0]
+                pose = obj.get_local_pose(to_matrix=False)[env_id]
+            except Exception as exc:  # noqa: BLE001
+                logger.log_warning(f"obstacle {name!r} mesh read failed: {exc}")
+                continue
+            verts_np = torch.as_tensor(verts).detach().to(torch.float32).cpu().numpy()
+            faces_np = torch.as_tensor(faces).detach().to(torch.int64).cpu().numpy()
+            obj_mesh = _o3d_mesh_from_arrays(verts_np, faces_np)
+            obj_mesh.transform(_pose7_to_matrix(pose).numpy())
+            geoms.append(
+                {
+                    "name": f"obstacle_mesh:{name}",
+                    "geometry": obj_mesh,
+                    "material": _o3d_opaque_material((0.5, 0.5, 0.5)),
+                }
+            )
+
+        rep = world_cfg.obstacle_representation
+        if rep == "sphere":
+            centers, radii = [], []
+            for fields in (data.get("sphere") or {}).values():
+                centers.append(np.asarray(fields["position"], dtype=np.float64))
+                radii.append(float(fields["radius"]))
+            if centers:
+                geoms.append(
+                    {
+                        "name": "obstacle_collision_spheres",
+                        "geometry": _o3d_spheres_mesh(
+                            np.array(centers), np.array(radii)
+                        ),
+                        "material": _o3d_sphere_material((0.85, 0.35, 0.0)),
+                    }
+                )
+        elif rep == "cuboid":
+            for key, fields in (data.get("cuboid") or {}).items():
+                box = _o3d_box_mesh(fields["dims"])
+                box.transform(_pose7_to_matrix(torch.tensor(fields["pose"])).numpy())
+                geoms.append(
+                    {
+                        "name": f"obstacle_cuboid:{key}",
+                        "geometry": box,
+                        "material": _o3d_sphere_material((0.85, 0.35, 0.0)),
+                    }
+                )
+        elif rep == "mesh":
+            for key, fields in (data.get("mesh") or {}).items():
+                mesh = _o3d_mesh_from_arrays(fields["vertices"], fields["faces"])
+                mesh.transform(_pose7_to_matrix(torch.tensor(fields["pose"])).numpy())
+                geoms.append(
+                    {
+                        "name": f"obstacle_mesh:{key}",
+                        "geometry": mesh,
+                        "material": _o3d_opaque_material((0.85, 0.35, 0.0)),
+                    }
+                )
+        return geoms
+
+    def visualize_robot_collision_model(
+        self, control_part: str, *, env_id: int = 0
+    ) -> None:
+        """Open an Open3D window with the robot's cached collision spheres.
+
+        Spheres are read from the cached cuRobo robot YAML and placed at each
+        link's live world pose (``robot.get_link_pose``); the link meshes are
+        drawn opaque as reference. Mirrors dexsim's :func:`sphere_fit_visual`.
+
+        .. attention::
+            Requires a display and Open3D's Filament renderer. The cached YAML is
+            generated on demand (running dexsim MorphIt sphere fitting) if it does
+            not yet exist.
+
+        Args:
+            control_part: Control part whose cached robot YAML to visualize.
+            env_id: Simulator environment index to read link poses from.
+        """
+        import open3d as o3d
+
+        geoms = self._robot_collision_geometries(control_part, env_id)
+        if not geoms:
+            logger.log_warning("No robot collision geometries to visualize.")
+            return
+        o3d.visualization.draw(geoms, title="cuRobo robot collision model")
+
+    def visualize_obstacle_collision_model(self, *, env_id: int = 0) -> None:
+        """Open an Open3D window with the cached obstacle collision model.
+
+        Draws the cached cuRobo world YAML (``sphere`` / ``cuboid`` / ``mesh``)
+        together with the original ``RigidObject`` meshes as opaque reference.
+
+        Args:
+            env_id: Simulator environment index to read object meshes/poses from.
+        """
+        import open3d as o3d
+
+        geoms = self._obstacle_collision_geometries(env_id)
+        if not geoms:
+            logger.log_warning("No obstacle collision geometries to visualize.")
+            return
+        o3d.visualization.draw(geoms, title="cuRobo obstacle collision model")
+
+    def visualize_collision_models(self, control_part: str, *, env_id: int = 0) -> None:
+        """Open one Open3D window with both robot and obstacle collision models.
+
+        Convenience wrapper drawing the robot link spheres and the obstacle
+        collision model in a single window so their relative placement is
+        visible. Robot spheres are blue, obstacle spheres orange, reference
+        meshes gray.
+
+        Args:
+            control_part: Control part whose cached robot YAML to visualize.
+            env_id: Simulator environment index to read poses from.
+        """
+        import open3d as o3d
+
+        geoms = self._robot_collision_geometries(control_part, env_id)
+        geoms += self._obstacle_collision_geometries(env_id)
+        if not geoms:
+            logger.log_warning("No collision geometries to visualize.")
+            return
+        o3d.visualization.draw(geoms, title="cuRobo collision models")
+
     def close(self) -> None:
         """Destroy every cached in-process cuRobo planner."""
         for backend in list(self._backend_cache.values()):
@@ -2282,3 +2599,64 @@ class _CuroboBackend:
     curobo_joint_names_sig: tuple[str, ...] | None = None
     tool_to_frame_matrix: torch.Tensor | None = None
     sim_base_to_curobo_base_matrix: torch.Tensor | None = None
+
+
+# =============================================================================
+# Example: visualize the cached collision models after planner init
+# =============================================================================
+#
+# Run with a display attached (Open3D's Filament renderer needs a window)::
+#
+#     python -m embodichain.lab.sim.planners.curobo.curobo_planner
+#
+# Builds a Franka Panda + block scene, constructs the cuRobo planner, then opens
+# one Open3D window showing the robot link spheres (blue) and the obstacle
+# spheres (orange) read from the cached robot/world YAMLs, placed at the live
+# link / object poses alongside the reference meshes (gray).
+
+
+def _visualize_collision_models_example() -> None:
+    """Build a Franka + block scene, init cuRobo, and visualize collision models."""
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+    from embodichain.lab.sim.objects import RigidObjectCfg
+    from embodichain.lab.sim.robots import FrankaPandaCfg
+    from embodichain.lab.sim.shapes import CubeCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            headless=True, sim_device="cuda", num_envs=1, arena_space=2.0
+        )
+    )
+    try:
+        robot = sim.add_robot(
+            cfg=FrankaPandaCfg.from_dict({"uid": "franka", "robot_type": "panda"})
+        )
+        assert robot is not None, "Failed to add the Franka Panda robot."
+        block = sim.add_rigid_object(
+            cfg=RigidObjectCfg(
+                uid="block",
+                shape=CubeCfg(size=[0.18, 0.40, 0.36]),
+                attrs=RigidBodyAttributesCfg(),
+                body_type="kinematic",
+                init_pos=(0.45, 0.0, 0.18),
+                init_rot=(0.0, 0.0, 0.0),
+            )
+        )
+        planner = CuroboPlanner(
+            CuroboPlannerCfg(
+                robot_uid="franka",
+                world=CuroboWorldCfg(rigid_objects=[block]),
+                use_cuda_graph=False,
+            )
+        )
+        # Reads the cached robot/world YAMLs (generating them via dexsim MorphIt
+        # on first call) and draws robot + obstacle collision models together.
+        planner.visualize_collision_models("arm")
+    finally:
+        sim.destroy()
+        SimulationManager.flush_cleanup_queue()
+
+
+if __name__ == "__main__":
+    _visualize_collision_models_example()

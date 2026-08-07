@@ -17,8 +17,8 @@
 
 The :func:`generate_curobo_robot_yaml` helper pulls the robot's URDF path and
 each link's collision mesh (vertices/faces) from the simulator, fits collision
-spheres to every link mesh with cuRobo's sphere-fitting library, and writes a
-complete cuRobo V2 robot configuration YAML. The cuRobo planner adapter calls
+spheres to every link mesh with dexsim's MorphIt :func:`sphere_fit`, and writes
+a complete cuRobo V2 robot configuration YAML. The cuRobo planner adapter calls
 this automatically (with on-disk caching) on the first plan; see
 :class:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboAutoGenCfg`.
 
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Sequence
 
+import numpy as np
 import torch
 
 from embodichain.utils import logger
@@ -79,6 +80,83 @@ def _parse_mimic_joint_names(urdf_path: str) -> set[str]:
     return mimic_joints
 
 
+# Robot links are near-convex, so 4 VisACD convex parts are enough and keep the
+# per-link sphere count (and thus planning time) low. Obstacles may be concave,
+# so allow up to 16 parts for a tighter sphere fit.
+_ROBOT_LINK_MAX_CONVEX_HULL_NUM = 4
+_OBSTACLE_MAX_CONVEX_HULL_NUM = 16
+
+
+def _fit_collision_spheres(
+    vertices: torch.Tensor,
+    faces: torch.Tensor,
+    *,
+    max_convex_hull_num: int,
+    num_spheres: int | None,
+    sphere_density: float,
+    iterations: int,
+    device: str,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """Fit collision spheres to a mesh with dexsim's MorphIt ``sphere_fit``.
+
+    Repairs the mesh (fill holes / fix winding & normals) via trimesh, builds an
+    ``o3d.t.geometry.TriangleMesh``, then calls
+    :func:`dexsim.kit.meshproc.sphere_fit` with ``SphereFitType.MORPHIT`` and the
+    requested ``max_convex_hull_num`` (4 for robot links, 16 for obstacles).
+
+    Args:
+        vertices: Mesh vertices ``(V, 3)`` (any float dtype, any device).
+        faces: Triangle indices ``(F, 3)`` (any integer dtype).
+        max_convex_hull_num: Cap on VisACD convex parts before per-part fitting.
+        num_spheres: Explicit sphere count; ``None`` auto-estimates from
+            ``sphere_density``.
+        sphere_density: Multiplier on the auto-estimated sphere count.
+        iterations: MorphIt Adam iterations.
+        device: Torch device for the fit (e.g. ``"cuda:0"``).
+
+    Returns:
+        ``(centers (N, 3), radii (N,))`` CPU float32 tensors, or ``None`` when no
+        spheres could be fitted.
+    """
+    import open3d as o3d
+    import trimesh
+    from dexsim.kit.meshproc import SphereFitType, sphere_fit
+
+    verts_np = torch.as_tensor(vertices).detach().to(torch.float32).cpu().numpy()
+    faces_np = torch.as_tensor(faces).detach().to(torch.int64).cpu().numpy()
+    mesh = trimesh.Trimesh(vertices=verts_np, faces=faces_np, process=False)
+    if len(mesh.vertices) == 0:
+        return None
+    mesh.fill_holes()
+    trimesh.repair.fix_normals(mesh)
+    trimesh.repair.fix_inversion(mesh)
+    trimesh.repair.fix_winding(mesh)
+
+    o3d_mesh = o3d.t.geometry.TriangleMesh()
+    o3d_mesh.vertex.positions = o3d.core.Tensor(
+        np.ascontiguousarray(mesh.vertices, dtype=np.float32)
+    )
+    o3d_mesh.triangle.indices = o3d.core.Tensor(
+        np.ascontiguousarray(mesh.faces, dtype=np.int32)
+    )
+
+    is_success, centers, radii = sphere_fit(
+        o3d_mesh,
+        num_spheres=num_spheres,
+        sphere_density=sphere_density,
+        fit_type=SphereFitType.MORPHIT,
+        iterations=iterations,
+        max_convex_hull_num=max_convex_hull_num,
+        device=device,
+    )
+    if not is_success or centers.shape[0] == 0:
+        return None
+    return (
+        centers.detach().to("cpu").reshape(-1, 3).to(torch.float32),
+        radii.detach().to("cpu").reshape(-1).to(torch.float32),
+    )
+
+
 def generate_curobo_robot_yaml(
     robot: Robot,
     control_part: str,
@@ -86,10 +164,8 @@ def generate_curobo_robot_yaml(
     *,
     tool_frame: str | None = None,
     urdf_path: str | None = None,
-    fit_type: str = "morphit",
     num_spheres: int | None = None,
     sphere_density: float = 1.0,
-    surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
     max_acceleration: float = 15.0,
@@ -99,14 +175,14 @@ def generate_curobo_robot_yaml(
     """Fit collision spheres to each robot link's mesh and write a cuRobo robot YAML.
 
     Extracts the URDF path and per-link vertices/faces from ``robot``, fits
-    collision spheres to every link mesh with cuRobo's :func:`fit_spheres_to_mesh`,
-    and writes a complete cuRobo V2 robot configuration YAML that the cuRobo
-    planner loads as its robot model.
+    collision spheres to every link mesh with dexsim's MorphIt
+    :func:`sphere_fit` (``max_convex_hull_num=4``), and writes a complete cuRobo
+    V2 robot configuration YAML that the cuRobo planner loads as its robot model.
 
     .. attention::
-        Requires a CUDA GPU and cuRobo installed (sphere fitting runs on GPU).
-        Link meshes from ``robot.get_link_vert_face`` are assumed to be in the
-        link-local rest frame -- the convention cuRobo collision spheres use,
+        Requires a CUDA GPU and dexsim installed (MorphIt sphere fitting runs on
+        GPU). Link meshes from ``robot.get_link_vert_face`` are assumed to be in
+        the link-local rest frame -- the convention cuRobo collision spheres use,
         since cuRobo applies each link's transform via FK at runtime.
 
     Args:
@@ -123,14 +199,11 @@ def generate_curobo_robot_yaml(
             cache key and the generation use the same file). Must be the full
             assembled URDF, not a solver's sub-chain URDF, or gripper links are
             silently dropped from the collision model.
-        fit_type: cuRobo sphere-fit strategy - ``"morphit"`` (default, best),
-            ``"voxel"`` (faster), or ``"surface"`` (crude, fixed radius).
-        num_spheres: Per-link sphere count. If ``None``, cuRobo auto-estimates
-            it from the link's bounding-box volume.
+        num_spheres: Per-link sphere count. If ``None``, dexsim auto-estimates it
+            from the link's bounding-box volume.
         sphere_density: Multiplier on the auto sphere count (ignored when
             ``num_spheres`` is set).
-        surface_radius: Fixed radius used only by the ``surface`` strategy.
-        iterations: Adam iterations for the ``morphit`` strategy.
+        iterations: Adam iterations for the MorphIt fit.
         collision_sphere_buffer: Padding added to every sphere's radius (m).
         max_acceleration: cspace maximum acceleration.
         max_jerk: cspace maximum jerk.
@@ -145,27 +218,12 @@ def generate_curobo_robot_yaml(
     """
     import os
 
-    import trimesh
     import yaml
 
-    from curobo._src.geom.sphere_fit.fit_spheres import fit_spheres_to_mesh
-    from curobo._src.geom.sphere_fit.types import SphereFitType
     from curobo._src.robot.parser.parser_urdf import UrdfRobotParser
-    from curobo.types import DeviceCfg
 
     if not torch.cuda.is_available():
         raise RuntimeError("generate_curobo_robot_yaml requires a CUDA GPU.")
-    fit_type_map = {
-        "morphit": SphereFitType.MORPHIT,
-        "voxel": SphereFitType.VOXEL,
-        "surface": SphereFitType.SURFACE,
-    }
-    if fit_type not in fit_type_map:
-        raise ValueError(
-            f"fit_type must be one of {list(fit_type_map)}, got {fit_type!r}."
-        )
-    fit_type_enum = fit_type_map[fit_type]
-    device_cfg = DeviceCfg(device=device)
 
     urdf_path = urdf_path or robot.cfg.fpath
     link_vert_dict: dict = {}
@@ -215,36 +273,25 @@ def generate_curobo_robot_yaml(
         faces = link_face_dict[link_name]
         if verts is None or faces is None or verts.numel() == 0 or faces.numel() == 0:
             continue
-        verts_np = torch.as_tensor(verts).detach().to(torch.float32).cpu().numpy()
-        faces_np = torch.as_tensor(faces).detach().to(torch.int64).cpu().numpy()
-        mesh = trimesh.Trimesh(vertices=verts_np, faces=faces_np, process=False)
-        if len(mesh.vertices) == 0:
-            continue
-        mesh.fill_holes()
-        trimesh.repair.fix_normals(mesh)
-        trimesh.repair.fix_inversion(mesh)
-        trimesh.repair.fix_winding(mesh)
         try:
-            fit_result = fit_spheres_to_mesh(
-                mesh,
+            fit_result = _fit_collision_spheres(
+                verts,
+                faces,
+                max_convex_hull_num=_ROBOT_LINK_MAX_CONVEX_HULL_NUM,
                 num_spheres=num_spheres,
                 sphere_density=sphere_density,
-                surface_radius=surface_radius,
-                fit_type=fit_type_enum,
                 iterations=iterations,
-                device_cfg=device_cfg,
+                device=device,
             )
         except Exception as exc:  # noqa: BLE001
             logger.log_warning(f"Sphere fitting failed for link {link_name!r}: {exc}")
             continue
-        if fit_result.num_spheres == 0:
+        if fit_result is None:
             continue
+        centers, radii = fit_result
         collision_spheres[link_name] = [
             {"center": list(c), "radius": float(r)}
-            for c, r in zip(
-                fit_result.centers.detach().cpu().tolist(),
-                fit_result.radii.detach().cpu().tolist(),
-            )
+            for c, r in zip(centers.tolist(), radii.tolist())
         ]
 
     if not collision_spheres:
@@ -373,10 +420,8 @@ def _mesh_to_obstacle_entry(
     pose: torch.Tensor,
     *,
     representation: str = "cuboid",
-    fit_type: str = "voxel",
     num_spheres: int | None = None,
     sphere_density: float = 1.0,
-    surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
     device: str = "cuda:0",
@@ -384,7 +429,7 @@ def _mesh_to_obstacle_entry(
     """Convert one mesh + pose into cuRobo world-YAML obstacle entry/entries.
 
     Pure tensor helper (no simulator / cuRobo import for ``cuboid``/``mesh``) so
-    it is unit-testable without CUDA. ``sphere`` lazily imports cuRobo + trimesh
+    it is unit-testable without CUDA. ``sphere`` lazily imports dexsim + trimesh
     and runs on CUDA.
 
     Args:
@@ -396,13 +441,11 @@ def _mesh_to_obstacle_entry(
             frame (the same frame static collision YAMLs are authored in).
         representation: ``"cuboid"`` (local-frame AABB -> OBB via ``pose``,
             default), ``"mesh"`` (exact triangle mesh), or ``"sphere"`` (fit
-            spheres with cuRobo's :func:`fit_spheres_to_mesh`).
-        fit_type: cuRobo sphere-fit strategy (``"voxel"``/``"morphit"``/
-            ``"surface"``); only used by ``"sphere"``.
+            spheres with dexsim's :func:`sphere_fit`, MorphIt,
+            ``max_convex_hull_num=16``).
         num_spheres: Per-mesh sphere count; ``None`` auto-estimates (sphere only).
         sphere_density: Multiplier on the auto sphere count (sphere only).
-        surface_radius: Fixed radius for the ``"surface"`` strategy (sphere only).
-        iterations: Adam iterations for ``"morphit"`` (sphere only).
+        iterations: Adam iterations for the MorphIt fit (sphere only).
         collision_sphere_buffer: Padding added to each fitted radius (sphere only).
         device: CUDA device for sphere fitting (sphere only).
 
@@ -414,7 +457,7 @@ def _mesh_to_obstacle_entry(
         ValueError: If ``representation`` is unsupported, ``pose`` is malformed,
             or the mesh has no geometry for the requested representation.
         RuntimeError: If ``"sphere"`` is requested without CUDA.
-        ImportError: If ``"sphere"`` is requested without cuRobo/trimesh.
+        ImportError: If ``"sphere"`` is requested without dexsim/trimesh.
     """
     if representation not in _REPRESENTATIONS:
         raise ValueError(
@@ -476,51 +519,23 @@ def _mesh_to_obstacle_entry(
         )
     if not torch.cuda.is_available():
         raise RuntimeError(
-            "The 'sphere' representation requires CUDA for cuRobo sphere fitting."
+            "The 'sphere' representation requires CUDA for sphere fitting."
         )
 
-    import trimesh
-
-    from curobo._src.geom.sphere_fit.fit_spheres import fit_spheres_to_mesh
-    from curobo._src.geom.sphere_fit.types import SphereFitType
-    from curobo.types import DeviceCfg
-
-    fit_type_map = {
-        "morphit": SphereFitType.MORPHIT,
-        "voxel": SphereFitType.VOXEL,
-        "surface": SphereFitType.SURFACE,
-    }
-    if fit_type not in fit_type_map:
-        raise ValueError(
-            f"fit_type must be one of {list(fit_type_map)}, got {fit_type!r}."
-        )
-    mesh = trimesh.Trimesh(
-        vertices=vertices.numpy(),
-        faces=faces.reshape(-1, 3).to(torch.int64).numpy(),
-        process=False,
-    )
-    mesh.fill_holes()
-    trimesh.repair.fix_normals(mesh)
-    trimesh.repair.fix_inversion(mesh)
-    trimesh.repair.fix_winding(mesh)
-    fit_result = fit_spheres_to_mesh(
-        mesh,
+    fit_result = _fit_collision_spheres(
+        vertices,
+        faces,
+        max_convex_hull_num=_OBSTACLE_MAX_CONVEX_HULL_NUM,
         num_spheres=num_spheres,
         sphere_density=sphere_density,
-        surface_radius=surface_radius,
-        fit_type=fit_type_map[fit_type],
         iterations=iterations,
-        device_cfg=DeviceCfg(device=device),
+        device=device,
     )
-    if fit_result.num_spheres == 0:
+    if fit_result is None:
         raise RuntimeError(f"No spheres could be fitted for object {name!r}.")
 
-    centers_local = (
-        fit_result.centers.detach().to("cpu").reshape(-1, 3).to(torch.float32)
-    )
-    radii = fit_result.radii.detach().to("cpu").reshape(-1).to(torch.float32) + float(
-        collision_sphere_buffer
-    )
+    centers_local, radii = fit_result
+    radii = radii + float(collision_sphere_buffer)
     rotation = matrix_from_quat(pose[3:7])
     centers_world = centers_local @ rotation.T + pose[:3]
     entries: list[tuple[str, str, dict]] = []
@@ -544,10 +559,8 @@ def generate_curobo_world_yaml(
     *,
     representation: str = "cuboid",
     env_id: int = 0,
-    fit_type: str = "voxel",
     num_spheres: int | None = None,
     sphere_density: float = 1.0,
-    surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
     device: str = "cuda:0",
@@ -571,15 +584,13 @@ def generate_curobo_world_yaml(
         rigid_objects: ``RigidObject`` instances to bake into the collision world.
         output_path: Destination YAML file path.
         representation: ``"cuboid"`` (default, AABB->OBB, no CUDA), ``"mesh"``
-            (exact triangle mesh, no CUDA), or ``"sphere"`` (cuRobo sphere fit,
-            requires CUDA + cuRobo + trimesh).
+            (exact triangle mesh, no CUDA), or ``"sphere"`` (dexsim MorphIt sphere
+            fit, requires CUDA + dexsim + trimesh).
         env_id: Environment instance index to read geometry/pose from (the static
             world is shared, so env 0 is representative).
-        fit_type: cuRobo sphere-fit strategy (sphere representation only).
         num_spheres: Per-object sphere count; ``None`` auto-estimates (sphere only).
         sphere_density: Multiplier on the auto sphere count (sphere only).
-        surface_radius: Fixed radius for the ``"surface"`` strategy (sphere only).
-        iterations: Adam iterations for ``"morphit"`` (sphere only).
+        iterations: Adam iterations for the MorphIt fit (sphere only).
         collision_sphere_buffer: Padding added to each fitted radius (sphere only).
         device: CUDA device for sphere fitting (sphere only).
 
@@ -624,10 +635,8 @@ def generate_curobo_world_yaml(
             faces,
             pose,
             representation=representation,
-            fit_type=fit_type,
             num_spheres=num_spheres,
             sphere_density=sphere_density,
-            surface_radius=surface_radius,
             iterations=iterations,
             collision_sphere_buffer=collision_sphere_buffer,
             device=device,
