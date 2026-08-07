@@ -22,8 +22,8 @@ complete cuRobo V2 robot configuration YAML. The cuRobo planner adapter calls
 this automatically (with on-disk caching) on the first plan; see
 :class:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboAutoGenCfg`.
 
-:func:`generate_curobo_world_yaml` builds the cuRobo collision-world YAML from
-live :class:`~embodichain.lab.sim.objects.RigidObject` meshes.
+:func:`generate_curobo_world_scene` builds cuRobo voxel collision data from live
+:class:`~embodichain.lab.sim.objects.RigidObject` meshes.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "generate_curobo_robot_yaml",
-    "generate_curobo_world_yaml",
+    "generate_curobo_world_scene",
     "visualize_curobo_collision_models",
     "visualize_curobo_robot_collision_model",
     "visualize_curobo_world_collision_model",
@@ -111,7 +111,7 @@ def _to_open3d_tensor_mesh(
     faces: torch.Tensor,
     o3d: Any,
 ) -> Any:
-    """Create the Open3D tensor mesh expected by DexSim's ``sphere_fit``."""
+    """Create an Open3D tensor triangle mesh from tensor-like geometry."""
     return o3d.t.geometry.TriangleMesh.from_legacy(
         _to_open3d_legacy_mesh(vertices, faces, o3d)
     )
@@ -324,68 +324,46 @@ def generate_curobo_robot_yaml(
 
 
 # =============================================================================
-# World (obstacle) YAML generation from RigidObject meshes
+# World voxel generation from RigidObject meshes
 # =============================================================================
 
 
-_REPRESENTATIONS = ("cuboid", "mesh", "sphere")
+def _voxel_grid_coordinates(
+    grid_shape: tuple[int, int, int], voxel_size: float
+) -> torch.Tensor:
+    """Return voxel centers in cuRobo's X/Y/Z flattening order."""
+    axes = [
+        (torch.arange(size, dtype=torch.float32) - (size - 1) / 2.0) * voxel_size
+        for size in grid_shape
+    ]
+    return torch.stack(torch.meshgrid(*axes, indexing="ij"), dim=-1).reshape(-1, 3)
 
 
-def _mesh_to_obstacle_entry(
+def _convex_hulls_to_voxel_entry(
     name: str,
     vertices: torch.Tensor,
     faces: torch.Tensor,
     pose: torch.Tensor,
     *,
-    representation: str = "cuboid",
-    num_spheres: int | None = None,
-    sphere_density: float = 1.0,
-    surface_radius: float = 0.005,
-    iterations: int = 200,
-    collision_sphere_buffer: float = 0.0,
-    device: str = "cuda:0",
-) -> list[tuple[str, str, dict]]:
-    """Convert one mesh + pose into cuRobo world-YAML obstacle entry/entries.
+    voxel_size: float = 0.01,
+    voxel_padding: float = 0.1,
+) -> tuple[str, dict[str, object]]:
+    """Decompose one mesh with VisACD and convert its union to an ESDF grid.
 
-    Pure tensor helper (no simulator import for ``cuboid``/``mesh``) so it is
-    unit-testable without CUDA. ``sphere`` lazily imports DexSim + Open3D.
-
-    Args:
-        name: Obstacle name (cuRobo key under ``cuboid``/``mesh``/``sphere``).
-        vertices: Mesh vertices ``(V, 3)`` in the object's local frame.
-        faces: Triangle indices ``(F, 3)`` (any integer dtype).
-        pose: Object pose as ``(x, y, z, qw, qx, qy, qz)`` ``(7,)`` or a
-            homogeneous ``(4, 4)`` matrix, expressed in the cuRobo world/base
-            frame (the same frame static collision YAMLs are authored in).
-        representation: ``"cuboid"`` (local-frame AABB -> OBB via ``pose``,
-            default), ``"mesh"`` (exact triangle mesh), or ``"sphere"`` (fit
-            spheres with DexSim's :func:`sphere_fit`).
-        num_spheres: Per-mesh sphere count; ``None`` auto-estimates (sphere only).
-        sphere_density: Multiplier on the auto sphere count (sphere only).
-        surface_radius: Fixed radius for MorphIt's surface fallback (sphere only).
-        iterations: Adam iterations for MorphIt (sphere only).
-        collision_sphere_buffer: Padding added to each fitted radius (sphere only).
-        device: CUDA device for sphere fitting (sphere only).
-
-    Returns:
-        A list of ``(top_level_key, obstacle_name, fields)`` tuples. ``cuboid``/
-        ``mesh`` return one entry; ``sphere`` returns one entry per fitted sphere.
-
-    Raises:
-        ValueError: If ``representation`` is unsupported, ``pose`` is malformed,
-            or the mesh has no geometry for the requested representation.
-        RuntimeError: If ``"sphere"`` is requested without CUDA.
-        ImportError: If ``"sphere"`` is requested without DexSim/Open3D.
+    The grid is centered at the object's local origin, so the voxel obstacle's
+    pose stays identical to the source object's pose during dynamic updates.
     """
-    if representation not in _REPRESENTATIONS:
-        raise ValueError(
-            f"representation must be one of {_REPRESENTATIONS}, got {representation!r}."
-        )
-
     vertices = (
         torch.as_tensor(vertices, dtype=torch.float32).detach().to("cpu").reshape(-1, 3)
     )
-    faces = torch.as_tensor(faces).detach().to("cpu")
+    faces = torch.as_tensor(faces).detach().to("cpu").reshape(-1, 3)
+    if vertices.numel() == 0 or faces.numel() == 0:
+        raise ValueError(f"object {name!r} has no mesh geometry for voxelization.")
+    if voxel_size <= 0.0:
+        raise ValueError(f"voxel_size must be positive, got {voxel_size}.")
+    if voxel_padding < 0.0:
+        raise ValueError(f"voxel_padding must be non-negative, got {voxel_padding}.")
+
     pose = torch.as_tensor(pose, dtype=torch.float32).detach().to("cpu")
     if pose.shape == (4, 4):
         position = pose[:3, 3]
@@ -396,192 +374,119 @@ def _mesh_to_obstacle_entry(
             f"pose must be (7,) [x,y,z,qw,qx,qy,qz] or (4, 4), got {tuple(pose.shape)}."
         )
 
-    if representation == "mesh":
-        if vertices.numel() == 0 or faces.numel() == 0:
-            raise ValueError(
-                f"object {name!r} has no mesh geometry for the 'mesh' representation."
-            )
-        return [
-            (
-                "mesh",
-                name,
-                {
-                    "vertices": vertices.tolist(),
-                    "faces": faces.reshape(-1).to(torch.int64).tolist(),
-                    "pose": pose.tolist(),
-                },
-            )
-        ]
-
-    if representation == "cuboid":
-        if vertices.numel() == 0:
-            raise ValueError(
-                f"object {name!r} has no vertices for the 'cuboid' representation."
-            )
-        # Local-frame AABB, emitted as an OBB via the object pose: cuRobo's
-        # Cuboid is centered at ``pose[:3]`` with ``dims`` along the pose axes.
-        vmin = vertices.amin(dim=0)
-        vmax = vertices.amax(dim=0)
-        dims = vmax - vmin
-        center_local = (vmin + vmax) / 2.0
-        rotation = matrix_from_quat(pose[3:7])  # (3, 3), wxyz
-        center_world = rotation @ center_local + pose[:3]
-        cuboid_pose = torch.cat([center_world, pose[3:7]])
-        return [("cuboid", name, {"dims": dims.tolist(), "pose": cuboid_pose.tolist()})]
-
-    # representation == "sphere": fit spheres in the local frame, then transform
-    # centers into the cuRobo world/base frame (Sphere obstacles have no pose/FK).
-    if vertices.numel() == 0 or faces.numel() == 0:
-        raise ValueError(
-            f"object {name!r} has no mesh geometry for the 'sphere' representation."
-        )
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "The 'sphere' representation requires CUDA for DexSim MorphIt fitting."
-        )
-
     import open3d as o3d
 
-    from dexsim.kit.meshproc import SphereFitType, sphere_fit
+    from dexsim.kit.meshproc import convex_decomposition_visacd
 
     mesh = _to_open3d_tensor_mesh(vertices, faces, o3d)
-    is_success, centers, fitted_radii = sphere_fit(
+    is_success, convex_hulls = convex_decomposition_visacd(
         mesh,
-        num_spheres=num_spheres,
-        sphere_density=sphere_density,
-        surface_radius=surface_radius,
-        fit_type=SphereFitType.MORPHIT,
-        iterations=iterations,
         max_convex_hull_num=_OBSTACLE_MAX_CONVEX_HULL_NUM,
-        device=device,
+        is_visual=False,
     )
-    if not is_success:
-        raise RuntimeError(f"No spheres could be fitted for object {name!r}.")
+    if not is_success or not convex_hulls:
+        raise RuntimeError(f"VisACD decomposition failed for object {name!r}.")
 
-    centers_local = centers.detach().to("cpu").reshape(-1, 3).to(torch.float32)
-    radii = fitted_radii.detach().to("cpu").reshape(-1).to(torch.float32) + float(
-        collision_sphere_buffer
+    local_half_extent = torch.maximum(
+        vertices.amin(dim=0).abs(), vertices.amax(dim=0).abs()
     )
-    rotation = matrix_from_quat(pose[3:7])
-    centers_world = centers_local @ rotation.T + pose[:3]
-    entries: list[tuple[str, str, dict]] = []
-    for i in range(centers_world.shape[0]):
-        entries.append(
-            (
-                "sphere",
-                f"{name}_{i}",
-                {
-                    "position": centers_world[i].tolist(),
-                    "radius": float(radii[i].item()),
-                },
-            )
-        )
-    return entries
+    requested_dims = 2.0 * (local_half_extent + float(voxel_padding))
+    grid_shape_tensor = torch.ceil(requested_dims / float(voxel_size)).to(torch.int64)
+    grid_shape_tensor = torch.clamp(grid_shape_tensor, min=2)
+    grid_shape = tuple(int(value) for value in grid_shape_tensor.tolist())
+    dims = grid_shape_tensor.to(torch.float32) * float(voxel_size)
+    query_points = _voxel_grid_coordinates(grid_shape, float(voxel_size))
+    query_o3d = o3d.core.Tensor(query_points.numpy(), dtype=o3d.core.Dtype.Float32)
+
+    union_sdf = torch.full((query_points.shape[0],), torch.inf, dtype=torch.float32)
+    for hull in convex_hulls:
+        hull_cpu = hull.cpu() if hasattr(hull, "cpu") else hull
+        scene = o3d.t.geometry.RaycastingScene()
+        scene.add_triangles(hull_cpu)
+        hull_sdf = torch.from_numpy(
+            scene.compute_signed_distance(query_o3d).numpy()
+        ).to(torch.float32)
+        union_sdf = torch.minimum(union_sdf, hull_sdf)
+
+    feature_tensor = union_sdf.reshape(grid_shape).to(torch.float16).contiguous()
+    return name, {
+        "pose": pose.tolist(),
+        "dims": dims.tolist(),
+        "voxel_size": float(voxel_size),
+        "feature_tensor": feature_tensor,
+    }
 
 
-def generate_curobo_world_yaml(
+def generate_curobo_world_scene(
     rigid_objects: Sequence[RigidObject],
-    output_path: str,
     *,
-    representation: str = "cuboid",
     env_id: int = 0,
-    num_spheres: int | None = None,
-    sphere_density: float = 1.0,
-    surface_radius: float = 0.005,
-    iterations: int = 200,
-    collision_sphere_buffer: float = 0.0,
-    device: str = "cuda:0",
-) -> str:
-    """Generate a cuRobo V2 scene (world) YAML from a sequence of ``RigidObject``.
+    voxel_size: float = 0.01,
+    voxel_padding: float = 0.1,
+) -> dict[str, dict[str, dict[str, object]]]:
+    """Build a VisACD-decomposed ESDF voxel scene for cuRobo.
 
-    Each object's mesh (``get_vertices`` / ``get_triangles``) and world pose
-    (``get_local_pose``) are converted into cuRobo obstacle entries under a single
-    top-level key (``cuboid`` / ``mesh`` / ``sphere``). The cuRobo planner loads
-    the resulting YAML as its collision world.
-
-    .. attention::
-        Poses are written in the cuRobo world/base frame - the same convention as
-        a hand-authored static collision YAML. When the robot base is offset from
-        the simulator world origin, rebase the object poses first, or register the
-        obstacle name in ``CuroboWorldCfg.dynamic_obstacle_names`` and update its
-        pose at plan time via
-        :meth:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboPlanner.update_dynamic_obstacles`.
+    Every source object produces one same-named voxel layer. The SDF is the
+    union of at most 16 convex hulls returned by DexSim's
+    :func:`convex_decomposition_visacd`.
 
     Args:
-        rigid_objects: ``RigidObject`` instances to bake into the collision world.
-        output_path: Destination YAML file path.
-        representation: ``"cuboid"`` (default, AABB->OBB, no CUDA), ``"mesh"``
-            (exact triangle mesh, no CUDA), or ``"sphere"`` (DexSim MorphIt
-            sphere fit, requiring CUDA + DexSim + Open3D).
-        env_id: Environment instance index to read geometry/pose from (the static
-            world is shared, so env 0 is representative).
-        num_spheres: Per-object sphere count; ``None`` auto-estimates (sphere only).
-        sphere_density: Multiplier on the auto sphere count (sphere only).
-        surface_radius: Fixed radius for MorphIt's surface fallback (sphere only).
-        iterations: Adam iterations for MorphIt (sphere only).
-        collision_sphere_buffer: Padding added to each fitted radius (sphere only).
-        device: CUDA device for sphere fitting (sphere only).
+        rigid_objects: Live obstacles whose meshes define the collision world.
+        env_id: Environment row used for geometry and initial object poses.
+        voxel_size: ESDF voxel edge length in meters.
+        voxel_padding: Free-space padding around each object-local mesh.
 
     Returns:
-        The ``output_path`` that was written.
+        A tensor-backed ``{"voxel": ...}`` mapping accepted by cuRobo
+        :meth:`Scene.create`.
 
     Raises:
-        ValueError: If ``rigid_objects`` is empty or a representation/pose is
-            invalid.
+        ValueError: If no usable uniquely named objects are provided.
+        RuntimeError: If DexSim VisACD decomposition fails.
     """
-    import os
-
-    import yaml
-
     rigid_objects = list(rigid_objects)
     if not rigid_objects:
         raise ValueError("rigid_objects must contain at least one RigidObject.")
 
-    data: dict[str, dict[str, object]] = {}
-    used_names: set[str] = set()
+    voxels: dict[str, dict[str, object]] = {}
     for idx, obj in enumerate(rigid_objects):
         name = getattr(obj, "uid", None) or f"obstacle_{idx}"
-        if name in used_names:
+        if name in voxels:
             raise ValueError(
                 f"Duplicate obstacle name {name!r}; RigidObject uids must be unique."
             )
-        used_names.add(name)
-
         vertices = obj.get_vertices(env_ids=[env_id], scale=True)[0]
         faces = obj.get_triangles(env_ids=[env_id])[0]
         pose = obj.get_local_pose(to_matrix=False)[env_id]
-
         if vertices is None or faces is None or vertices.numel() == 0:
             logger.log_warning(
                 f"RigidObject {name!r} has no mesh geometry; skipping collision export."
             )
             continue
-
-        entries = _mesh_to_obstacle_entry(
+        obstacle_name, fields = _convex_hulls_to_voxel_entry(
             name,
             vertices,
             faces,
             pose,
-            representation=representation,
-            num_spheres=num_spheres,
-            sphere_density=sphere_density,
-            surface_radius=surface_radius,
-            iterations=iterations,
-            collision_sphere_buffer=collision_sphere_buffer,
-            device=device,
+            voxel_size=voxel_size,
+            voxel_padding=voxel_padding,
         )
-        for top_key, obstacle_name, fields in entries:
-            data.setdefault(top_key, {})[obstacle_name] = fields
+        voxels[obstacle_name] = fields
 
-    if not data:
+    if not voxels:
         raise ValueError(
             "No collision obstacles could be generated from the given RigidObjects."
         )
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    with open(output_path, "w") as yaml_file:
-        yaml.dump(data, yaml_file, default_flow_style=False, sort_keys=False)
-    return output_path
+    # VoxelData allocates each layer with the first layer's capacity. Keep the
+    # largest layer first so differently-sized object grids all fit the cache.
+    voxels = dict(
+        sorted(
+            voxels.items(),
+            key=lambda item: int(item[1]["feature_tensor"].numel()),
+            reverse=True,
+        )
+    )
+    return {"voxel": voxels}
 
 
 # =============================================================================
@@ -713,17 +618,16 @@ def visualize_curobo_robot_collision_model(
 
 def visualize_curobo_world_collision_model(
     rigid_objects: Sequence[RigidObject],
-    world_yaml_path: str,
+    world_scene: Any,
     env_id: int = 0,
     *,
     draw: bool = True,
 ) -> list[dict[str, Any]]:
-    """Visualize live obstacle meshes and spheres loaded from a cached world YAML.
+    """Visualize live obstacle meshes and cuRobo ESDF collision voxels.
 
     Args:
         rigid_objects: Live simulator obstacles represented by the cache.
-        world_yaml_path: Cached auto-generated cuRobo world YAML. It must use
-            the ``sphere`` representation.
+        world_scene: Tensor-backed scene mapping or a cuRobo ``Scene`` instance.
         env_id: Simulator environment instance whose live meshes are shown.
         draw: Open an Open3D window immediately. ``False`` returns draw entries
             for composition with the robot collision model.
@@ -732,15 +636,15 @@ def visualize_curobo_world_collision_model(
         Open3D geometry dictionaries suitable for :func:`open3d.visualization.draw`.
     """
     import open3d as o3d
-    import yaml
 
-    with open(world_yaml_path, encoding="utf-8") as yaml_file:
-        data = yaml.safe_load(yaml_file)
-    sphere_entries = data.get("sphere", {}) if isinstance(data, dict) else {}
-    if not sphere_entries:
-        raise ValueError(
-            f"World cache {world_yaml_path!r} contains no sphere representation."
-        )
+    if isinstance(world_scene, dict):
+        voxel_entries = list(world_scene.get("voxel", {}).items())
+    else:
+        voxel_entries = [
+            (voxel.name, voxel) for voxel in (getattr(world_scene, "voxel", None) or [])
+        ]
+    if not voxel_entries:
+        raise ValueError("The cuRobo world scene contains no voxel collision data.")
 
     meshes: list[tuple[str, Any]] = []
     for idx, obj in enumerate(rigid_objects):
@@ -756,20 +660,33 @@ def visualize_curobo_world_collision_model(
         mesh.transform(pose.numpy())
         meshes.append((f"obstacle_mesh/{name}", mesh))
 
-    centers = torch.as_tensor(
-        [entry["position"] for entry in sphere_entries.values()], dtype=torch.float32
-    ).reshape(-1, 3)
-    radii = torch.as_tensor(
-        [entry["radius"] for entry in sphere_entries.values()], dtype=torch.float32
-    ).reshape(-1)
-    geometries = _collision_visualization_geometries(
-        meshes,
-        centers,
-        radii,
-        sphere_name="obstacle_spheres",
-        sphere_color=[0.8, 0.15, 0.0, 0.5],
-        mesh_color=[0.45, 0.55, 0.45, 1.0],
-    )
+    mesh_material = o3d.visualization.rendering.MaterialRecord()
+    mesh_material.shader = "defaultLit"
+    mesh_material.base_color = [0.45, 0.55, 0.45, 1.0]
+    geometries = [
+        {"name": name, "geometry": mesh, "material": mesh_material}
+        for name, mesh in meshes
+    ]
+    for name, entry in voxel_entries:
+        get_value = (
+            entry.get if isinstance(entry, dict) else lambda key: getattr(entry, key)
+        )
+        features = torch.as_tensor(get_value("feature_tensor")).detach().cpu()
+        voxel_size = float(get_value("voxel_size"))
+        local_points = _voxel_grid_coordinates(tuple(features.shape), voxel_size)
+        occupied = features.reshape(-1) <= 0.5 * voxel_size
+        if not torch.any(occupied):
+            continue
+        pose = torch.as_tensor(get_value("pose"), dtype=torch.float32)
+        rotation = matrix_from_quat(pose[3:7])
+        world_points = local_points[occupied] @ rotation.T + pose[:3]
+        point_cloud = o3d.geometry.PointCloud()
+        point_cloud.points = o3d.utility.Vector3dVector(world_points.numpy())
+        point_cloud.paint_uniform_color([0.8, 0.15, 0.0])
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(
+            point_cloud, voxel_size=voxel_size
+        )
+        geometries.append({"name": f"obstacle_voxels/{name}", "geometry": voxel_grid})
     if draw:
         o3d.visualization.draw(geometries, title="cuRobo obstacle collision model")
     return geometries
@@ -779,19 +696,19 @@ def visualize_curobo_collision_models(
     robot: Robot,
     robot_yaml_path: str,
     rigid_objects: Sequence[RigidObject] | None = None,
-    world_yaml_path: str | None = None,
+    world_scene: Any | None = None,
     env_id: int = 0,
 ) -> None:
-    """Draw cached robot and obstacle collision spheres in one Open3D window."""
+    """Draw cached robot spheres and obstacle collision voxels together."""
     import open3d as o3d
 
     geometries = visualize_curobo_robot_collision_model(
         robot, robot_yaml_path, env_id, draw=False
     )
-    if rigid_objects and world_yaml_path is not None:
+    if rigid_objects and world_scene is not None:
         geometries.extend(
             visualize_curobo_world_collision_model(
-                rigid_objects, world_yaml_path, env_id, draw=False
+                rigid_objects, world_scene, env_id, draw=False
             )
         )
     o3d.visualization.draw(geometries, title="cuRobo collision models")

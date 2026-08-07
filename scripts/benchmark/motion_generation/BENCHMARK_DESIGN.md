@@ -337,8 +337,8 @@ planner supports interruption.
 
 cuRobo lazily creates and caches a backend for each
 `(control_part, batch_size, multi_env, move_type)`. First use may include
-robot/world YAML generation, sphere fitting, collision-cache allocation, CUDA
-graph capture, and warmup. NMG has checkpoint loading, actor construction, and
+robot sphere fitting, voxel-world generation, CUDA graph capture, and warmup.
+NMG has checkpoint loading, actor construction, and
 device transfer.
 
 Report the following separately for both:
@@ -654,7 +654,6 @@ planners:
       warmup_iterations: 1
       preserve_plan_samples: true
       world:
-        obstacle_representation: mesh
         multi_env: false
 
 tracks:

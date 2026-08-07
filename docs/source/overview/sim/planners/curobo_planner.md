@@ -142,26 +142,19 @@ second CUDA context.
 
 The collision world is always auto-generated from live `RigidObject` meshes via
 `CuroboWorldCfg.rigid_objects`: the adapter reads each object's mesh
-(`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and writes a
-cached cuRobo scene YAML on the first plan, using
-`CuroboWorldCfg.obstacle_representation` (`"sphere"` by default; use
-`"cuboid"` for a local-frame AABB placed as an OBB via the object pose, or
-`"mesh"` for the exact triangle mesh). Sphere worlds remain sphere-based in
-the generated YAML, cache, collision-model visualization, and runtime checker.
-cuRobo V2 can parse those spheres but omits sphere storage from its generic
-world checker. EmbodiChain registers an analytic sphere obstacle type with that
-checker before constructing the backend; its signed distance is evaluated as
-the center distance minus the obstacle radius. The runtime sphere cache is
-sized automatically from the scene, and backend initialization verifies that
-no fitted sphere was silently dropped.
+(`get_vertices` / `get_triangles`) and world pose (`get_local_pose`), decomposes
+the mesh into at most 16 convex hulls with DexSim
+`convex_decomposition_visacd`, and computes their union as an ESDF voxel grid.
+The tensor-backed voxel scene is cached on the first plan and loaded directly
+into cuRobo's `SceneData`; there are no cuboid, triangle-mesh, or sphere world
+representation branches. `CuroboWorldCfg.voxel_size` controls resolution and
+`voxel_padding` keeps collision queries inside the ESDF grid near its boundary.
 Generated poses are authored in the cuRobo base/world frame, so this is exact
 when the robot base sits at the simulator world origin. For obstacles that move
 or live in an offset base frame, also declare their names in
 `CuroboWorldCfg.dynamic_obstacle_names` and update poses at plan time through
-`CuroboPlanOptions.dynamic_obstacle_poses` (provision
-`CuroboWorldCfg.collision_cache` before planning). Dynamic updates require the
-`"cuboid"` or `"mesh"` representation because sphere fitting expands one object
-into multiple independently named obstacles.
+`CuroboPlanOptions.dynamic_obstacle_poses`. Every source object remains one
+same-named voxel layer, so pose updates use the original `RigidObject` name.
 
 ### Shared and per-environment collision worlds
 
@@ -185,14 +178,13 @@ differ, the adapter rejects the update and instructs the caller to enable
 
 With `multi_env=True`, cuRobo allocates one collision world per batch row and
 EmbodiChain sends row `i` of each dynamic obstacle pose to world `i`. The
-auto-generated YAML still reads the static scene from env 0 and clones that
+auto-generated voxel cache still reads the static scene from env 0 and clones that
 scene for every row; setting `multi_env=True` does not by itself discover each
 environment's distinct initial object poses. Any object whose robot-relative
 pose differs by environment must also:
 
-1. Use `obstacle_representation="cuboid"` or `"mesh"`.
-2. Be listed in `CuroboWorldCfg.dynamic_obstacle_names`.
-3. Have its current `(B, 4, 4)` simulator-world poses passed through
+1. Be listed in `CuroboWorldCfg.dynamic_obstacle_names`.
+2. Have its current `(B, 4, 4)` simulator-world poses passed through
    `CuroboPlanOptions.dynamic_obstacle_poses` when planning.
 
 For example:
@@ -200,7 +192,6 @@ For example:
 ```python
 world_cfg = CuroboWorldCfg(
     rigid_objects=[block],
-    obstacle_representation="cuboid",
     dynamic_obstacle_names=["block"],
     multi_env=True,
 )
@@ -328,9 +319,9 @@ python examples/sim/planners/curobo_planner.py --headless --sim-device cpu
 ~~~
 
 The demo exports the DexSim `demo_block` into the cuRobo collision world via
-`CuroboWorldCfg.rigid_objects` (the robot and world YAMLs are both
-auto-generated), prints the result status and trajectory shape, then replays the
-returned full-DoF trajectory. CUDA graph capture is enabled by default with the
+`CuroboWorldCfg.rigid_objects` (the robot YAML and voxel world cache are
+auto-generated), prints the result status and trajectory shape, then replays
+the returned full-DoF trajectory. CUDA graph capture is enabled by default with the
 renderer-compatible `"thread_local"` mode; pass `--no-cuda-graph` to disable it.
 Headless runs
 automatically record this fixed offscreen camera view to an MP4. Set an explicit

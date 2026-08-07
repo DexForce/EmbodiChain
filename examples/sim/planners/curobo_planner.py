@@ -17,7 +17,8 @@
 """cuRobo V2 collision-aware planning through the atomic-action interface.
 
 The demo creates one or more copies of the selected robot and a kinematic
-cuboid represented in both DexSim and cuRobo. With multiple environments, each
+DexSim cuboid converted through VisACD into a cuRobo ESDF voxel obstacle. With
+multiple environments, each
 obstacle receives a small reproducible XY/yaw perturbation and cuRobo allocates
 an independent collision world for each environment. The demo then executes a
 batched ``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays
@@ -746,7 +747,6 @@ def main() -> None:
                     robot_uid=robot.uid,
                     world=CuroboWorldCfg(
                         rigid_objects=obstacles,
-                        obstacle_representation=("sphere"),
                         dynamic_obstacle_names=(
                             [obstacle.uid for obstacle in obstacles]
                             if use_independent_worlds
@@ -761,8 +761,8 @@ def main() -> None:
             )
         )
         if visualize_collision_models:
-            # This opens one blocking Open3D window. The spheres are loaded from
-            # the exact robot/world YAML caches consumed by cuRobo; close the
+            # This opens one blocking Open3D window. Robot spheres and obstacle
+            # voxels come from the exact caches consumed by cuRobo; close the
             # window to continue with planner backend creation and execution.
             motion_generator.planner.visualize_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
