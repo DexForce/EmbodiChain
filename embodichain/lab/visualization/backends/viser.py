@@ -645,6 +645,12 @@ class ViserBackend(VisualizationBackend):
 
                 @self._replay_control_slider.on_update
                 def _(event: object) -> None:
+                    # Assigning ``GuiSliderHandle.value`` on the update thread
+                    # synchronously invokes callbacks with no originating client.
+                    # Ignore those server-side synchronization events; otherwise
+                    # they feed back into the replay command queue indefinitely.
+                    if self._event_client_id(event) is None:
+                        return
                     self._gui_events.put(
                         _GuiEvent(
                             category="replay_control",

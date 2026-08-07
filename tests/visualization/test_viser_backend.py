@@ -531,6 +531,97 @@ def test_viser_backend_groups_sensor_and_record_camera_previews() -> None:
     backend.stop()
 
 
+def test_viser_backend_replay_slider_emits_client_seek_once() -> None:
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    commands: list[int] = []
+    backend.set_replay_control_command_sink(commands.append)
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_replay_control(
+        step=REPLAY_INITIAL_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    slider = server.gui.sliders["Frame"]
+    slider.callback(
+        SimpleNamespace(
+            client_id="client-a",
+            target=SimpleNamespace(value=REPLAY_TARGET_STEP),
+        )
+    )
+    backend.poll()
+
+    assert commands == [REPLAY_TARGET_STEP]
+    backend.stop()
+
+
+def test_viser_backend_ignores_server_originated_replay_slider_update() -> None:
+    """Viser invokes callbacks with no client when backend code sets value."""
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    commands: list[int] = []
+    backend.set_replay_control_command_sink(commands.append)
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_replay_control(
+        step=REPLAY_INITIAL_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    slider = server.gui.sliders["Frame"]
+    slider.callback(
+        SimpleNamespace(
+            client_id=None,
+            target=SimpleNamespace(value=REPLAY_TARGET_STEP),
+        )
+    )
+    backend.poll()
+
+    assert commands == []
+    backend.stop()
+
+
+def test_viser_backend_replay_slider_tracks_progress_and_hides() -> None:
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_replay_control(
+        step=REPLAY_INITIAL_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    folder = server.gui.folders["Replay control"]
+    slider = server.gui.sliders["Frame"]
+    backend.publish_replay_control(
+        step=REPLAY_TARGET_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    assert slider.value == REPLAY_TARGET_STEP
+
+    backend.publish_replay_control(
+        step=REPLAY_TARGET_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=False,
+    )
+    assert folder.removed is True
+    assert slider.removed is True
+    backend.stop()
+
+
 def test_viser_backend_batches_large_scenes_without_per_env_gui_nodes() -> None:
     num_envs = 1024
     server = _Server()
