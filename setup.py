@@ -121,6 +121,14 @@ def main():
         description="An end-to-end, GPU-accelerated, and modular platform for building generalized Embodied Intelligence.",
         packages=find_packages(exclude=["docs"]),
         data_files=data_files,
+        package_data={
+            "scripts.benchmark.motion_generation": ["suites/*.yaml"],
+            "scripts.benchmark.rl": [
+                "suites/*.yaml",
+                "tasks/*.yaml",
+                "algorithms/*.yaml",
+            ],
+        },
         cmdclass=cmdclass,
         include_package_data=True,
     )
