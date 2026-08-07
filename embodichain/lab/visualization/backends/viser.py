@@ -145,6 +145,9 @@ class ViserBackend(VisualizationBackend):
         self._joint_control_states: dict[str, JointControlState] = {}
         self._joint_control_pending_sequences: dict[str, int] = {}
         self._joint_control_sequence = 0
+        self._replay_control_state: tuple[int, int, bool] | None = None
+        self._replay_control_folder: object | None = None
+        self._replay_control_slider: object | None = None
         self._world_handle: object | None = None
         self._ground_grid_handle: object | None = None
         self._camera_handles: dict[str, object] = {}
@@ -238,6 +241,8 @@ class ViserBackend(VisualizationBackend):
         self._server.gui.reset()
         self._camera_env_dropdown = None
         self._camera_uid_dropdown = None
+        self._replay_control_folder = None
+        self._replay_control_slider = None
         self._camera_preview_folder = None
         self._camera_preview_group_folders.clear()
         self._camera_image_handles.clear()
@@ -246,9 +251,10 @@ class ViserBackend(VisualizationBackend):
         )
         if self.allow_commands:
             self._server.gui.add_markdown(
-                "⚠️ **Interactive controls enabled.** Gizmos and articulation "
-                "joint controls may mutate the simulation."
+                "⚠️ **Interactive controls enabled.** Registered browser controls "
+                "may mutate the simulation."
             )
+        self._register_replay_control()
         env_ids = sorted(
             {node.env_id for node in manifest.nodes}
             | {camera.env_id for camera in manifest.cameras}
@@ -605,6 +611,52 @@ class ViserBackend(VisualizationBackend):
                 value=value,
             )
         )
+
+    def _remove_replay_control(self) -> None:
+        if self._replay_control_slider is not None:
+            self._replay_control_slider.remove()
+        if self._replay_control_folder is not None:
+            self._replay_control_folder.remove()
+        self._replay_control_folder = None
+        self._replay_control_slider = None
+
+    def _register_replay_control(self) -> None:
+        if self._replay_control_state is None:
+            return
+        step, max_step, visible = self._replay_control_state
+        if not visible:
+            return
+        self._replay_control_folder = self._server.gui.add_folder(
+            "Replay control",
+            expand_by_default=True,
+        )
+        with self._replay_control_folder:
+            self._replay_control_slider = self._server.gui.add_slider(
+                "Frame",
+                min=0,
+                max=max_step,
+                step=1,
+                initial_value=step,
+                marks=(),
+                disabled=not self.allow_commands,
+                hint="Seek to a recorded trajectory frame.",
+            )
+            if self.allow_commands:
+
+                @self._replay_control_slider.on_update
+                def _(event: object) -> None:
+                    # Assigning ``GuiSliderHandle.value`` on the update thread
+                    # synchronously invokes callbacks with no originating client.
+                    # Ignore those server-side synchronization events; otherwise
+                    # they feed back into the replay command queue indefinitely.
+                    if self._event_client_id(event) is None:
+                        return
+                    self._gui_events.put(
+                        _GuiEvent(
+                            category="replay_control",
+                            value=int(round(event.target.value)),
+                        )
+                    )
 
     def _create_gizmo_handle(self, spec: GizmoSpec) -> object:
         if self.allow_commands:
@@ -1158,6 +1210,13 @@ class ViserBackend(VisualizationBackend):
                         str(control_id),
                         float(value),
                     )
+            elif event.category == "replay_control":
+                state = self._replay_control_state
+                sink = getattr(self, "_replay_control_command_sink", None)
+                if state is not None and state[2] and sink is not None:
+                    target_step = max(0, min(int(event.value), state[1]))
+                    self._replay_control_slider.value = target_step
+                    sink(target_step)
             changed = True
         if not changed:
             return
@@ -1439,6 +1498,38 @@ class ViserBackend(VisualizationBackend):
                     handle.image = image.image
         return True
 
+    def publish_replay_control(
+        self,
+        *,
+        step: int,
+        max_step: int,
+        visible: bool,
+    ) -> None:
+        """Create or update the trajectory replay frame slider.
+
+        Args:
+            step: Current trajectory step.
+            max_step: Largest valid trajectory step.
+            visible: Whether the replay control should be visible.
+        """
+        self._assert_update_thread()
+        if self._server is None:
+            raise RuntimeError("ViserBackend.start() must be called before publishing.")
+        self._apply_gui_events()
+        previous_max_step = (
+            self._replay_control_state[1]
+            if self._replay_control_state is not None
+            else None
+        )
+        self._replay_control_state = (step, max_step, visible)
+        if not visible:
+            self._remove_replay_control()
+        elif self._replay_control_slider is None or previous_max_step != max_step:
+            self._remove_replay_control()
+            self._register_replay_control()
+        else:
+            self._replay_control_slider.value = step
+
     def poll(self) -> None:
         """Apply queued browser GUI events."""
         self._assert_update_thread()
@@ -1470,6 +1561,9 @@ class ViserBackend(VisualizationBackend):
         self._joint_control_states.clear()
         self._joint_control_pending_sequences.clear()
         self._joint_control_sequence = 0
+        self._replay_control_state = None
+        self._replay_control_folder = None
+        self._replay_control_slider = None
         self._world_handle = None
         self._ground_grid_handle = None
         self._camera_handles.clear()
