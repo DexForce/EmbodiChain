@@ -151,7 +151,7 @@ def _run_case(
     elapsed, mem_delta, peak_gpu, result = timed_call(
         lambda: atomic_engine.compile(steps)
     )
-    is_success = result.plan_success
+    is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
     video_path = None
     if should_record_case(args, recorded_count, bool(is_success)):

@@ -590,7 +590,7 @@ def _timed_atomic_run(
             ),
         )
     )
-    is_success = result.plan_success
+    is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
     _sync_cuda()
     elapsed = time.perf_counter() - start

@@ -196,7 +196,7 @@ def _run_case(
                 )
             )
         )
-        is_success = result.plan_success
+        is_success = bool(result.plan_success.all().item())
         traj = result.trajectory.positions
         final_state = result.projected_context
         final_obj_position = None

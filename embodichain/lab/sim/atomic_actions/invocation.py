@@ -115,8 +115,8 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
     """Engine-owned immutable planning snapshot for one invocation revision.
 
     Recovery replans reuse this object verbatim and vary only the
-    :class:`PlanningContext`. Deep-copying policies and skill options severs
-    references to caller-owned runtime objects before planning starts.
+    :class:`PlanningContext`. Deep-copying the goal, policies, and skill options
+    severs references to caller-owned runtime objects before planning starts.
     """
 
     skill_id: str
@@ -145,6 +145,7 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
             raise ValueError("invocation_id must be a non-empty string when set.")
         if not isinstance(self.revision, int) or self.revision < 0:
             raise ValueError("revision must be a non-negative integer.")
+        object.__setattr__(self, "goal", deepcopy(self.goal))
         object.__setattr__(self, "motion_policy", deepcopy(self.motion_policy))
         object.__setattr__(self, "recovery_policy", deepcopy(self.recovery_policy))
         object.__setattr__(self, "skill_options", deepcopy(self.skill_options))

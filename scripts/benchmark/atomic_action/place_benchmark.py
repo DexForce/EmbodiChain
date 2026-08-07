@@ -228,7 +228,7 @@ def _prepare_held_state(
             ),
         )
     )
-    is_success = result.plan_success
+    is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
     state = result.projected_context
     if not is_success or state.get_held_object("arm") is None:
@@ -328,7 +328,7 @@ def _run_case(
                 context=state,
             )
         )
-        is_success = result.plan_success
+        is_success = bool(result.plan_success.all().item())
         traj = result.trajectory.positions
         final_state = result.projected_context
         torch = ensure_torch()

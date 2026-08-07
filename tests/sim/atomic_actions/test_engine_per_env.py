@@ -111,13 +111,13 @@ class EffectAction(DynamicAction):
         )
 
 
-def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
+def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 2
     robot.control_parts = {"arm": object()}
-    robot.get_qpos.return_value = torch.zeros(1, 2)
-    robot.get_qvel.return_value = torch.zeros(1, 2)
+    robot.get_qpos.return_value = torch.zeros(batch_size, 2)
+    robot.get_qvel.return_value = torch.zeros(batch_size, 2)
     robot.get_joint_ids.return_value = [0, 1]
     generator = Mock()
     generator.robot = robot
@@ -130,24 +130,32 @@ def _engine() -> tuple[AtomicActionEngine, DynamicAction]:
 
 
 def _context(
-    timestamp: float, qpos: float, entity_x: float, version: int
+    timestamp: float,
+    qpos: float | tuple[float, ...],
+    entity_x: float | tuple[float, ...],
+    version: int,
 ) -> PlanningContext:
-    positions = torch.full((1, 2), qpos)
-    pose = torch.eye(4).unsqueeze(0)
-    pose[:, 0, 3] = entity_x
+    qpos_values = torch.as_tensor(qpos, dtype=torch.float32).reshape(-1)
+    entity_x_values = torch.as_tensor(entity_x, dtype=torch.float32).reshape(-1)
+    if qpos_values.shape != entity_x_values.shape:
+        raise ValueError("qpos and entity_x must describe the same batch.")
+    batch_size = int(qpos_values.shape[0])
+    positions = qpos_values[:, None].expand(-1, 2).clone()
+    pose = torch.eye(4).repeat(batch_size, 1, 1)
+    pose[:, 0, 3] = entity_x_values
     return PlanningContext(
         robot=RobotObservation(
             timestamp=timestamp,
             qpos=positions,
             qvel=torch.zeros_like(positions),
         ),
-        task=TaskState.empty(batch_size=1, device="cpu"),
+        task=TaskState.empty(batch_size=batch_size, device="cpu"),
         scene=SceneSnapshot(
             timestamp=timestamp,
             version=version,
             entities={"target": EntityState(pose)},
         ),
-        env_ids=torch.tensor([0], dtype=torch.long),
+        env_ids=torch.arange(batch_size, dtype=torch.long),
     )
 
 
@@ -156,12 +164,13 @@ def _invocation(
     max_replans: int = 2,
     max_phase_retries: int = 2,
     phase_timeout: float = 30.0,
+    control_dt: float = 1.0 / 60.0,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     return ActionInvocation(
         skill_id="dynamic",
         goal=EndEffectorPoseGoal(SceneEntityPose("target")),
         binding=ActionBinding(manipulators={"primary": "arm"}),
-        motion_policy=MotionPolicy(sample_count=2),
+        motion_policy=MotionPolicy(sample_count=2, control_dt=control_dt),
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
             max_phase_retries=max_phase_retries,
@@ -188,6 +197,22 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert final.eligible_mask.tolist() == [True]
 
 
+def test_session_commands_preserve_trajectory_timing() -> None:
+    engine, _ = _engine()
+    session = engine.start(
+        (_invocation(control_dt=0.25),),
+        _context(0.0, 0.0, 0.2, 0),
+    )
+
+    first = session.tick(_context(0.0, 0.0, 0.2, 0))
+    second = session.tick(_context(0.25, 0.0, 0.2, 0))
+
+    assert first.command is not None
+    assert torch.equal(first.command.hold_duration, torch.tensor([0.25]))
+    assert second.command is not None
+    assert torch.equal(second.command.hold_duration, torch.tensor([0.25]))
+
+
 def test_scene_motion_replans_late_bound_goal() -> None:
     engine, action = _engine()
     session = engine.start((_invocation(),), _context(0.0, 0.0, 0.1, 0))
@@ -201,6 +226,86 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert action.plan_count == 2
     assert action.requests[0] is action.requests[1]
     assert tick.command is not None
+
+
+def test_resolved_goal_snapshot_is_reused_during_recovery() -> None:
+    engine, action = _engine()
+    target = torch.eye(4).unsqueeze(0)
+    target[:, 0, 3] = 0.2
+    base = _invocation()
+    invocation = ActionInvocation(
+        skill_id=base.skill_id,
+        goal=EndEffectorPoseGoal(target),
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+        invocation_id=base.invocation_id,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.0, 0))
+    target[:, 0, 3] = 0.8
+    session.tick(_context(0.0, 0.0, 0.0, 0))
+
+    session.tick(_context(0.1, 1.0, 0.0, 0))
+
+    assert action.plan_count == 2
+    assert action.requests[0] is action.requests[1]
+    snapshot = action.requests[1].goal.xpos
+    assert isinstance(snapshot, torch.Tensor)
+    assert torch.equal(snapshot[:, 0, 3], torch.tensor([0.2]))
+
+
+def test_subset_replan_restarts_synchronized_active_cohort() -> None:
+    engine, action = _engine(batch_size=2)
+    session = engine.start(
+        (_invocation(),),
+        _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
+    )
+    session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
+
+    replanned = session.tick(_context(0.1, (0.0, 0.0), (0.4, 0.2), 1))
+    next_command = session.tick(_context(0.2, (0.0, 0.0), (0.4, 0.2), 1))
+
+    changed = next(
+        event
+        for event in replanned.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
+    cohort = next(
+        event
+        for event in replanned.events
+        if event.kind is ExecutionEventKind.REPLANNED
+    )
+    assert changed.env_mask.tolist() == [True, False]
+    assert cohort.env_mask.tolist() == [True, True]
+    assert replanned.eligible_mask.tolist() == [True, True]
+    assert replanned.command is not None
+    assert torch.all(replanned.command.positions == 0.0)
+    assert next_command.command is not None
+    assert torch.equal(next_command.command.positions[:, 0], torch.tensor([0.4, 0.2]))
+    assert action.plan_count == 2
+
+
+def test_replan_exhaustion_disables_only_triggering_row() -> None:
+    engine, _ = _engine(batch_size=2)
+    session = engine.start(
+        (_invocation(max_replans=1),),
+        _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
+    )
+    session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
+    session.tick(_context(0.1, (0.0, 0.0), (0.4, 0.2), 1))
+
+    exhausted = session.tick(_context(0.2, (0.0, 0.0), (0.6, 0.2), 2))
+
+    event = next(
+        event
+        for event in exhausted.events
+        if event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED
+    )
+    assert event.env_mask.tolist() == [True, False]
+    assert exhausted.eligible_mask.tolist() == [False, True]
+    assert exhausted.status is ExecutionStatus.RUNNING
+    assert exhausted.command is not None
+    assert exhausted.command.active_mask.tolist() == [False, True]
 
 
 def test_session_revision_replans_from_latest_context() -> None:

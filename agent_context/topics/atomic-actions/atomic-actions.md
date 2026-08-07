@@ -81,21 +81,26 @@ session = engine.start(invocations, initial_context)
 tick = session.tick(latest_context, effect_success=None)
 ```
 
-An `ExecutionSession` emits at most one `JointCommand` per tick and monitors:
+An `ExecutionSession` emits at most one `JointCommand` per tick. The command's
+per-environment `hold_duration` preserves `TimedTrajectory.dt` for the caller's
+control loop. The session monitors:
 
 - joint tracking error against the previous command;
 - translation/rotation drift of referenced scene entities;
 - phase timeout;
 - planner and semantic-effect failure.
 
-It replans from the latest observation within per-environment budgets. Unknown
+It replans from the latest observation within per-environment budgets. The
+budgets and eligibility masks are row-local, while the phase and waypoint
+cursors are batch-synchronized: one allowed replan regenerates the active cohort
+and restarts its shared phase cursor without charging unaffected rows. Unknown
 or exhausted failures are reported as structured `ExecutionEvent` objects. A
 non-empty `StateDelta` is not committed until the caller supplies an external
 `effect_success` mask.
 
-Recovery replans reuse the current immutable `ResolvedActionRequest`. To change
-a goal, option, policy, binding, or control command during execution, submit a
-strictly newer revision explicitly:
+Recovery replans reuse the current immutable `ResolvedActionRequest`, including
+its owned goal snapshot. To change a goal, option, policy, binding, or control
+command during execution, submit a strictly newer revision explicitly:
 
 ```python
 session.revise_current(revised_invocation)

@@ -475,11 +475,26 @@ Recovery is bounded. A session replans from the latest observation, retries an
 action only within the configured budgets, freezes ineligible environment rows,
 and emits structured events when recovery is exhausted.
 
+Eligibility, retry counters, and replan counters are per environment. Execution
+cursors are intentionally batch-synchronized in this runtime: when any eligible
+row is allowed to replan, the session regenerates the current action for the
+active cohort and restarts the shared phase waypoint cursor. Rows that did not
+trigger recovery keep their eligibility and do not spend recovery budget, but
+they receive the regenerated plan from its batch barrier. Fully asynchronous
+per-environment phase scheduling belongs in a higher-level scheduler rather than
+this atomic-action session.
+
 Recovery does not re-read a mutable Action object or invocation. The engine
-resolves each call once into a `ResolvedActionRequest` containing its binding,
-policies, options, control commands, invocation ID, and revision. Every local
-replan for that revision reuses the same request and varies only the measured
-context.
+resolves each call once into a `ResolvedActionRequest` containing an owned goal
+snapshot, binding, policies, options, control commands, invocation ID, and
+revision. Every local replan for that revision reuses the same request and
+varies only the measured context.
+
+Each emitted `JointCommand` carries a per-environment `hold_duration` derived
+from the plan's `TimedTrajectory.dt`. The application control loop must respect
+that timing before requesting the next command. For a synchronized batch, the
+caller should wait for the longest duration among active rows. A passive hold
+command has zero duration.
 
 Use an explicit newer revision when the application or Action Agent decides to
 change runtime behavior:
