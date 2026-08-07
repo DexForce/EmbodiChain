@@ -1366,7 +1366,7 @@ class TestMoveJointsCurobo:
         )
         action = self._action(mg, sample_interval=10)
         with patch(
-            "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+            "embodichain.lab.sim.atomic_actions.trajectory.resample_with_distance",
             return_value=torch.zeros(NUM_ENVS, 10, ARM_DOF),
         ) as interp:
             result = action.execute(

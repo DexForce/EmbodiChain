@@ -276,6 +276,25 @@ class TestPlanJointTraj:
         assert torch.equal(kwargs["trajectory"][:, 1, :], waypoints[:, 0, :])
         assert torch.equal(kwargs["trajectory"][:, 2, :], waypoints[:, 1, :])
 
+    def test_emits_every_multi_waypoint_as_exact_sample(self):
+        start = torch.zeros(2, 6)
+        waypoints = torch.stack([torch.ones(2, 6), torch.full((2, 6), 3.0)], dim=1)
+
+        result = self.builder.plan_joint_traj(start, waypoints, n_waypoints=5)
+
+        keyframes = torch.cat([start.unsqueeze(1), waypoints], dim=1)
+        matches = torch.all(result.unsqueeze(2) == keyframes.unsqueeze(1), dim=-1).any(
+            dim=1
+        )
+        assert torch.all(matches)
+
+    def test_rejects_sample_count_smaller_than_keyframe_count(self):
+        start = torch.zeros(2, 6)
+        waypoints = torch.stack([torch.ones(2, 6), torch.full((2, 6), 3.0)], dim=1)
+
+        with pytest.raises(ValueError, match="at least the number of keyframes"):
+            self.builder.plan_joint_traj(start, waypoints, n_waypoints=2)
+
 
 class TestIkSolve:
     def test_uses_first_env_seed_for_single_pose(self):

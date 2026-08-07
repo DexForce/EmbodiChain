@@ -14,25 +14,37 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Trajectory interpolation and action-related simulation utilities."""
+
+from __future__ import annotations
+
 import numpy as np
 import torch
 import warp as wp
 
-from typing import Tuple
-
-from embodichain.utils.utility import inv_transform
-from embodichain.utils.warp import (
-    trajectory_get_diff_kernel,
-    trajectory_interpolate_kernel,
-    trajectory_add_origin_kernel,
-    get_offset_qpos_kernel,
-    pairwise_distances,
-    cumsum_distances,
-    repeat_first_point,
-    interpolate_along_distance,
-)
 from embodichain.lab.sim.solvers.base_solver import BaseSolver
 from embodichain.utils.device_utils import standardize_device_string
+from embodichain.utils.utility import inv_transform
+from embodichain.utils.warp import (
+    cumsum_distances,
+    get_offset_qpos_kernel,
+    interpolate_along_distance,
+    pairwise_distances,
+    repeat_first_point,
+    trajectory_add_origin_kernel,
+    trajectory_get_diff_kernel,
+    trajectory_interpolate_kernel,
+)
+
+__all__ = [
+    "compute_pose_offset_related_to_first",
+    "get_trajectory_object_offset_qpos",
+    "interpolate_with_distance",
+    "interpolate_with_nums",
+    "resample_with_distance",
+    "sort_and_padding_key_frame",
+    "warp_trajectory_qpos",
+]
 
 
 def compute_pose_offset_related_to_first(full_pose: torch.Tensor) -> torch.Tensor:
@@ -52,7 +64,7 @@ def compute_pose_offset_related_to_first(full_pose: torch.Tensor) -> torch.Tenso
 
 def sort_and_padding_key_frame(
     trajectory: np.ndarray, key_indices: np.ndarray, key_frames_batch: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """sort and padding key frames for warping trajectory
 
     Args:
@@ -245,96 +257,256 @@ def get_trajectory_object_offset_qpos(
     return is_success, key_qpos_offset
 
 
-def interpolate_with_distance(
-    trajectory: torch.Tensor,  # expected shape [B, N, M], float or convertible to float
-    interp_num: int,  # T
-    device=torch.device("cuda"),
+def _allocate_segment_intervals(
+    distances: torch.Tensor, total_intervals: int
 ) -> torch.Tensor:
-    """
-    Resample a batch of trajectories of shape [B, N, M] into [B, T, M] by
-    piecewise-linear interpolation over cumulative Euclidean distance
-    along the N dimension, handling each batch independently.
+    """Allocate output intervals to segments independently for each batch.
+
+    Every segment receives one interval so its endpoint is retained. Remaining
+    intervals are apportioned by segment length with the largest-remainder
+    method, producing an exact ``total_intervals`` sum for every batch.
 
     Args:
-        trajectory: Torch.Tensor of shape [B, N, M].
-        interp_num: Target number of samples T.
-        device: Torch device string ('cpu', 'cuda', 'cuda:0', ...).
-        dtype: Working dtype (wp.float32 or wp.float64). Defaults to wp.float32.
+        distances: Per-segment distances with shape ``(B, S)``.
+        total_intervals: Total number of output intervals. Must be at least
+            ``S``.
 
     Returns:
-        Torch.Tensor of shape [B, T, M] with interpolated trajectories.
+        Integer interval counts with shape ``(B, S)``.
     """
-    # Flatten input trajectory for warp kernels (avoid multi-dimensional wp.array bugs)
-    trajectory_flat = trajectory.contiguous().to(device).view(-1)
-    points = wp.from_torch(trajectory_flat)
+    batch_size, segment_count = distances.shape
+    intervals = torch.ones(
+        (batch_size, segment_count), dtype=torch.int64, device=distances.device
+    )
+    remaining = total_intervals - segment_count
+    if remaining == 0 or batch_size == 0:
+        return intervals
 
-    B, N, M = trajectory.shape  # original shape components
-    T = int(interp_num)
+    total_distance = distances.sum(dim=1, keepdim=True)
+    uniform_weights = torch.full_like(distances, 1.0 / segment_count)
+    safe_total_distance = torch.where(
+        total_distance > 0, total_distance, torch.ones_like(total_distance)
+    )
+    distance_weights = distances / safe_total_distance
+    weights = torch.where(total_distance > 0, distance_weights, uniform_weights)
 
-    if T < 0:
+    quotas = weights * remaining
+    extra_intervals = torch.floor(quotas).to(torch.int64)
+    remainders = quotas - extra_intervals.to(quotas.dtype)
+    intervals += extra_intervals
+
+    unallocated = remaining - extra_intervals.sum(dim=1)
+    ranked_segments = torch.argsort(remainders, dim=1, descending=True, stable=True)
+    ranked_bonus = (
+        torch.arange(segment_count, device=distances.device).unsqueeze(0)
+        < unallocated.unsqueeze(1)
+    ).to(torch.int64)
+    bonus = torch.zeros_like(intervals)
+    bonus.scatter_(1, ranked_segments, ranked_bonus)
+    return intervals + bonus
+
+
+def interpolate_with_distance(
+    trajectory: torch.Tensor,
+    interp_num: int,
+    device: torch.device | str = torch.device("cuda"),
+) -> torch.Tensor:
+    """Interpolate batched keyframes while preserving every keyframe boundary.
+
+    Each input point is treated as a required keyframe. The output is generated
+    segment by segment: every segment receives at least one interval, and any
+    remaining intervals are distributed by Euclidean segment length for each
+    batch independently. Segment endpoints are copied directly from the input,
+    so intermediate keyframes occur as exact emitted samples.
+
+    .. attention::
+        ``interp_num`` must be at least the number of input keyframes. Use
+        :func:`resample_with_distance` when input points are optional dense path
+        samples that may be downsampled.
+
+    Args:
+        trajectory: Keyframe tensor with shape ``(B, N, M)``.
+        interp_num: Target number of samples ``T``.
+        device: Device on which to perform interpolation.
+
+    Returns:
+        Interpolated trajectories with shape ``(B, T, M)``.
+
+    Raises:
+        ValueError: If ``trajectory`` is not three-dimensional, contains no
+            keyframes for a non-empty output, or ``interp_num`` cannot hold all
+            keyframes.
+    """
+    if trajectory.ndim != 3:
+        raise ValueError("`trajectory` must have shape (B, N, M).")
+
+    trajectory = trajectory.to(device)
+    if not torch.is_floating_point(trajectory):
+        trajectory = trajectory.float()
+
+    batch_size, keyframe_count, dimension = trajectory.shape
+    sample_count = int(interp_num)
+    if sample_count < 0:
         raise ValueError("`interp_num` must be non-negative.")
-
-    # Handle degenerate T
-    out = (
-        wp.empty(
-            (B * T * M,), dtype=wp.float32, device=standardize_device_string(device)
+    if keyframe_count == 0:
+        if sample_count == 0:
+            return trajectory.new_empty((batch_size, 0, dimension))
+        raise ValueError("Cannot interpolate a trajectory with no keyframes.")
+    if sample_count < keyframe_count:
+        raise ValueError(
+            f"`interp_num` ({sample_count}) must be at least the number of "
+            f"keyframes ({keyframe_count}) so every keyframe can be preserved."
         )
-        if T > 0
-        else wp.empty((0,), dtype=wp.float32, device=standardize_device_string(device))
+    if batch_size == 0:
+        return trajectory.new_empty((0, sample_count, dimension))
+    if keyframe_count == 1:
+        return trajectory.expand(-1, sample_count, -1).clone()
+    if sample_count == keyframe_count:
+        return trajectory.clone()
+
+    segment_distances = torch.linalg.vector_norm(
+        trajectory[:, 1:, :] - trajectory[:, :-1, :], dim=-1
+    )
+    segment_intervals = _allocate_segment_intervals(
+        segment_distances, total_intervals=sample_count - 1
+    )
+    segment_ends = torch.cumsum(segment_intervals, dim=1)
+    segment_starts = torch.cat(
+        [torch.zeros_like(segment_ends[:, :1]), segment_ends[:, :-1]], dim=1
     )
 
-    # Handle N < 2
-    if N < 2:
-        if N == 1 and T > 0:
-            # Repeat the single point across T (kernel expects flattened arrays)
-            wp.launch(
-                kernel=repeat_first_point,
-                dim=B * T,
-                inputs=[points, out, B, T, M, N],
-                device=standardize_device_string(device),
-            )
-        # N == 0 -> return empty (out already allocated)
-        interp_trajectory = (
-            wp.to_torch(out).view(B, T, M) if T > 0 else wp.to_torch(out).view(B, 0, M)
+    output_indices = (
+        torch.arange(sample_count, device=trajectory.device)
+        .unsqueeze(0)
+        .expand(batch_size, -1)
+        .contiguous()
+    )
+    segment_indices = torch.searchsorted(segment_ends, output_indices, right=False)
+    interval_counts = torch.gather(segment_intervals, 1, segment_indices)
+    local_indices = output_indices - torch.gather(segment_starts, 1, segment_indices)
+    alpha = (
+        local_indices.to(trajectory.dtype) / interval_counts.to(trajectory.dtype)
+    ).unsqueeze(-1)
+
+    gather_indices = segment_indices.unsqueeze(-1).expand(-1, -1, dimension)
+    segment_start_points = torch.gather(trajectory[:, :-1, :], 1, gather_indices)
+    segment_end_points = torch.gather(trajectory[:, 1:, :], 1, gather_indices)
+    interpolated = torch.lerp(segment_start_points, segment_end_points, alpha)
+
+    # Copy endpoints instead of relying on floating-point interpolation at
+    # alpha == 1, guaranteeing bit-exact keyframe samples in the output.
+    is_segment_end = (local_indices == interval_counts).unsqueeze(-1)
+    return torch.where(is_segment_end, segment_end_points, interpolated)
+
+
+def resample_with_distance(
+    trajectory: torch.Tensor,
+    interp_num: int,
+    device: torch.device | str = torch.device("cuda"),
+) -> torch.Tensor:
+    """Resample a batched path at uniform cumulative-distance positions.
+
+    Unlike :func:`interpolate_with_distance`, interior input samples are not
+    required output points, so this function supports both upsampling and
+    downsampling. It is intended for dense planner paths rather than required
+    waypoint sequences.
+
+    Args:
+        trajectory: Path tensor with shape ``(B, N, M)``.
+        interp_num: Target number of samples ``T``.
+        device: Device on which to perform interpolation.
+
+    Returns:
+        Resampled trajectories with shape ``(B, T, M)``.
+
+    Raises:
+        ValueError: If ``trajectory`` is not three-dimensional, contains no
+            points for a non-empty output, or ``interp_num`` is negative.
+    """
+    if trajectory.ndim != 3:
+        raise ValueError("`trajectory` must have shape (B, N, M).")
+
+    trajectory = trajectory.contiguous().to(device)
+    if not torch.is_floating_point(trajectory) or trajectory.dtype != torch.float32:
+        trajectory = trajectory.float()
+
+    batch_size, point_count, dimension = trajectory.shape
+    sample_count = int(interp_num)
+    if sample_count < 0:
+        raise ValueError("`interp_num` must be non-negative.")
+    if point_count == 0:
+        if sample_count == 0:
+            return trajectory.new_empty((batch_size, 0, dimension))
+        raise ValueError("Cannot resample a trajectory with no points.")
+    if batch_size == 0 or sample_count == 0:
+        return trajectory.new_empty((batch_size, sample_count, dimension))
+
+    # Flatten input trajectory for Warp kernels (avoids multidimensional
+    # wp.array interop issues).
+    trajectory_flat = trajectory.view(-1)
+    points = wp.from_torch(trajectory_flat)
+
+    out = wp.empty(
+        (batch_size * sample_count * dimension,),
+        dtype=wp.float32,
+        device=standardize_device_string(device),
+    )
+
+    if point_count == 1:
+        wp.launch(
+            kernel=repeat_first_point,
+            dim=batch_size * sample_count,
+            inputs=[
+                points,
+                out,
+                batch_size,
+                sample_count,
+                dimension,
+                point_count,
+            ],
+            device=standardize_device_string(device),
         )
-        return interp_trajectory
+        return wp.to_torch(out).view(batch_size, sample_count, dimension)
 
-    if T == 0:
-        return out  # nothing to do
-
-    # 1) pairwise distances along N
     dists = wp.empty(
-        (B * (N - 1),), dtype=wp.float32, device=standardize_device_string(device)
+        (batch_size * (point_count - 1),),
+        dtype=wp.float32,
+        device=standardize_device_string(device),
     )
     wp.launch(
         kernel=pairwise_distances,
-        dim=B * (N - 1),
-        inputs=[points, dists, B, N, M],
+        dim=batch_size * (point_count - 1),
+        inputs=[points, dists, batch_size, point_count, dimension],
         device=standardize_device_string(device),
     )
 
-    # 2) cumulative distances per batch
     cumulative = wp.empty(
-        (B * N,), dtype=wp.float32, device=standardize_device_string(device)
+        (batch_size * point_count,),
+        dtype=wp.float32,
+        device=standardize_device_string(device),
     )
     wp.launch(
         kernel=cumsum_distances,
-        dim=B,
-        inputs=[dists, cumulative, B, N],
+        dim=batch_size,
+        inputs=[dists, cumulative, batch_size, point_count],
         device=standardize_device_string(device),
     )
 
-    # 3) interpolation per (b, t)
     wp.launch(
         kernel=interpolate_along_distance,
-        dim=B * T,
-        inputs=[points, cumulative, out, B, N, M, T],
+        dim=batch_size * sample_count,
+        inputs=[
+            points,
+            cumulative,
+            out,
+            batch_size,
+            point_count,
+            dimension,
+            sample_count,
+        ],
         device=standardize_device_string(device),
     )
-
-    # wp.synchronize_device(device)
-    interp_trajectory = wp.to_torch(out).view(B, T, M)
-    return interp_trajectory
+    return wp.to_torch(out).view(batch_size, sample_count, dimension)
 
 
 def interpolate_with_nums(
