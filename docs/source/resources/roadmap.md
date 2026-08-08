@@ -23,12 +23,14 @@ under the area it improves.
 | Status | Planned capability |
 | --- | --- |
 | 🚧 | Support a more efficient real-time denoiser. |
+| 🚧 | Optimize batch rendering throughput and latency on graphics cards (e.g. RTX series) and compute cards (e.g. A series). |
 | 🔬 | Add 3DGS support for rendering and data generation. |
 
 ### Physics
 
 | Status | Planned capability |
 | --- | --- |
+| 🚧 | Add Newton backend support, along with higher-performance coupled solvers and fluid solvers. |
 | 🔬 | Develop a next-generation physics backend with high-accuracy simulation, differentiable dynamics, and neural physical models for end-to-end AI integration. |
 
 ### Sensors
@@ -42,6 +44,7 @@ under the area it improves.
 | Status | Planned capability |
 | --- | --- |
 | 📌 | Add more advanced motion generation methods with examples. |
+| 🔬 | Add Neural Motion Generation methods. |
 
 ### Robot Integration
 
@@ -54,22 +57,22 @@ under the area it improves.
 | Status | Planned capability |
 | --- | --- |
 | 📌 | Release a Real2Sim pipeline for automatic data generation and scaling from real-world seeding priors. |
-| 📌 | Release an agentic skill generation framework for automated expert trajectory generation. |
-| 📌 | Release a sim-ready asset and scene-layout generation framework for fast environment prototyping. |
+| 🚧 | Release a generative simulation system for automated expert trajectory, asset, and scene-layout generation. |
 
 ## Models and Training Infrastructure
 
 | Status | Planned capability |
 | --- | --- |
-| 📌 | Release a modular VLA framework for fast prototyping and training of embodied agents. |
+| 🚧 | Release APG training infrastructure. |
+| 🚧 | Release motion-control training infrastructure. |
 
 ## Embodied Tasks
 
 | Status | Planned capability |
 | --- | --- |
-| 📌 | Add more benchmark tasks for EmbodiChain. |
+| 🚧 | Add more benchmark tasks for EmbodiChain. |
 | 📌 | Add more tasks with reinforcement learning support. |
-| 📌 | Add manipulation tasks that demonstrate the data generation pipeline. |
+| 🚧 | Add more environment tasks involving deformable objects that demonstrate the data generation pipeline. |
 
 ## Extending This Roadmap
 
