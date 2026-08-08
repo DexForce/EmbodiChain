@@ -194,7 +194,7 @@ class BaseEnv(gym.Env):
         logger.log_info(f"\tEnvironment seed      : {self.cfg.seed}")
         logger.log_info(f"\tPhysics dt            : {self.physics_dt}")
         logger.log_info(f"\tEnvironment dt        : {self.step_dt}")
-        logger.log_info(f"\tControl frequency     : {self.control_frequency_hz} Hz")
+        logger.log_info(f"\tControl frequency     : {self.control_frequency} Hz")
 
     def _configure_timing(self) -> None:
         """Validate and expose the environment's simulation-derived timing."""
@@ -257,13 +257,13 @@ class BaseEnv(gym.Env):
 
         # Backwards-compatible aliases. Unlike the previous integer division,
         # these values preserve the exact rate implied by the simulation.
-        self.sim_freq = self.physics_frequency_hz
-        self.control_freq = self.control_frequency_hz
+        self.sim_freq = self.physics_frequency
+        self.control_freq = self.control_frequency
 
         # Gym consumers (for example video recorders) should observe the same
         # cadence as environment and dataset steps.
         self.metadata = dict(self.metadata)
-        self.metadata["render_fps"] = self.control_frequency_hz
+        self.metadata["render_fps"] = self.control_frequency
 
     @property
     def num_envs(self) -> int:
@@ -289,7 +289,7 @@ class BaseEnv(gym.Env):
         return self.physics_dt * int(self.cfg.sim_steps_per_control)
 
     @property
-    def physics_frequency_hz(self) -> float:
+    def physics_frequency(self) -> float:
         """Return the physics simulation frequency.
 
         Returns:
@@ -298,7 +298,7 @@ class BaseEnv(gym.Env):
         return 1.0 / self.physics_dt
 
     @property
-    def control_frequency_hz(self) -> float:
+    def control_frequency(self) -> float:
         """Return the environment control frequency.
 
         Returns:

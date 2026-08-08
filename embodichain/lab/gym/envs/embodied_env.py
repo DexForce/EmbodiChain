@@ -1217,7 +1217,7 @@ class EmbodiedEnv(BaseEnv):
             "physics_dt": self.physics_dt,
             "sim_steps_per_control": int(self.cfg.sim_steps_per_control),
             "step_dt": self.step_dt,
-            "control_frequency_hz": self.control_frequency_hz,
+            "control_frequency": self.control_frequency,
             "active_joint_ids": list(self.active_joint_ids),
             "robot_uid": self.robot.uid,
             "robot_dof": int(self.robot.dof),

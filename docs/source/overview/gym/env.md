@@ -51,10 +51,10 @@ The simulation timestep and the environment sampling timestep have different res
 ```text
 physics_dt = sim_cfg.physics_dt
 step_dt = physics_dt * sim_steps_per_control
-control_frequency_hz = 1 / step_dt
+control_frequency = 1 / step_dt
 ```
 
-Choose ``physics_dt`` according to physics stability and contact accuracy. To change how often a policy, controller, or expert trajectory supplies an action, change the integer ``sim_steps_per_control`` instead. The environment exposes ``physics_dt``, ``step_dt``, ``physics_frequency_hz``, and ``control_frequency_hz`` as derived runtime properties.
+Choose ``physics_dt`` according to physics stability and contact accuracy. To change how often a policy, controller, or expert trajectory supplies an action, change the integer ``sim_steps_per_control`` instead. The environment exposes ``physics_dt``, ``step_dt``, ``physics_frequency``, and ``control_frequency`` as derived runtime properties.
 
 If configuration is easier in hertz, set ``target_control_frequency``. For example, a 0.01 s physics timestep can represent 25 Hz exactly with four physics steps per environment step. It cannot represent 30 Hz exactly, so that combination is rejected.
 

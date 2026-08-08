@@ -51,11 +51,11 @@ def test_timing_is_derived_without_integer_truncation() -> None:
 
     assert env.physics_dt == pytest.approx(0.006)
     assert env.step_dt == pytest.approx(0.042)
-    assert env.physics_frequency_hz == pytest.approx(1.0 / 0.006)
-    assert env.control_frequency_hz == pytest.approx(1.0 / 0.042)
-    assert env.sim_freq == pytest.approx(env.physics_frequency_hz)
-    assert env.control_freq == pytest.approx(env.control_frequency_hz)
-    assert env.metadata["render_fps"] == pytest.approx(env.control_frequency_hz)
+    assert env.physics_frequency == pytest.approx(1.0 / 0.006)
+    assert env.control_frequency == pytest.approx(1.0 / 0.042)
+    assert env.sim_freq == pytest.approx(env.physics_frequency)
+    assert env.control_freq == pytest.approx(env.control_frequency)
+    assert env.metadata["render_fps"] == pytest.approx(env.control_frequency)
     assert "render_fps" not in BaseEnv.metadata
 
 
@@ -69,7 +69,7 @@ def test_exact_target_frequency_resolves_integer_sim_steps() -> None:
 
     assert env.cfg.sim_steps_per_control == 5
     assert env.step_dt == pytest.approx(0.05)
-    assert env.control_frequency_hz == pytest.approx(20.0)
+    assert env.control_frequency == pytest.approx(20.0)
 
 
 def test_unrepresentable_target_frequency_is_rejected() -> None:
