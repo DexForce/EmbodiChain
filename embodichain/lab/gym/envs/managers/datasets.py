@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import math
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -108,7 +110,18 @@ class LeRobotRecorder(Functor):
         self.lerobot_data_root = params.get(
             "save_path", EMBODICHAIN_DEFAULT_DATASET_ROOT
         )
-        self.robot_meta = params.get("robot_meta", {})
+        self.robot_meta = dict(params.get("robot_meta", {}) or {})
+        legacy_control_frequency = self.robot_meta.pop("control_freq", None)
+        self.dataset_fps = self._derive_dataset_fps()
+        if legacy_control_frequency is not None:
+            warnings.warn(
+                "robot_meta.control_freq is deprecated and ignored. Dataset FPS is "
+                f"derived from env.step_dt ({self.dataset_fps} Hz). Configure "
+                "sim_steps_per_control or target_control_frequency_hz on the "
+                "environment instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # Optional parameters
         self.instruction = params.get("instruction", None)
@@ -149,6 +162,27 @@ class LeRobotRecorder(Functor):
 
         # Initialize dataset
         self._initialize_dataset()
+
+    def _derive_dataset_fps(self) -> int:
+        """Derive the integer LeRobot sampling rate from the environment step."""
+        step_dt = float(self._env.step_dt)
+        if not math.isfinite(step_dt) or step_dt <= 0.0:
+            raise ValueError(
+                f"env.step_dt must be a finite positive number, got {step_dt!r}."
+            )
+
+        control_frequency = 1.0 / step_dt
+        dataset_fps = round(control_frequency)
+        if not math.isclose(
+            control_frequency, float(dataset_fps), rel_tol=0.0, abs_tol=1e-9
+        ):
+            raise ValueError(
+                f"The environment control frequency ({control_frequency:g} Hz) is "
+                "not an integer, but LeRobot requires an integer dataset FPS. "
+                "Choose compatible physics_dt and sim_steps_per_control values or "
+                "resample observations before recording."
+            )
+        return dataset_fps
 
     @property
     def dataset_path(self) -> str:
@@ -251,8 +285,7 @@ class LeRobotRecorder(Functor):
 
         # Update metadata
         extra_info = self.extra.copy() if self.extra else {}
-        fps = self.dataset.meta.info.get("fps", 30)
-        current_episode_time = len(obs_list) / fps if fps > 0 else 0
+        current_episode_time = len(obs_list) * float(self._env.step_dt)
 
         episode_extra_info = extra_info.copy()
         self.total_time += current_episode_time
@@ -416,12 +449,11 @@ class LeRobotRecorder(Functor):
         # LeRobot's root parameter is the COMPLETE dataset path (not parent directory)
         self.dataset_full_path = lerobot_data_root / dataset_name
 
-        fps = self.robot_meta.get("control_freq", 30)
         features = self._build_features()
 
         self.dataset = LeRobotDataset.create(
             repo_id=dataset_name,
-            fps=fps,
+            fps=self.dataset_fps,
             root=str(self.dataset_full_path),
             robot_type=robot_type,
             features=features,
@@ -438,7 +470,7 @@ class LeRobotRecorder(Functor):
         if self._depth_video_enabled and self._depth_sensor_specs:
             self._depth_manager = DepthSidecarManager(
                 dataset_root=self.dataset_full_path,
-                fps=fps,
+                fps=self.dataset_fps,
                 cfg=self.depth_video_cfg,
             )
             for sensor_key, shape in self._depth_sensor_specs.items():
