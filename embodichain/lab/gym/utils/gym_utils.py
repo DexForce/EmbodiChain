@@ -482,17 +482,23 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         ),
     )
 
-    # parser robot config
-    # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
-    if "robot_type" in config["robot"]:
+    # Parse the robot config. ``class_type`` selects a RobotCfg subclass while
+    # leaving subtype-specific fields such as URRobotCfg.robot_type intact.
+    # Keep ``robot_type`` as a backward-compatible class selector for existing
+    # configs such as {"robot_type": "CobotMagic"}.
+    robot_config = deepcopy(config["robot"])
+    robot_class_type = robot_config.pop("class_type", None)
+    if robot_class_type is None and "robot_type" in robot_config:
+        robot_class_type = robot_config.pop("robot_type")
+
+    if robot_class_type is not None:
         robot_cfg = get_class_instance(
             "embodichain.lab.sim.robots",
-            config["robot"]["robot_type"] + "Cfg",
+            robot_class_type + "Cfg",
         )
-        config["robot"].pop("robot_type")
-        robot_cfg = robot_cfg.from_dict(config["robot"])
+        robot_cfg = robot_cfg.from_dict(robot_config)
     else:
-        robot_cfg = RobotCfg.from_dict(config["robot"])
+        robot_cfg = RobotCfg.from_dict(robot_config)
 
     env_cfg.robot = robot_cfg
 

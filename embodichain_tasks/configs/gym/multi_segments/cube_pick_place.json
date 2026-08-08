@@ -1,0 +1,101 @@
+{
+    "id": "MultiSegmentsCubePickPlace-v1",
+    "max_episodes": 1,
+    "max_episode_steps": 1200,
+    "num_envs": 1,
+    "arena_space": 2.5,
+    "physics_config": {
+        "enable_ccd": true
+    },
+    "env": {
+        "sim_steps_per_control": 4,
+        "extensions": {
+            "num_cycles": 3,
+            "place_positions": [
+                [-0.40, 0.48, 0.10],
+                [-0.42, -0.08, 0.10]
+            ],
+            "grasp_samples": 10000,
+            "force_reannotate": false,
+            "grasp_hold_steps": 45,
+            "settle_min_steps": 15,
+            "settle_max_steps": 80,
+            "settle_stable_steps": 5,
+            "linear_velocity_threshold": 0.03,
+            "angular_velocity_threshold": 0.20,
+            "place_position_tolerance": 0.12
+        }
+    },
+    "robot": {
+        "class_type": "URRobot",
+        "robot_type": "ur5",
+        "uid": "UR5",
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "hand",
+                    "urdf_path": "DH_PGI_140_80/DH_PGI_140_80.urdf"
+                }
+            ]
+        },
+        "control_parts": {
+            "hand": ["gripper_finger1_joint_1"]
+        },
+        "drive_pros": {
+            "stiffness": {
+                "gripper_finger1_joint_1": 1000.0
+            },
+            "damping": {
+                "gripper_finger1_joint_1": 100.0
+            },
+            "max_effort": {
+                "gripper_finger1_joint_1": 10000.0
+            }
+        },
+        "solver_cfg": {
+            "arm": {
+                "tcp": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.15],
+                    [0.0, 0.0, 0.0, 1.0]
+                ]
+            }
+        },
+        "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+    },
+    "sensor": [],
+    "light": {
+        "direct": [
+            {
+                "uid": "main_light",
+                "color": [0.6, 0.6, 0.6],
+                "intensity": 30.0,
+                "init_pos": [1.0, 0.0, 3.0]
+            }
+        ]
+    },
+    "background": [],
+    "rigid_object": [
+        {
+            "uid": "cube",
+            "shape": {
+                "shape_type": "Cube",
+                "size": [0.05, 0.05, 0.05]
+            },
+            "body_type": "dynamic",
+            "max_convex_hull_num": 16,
+            "init_pos": [-0.42, -0.08, 0.025],
+            "attrs": {
+                "mass": 0.05,
+                "dynamic_friction": 0.97,
+                "static_friction": 0.99,
+                "enable_ccd": true,
+                "linear_damping": 0.2,
+                "angular_damping": 0.2
+            }
+        }
+    ],
+    "rigid_object_group": [],
+    "articulation": []
+}
