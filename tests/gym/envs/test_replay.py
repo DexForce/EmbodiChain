@@ -422,7 +422,7 @@ def test_auto_save_at_episode_end(tmp_path):
     assert data["meta"]["lengths"] == [4]
 
 
-def test_auto_save_on_close(tmp_path):
+def test_close_discards_uncommitted_trajectory(tmp_path):
     save_dir = tmp_path / "trajs"
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     env.cfg.trajectory_save_dir = str(save_dir)
@@ -436,7 +436,7 @@ def test_auto_save_on_close(tmp_path):
         gc.collect()
 
     files = list(save_dir.glob("*.pt"))
-    assert len(files) == 2  # one per in-flight env
+    assert files == []
 
 
 def test_async_envs_do_not_corrupt_recording():

@@ -716,7 +716,10 @@ class BaseEnv(gym.Env):
                     **kwargs,
                 )
 
-            if not getattr(self, "_replay_no_auto_reset", False):
+            if not (
+                getattr(self, "_replay_no_auto_reset", False)
+                or getattr(self, "_demo_no_auto_reset", False)
+            ):
                 reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
                 if len(reset_env_ids) > 0:
                     with self._profiler.section("auto_reset"):

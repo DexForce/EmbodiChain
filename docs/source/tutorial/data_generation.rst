@@ -15,7 +15,8 @@ EmbodiChain provides a built-in data generation workflow for imitation-learning 
 - **Gym Configuration**: Describes the scene, robot, sensors, randomization events, observations, dataset recorder, and rollout settings.
 - **Action Configuration**: Describes the task-specific expert action graph for tasks that use the action bank.
 - **Environment Rollout**: Builds the environment directly from configuration files and executes offline generation.
-- **Expert Policy**: Each task provides ``create_demo_action_list()`` or another scripted policy entry to generate expert actions.
+- **Expert Policy**: Each task provides ``create_demo_segments()`` or the
+  legacy ``create_demo_action_list()`` entry to generate expert actions.
 - **Dataset Manager**: Records observation-action pairs during ``env.step()``.
 - **LeRobotRecorder**: Converts completed episodes into LeRobot-compatible datasets, with optional video export.
 
@@ -85,9 +86,13 @@ Important parameters are:
 
 ``LeRobotRecorder`` stores robot state and action features following the LeRobot
 format: ``observation.state`` for joint positions, ``action`` for applied
-actions, and ``observation.images.{sensor_name}`` for RGB camera images. When a
-camera also produces depth or segmentation data, the recorder preserves those
-arrays: masks are always stored as exact numeric features under
+actions, and ``observation.images.{sensor_name}`` for RGB camera images. The
+episode-level instruction remains in LeRobot's ``task`` field. Segment-aware
+demonstrations additionally store a per-frame ``subtask_index`` and the
+corresponding descriptions in ``meta/subtasks.parquet``; precise boundaries
+remain available under ``annotation.segment_*``. When a camera also produces
+depth or segmentation data, the recorder preserves those arrays: masks are
+always stored as exact numeric features under
 ``observation.mask.{sensor_name}``, while depth is stored either as a numeric
 feature (``observation.depth.{sensor_name}``, the default) or as compressed
 ``gray12le``/HEVC sidecar videos when ``dataset.lerobot.params.depth_video.enable``
@@ -146,7 +151,10 @@ The rollout script parses command-line arguments, loads the gym and action confi
    :start-at: def cli(
    :end-at:     main(args, env, gym_config)
 
-Each rollout internally calls ``create_demo_action_list()``, validates the returned sequence, executes actions with ``env.step(action)``, and discards invalid rollouts by resetting with ``save_data=False``.
+Each rollout asks the task for ``create_demo_segments()``. Legacy
+``create_demo_action_list()`` tasks are wrapped as one segment. The runner
+validates and executes every action with ``env.step(action)`` and discards an
+invalid rollout by resetting with ``save_data=False``.
 
 The recommended CLI entrypoint is:
 
@@ -193,11 +201,190 @@ Dataset folders are automatically numbered, which makes it easy to run repeated 
 
 In a practical workflow, the output of this stage is the synthesized dataset itself. Later training scripts typically consume these saved LeRobot episodes instead of regenerating trajectories each time.
 
+
+Multi-Segment UR5 Example
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The repository includes a complete repeated pick-and-place example at
+``embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json``. It uses
+the specified UR5 robot and parallel gripper to pick up the same cube and place
+it three times in one episode. No separate action-bank config is required.
+
+Each pick/place cycle is one lazy demonstration segment. After placing the
+cube, the task waits for its free-fall motion to settle. Only then does it read
+the cube's measured pose and plan the next pickup. This avoids assuming that
+the previous release position is still the cube's current position.
+
+Generate one episode with:
+
+.. code-block:: bash
+
+   embodichain run-env \
+       --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+       --headless \
+       --device cuda \
+       --max_episodes 1
+
+Use ``--device cpu`` instead when the simulator is configured for CPU
+execution. The config writes an auto-numbered dataset below:
+
+.. code-block:: text
+
+   outputs/lerobot/multi_segments/
+   `-- ur5_multi_segments_three_cycle_cube_pick_place_NNN/
+
+The example has no configured camera sensor and sets ``use_videos`` to
+``false``. Its dataset therefore contains robot state, action, task, subtask,
+and segment annotations, but no RGB video. Add a sensor and record its image
+observation when visual playback of the cube is required.
+
+
+.. _tutorial_data_generation_preview:
+
+Inspect Recorded LeRobot Data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+EmbodiChain provides a terminal-oriented structural preview, while LeRobot
+provides an interactive Rerun visualization. They are complementary:
+
+.. list-table:: Dataset preview tools
+   :header-rows: 1
+   :widths: 23 37 40
+
+   * - Tool
+     - Best for
+     - Important limitation
+   * - EmbodiChain terminal preview
+     - Verifying frame/timestamp continuity, episode task, subtask mapping,
+       segment boundaries, and the EmbodiChain sidecar.
+     - Prints summaries and validation results; it does not render images or
+       time-series plots.
+   * - LeRobot ``lerobot-dataset-viz``
+     - Interactively scrubbing standard camera, state, and action streams in
+       Rerun.
+     - LeRobot 0.4.4 does not plot EmbodiChain's ``subtask_index`` or
+       ``annotation.segment_*`` fields.
+
+EmbodiChain terminal preview
+----------------------------
+
+Use the parent output directory with ``--latest`` to inspect the most recently
+generated auto-numbered dataset:
+
+.. code-block:: bash
+
+   embodichain preview_lerobot_data \
+       outputs/lerobot/multi_segments \
+       --latest \
+       --episode 0 \
+       --expect-segments 3
+
+The command loads the selected episode through LeRobot's official
+``LeRobotDataset`` API, then checks:
+
+- required state, action, task, subtask, and segment features;
+- contiguous ``frame_index``, ``episode_index``, and
+  ``annotation.episode_step`` values;
+- timestamps against ``frame_index / fps``;
+- one constant episode-level task;
+- monotonic contiguous segment ranges, per-segment step counters, and exactly
+  one start/end marker per segment;
+- stable ``subtask_index`` to description mappings; and
+- agreement with ``meta/embodichain_episodes.jsonl`` when the sidecar exists.
+
+The CLI arguments are:
+
+.. list-table:: EmbodiChain preview arguments
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Argument
+     - Meaning
+   * - ``dataset_root``
+     - Exact LeRobot dataset root containing ``meta/info.json``. It may instead
+       be a parent directory when ``--latest`` is supplied.
+   * - ``--latest``
+     - Select the newest direct child dataset below ``dataset_root``.
+   * - ``--episode N``
+     - Inspect episode index ``N``; defaults to episode 0.
+   * - ``--expect-segments N``
+     - Add an optional assertion that the episode contains exactly ``N``
+       contiguous segments. It does not change or generate data. A mismatch
+       makes validation fail; omit it when the segment count is not known.
+
+A representative successful result ends with:
+
+.. code-block:: text
+
+   Segments:
+     #0: frames [0, 304) (304), subtask_index=0
+     #1: frames [304, 608) (304), subtask_index=1
+     #2: frames [608, 912) (304), subtask_index=2
+   Sidecar : success=True
+   [PASS] Dataset structure and segment metadata are consistent.
+
+The exact frame ranges can change with motion planning and settling time. Exit
+status 0 means validation passed, status 1 means the dataset loaded but failed
+one or more checks, and status 2 means the path, episode, or dataset could not
+be loaded.
+
+LeRobot official Rerun preview
+------------------------------
+
+The supported LeRobot 0.4.x release installs the official
+``lerobot-dataset-viz`` command. Unlike the EmbodiChain preview, its ``--root``
+must be the exact auto-numbered dataset directory:
+
+.. code-block:: bash
+
+   lerobot-dataset-viz \
+       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --mode local \
+       --episode-index 0 \
+       --num-workers 0
+
+Replace the ``_000`` suffix with the dataset directory produced by your run.
+``--repo-id`` remains required for a local dataset and gives the recording its
+identifier inside Rerun; supplying ``--root`` makes the CLI load the local
+directory. The viewer displays one curve per dimension under ``state`` and
+``action`` and displays camera streams when standard LeRobot image features
+are present. For the camera-free example above, seeing only the eight UR5 and
+gripper state curves plus the eight action curves is expected.
+
+To create a portable Rerun recording without opening a viewer, add
+``--save 1`` and ``--output-dir``:
+
+.. code-block:: bash
+
+   lerobot-dataset-viz \
+       --repo-id DexForce/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --root outputs/lerobot/multi_segments/ur5_multi_segments_three_cycle_cube_pick_place_000 \
+       --episode-index 0 \
+       --num-workers 0 \
+       --save 1 \
+       --output-dir outputs/lerobot/previews
+
+   rerun outputs/lerobot/previews/DexForce_ur5_multi_segments_three_cycle_cube_pick_place_000_episode_0.rrd
+
+``--save 1`` disables automatic viewer spawning and writes the ``.rrd`` file;
+the second command opens that saved recording. You can validate the container
+itself with ``rerun rrd verify path/to/recording.rrd``.
+
+This repository constrains LeRobot to ``>=0.4.4,<0.5`` for Python 3.10 and
+3.11 compatibility. Use ``lerobot-dataset-viz --help`` for the flags available
+in the installed version; options documented only for later LeRobot releases
+may not exist here. See the `official LeRobot dataset visualization guide
+<https://huggingface.co/docs/lerobot/en/using_dataset_tools#dataset-visualization>`_
+for the upstream workflow.
+
 Best Practices
 ~~~~~~~~~~~~~~
 
 - **Keep the config pair together**: Version gym and action configs together for action-bank tasks (either JSON or YAML).
-- **Use valid scripted policies**: Make sure ``create_demo_action_list()`` returns executable trajectories for the current scene.
+- **Use valid scripted policies**: Make sure ``create_demo_segments()`` (or
+  legacy ``create_demo_action_list()``) returns executable trajectories for
+  the current scene.
 - **Use ``--headless`` for throughput**: Disable the GUI when generating large datasets.
 - **Use ``--preview`` and ``--filter_dataset_saving`` for debugging**: Inspect task logic without writing datasets.
 - **Discard invalid rollouts**: Keep the default validation logic so failed trajectories are not saved.

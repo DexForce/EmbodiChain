@@ -130,9 +130,11 @@ details.
 ## Run and record
 
 Without `--preview` or `--replay`, `run-env` enters offline rollout mode. For
-each episode, it asks the task for a demonstration action list, applies the
-actions through `env.step()`, discards invalid generations, and resets the
-environment. `--max_episodes` overrides the value in the gym config:
+each episode, it asks the task for its demonstration segments, applies every
+action through `env.step()`, and commits the complete episode with one reset.
+An empty plan, truncation, or failed final task validation discards the whole
+attempt. Attempts are bounded by `demo_max_attempts` in the gym config
+(default: 3). `--max_episodes` overrides the value in the gym config:
 
 ```bash
 embodichain run-env \
@@ -146,6 +148,95 @@ embodichain run-env \
 Headless execution is normally preferred for throughput. Use
 `--filter_dataset_saving` for a rollout smoke test that should not create a
 structured dataset.
+
+### Multi-segment episodes
+
+An episode is the complete task; a segment is one semantic subtask inside it.
+For example, moving three objects is one episode containing three pick/place
+segments, even if each segment has its own motion trajectory. The task owns
+the number, order, and targets of those segments. The runner only manages the
+episode lifecycle, termination checks, retry, and commit/discard boundary.
+
+Existing tasks implementing `create_demo_action_list()` remain compatible and
+are recorded as a single `legacy` segment. A multi-object task can instead
+implement a lazy segment planner:
+
+```python
+from embodichain.lab.gym.envs import DemoSegment
+
+
+def create_demo_segments(self):
+    for object_uid in self.object_order:
+        # This runs after the preceding segment, so planning sees the latest
+        # scene state.
+        actions = self.plan_pick_and_place(object_uid)
+        yield DemoSegment(
+            actions=actions,
+            name="pick_and_place",
+            target_uid=object_uid,
+            instruction=f"Place {object_uid} in its target bin",
+            # Segment validation is separate from Gym episode termination.
+            validator=lambda uid=object_uid: self.is_object_placed(uid),
+        )
+```
+
+Gym `terminated` and `truncated` always describe the whole episode, never an
+individual segment. A segment normally ends when its action iterable is
+exhausted; its optional zero-argument `validator` then returns one boolean per
+parallel environment. A failed validator aborts the batch. Episode-level
+success termination stops the remaining lazy plan without requesting another
+segment.
+
+The executor checks terminal signals after every action and temporarily
+disables Gym auto-reset. Dataset recording is transactional: only the explicit
+reset after successful final validation saves the episode. Exceptions,
+interrupts, failed attempts, and closing an environment with a live rollout
+abort pending structured data, videos, and trajectories.
+
+Segment actions pass through the same action-dimension normalization used by
+legacy `create_demo_action_list()` tasks. A time-limit truncation is always an
+invalid expert rollout, including when it occurs on the planner's final
+action, so a task's `max_episode_steps` must be greater than the longest valid
+expert plan.
+
+In a vectorized environment, segments and actions remain on one shared planner
+clock, but completion is tracked independently. When one environment reports
+success, its terminal result and recording cursor become sticky; subsequent
+shared actions use a safe hold/no-op command for that row while unfinished rows
+continue. Consequently, rollout and trajectory lengths may differ by row.
+The commit remains batch-atomic: every row must eventually succeed, while any
+failure or truncation aborts the whole attempt.
+
+Failed attempts use `reset(options={"save_data": False})`. This discards
+structured datasets, replay trajectories, and camera-video buffers; recorder
+options such as `save_failed_episodes` do not override the runner's expert
+transaction policy.
+
+#### Run the built-in three-cycle example
+
+The shipped
+`embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json` config uses
+a specified UR5 with a parallel gripper to pick up and freely place the same
+cube three times. Each cycle is a separate lazy segment. The next pickup is
+planned only after the previous placement has fallen and become stable, so the
+planner starts from the cube's measured pose rather than its requested release
+pose.
+
+No action-bank config is needed:
+
+```bash
+embodichain run-env \
+    --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+    --headless \
+    --device cuda \
+    --max_episodes 1
+```
+
+The configured `LeRobotRecorder` writes below
+`outputs/lerobot/multi_segments/` using an auto-numbered directory. The episode
+contains one overall task plus three per-frame subtask/segment annotations.
+See {ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for
+the EmbodiChain terminal validator and LeRobot's official Rerun viewer.
 
 ### Choose the recording output you need
 
@@ -161,7 +252,8 @@ EmbodiChain uses "recording" for three related but distinct outputs:
   - Intended consumer
 * - Structured dataset
   - A dataset manager in the gym config.
-  - Observations, actions, task metadata, and optionally sensor videos.
+  - Observations, actions, episode/segment annotations, task metadata, and
+    optionally sensor videos.
   - Imitation-learning or data-processing pipelines.
 * - Debug or demo video
   - `record_camera_data` or `record_camera_data_async` as an interval event
@@ -198,8 +290,9 @@ embodichain run-env \
 The recorder stores the robot root pose and complete joint position, the raw
 action before ActionManager preprocessing, and the pose or joint state of scene
 rigid objects and articulations. Each environment in a vectorized rollout is
-tracked independently. A trajectory is auto-saved at episode reset and again
-on close if an unfinished buffer still contains steps.
+tracked independently. A trajectory is saved only at an explicit successful
+episode reset. `close()` is a durability barrier for already committed writes,
+not an implicit commit, so an unfinished trajectory is discarded.
 
 Files are named like `traj_env0_000000.pt`. When
 `--trajectory_save_dir` is omitted, they are written below:
@@ -209,9 +302,14 @@ ${EMBODICHAIN_DATA_ROOT:-~/.cache/embodichain_data}/trajectories/<run_id>/
 ```
 
 Each file contains `states`, `actions`, and `meta`. Metadata includes the actual
-per-environment lengths, timestep, robot identity and DOF, active joint IDs,
-recorded object IDs, and original environment IDs. The final directory is also
-printed when the run finishes.
+per-environment lengths, segment ranges and targets, timestep, robot identity
+and DOF, active joint IDs, recorded object IDs, and original environment IDs.
+LeRobot exports also contain per-frame `annotation.segment_*` fields and a
+`meta/embodichain_episodes.jsonl` sidecar with the complete segment records.
+The overall episode instruction stays in LeRobot's `task` field; each semantic
+segment is exposed through a per-frame `subtask_index` resolved by
+`meta/subtasks.parquet`.
+The final directory is also printed when the run finishes.
 
 ## Replay a trajectory
 

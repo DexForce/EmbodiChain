@@ -347,6 +347,41 @@ reported separately as ``window_record_capture`` and
 
 ---
 
+(cli-preview-lerobot-data)=
+## Preview LeRobot Data
+
+Print and validate one recorded LeRobot episode without launching the
+simulator:
+
+```bash
+embodichain preview_lerobot_data \
+    outputs/lerobot/multi_segments \
+    --latest \
+    --episode 0 \
+    --expect-segments 3
+```
+
+The positional path must be an exact dataset root containing
+`meta/info.json`, unless `--latest` is used to select the newest direct child.
+`--expect-segments` is an optional exact-count assertion; it does not select,
+split, or modify segments.
+
+| Argument | Default | Description |
+|---|---|---|
+| ``dataset_root`` | *(required)* | Dataset root, or parent directory with ``--latest`` |
+| ``--episode`` | ``0`` | Episode index to inspect |
+| ``--expect-segments`` | *(unchecked)* | Fail unless the episode has exactly this many segments |
+| ``--latest`` | ``False`` | Select the newest direct child dataset |
+
+The command prints dataset format, robot, FPS, state/action shapes and ranges,
+task text, segment frame ranges, subtask descriptions, and sidecar success. It
+returns status 0 when all checks pass, 1 for a validation mismatch, and 2 when
+the path, episode, or dataset cannot be loaded. For the complete validation
+contract and a comparison with LeRobot's official Rerun visualization, see
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>`.
+
+---
+
 ## Train RL
 
 Launch reinforcement learning training from a JSON or YAML config file.

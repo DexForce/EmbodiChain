@@ -37,6 +37,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
 )
+from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
 
 
@@ -508,6 +509,29 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    def test_robot_class_type_preserves_ur_variant(self):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+        }
+
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert isinstance(cfg.robot, URRobotCfg)
+        assert cfg.robot.robot_type == "ur5"
+        assert cfg.robot.uid == "TestUR5"
+        assert cfg.robot.solver_cfg["arm"].ur_type == "ur5"
+        assert config["robot"] == {
+            "class_type": "URRobot",
+            "robot_type": "ur5",
+            "uid": "TestUR5",
+        }
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
