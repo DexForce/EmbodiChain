@@ -83,7 +83,8 @@ tick = session.tick(latest_context, effect_success=None)
 
 An `ExecutionSession` emits at most one `JointCommand` per tick. The command's
 per-environment `hold_duration` preserves `TimedTrajectory.dt` for the caller's
-control loop. The session monitors:
+control loop: command `i` carries the arrival interval `dt[:, i]`, which is
+normally zero for the initial waypoint. The session monitors:
 
 - joint tracking error against the previous command;
 - translation/rotation drift of referenced scene entities;
@@ -99,8 +100,10 @@ non-empty `StateDelta` is not committed until the caller supplies an external
 `effect_success` mask.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
-its owned goal snapshot. To change a goal, option, policy, binding, or control
-command during execution, submit a strictly newer revision explicitly:
+its owned goal snapshot. Mutable goal values are copied, while simulator-backed
+`BatchEntity` handles retain their runtime identity. To change a goal, option,
+policy, binding, or control command during execution, submit a strictly newer
+revision explicitly:
 
 ```python
 session.revise_current(revised_invocation)

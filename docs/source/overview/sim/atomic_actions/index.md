@@ -488,13 +488,17 @@ Recovery does not re-read a mutable Action object or invocation. The engine
 resolves each call once into a `ResolvedActionRequest` containing an owned goal
 snapshot, binding, policies, options, control commands, invocation ID, and
 revision. Every local replan for that revision reuses the same request and
-varies only the measured context.
+varies only the measured context. Mutable goal values such as tensors and
+metadata containers are copied, while simulator-backed `BatchEntity` handles
+retain their runtime identity.
 
 Each emitted `JointCommand` carries a per-environment `hold_duration` derived
 from the plan's `TimedTrajectory.dt`. The application control loop must respect
-that timing before requesting the next command. For a synchronized batch, the
-caller should wait for the longest duration among active rows. A passive hold
-command has zero duration.
+that timing after dispatching the command and before requesting the next
+observation. `dt[:, i]` is the arrival interval for waypoint `i`, so the first
+command normally carries zero duration. For a synchronized batch, the caller
+should wait for the longest duration among active rows. A passive hold command
+has zero duration.
 
 Use an explicit newer revision when the application or Action Agent decides to
 change runtime behavior:

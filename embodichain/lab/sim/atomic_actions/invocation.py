@@ -18,9 +18,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Generic, TypeVar
+
+from embodichain.lab.sim.common import BatchEntity
 
 from .bindings import ActionBinding, ResolvedActionBinding
 from .control import ActionControlOverrides
@@ -41,6 +44,40 @@ class ActionOptions:
 
 
 OptionsT = TypeVar("OptionsT", bound=ActionOptions)
+
+
+def _goal_snapshot_memo(goal: ActionGoal) -> dict[int, object]:
+    """Return deepcopy memo entries for live goal references and runtime caches."""
+    memo: dict[int, object] = {}
+    visited: set[int] = set()
+
+    def visit(value: object) -> None:
+        value_id = id(value)
+        if value_id in visited:
+            return
+        visited.add(value_id)
+        if isinstance(value, BatchEntity):
+            memo[value_id] = value
+            return
+        if is_dataclass(value) and not isinstance(value, type):
+            for data_field in fields(value):
+                nested = getattr(value, data_field.name)
+                if not data_field.init and nested is not None:
+                    memo[id(nested)] = nested
+                else:
+                    visit(nested)
+            return
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                visit(key)
+                visit(nested)
+            return
+        if isinstance(value, (list, tuple, set, frozenset)):
+            for nested in value:
+                visit(nested)
+
+    visit(goal)
+    return memo
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,8 +152,9 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
     """Engine-owned immutable planning snapshot for one invocation revision.
 
     Recovery replans reuse this object verbatim and vary only the
-    :class:`PlanningContext`. Deep-copying the goal, policies, and skill options
-    severs references to caller-owned runtime objects before planning starts.
+    :class:`PlanningContext`. Deep-copying goal value payloads, policies, and
+    skill options severs caller-owned mutable data before planning starts while
+    retaining simulator-backed entity handles and private runtime caches.
     """
 
     skill_id: str
@@ -145,7 +183,11 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
             raise ValueError("invocation_id must be a non-empty string when set.")
         if not isinstance(self.revision, int) or self.revision < 0:
             raise ValueError("revision must be a non-negative integer.")
-        object.__setattr__(self, "goal", deepcopy(self.goal))
+        object.__setattr__(
+            self,
+            "goal",
+            deepcopy(self.goal, _goal_snapshot_memo(self.goal)),
+        )
         object.__setattr__(self, "motion_policy", deepcopy(self.motion_policy))
         object.__setattr__(self, "recovery_policy", deepcopy(self.recovery_policy))
         object.__setattr__(self, "skill_options", deepcopy(self.skill_options))

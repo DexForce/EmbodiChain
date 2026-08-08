@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -36,18 +37,22 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     ExecutionEventKind,
     ExecutionStatus,
+    GraspGoal,
     HeldObjectState,
     MotionPolicy,
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
+    ResolvedActionBinding,
     ResolvedActionRequest,
     RobotObservation,
     SceneEntityPose,
     SceneSnapshot,
     StateDelta,
     TaskState,
+    TimedTrajectory,
 )
+from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 
 
@@ -111,6 +116,64 @@ class EffectAction(DynamicAction):
         )
 
 
+class NonuniformTimingAction(DynamicAction):
+    """Test action with explicit nonuniform waypoint arrival intervals."""
+
+    skill_id: ClassVar[str] = "nonuniform_timing"
+
+    def plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        positions = torch.stack(
+            [context.robot.qpos, torch.lerp(context.robot.qpos, target, 0.5), target],
+            dim=1,
+        )
+        dt = torch.tensor(
+            [0.0, 0.1, 0.3], dtype=torch.float32, device=positions.device
+        ).expand(context.batch_size, -1)
+        trajectory = TimedTrajectory.from_positions(
+            positions,
+            env_ids=context.env_ids,
+            control_dt=request.motion_policy.control_dt,
+            dt=dt,
+            duration=dt.sum(dim=1),
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=trajectory,
+        )
+
+
+class UncopyableEntity(BatchEntity):
+    """Minimal live entity whose simulator identity must not be copied."""
+
+    def __init__(self) -> None:
+        self._pose = torch.eye(4).unsqueeze(0)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> UncopyableEntity:
+        raise AssertionError("Live simulator entities must not be deep-copied.")
+
+    def set_local_pose(
+        self,
+        pose: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        self._pose = pose.clone()
+
+    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
+        return self._pose.clone()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        return None
+
+
 def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -161,13 +224,14 @@ def _context(
 
 def _invocation(
     *,
+    skill_id: str = "dynamic",
     max_replans: int = 2,
     max_phase_retries: int = 2,
     phase_timeout: float = 30.0,
     control_dt: float = 1.0 / 60.0,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     return ActionInvocation(
-        skill_id="dynamic",
+        skill_id=skill_id,
         goal=EndEffectorPoseGoal(SceneEntityPose("target")),
         binding=ActionBinding(manipulators={"primary": "arm"}),
         motion_policy=MotionPolicy(sample_count=2, control_dt=control_dt),
@@ -197,20 +261,64 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert final.eligible_mask.tolist() == [True]
 
 
-def test_session_commands_preserve_trajectory_timing() -> None:
+def test_session_commands_preserve_waypoint_arrival_intervals() -> None:
     engine, _ = _engine()
+    engine.register(NonuniformTimingAction())
     session = engine.start(
-        (_invocation(control_dt=0.25),),
+        (_invocation(skill_id="nonuniform_timing"),),
         _context(0.0, 0.0, 0.2, 0),
     )
 
     first = session.tick(_context(0.0, 0.0, 0.2, 0))
-    second = session.tick(_context(0.25, 0.0, 0.2, 0))
+    second = session.tick(_context(0.0, 0.0, 0.2, 0))
+    third = session.tick(_context(0.1, 0.1, 0.2, 0))
 
     assert first.command is not None
-    assert torch.equal(first.command.hold_duration, torch.tensor([0.25]))
     assert second.command is not None
-    assert torch.equal(second.command.hold_duration, torch.tensor([0.25]))
+    assert third.command is not None
+    command_durations = torch.stack(
+        [
+            first.command.hold_duration,
+            second.command.hold_duration,
+            third.command.hold_duration,
+        ],
+        dim=1,
+    )
+    assert torch.allclose(command_durations, torch.tensor([[0.0, 0.1, 0.3]]))
+    assert torch.allclose(command_durations.sum(dim=1), torch.tensor([0.4]))
+
+
+def test_request_snapshot_preserves_live_entity_identity() -> None:
+    entity = UncopyableEntity()
+    grasp_xpos = torch.eye(4).unsqueeze(0)
+    geometry_extent = torch.tensor([0.1, 0.2, 0.3])
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={"extent": geometry_extent},
+        label="object",
+        entity=entity,
+    )
+    goal = GraspGoal(semantics=semantics, grasp_xpos=grasp_xpos)
+
+    request = ResolvedActionRequest(
+        skill_id="pick_up",
+        goal=goal,
+        binding=ResolvedActionBinding(),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+    grasp_xpos.fill_(9.0)
+    geometry_extent.fill_(9.0)
+
+    assert request.goal is not goal
+    assert request.goal.semantics is not semantics
+    assert request.goal.semantics.entity is entity
+    assert torch.equal(request.goal.grasp_xpos, torch.eye(4).unsqueeze(0))
+    assert torch.equal(
+        request.goal.semantics.geometry["extent"],
+        torch.tensor([0.1, 0.2, 0.3]),
+    )
 
 
 def test_scene_motion_replans_late_bound_goal() -> None:

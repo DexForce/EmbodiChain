@@ -57,6 +57,7 @@ class TimedTrajectory:
     velocities: torch.Tensor | None
     accelerations: torch.Tensor | None
     dt: torch.Tensor
+    """Per-waypoint arrival intervals; the first sample normally has zero dt."""
     duration: torch.Tensor
     env_ids: torch.Tensor
 
