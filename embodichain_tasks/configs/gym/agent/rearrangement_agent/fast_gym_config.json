@@ -235,9 +235,6 @@
                 "func": "LeRobotRecorder",
                 "mode": "save",
                 "params": {
-                    "robot_meta": {
-                        "control_freq": 25
-                    },
                     "instruction": {
                         "lang": "Place the spoon and fork neatly into the plate on the table."
                     }

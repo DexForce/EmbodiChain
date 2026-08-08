@@ -550,6 +550,9 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
     env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
+    env_cfg.target_control_frequency = config["env"].get(
+        "target_control_frequency", None
+    )
     env_cfg.extensions = deepcopy(config.get("env", {}).get("extensions", {}))
 
     # Initialize manager_modules with defaults + registered extensions

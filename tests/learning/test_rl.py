@@ -59,7 +59,6 @@ class TestRLTraining:
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10_DH_Gripper",
-                        "control_freq": 25,
                     },
                     "instruction": {"lang": "push_cube_to_target"},
                     "extra": {

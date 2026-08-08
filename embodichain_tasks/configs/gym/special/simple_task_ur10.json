@@ -32,8 +32,7 @@
                 "mode": "save",
                 "params": {
                     "robot_meta": {
-                        "robot_type": "UR10",
-                        "control_freq": 3
+                        "robot_type": "UR10"
                     },
                     "instruction": {
                         "lang": "Acting with Oscillatory motion"

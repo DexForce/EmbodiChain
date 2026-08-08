@@ -26,7 +26,7 @@ This page covers structured dataset export. If you only need human-viewable debu
 
     ```json
     {"func": "LeRobotRecorder", "mode": "save",
-     "params": {"robot_meta": {"robot_type": "CobotMagic", "control_freq": 25},
+     "params": {"robot_meta": {"robot_type": "CobotMagic"},
                 "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
                           "task_description": "Pour water",
@@ -38,7 +38,7 @@ This page covers structured dataset export. If you only need human-viewable debu
 
     ```json
     {"func": "AsyncLeRobotRecorder", "mode": "save",
-     "params": {"robot_meta": {"robot_type": "CobotMagic", "control_freq": 25},
+     "params": {"robot_meta": {"robot_type": "CobotMagic"},
                 "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
                           "task_description": "Pour water",
@@ -73,7 +73,7 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 * - ``save_path``
   - Root directory for saving datasets. Defaults to EmbodiChain's default dataset root.
 * - ``robot_meta``
-  - Robot metadata for dataset (robot_type, control_freq, etc.)
+  - Robot identity metadata for the dataset (for example, ``robot_type``). Timing is derived from the environment and must not be configured here.
 * - ``instruction``
   - Optional task instruction (e.g., {"lang": "pick the cube"})
 * - ``extra``
@@ -86,6 +86,14 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
   - Number of background processes for image writing (alternative to threads; higher spawn cost, more isolation). Use 0 to rely on threads only.
 * - ``depth_video``
   - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See [Compressed depth sidecar](#compressed-depth-sidecar).
+```
+
+```{note}
+Dataset FPS is derived from ``env.step_dt`` and therefore always matches the
+actual observation-action sampling cadence. Configure ``sim_steps_per_control``
+or ``target_control_frequency`` on the environment. LeRobot currently requires
+an integer FPS, so the recorder rejects a non-integer derived control frequency
+rather than writing inaccurate metadata.
 ```
 
 ### Recorded Data
@@ -237,7 +245,6 @@ dataset = {
             "save_path": "/path/to/dataset/root",
             "robot_meta": {
                 "robot_type": "dexforce_w1",
-                "control_freq": 30,
             },
             "instruction": {
                 "lang": "pick the cube and place it on the target",
@@ -283,7 +290,7 @@ dataset = {
         func="embodichain.lab.gym.envs.managers.async_datasets.AsyncLeRobotRecorder",
         params={
             "save_path": "/path/to/dataset/root",
-            "robot_meta": {"robot_type": "dexforce_w1", "control_freq": 30},
+            "robot_meta": {"robot_type": "dexforce_w1"},
             "instruction": {"lang": "pick the cube"},
             "extra": {"scene_type": "table", "task_description": "pick_and_place"},
             "use_videos": False,
@@ -309,7 +316,7 @@ dataset = {
         func="embodichain.lab.gym.envs.managers.datasets.LeRobotRecorder",
         params={
             "save_path": "/path/to/dataset/root",
-            "robot_meta": {"robot_type": "dexforce_w1", "control_freq": 30},
+            "robot_meta": {"robot_type": "dexforce_w1"},
             "instruction": {"lang": "pick the cube"},
             "extra": {"scene_type": "table", "task_description": "pick_and_place"},
             "use_videos": False,
