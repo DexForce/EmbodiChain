@@ -64,7 +64,7 @@ class EnvCfg:
     This means that the control action is updated every 10 simulation steps.
     """
 
-    target_control_frequency_hz: float | None = None
+    target_control_frequency: float | None = None
     """Optional requested control frequency in hertz.
 
     When set, the environment resolves this value to an integer
@@ -212,7 +212,7 @@ class BaseEnv(gym.Env):
                 f"physics_dt must be a finite positive number, got {physics_dt!r}."
             )
 
-        target_frequency = self.cfg.target_control_frequency_hz
+        target_frequency = self.cfg.target_control_frequency
         if target_frequency is not None:
             try:
                 target_frequency_value = float(target_frequency)
@@ -224,7 +224,7 @@ class BaseEnv(gym.Env):
                 or target_frequency_value <= 0.0
             ):
                 raise ValueError(
-                    "target_control_frequency_hz must be a finite positive number, "
+                    "target_control_frequency must be a finite positive number, "
                     f"got {target_frequency!r}."
                 )
 
@@ -235,7 +235,7 @@ class BaseEnv(gym.Env):
             ):
                 achievable_frequency = 1.0 / (physics_dt_value * resolved_steps)
                 raise ValueError(
-                    f"target_control_frequency_hz={target_frequency!r} cannot be "
+                    f"target_control_frequency={target_frequency!r} cannot be "
                     f"represented exactly with physics_dt={physics_dt!r}. The nearest "
                     f"integer sim_steps_per_control is {resolved_steps}, which gives "
                     f"{achievable_frequency:g} Hz. Set sim_steps_per_control explicitly "

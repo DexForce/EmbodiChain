@@ -31,14 +31,14 @@ pytestmark = pytest.mark.no_sim
 def _configure_timing(
     physics_dt: float,
     sim_steps_per_control: int | float = 4,
-    target_control_frequency_hz: float | None = None,
+    target_control_frequency: float | None = None,
 ) -> BaseEnv:
     """Build only the timing portion of a BaseEnv without starting simulation."""
     env = BaseEnv.__new__(BaseEnv)
     env.cfg = EnvCfg(
         sim_cfg=SimulationManagerCfg(physics_dt=physics_dt),
         sim_steps_per_control=sim_steps_per_control,
-        target_control_frequency_hz=target_control_frequency_hz,
+        target_control_frequency=target_control_frequency,
     )
     env.sim_cfg = env.cfg.sim_cfg
     env._configure_timing()
@@ -64,7 +64,7 @@ def test_exact_target_frequency_resolves_integer_sim_steps() -> None:
     env = _configure_timing(
         physics_dt=0.01,
         sim_steps_per_control=2,
-        target_control_frequency_hz=20.0,
+        target_control_frequency=20.0,
     )
 
     assert env.cfg.sim_steps_per_control == 5
@@ -77,7 +77,7 @@ def test_unrepresentable_target_frequency_is_rejected() -> None:
     with pytest.raises(ValueError, match="cannot be represented exactly"):
         _configure_timing(
             physics_dt=0.01,
-            target_control_frequency_hz=30.0,
+            target_control_frequency=30.0,
         )
 
 
@@ -103,8 +103,8 @@ def test_invalid_sim_steps_per_control_is_rejected(
 @pytest.mark.parametrize("target_frequency", [0.0, -10.0, math.inf, math.nan, True])
 def test_invalid_target_frequency_is_rejected(target_frequency: float) -> None:
     """Requested control timing must be finite and positive."""
-    with pytest.raises(ValueError, match="target_control_frequency_hz must be"):
+    with pytest.raises(ValueError, match="target_control_frequency must be"):
         _configure_timing(
             physics_dt=0.01,
-            target_control_frequency_hz=target_frequency,
+            target_control_frequency=target_frequency,
         )

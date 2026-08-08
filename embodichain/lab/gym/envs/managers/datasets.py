@@ -117,7 +117,7 @@ class LeRobotRecorder(Functor):
             warnings.warn(
                 "robot_meta.control_freq is deprecated and ignored. Dataset FPS is "
                 f"derived from env.step_dt ({self.dataset_fps} Hz). Configure "
-                "sim_steps_per_control or target_control_frequency_hz on the "
+                "sim_steps_per_control or target_control_frequency on the "
                 "environment instead.",
                 DeprecationWarning,
                 stacklevel=2,
