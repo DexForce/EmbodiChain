@@ -74,12 +74,8 @@ class CuroboAdapter(PlannerAdapter):
             )
         world = CuroboWorldCfg(
             rigid_objects=None,
-            obstacle_representation=str(
-                world_values.get("obstacle_representation", "sphere")
-            ),
-            collision_cache=dict(
-                world_values.get("collision_cache", {"cuboid": 8, "mesh": 2})
-            ),
+            voxel_size=float(world_values.get("voxel_size", 0.01)),
+            voxel_padding=float(world_values.get("voxel_padding", 0.1)),
             dynamic_obstacle_names=[],
             multi_env=False,
         )

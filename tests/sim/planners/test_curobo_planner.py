@@ -17,7 +17,7 @@
 """Unit and smoke tests for the optional cuRobo planner.
 
 Most tests are dependency-free and cover planner configuration, conversion,
-validation, and generated robot/world YAML. The two GPU-marked smoke tests
+validation, generated robot YAML, and voxel-world data. The GPU-marked smoke tests
 exercise cached in-process planning and CPU-physics interoperability. Full
 collision-planning coverage remains in ``test_curobo_integration.py``.
 """
@@ -26,7 +26,9 @@ from __future__ import annotations
 
 import importlib
 import logging
-import math
+from contextlib import nullcontext
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -38,6 +40,7 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
+    _CuroboProfile,
     _configure_curobo_logging,
     _matrix_to_position_quaternion,
     _require_curobo,
@@ -46,10 +49,15 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     _validate_dynamic_obstacles,
 )
 from embodichain.lab.sim.planners.curobo.curobo_yaml import (
-    _mesh_to_obstacle_entry,
+    _convex_hulls_to_voxel_entry,
     _parse_mimic_joint_names,
-    generate_curobo_world_yaml,
+    generate_curobo_robot_yaml,
+    generate_curobo_world_scene,
+    visualize_curobo_collision_models,
+    visualize_curobo_robot_collision_model,
+    visualize_curobo_world_collision_model,
 )
+from embodichain.lab.sim.planners.utils import MoveType
 
 _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
@@ -211,18 +219,18 @@ def test_configure_curobo_logging_rejects_unknown_level():
         _configure_curobo_logging("silent")
 
 
-def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
+def test_curobo_world_cfg_has_single_voxel_collision_path():
     cfg = CuroboWorldCfg()
 
-    assert cfg.collision_cache == {"cuboid": 8, "mesh": 2}
-    assert cfg.obstacle_representation == "sphere"
+    assert cfg.voxel_size == pytest.approx(0.01)
+    assert cfg.voxel_padding == pytest.approx(0.1)
 
 
-def test_auto_gen_defaults_keep_sphere_count_low():
-    """The voxel sphere estimate must be scaled down so planning stays fast."""
+def test_auto_gen_defaults_keep_sphere_count_low_and_fit_type_fixed():
+    """MorphIt is fixed by the generator while density remains configurable."""
     auto = CuroboPlannerCfg(robot_uid="franka").auto_gen
-    assert auto.fit_type == "voxel"
     assert auto.sphere_density == 0.1
+    assert not hasattr(auto, "fit_type")
 
 
 def test_curobo_planner_class_is_lazy_import_safe():
@@ -232,6 +240,149 @@ def test_curobo_planner_class_is_lazy_import_safe():
     sys.modules.pop("curobo", None)
     assert CuroboPlanner.__name__ == "CuroboPlanner"
     assert "curobo" not in sys.modules
+
+
+def test_backend_disables_curobo_self_collision(monkeypatch):
+    create_kwargs = {}
+
+    class FakeMotionPlannerCfg:
+        @staticmethod
+        def create(**kwargs):
+            create_kwargs.update(kwargs)
+            return SimpleNamespace(
+                trajopt_solver_config=SimpleNamespace(interpolation_dt=None)
+            )
+
+    class FakeMotionPlanner:
+        joint_names = ["joint"]
+
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        world=SimpleNamespace(multi_env=False),
+        collision_activation_distance=0.01,
+        interpolation_dt=0.025,
+    )
+    planner._curobo_device = torch.device("cuda:0")
+    planner._bindings = SimpleNamespace(
+        MotionPlannerCfg=FakeMotionPlannerCfg,
+        DeviceCfg=lambda device: device,
+        MotionPlanner=FakeMotionPlanner,
+        BatchMotionPlanner=FakeMotionPlanner,
+    )
+    planner._validate_profile_joint_names = lambda *args: None
+    planner._validate_base_link_name = lambda *args: None
+    planner._resolve_tool_frame = lambda *args: "tool"
+    planner._load_runtime_robot_config = lambda path: {
+        "robot_cfg": {
+            "kinematics": {
+                "source": path,
+                "self_collision_buffer": {},
+                "self_collision_ignore": {},
+            }
+        }
+    }
+    monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
+
+    planner._build_backend(
+        control_part="arm",
+        batch_size=1,
+        profile=_CuroboProfile(
+            robot_config_path="robot.yml",
+            sim_to_curobo_joint_names={"joint": "joint"},
+        ),
+        sim_joint_names=["joint"],
+        scene_model=None,
+        use_cuda_graph=False,
+        planning_mode=MoveType.EEF_MOVE,
+    )
+
+    assert create_kwargs["self_collision_check"] is False
+    assert create_kwargs["robot"]["robot_cfg"]["kinematics"] == {
+        "source": "robot.yml",
+        "self_collision_buffer": {},
+        "self_collision_ignore": {},
+    }
+
+
+def test_runtime_robot_config_adds_only_curobo_compatibility_placeholders(tmp_path):
+    config_path = tmp_path / "robot.yml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "base_link": "base",
+                        "collision_spheres": {
+                            "base": [{"center": [0.0, 0.0, 0.0], "radius": 0.1}]
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_config = CuroboPlanner._load_runtime_robot_config(str(config_path))
+    kinematics = runtime_config["robot_cfg"]["kinematics"]
+
+    assert kinematics["self_collision_buffer"] == {}
+    assert kinematics["self_collision_ignore"] == {}
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert "self_collision_buffer" not in persisted["robot_cfg"]["kinematics"]
+    assert "self_collision_ignore" not in persisted["robot_cfg"]["kinematics"]
+
+
+def test_disable_self_collision_reaches_all_curobo_rollouts():
+    class FakeCostCfg:
+        def __init__(self):
+            self.disable_calls = 0
+
+        def disable_self_collision(self):
+            self.disable_calls += 1
+
+    class FakeRollout:
+        def __init__(self):
+            self.cost_cfg = FakeCostCfg()
+
+        def get_cost_manager_configs(self):
+            return [self.cost_cfg]
+
+    ik_metrics = FakeRollout()
+    ik_optimizer = FakeRollout()
+    trajopt_metrics = FakeRollout()
+    trajopt_optimizer = FakeRollout()
+    graph_rollout = FakeRollout()
+    planner_cfg = SimpleNamespace(
+        ik_solver_config=SimpleNamespace(
+            core_cfg=SimpleNamespace(
+                metrics_rollout_config=ik_metrics,
+                optimizer_rollout_configs=[ik_optimizer],
+            )
+        ),
+        trajopt_solver_config=SimpleNamespace(
+            core_cfg=SimpleNamespace(
+                metrics_rollout_config=trajopt_metrics,
+                optimizer_rollout_configs=[trajopt_optimizer],
+            )
+        ),
+        graph_planner_config=SimpleNamespace(rollout_config=graph_rollout),
+    )
+
+    CuroboPlanner._disable_curobo_self_collision_rollouts(planner_cfg)
+
+    assert all(
+        rollout.cost_cfg.disable_calls == 1
+        for rollout in (
+            ik_metrics,
+            ik_optimizer,
+            trajopt_metrics,
+            trajopt_optimizer,
+            graph_rollout,
+        )
+    )
 
 
 def test_cpu_sim_resolves_current_cuda_device(monkeypatch):
@@ -296,6 +447,109 @@ def test_parse_mimic_joint_names_returns_empty_without_mimic(tmp_path):
 
 def test_parse_mimic_joint_names_handles_missing_file(tmp_path):
     assert _parse_mimic_joint_names(str(tmp_path / "does_not_exist.urdf")) == set()
+
+
+def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
+    pytest.importorskip("curobo")
+    import dexsim.kit.meshproc as meshproc
+
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(
+        '<?xml version="1.0"?><robot name="test"><link name="base"/></robot>',
+        encoding="utf-8",
+    )
+
+    class FakeRobot:
+        cfg = type(
+            "Cfg",
+            (),
+            {"fpath": str(urdf_path), "init_qpos": [], "base_link_name": "base"},
+        )()
+        joint_names = []
+        control_parts = {"arm": []}
+
+        def get_link_names(self):
+            return ["base"]
+
+        def get_link_vert_face(self, link_name):  # noqa: ARG002
+            return _unit_cube_vertices(), _cube_faces()
+
+        def get_control_part_link_names(self, control_part):  # noqa: ARG002
+            return ["base"]
+
+    calls = []
+
+    def fake_sphere_fit(mesh, **kwargs):
+        calls.append((mesh, kwargs))
+        return (
+            True,
+            torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32),
+            torch.tensor([0.25], dtype=torch.float32),
+        )
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(meshproc, "sphere_fit", fake_sphere_fit)
+    output_path = tmp_path / "robot.yml"
+
+    generate_curobo_robot_yaml(
+        FakeRobot(),
+        "arm",
+        str(output_path),
+        urdf_path=str(urdf_path),
+        device="cuda:0",
+    )
+
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["fit_type"] is meshproc.SphereFitType.MORPHIT
+    assert kwargs["max_convex_hull_num"] == 2
+    kinematics = yaml.safe_load(output_path.read_text(encoding="utf-8"))["robot_cfg"][
+        "kinematics"
+    ]
+    assert kinematics["collision_spheres"]["base"][0]["radius"] == pytest.approx(0.25)
+    assert "self_collision_buffer" not in kinematics
+    assert "self_collision_ignore" not in kinematics
+
+
+def test_robot_collision_visualization_reads_cache_and_live_link_pose(tmp_path):
+    robot_yaml_path = tmp_path / "robot_visual.yml"
+    robot_yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "collision_sphere_buffer": 0.0,
+                        "collision_spheres": {
+                            "base": [{"center": [0.0, 0.0, 0.0], "radius": 0.1}]
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeRobot:
+        def get_link_vert_face(self, link_name):  # noqa: ARG002
+            return _unit_cube_vertices(), _cube_faces()
+
+        def get_link_pose(
+            self, link_name, env_ids=None, to_matrix=False  # noqa: ARG002
+        ):
+            pose = torch.eye(4, dtype=torch.float32)
+            pose[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+            return pose.unsqueeze(0)
+
+    geometries = visualize_curobo_robot_collision_model(
+        FakeRobot(), str(robot_yaml_path), draw=False
+    )
+
+    assert [geometry["name"] for geometry in geometries] == [
+        "robot_mesh/base",
+        "robot_spheres",
+    ]
+    sphere_bounds = geometries[-1]["geometry"].get_axis_aligned_bounding_box()
+    assert sphere_bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
 
 
 # World YAML generation
@@ -374,148 +628,224 @@ class _FakeRigidObject:
         return self._pose.unsqueeze(0)
 
 
-def test_cuboid_entry_centered_mesh_matches_aabb_and_pose():
-    entries = _mesh_to_obstacle_entry(
-        "demo_block",
-        _unit_cube_vertices(),
-        _cube_faces(),
-        _identity_pose(),
-        representation="cuboid",
-    )
+def _mock_visacd_as_identity(monkeypatch, calls=None):
+    import dexsim.kit.meshproc as meshproc
 
-    assert len(entries) == 1
-    top_key, name, fields = entries[0]
-    assert (top_key, name) == ("cuboid", "demo_block")
-    assert fields["dims"] == pytest.approx([1.0, 1.0, 1.0])
-    assert fields["pose"] == pytest.approx([0.45, 0.0, 0.18, 1.0, 0.0, 0.0, 0.0])
+    def fake_visacd(mesh, **kwargs):
+        if calls is not None:
+            calls.append((mesh, kwargs))
+        return True, (mesh,)
+
+    monkeypatch.setattr(meshproc, "convex_decomposition_visacd", fake_visacd)
 
 
-def test_cuboid_entry_off_origin_mesh_offsets_center():
-    vertices = _unit_cube_vertices() + 0.5
-    _, _, fields = _mesh_to_obstacle_entry(
-        "block",
-        vertices,
-        _cube_faces(),
-        _identity_pose(),
-        representation="cuboid",
-    )[0]
+def test_voxel_entry_uses_visacd_with_sixteen_hulls(monkeypatch):
+    calls = []
+    _mock_visacd_as_identity(monkeypatch, calls)
 
-    assert fields["dims"] == pytest.approx([1.0, 1.0, 1.0])
-    assert fields["pose"][:3] == pytest.approx([0.95, 0.5, 0.68])
-
-
-def test_cuboid_entry_rotated_pose_preserves_center():
-    quaternion = torch.tensor(
-        [math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)],
-        dtype=torch.float32,
-    )
-    pose = torch.cat([torch.tensor([0.45, 0.0, 0.18]), quaternion])
-    _, _, fields = _mesh_to_obstacle_entry(
+    name, fields = _convex_hulls_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
-        pose,
-        representation="cuboid",
-    )[0]
+        _identity_pose(),
+        voxel_size=0.25,
+        voxel_padding=0.25,
+    )
 
-    assert fields["pose"][:3] == pytest.approx([0.45, 0.0, 0.18])
-    assert fields["pose"][3:] == pytest.approx(quaternion.tolist())
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["max_convex_hull_num"] == 16
+    assert name == "block"
+    assert fields["pose"] == pytest.approx(_identity_pose().tolist())
+    assert fields["dims"] == pytest.approx([1.5, 1.5, 1.5])
+    assert tuple(fields["feature_tensor"].shape) == (6, 6, 6)
+    assert fields["feature_tensor"].amin() < 0.0
+    assert fields["feature_tensor"].amax() > 0.0
 
 
-def test_cuboid_entry_accepts_homogeneous_pose():
+def test_voxel_entry_preserves_homogeneous_object_pose(monkeypatch):
+    _mock_visacd_as_identity(monkeypatch)
     pose = torch.eye(4, dtype=torch.float32)
     pose[:3, 3] = torch.tensor([0.45, 0.0, 0.18])
-    _, _, fields = _mesh_to_obstacle_entry(
+
+    _, fields = _convex_hulls_to_voxel_entry(
         "block",
         _unit_cube_vertices(),
         _cube_faces(),
         pose,
-        representation="cuboid",
-    )[0]
+        voxel_size=0.5,
+        voxel_padding=0.0,
+    )
 
-    assert fields["pose"] == pytest.approx([0.45, 0.0, 0.18, 1.0, 0.0, 0.0, 0.0])
-
-
-def test_mesh_entry_serializes_flat_face_buffer():
-    top_key, name, fields = _mesh_to_obstacle_entry(
-        "demo_block",
-        _unit_cube_vertices(),
-        _cube_faces(),
-        _identity_pose(),
-        representation="mesh",
-    )[0]
-
-    assert (top_key, name) == ("mesh", "demo_block")
-    assert len(fields["vertices"]) == 8
-    assert len(fields["faces"]) == 36
     assert fields["pose"] == pytest.approx(_identity_pose().tolist())
 
 
-def test_invalid_obstacle_representation_raises():
-    with pytest.raises(ValueError, match="representation"):
-        _mesh_to_obstacle_entry(
+@pytest.mark.parametrize(
+    ("voxel_size", "voxel_padding", "match"),
+    [(0.0, 0.1, "voxel_size"), (0.1, -0.1, "voxel_padding")],
+)
+def test_voxel_entry_rejects_invalid_settings(voxel_size, voxel_padding, match):
+    with pytest.raises(ValueError, match=match):
+        _convex_hulls_to_voxel_entry(
             "block",
             _unit_cube_vertices(),
             _cube_faces(),
             _identity_pose(),
-            representation="banana",
+            voxel_size=voxel_size,
+            voxel_padding=voxel_padding,
         )
 
 
-def test_empty_mesh_raises_for_cuboid():
-    with pytest.raises(ValueError, match="no vertices"):
-        _mesh_to_obstacle_entry(
-            "block",
-            torch.zeros((0, 3), dtype=torch.float32),
-            torch.zeros((0, 3), dtype=torch.int32),
-            _identity_pose(),
-            representation="cuboid",
-        )
+class _FakeDexsimMaterial:
+    def __init__(self, name, color):
+        self.name = name
+        self.color = color
+
+    def set_base_color(self, color):
+        self.color = color
 
 
-def test_generate_cuboid_world_yaml_assembles_schema(tmp_path):
+class _FakeDexsimActor:
+    def __init__(self, mesh):
+        self.mesh = mesh
+        self.material = None
+
+    def set_material(self, material):
+        self.material = material
+
+
+class _FakeDexsimEnv:
+    def __init__(self):
+        self.materials = {}
+        self.actors = []
+        self.loaded_paths = []
+        self.removed_actors = []
+
+    def find_material(self, name):
+        return self.materials.get(name)
+
+    def create_color_material(self, color, name, has_alpha=False):  # noqa: ARG002
+        material = _FakeDexsimMaterial(name, color)
+        self.materials[name] = material
+        return material
+
+    def load_actor(self, mesh_path):
+        import open3d as o3d
+
+        self.loaded_paths.append(mesh_path)
+        actor = _FakeDexsimActor(o3d.io.read_triangle_mesh(mesh_path))
+        self.actors.append(actor)
+        return actor
+
+    def remove_actor(self, actor):
+        self.removed_actors.append(actor)
+
+
+def test_obstacle_collision_visualization_loads_one_combined_dexsim_actor():
     rigid_object = _FakeRigidObject(
-        "demo_block",
-        _unit_cube_vertices(),
-        _cube_faces(),
-        _identity_pose(),
+        "block", _unit_cube_vertices(), _cube_faces(), _identity_pose()
     )
-    output_path = tmp_path / "world.yml"
+    env = _FakeDexsimEnv()
 
-    result = generate_curobo_world_yaml(
-        [rigid_object],
-        str(output_path),
-        representation="cuboid",
+    features = torch.ones((3, 3, 3), dtype=torch.float16)
+    features[1, 1, 1] = 0.0
+    world_scene = {
+        "voxel": {
+            "block": {
+                "pose": [1.0, 2.0, 3.0, 1.0, 0.0, 0.0, 0.0],
+                "dims": [0.3, 0.3, 0.3],
+                "voxel_size": 0.1,
+                "feature_tensor": features,
+            }
+        }
+    }
+    actors = visualize_curobo_world_collision_model(
+        [rigid_object], world_scene, env=env
     )
-    data = yaml.safe_load(output_path.read_text(encoding="utf-8"))
 
-    assert result == str(output_path)
-    assert list(data) == ["cuboid"]
-    assert data["cuboid"]["demo_block"]["dims"] == pytest.approx([1.0, 1.0, 1.0])
-    assert data["cuboid"]["demo_block"]["pose"][:3] == pytest.approx([0.45, 0.0, 0.18])
+    assert actors == env.actors
+    assert len(env.loaded_paths) == 1
+    assert not Path(env.loaded_paths[0]).exists()
+    bounds = actors[0].mesh.get_axis_aligned_bounding_box()
+    assert bounds.get_center() == pytest.approx([1.0, 2.0, 3.0])
+    assert bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
+    assert actors[0].material.name == "curobo_world_collision_material"
+    assert actors[0].material.color == [1.0, 0.0, 0.0, 0.45]
 
 
-def test_generate_mesh_world_yaml_assembles_schema(tmp_path):
+def test_combined_collision_visualization_colors_and_cleans_two_actors(
+    tmp_path, monkeypatch
+):
+    import dexsim
+
+    robot_yaml_path = tmp_path / "robot_visual.yml"
+    robot_yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "robot_cfg": {
+                    "kinematics": {
+                        "collision_sphere_buffer": 0.01,
+                        "collision_spheres": {
+                            "hand": [{"center": [0.1, 0.0, 0.0], "radius": 0.1}]
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeRobot:
+        def get_link_pose(
+            self, link_name, env_ids=None, to_matrix=False  # noqa: ARG002
+        ):
+            pose = torch.eye(4, dtype=torch.float32)
+            pose[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+            return pose.unsqueeze(0)
+
+    env = _FakeDexsimEnv()
+    world = SimpleNamespace(get_env=lambda: env)
+    prompts = []
+    monkeypatch.setattr(dexsim, "default_world", lambda: world)
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
+
+    features = torch.ones((3, 3, 3), dtype=torch.float16)
+    features[1, 1, 1] = 0.0
+    world_scene = {
+        "voxel": {
+            "block": {
+                "pose": [2.0, 2.0, 3.0, 1.0, 0.0, 0.0, 0.0],
+                "voxel_size": 0.1,
+                "feature_tensor": features,
+            }
+        }
+    }
     rigid_object = _FakeRigidObject(
-        "demo_block",
-        _unit_cube_vertices(),
-        _cube_faces(),
-        _identity_pose(),
+        "block", _unit_cube_vertices(), _cube_faces(), _identity_pose()
     )
-    output_path = tmp_path / "world_mesh.yml"
-
-    generate_curobo_world_yaml(
-        [rigid_object],
-        str(output_path),
-        representation="mesh",
+    visualize_curobo_collision_models(
+        FakeRobot(), str(robot_yaml_path), [rigid_object], world_scene
     )
-    data = yaml.safe_load(output_path.read_text(encoding="utf-8"))
 
-    assert list(data) == ["mesh"]
-    assert len(data["mesh"]["demo_block"]["vertices"]) == 8
+    assert len(env.actors) == 2
+    robot_actor, obstacle_actor = env.actors
+    robot_bounds = robot_actor.mesh.get_axis_aligned_bounding_box()
+    assert robot_bounds.get_center() == pytest.approx([1.1, 2.0, 3.0])
+    assert robot_bounds.get_extent() == pytest.approx([0.22, 0.22, 0.22])
+    assert robot_actor.material.name == "curobo_robot_collision_material"
+    assert robot_actor.material.color == [0.0, 0.0, 1.0, 0.45]
+    obstacle_bounds = obstacle_actor.mesh.get_axis_aligned_bounding_box()
+    assert obstacle_bounds.get_center() == pytest.approx([2.0, 2.0, 3.0])
+    assert obstacle_bounds.get_extent() == pytest.approx([0.1, 0.1, 0.1])
+    assert obstacle_actor.material.name == "curobo_world_collision_material"
+    assert obstacle_actor.material.color == [1.0, 0.0, 0.0, 0.45]
+    assert env.removed_actors == list(reversed(env.actors))
+    assert all(not Path(path).exists() for path in env.loaded_paths)
+    assert "Showing 2 cuRobo collision spheres" in prompts[0]
 
 
-def test_generate_world_yaml_supports_multiple_objects(tmp_path):
+def test_generate_world_scene_supports_multiple_objects(monkeypatch):
+    _mock_visacd_as_identity(monkeypatch)
     rigid_objects = [
         _FakeRigidObject(
             "block_a",
@@ -530,25 +860,22 @@ def test_generate_world_yaml_supports_multiple_objects(tmp_path):
             _identity_pose((0.0, 0.3, 0.1)),
         ),
     ]
-    output_path = tmp_path / "multi.yml"
-
-    generate_curobo_world_yaml(
-        rigid_objects,
-        str(output_path),
-        representation="cuboid",
+    scene_data = generate_curobo_world_scene(
+        rigid_objects, voxel_size=0.5, voxel_padding=0.0
     )
-    data = yaml.safe_load(output_path.read_text(encoding="utf-8"))
 
-    assert set(data["cuboid"]) == {"block_a", "block_b"}
-    assert data["cuboid"]["block_b"]["pose"][:3] == pytest.approx([0.0, 0.3, 0.1])
+    assert list(scene_data) == ["voxel"]
+    assert set(scene_data["voxel"]) == {"block_a", "block_b"}
+    assert scene_data["voxel"]["block_b"]["pose"][:3] == pytest.approx([0.0, 0.3, 0.1])
 
 
-def test_generate_world_yaml_rejects_empty_input(tmp_path):
+def test_generate_world_scene_rejects_empty_input():
     with pytest.raises(ValueError, match="at least one"):
-        generate_curobo_world_yaml([], str(tmp_path / "world.yml"))
+        generate_curobo_world_scene([])
 
 
-def test_generate_world_yaml_rejects_duplicate_names(tmp_path):
+def test_generate_world_scene_rejects_duplicate_names(monkeypatch):
+    _mock_visacd_as_identity(monkeypatch)
     pose = _identity_pose()
     first = _FakeRigidObject(
         "block",
@@ -564,15 +891,14 @@ def test_generate_world_yaml_rejects_duplicate_names(tmp_path):
     )
 
     with pytest.raises(ValueError, match="Duplicate"):
-        generate_curobo_world_yaml(
-            [first, second],
-            str(tmp_path / "world.yml"),
-        )
+        generate_curobo_world_scene([first, second], voxel_size=0.5)
 
 
-def test_generated_cuboid_yaml_loads_in_curobo_scene_cfg(tmp_path):
+def test_generated_voxel_data_loads_in_curobo_scene_cfg(monkeypatch):
     pytest.importorskip("curobo")
     from curobo._src.geom.types import SceneCfg
+
+    _mock_visacd_as_identity(monkeypatch)
 
     rigid_object = _FakeRigidObject(
         "demo_block",
@@ -580,42 +906,16 @@ def test_generated_cuboid_yaml_loads_in_curobo_scene_cfg(tmp_path):
         _cube_faces(),
         _identity_pose(),
     )
-    output_path = tmp_path / "world.yml"
-    generate_curobo_world_yaml(
-        [rigid_object],
-        str(output_path),
-        representation="cuboid",
+    scene_data = generate_curobo_world_scene(
+        [rigid_object], voxel_size=0.5, voxel_padding=0.0
     )
 
-    scene = SceneCfg.create(yaml.safe_load(output_path.read_text(encoding="utf-8")))
+    scene = SceneCfg.create(scene_data)
 
-    assert len(scene.cuboid) == 1
-    assert scene.cuboid[0].name == "demo_block"
-    assert scene.cuboid[0].dims == pytest.approx([1.0, 1.0, 1.0])
-
-
-def test_generated_mesh_yaml_loads_in_curobo_scene_cfg(tmp_path):
-    pytest.importorskip("curobo")
-    from curobo._src.geom.types import SceneCfg
-
-    rigid_object = _FakeRigidObject(
-        "demo_block",
-        _unit_cube_vertices(),
-        _cube_faces(),
-        _identity_pose(),
-    )
-    output_path = tmp_path / "world_mesh.yml"
-    generate_curobo_world_yaml(
-        [rigid_object],
-        str(output_path),
-        representation="mesh",
-    )
-
-    scene = SceneCfg.create(yaml.safe_load(output_path.read_text(encoding="utf-8")))
-
-    assert len(scene.mesh) == 1
-    assert scene.mesh[0].name == "demo_block"
-    assert len(scene.mesh[0].vertices) == 8
+    assert len(scene.voxel) == 1
+    assert scene.voxel[0].name == "demo_block"
+    assert scene.voxel[0].voxel_size == pytest.approx(0.5)
+    assert tuple(scene.voxel[0].feature_tensor.shape) == (2, 2, 2)
 
 
 # Simulator smoke coverage
