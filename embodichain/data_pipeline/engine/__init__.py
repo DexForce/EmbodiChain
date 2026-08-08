@@ -16,6 +16,8 @@
 
 """Process-safe shared buffer (``OnlineDataEngine``) that decouples simulation producers from training consumers."""
 
+from __future__ import annotations
+
 from .data import (
     OnlineDataEngine,
     OnlineDataEngineCfg,

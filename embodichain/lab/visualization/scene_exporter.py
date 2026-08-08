@@ -618,9 +618,16 @@ class SceneExporter:
     def _append_cameras(self, sources: list[_CameraSource]) -> None:
         for uid in self._sim.get_sensor_uid_list():
             camera = self._sim.get_sensor(uid)
-            if camera is None or getattr(camera.cfg, "sensor_type", None) != "Camera":
+            sensor_type = getattr(getattr(camera, "cfg", None), "sensor_type", None)
+            if camera is None or sensor_type not in {"Camera", "StereoCamera"}:
                 continue
-            intrinsics = _to_numpy(camera.get_intrinsics(), np.float32)
+            camera_intrinsics = camera.get_intrinsics()
+            if sensor_type == "StereoCamera":
+                # A stereo sensor is represented by its primary (left) RGB
+                # observation. This keeps one preview per configured sensor,
+                # matching the environment's ``color`` observation key.
+                camera_intrinsics = camera_intrinsics[0]
+            intrinsics = _to_numpy(camera_intrinsics, np.float32)
             if intrinsics.shape[0] != self._sim.num_envs:
                 raise ValueError(
                     f"Camera {uid!r} returned {intrinsics.shape[0]} intrinsics "
@@ -642,6 +649,7 @@ class SceneExporter:
                             aspect=float(width) / float(height),
                             near=float(camera.cfg.near),
                             far=float(camera.cfg.far),
+                            role=getattr(camera.cfg, "visualization_role", "sensor"),
                         ),
                         camera=camera,
                     )
@@ -819,7 +827,14 @@ class SceneExporter:
             uid = source.spec.sensor_uid
             if uid in camera_pose_cache:
                 continue
-            pose = _to_numpy(source.camera.get_arena_pose(to_matrix=True), np.float32)
+            if getattr(source.camera.cfg, "sensor_type", None) == "StereoCamera":
+                primary_pose, _ = source.camera.get_left_right_arena_pose()
+                pose = _to_numpy(primary_pose, np.float32)
+            else:
+                pose = _to_numpy(
+                    source.camera.get_arena_pose(to_matrix=True),
+                    np.float32,
+                )
             if pose.shape != (self._sim.num_envs, 4, 4):
                 raise ValueError(
                     f"Camera {uid!r} arena poses must have shape "

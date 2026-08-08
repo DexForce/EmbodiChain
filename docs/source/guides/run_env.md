@@ -118,10 +118,12 @@ embodichain run-env \
     --viser-port 8080
 ```
 
-Use Viser to inspect selected environments, camera frustums, RGB previews, and
-overlays locally or remotely. Limit the published batch with
-`--viser-env-ids`, and tune scene, image, or soft-body publication rates with
-the corresponding `--viser-*-fps` options. See
+Use Viser to inspect selected environments, camera frustums, and all camera RGB
+previews locally or remotely. The expanded preview panel separates cameras
+created by `record_camera_data` under **Record cameras** from configured
+observation sensors under **Sensor cameras**.
+Limit the published batch with `--viser-env-ids`, and tune scene, image, or
+soft-body publication rates with the corresponding `--viser-*-fps` options. See
 {doc}`/overview/sim/viser_visualization` for browser controls and remote-access
 details.
 
@@ -345,8 +347,8 @@ settings that are not stored in the trajectory file.
 
 ### Interactive control replay
 
-Control mode uses kinematic state restoration but lets you scrub the trajectory
-from the terminal:
+Control mode uses kinematic state restoration and lets you scrub the trajectory
+from the terminal or Viser:
 
 ```bash
 embodichain run-env \
@@ -366,7 +368,10 @@ The commands are:
 - `q`: quit.
 
 Run control mode with a native render window. `--headless` leaves no window in
-which to see the scrubbed state.
+which to see the scrubbed state. Alternatively, add `--viser` to open an
+expanded **Replay control** panel in the browser. Its integer **Frame** slider
+jumps directly to any recorded frame, stays synchronized with terminal and
+auto-play commands, and pauses auto-play when dragged.
 
 ## Recommended workflow
 

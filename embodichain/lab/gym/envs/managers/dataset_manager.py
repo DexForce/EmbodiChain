@@ -30,6 +30,8 @@ from embodichain.utils import logger
 from .manager_base import ManagerBase
 from .cfg import DatasetFunctorCfg
 
+__all__ = ["DatasetManager"]
+
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 

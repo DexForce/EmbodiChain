@@ -110,6 +110,10 @@ class ViserBackend(VisualizationBackend):
     """
 
     _INDIVIDUAL_ENV_CONTROL_LIMIT = 16
+    _CAMERA_PREVIEW_GROUPS = (
+        ("record", "Record cameras"),
+        ("sensor", "Sensor cameras"),
+    )
 
     def __init__(
         self,
@@ -141,6 +145,9 @@ class ViserBackend(VisualizationBackend):
         self._joint_control_states: dict[str, JointControlState] = {}
         self._joint_control_pending_sequences: dict[str, int] = {}
         self._joint_control_sequence = 0
+        self._replay_control_state: tuple[int, int, bool] | None = None
+        self._replay_control_folder: object | None = None
+        self._replay_control_slider: object | None = None
         self._world_handle: object | None = None
         self._ground_grid_handle: object | None = None
         self._camera_handles: dict[str, object] = {}
@@ -152,7 +159,9 @@ class ViserBackend(VisualizationBackend):
         self._show_camera_rgb = True
         self._camera_env_dropdown: object | None = None
         self._camera_uid_dropdown: object | None = None
-        self._camera_image_handle: object | None = None
+        self._camera_preview_folder: object | None = None
+        self._camera_preview_group_folders: dict[str, object] = {}
+        self._camera_image_handles: dict[str, object] = {}
         self._overlay_handles: dict[tuple[str, str], object] = {}
         self._overlay_base_visibility: dict[tuple[str, str], bool] = {}
         self._env_visibility: dict[int, bool] = {}
@@ -230,17 +239,22 @@ class ViserBackend(VisualizationBackend):
             except queue.Empty:
                 break
         self._server.gui.reset()
-        self._camera_image_handle = None
         self._camera_env_dropdown = None
         self._camera_uid_dropdown = None
+        self._replay_control_folder = None
+        self._replay_control_slider = None
+        self._camera_preview_folder = None
+        self._camera_preview_group_folders.clear()
+        self._camera_image_handles.clear()
         self._server.gui.add_markdown(
             f"**Run:** `{manifest.run_id}`  \n**Scene revision:** {manifest.scene_revision}"
         )
         if self.allow_commands:
             self._server.gui.add_markdown(
-                "⚠️ **Interactive controls enabled.** Gizmos and articulation "
-                "joint controls may mutate the simulation."
+                "⚠️ **Interactive controls enabled.** Registered browser controls "
+                "may mutate the simulation."
             )
+        self._register_replay_control()
         env_ids = sorted(
             {node.env_id for node in manifest.nodes}
             | {camera.env_id for camera in manifest.cameras}
@@ -598,6 +612,52 @@ class ViserBackend(VisualizationBackend):
             )
         )
 
+    def _remove_replay_control(self) -> None:
+        if self._replay_control_slider is not None:
+            self._replay_control_slider.remove()
+        if self._replay_control_folder is not None:
+            self._replay_control_folder.remove()
+        self._replay_control_folder = None
+        self._replay_control_slider = None
+
+    def _register_replay_control(self) -> None:
+        if self._replay_control_state is None:
+            return
+        step, max_step, visible = self._replay_control_state
+        if not visible:
+            return
+        self._replay_control_folder = self._server.gui.add_folder(
+            "Replay control",
+            expand_by_default=True,
+        )
+        with self._replay_control_folder:
+            self._replay_control_slider = self._server.gui.add_slider(
+                "Frame",
+                min=0,
+                max=max_step,
+                step=1,
+                initial_value=step,
+                marks=(),
+                disabled=not self.allow_commands,
+                hint="Seek to a recorded trajectory frame.",
+            )
+            if self.allow_commands:
+
+                @self._replay_control_slider.on_update
+                def _(event: object) -> None:
+                    # Assigning ``GuiSliderHandle.value`` on the update thread
+                    # synchronously invokes callbacks with no originating client.
+                    # Ignore those server-side synchronization events; otherwise
+                    # they feed back into the replay command queue indefinitely.
+                    if self._event_client_id(event) is None:
+                        return
+                    self._gui_events.put(
+                        _GuiEvent(
+                            category="replay_control",
+                            value=int(round(event.target.value)),
+                        )
+                    )
+
     def _create_gizmo_handle(self, spec: GizmoSpec) -> object:
         if self.allow_commands:
             handle = self._server.scene.add_transform_controls(
@@ -779,28 +839,51 @@ class ViserBackend(VisualizationBackend):
                 return camera_id
         return None
 
-    def _selected_camera_image(self) -> np.ndarray:
-        camera_id = self._selected_camera_id()
-        if camera_id is None or camera_id not in self._latest_camera_images:
+    def _camera_image(self, camera_id: str) -> np.ndarray:
+        if camera_id not in self._latest_camera_images:
             return np.zeros((120, 160, 3), dtype=np.uint8)
         return self._latest_camera_images[camera_id]
 
-    def _replace_camera_image_handle(self) -> None:
-        if self._camera_image_handle is not None:
-            self._camera_image_handle.remove()
-            self._camera_image_handle = None
-        if not self._show_camera_rgb or self._selected_camera_uid is None:
+    def _replace_camera_image_handles(self) -> None:
+        for handle in self._camera_image_handles.values():
+            handle.remove()
+        self._camera_image_handles.clear()
+
+        previews_visible = (
+            self._show_camera_rgb and self._selected_camera_env is not None
+        )
+        if self._camera_preview_folder is not None:
+            self._camera_preview_folder.visible = previews_visible
+
+        grouped_cameras: dict[str, list[tuple[str, CameraSpec]]] = {
+            role: [] for role, _ in self._CAMERA_PREVIEW_GROUPS
+        }
+        if previews_visible:
+            for camera_id, spec in sorted(
+                self._camera_specs.items(),
+                key=lambda item: item[1].sensor_uid,
+            ):
+                if spec.env_id == self._selected_camera_env:
+                    grouped_cameras[spec.role].append((camera_id, spec))
+
+        for role, folder in self._camera_preview_group_folders.items():
+            folder.visible = previews_visible and bool(grouped_cameras[role])
+
+        if not previews_visible or self._camera_preview_folder is None:
             return
-        label = (
-            f"Environment {self._selected_camera_env} / "
-            f"{self._selected_camera_uid} RGB"
-        )
-        self._camera_image_handle = self._server.gui.add_image(
-            self._selected_camera_image(),
-            label=label,
-            format="jpeg",
-            jpeg_quality=80,
-        )
+
+        for role, _ in self._CAMERA_PREVIEW_GROUPS:
+            folder = self._camera_preview_group_folders.get(role)
+            if folder is None or not grouped_cameras[role]:
+                continue
+            with folder:
+                for camera_id, spec in grouped_cameras[role]:
+                    self._camera_image_handles[camera_id] = self._server.gui.add_image(
+                        self._camera_image(camera_id),
+                        label=f"{spec.sensor_uid} RGB",
+                        format="jpeg",
+                        jpeg_quality=80,
+                    )
 
     def _register_camera_controls(self, manifest: SceneManifest) -> None:
         self._reconcile_camera_selection()
@@ -810,7 +893,7 @@ class ViserBackend(VisualizationBackend):
             str(env_id) for env_id in sorted({c.env_id for c in manifest.cameras})
         ]
         camera_options = self._camera_uids_for_env(self._selected_camera_env)
-        with self._server.gui.add_folder("Cameras"):
+        with self._server.gui.add_folder("Cameras", expand_by_default=True):
             self._camera_env_dropdown = self._server.gui.add_dropdown(
                 "Environment",
                 options=env_options,
@@ -824,7 +907,7 @@ class ViserBackend(VisualizationBackend):
                 )
 
             self._camera_uid_dropdown = self._server.gui.add_dropdown(
-                "Camera",
+                "Frustum camera",
                 options=camera_options,
                 initial_value=self._selected_camera_uid,
             )
@@ -850,7 +933,7 @@ class ViserBackend(VisualizationBackend):
                 )
 
             rgb_checkbox = self._server.gui.add_checkbox(
-                "RGB preview",
+                "RGB previews",
                 initial_value=self._show_camera_rgb,
             )
 
@@ -863,7 +946,22 @@ class ViserBackend(VisualizationBackend):
                     )
                 )
 
-        self._replace_camera_image_handle()
+            self._camera_preview_folder = self._server.gui.add_folder(
+                "RGB previews",
+                expand_by_default=True,
+                visible=self._show_camera_rgb,
+            )
+            with self._camera_preview_folder:
+                for role, label in self._CAMERA_PREVIEW_GROUPS:
+                    self._camera_preview_group_folders[role] = (
+                        self._server.gui.add_folder(
+                            label,
+                            expand_by_default=True,
+                            visible=False,
+                        )
+                    )
+
+        self._replace_camera_image_handles()
 
     def publish_manifest(self, manifest: SceneManifest) -> None:
         """Replace the browser's static scene topology.
@@ -1058,8 +1156,7 @@ class ViserBackend(VisualizationBackend):
     def _apply_gui_events(self) -> None:
         self._apply_gizmo_events()
         changed = False
-        camera_selection_changed = False
-        camera_rgb_changed = False
+        camera_previews_changed = False
         while True:
             try:
                 event = self._gui_events.get_nowait()
@@ -1092,15 +1189,14 @@ class ViserBackend(VisualizationBackend):
                 if self._camera_uid_dropdown is not None:
                     self._camera_uid_dropdown.options = camera_uids
                     self._camera_uid_dropdown.value = self._selected_camera_uid
-                camera_selection_changed = True
+                camera_previews_changed = True
             elif event.category == "camera_uid":
                 self._selected_camera_uid = str(event.value)
-                camera_selection_changed = True
             elif event.category == "camera_frustum":
                 self._show_camera_frustum = bool(event.value)
             elif event.category == "camera_rgb":
                 self._show_camera_rgb = bool(event.value)
-                camera_rgb_changed = True
+                camera_previews_changed = True
             elif event.category == "joint_control":
                 client_id, control_id, value = event.value
                 joint_handle = self._joint_control_handles.get(str(control_id))
@@ -1114,6 +1210,13 @@ class ViserBackend(VisualizationBackend):
                         str(control_id),
                         float(value),
                     )
+            elif event.category == "replay_control":
+                state = self._replay_control_state
+                sink = getattr(self, "_replay_control_command_sink", None)
+                if state is not None and state[2] and sink is not None:
+                    target_step = max(0, min(int(event.value), state[1]))
+                    self._replay_control_slider.value = target_step
+                    sink(target_step)
             changed = True
         if not changed:
             return
@@ -1127,8 +1230,8 @@ class ViserBackend(VisualizationBackend):
             ) and self._overlay_visibility.get(key[0], True)
         self._apply_camera_visibility()
         self._apply_gizmo_visibility()
-        if camera_selection_changed or camera_rgb_changed:
-            self._replace_camera_image_handle()
+        if camera_previews_changed:
+            self._replace_camera_image_handles()
 
     def _apply_camera_visibility(self) -> None:
         selected_camera_id = self._selected_camera_id()
@@ -1390,16 +1493,42 @@ class ViserBackend(VisualizationBackend):
         for image in frame.images:
             if image.camera_id in self._camera_specs:
                 self._latest_camera_images[image.camera_id] = image.image
-        selected_camera_id = self._selected_camera_id()
-        if (
-            self._show_camera_rgb
-            and self._camera_image_handle is not None
-            and selected_camera_id in self._latest_camera_images
-        ):
-            self._camera_image_handle.image = self._latest_camera_images[
-                selected_camera_id
-            ]
+                handle = self._camera_image_handles.get(image.camera_id)
+                if handle is not None:
+                    handle.image = image.image
         return True
+
+    def publish_replay_control(
+        self,
+        *,
+        step: int,
+        max_step: int,
+        visible: bool,
+    ) -> None:
+        """Create or update the trajectory replay frame slider.
+
+        Args:
+            step: Current trajectory step.
+            max_step: Largest valid trajectory step.
+            visible: Whether the replay control should be visible.
+        """
+        self._assert_update_thread()
+        if self._server is None:
+            raise RuntimeError("ViserBackend.start() must be called before publishing.")
+        self._apply_gui_events()
+        previous_max_step = (
+            self._replay_control_state[1]
+            if self._replay_control_state is not None
+            else None
+        )
+        self._replay_control_state = (step, max_step, visible)
+        if not visible:
+            self._remove_replay_control()
+        elif self._replay_control_slider is None or previous_max_step != max_step:
+            self._remove_replay_control()
+            self._register_replay_control()
+        else:
+            self._replay_control_slider.value = step
 
     def poll(self) -> None:
         """Apply queued browser GUI events."""
@@ -1432,14 +1561,19 @@ class ViserBackend(VisualizationBackend):
         self._joint_control_states.clear()
         self._joint_control_pending_sequences.clear()
         self._joint_control_sequence = 0
+        self._replay_control_state = None
+        self._replay_control_folder = None
+        self._replay_control_slider = None
         self._world_handle = None
         self._ground_grid_handle = None
         self._camera_handles.clear()
         self._camera_specs.clear()
         self._latest_camera_images.clear()
-        self._camera_image_handle = None
         self._camera_env_dropdown = None
         self._camera_uid_dropdown = None
+        self._camera_preview_folder = None
+        self._camera_preview_group_folders.clear()
+        self._camera_image_handles.clear()
         self._overlay_handles.clear()
         self._overlay_base_visibility.clear()
         while True:

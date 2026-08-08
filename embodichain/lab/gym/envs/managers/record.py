@@ -81,6 +81,7 @@ class record_camera_data(Functor):
                 height=resolution[1],
                 extrinsics=CameraCfg.ExtrinsicsCfg(eye=eye, target=target, up=up),
                 intrinsics=intrinsics,
+                visualization_role="record",
             )
         )
 
