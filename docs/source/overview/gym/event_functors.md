@@ -249,6 +249,36 @@ This page lists all available event functors that can be used with the Event Man
     ```
 ```
 
+## Simulation Control
+
+```{list-table} Simulation Control Functors
+:header-rows: 1
+:widths: 25 75
+
+* - Functor Name
+  - Description
+* - {func}`~events.wait_for_dynamic_objects_to_settle`
+  - Advance physics until every selected dynamic rigid object, rigid object
+    group member, or articulation link remains below the configured linear and
+    angular velocity thresholds for several consecutive checks. When
+    ``entity_cfgs`` is omitted, all supported non-robot dynamic entities are
+    discovered automatically.
+
+    ```json
+    {"func": "wait_for_dynamic_objects_to_settle", "mode": "reset",
+     "params": {
+       "entity_cfgs": [{"uid": "cube"}],
+       "min_steps": 10,
+       "max_steps": 120,
+       "check_interval_steps": 2,
+       "required_stable_checks": 3,
+       "timeout_behavior": "raise"}}
+    ```
+
+    Because physics updates advance the entire vectorized world, partial
+    ``env_ids`` are rejected unless ``allow_partial_envs`` is explicitly enabled.
+```
+
 ## Asset Management
 
 ```{list-table} Asset Management Functors
