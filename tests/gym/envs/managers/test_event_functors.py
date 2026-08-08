@@ -1,5 +1,6 @@
 # ----------------------------------------------------------------------------
 # Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -20,7 +21,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, call
 
 
 class MockRobot:
@@ -66,6 +67,8 @@ class MockRigidObject:
         self.body_data = Mock()
         self.body_data.default_com_pose = torch.zeros(num_envs, 7)
         self.body_data.default_com_pose[:, 3] = 1.0  # quaternion w
+        self.body_data.lin_vel = torch.zeros(num_envs, 3)
+        self.body_data.ang_vel = torch.zeros(num_envs, 3)
 
     def get_local_pose(self, to_matrix=True):
         return self._pose
@@ -91,9 +94,20 @@ class MockRigidObject:
 class MockRigidObjectGroup:
     """Mock rigid object group for event functor tests."""
 
-    def __init__(self, uid: str = "object_group", num_objects: int = 3):
+    def __init__(
+        self,
+        uid: str = "object_group",
+        num_envs: int = 4,
+        num_objects: int = 3,
+        is_dynamic: bool = True,
+    ):
         self.uid = uid
+        self.num_envs = num_envs
         self.num_objects = num_objects
+        self.is_non_dynamic = not is_dynamic
+        self.body_data = Mock()
+        self.body_data.lin_vel = torch.zeros(num_envs, num_objects, 3)
+        self.body_data.ang_vel = torch.zeros(num_envs, num_objects, 3)
 
     def set_local_pose(self, pose, env_ids, obj_ids):
         pass
@@ -187,6 +201,8 @@ class MockArticulation:
         self.uid = uid
         self.num_envs = num_envs
         self.device = torch.device("cpu")
+        self.cfg = Mock()
+        self.cfg.body_type = "dynamic"
 
         # Link names for the articulation
         self.link_names: list[str] = link_names or [
@@ -208,6 +224,10 @@ class MockArticulation:
 
         self.default_link_masses = torch.ones(
             (self.num_envs, len(self.link_names)), device=self.device
+        )
+        self.body_data = Mock()
+        self.body_data.body_link_vel = torch.zeros(
+            self.num_envs, len(self.link_names), 6, device=self.device
         )
 
     def _matrix_to_quat_pos(self, pose_matrix):
@@ -323,7 +343,15 @@ class MockSim:
         return list(self._robots.keys())
 
     def get_asset(self, uid: str):
-        return self._rigid_objects.get(uid)
+        for entities in (
+            self._rigid_objects,
+            self._rigid_object_groups,
+            self._articulations,
+            self._robots,
+        ):
+            if uid in entities:
+                return entities[uid]
+        return None
 
     def add_rigid_object(self, obj):
         self._rigid_objects[obj.uid] = obj
@@ -338,6 +366,13 @@ class MockSim:
 
     def get_rigid_object_group(self, uid: str):
         return self._rigid_object_groups.get(uid)
+
+    def get_rigid_object_group_uid_list(self):
+        return list(self._rigid_object_groups.keys())
+
+    def add_rigid_object_group(self, obj_group):
+        self._rigid_object_groups[obj_group.uid] = obj_group
+        return obj_group
 
     def update(self, step: int = 1):
         pass
@@ -389,6 +424,7 @@ from embodichain.lab.gym.envs.managers.events import (
     resolve_uids,
     resolve_dict,
     set_detached_uids_for_env_reset,
+    wait_for_dynamic_objects_to_settle,
 )
 from embodichain.lab.gym.envs.managers.randomization.physics import (
     randomize_rigid_object_mass,
@@ -401,8 +437,8 @@ from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_indirect_lighting,
     randomize_light,
 )
-from embodichain.lab.gym.envs.managers.cfg import SceneEntityCfg
-from embodichain.lab.gym.envs.managers import FunctorCfg
+from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
+from embodichain.lab.gym.envs.managers import EventManager, FunctorCfg
 
 
 class TestResolveUids:
@@ -893,6 +929,238 @@ class TestRandomizeArticulationMass:
                 entity_cfg=MagicMock(uid="articulation"),
                 mass_range=(0.5, 2.0),
                 link_names="nonexistent_link",
+            )
+
+
+class TestWaitForDynamicObjectsToSettle:
+    """Tests for adaptive dynamic-object settling."""
+
+    def test_requires_consecutive_checks_and_stops_early(self):
+        """A transient stable sample resets before an eventual early exit."""
+        env = MockEnv(num_envs=4)
+        cube = env.test_object
+        cube.body_data.lin_vel.fill_(1.0)
+        sampled_speeds = iter((0.0, 1.0, 0.0, 0.0))
+
+        def update_velocity(step):
+            del step
+            cube.body_data.lin_vel.fill_(next(sampled_speeds))
+
+        env.sim.update = Mock(side_effect=update_velocity)
+
+        wait_for_dynamic_objects_to_settle(
+            env,
+            None,
+            entity_cfgs=[SceneEntityCfg(uid="cube")],
+            linear_velocity_threshold=0.1,
+            angular_velocity_threshold=0.1,
+            min_steps=2,
+            max_steps=20,
+            check_interval_steps=3,
+            required_stable_checks=2,
+        )
+
+        assert env.sim.update.call_args_list == [
+            call(step=2),
+            call(step=3),
+            call(step=3),
+            call(step=3),
+        ]
+
+    def test_auto_discovers_all_supported_dynamic_entities(self):
+        """Automatic discovery includes groups and skips non-dynamic objects."""
+        env = MockEnv(num_envs=4)
+        obj_group = env.sim.add_rigid_object_group(
+            MockRigidObjectGroup(uid="objects", num_envs=env.num_envs)
+        )
+        obj_group.body_data.ang_vel.fill_(1.0)
+        env.target_object.is_non_dynamic = True
+        env.target_object.body_data.lin_vel.fill_(float("nan"))
+
+        def stop_group(step):
+            del step
+            obj_group.body_data.ang_vel.zero_()
+
+        env.sim.update = Mock(side_effect=stop_group)
+
+        wait_for_dynamic_objects_to_settle(
+            env,
+            None,
+            min_steps=0,
+            max_steps=2,
+            check_interval_steps=1,
+            required_stable_checks=1,
+        )
+
+        env.sim.update.assert_called_once_with(step=1)
+
+    def test_articulation_body_ids_limit_checked_links(self):
+        """Unselected moving articulation links do not block settling."""
+        env = MockEnv(num_envs=4)
+        env.test_articulation.body_data.body_link_vel[:, 0, 0] = 1.0
+        env.sim.update = Mock()
+
+        wait_for_dynamic_objects_to_settle(
+            env,
+            None,
+            entity_cfgs=[SceneEntityCfg(uid="articulation", body_ids=[1])],
+            min_steps=0,
+            max_steps=0,
+            required_stable_checks=1,
+        )
+
+        env.sim.update.assert_not_called()
+
+    def test_registers_and_runs_through_event_manager(self):
+        """The function follows the EventCfg signature and reset dispatch path."""
+        env = MockEnv(num_envs=4)
+        env.sim.update = Mock()
+        manager = EventManager(
+            cfg={
+                "settle": EventCfg(
+                    func=wait_for_dynamic_objects_to_settle,
+                    mode="reset",
+                    params={
+                        "min_steps": 0,
+                        "max_steps": 0,
+                        "required_stable_checks": 1,
+                    },
+                )
+            },
+            env=env,
+        )
+
+        manager.apply(mode="reset")
+
+        env.sim.update.assert_not_called()
+
+    def test_partial_envs_are_rejected_by_default(self):
+        """Partial selection requires explicit acceptance of global stepping."""
+        env = MockEnv(num_envs=4)
+
+        with pytest.raises(ValueError, match="allow_partial_envs=True"):
+            wait_for_dynamic_objects_to_settle(
+                env,
+                [1],
+                entity_cfgs=[SceneEntityCfg(uid="cube")],
+                min_steps=0,
+                max_steps=0,
+                required_stable_checks=1,
+            )
+
+    def test_partial_envs_only_affect_stability_check_when_allowed(self):
+        """Allowed partial waits ignore motion in unselected environments."""
+        env = MockEnv(num_envs=4)
+        env.test_object.body_data.lin_vel[0, 0] = 1.0
+        env.sim.update = Mock()
+
+        wait_for_dynamic_objects_to_settle(
+            env,
+            [1],
+            entity_cfgs=[SceneEntityCfg(uid="cube")],
+            min_steps=0,
+            max_steps=0,
+            required_stable_checks=1,
+            allow_partial_envs=True,
+        )
+
+        env.sim.update.assert_not_called()
+
+    def test_timeout_warns_with_diagnostics(self, caplog):
+        """Warning timeouts report exact step usage and residual speed."""
+        env = MockEnv(num_envs=4)
+        env.test_object.body_data.lin_vel[:, 0] = 0.5
+        env.sim.update = Mock()
+
+        with caplog.at_level("WARNING"):
+            wait_for_dynamic_objects_to_settle(
+                env,
+                None,
+                entity_cfgs=[SceneEntityCfg(uid="cube")],
+                linear_velocity_threshold=0.1,
+                min_steps=1,
+                max_steps=5,
+                check_interval_steps=2,
+                required_stable_checks=2,
+            )
+
+        assert env.sim.update.call_args_list == [
+            call(step=1),
+            call(step=2),
+            call(step=2),
+        ]
+        assert "did not settle within 5 physics steps" in caplog.text
+        assert "cube(env_ids=[0, 1, 2, 3])" in caplog.text
+        assert "maximum linear speed: 0.5 m/s" in caplog.text
+
+    def test_timeout_raises_and_nonfinite_speed_is_unstable(self):
+        """Strict timeout mode raises and treats NaN velocity as unstable."""
+        env = MockEnv(num_envs=4)
+        env.test_object.body_data.lin_vel[0, 0] = float("nan")
+
+        with pytest.raises(TimeoutError, match="maximum linear speed: inf"):
+            wait_for_dynamic_objects_to_settle(
+                env,
+                None,
+                entity_cfgs=[SceneEntityCfg(uid="cube")],
+                min_steps=0,
+                max_steps=0,
+                required_stable_checks=1,
+                timeout_behavior="raise",
+            )
+
+    def test_explicit_non_dynamic_and_robot_targets_are_rejected(self):
+        """Explicit targets must be dynamic non-robot entities."""
+        env = MockEnv(num_envs=4)
+        env.target_object.is_non_dynamic = True
+
+        with pytest.raises(ValueError, match="static or kinematic"):
+            wait_for_dynamic_objects_to_settle(
+                env,
+                None,
+                entity_cfgs=[SceneEntityCfg(uid="target")],
+                min_steps=0,
+                max_steps=0,
+                required_stable_checks=1,
+            )
+        with pytest.raises(ValueError, match="Robot 'robot'"):
+            wait_for_dynamic_objects_to_settle(
+                env,
+                None,
+                entity_cfgs=[SceneEntityCfg(uid="robot")],
+                min_steps=0,
+                max_steps=0,
+                required_stable_checks=1,
+            )
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"min_steps": -1},
+            {"min_steps": 2, "max_steps": 1},
+            {"check_interval_steps": 0},
+            {"required_stable_checks": 0},
+            {
+                "min_steps": 0,
+                "max_steps": 1,
+                "check_interval_steps": 2,
+                "required_stable_checks": 3,
+            },
+            {"linear_velocity_threshold": float("nan")},
+            {"timeout_behavior": "ignore"},
+            {"allow_partial_envs": "yes"},
+        ],
+    )
+    def test_invalid_parameters_are_rejected(self, params):
+        """Invalid thresholds and step budgets fail before simulation."""
+        env = MockEnv(num_envs=4)
+
+        with pytest.raises((TypeError, ValueError)):
+            wait_for_dynamic_objects_to_settle(
+                env,
+                None,
+                entity_cfgs=[SceneEntityCfg(uid="cube")],
+                **params,
             )
 
 
