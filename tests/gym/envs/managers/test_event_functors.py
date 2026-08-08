@@ -23,6 +23,8 @@ import torch
 
 from unittest.mock import MagicMock, Mock, call
 
+from embodichain.lab.sim.cfg import ArticulationCfg
+
 
 class MockRobot:
     """Mock robot for event functor tests."""
@@ -201,8 +203,7 @@ class MockArticulation:
         self.uid = uid
         self.num_envs = num_envs
         self.device = torch.device("cpu")
-        self.cfg = Mock()
-        self.cfg.body_type = "dynamic"
+        self.cfg = ArticulationCfg(uid=uid, fpath="mock.urdf")
 
         # Link names for the articulation
         self.link_names: list[str] = link_names or [
@@ -978,20 +979,27 @@ class TestWaitForDynamicObjectsToSettle:
         ]
 
     def test_auto_discovers_all_supported_dynamic_entities(self):
-        """Automatic discovery includes groups and skips non-dynamic objects."""
+        """Automatic discovery includes production-configured articulations."""
         env = MockEnv(num_envs=4)
         obj_group = env.sim.add_rigid_object_group(
             MockRigidObjectGroup(uid="objects", num_envs=env.num_envs)
         )
         obj_group.body_data.ang_vel.fill_(1.0)
+        env.test_articulation.body_data.body_link_vel[..., 0].fill_(1.0)
         env.target_object.is_non_dynamic = True
         env.target_object.body_data.lin_vel.fill_(float("nan"))
+        update_count = 0
 
-        def stop_group(step):
+        def settle_entities(step):
+            nonlocal update_count
             del step
-            obj_group.body_data.ang_vel.zero_()
+            if update_count == 0:
+                obj_group.body_data.ang_vel.zero_()
+            else:
+                env.test_articulation.body_data.body_link_vel.zero_()
+            update_count += 1
 
-        env.sim.update = Mock(side_effect=stop_group)
+        env.sim.update = Mock(side_effect=settle_entities)
 
         wait_for_dynamic_objects_to_settle(
             env,
@@ -1002,11 +1010,12 @@ class TestWaitForDynamicObjectsToSettle:
             required_stable_checks=1,
         )
 
-        env.sim.update.assert_called_once_with(step=1)
+        assert env.sim.update.call_args_list == [call(step=1), call(step=1)]
 
     def test_articulation_body_ids_limit_checked_links(self):
-        """Unselected moving articulation links do not block settling."""
+        """Production articulation configs work without a body_type field."""
         env = MockEnv(num_envs=4)
+        assert not hasattr(env.test_articulation.cfg, "body_type")
         env.test_articulation.body_data.body_link_vel[:, 0, 0] = 1.0
         env.sim.update = Mock()
 
