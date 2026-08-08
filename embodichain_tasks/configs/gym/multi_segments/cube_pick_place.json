@@ -9,6 +9,28 @@
     },
     "env": {
         "sim_steps_per_control": 4,
+        "dataset": {
+            "lerobot": {
+                "func": "LeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "save_path": "outputs/lerobot/multi_segments",
+                    "robot_meta": {
+                        "robot_type": "UR5",
+                        "control_freq": 25
+                    },
+                    "instruction": {
+                        "lang": "Pick up and place the cube three times between the configured targets."
+                    },
+                    "extra": {
+                        "scene_type": "multi_segments",
+                        "task_description": "three_cycle_cube_pick_place",
+                        "data_type": "sim"
+                    },
+                    "use_videos": false
+                }
+            }
+        },
         "extensions": {
             "num_cycles": 3,
             "place_positions": [

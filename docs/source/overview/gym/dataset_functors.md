@@ -85,19 +85,61 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 * - ``image_writer_processes``
   - Number of background processes for image writing (alternative to threads; higher spawn cost, more isolation). Use 0 to rely on threads only.
 * - ``depth_video``
-  - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See [Compressed depth sidecar](#compressed-depth-sidecar).
+  - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See {ref}`compressed-depth-sidecar`.
 ```
 
 ### Recorded Data
 
 The LeRobotRecorder saves the following data for each frame:
 
+- ``task``: The episode-level task instruction, constant across its frames
+- ``subtask_index``: Dataset-global index of the active segment instruction;
+  descriptions are stored in ``meta/subtasks.parquet``
 - ``observation.state``: Joint positions (proprioceptive state)
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
 - ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
 - ``observation.mask.{sensor_name}``: Native numeric segmentation-mask arrays
 - ``observation.mask.{sensor_name}_right``: Right-camera segmentation-mask arrays
+- ``annotation.segment_*``: Exact episode-local segment identifiers and boundaries
+
+For legacy episodes without explicit segment metadata, the overall task is
+also registered as their single subtask. ``subtask_index`` follows LeRobot
+0.4.4's optional subtask convention, while ``annotation.segment_id`` remains
+episode-local and is therefore not required to have the same numeric value.
+
+### Previewing Recorded Episodes
+
+Use EmbodiChain's terminal preview when validating both standard LeRobot data
+and EmbodiChain's segment metadata:
+
+```bash
+embodichain preview_lerobot_data \
+    path/to/lerobot_dataset \
+    --episode 0 \
+    --expect-segments 3
+```
+
+The path may be a parent containing auto-numbered datasets when `--latest` is
+added. `--expect-segments` is an optional assertion, not a filter: validation
+fails if the selected episode does not contain exactly that many segments.
+
+Use LeRobot's official Rerun CLI for an interactive view of standard camera,
+state, and action streams:
+
+```bash
+lerobot-dataset-viz \
+    --repo-id organization/local-dataset-name \
+    --root path/to/exact/lerobot_dataset \
+    --mode local \
+    --episode-index 0
+```
+
+The LeRobot 0.4.4 viewer does not render `subtask_index` or
+`annotation.segment_*`; use the terminal preview to verify those fields. See
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for the
+complete three-segment example, exit codes, local-root behavior, and `.rrd`
+export commands.
 
 Depth and mask features keep the dtype and shape declared by the sensor
 observation space. Masks are always stored as numeric LeRobot array features
@@ -111,6 +153,7 @@ Depth has two storage modes:
   ``gray12le``/HEVC MP4s alongside the dataset (see below), and the numeric
   feature is dropped unless ``keep_numeric_fallback=True``.
 
+(compressed-depth-sidecar)=
 ## Compressed depth sidecar
 
 When ``depth_video.enable=True`` and an HEVC encoder (``libx265``) is available,

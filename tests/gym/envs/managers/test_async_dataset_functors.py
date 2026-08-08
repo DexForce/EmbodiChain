@@ -225,7 +225,9 @@ class TestAsyncLeRobotRecorder:
             assert (frame[LeRobotKey.OBS_STATE.value] == 0).all()
             assert (frame[LeRobotKey.ACTION.value] == 0).all()
             assert frame["annotation.segment_id"].tolist() == [0]
-            assert frame["task"] == "original segment task"
+            assert frame["task"] == "test"
+            assert frame["subtask_index"].tolist() == [0]
+        assert mock_ds.meta.subtasks.index.tolist() == ["original segment task"]
         assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]
 
     def test_finalize_drains_and_finalizes_dataset(self):
@@ -254,6 +256,19 @@ class TestAsyncLeRobotRecorder:
 
         assert mock_ds.save_episode_calls == 0
         assert mock_ds.finalize_calls == 1
+
+    def test_call_skips_empty_rollout(self):
+        """An initial reset must not enqueue a zero-frame episode."""
+        env = _MockEnv(num_envs=1, steps=0)
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+        recorder._save_single_episode = Mock()
+
+        recorder(env, env_ids=torch.tensor([0]))
+        recorder.finalize()
+
+        recorder._save_single_episode.assert_not_called()
+        assert mock_ds.save_episode_calls == 0
 
     def test_finalize_aggregates_background_failures_after_draining(self):
         """All queued commits run and their failures surface at the barrier."""

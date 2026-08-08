@@ -212,6 +212,32 @@ structured datasets, replay trajectories, and camera-video buffers; recorder
 options such as `save_failed_episodes` do not override the runner's expert
 transaction policy.
 
+#### Run the built-in three-cycle example
+
+The shipped
+`embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json` config uses
+a specified UR5 with a parallel gripper to pick up and freely place the same
+cube three times. Each cycle is a separate lazy segment. The next pickup is
+planned only after the previous placement has fallen and become stable, so the
+planner starts from the cube's measured pose rather than its requested release
+pose.
+
+No action-bank config is needed:
+
+```bash
+embodichain run-env \
+    --gym_config embodichain_tasks/configs/gym/multi_segments/cube_pick_place.json \
+    --headless \
+    --device cuda \
+    --max_episodes 1
+```
+
+The configured `LeRobotRecorder` writes below
+`outputs/lerobot/multi_segments/` using an auto-numbered directory. The episode
+contains one overall task plus three per-frame subtask/segment annotations.
+See {ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for
+the EmbodiChain terminal validator and LeRobot's official Rerun viewer.
+
 ### Choose the recording output you need
 
 EmbodiChain uses "recording" for three related but distinct outputs:
@@ -280,6 +306,9 @@ per-environment lengths, segment ranges and targets, timestep, robot identity
 and DOF, active joint IDs, recorded object IDs, and original environment IDs.
 LeRobot exports also contain per-frame `annotation.segment_*` fields and a
 `meta/embodichain_episodes.jsonl` sidecar with the complete segment records.
+The overall episode instruction stays in LeRobot's `task` field; each semantic
+segment is exposed through a per-frame `subtask_index` resolved by
+`meta/subtasks.parquet`.
 The final directory is also printed when the run finishes.
 
 ## Replay a trajectory

@@ -214,6 +214,11 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
 
             for env_id in env_ids.cpu().tolist():
                 step = self._episode_length(env_id)
+                # Initial reset may reach the recorder before the first
+                # transition.  Do not enqueue an empty payload and later
+                # report it as a failed committed episode.
+                if step <= 0:
+                    continue
                 obs_view = env.rollout_buffer["obs"][env_id, :step]
                 action_view = env.rollout_buffer["actions"][env_id, :step]
                 # Clone in the caller thread: the rollout buffer is cleared and

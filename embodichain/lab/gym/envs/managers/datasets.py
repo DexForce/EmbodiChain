@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import threading
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -74,11 +74,15 @@ DEMO_FRAME_FEATURES = {
     "terminated": "annotation.terminated",
     "truncated": "annotation.truncated",
 }
+LEROBOT_SUBTASK_INDEX_KEY = "subtask_index"
+LEROBOT_SUBTASKS_PATH = Path("meta/subtasks.parquet")
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
 try:
+    import pandas as pd
+
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     LEROBOT_AVAILABLE = True
@@ -165,6 +169,7 @@ class LeRobotRecorder(Functor):
         self.total_time: float = 0.0
         self.curr_episode: int = 0
         self._metadata_lock = threading.Lock()
+        self._subtask_to_index: dict[str, int] = {}
         self._finalize_lock = threading.Lock()
         self._finalized = False
         self._finalize_result: Optional[str] = None
@@ -237,6 +242,11 @@ class LeRobotRecorder(Functor):
         """
         for env_id in env_ids.cpu().tolist():
             step = self._episode_length(env_id)
+            # The first env.reset() can request a dataset save before any
+            # transition has been recorded.  That is an empty buffer, not a
+            # committed episode whose persistence failed.
+            if step <= 0:
+                continue
             obs_list = self._env.rollout_buffer["obs"][env_id, :step]
             action_list = self._env.rollout_buffer["actions"][env_id, :step]
             annotations = {
@@ -329,6 +339,11 @@ class LeRobotRecorder(Functor):
         episode_index = self.curr_episode
         dataset_committed = False
         try:
+            frame_subtasks = [
+                self._subtask_for_frame(task, episode_metadata, frame_index)
+                for frame_index in range(episode_length)
+            ]
+            subtask_indices = self._register_subtasks(frame_subtasks)
             if self._depth_manager is not None:
                 self._depth_manager.start_episode(
                     episode_index, list(self._depth_sensor_specs.keys())
@@ -361,12 +376,13 @@ class LeRobotRecorder(Functor):
                     # Legacy/manual collection has no end-segment callback;
                     # the last committed frame is still an episode boundary.
                     frame_annotations["segment_end"] = True
-                frame_task = self._task_for_frame(task, episode_metadata, frame_index)
+                frame_subtask = frame_subtasks[frame_index]
                 frame = self._convert_frame_to_lerobot(
                     obs,
                     action,
-                    frame_task,
+                    task,
                     annotations=frame_annotations,
+                    subtask_index=subtask_indices[frame_subtask],
                 )
                 # Offload depth to the sidecar writer and drop it from the frame
                 # so LeRobot's RGB-only image/video path never sees it. With
@@ -436,22 +452,103 @@ class LeRobotRecorder(Functor):
             raise
 
     @staticmethod
-    def _task_for_frame(
-        default_task: str,
+    def _subtask_for_frame(
+        default_subtask: str,
         episode_metadata: Mapping[str, Any] | None,
         frame_index: int,
     ) -> str:
         """Resolve a segment-specific instruction for one LeRobot frame."""
         if episode_metadata is None:
-            return default_task
+            return LeRobotRecorder._normalize_subtask_description(default_subtask)
         for segment in episode_metadata.get("segments", []):
             if (
                 int(segment.get("start_step", 0))
                 <= frame_index
                 < int(segment.get("end_step", 0))
             ):
-                return str(segment.get("instruction") or default_task)
-        return default_task
+                return LeRobotRecorder._normalize_subtask_description(
+                    segment.get("instruction") or default_subtask
+                )
+        return LeRobotRecorder._normalize_subtask_description(default_subtask)
+
+    @staticmethod
+    def _normalize_subtask_description(description: Any) -> str:
+        """Return a non-empty description suitable for the subtask table."""
+        return str(description).strip() or "unknown_task"
+
+    def _register_subtasks(self, descriptions: Iterable[str]) -> dict[str, int]:
+        """Register subtask descriptions and persist LeRobot's lookup table.
+
+        LeRobot 0.4.4 can resolve a per-frame ``subtask_index`` through
+        ``meta/subtasks.parquet``, but its recording API does not create that
+        table. EmbodiChain therefore maintains the same description-to-index
+        convention used by LeRobot's task table.
+
+        Args:
+            descriptions: Subtask descriptions referenced by an episode.
+
+        Returns:
+            The global dataset index for every referenced description.
+
+        Raises:
+            RuntimeError: If the dataset path is unavailable while new
+                descriptions need to be persisted.
+        """
+        normalized = [
+            self._normalize_subtask_description(description)
+            for description in descriptions
+        ]
+        with self._metadata_lock:
+            new_descriptions: list[str] = []
+            for description in normalized:
+                if description in self._subtask_to_index:
+                    continue
+                self._subtask_to_index[description] = len(self._subtask_to_index)
+                new_descriptions.append(description)
+
+            if new_descriptions:
+                try:
+                    self._write_subtasks_metadata()
+                except Exception:
+                    for description in reversed(new_descriptions):
+                        self._subtask_to_index.pop(description)
+                    raise
+
+            return {
+                description: self._subtask_to_index[description]
+                for description in dict.fromkeys(normalized)
+            }
+
+    def _write_subtasks_metadata(self) -> None:
+        """Atomically write the LeRobot 0.4.4 subtask lookup table."""
+        if self.dataset_full_path is None or self.dataset is None:
+            raise RuntimeError("LeRobotDataset is not initialized.")
+
+        ordered_subtasks = sorted(
+            self._subtask_to_index.items(), key=lambda item: item[1]
+        )
+        subtasks = pd.DataFrame(
+            {
+                LEROBOT_SUBTASK_INDEX_KEY: np.asarray(
+                    [index for _, index in ordered_subtasks], dtype=np.int64
+                )
+            },
+            index=pd.Index([description for description, _ in ordered_subtasks]),
+        )
+        subtasks.index.name = None
+
+        metadata_path = self.dataset_full_path / LEROBOT_SUBTASKS_PATH
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = metadata_path.with_name(f".{metadata_path.name}.tmp")
+        try:
+            subtasks.to_parquet(temporary_path)
+            temporary_path.replace(metadata_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+        # Keep the live writer's metadata consistent with a freshly loaded
+        # LeRobotDataset, which exposes this table through ``meta.subtasks``.
+        self.dataset.meta.subtasks = subtasks
 
     @staticmethod
     def _json_default(value: Any) -> Any:
@@ -701,6 +798,11 @@ class LeRobotRecorder(Functor):
             "shape": (action_dim,),
             "names": joint_names,
         }
+        features[LEROBOT_SUBTASK_INDEX_KEY] = {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": None,
+        }
 
         for feature_key in DEMO_FRAME_FEATURES.values():
             features[feature_key] = {
@@ -907,19 +1009,24 @@ class LeRobotRecorder(Functor):
         action: TensorDict | torch.Tensor,
         task: str,
         annotations: Mapping[str, Any] | None = None,
+        subtask_index: int = 0,
     ) -> Dict:
         """Convert a single frame to LeRobot format.
 
         Args:
             obs: Single environment observation (already extracted from batch)
             action: Single environment action (already extracted from batch)
-            task: Task name
+            task: Episode-level task description.
             annotations: Optional segment and terminal fields for this frame.
+            subtask_index: Dataset-global index of the active subtask description.
 
         Returns:
             Frame dict in LeRobot format with numpy arrays
         """
-        frame = {"task": task}
+        frame = {
+            "task": task,
+            LEROBOT_SUBTASK_INDEX_KEY: torch.tensor([subtask_index], dtype=torch.int64),
+        }
 
         if self._env.has_sensors:
             sensor_obs_space: dict = self._env.single_observation_space["sensor"]

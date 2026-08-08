@@ -30,6 +30,9 @@ from unittest.mock import MagicMock, Mock, patch
 
 # Skip all tests if LeRobot is not available
 try:
+    import pandas as pd
+
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from embodichain.lab.gym.envs.managers.datasets import (
         LeRobotRecorder,
         LEROBOT_AVAILABLE,
@@ -40,6 +43,7 @@ try:
     LEROBOT_AVAILABLE = True
 except ImportError:
     LEROBOT_AVAILABLE = False
+    LeRobotDataset = None
     LeRobotRecorder = None
     LeRobotKey = None
 
@@ -283,6 +287,11 @@ class TestLeRobotRecorderFeatures:
         # Check shapes
         assert features[LeRobotKey.OBS_STATE.value]["shape"] == (6,)
         assert features[LeRobotKey.ACTION.value]["shape"] == (6,)
+        assert features["subtask_index"] == {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": None,
+        }
         assert features["annotation.segment_id"] == {
             "dtype": "int64",
             "shape": (1,),
@@ -699,10 +708,12 @@ class TestLeRobotRecorderFrameConversion:
                 "terminated": False,
                 "truncated": False,
             },
+            subtask_index=3,
         )
 
         assert "task" in frame
         assert frame["task"] == "test_task"
+        assert frame["subtask_index"].tolist() == [3]
         assert LeRobotKey.OBS_STATE.value in frame
         assert LeRobotKey.ACTION.value in frame
         assert frame["annotation.segment_id"].tolist() == [2]
@@ -797,6 +808,112 @@ def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_subtask_registry_writes_stable_deduplicated_indices(tmp_path) -> None:
+    """Repeated descriptions retain one stable row in subtasks.parquet."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder.dataset_full_path = tmp_path
+    recorder.dataset = MagicMock()
+    recorder._metadata_lock = threading.Lock()
+    recorder._subtask_to_index = {}
+
+    first_indices = recorder._register_subtasks(
+        ["pick cube", "place cube", "pick cube"]
+    )
+    second_indices = recorder._register_subtasks([" place cube ", "release cube"])
+
+    assert first_indices == {"pick cube": 0, "place cube": 1}
+    assert second_indices == {"place cube": 1, "release cube": 2}
+
+    subtasks = pd.read_parquet(tmp_path / "meta" / "subtasks.parquet")
+    assert subtasks.index.tolist() == ["pick cube", "place cube", "release cube"]
+    assert subtasks["subtask_index"].tolist() == [0, 1, 2]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
+    """LeRobot 0.4.4 reloads one overall task and per-frame subtasks."""
+    env = MockEnvForDataset(num_joints=2, has_sensors=False)
+    cfg = MockFunctorCfg(
+        params={
+            "save_path": str(tmp_path),
+            "robot_meta": {"robot_type": "test_robot", "control_freq": 10},
+            "instruction": {"lang": "Move the cube between two targets."},
+            "extra": {"task_description": "multisegment_round_trip"},
+            "use_videos": False,
+        }
+    )
+    recorder = LeRobotRecorder(cfg, env)
+    obs_list = [
+        TensorDict(
+            {
+                "robot": {
+                    "qpos": torch.full((2,), frame_index, dtype=torch.float32),
+                    "qvel": torch.zeros(2),
+                    "qf": torch.zeros(2),
+                }
+            },
+            batch_size=[],
+        )
+        for frame_index in range(4)
+    ]
+    action_list = [torch.zeros(2) for _ in obs_list]
+    annotations = {
+        "segment_id": torch.tensor([0, 0, 1, 1]),
+        "segment_step": torch.tensor([0, 1, 0, 1]),
+        "segment_start": torch.tensor([1, 0, 1, 0]),
+        "segment_end": torch.tensor([0, 1, 0, 1]),
+    }
+    episode_metadata = {
+        "segments": [
+            {
+                "segment_id": 0,
+                "start_step": 0,
+                "end_step": 2,
+                "instruction": "Pick up the cube.",
+            },
+            {
+                "segment_id": 1,
+                "start_step": 2,
+                "end_step": 4,
+                "instruction": "Place the cube at the next target.",
+            },
+        ]
+    }
+
+    assert recorder._save_single_episode(
+        0,
+        obs_list,
+        action_list,
+        annotations=annotations,
+        episode_metadata=episode_metadata,
+    )
+    recorder.finalize()
+
+    loaded = LeRobotDataset(
+        repo_id=recorder.dataset_full_path.name,
+        root=recorder.dataset_full_path,
+    )
+    samples = [loaded[index] for index in range(len(obs_list))]
+
+    assert {sample["task"] for sample in samples} == {
+        "Move the cube between two targets."
+    }
+    assert [sample["subtask"] for sample in samples] == [
+        "Pick up the cube.",
+        "Pick up the cube.",
+        "Place the cube at the next target.",
+        "Place the cube at the next target.",
+    ]
+    assert [sample["subtask_index"].item() for sample in samples] == [0, 0, 1, 1]
+    assert [sample["annotation.segment_id"].item() for sample in samples] == [
+        0,
+        0,
+        1,
+        1,
+    ]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
     """A sidecar failure after LeRobot commit advances the global index first."""
     recorder = LeRobotRecorder.__new__(LeRobotRecorder)
@@ -808,6 +925,7 @@ def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
     recorder.dataset = MagicMock()
     recorder.dataset.meta.info = {"fps": 30}
     recorder._depth_manager = None
+    recorder._register_subtasks = MagicMock(return_value={"unknown_task": 0})
     recorder._convert_frame_to_lerobot = MagicMock(return_value={})
     recorder._write_episode_metadata = MagicMock(side_effect=OSError("disk full"))
 
@@ -816,6 +934,23 @@ def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
 
     recorder.dataset.save_episode.assert_called_once_with()
     assert recorder.curr_episode == 1
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_save_episodes_skips_empty_rollout() -> None:
+    """An initial reset with no recorded frames is not a failed commit."""
+    env = Mock()
+    env.rollout_steps = torch.zeros(1, dtype=torch.long)
+    env.rollout_buffer = MagicMock()
+
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = env
+    recorder._save_single_episode = Mock()
+
+    recorder._save_episodes(torch.tensor([0]))
+
+    recorder._save_single_episode.assert_not_called()
+    env.rollout_buffer.__getitem__.assert_not_called()
 
 
 class TestDatasetFunctorCfg:

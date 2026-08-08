@@ -69,6 +69,13 @@ class TestMultiSegmentsCubePickPlaceEnv:
         assert config["rigid_object"][0]["uid"] == "cube"
         assert config["robot"]["class_type"] == "URRobot"
         assert config["robot"]["robot_type"] == "ur5"
+        recorder = config["env"]["dataset"]["lerobot"]
+        assert recorder["func"] == "LeRobotRecorder"
+        assert recorder["params"]["robot_meta"] == {
+            "robot_type": "UR5",
+            "control_freq": 25,
+        }
+        assert recorder["params"]["save_path"] == "outputs/lerobot/multi_segments"
 
         cfg = config_to_cfg(config)
 
