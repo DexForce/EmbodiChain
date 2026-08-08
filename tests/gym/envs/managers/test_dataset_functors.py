@@ -195,30 +195,6 @@ class TestLeRobotRecorderInitialization:
         assert mock_lerobot_dataset.create.call_args.kwargs["fps"] == 30
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
-    def test_legacy_control_frequency_is_ignored(self, mock_lerobot_dataset):
-        """Legacy robot metadata cannot override the simulated sampling rate."""
-        env = MockEnvForDataset(step_dt=0.04)
-
-        mock_dataset_instance = Mock()
-        mock_dataset_instance.meta = Mock()
-        mock_dataset_instance.meta.info = {"fps": 25}
-        mock_lerobot_dataset.create.return_value = mock_dataset_instance
-
-        cfg = MockFunctorCfg(
-            params={
-                "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 3},
-            }
-        )
-
-        with pytest.warns(DeprecationWarning, match="deprecated and ignored"):
-            recorder = LeRobotRecorder(cfg, env)
-
-        assert recorder.robot_meta == {"robot_type": "test_robot"}
-        assert recorder.dataset_fps == 25
-        assert mock_lerobot_dataset.create.call_args.kwargs["fps"] == 25
-
-    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_non_integer_environment_frequency_is_rejected(self, mock_lerobot_dataset):
         """LeRobot recording rejects cadence that its integer FPS cannot encode."""
         env = MockEnvForDataset(step_dt=0.03)

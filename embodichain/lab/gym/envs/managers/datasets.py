@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import math
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -111,17 +110,7 @@ class LeRobotRecorder(Functor):
             "save_path", EMBODICHAIN_DEFAULT_DATASET_ROOT
         )
         self.robot_meta = dict(params.get("robot_meta", {}) or {})
-        legacy_control_frequency = self.robot_meta.pop("control_freq", None)
         self.dataset_fps = self._derive_dataset_fps()
-        if legacy_control_frequency is not None:
-            warnings.warn(
-                "robot_meta.control_freq is deprecated and ignored. Dataset FPS is "
-                f"derived from env.step_dt ({self.dataset_fps} Hz). Configure "
-                "sim_steps_per_control or target_control_frequency on the "
-                "environment instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
 
         # Optional parameters
         self.instruction = params.get("instruction", None)

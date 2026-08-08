@@ -90,11 +90,10 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 
 ```{note}
 Dataset FPS is derived from ``env.step_dt`` and therefore always matches the
-actual observation-action sampling cadence. The legacy
-``robot_meta.control_freq`` field is deprecated and ignored. Configure
-``sim_steps_per_control`` or ``target_control_frequency`` on the environment
-instead. LeRobot currently requires an integer FPS, so the recorder rejects a
-non-integer derived control frequency rather than writing inaccurate metadata.
+actual observation-action sampling cadence. Configure ``sim_steps_per_control``
+or ``target_control_frequency`` on the environment. LeRobot currently requires
+an integer FPS, so the recorder rejects a non-integer derived control frequency
+rather than writing inaccurate metadata.
 ```
 
 ### Recorded Data
