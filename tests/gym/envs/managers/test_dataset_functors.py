@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import threading
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -880,13 +881,19 @@ def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
         ]
     }
 
-    assert recorder._save_single_episode(
-        0,
-        obs_list,
-        action_list,
-        annotations=annotations,
-        episode_metadata=episode_metadata,
-    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error",
+            message=("Conversion of an array with ndim > 0 to a scalar is deprecated"),
+            category=DeprecationWarning,
+        )
+        assert recorder._save_single_episode(
+            0,
+            obs_list,
+            action_list,
+            annotations=annotations,
+            episode_metadata=episode_metadata,
+        )
     recorder.finalize()
 
     loaded = LeRobotDataset(

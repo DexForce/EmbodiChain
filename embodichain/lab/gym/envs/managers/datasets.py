@@ -396,6 +396,7 @@ class LeRobotRecorder(Functor):
                                 del frame[key]
                 self.dataset.add_frame(frame)
 
+            self._normalize_scalar_episode_buffer()
             self.dataset.save_episode()
             # LeRobot has committed this index. Advance immediately so a later
             # depth/metadata failure cannot make the next queued episode reuse
@@ -450,6 +451,62 @@ class LeRobotRecorder(Functor):
                         f"{type(abort_error).__name__}: {abort_error}"
                     )
             raise
+
+    def _normalize_scalar_episode_buffer(self) -> None:
+        """Collapse single-value arrays before LeRobot serializes an episode.
+
+        LeRobot 0.4.4 validates a scalar feature declared with shape ``(1,)``
+        as a one-dimensional NumPy array when :meth:`add_frame` is called, but
+        maps that same feature to a Hugging Face ``Value`` during
+        :meth:`save_episode`. Without normalization, LeRobot stacks the frame
+        arrays into shape ``(frames, 1)`` and ``datasets`` converts each
+        ``array([value])`` to a Python scalar. NumPy 2.4 rejects that implicit
+        conversion.
+
+        This method runs after per-frame validation and replaces buffered
+        one-element numeric arrays with dtype-preserving NumPy scalars. The
+        subsequent LeRobot stack therefore has shape ``(frames,)``, matching
+        the Hugging Face scalar schema.
+
+        Raises:
+            ValueError: If a feature declared with shape ``(1,)`` contains a
+                buffered value with more than one element.
+        """
+        if self.dataset is None:
+            return
+
+        episode_buffer = getattr(self.dataset, "episode_buffer", None)
+        features = getattr(self.dataset, "features", None)
+        if not isinstance(episode_buffer, dict) or not isinstance(features, Mapping):
+            return
+
+        for feature_key, feature in features.items():
+            if not isinstance(feature, Mapping):
+                continue
+            if tuple(feature.get("shape", ())) != (1,):
+                continue
+
+            values = episode_buffer.get(feature_key)
+            if not isinstance(values, list) or not values:
+                continue
+
+            try:
+                dtype = np.dtype(feature["dtype"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            normalized_values: list[np.generic] = []
+            for value in values:
+                if isinstance(value, torch.Tensor):
+                    value = value.detach().cpu().numpy()
+                array = np.asarray(value, dtype=dtype)
+                if array.size != 1:
+                    raise ValueError(
+                        f"Scalar LeRobot feature {feature_key!r} expected one "
+                        f"value, got shape {array.shape}."
+                    )
+                normalized_values.append(array.reshape(-1)[0])
+            episode_buffer[feature_key] = normalized_values
 
     @staticmethod
     def _subtask_for_frame(
