@@ -81,13 +81,14 @@ def _ensure_runtime_imports() -> None:
         import torch as torch_module
         from embodichain.lab.sim import SimulationManager as simulation_manager_cls
         from embodichain.lab.sim.atomic_actions import (
+            ActionBinding as action_binding_cls,
+            ActionInvocation as action_invocation_cls,
             AtomicActionEngine as atomic_action_engine_cls,
-            EndEffectorPoseTarget as end_effector_pose_target_cls,
-            MoveEndEffector as move_end_effector_cls,
-            MoveEndEffectorCfg as move_end_effector_cfg_cls,
-            Press as press_cls,
-            PressCfg as press_cfg_cls,
-            PressTarget as press_target_cls,
+            ControlPartCommandProfile as control_part_command_profile_cls,
+            EndEffectorPoseGoal as end_effector_pose_target_cls,
+            MotionPolicy as motion_policy_cls,
+            PressGoal as press_target_cls,
+            PressOptions as press_options_cls,
         )
         from embodichain.lab.sim.cfg import (
             RigidBodyAttributesCfg as rigid_body_attributes_cfg_cls,
@@ -123,12 +124,13 @@ def _ensure_runtime_imports() -> None:
             "torch": torch_module,
             "SimulationManager": simulation_manager_cls,
             "AtomicActionEngine": atomic_action_engine_cls,
-            "EndEffectorPoseTarget": end_effector_pose_target_cls,
-            "MoveEndEffector": move_end_effector_cls,
-            "MoveEndEffectorCfg": move_end_effector_cfg_cls,
-            "Press": press_cls,
-            "PressCfg": press_cfg_cls,
-            "PressTarget": press_target_cls,
+            "ControlPartCommandProfile": control_part_command_profile_cls,
+            "ActionBinding": action_binding_cls,
+            "ActionInvocation": action_invocation_cls,
+            "EndEffectorPoseGoal": end_effector_pose_target_cls,
+            "MotionPolicy": motion_policy_cls,
+            "PressGoal": press_target_cls,
+            "PressOptions": press_options_cls,
             "RigidBodyAttributesCfg": rigid_body_attributes_cfg_cls,
             "RigidObjectCfg": rigid_object_cfg_cls,
             "VisualMaterialCfg": visual_material_cfg_cls,
@@ -480,27 +482,13 @@ def _build_atomic_engine(
 ) -> AtomicActionEngine:
     """Build a Press benchmark engine with MoveEndEffector pre-positioning."""
     hand_close = get_hand_close_qpos(robot, device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(
-                control_part="arm",
-                sample_interval=MOVE_SAMPLE_INTERVAL,
-            ),
-        )
-    )
-    atomic_engine.register(
-        Press(
-            motion_gen,
-            cfg=PressCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_close_qpos=hand_close,
-                sample_interval=PRESS_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                grasp=hand_close,
+            )
+        },
     )
     return atomic_engine
 
@@ -579,12 +567,31 @@ def _timed_atomic_run(
     _sync_cuda()
 
     start = time.perf_counter()
-    is_success, traj, _ = atomic_engine.run(
-        steps=[
-            ("move_end_effector", EndEffectorPoseTarget(xpos=move_target)),
-            ("press", PressTarget(xpos=press_target)),
-        ]
+    binding = ActionBinding(
+        manipulators={"primary": "arm"},
+        end_effectors={"primary": "hand"},
     )
+    result = atomic_engine.compile(
+        (
+            ActionInvocation(
+                "move_end_effector",
+                EndEffectorPoseGoal(xpos=move_target),
+                binding,
+                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+            ),
+            ActionInvocation(
+                "press",
+                PressGoal(xpos=press_target),
+                binding,
+                MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                skill_options=PressOptions(
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
+            ),
+        )
+    )
+    is_success = bool(result.plan_success.all().item())
+    traj = result.trajectory.positions
     _sync_cuda()
     elapsed = time.perf_counter() - start
 
