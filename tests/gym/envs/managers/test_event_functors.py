@@ -439,6 +439,7 @@ from embodichain.lab.gym.envs.managers.randomization.visual import (
 )
 from embodichain.lab.gym.envs.managers.cfg import EventCfg, SceneEntityCfg
 from embodichain.lab.gym.envs.managers import EventManager, FunctorCfg
+from embodichain.utils.module_utils import find_function_from_modules
 
 
 class TestResolveUids:
@@ -934,6 +935,15 @@ class TestRandomizeArticulationMass:
 
 class TestWaitForDynamicObjectsToSettle:
     """Tests for adaptive dynamic-object settling."""
+
+    def test_is_discoverable_through_public_events_module(self):
+        """Configuration lookup keeps using the stable events module path."""
+        resolved = find_function_from_modules(
+            "wait_for_dynamic_objects_to_settle",
+            ["embodichain.lab.gym.envs.managers.events"],
+        )
+
+        assert resolved is wait_for_dynamic_objects_to_settle
 
     def test_requires_consecutive_checks_and_stops_early(self):
         """A transient stable sample resets before an eventual early exit."""
