@@ -41,6 +41,8 @@ from embodichain.lab.sim.atomic_actions import (
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
     EndEffectorPoseGoal,
+    EntityState,
+    ExecutionEventKind,
     GraspGoal,
     HandOver,
     HandOverOptions,
@@ -65,6 +67,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
     RobotObservation,
+    SceneEntityPose,
     SceneSnapshot,
     TaskState,
 )
@@ -198,13 +201,36 @@ def _plan_action(
     return action.plan(action.resolve_request(invocation), context)
 
 
-def _context(task: TaskState | None = None) -> PlanningContext:
+def _context(
+    task: TaskState | None = None,
+    *,
+    scene: SceneSnapshot | None = None,
+    timestamp: float = 0.0,
+) -> PlanningContext:
     qpos = torch.zeros(NUM_ENVS, ROBOT_DOF)
     return PlanningContext(
-        robot=RobotObservation(timestamp=0.0, qpos=qpos, qvel=torch.zeros_like(qpos)),
+        robot=RobotObservation(
+            timestamp=timestamp,
+            qpos=qpos,
+            qvel=torch.zeros_like(qpos),
+        ),
         task=task or TaskState.empty(batch_size=NUM_ENVS, device="cpu"),
-        scene=SceneSnapshot.empty(),
+        scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+    )
+
+
+def _target_scene(
+    pose: torch.Tensor,
+    *,
+    timestamp: float,
+    version: int,
+) -> SceneSnapshot:
+    """Build a versioned target snapshot for late-bound grasp tests."""
+    return SceneSnapshot(
+        timestamp=timestamp,
+        version=version,
+        entities={"target": EntityState(pose)},
     )
 
 
@@ -692,6 +718,101 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     held = projected.get_held_object("arm")
     assert held is not None
     assert torch.allclose(held.grasp_xpos, grasp)
+
+
+def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
+    generator = _motion_generator()
+    target_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    target_pose[:, 0, 3] = torch.tensor([0.1, 0.2])
+    relative_pose = torch.eye(4)
+    relative_pose[2, 3] = 0.05
+    entity = Mock()
+    entity.get_local_pose.return_value = target_pose
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="late-bound-grasp-object",
+        entity=entity,
+    )
+    action = _bind_action(generator, PickUp())
+    context = _context(scene=_target_scene(target_pose, timestamp=0.0, version=0))
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            "pick_up",
+            GraspGoal(
+                semantics=semantics,
+                grasp_xpos=SceneEntityPose(
+                    "target",
+                    relative_pose=relative_pose,
+                ),
+            ),
+            sample_count=20,
+        ),
+        context,
+    )
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+    expected_grasp = torch.bmm(
+        target_pose,
+        relative_pose.unsqueeze(0).expand(NUM_ENVS, -1, -1),
+    )
+
+    held = projected.get_held_object("arm")
+    assert held is not None
+    assert torch.allclose(held.grasp_xpos, expected_grasp)
+    assert plan.phases[0].spec.scene_dependencies == ("target",)
+
+
+def test_pick_session_replans_when_late_bound_target_moves() -> None:
+    generator = _motion_generator()
+    initial_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    moved_pose = initial_pose.clone()
+    moved_pose[:, 1, 3] = 0.3
+    entity = Mock()
+    entity.get_local_pose.return_value = initial_pose
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="moving-grasp-object",
+        entity=entity,
+    )
+    engine = AtomicActionEngine(
+        generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(HAND_DOF),
+                grasp=torch.ones(HAND_DOF),
+            )
+        },
+        load_builtins=False,
+    )
+    engine.register(PickUp())
+    invocation = _invocation(
+        "pick_up",
+        GraspGoal(
+            semantics=semantics,
+            grasp_xpos=SceneEntityPose("target"),
+        ),
+        sample_count=20,
+    )
+    initial_context = _context(
+        scene=_target_scene(initial_pose, timestamp=0.0, version=0)
+    )
+    session = engine.start((invocation,), initial_context)
+    session.tick(initial_context)
+    entity.get_local_pose.return_value = moved_pose
+
+    recovered = session.tick(
+        _context(
+            scene=_target_scene(moved_pose, timestamp=0.1, version=1),
+            timestamp=0.1,
+        )
+    )
+
+    event_kinds = {event.kind for event in recovered.events}
+    assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in event_kinds
+    assert ExecutionEventKind.REPLANNED in event_kinds
 
 
 def test_pick_uses_binding_control_part_as_effect_resource() -> None:

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Replan after a visible target move, then grasp the relocated cube."""
+"""Replan one PickUp action after its visible target moves."""
 
 from __future__ import annotations
 
@@ -36,7 +36,6 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AtomicActionEngine,
     ControlPartCommandProfile,
-    EndEffectorPoseGoal,
     EntityState,
     ExecutionEventKind,
     ExecutionRunner,
@@ -66,6 +65,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
+    initialize_pre_pick_robot_pose,
     make_top_down_eef_pose,
     prepare_tutorial_scene,
     run_tutorial,
@@ -78,8 +78,6 @@ TARGET_ENTITY_ID = "moving_target"
 TARGET_SIZE = (0.05, 0.05, 0.05)
 INITIAL_TARGET_POSITION = (-0.42, -0.18, 0.5 * TARGET_SIZE[2])
 MOVED_TARGET_POSITION = (-0.42, 0.12, 0.5 * TARGET_SIZE[2])
-TARGET_TO_EEF_HEIGHT = 0.30
-MOVE_SAMPLE_COUNT = 80
 PICK_SAMPLE_COUNT = 120
 HAND_INTERP_STEPS = 12
 PICK_LIFT_HEIGHT = 0.16
@@ -88,7 +86,7 @@ MAXIMUM_HELD_DISTANCE = 0.10
 MOVE_AFTER_COMMAND = 20
 TARGET_MOVE_DURATION = 0.6
 GOAL_TRANSLATION_THRESHOLD = 0.04
-TRACKING_ERROR_THRESHOLD = 0.25
+TRACKING_ERROR_THRESHOLD = 1.0
 POST_EXECUTION_UPDATES = 120
 
 
@@ -214,50 +212,36 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Replan toward a relocated cube, close the gripper, and lift it."""
+    """Replan a late-bound PickUp request and lift the relocated cube."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(sim)
     target = _create_moving_target(sim)
     sim.update(step=10)
     target_scene = _MovingTargetScene(target, MOVED_TARGET_POSITION)
-    adapter = SimulationExecutionAdapter(
+    sim_runtime = SimulationExecutionAdapter(
         sim,
         robot,
         scene_supplier=target_scene.snapshot,
     )
     motion_gen = create_toppra_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
-    hand_open_batch = hand_open.unsqueeze(0).repeat(robot.get_qpos().shape[0], 1)
-    for target_value in (False, True):
-        robot.set_qpos(hand_open_batch, name="hand", target=target_value)
-    robot.clear_dynamics()
+    initialize_pre_pick_robot_pose(robot, target, hand_open)
+    if args.no_target_motion:
+        target.set_body_type("dynamic")
+        target.clear_dynamics()
 
-    target_to_eef = make_top_down_eef_pose(
-        torch.tensor(
-            [0.0, 0.0, TARGET_TO_EEF_HEIGHT],
-            dtype=torch.float32,
-            device=sim.device,
-        )
+    target_to_grasp = make_top_down_eef_pose(
+        torch.zeros(3, dtype=torch.float32, device=sim.device)
     )
     initial_target_pose = target.get_local_pose(to_matrix=True)
     draw_axis_marker(
         sim,
         "moving_target_original_goal",
-        _compose_goal_pose(initial_target_pose, target_to_eef),
+        _compose_goal_pose(initial_target_pose, target_to_grasp),
         axis_len=0.10,
     )
 
-    grasp_target_position = (
-        INITIAL_TARGET_POSITION if args.no_target_motion else MOVED_TARGET_POSITION
-    )
-    grasp_pose = make_top_down_eef_pose(
-        torch.tensor(
-            grasp_target_position,
-            dtype=torch.float32,
-            device=sim.device,
-        )
-    )
     semantics = ObjectSemantics(
         affordance=Affordance(),
         geometry={},
@@ -277,37 +261,25 @@ def main() -> None:
             )
         },
     )
-    move_invocation = ActionInvocation(
-        skill_id="move_end_effector",
-        goal=EndEffectorPoseGoal(
-            SceneEntityPose(
-                TARGET_ENTITY_ID,
-                relative_pose=target_to_eef,
-            )
-        ),
-        binding=binding,
-        motion_policy=MotionPolicy(
-            sample_count=MOVE_SAMPLE_COUNT,
-            control_dt=2.0 * adapter.physics_dt,
-        ),
-        recovery_policy=RecoveryPolicy(
-            max_replans=2,
-            tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
-            goal_translation_threshold=GOAL_TRANSLATION_THRESHOLD,
-            phase_timeout=20.0,
-        ),
-    )
     pick_invocation = ActionInvocation(
         skill_id="pick_up",
-        goal=GraspGoal(semantics, grasp_xpos=grasp_pose),
+        goal=GraspGoal(
+            semantics,
+            grasp_xpos=SceneEntityPose(
+                TARGET_ENTITY_ID,
+                relative_pose=target_to_grasp,
+            ),
+        ),
         binding=binding,
         motion_policy=MotionPolicy(
             sample_count=PICK_SAMPLE_COUNT,
-            control_dt=2.0 * adapter.physics_dt,
+            control_dt=2.0 * sim_runtime.physics_dt,
         ),
         recovery_policy=RecoveryPolicy(
+            max_replans=2,
             max_phase_retries=1,
             tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
+            goal_translation_threshold=GOAL_TRANSLATION_THRESHOLD,
             phase_timeout=30.0,
         ),
         skill_options=PickUpOptions(
@@ -317,24 +289,23 @@ def main() -> None:
         ),
     )
     task_state = TaskState.empty(robot.get_qpos().shape[0], robot.device)
-    initial_context = adapter.observe(task_state)
-    session = engine.start((move_invocation, pick_invocation), initial_context)
+    initial_context = sim_runtime.observe(task_state)
+    session = engine.start((pick_invocation,), initial_context)
     runner = ExecutionRunner(
-        session,
-        adapter,
-        adapter,
-        clock=adapter,
-        cfg=ExecutionRunnerCfg(minimum_cycle_time=adapter.physics_dt),
+        session=session,
+        observation_provider=sim_runtime,
+        command_sink=sim_runtime,
+        clock=sim_runtime,
+        cfg=ExecutionRunnerCfg(minimum_cycle_time=sim_runtime.physics_dt),
     )
 
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Watch the blue cube, then press Enter to replan and pick it up...",
+        "Watch the blue cube, then press Enter to run recovering PickUp...",
     )
-    dynamic_change_observed = False
-    replan_observed = False
-    pickup_start_command: int | None = None
+    observed_events: set[ExecutionEventKind] = set()
+    plan_start_command = 0
     pickup_dynamics_cleared = False
 
     clear_after_pick_command = (
@@ -342,8 +313,7 @@ def main() -> None:
     )
 
     def on_step(step: RunnerStep) -> None:
-        nonlocal dynamic_change_observed, replan_observed
-        nonlocal pickup_dynamics_cleared, pickup_start_command
+        nonlocal pickup_dynamics_cleared, plan_start_command
         if (
             not args.no_target_motion
             and not target_scene.moved
@@ -354,13 +324,15 @@ def main() -> None:
                 "while the robot holds its current command."
             )
             moved_pose = target_scene.move(
-                adapter,
+                sim_runtime,
                 duration=TARGET_MOVE_DURATION,
             )
+            target.set_body_type("dynamic")
+            target.clear_dynamics()
             draw_axis_marker(
                 sim,
                 "moving_target_replanned_goal",
-                _compose_goal_pose(moved_pose, target_to_eef),
+                _compose_goal_pose(moved_pose, target_to_grasp),
                 axis_len=0.10,
             )
             displacement = torch.linalg.vector_norm(
@@ -376,6 +348,7 @@ def main() -> None:
         if step.tick is None:
             return
         for event in step.tick.events:
+            observed_events.add(event.kind)
             if event.kind in {
                 ExecutionEventKind.DYNAMIC_GOAL_CHANGED,
                 ExecutionEventKind.REPLANNED,
@@ -386,27 +359,17 @@ def main() -> None:
                     f"Execution event {event.kind.value}: env rows={env_ids}; "
                     f"{event.message}"
                 )
-            dynamic_change_observed |= (
-                event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
-            )
-            replan_observed |= event.kind is ExecutionEventKind.REPLANNED
-            if (
-                event.kind is ExecutionEventKind.ACTION_PLANNED
-                and event.invocation_index == 1
-                and pickup_start_command is None
-            ):
-                target.set_body_type("dynamic")
-                target.clear_dynamics()
-                pickup_start_command = step.command_count
+            if event.kind is ExecutionEventKind.REPLANNED:
+                plan_start_command = step.command_count
                 logger.log_info(
-                    "The approach completed; the cube is now dynamic and PickUp "
-                    "is starting.",
+                    "PickUp discarded the stale plan and restarted from the "
+                    "latest cube pose.",
                     color="green",
                 )
         if (
-            pickup_start_command is not None
+            (args.no_target_motion or target_scene.moved)
             and not pickup_dynamics_cleared
-            and step.command_count - pickup_start_command > clear_after_pick_command
+            and step.command_count - plan_start_command > clear_after_pick_command
         ):
             target.clear_dynamics()
             pickup_dynamics_cleared = True
@@ -451,7 +414,7 @@ def main() -> None:
             on_step=on_step,
         )
         for _ in range(POST_EXECUTION_UPDATES):
-            adapter.sleep(adapter.physics_dt)
+            sim_runtime.sleep(sim_runtime.physics_dt)
     finally:
         stop_auto_play_recording(sim, recording_started)
 
@@ -460,12 +423,10 @@ def main() -> None:
     if not args.no_target_motion:
         if not target_scene.moved:
             raise RuntimeError("Execution completed before the target could move.")
-        if not dynamic_change_observed:
+        if ExecutionEventKind.DYNAMIC_GOAL_CHANGED not in observed_events:
             raise RuntimeError("The target move was not reported as a dynamic change.")
-        if not replan_observed:
+        if ExecutionEventKind.REPLANNED not in observed_events:
             raise RuntimeError("The target move did not trigger replanning.")
-    if pickup_start_command is None:
-        raise RuntimeError("PickUp did not start after the recovered approach.")
     if not pickup_dynamics_cleared:
         raise RuntimeError("The cube was not stabilized after gripper closure.")
     logger.log_info(

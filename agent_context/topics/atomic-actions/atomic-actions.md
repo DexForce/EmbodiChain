@@ -224,6 +224,11 @@ tutorial may derive a simple profile from limits explicitly.
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing`, `support` |
 | `hand_over` | `GraspGoal` | `source`, `destination` |
 
+`GraspGoal.grasp_xpos` accepts an explicit pose tensor, a late-bound
+`SceneEntityPose`, or `None` for affordance sampling. A `SceneEntityPose`
+registers the referenced entity as a recovery dependency, allowing an executing
+`PickUp` to replan when the grasp target moves.
+
 ## Extension rules
 
 1. Define a frozen action-owned goal dataclass with `goal_kind`.

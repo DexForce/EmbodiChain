@@ -288,12 +288,13 @@ with ``is_waiting`` set has not consumed a new observation or effect result; use
 its ``wait_duration`` to schedule the next call.
 
 The complete simulation example starts with a visible cube directly in front of
-the robot, then slides it sideways while the robot is approaching. The session
-observes ``dynamic_goal_changed`` and ``replanned`` events, discards the stale
-path, and approaches the cube's new location. The same session then executes
-``PickUp``, closes the gripper, verifies the physical lift, and finishes while
-holding the cube. The original and regenerated goal axes remain visible for
-comparison:
+the robot, then slides it sideways during one ``PickUp`` invocation whose
+``GraspGoal.grasp_xpos`` is a ``SceneEntityPose``. The session observes
+``dynamic_goal_changed`` and ``replanned`` events, discards the entire stale
+approach/close/lift plan, and rebuilds it from the cube's new location. The
+replanned action closes the gripper, verifies the physical lift, and finishes
+while holding the cube. The original and regenerated goal axes remain visible
+for comparison:
 
 .. code-block:: bash
 

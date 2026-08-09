@@ -39,7 +39,12 @@ from ..bindings import ResolvedControlPart
 from ..control import GRASP_COMMAND, OPEN_COMMAND
 from ..core import AtomicAction, ObjectSemantics
 from ..effects import StateDelta
-from ..goals import ObjectActionGoal, validate_pose_tensor
+from ..goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..policies import MotionPolicy
@@ -52,18 +57,20 @@ class GraspGoal(ObjectActionGoal):
 
     goal_kind: ClassVar[str] = "grasp"
 
-    grasp_xpos: torch.Tensor | None = None
+    grasp_xpos: PoseGoalValue | None = None
     """Optional end-effector grasp pose.
 
-    When omitted, :class:`PickUp` selects a grasp from the target affordance.
-    Supplying a pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)`` skips grasp
-    sampling.
+    When omitted, :class:`PickUp` selects a grasp from the target affordance. An
+    explicit tensor or late-bound
+    :class:`~embodichain.lab.sim.atomic_actions.goals.SceneEntityPose` skips
+    grasp sampling. Late-bound poses also declare the scene dependency used by
+    closed-loop execution recovery.
     """
 
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
         if self.grasp_xpos is not None:
-            validate_pose_tensor(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
+            validate_pose_goal(self.grasp_xpos, "grasp_xpos", allow_waypoints=False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -294,7 +301,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             )
         else:
             grasp_xpos = self.builder.resolve_pose_target(
-                target.grasp_xpos, n_envs=self.n_envs
+                resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
+                n_envs=self.n_envs,
             )
             if options.rotate_upright is not None:
                 grasp_xpos = self._upright_adjusted_grasp_poses(
