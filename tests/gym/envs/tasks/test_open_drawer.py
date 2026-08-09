@@ -56,8 +56,14 @@ class TestOpenDrawerEnv:
         assert spec.max_episode_steps == 300
         assert issubclass(OpenDrawerEnv, EmbodiedEnv)
 
-    def test_config_preserves_entity_specific_drive_defaults(self) -> None:
+    def test_config_preserves_entity_specific_drive_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A partial drawer drive config stays none while the robot stays force."""
+        # Keep this config-only regression independent of dataset availability.
+        monkeypatch.setattr(
+            "embodichain.data.get_data_path", lambda asset_path: asset_path
+        )
         config = _load_config()
         drawer_dict = config["articulation"][0]
         assert "drive_type" not in drawer_dict["drive_pros"]
