@@ -75,6 +75,7 @@ class _MockEnv:
     def __init__(self, num_envs: int = 2, num_joints: int = 6, steps: int = 5):
         self.num_envs = num_envs
         self.device = torch.device("cpu")
+        self.step_dt = 1.0 / 30.0
         self.active_joint_ids = list(range(num_joints))
         self.robot = _MockRobot(num_joints)
         self.has_sensors = False
@@ -141,7 +142,7 @@ def _make_recorder(env: _MockEnv, mock_dataset: _MockDataset) -> AsyncLeRobotRec
         func=AsyncLeRobotRecorder,
         params={
             "save_path": "/tmp/test_async_recorder",
-            "robot_meta": {"robot_type": "test", "control_freq": 30},
+            "robot_meta": {"robot_type": "test"},
             "instruction": {"lang": "test"},
             "extra": {"scene_type": "s", "task_description": "t"},
             "use_videos": False,

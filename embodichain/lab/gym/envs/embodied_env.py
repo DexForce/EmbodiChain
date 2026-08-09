@@ -1729,7 +1729,14 @@ class EmbodiedEnv(BaseEnv):
             "lengths": lengths.tolist(),
             "num_steps": max_len,
             "num_envs": int(len(env_ids)),
-            "dt": float(self.sim_cfg.physics_dt),
+            # ``dt`` historically represented trajectory timing. Keep the key
+            # for compatibility, but make it describe the actual interval
+            # between recorded environment steps rather than a physics substep.
+            "dt": self.step_dt,
+            "physics_dt": self.physics_dt,
+            "sim_steps_per_control": int(self.cfg.sim_steps_per_control),
+            "step_dt": self.step_dt,
+            "control_frequency": self.control_frequency,
             "active_joint_ids": list(self.active_joint_ids),
             "robot_uid": self.robot.uid,
             "robot_dof": int(self.robot.dof),
