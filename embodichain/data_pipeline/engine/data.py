@@ -35,7 +35,6 @@ import torch
 from tensordict import TensorDict
 from tqdm import tqdm
 
-from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
 
@@ -272,6 +271,7 @@ def _run_sim_worker(
     )
     from embodichain.lab.gym.envs.demo import execute_demo_episode
     from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
     from embodichain.utils.logger import log_info, log_warning
 
     gym_config: dict = cfg.gym_config

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import sys
 import threading
 import unittest
 from queue import Empty
@@ -66,9 +67,9 @@ MAX_EPISODE_STEPS = 50
 STATE_DIM = 6
 OBS_DIM = 10
 ACTION_DIM = 4
-CONSUMER_PROCESS_TIMEOUT = 60.0
-RESULT_QUEUE_TIMEOUT = 5.0
+CONSUMER_RESULT_TIMEOUT = 60.0
 PROCESS_CLEANUP_TIMEOUT = 5.0
+LAB_PACKAGE_NAME = "embodichain.lab"
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ def _sample_engine_in_subprocess(
     """Sample once in a real consumer process and return a pickle-safe result."""
     try:
         sample = engine.sample_batch(batch_size=1, chunk_size=1)
-        result_queue.put(("ok", tuple(sample.shape)))
+        result_queue.put(("ok", tuple(sample.shape), LAB_PACKAGE_NAME in sys.modules))
     except BaseException as error:
         result_queue.put(("error", type(error).__name__, str(error)))
 
@@ -442,23 +443,30 @@ class TestOnlineDataEngine:
         process.start()
         try:
             # A spawned consumer imports torch and the EmbodiChain package from
-            # scratch.  Under xdist load this can exceed the old 10-second
-            # queue timeout even though the consumer is making progress.
-            process.join(timeout=CONSUMER_PROCESS_TIMEOUT)
-            if process.is_alive():
+            # scratch. Read its small result before joining so the Queue feeder
+            # cannot delay process exit while the parent waits in join().
+            try:
+                result = result_queue.get(timeout=CONSUMER_RESULT_TIMEOUT)
+            except Empty:
+                if process.is_alive():
+                    pytest.fail(
+                        "consumer process did not publish a result within "
+                        f"{CONSUMER_RESULT_TIMEOUT} seconds"
+                    )
+                process.join(timeout=0)
                 pytest.fail(
-                    "consumer process did not exit within "
-                    f"{CONSUMER_PROCESS_TIMEOUT} seconds"
+                    "consumer process exited without publishing a result "
+                    f"(exit code {process.exitcode})"
                 )
+
+            process.join(timeout=PROCESS_CLEANUP_TIMEOUT)
+            if process.is_alive():
+                pytest.fail("consumer process did not exit after publishing a result")
             if process.exitcode != 0:
                 pytest.fail(
                     "consumer process exited without sampling successfully "
                     f"(exit code {process.exitcode})"
                 )
-            try:
-                result = result_queue.get(timeout=RESULT_QUEUE_TIMEOUT)
-            except Empty:
-                pytest.fail("consumer process exited without publishing a result")
         finally:
             if process.is_alive():
                 process.terminate()
@@ -469,7 +477,9 @@ class TestOnlineDataEngine:
             result_queue.close()
             result_queue.join_thread()
 
-        assert result == ("ok", (1, 1))
+        assert result[:2] == ("ok", (1, 1))
+        if start_method == "spawn":
+            assert result[2] is False
         assert not self.engine._close_signal.is_set()
 
     def test_worker_error_is_broadcast_to_all_consumers(self) -> None:
