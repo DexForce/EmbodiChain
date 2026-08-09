@@ -85,13 +85,15 @@ MINIMUM_LIFT_HEIGHT = 0.08
 MAXIMUM_HELD_DISTANCE = 0.10
 MOVE_AFTER_COMMAND = 20
 TARGET_MOVE_DURATION = 0.6
+TARGET_PUSH_DURATION = 0.12
+TARGET_PUSH_FORCE = 1.25
 GOAL_TRANSLATION_THRESHOLD = 0.04
 TRACKING_ERROR_THRESHOLD = 1.0
 POST_EXECUTION_UPDATES = 120
 
 
 class _MovingTargetScene:
-    """Publish a versioned target pose and move it exactly once."""
+    """Publish a versioned target pose and physically push it exactly once."""
 
     def __init__(
         self,
@@ -126,44 +128,70 @@ class _MovingTargetScene:
             },
         )
 
-    def move(
+    def push(
         self,
         clock: SimulationExecutionAdapter,
         *,
         duration: float,
+        force_duration: float,
+        force_magnitude: float,
     ) -> torch.Tensor:
-        """Animate the visible target and advance the scene version.
+        """Push the visible target with a short force pulse.
 
         Args:
-            clock: Simulation adapter used to advance physics between poses.
-            duration: Requested target-motion duration in seconds.
+            clock: Simulation adapter used to advance physics.
+            duration: Total time allowed for the push and natural deceleration.
+            force_duration: Time spent applying the horizontal force.
+            force_magnitude: Magnitude of the applied force in newtons.
 
         Returns:
-            Updated batched target pose.
+            Batched target pose after the physical motion.
         """
         if self.moved:
             return self.target.get_local_pose(to_matrix=True)
         if not math.isfinite(duration) or duration <= 0.0:
             raise ValueError("duration must be finite and greater than zero.")
-        start_pose = self.target.get_local_pose(to_matrix=True).clone()
-        step_count = max(1, math.ceil(duration / clock.physics_dt))
-        pose = start_pose.clone()
-        for step_index in range(1, step_count + 1):
-            alpha = step_index / step_count
-            pose[:, :3, 3] = torch.lerp(
-                start_pose[:, :3, 3],
-                self.destination,
-                alpha,
+        if (
+            not math.isfinite(force_duration)
+            or force_duration <= 0.0
+            or force_duration > duration
+        ):
+            raise ValueError(
+                "force_duration must be finite, greater than zero, and no "
+                "greater than duration."
             )
-            self.target.set_local_pose(pose)
+        if not math.isfinite(force_magnitude) or force_magnitude <= 0.0:
+            raise ValueError("force_magnitude must be finite and greater than zero.")
+
+        start_pose = self.target.get_local_pose(to_matrix=True).clone()
+        planar_offset = self.destination - start_pose[:, :3, 3]
+        planar_offset[:, 2] = 0.0
+        planar_distance = torch.linalg.vector_norm(planar_offset, dim=1)
+        if torch.any(planar_distance <= torch.finfo(planar_offset.dtype).eps):
+            raise ValueError("destination must differ from the current planar pose.")
+        force = force_magnitude * planar_offset / planar_distance.unsqueeze(-1)
+
+        self.target.set_body_type("dynamic")
+        self.target.clear_dynamics()
+        step_count = max(1, math.ceil(duration / clock.physics_dt))
+        force_step_count = min(
+            step_count,
+            max(1, math.ceil(force_duration / clock.physics_dt)),
+        )
+        for step_index in range(step_count):
+            if step_index < force_step_count:
+                self.target.add_force_torque(force=force)
             clock.sleep(clock.physics_dt)
+        self.target.clear_dynamics()
+
+        pose = self.target.get_local_pose(to_matrix=True)
         self.version += 1
         self.moved = True
         return pose
 
 
 def _create_moving_target(sim: SimulationManager) -> RigidObject:
-    """Create the bright cube, initially kinematic for scripted relocation."""
+    """Create the bright cube, held kinematic until the physical push."""
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=TARGET_ENTITY_ID,
@@ -320,15 +348,15 @@ def main() -> None:
             and step.command_count >= MOVE_AFTER_COMMAND
         ):
             logger.log_warning(
-                f"Animating the blue target for {TARGET_MOVE_DURATION:.1f} s "
-                "while the robot holds its current command."
+                f"Applying a {TARGET_PUSH_FORCE:.2f} N force pulse to the blue "
+                "target while the robot holds its current command."
             )
-            moved_pose = target_scene.move(
+            moved_pose = target_scene.push(
                 sim_runtime,
                 duration=TARGET_MOVE_DURATION,
+                force_duration=TARGET_PUSH_DURATION,
+                force_magnitude=TARGET_PUSH_FORCE,
             )
-            target.set_body_type("dynamic")
-            target.clear_dynamics()
             draw_axis_marker(
                 sim,
                 "moving_target_replanned_goal",
@@ -340,7 +368,7 @@ def main() -> None:
                 dim=1,
             )
             logger.log_warning(
-                "Moved the blue target after "
+                "The force pulse moved the blue target after "
                 f"{step.command_count} accepted commands by "
                 f"{displacement.detach().cpu().tolist()} m; the original goal "
                 "axis remains visible."
