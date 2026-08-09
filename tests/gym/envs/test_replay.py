@@ -641,11 +641,12 @@ def test_run_env_replay_function(tmp_path):
         SimulationManager.flush_cleanup_queue()
         gc.collect()
 
-    # kinematic replay (replay() closes the env)
+    # replay() borrows the environment; the caller remains responsible for close().
     env_k = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
     try:
         replay(env_k, str(path), mode="kinematic")
     finally:
+        env_k.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
 
@@ -654,5 +655,6 @@ def test_run_env_replay_function(tmp_path):
     try:
         replay(env_d, str(path), mode="dynamic")
     finally:
+        env_d.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
