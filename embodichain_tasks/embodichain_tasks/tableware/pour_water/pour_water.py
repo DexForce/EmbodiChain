@@ -14,8 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from typing import Any
+
 import torch
-from typing import Dict, Optional
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
@@ -31,12 +34,17 @@ __all__ = ["PourWaterEnv", "PourWaterAgentEnv"]
 
 @register_env("PourWater-v3", max_episode_steps=600)
 class PourWaterEnv(EmbodiedEnv):
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+    """Pour-water expert task restricted to one simulation environment."""
+
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
+        if cfg is not None and int(cfg.num_envs) != 1:
+            raise ValueError(
+                "PourWater-v3 supports exactly one environment; "
+                f"received num_envs={cfg.num_envs}."
+            )
         super().__init__(cfg, **kwargs)
 
-        action_config = kwargs.get("action_config", None)
-        if action_config is not None:
-            self.action_config = action_config
+        self.action_config = kwargs.get("action_config")
 
     def create_demo_action_list(self, *args, **kwargs):
         """
@@ -47,11 +55,12 @@ class PourWaterEnv(EmbodiedEnv):
         """
         logger.log_info("Create demo action list for PourWaterTask.")
 
-        if getattr(self, "action_config") is not None:
+        if self.action_config is not None:
             self._init_action_bank(PourWaterActionBank, self.action_config)
             action_list = self.create_expert_demo_action_list(*args, **kwargs)
         else:
             logger.log_error("No action_config found in env, please check again.")
+            return None
 
         if action_list is None:
             return action_list
@@ -151,11 +160,11 @@ class PourWaterEnv(EmbodiedEnv):
 
 @register_env("PourWaterAgent-v3", max_episode_steps=600)
 class PourWaterAgentEnv(BaseAgentEnv, PourWaterEnv):
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
         super().__init__(cfg, **kwargs)
         super()._init_agents(**kwargs)
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
+    def reset(self, seed: int | None = None, options: dict[str, Any] | None = None):
         obs, info = super().reset(seed=seed, options=options)
         super().get_states()
         return obs, info

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -269,6 +269,25 @@ def _as_bool_tuple(value: Any, num_envs: int) -> tuple[bool, ...]:
     return tuple(bool(item) for item in tensor.tolist())
 
 
+def _dataset_instruction(env: Any) -> str:
+    """Return the dataset-level instruction used for legacy demo segments."""
+    metadata = getattr(_env_target(env), "metadata", {})
+    dataset_metadata = (
+        metadata.get("dataset", {}) if isinstance(metadata, Mapping) else {}
+    )
+    instruction_cfg = (
+        dataset_metadata.get("instruction")
+        if isinstance(dataset_metadata, Mapping)
+        else None
+    )
+    instruction = (
+        instruction_cfg.get("lang")
+        if isinstance(instruction_cfg, Mapping)
+        else instruction_cfg
+    )
+    return str(instruction) if instruction else "unknown_task"
+
+
 def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
     """Resolve a task's segment plan with legacy single-action-list fallback.
 
@@ -305,6 +324,8 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
     if isinstance(segments, DemoSegment):
         segments = (segments,)
 
+    fallback_instruction = _dataset_instruction(env)
+
     def _validate() -> Iterable[DemoSegment]:
         for segment in segments:
             if not isinstance(segment, DemoSegment):
@@ -312,6 +333,8 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
                     "create_demo_segments() must yield DemoSegment objects, "
                     f"got {type(segment).__name__}."
                 )
+            if segment.instruction is None:
+                segment = replace(segment, instruction=fallback_instruction)
             yield segment
 
     return _validate()

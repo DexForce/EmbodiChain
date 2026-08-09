@@ -328,6 +328,23 @@ def build_episode_preview(
         if len(sidecar_segments) != len(segment_previews):
             errors.append("Sidecar segment count does not match frame annotations.")
         for preview, metadata in zip(segment_previews, sidecar_segments, strict=False):
+            segment_instruction = metadata.get("instruction")
+            is_legacy_single_segment = (
+                int(sidecar.get("schema_version", -1)) == 2
+                and len(sidecar_segments) == 1
+                and metadata.get("name") == "legacy"
+            )
+            if segment_instruction is None and is_legacy_single_segment:
+                # Schema-v2 datasets written before segment instructions were
+                # propagated used the episode instruction for their LeRobot
+                # subtask but left the sidecar segment value null.  Preserve
+                # strict span/id checks while allowing those datasets to be
+                # previewed with the same deterministic fallback.
+                segment_instruction = sidecar.get("instruction") or ""
+                warnings.append(
+                    f"Sidecar segment {preview.segment_id} has no instruction; "
+                    "using the episode instruction for compatibility."
+                )
             expected = (
                 preview.segment_id,
                 preview.start_frame,
@@ -338,7 +355,7 @@ def build_episode_preview(
                 int(metadata.get("segment_id", -1)),
                 int(metadata.get("start_step", -1)),
                 int(metadata.get("end_step", -1)),
-                str(metadata.get("instruction", "")),
+                str(segment_instruction),
             )
             if actual != expected:
                 errors.append(

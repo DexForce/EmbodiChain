@@ -141,6 +141,70 @@ def test_build_episode_preview_rejects_invalid_segment_end_marker(
     assert preview.errors == ("Segment 2 has invalid segment_end markers.",)
 
 
+def test_build_episode_preview_accepts_legacy_null_segment_instruction(
+    tmp_path: Path,
+) -> None:
+    """Older schema-v2 sidecars inherit their episode-level instruction."""
+    samples = _build_samples()[:FRAMES_PER_SEGMENT]
+    for frame_index, sample in enumerate(samples):
+        sample["subtask"] = TASK
+        sample["annotation.segment_end"] = np.int64(
+            frame_index == FRAMES_PER_SEGMENT - 1
+        )
+    sidecar = {
+        "schema_version": 2,
+        "length": FRAMES_PER_SEGMENT,
+        "instruction": TASK,
+        "success": True,
+        "segments": [
+            {
+                "segment_id": 0,
+                "name": "legacy",
+                "start_step": 0,
+                "end_step": FRAMES_PER_SEGMENT,
+                "instruction": None,
+            }
+        ],
+    }
+
+    preview = build_episode_preview(
+        dataset_root=tmp_path,
+        info=_build_info(),
+        episode_index=0,
+        samples=samples,
+        expected_segments=1,
+        sidecar=sidecar,
+    )
+
+    assert preview.is_valid
+    assert preview.errors == ()
+    assert "using the episode instruction" in preview.warnings[0]
+
+
+def test_build_episode_preview_rejects_null_instruction_for_modern_segments(
+    tmp_path: Path,
+) -> None:
+    """Compatibility fallback must not hide malformed segmented metadata."""
+    samples = _build_samples()
+    sidecar = _build_sidecar()
+    sidecar["schema_version"] = 2
+    sidecar["segments"][0]["name"] = "pick"
+    sidecar["segments"][0]["instruction"] = None
+
+    preview = build_episode_preview(
+        dataset_root=tmp_path,
+        info=_build_info(),
+        episode_index=0,
+        samples=samples,
+        expected_segments=NUM_SEGMENTS,
+        sidecar=sidecar,
+    )
+
+    assert not preview.is_valid
+    assert preview.warnings == ()
+    assert any("Sidecar metadata does not match" in error for error in preview.errors)
+
+
 def test_resolve_dataset_root_selects_newest_child(tmp_path: Path) -> None:
     """--latest resolves the most recently modified child dataset."""
     older = tmp_path / "dataset_000" / "meta"

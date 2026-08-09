@@ -422,6 +422,7 @@ def test_cancellation_after_last_action_does_not_advance_lazy_plan() -> None:
 
 class _LegacyEnv(_SegmentedEnv):
     create_demo_segments = EmbodiedEnv.create_demo_segments
+    metadata = {"dataset": {"instruction": {"lang": "Complete the legacy task"}}}
 
     def create_demo_action_list(self):
         return (3,)
@@ -443,6 +444,7 @@ def test_execute_demo_episode_adapts_legacy_action_list() -> None:
     assert result.all_success
     assert len(result.segments) == 1
     assert result.segments[0].name == "legacy"
+    assert result.segments[0].instruction == "Complete the legacy task"
 
 
 class _NormalizingSegmentedEnv(_SegmentedEnv):
@@ -728,6 +730,8 @@ def test_clear_expert_rows_preserves_unrelated_environment() -> None:
 def test_legacy_metadata_reports_consistent_episode_success() -> None:
     """Fallback metadata agrees at the episode and segment levels."""
     env = _RolloutWriterStub()
+    task_instruction = "Hold still while recording"
+    env.metadata = {"dataset": {"instruction": {"lang": task_instruction}}}
     env._demo_episode_metadata = [
         {
             "schema_version": 2,
@@ -752,6 +756,48 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
     assert metadata["success"]
     assert metadata["terminal_reason"] == "success"
     assert metadata["segments"][0]["success"]
+    assert metadata["segments"][0]["instruction"] == task_instruction
+
+
+def test_explicit_segment_instructions_are_preserved() -> None:
+    """Dataset-level fallback never overwrites explicit segment instructions."""
+    env = _RolloutWriterStub()
+    env.metadata = {"dataset": {"instruction": {"lang": "Complete the overall task"}}}
+    expected_segments = [
+        {
+            "segment_id": 0,
+            "name": "pick",
+            "start_step": 0,
+            "end_step": 1,
+            "instruction": "Pick up the cube",
+        },
+        {
+            "segment_id": 1,
+            "name": "place",
+            "start_step": 1,
+            "end_step": 2,
+            "instruction": "Place the cube",
+        },
+    ]
+    env._demo_episode_metadata = [
+        {
+            "schema_version": 2,
+            "episode_index": 0,
+            "env_id": env_id,
+            "length": 2,
+            "completed": True,
+            "success": True,
+            "terminated": True,
+            "truncated": False,
+            "terminal_reason": "success",
+            "segments": expected_segments,
+        }
+        for env_id in range(env.num_envs)
+    ]
+
+    metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+
+    assert metadata["segments"] == expected_segments
 
 
 class _CloseDependencyStub:

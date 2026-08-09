@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -928,6 +929,23 @@ class EmbodiedEnv(BaseEnv):
         )
         metadata["length"] = length
         if length > 0 and not metadata["segments"]:
+            env_metadata = getattr(self, "metadata", {})
+            dataset_metadata = (
+                env_metadata.get("dataset", {})
+                if isinstance(env_metadata, Mapping)
+                else {}
+            )
+            instruction_cfg = (
+                dataset_metadata.get("instruction")
+                if isinstance(dataset_metadata, Mapping)
+                else None
+            )
+            instruction = (
+                instruction_cfg.get("lang")
+                if isinstance(instruction_cfg, Mapping)
+                else instruction_cfg
+            )
+            instruction = str(instruction) if instruction else "unknown_task"
             success_status = getattr(self, "episode_success_status", None)
             task_success = getattr(self, "_task_success", None)
             success = bool(
@@ -970,7 +988,7 @@ class EmbodiedEnv(BaseEnv):
                     "end_step": length,
                     "success": success,
                     "target_uid": None,
-                    "instruction": None,
+                    "instruction": instruction,
                     "failure_reason": None if success else terminal_reason,
                     "metadata": {},
                 }

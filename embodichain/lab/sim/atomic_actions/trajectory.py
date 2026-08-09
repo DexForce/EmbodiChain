@@ -365,6 +365,12 @@ class TrajectoryBuilder:
             is_success, qpos = self.robot.compute_ik(
                 pose=xpos_traj[:, j], name=control_part, joint_seed=qpos_seed
             )
+            # Some solver backends expose their success mask as an integer
+            # tensor.  Normalize it before combining masks or using it as a
+            # ``torch.where`` condition, both of which require boolean values.
+            is_success = torch.as_tensor(
+                is_success, dtype=torch.bool, device=self.device
+            )
             if not self.all_envs_success(is_success):
                 logger.log_warning(
                     f"Failed to compute IK for target state {j} in some environments."
