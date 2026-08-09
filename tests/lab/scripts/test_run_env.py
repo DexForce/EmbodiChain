@@ -155,7 +155,17 @@ def test_preview_quit_returns_without_zero_exit(monkeypatch) -> None:
 
 
 class _ResetTrackingEnv:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        num_envs: int = 1,
+        save_failed_episodes: bool = False,
+    ) -> None:
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        self.dataset_manager = SimpleNamespace(
+            save_failed_episodes=save_failed_episodes
+        )
         self.reset_options = []
 
     def reset(self, options=None):
@@ -176,15 +186,22 @@ class _LifecycleTrackingEnv(_ResetTrackingEnv):
         self.events.append(("close", exit_process))
 
 
-def _episode_result(*, success: bool, reason: str) -> DemoEpisodeResult:
+def _episode_result(
+    *,
+    success: bool,
+    reason: str,
+    length: int = 2,
+    num_envs: int = 1,
+) -> DemoEpisodeResult:
     return DemoEpisodeResult(
         episode_index=0,
-        length=2,
+        length=length,
         completed=success,
-        success=(success,),
-        terminated=(False,),
-        truncated=(False,),
+        success=(success,) * num_envs,
+        terminated=(False,) * num_envs,
+        truncated=(False,) * num_envs,
         terminal_reason=reason,
+        lengths=(length,) * num_envs,
     )
 
 
@@ -211,6 +228,110 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
 
     assert generated
     assert env.reset_options == [{"save_data": False}, None]
+
+
+def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -> None:
+    """A recorded task failure is a persisted result when explicitly enabled."""
+    env = _ResetTrackingEnv(save_failed_episodes=True)
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: _episode_result(
+            success=False,
+            reason="task_incomplete",
+        ),
+    )
+
+    generated = generate_function(
+        env,
+        time_id=3,
+        max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [None]
+
+
+def test_generate_function_retries_empty_failure_even_when_saving_failures(
+    monkeypatch,
+) -> None:
+    """An empty plan cannot count as a saved failed episode."""
+    env = _ResetTrackingEnv(save_failed_episodes=True)
+    results = iter(
+        [
+            _episode_result(success=False, reason="empty_plan", length=0),
+            _episode_result(success=True, reason="success"),
+        ]
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: next(results),
+    )
+
+    generated = generate_function(
+        env,
+        max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [{"save_data": False}, None]
+
+
+def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> None:
+    """The final partial batch commits selected rows and discards its remainder."""
+    num_envs = 3
+    env = _ResetTrackingEnv(num_envs=num_envs)
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: _episode_result(
+            success=True,
+            reason="success",
+            num_envs=num_envs,
+        ),
+    )
+
+    generated = generate_function(
+        env,
+        save_env_ids=(0, 1),
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options[0]["reset_ids"].tolist() == [0, 1]
+    assert "save_data" not in env.reset_options[0]
+    assert env.reset_options[1]["reset_ids"].tolist() == [2]
+    assert env.reset_options[1]["save_data"] is False
+
+
+def test_main_counts_max_episodes_as_persisted_env_rows(monkeypatch) -> None:
+    """Vector collection persists exactly max_episodes, including a partial batch."""
+    env = _ResetTrackingEnv(num_envs=3)
+    args = SimpleNamespace(
+        replay=False,
+        preview=False,
+        save_path="",
+        save_video=False,
+        debug_mode=False,
+        regenerate=False,
+        record_trajectory=False,
+    )
+    calls: list[tuple[int, tuple[int, ...]]] = []
+
+    def record_batch(*args, **kwargs) -> bool:
+        calls.append((kwargs["time_id"], tuple(kwargs["save_env_ids"])))
+        return True
+
+    monkeypatch.setattr(run_env, "generate_function", record_batch)
+
+    run_env.main(
+        args,
+        env,
+        {"max_episodes": 5, "demo_max_attempts": 2},
+    )
+
+    assert calls == [(0, (0, 1, 2)), (3, (0, 1))]
+    assert sum(len(env_ids) for _, env_ids in calls) == 5
 
 
 def test_generate_function_rejects_runner_owned_segment_count() -> None:

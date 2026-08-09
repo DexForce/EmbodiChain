@@ -26,6 +26,7 @@ This page covers structured dataset export. If you only need human-viewable debu
 
     ```json
     {"func": "LeRobotRecorder", "mode": "save",
+     "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
                 "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
@@ -38,6 +39,7 @@ This page covers structured dataset export. If you only need human-viewable debu
 
     ```json
     {"func": "AsyncLeRobotRecorder", "mode": "save",
+     "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
                 "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
@@ -63,6 +65,23 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 - Auto-incrementing dataset naming
 
 ### Parameters
+
+``save_failed_episodes`` is a {class}`~cfg.DatasetFunctorCfg` lifecycle option,
+not a recorder constructor parameter. Place it beside ``func`` and ``mode`` in
+JSON/YAML, or pass it directly to ``DatasetFunctorCfg`` in Python. Its default
+is ``false``. During ``run-env`` expert generation:
+
+- ``false`` discards and retries failed or truncated attempts;
+- ``true`` commits a failed/truncated attempt when every selected environment
+  row contains at least one frame. The saved sidecar records ``success=false``
+  and the terminal reason;
+- empty plans and exceptions are always discarded; and
+- a saved failure counts toward ``max_episodes``, so the requested dataset size
+  is not exceeded.
+
+When several save-mode functors are configured, enabling this option on any of
+them makes the Dataset Manager submit failed rows to all save-mode functors so
+their outputs stay aligned.
 
 ```{list-table} LeRobotRecorder Parameters
 :header-rows: 1
@@ -109,12 +128,27 @@ The LeRobotRecorder saves the following data for each frame:
 - ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
 - ``observation.mask.{sensor_name}``: Native numeric segmentation-mask arrays
 - ``observation.mask.{sensor_name}_right``: Right-camera segmentation-mask arrays
-- ``annotation.segment_*``: Exact episode-local segment identifiers and boundaries
+- ``annotation.episode_step``: Zero-based frame position inside the episode
+- ``annotation.segment_id``: Episode-local semantic segment identifier
+- ``annotation.segment_step``: Zero-based frame position inside the segment
+- ``annotation.segment_start``: 1 on the segment's first frame, otherwise 0
+- ``annotation.segment_end``: 1 on the segment's final frame, otherwise 0
+- ``annotation.terminated``: Gym termination flag for this frame
+- ``annotation.truncated``: Gym truncation flag for this frame
+
+All ``annotation.*`` fields above and ``subtask_index`` are stored as scalar
+``int64`` features. Booleans therefore appear as 0 or 1. The expert rollout
+buffer also contains an internal ``valid`` mask, but the recorder uses it only
+to select each environment's real frame prefix; there is no
+``annotation.valid`` LeRobot column.
 
 For legacy episodes without explicit segment metadata, the overall task is
 also registered as their single subtask. ``subtask_index`` follows LeRobot
 0.4.4's optional subtask convention, while ``annotation.segment_id`` remains
 episode-local and is therefore not required to have the same numeric value.
+Episode-level completion, success, terminal reason, per-segment status and
+segment metadata are additionally written to
+``meta/embodichain_episodes.jsonl``.
 
 ### Previewing Recorded Episodes
 
@@ -131,6 +165,9 @@ embodichain preview_lerobot_data \
 The path may be a parent containing auto-numbered datasets when `--latest` is
 added. `--expect-segments` is an optional assertion, not a filter: validation
 fails if the selected episode does not contain exactly that many segments.
+A failed episode can still pass structural validation; in that case the
+preview prints ``Sidecar : success=False`` while checking that its terminal
+annotations and sidecar agree.
 
 Use LeRobot's official Rerun CLI for an interactive view of standard camera,
 state, and action streams:
@@ -143,8 +180,9 @@ lerobot-dataset-viz \
     --episode-index 0
 ```
 
-The LeRobot 0.4.4 viewer does not render `subtask_index` or
-`annotation.segment_*`; use the terminal preview to verify those fields. See
+The LeRobot 0.4.4 viewer does not render `subtask_index` or EmbodiChain's
+`annotation.*` fields; use the terminal preview to verify segment boundaries,
+episode steps, and terminal flags. See
 {ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for the
 complete three-segment example, exit codes, local-root behavior, and `.rrd`
 export commands.
@@ -292,6 +330,7 @@ from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 dataset = {
     "lerobot_recorder": DatasetFunctorCfg(
         func="embodichain.lab.gym.envs.managers.datasets.LeRobotRecorder",
+        save_failed_episodes=True,
         params={
             "save_path": "/path/to/dataset/root",
             "robot_meta": {
@@ -317,7 +356,8 @@ dataset = {
 
 1. **Initialization**: The Dataset Manager initializes the functor with the configured parameters
 2. **Data Collection**: During episode rollout, the functor receives observations and actions
-3. **Save Trigger**: When an episode completes, call the functor with `mode="save"`
+3. **Save Trigger**: Reset selected rows to commit them. Successful rows always
+   save; failed rows save only when ``save_failed_episodes=True``
 4. **Finalization**: After all episodes, call `finalize()` to drain committed writes and finalize storage metadata
 
 ```python
@@ -339,6 +379,7 @@ from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 dataset = {
     "lerobot_recorder": DatasetFunctorCfg(
         func="embodichain.lab.gym.envs.managers.async_datasets.AsyncLeRobotRecorder",
+        save_failed_episodes=True,
         params={
             "save_path": "/path/to/dataset/root",
             "robot_meta": {"robot_type": "dexforce_w1"},

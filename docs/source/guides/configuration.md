@@ -129,6 +129,12 @@ For RL training and data generation, EmbodiChain uses file-based configs (`.json
 
 Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
 
+For offline expert generation, `max_episodes` counts persisted
+per-environment episodes rather than vector batches. Thus `num_envs: 4` and
+`max_episodes: 10` produce two full four-row commits plus a final two-row
+commit. Failed rows count only when the relevant `DatasetFunctorCfg` sets
+`save_failed_episodes: true`.
+
 Example paths in the repository:
 
 | Use case | JSON example | YAML example |

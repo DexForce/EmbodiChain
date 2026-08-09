@@ -58,6 +58,8 @@ def _build_samples() -> list[dict]:
                 "annotation.segment_end": np.int64(
                     segment_step == FRAMES_PER_SEGMENT - 1
                 ),
+                "annotation.terminated": np.int64(0),
+                "annotation.truncated": np.int64(0),
                 "timestamp": np.float32(frame_index / FPS),
                 "frame_index": np.int64(frame_index),
                 "episode_index": np.int64(0),
@@ -87,6 +89,8 @@ def _build_sidecar() -> dict:
         "length": NUM_SEGMENTS * FRAMES_PER_SEGMENT,
         "instruction": TASK,
         "success": True,
+        "terminated": False,
+        "truncated": False,
         "segments": [
             {
                 "segment_id": segment_id,
@@ -139,6 +143,51 @@ def test_build_episode_preview_rejects_invalid_segment_end_marker(
 
     assert not preview.is_valid
     assert preview.errors == ("Segment 2 has invalid segment_end markers.",)
+
+
+def test_build_episode_preview_accepts_structurally_valid_failed_episode(
+    tmp_path: Path,
+) -> None:
+    """A failed episode is valid data when terminal annotations match its sidecar."""
+    samples = _build_samples()
+    samples[-1]["annotation.terminated"] = np.int64(1)
+    sidecar = _build_sidecar()
+    sidecar["success"] = False
+    sidecar["terminated"] = True
+
+    preview = build_episode_preview(
+        dataset_root=tmp_path,
+        info=_build_info(),
+        episode_index=0,
+        samples=samples,
+        expected_segments=NUM_SEGMENTS,
+        sidecar=sidecar,
+    )
+
+    assert preview.is_valid
+    assert preview.sidecar_success is False
+
+
+def test_build_episode_preview_rejects_early_terminal_annotation(
+    tmp_path: Path,
+) -> None:
+    """A terminal flag before the saved row's final frame is inconsistent."""
+    samples = _build_samples()
+    samples[0]["annotation.truncated"] = np.int64(1)
+
+    preview = build_episode_preview(
+        dataset_root=tmp_path,
+        info=_build_info(),
+        episode_index=0,
+        samples=samples,
+        expected_segments=NUM_SEGMENTS,
+        sidecar=_build_sidecar(),
+    )
+
+    assert not preview.is_valid
+    assert preview.errors == (
+        "annotation.truncated may be set only on the final frame.",
+    )
 
 
 def test_build_episode_preview_accepts_legacy_null_segment_instruction(

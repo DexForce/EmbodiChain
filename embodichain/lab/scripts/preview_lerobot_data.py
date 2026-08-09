@@ -49,6 +49,8 @@ REQUIRED_FEATURES = {
     "annotation.segment_step",
     "annotation.segment_start",
     "annotation.segment_end",
+    "annotation.terminated",
+    "annotation.truncated",
     "timestamp",
     "frame_index",
     "episode_index",
@@ -222,6 +224,16 @@ def build_episode_preview(
     if episode_steps != expected_frame_indices:
         errors.append("annotation.episode_step does not match frame_index.")
 
+    terminal_annotations: dict[str, list[int]] = {}
+    for annotation in ("terminated", "truncated"):
+        feature_key = f"annotation.{annotation}"
+        values = [int(_scalar(sample[feature_key])) for sample in samples]
+        terminal_annotations[annotation] = values
+        if any(value not in (0, 1) for value in values):
+            errors.append(f"{feature_key} must contain only 0 or 1.")
+        if any(values[:-1]):
+            errors.append(f"{feature_key} may be set only on the final frame.")
+
     fps = int(info.get("fps", 0))
     timestamps = np.asarray(
         [float(_scalar(sample["timestamp"])) for sample in samples],
@@ -323,6 +335,12 @@ def build_episode_preview(
             errors.append("Sidecar episode length does not match LeRobot frames.")
         if str(sidecar.get("instruction", "")) != task:
             errors.append("Sidecar instruction does not match LeRobot task.")
+        for annotation, values in terminal_annotations.items():
+            sidecar_value = bool(sidecar.get(annotation, False))
+            if sidecar_value != bool(values[-1]):
+                errors.append(
+                    f"Sidecar {annotation} does not match annotation.{annotation}."
+                )
 
         sidecar_segments = sidecar.get("segments", [])
         if len(sidecar_segments) != len(segment_previews):

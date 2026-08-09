@@ -197,7 +197,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--preview`` | ``False`` | Enter interactive preview mode |
 | ``--filter_visual_rand`` | ``False`` | Filter out visual randomization |
 | ``--filter_dataset_saving`` | ``False`` | Filter out dataset saving |
-| ``--max_episodes`` | *(from config)* | Override the maximum number of rollout episodes |
+| ``--max_episodes`` | *(from config)* | Override the exact number of persisted per-environment episodes; vector batches are trimmed to this count |
 | ``--record_trajectory`` | ``False`` | Record per-object kinematic trajectories during generation (for replay). Episodes auto-save to ``--trajectory_save_dir`` (or ``~/.cache/embodichain_data/trajectories/<run_id>/``) |
 | ``--trajectory_save_dir`` | ``None`` | Directory for auto-saved trajectories (default: ``~/.cache/embodichain_data/trajectories/<run_id>/``) |
 | ``--replay`` | ``False`` | Replay a recorded trajectory (``--replay_trajectory`` required; mutually exclusive with ``--preview``) |

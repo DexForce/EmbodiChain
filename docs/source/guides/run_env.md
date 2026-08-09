@@ -130,11 +130,12 @@ details.
 ## Run and record
 
 Without `--preview` or `--replay`, `run-env` enters offline rollout mode. For
-each episode, it asks the task for its demonstration segments, applies every
-action through `env.step()`, and commits the complete episode with one reset.
-An empty plan, truncation, or failed final task validation discards the whole
-attempt. Attempts are bounded by `demo_max_attempts` in the gym config
-(default: 3). `--max_episodes` overrides the value in the gym config:
+each vector batch, it asks the task for its demonstration segments, applies
+every action through `env.step()`, and commits selected environment rows with
+an explicit reset. `max_episodes` is the exact number of persisted
+per-environment episodes, not the number of vector batches. For example,
+`max_episodes=10` with `num_envs=4` runs three batches and commits only two rows
+from the final batch. `--max_episodes` overrides the value in the gym config:
 
 ```bash
 embodichain run-env \
@@ -148,6 +149,12 @@ embodichain run-env \
 Headless execution is normally preferred for throughput. Use
 `--filter_dataset_saving` for a rollout smoke test that should not create a
 structured dataset.
+
+Failed attempts are discarded and retried by default, up to
+`demo_max_attempts` (default: 3). Set `save_failed_episodes: true` on a dataset
+functor to keep a failed or truncated attempt that contains recorded frames.
+Such a commit counts toward `max_episodes` and is not retried. Empty plans and
+exceptions have no complete dataset transaction and are still discarded.
 
 ### Multi-segment episodes
 
@@ -180,6 +187,11 @@ def create_demo_segments(self):
         )
 ```
 
+Direct callers of `generate_function()` must no longer use `num_traj` as a
+sub-trajectory count. Only `None` and `1` are accepted; larger values raise
+`ValueError`. Move the repeated subtasks into `create_demo_segments()` so the
+task, rather than the runner, owns their order and validation.
+
 Gym `terminated` and `truncated` always describe the whole episode, never an
 individual segment. A segment normally ends when its action iterable is
 exhausted; its optional zero-argument `validator` then returns one boolean per
@@ -188,29 +200,45 @@ success termination stops the remaining lazy plan without requesting another
 segment.
 
 The executor checks terminal signals after every action and temporarily
-disables Gym auto-reset. Dataset recording is transactional: only the explicit
-reset after successful final validation saves the episode. Exceptions,
-interrupts, failed attempts, and closing an environment with a live rollout
-abort pending structured data, videos, and trajectories.
+disables Gym auto-reset. Dataset recording is transactional: an explicit reset
+commits selected rows, while `reset(options={"save_data": False})` discards
+them. Successful final validation always commits. A failed result commits only
+when a configured dataset functor enables `save_failed_episodes`; exceptions,
+interrupts, empty plans, and closing an environment with a live rollout abort
+pending structured data, videos, and trajectories.
 
 Segment actions pass through the same action-dimension normalization used by
 legacy `create_demo_action_list()` tasks. A time-limit truncation is always an
-invalid expert rollout, including when it occurs on the planner's final
-action, so a task's `max_episode_steps` must be greater than the longest valid
-expert plan.
+unsuccessful expert result, including when it occurs on the planner's final
+action. It is discarded by default or retained as failed data when configured,
+so a task's `max_episode_steps` must be greater than the longest valid expert
+plan when collecting successful demonstrations.
 
 In a vectorized environment, segments and actions remain on one shared planner
 clock, but completion is tracked independently. When one environment reports
 success, its terminal result and recording cursor become sticky; subsequent
 shared actions use a safe hold/no-op command for that row while unfinished rows
 continue. Consequently, rollout and trajectory lengths may differ by row.
-The commit remains batch-atomic: every row must eventually succeed, while any
-failure or truncation aborts the whole attempt.
+The executor's result remains batch-atomic: without failed-data saving every
+row must eventually succeed, while any failure or truncation invalidates the
+batch. With `save_failed_episodes`, selected failed rows are committed with
+their per-row failure metadata. Rows not needed to reach `max_episodes` are
+explicitly discarded, so parallel collection never overshoots the requested
+episode count.
 
-Failed attempts use `reset(options={"save_data": False})`. This discards
-structured datasets, replay trajectories, and camera-video buffers; recorder
-options such as `save_failed_episodes` do not override the runner's expert
-transaction policy.
+`save_failed_episodes` belongs beside `func` and `mode`, not inside `params`:
+
+```json
+{
+  "func": "LeRobotRecorder",
+  "mode": "save",
+  "save_failed_episodes": true,
+  "params": {
+    "robot_meta": {"robot_type": "UR5"},
+    "instruction": {"lang": "Pick and place the cube"}
+  }
+}
+```
 
 #### Run the built-in three-cycle example
 
@@ -290,9 +318,11 @@ embodichain run-env \
 The recorder stores the robot root pose and complete joint position, the raw
 action before ActionManager preprocessing, and the pose or joint state of scene
 rigid objects and articulations. Each environment in a vectorized rollout is
-tracked independently. A trajectory is saved only at an explicit successful
-episode reset. `close()` is a durability barrier for already committed writes,
-not an implicit commit, so an unfinished trajectory is discarded.
+tracked independently. A trajectory is saved only at an explicit commit reset;
+this is normally a successful episode, or a recorded failure when
+`save_failed_episodes` is enabled on a dataset functor. `close()` is a
+durability barrier for already committed writes, not an implicit commit, so an
+unfinished trajectory is discarded.
 
 Files are named like `traj_env0_000000.pt`. When
 `--trajectory_save_dir` is omitted, they are written below:

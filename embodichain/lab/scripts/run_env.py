@@ -54,9 +54,113 @@ def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]
     return tqdm.tqdm(actions, desc=description, unit="step")
 
 
-def _abort_pending_episode(env: Any) -> None:
+def _env_target(env: Any) -> Any:
+    """Return the underlying environment used for lifecycle introspection."""
+    return getattr(env, "unwrapped", env)
+
+
+def _normalize_save_env_ids(
+    env: Any,
+    env_ids: Sequence[int] | torch.Tensor | None,
+) -> tuple[int, ...]:
+    """Validate environment rows selected for one persisted episode batch."""
+    num_envs = int(getattr(_env_target(env), "num_envs", 1))
+    if num_envs < 1:
+        raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
+
+    if env_ids is None:
+        normalized = tuple(range(num_envs))
+    elif isinstance(env_ids, torch.Tensor):
+        normalized = tuple(
+            int(env_id) for env_id in env_ids.detach().cpu().reshape(-1).tolist()
+        )
+    else:
+        normalized = tuple(int(env_id) for env_id in env_ids)
+
+    if not normalized:
+        raise ValueError("save_env_ids must select at least one environment.")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"save_env_ids contains duplicates: {normalized}.")
+    invalid = [env_id for env_id in normalized if not 0 <= env_id < num_envs]
+    if invalid:
+        raise ValueError(
+            f"save_env_ids {invalid} are outside the valid range [0, {num_envs})."
+        )
+    return normalized
+
+
+def _reset_episode_rows(
+    env: Any,
+    env_ids: Sequence[int] | torch.Tensor | None,
+    *,
+    save_data: bool,
+) -> None:
+    """Reset selected rows, committing or discarding their pending recordings."""
+    selected = _normalize_save_env_ids(env, env_ids)
+    target = _env_target(env)
+    num_envs = int(getattr(target, "num_envs", 1))
+    all_env_ids = tuple(range(num_envs))
+
+    if selected == all_env_ids:
+        if save_data:
+            env.reset()
+        else:
+            env.reset(options={"save_data": False})
+        return
+
+    reset_ids = torch.tensor(
+        selected,
+        dtype=torch.int32,
+        device=getattr(target, "device", None),
+    )
+    options: dict[str, Any] = {"reset_ids": reset_ids}
+    if not save_data:
+        options["save_data"] = False
+    env.reset(options=options)
+
+
+def _abort_pending_episode(
+    env: Any,
+    env_ids: Sequence[int] | torch.Tensor | None = None,
+) -> None:
     """Discard buffered data before retrying or closing an environment."""
-    env.reset(options={"save_data": False})
+    _reset_episode_rows(env, env_ids, save_data=False)
+
+
+def _commit_pending_episode(
+    env: Any,
+    save_env_ids: Sequence[int] | torch.Tensor | None,
+) -> None:
+    """Commit selected rows and discard unused rows from the same vector batch."""
+    selected = _normalize_save_env_ids(env, save_env_ids)
+    num_envs = int(getattr(_env_target(env), "num_envs", 1))
+    _reset_episode_rows(env, selected, save_data=True)
+
+    selected_set = set(selected)
+    discarded = tuple(
+        env_id for env_id in range(num_envs) if env_id not in selected_set
+    )
+    if discarded:
+        _reset_episode_rows(env, discarded, save_data=False)
+
+
+def _save_failed_episodes_enabled(env: Any) -> bool:
+    """Return whether the configured dataset manager keeps failed episodes."""
+    dataset_manager = getattr(_env_target(env), "dataset_manager", None)
+    return bool(
+        dataset_manager is not None
+        and getattr(dataset_manager, "save_failed_episodes", False)
+    )
+
+
+def _selected_rows_have_frames(
+    result: DemoEpisodeResult,
+    save_env_ids: Sequence[int],
+) -> bool:
+    """Return whether every selected row contains a persistable frame."""
+    if result.lengths:
+        return all(result.lengths[env_id] > 0 for env_id in save_env_ids)
+    return result.length > 0
 
 
 def generate_and_execute_action_list(
@@ -106,13 +210,16 @@ def generate_function(
     save_path: str = "",
     save_video: bool = False,
     debug_mode: bool = False,
+    save_env_ids: Sequence[int] | torch.Tensor | None = None,
     **kwargs: Any,
 ) -> bool:
-    """Generate, execute, and transactionally save one task episode.
+    """Generate, execute, and transactionally save one task episode batch.
 
     A task owns its segment count through ``create_demo_segments``. The legacy
     ``num_traj`` parameter is accepted only as ``None`` or ``1`` so callers do
-    not accidentally repeat a one-grasp planner inside the same episode.
+    not accidentally repeat a one-grasp planner inside the same episode. When
+    a dataset functor enables ``save_failed_episodes``, a failed result with at
+    least one frame in every selected row is committed instead of retried.
 
     Args:
         env: The environment instance.
@@ -121,10 +228,13 @@ def generate_function(
         save_path (str, optional): Path to save generated videos.
         save_video (bool, optional): Whether to save episode videos.
         debug_mode (bool, optional): Enable debug mode for visualization and logging.
+        save_env_ids: Environment rows to persist from this vector batch. Other
+            rows are explicitly discarded after the selected rows commit.
         **kwargs: Additional keyword arguments for data generation.
 
     Returns:
-        True if a successful episode was committed, otherwise False.
+        True if one episode per selected environment row was committed. With
+        ``save_failed_episodes`` enabled, committed episodes may be unsuccessful.
     """
     if num_traj not in (None, 1):
         raise ValueError(
@@ -136,6 +246,8 @@ def generate_function(
     reset_before = bool(kwargs.pop("reset_before", True))
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
+    normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
+    save_failed_episodes = _save_failed_episodes_enabled(env)
 
     if reset_before:
         _abort_pending_episode(env)
@@ -149,11 +261,22 @@ def generate_function(
                 progress=_progress_wrapper,
                 **kwargs,
             )
-            if result.completed and result.all_success:
+            successful = result.completed and result.all_success
+            persistable_failure = (
+                not successful
+                and save_failed_episodes
+                and _selected_rows_have_frames(result, normalized_save_env_ids)
+            )
+            if successful or persistable_failure:
                 # reset() is the commit boundary: dataset functors consume the
                 # whole episode once, then buffers and scene state are reset.
-                env.reset()
+                _commit_pending_episode(env, normalized_save_env_ids)
                 commit_succeeded = True
+                if persistable_failure:
+                    log_warning(
+                        f"Episode {time_id} failed ({result.terminal_reason}) but "
+                        "was saved because save_failed_episodes is enabled."
+                    )
                 return True
         finally:
             # ``finally`` also covers KeyboardInterrupt, SystemExit, and
@@ -502,25 +625,45 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         return
 
     log_info("Start offline data generation.", color="green")
-    # Prepare one clean scene. Every successful generate_function call commits
-    # via reset(), leaving the next episode ready to plan.
+    # Prepare one clean scene. max_episodes counts persisted per-environment
+    # episodes, not vector batches. Every successful generate_function call
+    # commits exactly the selected rows and leaves the next batch ready to plan.
     _abort_pending_episode(env)
-    for i in range(gym_config.get("max_episodes", 1)):
+    max_episodes = int(gym_config.get("max_episodes", 1))
+    if max_episodes < 0:
+        raise ValueError(f"max_episodes must be non-negative, got {max_episodes}.")
+    num_envs = int(getattr(_env_target(env), "num_envs", 1))
+    if num_envs < 1:
+        raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
+
+    saved_episodes = 0
+    generated_batches = 0
+    while saved_episodes < max_episodes:
+        batch_episode_count = min(num_envs, max_episodes - saved_episodes)
+        save_env_ids = tuple(range(batch_episode_count))
         generated = generate_function(
             env,
-            time_id=i,
+            time_id=saved_episodes,
             save_path=getattr(args, "save_path", ""),
             save_video=getattr(args, "save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
+            save_env_ids=save_env_ids,
             regenerate=getattr(args, "regenerate", False),
             max_attempts=gym_config.get("demo_max_attempts", 3),
             reset_before=False,
         )
         if not generated:
             raise RuntimeError(
-                f"Failed to generate episode {i} after "
+                f"Failed to generate episode batch starting at {saved_episodes} after "
                 f"{gym_config.get('demo_max_attempts', 3)} attempts."
             )
+        saved_episodes += batch_episode_count
+        generated_batches += 1
+
+    log_info(
+        f"Committed {saved_episodes} episode(s) in {generated_batches} vector batch(es).",
+        color="green",
+    )
 
     # Log the trajectory save location before cli() tears down the sim and, by
     # default, os._exit()s the process.
