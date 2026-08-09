@@ -20,7 +20,7 @@ The left arm picks up a soda can (object A) and places it directly above a cube
 (object B). The relative pose of the can with respect to the cube is declared on
 an :class:`~embodichain.lab.sim.atomic_actions.AssembleAffordance` and consumed
 by the :class:`~embodichain.lab.sim.atomic_actions.Place` action through an
-:class:`~embodichain.lab.sim.atomic_actions.AssembleTarget`.
+:class:`~embodichain.lab.sim.atomic_actions.AssembleGoal`.
 """
 
 from __future__ import annotations
@@ -34,38 +34,38 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import numpy as np
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AssembleAffordance,
-    AssembleTarget,
+    AssembleGoal,
     AtomicActionEngine,
-    GraspTarget,
-    PickUp,
-    PickUpCfg,
-    Place,
-    PlaceCfg,
+    ControlPartCommandProfile,
+    GraspGoal,
+    PickUpOptions,
+    PlaceOptions,
+    MotionPolicy,
 )
-from embodichain.lab.sim.cfg import (
-    JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
-    RigidObjectCfg,
-    RobotCfg,
-    URDFCfg,
-)
+from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
-from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.utils import logger
+from scripts.tutorials.atomic_action.scenario_utils import (
+    add_dual_ur5_robot,
+    add_support_surface,
+    make_dual_ur5_solver_cfg,
+    settle_object,
+)
 from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
@@ -75,14 +75,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     serve_tutorial_scene,
 )
 
-ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
-GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
 GRIPPER_TCP_Z = 0.155
-ROBOT_INIT_POS = (1.95, 0.0, 0.1)
-ROBOT_INIT_ROT = (0.0, 0.0, -90.0)
-LEFT_ARM_HOME = (0.0, 0.0, -1.57, -1.57, 1.57, 1.57)
-RIGHT_ARM_HOME = (-1.57, -1.57, -1.57, -1.57, 0.0, 0.0)
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -130,153 +124,42 @@ ASSEMBLE_RECORD_LOOK_AT = (
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the assembly demo."""
-    parser = argparse.ArgumentParser(description="Dual-arm object assembly demo")
-    add_env_launcher_args_to_parser(parser)
-    parser.set_defaults(device="cpu", renderer="hybrid")
-    parser.add_argument("--n_sample", type=int, default=10000)
-    parser.add_argument("--force_reannotate", action="store_true")
-    parser.add_argument(
-        "--diagnose_plan",
-        action="store_true",
-        help="Plan and print diagnostics without playing the trajectory.",
-    )
-    parser.add_argument(
-        "--auto_play",
-        action="store_true",
-        help="Run the viewer demo without waiting for keyboard input.",
-    )
-    parser.add_argument(
-        "--headless_play",
-        action="store_true",
-        help="Execute planned trajectories without opening the viewer window.",
-    )
-    parser.add_argument(
-        "--no_vis_eef_axis",
-        action="store_true",
-        help="Skip drawing the assembly target axis marker.",
+    parser = create_tutorial_argument_parser(
+        "Dual-arm object assembly demo",
+        features=(
+            "diagnose_plan",
+            "grasp_sampling",
+            "headless_play",
+            "visualize_axes",
+        ),
+        default_device="cpu",
+        default_renderer="hybrid",
     )
     return parser.parse_args()
 
 
-def rotation_z(yaw: float) -> np.ndarray:
-    """Build a 3x3 yaw rotation matrix."""
-    cos_yaw = math.cos(yaw)
-    sin_yaw = math.sin(yaw)
-    return np.array(
-        [
-            [cos_yaw, -sin_yaw, 0.0],
-            [sin_yaw, cos_yaw, 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-
-
-def make_transform(xyz: tuple[float, float, float], yaw: float) -> np.ndarray:
-    """Build a homogeneous transform from translation and yaw."""
-    transform = np.eye(4, dtype=np.float32)
-    transform[:3, :3] = rotation_z(yaw)
-    transform[:3, 3] = np.asarray(xyz, dtype=np.float32)
-    return transform
-
-
 def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
     """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    arm_urdf_path = ARM_URDF_PATH
-    gripper_urdf_path = GRIPPER_URDF_PATH
-    tcp = [
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
-        [0.0, 0.0, 0.0, 1.0],
-    ]
-    cfg = RobotCfg(
+    return add_dual_ur5_robot(
+        sim,
         uid="DualUR5Assemble",
-        urdf_cfg=URDFCfg(
-            components=[
-                {
-                    "component_type": "left_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": make_transform((-0.3, -1.45, 0.4), np.pi / 2),
-                },
-                {
-                    "component_type": "right_arm",
-                    "urdf_path": arm_urdf_path,
-                    "transform": make_transform((0.3, -1.45, 0.4), np.pi / 2),
-                },
-                {"component_type": "left_hand", "urdf_path": gripper_urdf_path},
-                {"component_type": "right_hand", "urdf_path": gripper_urdf_path},
-            ],
-            fname="dual_ur5_assemble",
-            name_case={"joint": "upper", "link": "lower"},
+        urdf_name="dual_ur5_assemble",
+        solver_cfg=make_dual_ur5_solver_cfg(
+            GRIPPER_TCP_Z,
+            ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
         ),
-        drive_pros=JointDrivePropertiesCfg(
-            stiffness={
-                "LEFT_JOINT[0-9]": 1e4,
-                "RIGHT_JOINT[0-9]": 1e4,
-                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
-                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e2,
-            },
-            damping={
-                "LEFT_JOINT[0-9]": 1e3,
-                "RIGHT_JOINT[0-9]": 1e3,
-                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e1,
-                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e1,
-            },
-            max_effort={
-                "LEFT_JOINT[0-9]": 1e5,
-                "RIGHT_JOINT[0-9]": 1e5,
-                "LEFT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
-                "RIGHT_GRIPPER_FINGER[1-2]_JOINT_1": 1e3,
-            },
-            drive_type="force",
-        ),
-        control_parts={
-            "left_arm": ["LEFT_JOINT[0-9]"],
-            "right_arm": ["RIGHT_JOINT[0-9]"],
-            "dual_arm": ["LEFT_JOINT[0-9]", "RIGHT_JOINT[0-9]"],
-            "left_hand": ["LEFT_GRIPPER_FINGER1_JOINT_1"],
-            "right_hand": ["RIGHT_GRIPPER_FINGER1_JOINT_1"],
-        },
-        solver_cfg={
-            "left_arm": URSolverCfg(
-                ur_type="ur5",
-                tcp=tcp,
-                end_link_name="left_ee_link",
-                root_link_name="left_base_link",
-                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
-            ),
-            "right_arm": URSolverCfg(
-                ur_type="ur5",
-                tcp=tcp,
-                end_link_name="right_ee_link",
-                root_link_name="right_base_link",
-                ik_nearest_weight=[1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
-            ),
-        },
-        init_pos=list(ROBOT_INIT_POS),
-        init_rot=list(ROBOT_INIT_ROT),
-        init_qpos=list(LEFT_ARM_HOME) + list(RIGHT_ARM_HOME) + [0.0, 0.0, 0.0, 0.0],
+        hand_stiffness=1e2,
+        hand_damping=1e1,
+        hand_max_effort=1e3,
     )
-    return sim.add_robot(cfg=cfg)
 
 
 def create_support_surface(sim: SimulationManager) -> RigidObject:
     """Create a compact support slab under the staged objects."""
-    return sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="support_surface",
-            shape=CubeCfg(size=list(SUPPORT_SURFACE_SIZE)),
-            attrs=RigidBodyAttributesCfg(
-                mass=10.0,
-                dynamic_friction=0.9,
-                static_friction=0.95,
-                restitution=0.01,
-            ),
-            body_type="static",
-            init_pos=list(SUPPORT_SURFACE_CENTER),
-            init_rot=[0.0, 0.0, 0.0],
-        )
+    return add_support_surface(
+        sim,
+        size=SUPPORT_SURFACE_SIZE,
+        center=SUPPORT_SURFACE_CENTER,
     )
 
 
@@ -332,16 +215,6 @@ def create_base_object(sim: SimulationManager) -> RigidObject:
             init_rot=[0.0, 0.0, 0.0],
         )
     )
-
-
-def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
-    """Settle an object before planning."""
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
-    obj.reset()
-    if step > 0:
-        sim.update(step=step)
-    obj.clear_dynamics()
 
 
 def compute_can_half_height(can: RigidObject) -> float:
@@ -405,43 +278,30 @@ def run_assemble_demo(
         )
 
     # Step 1 - the left arm picks the soda can up by its top part.
-    pick_up_action = PickUp(
-        motion_generator=motion_gen,
-        cfg=PickUpCfg(
-            name="pick_up",
-            control_part="left_arm",
-            hand_control_part="left_hand",
-            hand_open_qpos=left_open,
-            hand_close_qpos=left_close,
-            pick_object_part="top",
-            pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
-            lift_height=PICKUP_LIFT_HEIGHT,
-            sample_interval=PICKUP_SAMPLE_INTERVAL,
-            hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
-            approach_direction=torch.as_tensor(
-                [0.0, -math.sqrt(0.5), -math.sqrt(0.5)], dtype=torch.float32
-            ),
-            downstream_object_target_poses=(assemble_object_target_pose,),
+    pick_up_options = PickUpOptions(
+        pick_object_part="top",
+        pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
+        lift_height=PICKUP_LIFT_HEIGHT,
+        hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
+        approach_direction=torch.as_tensor(
+            [0.0, -math.sqrt(0.5), -math.sqrt(0.5)], dtype=torch.float32
         ),
+        downstream_object_target_poses=(assemble_object_target_pose,),
     )
     # Step 2 - the left arm places the can directly above the cube.
-    place_action = Place(
-        motion_generator=motion_gen,
-        cfg=PlaceCfg(
-            name="place",
-            control_part="left_arm",
-            hand_control_part="left_hand",
-            hand_open_qpos=left_open,
-            hand_close_qpos=left_close,
-            lift_height=PLACE_LIFT_HEIGHT,
-            sample_interval=PLACE_SAMPLE_INTERVAL,
-            hand_interp_steps=PLACE_HAND_INTERP_STEPS,
-        ),
+    place_options = PlaceOptions(
+        lift_height=PLACE_LIFT_HEIGHT,
+        hand_interp_steps=PLACE_HAND_INTERP_STEPS,
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(pick_up_action)
-    engine.register(place_action)
-
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "left_hand": ControlPartCommandProfile.joint_positions(
+                open=left_open,
+                grasp=left_close,
+            )
+        },
+    )
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to plan PickUp -> Place..."
     )
@@ -456,12 +316,30 @@ def run_assemble_demo(
         assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
     )
-    success, traj, _ = engine.run(
-        [
-            ("pick_up", GraspTarget(can_semantics)),
-            ("place", AssembleTarget(affordance=assemble_affordance)),
-        ]
+    binding = ActionBinding(
+        manipulators={"primary": "left_arm"},
+        end_effectors={"primary": "left_hand"},
     )
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(can_semantics),
+                binding,
+                MotionPolicy(sample_count=PICKUP_SAMPLE_INTERVAL),
+                skill_options=pick_up_options,
+            ),
+            ActionInvocation(
+                "place",
+                AssembleGoal(affordance=assemble_affordance),
+                binding,
+                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                skill_options=place_options,
+            ),
+        )
+    )
+    success = compiled.plan_success
+    traj = compiled.trajectory.positions
 
     if not success.all():
         logger.log_warning("Failed to plan the assemble demo trajectory.")
