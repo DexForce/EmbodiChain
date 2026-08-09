@@ -654,5 +654,5 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
-- `scripts/tutorials/atomic_action/tracking_error_recovery.py` — runnable runner
-  example with an injected tracking disturbance
+- `scripts/tutorials/atomic_action/moving_target_recovery.py` — runnable runner
+  example that visibly moves a late-bound target, replans, and picks up the cube

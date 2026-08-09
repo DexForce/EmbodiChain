@@ -99,7 +99,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``coordinated_pickment.py``
 * ``coordinated_placement.py``
 * ``hand_over.py``
-* ``tracking_error_recovery.py``
+* ``moving_target_recovery.py``
 
 The scripts are interactive by default. Add ``--auto_play`` to skip prompts;
 combine it with ``--headless --device cpu`` for a headless run that records
@@ -287,13 +287,17 @@ For an application that already owns its event loop, call the non-blocking
 with ``is_waiting`` set has not consumed a new observation or effect result; use
 its ``wait_duration`` to schedule the next call.
 
-The complete simulation example deliberately changes a measured joint position,
-observes ``tracking_error`` and ``replanned`` events, and finishes the regenerated
-trajectory:
+The complete simulation example starts with a visible cube directly in front of
+the robot, then slides it sideways while the robot is approaching. The session
+observes ``dynamic_goal_changed`` and ``replanned`` events, discards the stale
+path, and approaches the cube's new location. The same session then executes
+``PickUp``, closes the gripper, verifies the physical lift, and finishes while
+holding the cube. The original and regenerated goal axes remain visible for
+comparison:
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/tracking_error_recovery.py --headless
+   python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
 
 Recovery replans reuse one immutable invocation-revision snapshot. If an
 application intentionally changes the goal, options, policy, binding, or a
