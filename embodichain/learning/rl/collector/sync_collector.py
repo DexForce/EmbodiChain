@@ -121,11 +121,13 @@ class SyncCollector(BaseCollector):
         return dict_to_tensordict(obs, self.device)
 
     def _to_action_dict(self, action: torch.Tensor) -> TensorDict | torch.Tensor:
-        am = getattr(self.env, "action_manager", None)
-        if am is None:
-            return action
-        else:
-            return am.convert_policy_action_to_env_action(action)
+        """Return the policy action unchanged.
+
+        Action interpretation belongs to ``env.step`` so collectors do not need
+        to know whether an environment uses position, velocity, effort or mixed
+        control. The helper remains for compatibility with external subclasses.
+        """
+        return action
 
     def _write_step(
         self,

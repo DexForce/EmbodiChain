@@ -499,10 +499,37 @@ def train_from_config(
         )
 
     # Build Policy via registry
+    action_manager = env.get_wrapper_attr("action_manager")
+    managed_action_dim = (
+        action_manager.total_action_dim if action_manager is not None else 0
+    )
+    if managed_action_dim > 0:
+        manager_space = action_manager.single_action_space
+        has_normalized_bounds = bool(
+            np.allclose(manager_space.low, -1.0)
+            and np.allclose(manager_space.high, 1.0)
+        )
+        configured_squashing = policy_block.get("squash_actions")
+        if configured_squashing is None:
+            policy_block = {
+                **policy_block,
+                "squash_actions": has_normalized_bounds,
+            }
+            if not has_normalized_bounds:
+                logger.log_warning(
+                    "ActionManager policy bounds are not [-1, 1]; automatic tanh "
+                    "action squashing is disabled. Configure a policy distribution "
+                    "that matches the custom action_range."
+                )
+        elif bool(configured_squashing) and not has_normalized_bounds:
+            raise ValueError(
+                "policy.squash_actions=true requires ActionManager bounds [-1, 1]. "
+                "Use normalized action terms or a custom bounded distribution."
+            )
     policy_name = policy_block["name"]
     env_action_dim = (
-        env.get_wrapper_attr("action_manager").total_action_dim
-        if env.get_wrapper_attr("action_manager") is not None
+        managed_action_dim
+        if managed_action_dim > 0
         else len(env.get_wrapper_attr("active_joint_ids"))
     )
     action_dim = policy_block.get("action_dim", env_action_dim)

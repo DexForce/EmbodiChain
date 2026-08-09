@@ -481,12 +481,21 @@ class LeRobotRecorder(Functor):
             "names": joint_names,
         }
 
-        # Use full qpos dimension for action (includes gripper)
-        action_dim = state_dim
+        # Actions are policy-space values and may represent qpos, qvel, qf,
+        # end-effector poses, or mixed disjoint control terms.
+        action_space = getattr(self._env, "single_action_space", None)
+        action_dim = (
+            int(np.prod(action_space.shape)) if action_space is not None else state_dim
+        )
+        action_names = (
+            joint_names
+            if action_dim == len(joint_names)
+            else [f"action_{index}" for index in range(action_dim)]
+        )
         features[LeRobotKey.ACTION.value] = {
             "dtype": "float32",
             "shape": (action_dim,),
-            "names": joint_names,
+            "names": action_names,
         }
 
         # Setup sensor observation features based env.observation.sensor

@@ -17,10 +17,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock
+
 import pytest
 import torch
-
-from unittest.mock import MagicMock, Mock
 
 
 class MockRobot:
@@ -292,6 +293,23 @@ class TestActionSmoothnessPenalty:
         assert result.shape == (4,)
         # All have negative penalty from action difference
         assert torch.all(result < 0)
+
+    def test_uses_flat_raw_action_from_action_manager(self):
+        """Mixed physical commands are compared in their policy-space order."""
+        env = MockEnv(num_envs=4)
+        env.current_rollout_step = 1
+        env.rollout_buffer["action"][:4, 0, :] = torch.zeros(4, 6)
+        env.rollout_buffer["done"][:4, 0] = False
+        raw_action = torch.ones(4, 6)
+        env.action_manager = SimpleNamespace(raw_action=raw_action)
+        processed_action = {
+            "velocity": {"qvel": torch.zeros(4, 3)},
+            "effort": {"qf": torch.zeros(4, 3)},
+        }
+
+        result = action_smoothness_penalty(env, {}, processed_action, {})
+
+        torch.testing.assert_close(result, torch.full((4,), -(6.0**0.5)))
 
     def test_zero_when_expert_buffer_lacks_rl_keys(self):
         """Expert buffers without done/action keys yield zero penalty."""

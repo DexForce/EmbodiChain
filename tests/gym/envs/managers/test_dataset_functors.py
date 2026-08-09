@@ -96,6 +96,7 @@ class MockEnvForDataset:
         self.active_joint_ids = list(range(num_joints))
 
         self.robot = MockRobot(num_joints)
+        self.single_action_space = Mock(shape=(num_joints,))
 
         # Mock has_sensors
         self.has_sensors = has_sensors
@@ -247,6 +248,31 @@ class TestLeRobotRecorderFeatures:
         # Check shapes
         assert features[LeRobotKey.OBS_STATE.value]["shape"] == (6,)
         assert features[LeRobotKey.ACTION.value]["shape"] == (6,)
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_build_features_uses_policy_action_dimension(self, mock_lerobot_dataset):
+        """Recorded actions need not have the same dimension as robot qpos."""
+        env = MockEnvForDataset(num_joints=6)
+        env.single_action_space = Mock(shape=(8,))
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": "/tmp/test_dataset",
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+                "use_videos": False,
+            }
+        )
+
+        features = LeRobotRecorder(cfg, env)._build_features()
+
+        action_feature = features[LeRobotKey.ACTION.value]
+        assert action_feature["shape"] == (8,)
+        assert action_feature["names"] == [f"action_{index}" for index in range(8)]
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
