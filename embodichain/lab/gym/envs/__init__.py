@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from .base_env import *
+from .demo import *
 from .embodied_env import *
 from .wrapper import *
 

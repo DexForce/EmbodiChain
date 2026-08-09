@@ -26,6 +26,7 @@ so the simulator can keep stepping.
 
 from __future__ import annotations
 
+import copy
 import queue
 import threading
 from typing import TYPE_CHECKING, Dict, Optional, Union
@@ -33,7 +34,10 @@ from typing import TYPE_CHECKING, Dict, Optional, Union
 import torch
 
 from embodichain.utils import logger
+from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS
 from .datasets import LeRobotRecorder
+
+__all__ = ["AsyncLeRobotRecorder"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -67,8 +71,9 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
 
     1. Reads each env's rollout-buffer slice (``obs``/``actions``).
     2. **Clones** the slice to CPU (detached from the live buffer).
-    3. Pushes ``(env_id, obs_clone, action_clone)`` onto a queue.
-    4. Returns immediately - the sim is free to reset and keep stepping.
+    3. Clones frame annotations and episode/segment metadata with the payload.
+    4. Pushes the detached payload onto a queue.
+    5. Returns immediately - the sim is free to reset and keep stepping.
 
     A single daemon worker thread drains the queue and runs the standard
     :meth:`LeRobotRecorder._save_single_episode` on each cloned payload.
@@ -115,6 +120,13 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
         # only ever touched from one thread (it is not thread-safe) and keeps
         # episode ordering deterministic.
         self._save_queue: "queue.Queue[Optional[tuple]]" = queue.Queue()
+        self._background_error_lock = threading.Lock()
+        self._background_errors: list[tuple[int, str]] = []
+        self._async_finalize_lock = threading.Lock()
+        self._accepting_commits = True
+        self._async_finalized = False
+        self._async_finalize_result: Optional[str] = None
+        self._async_finalize_error: Optional[str] = None
         self._worker: threading.Thread = threading.Thread(
             target=self._worker_loop,
             name="AsyncLeRobotRecorder-worker",
@@ -133,14 +145,28 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
             if item is None:
                 # Sentinel: finalize() is draining. Exit the worker.
                 break
-            env_id, obs_clone, action_clone = item
+            env_id, obs_clone, action_clone, annotations, episode_metadata = item
             try:
-                self._save_single_episode(env_id, obs_clone, action_clone)
-            except Exception as e:  # noqa: BLE001 - worker must not die
-                logger.log_error(
-                    f"[AsyncLeRobotRecorder] Background worker failed on "
-                    f"env {env_id}: {e}"
+                saved = self._save_single_episode(
+                    env_id,
+                    obs_clone,
+                    action_clone,
+                    annotations=annotations,
+                    episode_metadata=episode_metadata,
                 )
+                if not saved:
+                    self._record_background_error(env_id, "episode save returned False")
+            except BaseException as error:  # noqa: BLE001 - worker must not die
+                self._record_background_error(env_id, str(error))
+                logger.log_warning(
+                    f"[AsyncLeRobotRecorder] Background worker failed on "
+                    f"env {env_id}: {error}"
+                )
+
+    def _record_background_error(self, env_id: int, message: str) -> None:
+        """Remember one failed committed episode for the final durability check."""
+        with self._background_error_lock:
+            self._background_errors.append((env_id, message))
 
     def __call__(
         self,
@@ -172,34 +198,106 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                 passed through by ``DatasetManager.apply``; honored in
                 :meth:`__init__`, ignored here.
         """
-        if env_ids is None:
-            env_ids = torch.arange(env.num_envs, device=env.device)
-        elif isinstance(env_ids, (list, range)):
-            env_ids = torch.tensor(list(env_ids), device=env.device)
+        # Serializing enqueue with finalize prevents an episode from being
+        # placed behind the worker's shutdown sentinel.
+        with self._async_finalize_lock:
+            if not self._accepting_commits:
+                raise RuntimeError("AsyncLeRobotRecorder is already finalized")
 
-        if len(env_ids) == 0:
-            return
+            if env_ids is None:
+                env_ids = torch.arange(env.num_envs, device=env.device)
+            elif isinstance(env_ids, (list, range)):
+                env_ids = torch.tensor(list(env_ids), device=env.device)
 
-        step = env.current_rollout_step
-        for env_id in env_ids.cpu().tolist():
-            obs_view = env.rollout_buffer["obs"][env_id, :step]
-            action_view = env.rollout_buffer["actions"][env_id, :step]
-            # Clone in the caller thread: the rollout buffer is cleared and
-            # reused by the next episode on reset, so the worker must not hold
-            # a view into it.
-            obs_clone = obs_view.clone().cpu()
-            action_clone = action_view.clone().cpu()
-            self._save_queue.put((env_id, obs_clone, action_clone))
+            if len(env_ids) == 0:
+                return
+
+            for env_id in env_ids.cpu().tolist():
+                step = self._episode_length(env_id)
+                # Initial reset may reach the recorder before the first
+                # transition.  Do not enqueue an empty payload and later
+                # report it as a failed committed episode.
+                if step <= 0:
+                    continue
+                obs_view = env.rollout_buffer["obs"][env_id, :step]
+                action_view = env.rollout_buffer["actions"][env_id, :step]
+                # Clone in the caller thread: the rollout buffer is cleared and
+                # reused by the next episode on reset, so the worker must not hold
+                # a view into it.
+                obs_clone = obs_view.clone().cpu()
+                action_clone = action_view.clone().cpu()
+                annotations = {
+                    key: env.rollout_buffer[key][env_id, :step].clone().cpu()
+                    for key in DEMO_ANNOTATION_KEYS
+                    if key in env.rollout_buffer.keys()
+                }
+                metadata_getter = getattr(env, "get_demo_episode_metadata", None)
+                episode_metadata = (
+                    copy.deepcopy(metadata_getter(env_id))
+                    if metadata_getter is not None
+                    else None
+                )
+                self._save_queue.put(
+                    (
+                        env_id,
+                        obs_clone,
+                        action_clone,
+                        annotations,
+                        episode_metadata,
+                    )
+                )
 
     def finalize(self) -> Optional[str]:
-        """Drain the background worker, then finalize the dataset.
+        """Drain committed writes, finalize storage, and surface all failures.
 
-        Signals the worker to stop after finishing all queued episodes, waits
-        for it to exit, and delegates to the parent to flush any remaining
-        buffer, stop the async image writer, and finalize dataset metadata.
+        The queue is a durability barrier for episodes explicitly committed by
+        ``reset(save_data=True)``. A live rollout that was never enqueued is not
+        saved during close.
+
+        Returns:
+            The finalized dataset path.
+
+        Raises:
+            RuntimeError: If any queued episode or dataset resource failed.
         """
-        # Signal the worker to exit once the queue is drained.
-        self._save_queue.put(None)
-        self._worker.join()
-        # Parent flushes leftover episodes, stops image writer, finalizes.
-        return super().finalize()
+        with self._async_finalize_lock:
+            if self._async_finalized:
+                if self._async_finalize_error is not None:
+                    raise RuntimeError(self._async_finalize_error)
+                return self._async_finalize_result
+
+            self._accepting_commits = False
+            # FIFO ordering guarantees every commit queued before this sentinel
+            # is processed before the worker exits.
+            self._save_queue.put(None)
+            self._worker.join()
+
+            parent_error: Optional[str] = None
+            try:
+                self._async_finalize_result = super().finalize()
+            except Exception as error:  # noqa: BLE001 - combine all failures
+                parent_error = str(error)
+
+            with self._background_error_lock:
+                background_errors = list(self._background_errors)
+
+            failures: list[str] = []
+            if background_errors:
+                episode_details = "; ".join(
+                    f"env {env_id}: {message}" for env_id, message in background_errors
+                )
+                failures.append(
+                    f"failed to persist {len(background_errors)} committed "
+                    f"episode(s): {episode_details}"
+                )
+            if parent_error is not None:
+                failures.append(f"storage finalization: {parent_error}")
+
+            self._async_finalized = True
+            if failures:
+                self._async_finalize_error = (
+                    "AsyncLeRobotRecorder finalization failed: " + "; ".join(failures)
+                )
+                raise RuntimeError(self._async_finalize_error)
+
+            return self._async_finalize_result

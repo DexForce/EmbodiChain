@@ -19,13 +19,16 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 import torch
 
+from embodichain.lab.gym.envs.demo import DemoEpisodeResult
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
 from embodichain.lab.scripts import run_env
 from embodichain.lab.scripts.run_env import (
     _create_parser,
     _run_replay_control_loop,
+    generate_function,
 )
 
 GYM_CONFIG_PATH = "task.yaml"
@@ -37,21 +40,43 @@ REPLAY_TARGET_STEP = 3
 VISER_POLL_INTERVAL = 0.05
 
 
-def test_generate_function_displays_episode_and_action_list_indices(
+class _LegacyProgressEnv:
+    num_envs = 1
+
+    @property
+    def unwrapped(self):
+        return self
+
+    def get_wrapper_attr(self, name: str):
+        if name == "create_demo_action_list":
+            return lambda **kwargs: [object()]
+        raise AttributeError(name)
+
+    def step(self, action):
+        return None, None, False, False, {"success": False}
+
+    def is_task_success(self) -> bool:
+        return True
+
+
+def test_legacy_action_list_displays_episode_and_segment_indices(
     monkeypatch,
 ) -> None:
-    """Progress output distinguishes episodes from their local action lists."""
-    env = MagicMock()
-    env.reset.return_value = (None, {})
-    env.get_wrapper_attr.return_value.return_value = [object()]
-    env.step.return_value = (None, None, None, None, None)
+    """Progress output distinguishes episodes from their local segments."""
+    env = _LegacyProgressEnv()
     progress = MagicMock(side_effect=lambda actions, **kwargs: actions)
     monkeypatch.setattr(run_env.tqdm, "tqdm", progress)
 
-    run_env.generate_function(env, num_traj=1, time_id=EPISODE_INDEX)
+    generated = run_env.generate_and_execute_action_list(
+        env,
+        ACTION_LIST_INDEX,
+        debug_mode=False,
+        episode_idx=EPISODE_INDEX,
+    )
 
+    assert generated
     assert progress.call_args.kwargs["desc"] == (
-        f"Executing episode #{EPISODE_INDEX}, action list #{ACTION_LIST_INDEX}"
+        f"Executing episode #{EPISODE_INDEX}, segment #{ACTION_LIST_INDEX}: legacy"
     )
 
 
@@ -96,6 +121,403 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
     )
 
     assert merged["visualization"]["sensor_image_fps"] == configured_fps
+
+
+def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -> None:
+    """Replay leaves the environment close to its CLI owner."""
+    env = MagicMock()
+    env.unwrapped = env
+    replay_env = MagicMock()
+    monkeypatch.setattr(
+        run_env,
+        "load_trajectory",
+        lambda path: {"meta": {"num_envs": 1, "num_steps": 1, "lengths": [1]}},
+    )
+    monkeypatch.setattr(run_env, "ReplayWrapper", lambda *args, **kwargs: replay_env)
+    monkeypatch.setattr(run_env, "replay_auto", lambda *args, **kwargs: None)
+
+    run_env.replay(env, "trajectory.pt")
+
+    replay_env.close.assert_not_called()
+    replay_env.env.sim.enable_physics.assert_called_once_with(True)
+    assert replay_env.env._replay_no_auto_reset is False
+
+
+def test_preview_quit_returns_without_zero_exit(monkeypatch) -> None:
+    """Preview quit lets CLI cleanup failures determine the process status."""
+    env = MagicMock()
+    env.reset.return_value = (None, {})
+    monkeypatch.setattr("builtins.input", lambda: "q")
+
+    run_env.preview(env)
+
+    env.reset.assert_called_once_with()
+
+
+class _ResetTrackingEnv:
+    def __init__(
+        self,
+        *,
+        num_envs: int = 1,
+        save_failed_episodes: bool = False,
+    ) -> None:
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        self.dataset_manager = SimpleNamespace(
+            save_failed_episodes=save_failed_episodes
+        )
+        self.reset_options = []
+
+    def reset(self, options=None):
+        self.reset_options.append(options)
+        return None, {}
+
+
+class _LifecycleTrackingEnv(_ResetTrackingEnv):
+    def __init__(self) -> None:
+        super().__init__()
+        self.events = []
+
+    def reset(self, options=None):
+        self.events.append(("reset", options))
+        return super().reset(options=options)
+
+    def close(self, *, exit_process=None) -> None:
+        self.events.append(("close", exit_process))
+
+
+def _episode_result(
+    *,
+    success: bool,
+    reason: str,
+    length: int = 2,
+    num_envs: int = 1,
+) -> DemoEpisodeResult:
+    return DemoEpisodeResult(
+        episode_index=0,
+        length=length,
+        completed=success,
+        success=(success,) * num_envs,
+        terminated=(False,) * num_envs,
+        truncated=(False,) * num_envs,
+        terminal_reason=reason,
+        lengths=(length,) * num_envs,
+    )
+
+
+def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None:
+    """Failed attempts are discarded and only the complete episode is saved."""
+    env = _ResetTrackingEnv()
+    results = iter(
+        [
+            _episode_result(success=False, reason="empty_plan"),
+            _episode_result(success=True, reason="success"),
+        ]
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: next(results),
+    )
+
+    generated = generate_function(
+        env,
+        time_id=3,
+        max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [{"save_data": False}, None]
+
+
+def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -> None:
+    """A recorded task failure is a persisted result when explicitly enabled."""
+    env = _ResetTrackingEnv(save_failed_episodes=True)
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: _episode_result(
+            success=False,
+            reason="task_incomplete",
+        ),
+    )
+
+    generated = generate_function(
+        env,
+        time_id=3,
+        max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [None]
+
+
+def test_generate_function_retries_empty_failure_even_when_saving_failures(
+    monkeypatch,
+) -> None:
+    """An empty plan cannot count as a saved failed episode."""
+    env = _ResetTrackingEnv(save_failed_episodes=True)
+    results = iter(
+        [
+            _episode_result(success=False, reason="empty_plan", length=0),
+            _episode_result(success=True, reason="success"),
+        ]
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: next(results),
+    )
+
+    generated = generate_function(
+        env,
+        max_attempts=2,
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options == [{"save_data": False}, None]
+
+
+def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> None:
+    """The final partial batch commits selected rows and discards its remainder."""
+    num_envs = 3
+    env = _ResetTrackingEnv(num_envs=num_envs)
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: _episode_result(
+            success=True,
+            reason="success",
+            num_envs=num_envs,
+        ),
+    )
+
+    generated = generate_function(
+        env,
+        save_env_ids=(0, 1),
+        reset_before=False,
+    )
+
+    assert generated
+    assert env.reset_options[0]["reset_ids"].tolist() == [0, 1]
+    assert "save_data" not in env.reset_options[0]
+    assert env.reset_options[1]["reset_ids"].tolist() == [2]
+    assert env.reset_options[1]["save_data"] is False
+
+
+def test_main_counts_max_episodes_as_persisted_env_rows(monkeypatch) -> None:
+    """Vector collection persists exactly max_episodes, including a partial batch."""
+    env = _ResetTrackingEnv(num_envs=3)
+    args = SimpleNamespace(
+        replay=False,
+        preview=False,
+        save_path="",
+        save_video=False,
+        debug_mode=False,
+        regenerate=False,
+        record_trajectory=False,
+    )
+    calls: list[tuple[int, tuple[int, ...]]] = []
+
+    def record_batch(*args, **kwargs) -> bool:
+        calls.append((kwargs["time_id"], tuple(kwargs["save_env_ids"])))
+        return True
+
+    monkeypatch.setattr(run_env, "generate_function", record_batch)
+
+    run_env.main(
+        args,
+        env,
+        {"max_episodes": 5, "demo_max_attempts": 2},
+    )
+
+    assert calls == [(0, (0, 1, 2)), (3, (0, 1))]
+    assert sum(len(env_ids) for _, env_ids in calls) == 5
+
+
+def test_generate_function_rejects_runner_owned_segment_count() -> None:
+    """The task, not run-env, defines how many segments an episode contains."""
+    with pytest.raises(ValueError, match="create_demo_segments"):
+        generate_function(_ResetTrackingEnv(), num_traj=2)
+
+
+def test_generate_function_discards_partial_episode_on_exception(monkeypatch) -> None:
+    """Planner or step exceptions cannot be committed later by finalize()."""
+    env = _ResetTrackingEnv()
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("planner failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="planner failed"):
+        generate_function(env, reset_before=False)
+
+    assert env.reset_options == [{"save_data": False}]
+
+
+@pytest.mark.parametrize(
+    "exit_type",
+    [KeyboardInterrupt, SystemExit, GeneratorExit],
+    ids=["keyboard-interrupt", "system-exit", "generator-exit"],
+)
+def test_generate_function_discards_partial_episode_on_early_exit(
+    monkeypatch, exit_type
+) -> None:
+    """Non-Exception exits abort the pending episode before propagating."""
+    env = _ResetTrackingEnv()
+
+    def exit_during_episode(*args, **kwargs):
+        raise exit_type()
+
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        exit_during_episode,
+    )
+
+    with pytest.raises(exit_type):
+        generate_function(env, reset_before=False)
+
+    assert env.reset_options == [{"save_data": False}]
+
+
+def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
+    """CLI owns finalization and closes only after discarding pending data."""
+    env = _LifecycleTrackingEnv()
+    args = SimpleNamespace(
+        replay=False,
+        replay_mode="kinematic",
+        preview=False,
+        save_path="",
+        save_video=False,
+        debug_mode=False,
+        regenerate=False,
+        record_trajectory=False,
+    )
+    parser = MagicMock()
+    parser.parse_args.return_value = args
+    gym_config = {
+        "id": GYM_ID,
+        "max_episodes": 1,
+        "demo_max_attempts": 1,
+    }
+
+    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(
+        run_env,
+        "build_env_cfg_from_args",
+        lambda parsed_args: (object(), gym_config, {}),
+    )
+    monkeypatch.setattr(run_env.gymnasium, "make", lambda **kwargs: env)
+    monkeypatch.setattr(run_env, "generate_function", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
+        lambda: None,
+    )
+
+    run_env.cli([])
+
+    abort_event = ("reset", {"save_data": False})
+    assert env.events == [abort_event, abort_event, ("close", None)]
+
+
+def test_close_durability_failure_is_not_swallowed() -> None:
+    """A failed recorder barrier makes the runner fail after aborting pending data."""
+    env = _LifecycleTrackingEnv()
+
+    def fail_close(*, exit_process=None) -> None:
+        env.events.append(("close", exit_process))
+        raise OSError("dataset flush failed")
+
+    env.close = fail_close
+
+    with pytest.raises(OSError, match="dataset flush failed"):
+        run_env._abort_and_close_env(env)
+
+    assert env.events == [
+        ("reset", {"save_data": False}),
+        ("close", None),
+    ]
+
+
+def test_cli_preserves_main_error_and_disables_fast_exit(monkeypatch) -> None:
+    """Failure cleanup returns normally so the original CLI error reaches the shell."""
+    env = _LifecycleTrackingEnv()
+    args = SimpleNamespace(
+        replay=False,
+        replay_mode="kinematic",
+        preview=False,
+        save_path="",
+        save_video=False,
+        debug_mode=False,
+        regenerate=False,
+        record_trajectory=False,
+    )
+    parser = MagicMock()
+    parser.parse_args.return_value = args
+    gym_config = {"id": GYM_ID}
+
+    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(
+        run_env,
+        "build_env_cfg_from_args",
+        lambda parsed_args: (object(), gym_config, {}),
+    )
+    monkeypatch.setattr(run_env.gymnasium, "make", lambda **kwargs: env)
+    monkeypatch.setattr(
+        run_env,
+        "main",
+        MagicMock(side_effect=RuntimeError("generation failed")),
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
+        lambda: None,
+    )
+
+    with pytest.raises(RuntimeError, match="generation failed"):
+        run_env.cli([])
+
+    assert env.events == [
+        ("reset", {"save_data": False}),
+        ("close", False),
+    ]
+
+
+def test_zero_system_exit_cannot_hide_cleanup_failure(monkeypatch) -> None:
+    """A nominal exit code is replaced by a failed durability barrier."""
+    env = _LifecycleTrackingEnv()
+    args = SimpleNamespace(
+        replay=False,
+        replay_mode="kinematic",
+        preview=False,
+        replay_trajectory=None,
+    )
+    parser = MagicMock()
+    parser.parse_args.return_value = args
+    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(
+        run_env,
+        "build_env_cfg_from_args",
+        lambda parsed_args: (object(), {"id": GYM_ID}, {}),
+    )
+    monkeypatch.setattr(run_env.gymnasium, "make", lambda **kwargs: env)
+    monkeypatch.setattr(run_env, "main", MagicMock(side_effect=SystemExit(0)))
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
+        lambda: None,
+    )
+
+    def fail_close(*, exit_process=None) -> None:
+        raise OSError("dataset flush failed")
+
+    env.close = fail_close
+
+    with pytest.raises(OSError, match="dataset flush failed"):
+        run_env.cli([])
 
 
 def test_control_loop_consumes_viser_seek_while_paused() -> None:

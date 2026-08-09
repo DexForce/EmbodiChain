@@ -1,6 +1,7 @@
 {   
     "id": "BlocksRankingRGB-v1",
     "max_episodes": 5,
+    "max_episode_steps": 600,
     "env": {
         "events": {
             "random_light": {
@@ -42,20 +43,6 @@
                     "position_range": [[0.70, 0.12, 0.9], [0.75, 0.18, 0.9]],
                     "rotation_range": [[0, 0, 0], [0, 0, 0]],
                     "relative_position": false
-                }
-            },
-            "init_block_sizes": {
-                "func": "randomize_rigid_objects_scale",
-                "mode": "reset",
-                "params": {
-                    "entity_cfgs": [
-                        {"uid": "block_1"},
-                        {"uid": "block_2"},
-                        {"uid": "block_3"}
-                    ],
-                    "scale_factor_range": [[0.75], [1.25]],
-                    "same_scale_all_axes": true,
-                    "shared_sample": true
                 }
             },
             "set_block_1_color": {
@@ -219,7 +206,7 @@
             "uid":"block_1",
             "shape": {
                 "shape_type": "Cube",
-                "size": [0.04, 0.04, 0.04]
+                "size": [0.05, 0.05, 0.05]
             },
             "attrs" : {
                 "mass": 0.05,
@@ -240,7 +227,7 @@
             "uid":"block_2",
             "shape": {
                 "shape_type": "Cube",
-                "size": [0.04, 0.04, 0.04]
+                "size": [0.05, 0.05, 0.05]
             },
             "attrs" : {
                 "mass": 0.05,
@@ -261,7 +248,7 @@
             "uid":"block_3",
             "shape": {
                 "shape_type": "Cube",
-                "size": [0.04, 0.04, 0.04]
+                "size": [0.05, 0.05, 0.05]
             },
             "attrs" : {
                 "mass": 0.05,
@@ -280,4 +267,3 @@
         }
     ]
 }
-

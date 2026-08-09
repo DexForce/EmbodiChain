@@ -335,23 +335,28 @@ class DepthSidecarManager:
     def end_episode(self, episode_index: int) -> None:
         """Close all writers for the current episode and update metadata.
 
-        On failure of any writer the partial files are discarded and that
-        sensor/episode is skipped (with a warning) rather than aborting the
-        whole recording.
+        Every writer is attempted. Partial files from failed writers are
+        discarded, metadata for successful writers is flushed, and any error
+        is then raised so a committed LeRobot episode cannot silently lose its
+        depth sidecar.
 
         Args:
             episode_index: Global episode index.
+
+        Raises:
+            RuntimeError: If a depth video or its metadata cannot be finalized.
         """
+        errors: list[str] = []
         for key, writer in self._writers.items():
             try:
                 writer.close()
                 frame_count = writer.frame_count
-            except Exception as e:
-                logger.log_warning(
-                    f"Failed to finalize depth video for sensor '{key}' "
-                    f"episode {episode_index}: {e}"
-                )
-                writer.abort()
+            except Exception as error:
+                errors.append(f"sensor {key!r}: {error}")
+                try:
+                    writer.abort()
+                except Exception as abort_error:  # noqa: BLE001 - aggregate cleanup
+                    errors.append(f"sensor {key!r} abort: {abort_error}")
                 continue
             rel_file = writer.final_path.relative_to(self._root).as_posix()
             self._meta["sensors"][key]["episodes"][str(episode_index)] = {
@@ -361,7 +366,15 @@ class DepthSidecarManager:
             }
         self._writers = {}
         self._episode_sensors = []
-        self._write_meta()
+        try:
+            self._write_meta()
+        except Exception as error:
+            errors.append(f"metadata: {error}")
+        if errors:
+            raise RuntimeError(
+                f"Failed to finalize depth episode {episode_index}: "
+                + "; ".join(errors)
+            )
 
     def abort_episode(self) -> None:
         """Abort the current episode: discard all partial depth videos.

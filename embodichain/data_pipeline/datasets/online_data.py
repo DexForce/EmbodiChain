@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Iterator, List, Optional
+from typing import Callable, Iterator, List, Literal, Optional
 
 from tensordict import TensorDict
 from torch.utils.data import IterableDataset
@@ -77,6 +77,9 @@ class OnlineDataset(IterableDataset):
             ``[batch_size, chunk_size]`` (batch mode).
         transform: Optional ``(TensorDict) -> TensorDict`` applied to each
             yielded item/batch before returning.
+        sampling_mode: ``"episode"`` allows chunks to cross segment boundaries,
+            ``"segment"`` keeps chunks within one segment, and ``"boundary"``
+            samples chunks that cross a boundary.
 
     Example — fixed chunk size, item mode::
 
@@ -123,6 +126,7 @@ class OnlineDataset(IterableDataset):
         chunk_size: int | ChunkSizeSampler,
         batch_size: Optional[int] = None,
         transform: Optional[Callable[[TensorDict], TensorDict]] = None,
+        sampling_mode: Literal["episode", "segment", "boundary"] = "episode",
     ) -> None:
         if isinstance(chunk_size, int):
             if chunk_size < 1:
@@ -131,10 +135,16 @@ class OnlineDataset(IterableDataset):
             raise TypeError(
                 f"chunk_size must be an int or a ChunkSizeSampler, got {type(chunk_size).__name__}."
             )
+        if sampling_mode not in {"episode", "segment", "boundary"}:
+            raise ValueError(
+                "sampling_mode must be 'episode', 'segment', or 'boundary', "
+                f"got {sampling_mode!r}."
+            )
         self._engine = engine
         self._chunk_size = chunk_size
         self._batch_size = batch_size
         self._transform = transform
+        self._sampling_mode = sampling_mode
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -177,7 +187,11 @@ class OnlineDataset(IterableDataset):
 
             while True:
                 # Item mode: draw one trajectory and remove the outer batch dim.
-                raw = self._engine.sample_batch(batch_size=1, chunk_size=chunk_size)
+                raw = self._engine.sample_batch(
+                    batch_size=1,
+                    chunk_size=chunk_size,
+                    sampling_mode=self._sampling_mode,
+                )
                 sample: TensorDict = raw[0]
 
                 if self._transform is not None:
@@ -190,7 +204,9 @@ class OnlineDataset(IterableDataset):
 
             # Batch mode: draw a full pre-batched TensorDict.
             sample = self._engine.sample_batch(
-                batch_size=self._batch_size, chunk_size=chunk_size
+                batch_size=self._batch_size,
+                chunk_size=chunk_size,
+                sampling_mode=self._sampling_mode,
             )
 
             if self._transform is not None:

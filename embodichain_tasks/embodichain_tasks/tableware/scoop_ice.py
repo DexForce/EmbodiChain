@@ -14,36 +14,44 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import os
-import torch
-import numpy as np
+from __future__ import annotations
+
 import pickle
 
 from copy import deepcopy
-from typing import Sequence
+from typing import Any, Sequence
+
+import numpy as np
+import torch
 from scipy.spatial.transform import Rotation as R
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from tqdm import tqdm
+
+__all__ = ["ScoopIce"]
 
 
 @register_env("ScoopIce-v1", max_episode_steps=600)
 class ScoopIce(EmbodiedEnv):
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+    """Scoop-ice expert task restricted to one simulation environment."""
+
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
+        if cfg is not None and int(cfg.num_envs) != 1:
+            raise ValueError(
+                "ScoopIce-v1 supports exactly one environment; "
+                f"received num_envs={cfg.num_envs}."
+            )
         super().__init__(cfg, **kwargs)
 
         self.affordance_datas = {}
 
         # TODO: hardcode code, should be implemented as functor way.
-        self.trajectory = pickle.load(
-            open(
-                get_data_path("ScoopIceNewEnv/pose_record_20250919_184544.pkl"),
-                "rb",
-            )
-        )
+        with open(
+            get_data_path("ScoopIceNewEnv/pose_record_20250919_184544.pkl"), "rb"
+        ) as trajectory_file:
+            self.trajectory = pickle.load(trajectory_file)
         self.trajectory_sample_rate = 2
 
     def set_scoop_pose(self, xyzrxryrz):
@@ -208,6 +216,7 @@ class ScoopIce(EmbodiedEnv):
             f"The original demo action list length: {len(self.demo_action_list)}"
         )
         logger.log_info(
-            f"Downsample the demo action list by self.trajectory_sample_rate5 times."
+            "Downsample the demo action list by "
+            f"self.trajectory_sample_rate={self.trajectory_sample_rate}."
         )
         return self.demo_action_list[:: self.trajectory_sample_rate]

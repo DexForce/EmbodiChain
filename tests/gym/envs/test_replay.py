@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import gc
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -90,6 +90,7 @@ def test_record_trajectory_populates_states():
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     try:
         env.reset()
+        initial_qpos = env.robot.get_qpos().clone()
         _drive(env, num_steps=5)
         assert env._traj_buffer is not None
         assert "states" in env._traj_buffer.keys()
@@ -97,10 +98,39 @@ def test_record_trajectory_populates_states():
         states = env._traj_buffer["states"]
         assert tuple(states["robot"]["qpos"].shape) == (2, 100, 6)
         assert tuple(states["rigid_objects"]["cube"]["pose"].shape) == (2, 100, 7)
-        # The last recorded step must reflect the actual robot qpos after driving.
-        recorded = states["robot"]["qpos"][:, env._traj_steps[0].item() - 1]
-        actual = env.robot.get_qpos()
-        assert torch.allclose(recorded, actual, atol=1e-5)
+        # Saved rows are pre-action states. The post-final state is only the
+        # pending seed for a possible next action and is excluded on save.
+        assert torch.allclose(states["robot"]["qpos"][:, 0], initial_qpos)
+        pending = states["robot"]["qpos"][:, env._traj_steps[0].item()]
+        assert torch.allclose(pending, env.robot.get_qpos(), atol=1e-5)
+    finally:
+        env.close()
+        SimulationManager.flush_cleanup_queue()
+        gc.collect()
+
+
+def test_expert_rollout_pairs_action_with_pre_action_observation():
+    """Expert frame t keeps s_t while the returned s_(t+1) seeds frame t+1."""
+    env = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
+    try:
+        initial_obs, _ = env.reset()
+        initial_qpos = initial_obs["robot"]["qpos"].clone()
+        action = initial_qpos.clone()
+        action[:, 0] += 0.2
+
+        next_obs, _, _, _, _ = env.step(action)
+
+        assert env.rollout_steps.tolist() == [1]
+        assert torch.allclose(
+            env.rollout_buffer["obs"]["robot"]["qpos"][0, 0],
+            initial_qpos[0],
+        )
+        assert torch.allclose(
+            env.rollout_buffer["obs"]["robot"]["qpos"][0, 1],
+            next_obs["robot"]["qpos"][0],
+        )
+        assert env.rollout_buffer["valid"][0, 0]
+        assert not env.rollout_buffer["valid"][0, 1]
     finally:
         env.close()
         SimulationManager.flush_cleanup_queue()
@@ -111,6 +141,7 @@ def test_save_trajectory_round_trip(tmp_path):
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     try:
         env.reset()
+        initial_qpos = env.robot.get_qpos().clone()
         n = 4
         _drive(env, num_steps=n)
         path = tmp_path / "traj.pt"
@@ -129,7 +160,9 @@ def test_save_trajectory_round_trip(tmp_path):
         assert data["meta"]["step_dt"] == pytest.approx(env.step_dt)
         assert data["meta"]["control_frequency"] == pytest.approx(env.control_frequency)
         assert tuple(data["states"]["robot"]["qpos"].shape) == (2, n, 6)
+        assert torch.allclose(data["states"]["robot"]["qpos"][:, 0], initial_qpos)
         assert data["actions"].shape == (2, n, 6)
+        assert "initial_states" not in data
         assert "cube" in data["states"]["rigid_objects"].keys()
     finally:
         env.close()
@@ -195,6 +228,11 @@ def test_kinematic_replay_reproduces_recorded_states(tmp_path):
     env2 = ReplayWrapper(env2, str(path), mode="kinematic")
     try:
         env2.reset()
+        assert torch.allclose(
+            env2.env.robot.get_qpos(),
+            rec_states["robot"]["qpos"][:, 0],
+            atol=1e-4,
+        )
         for i in range(n):
             obs, reward, term, trunc, info = env2.step(None)
             inner = env2.env  # the wrapped ReplayTestEnv
@@ -219,36 +257,13 @@ def test_kinematic_replay_reproduces_recorded_states(tmp_path):
         gc.collect()
 
 
-def test_kinematic_state_restore_writes_mimic_joint_qpos():
-    """The state restore shared by kinematic/control replay writes every joint."""
-    recorded_qpos = torch.tensor([[0.1, 0.02, 0.02]])
-    robot = SimpleNamespace(
-        set_local_pose=MagicMock(),
-        set_qpos=MagicMock(),
-        get_joint_ids=MagicMock(return_value=[0, 1]),
-    )
-    env = SimpleNamespace(
-        robot=robot,
-        sim=SimpleNamespace(_articulations={}, _rigid_objects={}),
-    )
-    states = {
-        "robot": {
-            "root_pose": torch.zeros((1, 7)),
-            "qpos": recorded_qpos,
-        }
-    }
-
-    ReplayWrapper._set_all_states(SimpleNamespace(env=env), states)
-
-    robot.set_qpos.assert_called_once_with(recorded_qpos, target=False)
-
-
 def test_dynamic_replay_tracks_recorded_states(tmp_path):
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     try:
         env.reset()
         n = 5
         _drive(env, num_steps=n)
+        recorded_final_qpos = env.robot.get_qpos().clone()
         path = tmp_path / "traj.pt"
         env.save_trajectory(str(path))
     finally:
@@ -267,9 +282,12 @@ def test_dynamic_replay_tracks_recorded_states(tmp_path):
             obs, reward, term, trunc, info = env2.step(None)
             inner = env2.env
             # Robot qpos is driven by the recorded action target -> tracks closely.
-            assert torch.allclose(
-                inner.robot.get_qpos(), rec_states["robot"]["qpos"][:, i], atol=0.05
+            expected = (
+                rec_states["robot"]["qpos"][:, i + 1]
+                if i + 1 < n
+                else recorded_final_qpos
             )
+            assert torch.allclose(inner.robot.get_qpos(), expected, atol=0.05)
         # Dynamic replay keeps the auto-reset guard engaged.
         assert inner._replay_no_auto_reset is True
     finally:
@@ -334,39 +352,6 @@ def test_close_restores_physics(tmp_path):
         gc.collect()
 
 
-def test_replay_reads_legacy_file_without_lengths(tmp_path):
-    """PR #425 files (no meta["lengths"]) replay as uniform-length (backward compat)."""
-    env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
-    try:
-        env.reset()
-        _drive(env, num_steps=4)
-        path = tmp_path / "legacy.pt"
-        env.save_trajectory(str(path))
-    finally:
-        env.close()
-        SimulationManager.flush_cleanup_queue()
-        gc.collect()
-
-    # Strip "lengths" to simulate a PR #425 file.
-    data = torch.load(path, weights_only=False)
-    data["meta"].pop("lengths", None)
-    torch.save(data, path)
-
-    env2 = ReplayTestEnv(record_trajectory=False, num_envs=2, device="cpu")
-    env2 = ReplayWrapper(env2, str(path), mode="kinematic")
-    try:
-        env2.reset()
-        trunc_all = torch.zeros(2, dtype=torch.bool)
-        for _ in range(4):
-            _, _, _, trunc, _ = env2.step(None)
-            trunc_all = trunc_all | trunc
-        assert bool(trunc_all.all())  # all envs done after num_steps
-    finally:
-        env2.close()
-        SimulationManager.flush_cleanup_queue()
-        gc.collect()
-
-
 def test_replay_respects_per_env_lengths(tmp_path):
     """Replay truncates each env at its own recorded length."""
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
@@ -413,7 +398,7 @@ def test_auto_save_at_episode_end(tmp_path):
         env.reset()
         _drive(env, num_steps=4)
         # Trigger an episode-end reset for env 0 only.
-        env._initialize_episode(torch.tensor([0]))
+        env.reset(options={"reset_ids": torch.tensor([0])})
     finally:
         env.close()
         SimulationManager.flush_cleanup_queue()
@@ -427,7 +412,7 @@ def test_auto_save_at_episode_end(tmp_path):
     assert data["meta"]["lengths"] == [4]
 
 
-def test_auto_save_on_close(tmp_path):
+def test_close_discards_uncommitted_trajectory(tmp_path):
     save_dir = tmp_path / "trajs"
     env = ReplayTestEnv(record_trajectory=True, num_envs=2, device="cpu")
     env.cfg.trajectory_save_dir = str(save_dir)
@@ -441,7 +426,7 @@ def test_auto_save_on_close(tmp_path):
         gc.collect()
 
     files = list(save_dir.glob("*.pt"))
-    assert len(files) == 2  # one per in-flight env
+    assert files == []
 
 
 def test_async_envs_do_not_corrupt_recording():
@@ -451,7 +436,7 @@ def test_async_envs_do_not_corrupt_recording():
         env.reset()
         _drive(env, num_steps=3)
         # env0 "finishes" its episode at step 3 -> its counter resets to 0.
-        env._initialize_episode(torch.tensor([0]))
+        env.reset(options={"reset_ids": torch.tensor([0])})
         # env1 continues for 2 more steps; env0 records a new episode from 0.
         _drive(env, num_steps=2)
         # env1 should have 5 recorded steps; env0 should have 2 (not overwrite env1).
@@ -507,36 +492,46 @@ def test_dynamic_replay_with_action_manager(tmp_path):
     env = ReplayDeltaEnv(record_trajectory=True, num_envs=1, device="cpu")
     try:
         env.reset()
-        init_qpos = env.robot.get_qpos()
+        init_qpos = env.robot.get_qpos().clone()
         deltas = []
+        recorded_post_qpos = []
         for i in range(4):
             d = torch.zeros_like(init_qpos)
             d[:, 0] = 0.05 * (i + 1)
             deltas.append(d)
             env.step(d)
+            recorded_post_qpos.append(env.robot.get_qpos().clone())
         path = tmp_path / "delta.pt"
         env.save_trajectory(str(path))
         # Recorded action must be the raw delta (pre-process), not the resolved qpos.
         rec = torch.load(path, weights_only=False)
         assert torch.allclose(rec["actions"][0, 0], deltas[0][0], atol=1e-6)
+        assert torch.allclose(rec["states"]["robot"]["qpos"][:, 0], init_qpos)
+        for step in range(1, len(deltas)):
+            assert torch.allclose(
+                rec["states"]["robot"]["qpos"][:, step],
+                recorded_post_qpos[step - 1],
+                atol=1e-5,
+            )
     finally:
         env.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
 
-    rec_states = rec["states"]
-
     env2 = ReplayDeltaEnv(record_trajectory=False, num_envs=1, device="cpu")
     env2 = ReplayWrapper(env2, str(path), mode="dynamic")
     try:
         env2.reset()
-        for _ in range(4):
-            obs, reward, term, trunc, info = env2.step(None)
-        # Dynamic replay re-applies the recorded raw deltas through the same
-        # ActionManager, so the final state should closely track the recording.
         assert torch.allclose(
-            env2.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, -1], atol=0.05
+            env2.env.robot.get_qpos(),
+            rec["states"]["robot"]["qpos"][:, 0],
+            atol=1e-5,
         )
+        for step in range(len(deltas)):
+            obs, reward, term, trunc, info = env2.step(None)
+            assert torch.allclose(
+                env2.env.robot.get_qpos(), recorded_post_qpos[step], atol=1e-3
+            )
         # Auto-reset guard stays engaged during dynamic replay.
         assert env2.env._replay_no_auto_reset is True
     finally:
@@ -565,7 +560,7 @@ def test_control_mode_scrubs_to_recorded_state(tmp_path):
     rw = ReplayWrapper(env2.unwrapped, str(path), mode="control")
     try:
         rw.reset()
-        # jump to step 3
+        # State index t is the state immediately before action t.
         rw.go_to_step(3)
         assert torch.allclose(
             rw.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, 3], atol=1e-4
@@ -576,10 +571,12 @@ def test_control_mode_scrubs_to_recorded_state(tmp_path):
         assert torch.allclose(
             rw.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, max_step], atol=1e-4
         )
-        # jump back to step 0
+        # jump back to the first pre-action state
         rw.go_to_step(0)
         assert torch.allclose(
-            rw.env.robot.get_qpos(), rec_states["robot"]["qpos"][:, 0], atol=1e-4
+            rw.env.robot.get_qpos(),
+            rec_states["robot"]["qpos"][:, 0],
+            atol=1e-4,
         )
     finally:
         rw.close()
@@ -641,11 +638,12 @@ def test_run_env_replay_function(tmp_path):
         SimulationManager.flush_cleanup_queue()
         gc.collect()
 
-    # kinematic replay (replay() closes the env)
+    # replay() borrows the environment; the caller remains responsible for close().
     env_k = ReplayTestEnv(record_trajectory=False, num_envs=1, device="cpu")
     try:
         replay(env_k, str(path), mode="kinematic")
     finally:
+        env_k.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()
 
@@ -654,5 +652,6 @@ def test_run_env_replay_function(tmp_path):
     try:
         replay(env_d, str(path), mode="dynamic")
     finally:
+        env_d.close()
         SimulationManager.flush_cleanup_queue()
         gc.collect()

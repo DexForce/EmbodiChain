@@ -129,6 +129,12 @@ For RL training and data generation, EmbodiChain uses file-based configs (`.json
 
 Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
 
+For offline expert generation, `max_episodes` counts persisted
+per-environment episodes rather than vector batches. Thus `num_envs: 4` and
+`max_episodes: 10` produce two full four-row commits plus a final two-row
+commit. Failed rows count only when the relevant `DatasetFunctorCfg` sets
+`save_failed_episodes: true`.
+
 Example paths in the repository:
 
 | Use case | JSON example | YAML example |
@@ -256,6 +262,27 @@ Keep `viser_server.host` on loopback for remote workers and use SSH port
 forwarding unless the service is behind an authenticated gateway. See
 [Browser visualization with Viser](../overview/sim/viser_visualization.md) for
 the full schema, supported scene content, and deformable-object behavior.
+
+### Robot Preset Configs
+
+Use `class_type` to select a `RobotCfg` subclass from
+`embodichain.lab.sim.robots`. Subclass-specific fields remain in the robot
+configuration and are passed to its `from_dict()` method. For example, this
+selects the canonical UR preset and then specifies the UR5 variant:
+
+```json
+{
+    "robot": {
+        "class_type": "URRobot",
+        "robot_type": "ur5",
+        "uid": "Manipulator"
+    }
+}
+```
+
+For backward compatibility, existing configs may continue to use
+`"robot_type": "CobotMagic"` as the preset-class selector when the selected
+class has no separate variant field.
 
 ### RL Training Config (`train_config.json` / `train_config.yaml`)
 

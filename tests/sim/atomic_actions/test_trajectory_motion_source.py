@@ -161,6 +161,30 @@ class TestPlanArmTrajMotionGen:
         assert traj.shape[0] == 2
         interpolate.assert_called_once()
 
+    def test_ik_interp_normalizes_integer_success_mask(self):
+        mg = _mock_mg(num_envs=2, arm_dof=6)
+        mg.robot.compute_ik = Mock(
+            return_value=(
+                torch.tensor([1, 0], dtype=torch.int64),
+                torch.ones(2, 6),
+            )
+        )
+        builder = TrajectoryBuilder(mg)
+        start_qpos = torch.zeros(2, 6)
+
+        success, trajectory = builder.plan_arm_traj(
+            _pose_targets_for_two_envs(),
+            start_qpos,
+            10,
+            control_part="arm",
+            arm_dof=6,
+            cfg=MotionPolicy(motion_source="ik_interp"),
+        )
+
+        assert success.dtype == torch.bool
+        assert success.tolist() == [True, False]
+        assert torch.allclose(trajectory[1], torch.zeros_like(trajectory[1]))
+
 
 class TestCuroboBuilderDispatch:
     def test_curobo_builder_preserves_cartesian_targets_and_samples(self):

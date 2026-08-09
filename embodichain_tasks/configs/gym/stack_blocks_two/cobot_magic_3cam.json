@@ -1,6 +1,7 @@
 {   
     "id": "StackBlocksTwo-v1",
     "max_episodes": 5,
+    "max_episode_steps": 600,
     "env": {
         "events": {
             "random_light": {
@@ -188,4 +189,3 @@
         }
     ]
 }
-

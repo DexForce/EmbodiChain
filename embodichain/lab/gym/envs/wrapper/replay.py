@@ -22,6 +22,7 @@ import gymnasium as gym
 import torch
 
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
+from embodichain.lab.gym.utils.trajectory_state import restore_trajectory_state
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
@@ -81,9 +82,8 @@ class ReplayWrapper(gym.Wrapper):
 
         self._expand_to_env_count()
 
-        # Per-env lengths: fall back to uniform num_steps for legacy files.
-        num_envs = int(self._trajectory["meta"]["num_envs"])
-        lengths = meta.get("lengths", [int(meta["num_steps"])] * num_envs)
+        # Per-env lengths support async vector trajectories.
+        lengths = meta["lengths"]
         self._lengths = torch.tensor(lengths, dtype=torch.long, device=self.env.device)
 
         # Clamp replay length to the wrapped env's horizon.
@@ -113,47 +113,7 @@ class ReplayWrapper(gym.Wrapper):
             t = self._trajectory[key]
             self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
         meta["num_envs"] = env_envs
-        if "lengths" in meta:
-            meta["lengths"] = meta["lengths"] * env_envs
-
-    def _set_all_states(self, states: Any) -> None:
-        """Write one timestep's object states directly (kinematic write)."""
-        env = self.env
-        robot = env.robot
-        robot.set_local_pose(states["robot"]["root_pose"])
-        # Trajectories record the robot's complete qpos, including mimic joints.
-        # Physics is disabled for kinematic/control replay, so writing only the
-        # active joints does not propagate their values to mimic children.
-        robot.set_qpos(states["robot"]["qpos"], target=False)
-        if "articulations" in states.keys():
-            traj_art_uids = set(states["articulations"].keys())
-            scene_art_uids = set(env.sim._articulations.keys())
-            for uid in traj_art_uids - scene_art_uids:
-                logger.log_warning(
-                    f"Trajectory articulation '{uid}' is not present in the scene; skipping."
-                )
-            for uid in traj_art_uids & scene_art_uids:
-                art = env.sim._articulations[uid]
-                art.set_local_pose(states["articulations"][uid]["root_pose"])
-                art.set_qpos(states["articulations"][uid]["qpos"], target=False)
-            for uid in scene_art_uids - traj_art_uids:
-                logger.log_warning(
-                    f"Scene articulation '{uid}' is not in the trajectory; leaving initial state."
-                )
-        if "rigid_objects" in states.keys():
-            traj_rigid_uids = set(states["rigid_objects"].keys())
-            scene_rigid_uids = set(env.sim._rigid_objects.keys())
-            for uid in traj_rigid_uids - scene_rigid_uids:
-                logger.log_warning(
-                    f"Trajectory rigid object '{uid}' is not present in the scene; skipping."
-                )
-            for uid in traj_rigid_uids & scene_rigid_uids:
-                obj = env.sim._rigid_objects[uid]
-                obj.set_local_pose(states["rigid_objects"][uid]["pose"])
-            for uid in scene_rigid_uids - traj_rigid_uids:
-                logger.log_warning(
-                    f"Scene rigid object '{uid}' is not in the trajectory; leaving initial state."
-                )
+        meta["lengths"] = meta["lengths"] * env_envs
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
@@ -162,14 +122,22 @@ class ReplayWrapper(gym.Wrapper):
         # Disable physics during restore so set_local_pose's internal update
         # does not integrate dynamics.
         self.env.sim.enable_physics(False)
-        self._set_all_states(self._trajectory["states"][:, 0])
+        restore_trajectory_state(self.env, self._trajectory["states"][:, 0])
         if self._mode == "dynamic":
             self.env.sim.enable_physics(True)
             self.env._replay_no_auto_reset = True
         self._replay_steps = torch.zeros(
             self.env.num_envs, dtype=torch.long, device=self.env.device
         )
-        return self.env.get_obs(), info
+        obs = self.env.get_obs()
+
+        # If the wrapped environment also records this replay, replace the
+        # default-reset pending state with the state restored from the file.
+        env_ids = torch.arange(self.env.num_envs, device=self.env.device)
+        seed_recording_state = getattr(self.env, "_seed_recording_state", None)
+        if seed_recording_state is not None:
+            seed_recording_state(obs, env_ids)
+        return obs, info
 
     def step(
         self, action: Any
@@ -180,7 +148,7 @@ class ReplayWrapper(gym.Wrapper):
         st = self._replay_steps.clamp(max=self._lengths - 1)  # finished envs hold last
 
         if self._mode in ("kinematic", "control"):
-            self._set_all_states(self._trajectory["states"][idx, st])
+            restore_trajectory_state(self.env, self._trajectory["states"][idx, st])
             env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
             obs = env.get_obs()
             self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
@@ -201,12 +169,9 @@ class ReplayWrapper(gym.Wrapper):
         return obs, reward, term, trunc, info
 
     def go_to_step(self, step: int) -> EnvObs:
-        """Scrub to a specific recorded step (kinematic).
+        """Scrub to a specific recorded state (kinematic).
 
-        Disables physics, writes the recorded object states at ``step``, commits
-        the scene, and returns the rendered observation. Used by interactive
-        control mode (forward/back/jump are all O(1) since kinematic replay sets
-        states directly). ``step`` is clamped to ``[0, min(lengths)-1]``.
+        State index ``t`` is the state immediately before recorded action ``t``.
 
         Args:
             step: Target step index.
@@ -215,15 +180,21 @@ class ReplayWrapper(gym.Wrapper):
             The observation at the target step.
         """
         env = self.env
-        max_step = int(self._lengths.min().item()) - 1
+        max_step = self.control_max_step
         step = max(0, min(int(step), max_step))
         env.sim.enable_physics(False)
-        self._set_all_states(self._trajectory["states"][:, step])
+        restore_trajectory_state(env, self._trajectory["states"][:, step])
         env.sim.update(env.sim_cfg.physics_dt, env.cfg.sim_steps_per_control)
         self._replay_steps = torch.full(
             (env.num_envs,), step, dtype=torch.long, device=env.device
         )
         return env.get_obs()
+
+    @property
+    def control_max_step(self) -> int:
+        """Largest state index available to interactive control replay."""
+        transition_count = int(self._lengths.min().item())
+        return transition_count - 1
 
     def close(self) -> None:
         try:

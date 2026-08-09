@@ -1,6 +1,8 @@
 {   
     "id": "ScoopIce-v1",
     "max_episodes": 5,
+    "max_episode_steps": 600,
+    "num_envs": 1,
     "env": {
         "events": {
             "drop_ice":{

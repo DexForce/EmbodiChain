@@ -2,6 +2,7 @@
     "id": "PourWater-v3",
     "max_episodes": 5,
     "max_episode_steps": 300,
+    "num_envs": 1,
     "env": {
         "events": {
             "record_camera": {

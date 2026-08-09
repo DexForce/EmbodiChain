@@ -72,6 +72,11 @@ COMMANDS = (
         help="Run an environment for data generation or preview.",
     ),
     Command(
+        name="preview_lerobot_data",
+        target="embodichain.lab.scripts.preview_lerobot_data:cli",
+        help="Print and validate a recorded LeRobot dataset episode.",
+    ),
+    Command(
         name="train-rl",
         target="embodichain.learning.rl.train:cli",
         help="Train an RL agent from a JSON or YAML config.",
