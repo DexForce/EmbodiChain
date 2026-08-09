@@ -323,6 +323,14 @@ before replanning:
 
    python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless --auto_play
 
+``MotionPolicy.dynamic_collision_mode`` defaults to
+``DynamicCollisionMode.AUTO``. Use ``DynamicCollisionMode.REQUIRED`` when
+planning must fail unless the live collision world is available, or
+``DynamicCollisionMode.OFF`` to ignore snapshot collision entities and
+collision-world revisions. These modes do not disable static-world or
+self-collision checks configured by the selected planner. The deprecated
+``collision_check`` boolean maps ``True`` to ``AUTO`` and ``False`` to ``OFF``.
+
 Recovery replans reuse one immutable invocation-revision snapshot. If an
 application intentionally changes the goal, options, policy, binding, or a
 control command while the action is active, submit a strictly newer revision:

@@ -71,7 +71,7 @@ from .plans import (
     PlannerDiagnostics,
     TimedTrajectory,
 )
-from .policies import MotionPolicy, RecoveryPolicy
+from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
@@ -169,6 +169,7 @@ __all__ = [
     "CoordinatedPlacement",
     "CoordinatedPlacementGoal",
     "CoordinatedPlacementOptions",
+    "DynamicCollisionMode",
     "EndEffectorPoseGoal",
     "EntityState",
     "EffectVerifier",

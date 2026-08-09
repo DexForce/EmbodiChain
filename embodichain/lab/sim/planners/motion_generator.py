@@ -14,12 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
-import numpy as np
+from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import MISSING
+from typing import Any, Dict, List, Tuple, Union
+
 import matplotlib.pyplot as plt
-from typing import Dict, List, Tuple, Union, Any
+import numpy as np
+import torch
 
 from embodichain.lab.sim.planners import (
     BasePlannerCfg,
@@ -118,6 +122,49 @@ class MotionGenerator:
 
         self.robot = self.planner.robot
         self.device = self.robot.device
+
+    @property
+    def supports_dynamic_collision_world(self) -> bool:
+        """Whether the planner accepts per-plan dynamic obstacle poses.
+
+        Returns:
+            ``True`` when the selected planner supports collision-world updates.
+        """
+        return getattr(self.planner, "supports_collision_world_updates", False) is True
+
+    def bind_collision_world(
+        self,
+        plan_opts: PlanOptions | None,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> PlanOptions:
+        """Bind live obstacle poses to owned planner options.
+
+        Args:
+            plan_opts: Optional reusable caller-owned planner options.
+            obstacle_poses: Batched world poses keyed by stable obstacle ID.
+
+        Returns:
+            Backend-specific options bound to the supplied collision world.
+
+        Raises:
+            ValueError: If the selected planner cannot consume dynamic obstacles.
+        """
+        if not self.supports_dynamic_collision_world:
+            logger.log_error(
+                f"{type(self.planner).__name__} does not support dynamic "
+                "collision-world updates.",
+                ValueError,
+            )
+        options = (
+            deepcopy(plan_opts)
+            if plan_opts is not None
+            else self.planner.default_plan_options()
+        )
+        return self.planner.with_collision_world(
+            options,
+            obstacle_poses=obstacle_poses,
+        )
 
     @classmethod
     def register_planner_type(cls, name: str, planner_class, planner_cfg_class) -> None:

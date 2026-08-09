@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 import torch
@@ -27,6 +27,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     Affordance,
+    DynamicCollisionMode,
     EndEffectorPoseGoal,
     EntityState,
     HeldObjectState,
@@ -97,10 +98,50 @@ def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
     policy = MotionPolicy(sample_count=24, control_dt=0.01)
     assert policy.sample_count == 24
     assert policy.control_dt == 0.01
+    assert policy.dynamic_collision_mode is DynamicCollisionMode.AUTO
     with pytest.raises(ValueError, match="sample_count"):
         MotionPolicy(sample_count=1)
     with pytest.raises(ValueError, match="max_replans"):
         RecoveryPolicy(max_replans=-1)
+
+
+def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
+    assert (
+        MotionPolicy(dynamic_collision_mode="off").dynamic_collision_mode
+        is DynamicCollisionMode.OFF
+    )
+    with pytest.raises(ValueError, match="dynamic_collision_mode"):
+        MotionPolicy(dynamic_collision_mode="unknown")
+    with pytest.raises(TypeError, match="DynamicCollisionMode"):
+        MotionPolicy(dynamic_collision_mode=object())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("legacy_value", "expected"),
+    [
+        (True, DynamicCollisionMode.AUTO),
+        (False, DynamicCollisionMode.OFF),
+    ],
+)
+def test_motion_policy_maps_deprecated_collision_check(
+    legacy_value: bool,
+    expected: DynamicCollisionMode,
+) -> None:
+    with pytest.warns(DeprecationWarning, match="collision_check"):
+        policy = MotionPolicy(collision_check=legacy_value)
+
+    assert policy.dynamic_collision_mode is expected
+    with pytest.warns(DeprecationWarning, match="collision_check"):
+        assert policy.collision_check is legacy_value
+
+
+def test_motion_policy_replace_preserves_required_dynamic_collision_mode() -> None:
+    policy = MotionPolicy(dynamic_collision_mode=DynamicCollisionMode.REQUIRED)
+
+    replaced = replace(policy, sample_count=60)
+
+    assert replaced.sample_count == 60
+    assert replaced.dynamic_collision_mode is DynamicCollisionMode.REQUIRED
 
 
 def test_task_state_normalizes_held_relations_and_masks_updates() -> None:

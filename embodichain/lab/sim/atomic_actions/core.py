@@ -46,6 +46,7 @@ from .plans import (
     PlannerDiagnostics,
     TimedTrajectory,
 )
+from .policies import DynamicCollisionMode
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -383,12 +384,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         """Bind snapshot obstacle poses without mutating the resolved request."""
         if not self._uses_collision_world(request, context):
             return request
-        planner = self.motion_generator.planner
-        options = (
-            deepcopy(request.motion_policy.plan_opts)
-            if request.motion_policy.plan_opts is not None
-            else planner.default_plan_options()
-        )
         poses = context.scene.collision_obstacle_poses(
             batch_size=context.batch_size,
             device=context.robot.qpos.device,
@@ -396,8 +391,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         )
         policy = replace(
             request.motion_policy,
-            plan_opts=planner.with_collision_world(
-                options,
+            plan_opts=self.motion_generator.bind_collision_world(
+                request.motion_policy.plan_opts,
                 obstacle_poses=poses,
             ),
         )
@@ -409,13 +404,37 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
     ) -> bool:
         """Return whether this planning attempt consumes collision revisions."""
-        planner = getattr(self.motion_generator, "planner", None)
-        return (
-            request.motion_policy.motion_source == "motion_gen"
-            and request.motion_policy.collision_check
-            and bool(context.scene.collision_entity_ids)
-            and getattr(planner, "supports_collision_world_updates", False) is True
+        mode = request.motion_policy.dynamic_collision_mode
+        if mode is DynamicCollisionMode.OFF:
+            return False
+
+        uses_motion_generator = request.motion_policy.motion_source == "motion_gen"
+        has_collision_entities = bool(context.scene.collision_entity_ids)
+        supports_updates = (
+            getattr(
+                self.motion_generator,
+                "supports_dynamic_collision_world",
+                False,
+            )
+            is True
         )
+        available = (
+            uses_motion_generator and has_collision_entities and supports_updates
+        )
+        if mode is DynamicCollisionMode.REQUIRED and not available:
+            missing: list[str] = []
+            if not uses_motion_generator:
+                missing.append("motion_source='motion_gen'")
+            if not has_collision_entities:
+                missing.append("scene collision entities")
+            if not supports_updates:
+                missing.append("a planner with dynamic collision-world support")
+            raise ValueError(
+                "dynamic_collision_mode='required' cannot be satisfied; missing "
+                + ", ".join(missing)
+                + "."
+            )
+        return available
 
     def build_plan(
         self,

@@ -167,8 +167,10 @@ For lightweight sources that do not need environment correlation IDs,
 `SimulationExecutionAdapter` also accepts a mutually exclusive
 `SceneSnapshotSupplier(timestamp)` callback.
 
-The public `AtomicAction.plan()` copies `MotionPolicy` and forwards collision
-entity poses through `BasePlanner.with_collision_world()`. Backends opt in via
+The public `AtomicAction.plan()` copies `MotionPolicy` and binds collision entity
+poses through `MotionGenerator.bind_collision_world()`. The motion generator
+owns option copying and the backend capability boundary, then forwards the
+update through `BasePlanner.with_collision_world()`. Backends opt in via
 `supports_collision_world_updates`; cuRobo implements this bridge using
 `CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore consumes the
 same scene snapshot that triggered invalidation without adding obstacle
@@ -192,12 +194,16 @@ Goal dataclasses carry only semantic task intent. They do not carry robot part
 names, planner configuration, retry policy, or runtime state.
 
 `MotionPolicy` owns planner selection, motion source, sample count, fallback
-control period, limits, and typed planner options. `RecoveryPolicy` owns
-tracking/dynamic-goal thresholds, timeouts, and budgets. Each built-in has a
-frozen `*Options` value for invocation-varying phase counts, offsets, and grasp
-selection behavior. An action constructor may accept `default_options`; an
-invocation's `skill_options` replaces them for that call. There is no
-`ActionCfg` or built-in `*Cfg` layer.
+control period, limits, dynamic-collision mode, and typed planner options.
+`DynamicCollisionMode.AUTO` consumes a live collision world when available,
+`OFF` ignores snapshot collision entities and their revisions, and `REQUIRED`
+fails unless the motion source, scene, and planner support that path. These
+modes do not toggle backend-configured static-world or self-collision checks.
+`RecoveryPolicy` owns tracking/dynamic-goal thresholds, timeouts, and budgets.
+Each built-in has a frozen `*Options` value for invocation-varying phase counts,
+offsets, and grasp selection behavior. An action constructor may accept
+`default_options`; an invocation's `skill_options` replaces them for that call.
+There is no `ActionCfg` or built-in `*Cfg` layer.
 
 `engine.register(action)` is reserved for custom skill implementations. A
 built-in can be replaced only with explicit `replace=True`. Registration means

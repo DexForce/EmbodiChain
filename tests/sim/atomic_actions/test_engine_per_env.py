@@ -33,6 +33,7 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AtomicAction,
     AtomicActionEngine,
+    DynamicCollisionMode,
     EndEffectorPoseGoal,
     EntityState,
     ExecutionEventKind,
@@ -187,6 +188,7 @@ def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
+    generator.supports_dynamic_collision_world = False
     engine = AtomicActionEngine(generator, load_builtins=False)
     action = DynamicAction()
     engine.register(action)
@@ -264,6 +266,7 @@ def _invocation(
     phase_timeout: float = 30.0,
     control_dt: float = 1.0 / 60.0,
     motion_source: str = "ik_interp",
+    dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     return ActionInvocation(
         skill_id=skill_id,
@@ -273,6 +276,7 @@ def _invocation(
             sample_count=2,
             control_dt=control_dt,
             motion_source=motion_source,
+            dynamic_collision_mode=dynamic_collision_mode,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
@@ -377,11 +381,10 @@ def test_scene_motion_replans_late_bound_goal() -> None:
 
 def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
     engine, action = _engine()
-    planner = engine.motion_generator.planner
-    planner.supports_collision_world_updates = True
-    planner.default_plan_options.return_value = PlanOptions()
-    planner.with_collision_world.side_effect = (
-        lambda options, *, obstacle_poses: options
+    generator = engine.motion_generator
+    generator.supports_dynamic_collision_world = True
+    generator.bind_collision_world.side_effect = (
+        lambda options, *, obstacle_poses: options or PlanOptions()
     )
     initial_qpos = torch.zeros(1, 2)
     initial = _collision_context(
@@ -408,18 +411,17 @@ def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
     assert ExecutionEventKind.COLLISION_WORLD_CHANGED in kinds
     assert ExecutionEventKind.REPLANNED in kinds
     assert action.plan_count == 2
-    latest_obstacles = planner.with_collision_world.call_args.kwargs["obstacle_poses"]
+    latest_obstacles = generator.bind_collision_world.call_args.kwargs["obstacle_poses"]
     assert latest_obstacles["obstacle"][0, 0, 3] == pytest.approx(0.6)
     assert tick.command is not None
 
 
 def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
     engine, _ = _engine(batch_size=2)
-    planner = engine.motion_generator.planner
-    planner.supports_collision_world_updates = True
-    planner.default_plan_options.return_value = PlanOptions()
-    planner.with_collision_world.side_effect = (
-        lambda options, *, obstacle_poses: options
+    generator = engine.motion_generator
+    generator.supports_dynamic_collision_world = True
+    generator.bind_collision_world.side_effect = (
+        lambda options, *, obstacle_poses: options or PlanOptions()
     )
     qpos = torch.zeros(2, 2)
     initial = _collision_context(
@@ -463,6 +465,118 @@ def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
     assert tick.eligible_mask.tolist() == [True, False]
     assert tick.command is not None
     assert tick.command.active_mask.tolist() == [True, False]
+
+
+def test_dynamic_collision_off_skips_binding_and_revision_recovery() -> None:
+    engine, action = _engine()
+    generator = engine.motion_generator
+    generator.supports_dynamic_collision_world = True
+    initial_qpos = torch.zeros(1, 2)
+    initial = _collision_context(
+        0.0,
+        initial_qpos,
+        torch.tensor([0.4]),
+        (0,),
+    )
+    session = engine.start(
+        (
+            _invocation(
+                motion_source="motion_gen",
+                dynamic_collision_mode=DynamicCollisionMode.OFF,
+            ),
+        ),
+        initial,
+    )
+    session.tick(initial)
+
+    changed = _collision_context(
+        0.1,
+        initial_qpos,
+        torch.tensor([0.6]),
+        (1,),
+    )
+    tick = session.tick(changed)
+
+    assert ExecutionEventKind.COLLISION_WORLD_CHANGED not in {
+        event.kind for event in tick.events
+    }
+    assert action.plan_count == 1
+    generator.bind_collision_world.assert_not_called()
+
+
+def test_required_dynamic_collision_rejects_incompatible_motion_source() -> None:
+    engine, _ = _engine()
+    engine.motion_generator.supports_dynamic_collision_world = True
+
+    with pytest.raises(ValueError, match="motion_source='motion_gen'"):
+        engine.plan(
+            _invocation(
+                dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
+            ),
+            _collision_context(
+                0.0,
+                torch.zeros(1, 2),
+                torch.tensor([0.4]),
+                (0,),
+            ),
+        )
+
+
+def test_required_dynamic_collision_rejects_missing_scene_entities() -> None:
+    engine, _ = _engine()
+    engine.motion_generator.supports_dynamic_collision_world = True
+
+    with pytest.raises(ValueError, match="scene collision entities"):
+        engine.plan(
+            _invocation(
+                motion_source="motion_gen",
+                dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
+            ),
+            _context(0.0, 0.0, 0.2, 0),
+        )
+
+
+def test_required_dynamic_collision_rejects_unsupported_planner() -> None:
+    engine, _ = _engine()
+
+    with pytest.raises(ValueError, match="dynamic collision-world support"):
+        engine.plan(
+            _invocation(
+                motion_source="motion_gen",
+                dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
+            ),
+            _collision_context(
+                0.0,
+                torch.zeros(1, 2),
+                torch.tensor([0.4]),
+                (0,),
+            ),
+        )
+
+
+def test_required_dynamic_collision_binds_supported_scene() -> None:
+    engine, _ = _engine()
+    generator = engine.motion_generator
+    generator.supports_dynamic_collision_world = True
+    generator.bind_collision_world.side_effect = (
+        lambda options, *, obstacle_poses: options or PlanOptions()
+    )
+
+    plan = engine.plan(
+        _invocation(
+            motion_source="motion_gen",
+            dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
+        ),
+        _collision_context(
+            0.0,
+            torch.zeros(1, 2),
+            torch.tensor([0.4]),
+            (0,),
+        ),
+    )
+
+    assert plan.phases[0].spec.collision_world_sensitive is True
+    generator.bind_collision_world.assert_called_once()
 
 
 def test_resolved_goal_snapshot_is_reused_during_recovery() -> None:

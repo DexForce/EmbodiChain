@@ -117,10 +117,12 @@ layouts.
 `with_collision_world(options, obstacle_poses=...)` form the generic per-plan
 dynamic-world bridge. The base implementation opts out and leaves options
 unchanged. `CuroboPlanner` opts in, clones the supplied pose tensors, and merges
-them into `CuroboPlanOptions.dynamic_obstacle_poses`. Atomic actions call this
-hook from their framework-owned `plan()` template when a `SceneSnapshot`
-declares collision entities; individual skills must not construct backend
-obstacle options themselves.
+them into `CuroboPlanOptions.dynamic_obstacle_poses`.
+`MotionGenerator.supports_dynamic_collision_world` exposes the capability and
+`MotionGenerator.bind_collision_world()` owns option copying before forwarding
+to the backend hook. Atomic actions use that facade from their framework-owned
+`plan()` template when a `SceneSnapshot` declares collision entities;
+individual skills must not construct backend obstacle options themselves.
 
 ### MotionGenerator
 

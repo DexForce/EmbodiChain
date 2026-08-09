@@ -170,7 +170,7 @@ from leaking into an Action Agent schema.
 | `ActionOptions` / built-in `*Options` | Frozen invocation-varying skill behavior: phase counts, offsets, grasp-selection rules | Robot resource names, hand qpos, planner backend |
 | `ControlPartCommandProfile` | Embodiment-specific semantic commands such as `open`, `grasp`, and `ready`, keyed by actual control-part name | Action roles, task goals, recovery state |
 | `ActionControlOverrides` | Optional role-scoped command replacements for one invocation revision | Persistent robot configuration |
-| `MotionPolicy` | Motion source, sample count, timing, limits, collision option, typed planner options | Skill semantics or robot-resource names |
+| `MotionPolicy` | Motion source, sample count, timing, limits, dynamic-collision mode, typed planner options | Skill semantics or robot-resource names |
 | `RecoveryPolicy` | Replan/retry budgets, tracking and dynamic-goal thresholds, phase timeout | Controller state or mutable counters |
 | `ExecutionRunnerCfg` | Runner-level acknowledgement deadlines, minimum feedback cadence, and completion hold policy | Skill behavior, planning resources, or invocation revision data |
 | `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs | Hypothetical simulator mutation |
@@ -552,9 +552,17 @@ boundary. `SceneSnapshot.collision_entity_ids` identifies obstacle poses
 consumed by a planner, while `collision_world_revision` can be global or
 per-environment. `RigidObjectSceneProvider` tracks live simulation objects,
 filters sub-threshold pose noise, and advances those revisions. Backends opt in
-through `supports_collision_world_updates` and `with_collision_world()`; cuRobo
+through `supports_collision_world_updates` and `with_collision_world()`;
+`MotionGenerator.bind_collision_world()` owns that backend boundary, and cuRobo
 maps the snapshot poses to `CuroboPlanOptions.dynamic_obstacle_poses`. A newer
 revision invalidates only affected rows before synchronized cohort replanning.
+
+`MotionPolicy.dynamic_collision_mode` controls this live-scene path. `AUTO`
+(the default) consumes collision entities when the selected motion source and
+planner support them, `OFF` ignores snapshot collision entities and their
+revisions, and `REQUIRED` fails planning unless a compatible motion generator
+and collision entities are available. This mode does not enable or disable the
+planner's configured static-world or self-collision checks.
 
 Recovery does not re-read a mutable Action object or invocation. The engine
 resolves each call once into a `ResolvedActionRequest` containing an owned goal
