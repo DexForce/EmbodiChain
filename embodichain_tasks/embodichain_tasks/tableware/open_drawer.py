@@ -29,6 +29,7 @@ from embodichain.lab.sim.planners import (
     MotionGenerator,
     MotionGenOptions,
     MoveType,
+    PlanResult,
     PlanState,
     ToppraPlannerCfg,
     ToppraPlanOptions,
@@ -37,6 +38,28 @@ from embodichain.lab.sim.planners import (
 from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
 
 __all__ = ["OpenDrawerEnv"]
+
+
+def _require_plan_positions(result: PlanResult, *, phase: str) -> torch.Tensor:
+    """Return a successful single-environment trajectory.
+
+    Args:
+        result: Motion-planning result to validate.
+        phase: Human-readable planning phase for error reporting.
+
+    Returns:
+        Joint positions for the task's single environment.
+
+    Raises:
+        RuntimeError: If planning failed or returned no joint positions.
+    """
+    if not result.is_all_success():
+        raise RuntimeError(f"Motion planning failed during {phase}.")
+    if result.positions is None:
+        raise RuntimeError(
+            f"Motion planning returned no joint positions during {phase}."
+        )
+    return result.positions[0]
 
 
 @register_env("OpenDrawer-v1", max_episode_steps=300)
@@ -97,6 +120,7 @@ class OpenDrawerEnv(EmbodiedEnv):
 
         Raises:
             ValueError: If the environment contains more than one arena.
+            RuntimeError: If any motion-planning phase fails.
         """
         if self.num_envs != 1:
             raise ValueError(
@@ -118,12 +142,15 @@ class OpenDrawerEnv(EmbodiedEnv):
                 sample_interval=50,
             ),
         )
-        plan_to_start = self.motion_gen.generate(
+        plan_to_start_result = self.motion_gen.generate(
             target_states=[
                 PlanState.single(move_type=MoveType.JOINT_MOVE, qpos=qpos_start[0])
             ],
             options=options_to_start,
-        ).positions[0]
+        )
+        plan_to_start = _require_plan_positions(
+            plan_to_start_result, phase="move to start"
+        )
 
         xpos_begin = self.robot.compute_fk(
             name="right_arm", qpos=qpos_start, to_matrix=True
@@ -141,13 +168,16 @@ class OpenDrawerEnv(EmbodiedEnv):
                 sample_interval=50,
             ),
         )
-        plan_to_handle = self.motion_gen.generate(
+        plan_to_handle_result = self.motion_gen.generate(
             target_states=[
                 PlanState.single(move_type=MoveType.EEF_MOVE, xpos=xpos)
                 for xpos in (xpos_begin, xpos_mid)
             ],
             options=options_to_handle,
-        ).positions[0]
+        )
+        plan_to_handle = _require_plan_positions(
+            plan_to_handle_result, phase="handle approach"
+        )
 
         options_leave_handle = MotionGenOptions(
             control_part="right_arm",
@@ -159,13 +189,16 @@ class OpenDrawerEnv(EmbodiedEnv):
                 sample_interval=50,
             ),
         )
-        plan_leave_handle = self.motion_gen.generate(
+        plan_leave_handle_result = self.motion_gen.generate(
             target_states=[
                 PlanState.single(move_type=MoveType.EEF_MOVE, xpos=xpos)
                 for xpos in (xpos_mid, xpos_begin)
             ],
             options=options_leave_handle,
-        ).positions[0]
+        )
+        plan_leave_handle = _require_plan_positions(
+            plan_leave_handle_result, phase="drawer pull"
+        )
 
         num_grasp_steps = 20
         eef_grasp_motion = self._generate_eef_motion(

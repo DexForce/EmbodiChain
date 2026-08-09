@@ -171,7 +171,7 @@ def main() -> None:
 
     # Configure the simulation. Window creation is deferred until the asset is loaded.
     sim_cfg = SimulationManagerCfg(
-        headless=True,
+        headless=args.headless,
         sim_device=args.device,
         num_envs=args.num_envs,
         arena_space=2.0,

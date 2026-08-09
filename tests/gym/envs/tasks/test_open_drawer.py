@@ -31,11 +31,15 @@ from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
     make,
 )
+from embodichain.lab.sim.planners import PlanResult
 
 discover_task_packages()
 
 from embodichain_tasks.configs import get_config_path  # noqa: E402
-from embodichain_tasks.tableware.open_drawer import OpenDrawerEnv  # noqa: E402
+from embodichain_tasks.tableware.open_drawer import (  # noqa: E402
+    OpenDrawerEnv,
+    _require_plan_positions,
+)
 
 CONFIG_PATH = get_config_path("gym/open_drawer/cobot_magic_3cam.json")
 
@@ -72,6 +76,23 @@ class TestOpenDrawerEnv:
 
         assert cfg.articulation[0].drive_pros.drive_type == "none"
         assert cfg.robot.drive_pros.drive_type == "force"
+
+    def test_failed_motion_plan_is_rejected(self) -> None:
+        """An infeasible planner result cannot become an expert trajectory."""
+        result = PlanResult(
+            success=torch.tensor([False]),
+            positions=torch.zeros((1, 1, 1)),
+        )
+
+        with pytest.raises(RuntimeError, match="handle approach"):
+            _require_plan_positions(result, phase="handle approach")
+
+    def test_successful_motion_plan_requires_positions(self) -> None:
+        """A planner result without joint positions cannot become an action."""
+        result = PlanResult(success=torch.tensor([True]), positions=None)
+
+        with pytest.raises(RuntimeError, match="no joint positions.*drawer pull"):
+            _require_plan_positions(result, phase="drawer pull")
 
     @pytest.mark.requires_sim
     def test_built_environment_drive_types_and_demo(self) -> None:

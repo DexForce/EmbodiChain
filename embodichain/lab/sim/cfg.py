@@ -764,7 +764,7 @@ class JointDrivePropertiesCfg:
     @classmethod
     def from_dict(
         cls,
-        init_dict: Dict[str, str | float | int],
+        init_dict: Dict[str, str | float | int | Dict[str, float]],
         *,
         defaults: JointDrivePropertiesCfg | None = None,
     ) -> JointDrivePropertiesCfg:
