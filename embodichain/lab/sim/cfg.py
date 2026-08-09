@@ -763,10 +763,22 @@ class JointDrivePropertiesCfg:
 
     @classmethod
     def from_dict(
-        cls, init_dict: Dict[str, str | float | int]
+        cls,
+        init_dict: Dict[str, str | float | int | Dict[str, float]],
+        *,
+        defaults: JointDrivePropertiesCfg | None = None,
     ) -> JointDrivePropertiesCfg:
-        """Initialize the configuration from a dictionary."""
-        cfg = cls()
+        """Initialize the configuration from a dictionary.
+
+        Args:
+            init_dict: Joint-drive properties to override.
+            defaults: Optional base properties whose unspecified values are
+                preserved. If omitted, the class defaults are used.
+
+        Returns:
+            Parsed joint-drive properties.
+        """
+        cfg = defaults.copy() if defaults is not None else cls()
         for key, value in init_dict.items():
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
@@ -1681,7 +1693,15 @@ class ArticulationCfg(ObjectBaseCfg):
                 cfg.link_attrs = link_attrs_from_dict(value)
             elif hasattr(cfg, key):
                 attr = getattr(cfg, key)
-                if is_configclass(attr):
+                if isinstance(attr, JointDrivePropertiesCfg) and isinstance(
+                    value, dict
+                ):
+                    setattr(
+                        cfg,
+                        key,
+                        JointDrivePropertiesCfg.from_dict(value, defaults=attr),
+                    )
+                elif is_configclass(attr):
                     setattr(cfg, key, attr.from_dict(value))
                 else:
                     setattr(cfg, key, value)
@@ -1781,6 +1801,14 @@ class RobotCfg(ArticulationCfg):
                     )
                 elif key == "fpath":
                     setattr(cfg, key, get_data_path(value))
+                elif isinstance(attr, JointDrivePropertiesCfg) and isinstance(
+                    value, dict
+                ):
+                    setattr(
+                        cfg,
+                        key,
+                        JointDrivePropertiesCfg.from_dict(value, defaults=attr),
+                    )
                 elif is_configclass(attr):
                     setattr(
                         cfg, key, attr.from_dict(value)

@@ -21,7 +21,37 @@ import pytest
 
 from dexsim.types import DenoiserType, Renderer, ToneMappingType
 
-from embodichain.lab.sim.cfg import PhysicsCfg, RenderCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, PhysicsCfg, RenderCfg, RobotCfg
+
+
+def test_articulation_cfg_defaults_to_no_joint_drive() -> None:
+    """Generic articulations are passive unless a drive is requested."""
+    articulation_cfg = ArticulationCfg()
+
+    assert articulation_cfg.drive_pros.drive_type == "none"
+
+
+def test_articulation_cfg_partial_drive_properties_preserve_no_drive() -> None:
+    """Partial articulation drive overrides retain the passive default."""
+    articulation_cfg = ArticulationCfg.from_dict(
+        {"drive_pros": {"stiffness": 0.0, "damping": 0.0}}
+    )
+
+    assert articulation_cfg.drive_pros.drive_type == "none"
+
+
+def test_robot_cfg_defaults_to_force_joint_drive() -> None:
+    """Robots retain force-based joint drives by default."""
+    robot_cfg = RobotCfg()
+
+    assert robot_cfg.drive_pros.drive_type == "force"
+
+
+def test_robot_cfg_partial_drive_properties_preserve_force_drive() -> None:
+    """Partial robot drive overrides retain the force-drive default."""
+    robot_cfg = RobotCfg.from_dict({"drive_pros": {"stiffness": 0.0, "damping": 0.0}})
+
+    assert robot_cfg.drive_pros.drive_type == "force"
 
 
 def test_physics_cfg_does_not_expose_fixed_solver_options() -> None:
