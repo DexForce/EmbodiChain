@@ -247,6 +247,32 @@ This example shows the typical division of responsibilities:
 - ``actions`` define how policy outputs map to robot control commands.
 - ``dataset`` controls structured episode export, independent from debug-video recording.
 
+## Rollout Buffer Modes
+
+{class}`~envs.EmbodiedEnv` always stores rollout data in one rectangular
+``TensorDict``; it does not allocate a Python list or ragged
+tensor per environment. Leaf tensors use a layout such as
+``[num_envs, max_steps, ...]``. The cursor semantics depend on how the buffer is
+used:
+
+- **Expert/demo mode** is used by dataset and scripted-trajectory collection.
+  Every row has its own ``rollout_steps[env_id]`` cursor and every stored frame
+  has a ``valid`` flag. A row that finishes early is frozen while other rows
+  continue, so logical episode lengths can differ even though the underlying
+  tensor remains fixed-size. LeRobot recorders slice each row to its own valid
+  length and do not export padding or a stale tail.
+- **RL mode** is selected for externally supplied buffers containing the RL
+  fields ``obs``, ``action``, ``reward``, ``done``, ``value``, ``terminated``,
+  and ``truncated``. These buffers use a uniform
+  ``[num_envs, rollout_time + 1]`` layout and one shared
+  ``current_rollout_step``. Environments may auto-reset independently, but
+  collection stays on the vector rollout's synchronized time axis; the
+  expert-only per-row cursor and ``valid`` slicing are not applied.
+
+Consequently, references to “different parallel episode lengths” in the
+demonstration and LeRobot documentation describe expert collection, not the RL
+training buffer.
+
 ## Manager Systems
 
 The manager systems in {class}`~envs.EmbodiedEnv` provide modular, configuration-driven functionality for handling complex simulation behaviors. Each manager uses a **functor-based** architecture, allowing you to compose behaviors through configuration without modifying environment code. Functors are reusable functions or classes (inheriting from {class}`~envs.managers.Functor`) that operate on the environment state, configured through {class}`~envs.managers.cfg.FunctorCfg`.
@@ -389,7 +415,7 @@ Configure rewards through the {class}`~envs.managers.RewardManager` in your envi
 Inherit from {class}`~envs.EmbodiedEnv` for IL tasks:
 
 ```python
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
 @register_env("MyILTask-v0")
@@ -397,12 +423,20 @@ class MyILTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
-    def create_demo_action_list(self, *args, **kwargs):
-        # Required: Generate scripted demonstrations for data collection
-        pass
+    def create_demo_segments(self, *args, **kwargs):
+        # Plan lazily: each iteration runs after the previous segment finishes.
+        for object_uid in self.object_order:
+            yield DemoSegment(
+                actions=self.plan_pick_and_place(object_uid),
+                name="pick_and_place",
+                target_uid=object_uid,
+                instruction=f"Place {object_uid} in its target bin",
+                # Optional zero-argument, per-env subtask validation.
+                validator=lambda uid=object_uid: self.is_object_placed(uid),
+            )
 
     def is_task_success(self, **kwargs):
-        # Required: Define success criteria for filtering successful episodes
+        # Define final task success for episode classification and filtering.
         # Returns: torch.Tensor of shape (num_envs,) with boolean values
         return success_tensor
 
@@ -412,6 +446,17 @@ class MyILTaskEnv(EmbodiedEnv):
         info["custom_metric"] = ...
         return info
 ```
+
+``create_demo_segments()`` is the preferred expert API. Each
+{class}`~envs.DemoSegment` may carry its own target, language instruction,
+metadata, and validator, and its action iterable may be generated lazily from
+the scene state left by the previous segment. Existing tasks that implement
+``create_demo_action_list()`` remain compatible and are represented as one
+``legacy`` segment.
+
+The common executor checks termination after every action. A task should
+override ``is_task_success()`` with a meaningful per-environment result so
+normal plan exhaustion cannot classify incomplete demonstrations as success.
 
 For a complete example of a modular environment setup, please refer to the {ref}`tutorial_modular_env` tutorial.
 

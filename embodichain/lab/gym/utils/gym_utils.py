@@ -482,17 +482,23 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         ),
     )
 
-    # parser robot config
-    # TODO: support multiple robots cfg initialization from config, eg, cobotmagic, dexforce_w1, etc.
-    if "robot_type" in config["robot"]:
+    # Parse the robot config. ``class_type`` selects a RobotCfg subclass while
+    # leaving subtype-specific fields such as URRobotCfg.robot_type intact.
+    # Keep ``robot_type`` as a backward-compatible class selector for existing
+    # configs such as {"robot_type": "CobotMagic"}.
+    robot_config = deepcopy(config["robot"])
+    robot_class_type = robot_config.pop("class_type", None)
+    if robot_class_type is None and "robot_type" in robot_config:
+        robot_class_type = robot_config.pop("robot_type")
+
+    if robot_class_type is not None:
         robot_cfg = get_class_instance(
             "embodichain.lab.sim.robots",
-            config["robot"]["robot_type"] + "Cfg",
+            robot_class_type + "Cfg",
         )
-        config["robot"].pop("robot_type")
-        robot_cfg = robot_cfg.from_dict(config["robot"])
+        robot_cfg = robot_cfg.from_dict(robot_config)
     else:
-        robot_cfg = RobotCfg.from_dict(config["robot"])
+        robot_cfg = RobotCfg.from_dict(robot_config)
 
     env_cfg.robot = robot_cfg
 
@@ -1125,6 +1131,39 @@ def init_rollout_buffer_from_gym_space(
             "rewards": torch.zeros(
                 (num_envs, max_episode_steps), dtype=torch.float32, device=device
             ),
+            "valid": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "episode_step": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_id": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_step": torch.full(
+                (num_envs, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_start": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_end": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "terminated": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "truncated": torch.zeros(
+                (num_envs, max_episode_steps), dtype=torch.bool, device=device
+            ),
         },
         batch_size=[num_envs, max_episode_steps],
         device=device,
@@ -1318,6 +1357,39 @@ def init_rollout_buffer_from_config(
             "rewards": torch.zeros(
                 (batch_size, max_episode_steps), dtype=torch.float32, device=device
             ),
+            "valid": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "episode_step": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_id": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_step": torch.full(
+                (batch_size, max_episode_steps),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            "segment_start": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "segment_end": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "terminated": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
+            "truncated": torch.zeros(
+                (batch_size, max_episode_steps), dtype=torch.bool, device=device
+            ),
         },
         batch_size=[batch_size, max_episode_steps],
         device=device,
@@ -1346,7 +1418,7 @@ def build_trajectory_buffer(
 ) -> TensorDict:
     """Preallocate a nested trajectory buffer for per-env recording.
 
-    Records per-object kinematic state over time (the robot always, plus all
+    Records per-object state over time (the robot always, plus all
     non-robot articulations and rigid objects unless ``uids`` restricts the
     non-robot set) and, when ``action_space`` is provided, pre-process actions.
     Layout is ``[num_envs, max_steps, ...]``.
@@ -1375,6 +1447,7 @@ def build_trajectory_buffer(
         {
             "root_pose": _zeros(num_envs, max_steps, 7),
             "qpos": _zeros(num_envs, max_steps, env.robot.dof),
+            "qvel": _zeros(num_envs, max_steps, env.robot.dof),
         },
         batch_size=[num_envs, max_steps],
         device=device,
@@ -1392,6 +1465,7 @@ def build_trajectory_buffer(
                     {
                         "root_pose": _zeros(num_envs, max_steps, 7),
                         "qpos": _zeros(num_envs, max_steps, art.dof),
+                        "qvel": _zeros(num_envs, max_steps, art.dof),
                     },
                     batch_size=[num_envs, max_steps],
                     device=device,
@@ -1411,7 +1485,11 @@ def build_trajectory_buffer(
         states["rigid_objects"] = TensorDict(
             {
                 uid: TensorDict(
-                    {"pose": _zeros(num_envs, max_steps, 7)},
+                    {
+                        "pose": _zeros(num_envs, max_steps, 7),
+                        "lin_vel": _zeros(num_envs, max_steps, 3),
+                        "ang_vel": _zeros(num_envs, max_steps, 3),
+                    },
                     batch_size=[num_envs, max_steps],
                     device=device,
                 )
@@ -1442,7 +1520,7 @@ def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
 
     Returns:
         A dict with keys ``states`` (TensorDict), ``actions`` (Tensor) and
-        ``meta`` (dict).
+        ``meta`` (dict). ``states[t]`` and ``actions[t]`` form a causal pair.
 
     Raises:
         ValueError: If required top-level or ``meta`` keys are missing.
@@ -1455,7 +1533,48 @@ def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
         if key not in data:
             raise ValueError(f"Trajectory is missing required key: {key!r}")
     meta = data["meta"]
-    for key in ("num_steps", "num_envs"):
+    for key in ("num_steps", "num_envs", "lengths"):
         if key not in meta:
             raise ValueError(f"Trajectory meta is missing key: {key!r}")
+
+    try:
+        num_steps = int(meta["num_steps"])
+        num_envs = int(meta["num_envs"])
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "Trajectory metadata contains non-integer dimensions."
+        ) from error
+    if num_steps < 0 or num_envs <= 0:
+        raise ValueError(
+            f"Invalid trajectory dimensions: num_envs={num_envs}, "
+            f"num_steps={num_steps}."
+        )
+
+    states = data["states"]
+    actions = data["actions"]
+    if not isinstance(states, TensorDict) or len(states.batch_size) != 2:
+        raise ValueError("Trajectory states must be a 2D TensorDict [env, step].")
+    if tuple(states.batch_size[:2]) != (num_envs, num_steps):
+        raise ValueError(
+            "Trajectory states batch size does not match metadata: "
+            f"got {tuple(states.batch_size)}, expected ({num_envs}, {num_steps})."
+        )
+    if not isinstance(actions, torch.Tensor) or actions.ndim < 2:
+        raise ValueError("Trajectory actions must be a tensor with [env, step, ...].")
+    if tuple(actions.shape[:2]) != (num_envs, num_steps):
+        raise ValueError(
+            "Trajectory actions shape does not match metadata: "
+            f"got {tuple(actions.shape[:2])}, expected ({num_envs}, {num_steps})."
+        )
+
+    lengths = meta["lengths"]
+    if len(lengths) != num_envs:
+        raise ValueError(
+            f"Trajectory has {len(lengths)} lengths for {num_envs} environments."
+        )
+    if any(int(length) < 0 or int(length) > num_steps for length in lengths):
+        raise ValueError(
+            f"Trajectory lengths must be within [0, {num_steps}], got {lengths}."
+        )
+
     return data
