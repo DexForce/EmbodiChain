@@ -308,7 +308,7 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
     """
     data = load_trajectory(trajectory_path)
     meta = data["meta"]
-    lengths = meta.get("lengths", [meta["num_steps"]] * meta["num_envs"])
+    lengths = meta["lengths"]
     log_info(
         f"Replaying trajectory: num_envs={meta['num_envs']}, lengths={lengths}, "
         f"num_steps={meta['num_steps']}, mode={mode}",
@@ -450,7 +450,7 @@ def _run_replay_control_loop(
 ) -> None:
     """Run the interactive replay loop using the provided input source."""
     num_steps = int(replay_env._lengths.min().item())
-    max_step = num_steps - 1
+    max_step = int(getattr(replay_env, "control_max_step", num_steps - 1))
     step = 0
     dt = (
         float(replay_env.env.sim_cfg.physics_dt)
@@ -489,7 +489,7 @@ def _run_replay_control_loop(
             return None
 
     seek(0)
-    print(f"Trajectory has {num_steps} steps (0..{max_step}).")
+    print(f"Trajectory has {num_steps} transitions (state indices 0..{max_step}).")
     try:
         while True:
             if visualization_runtime is not None:

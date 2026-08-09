@@ -16,6 +16,17 @@
 
 """Environment utilities: the registration system (``register_env``, ``make``), Gymnasium integration helpers, miscellaneous utilities, and ``EnvProfiler`` for step/reset timing."""
 
-from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
+from __future__ import annotations
 
-__all__ = ["EnvProfiler", "EnvProfilerCfg"]
+from embodichain.lab.gym.utils.profiler import EnvProfiler, EnvProfilerCfg
+from embodichain.lab.gym.utils.trajectory_state import (
+    capture_trajectory_state,
+    restore_trajectory_state,
+)
+
+__all__ = [
+    "EnvProfiler",
+    "EnvProfilerCfg",
+    "capture_trajectory_state",
+    "restore_trajectory_state",
+]

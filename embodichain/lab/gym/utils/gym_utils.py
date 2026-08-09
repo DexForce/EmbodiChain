@@ -1418,7 +1418,7 @@ def build_trajectory_buffer(
 ) -> TensorDict:
     """Preallocate a nested trajectory buffer for per-env recording.
 
-    Records per-object kinematic state over time (the robot always, plus all
+    Records per-object state over time (the robot always, plus all
     non-robot articulations and rigid objects unless ``uids`` restricts the
     non-robot set) and, when ``action_space`` is provided, pre-process actions.
     Layout is ``[num_envs, max_steps, ...]``.
@@ -1447,6 +1447,7 @@ def build_trajectory_buffer(
         {
             "root_pose": _zeros(num_envs, max_steps, 7),
             "qpos": _zeros(num_envs, max_steps, env.robot.dof),
+            "qvel": _zeros(num_envs, max_steps, env.robot.dof),
         },
         batch_size=[num_envs, max_steps],
         device=device,
@@ -1464,6 +1465,7 @@ def build_trajectory_buffer(
                     {
                         "root_pose": _zeros(num_envs, max_steps, 7),
                         "qpos": _zeros(num_envs, max_steps, art.dof),
+                        "qvel": _zeros(num_envs, max_steps, art.dof),
                     },
                     batch_size=[num_envs, max_steps],
                     device=device,
@@ -1483,7 +1485,11 @@ def build_trajectory_buffer(
         states["rigid_objects"] = TensorDict(
             {
                 uid: TensorDict(
-                    {"pose": _zeros(num_envs, max_steps, 7)},
+                    {
+                        "pose": _zeros(num_envs, max_steps, 7),
+                        "lin_vel": _zeros(num_envs, max_steps, 3),
+                        "ang_vel": _zeros(num_envs, max_steps, 3),
+                    },
                     batch_size=[num_envs, max_steps],
                     device=device,
                 )
@@ -1514,7 +1520,7 @@ def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
 
     Returns:
         A dict with keys ``states`` (TensorDict), ``actions`` (Tensor) and
-        ``meta`` (dict).
+        ``meta`` (dict). ``states[t]`` and ``actions[t]`` form a causal pair.
 
     Raises:
         ValueError: If required top-level or ``meta`` keys are missing.
@@ -1527,7 +1533,48 @@ def load_trajectory(trajectory: str | os.PathLike[str] | dict) -> dict:
         if key not in data:
             raise ValueError(f"Trajectory is missing required key: {key!r}")
     meta = data["meta"]
-    for key in ("num_steps", "num_envs"):
+    for key in ("num_steps", "num_envs", "lengths"):
         if key not in meta:
             raise ValueError(f"Trajectory meta is missing key: {key!r}")
+
+    try:
+        num_steps = int(meta["num_steps"])
+        num_envs = int(meta["num_envs"])
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "Trajectory metadata contains non-integer dimensions."
+        ) from error
+    if num_steps < 0 or num_envs <= 0:
+        raise ValueError(
+            f"Invalid trajectory dimensions: num_envs={num_envs}, "
+            f"num_steps={num_steps}."
+        )
+
+    states = data["states"]
+    actions = data["actions"]
+    if not isinstance(states, TensorDict) or len(states.batch_size) != 2:
+        raise ValueError("Trajectory states must be a 2D TensorDict [env, step].")
+    if tuple(states.batch_size[:2]) != (num_envs, num_steps):
+        raise ValueError(
+            "Trajectory states batch size does not match metadata: "
+            f"got {tuple(states.batch_size)}, expected ({num_envs}, {num_steps})."
+        )
+    if not isinstance(actions, torch.Tensor) or actions.ndim < 2:
+        raise ValueError("Trajectory actions must be a tensor with [env, step, ...].")
+    if tuple(actions.shape[:2]) != (num_envs, num_steps):
+        raise ValueError(
+            "Trajectory actions shape does not match metadata: "
+            f"got {tuple(actions.shape[:2])}, expected ({num_envs}, {num_steps})."
+        )
+
+    lengths = meta["lengths"]
+    if len(lengths) != num_envs:
+        raise ValueError(
+            f"Trajectory has {len(lengths)} lengths for {num_envs} environments."
+        )
+    if any(int(length) < 0 or int(length) > num_steps for length in lengths):
+        raise ValueError(
+            f"Trajectory lengths must be within [0, {num_steps}], got {lengths}."
+        )
+
     return data

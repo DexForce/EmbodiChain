@@ -131,7 +131,7 @@ def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -
     monkeypatch.setattr(
         run_env,
         "load_trajectory",
-        lambda path: {"meta": {"num_envs": 1, "num_steps": 1}},
+        lambda path: {"meta": {"num_envs": 1, "num_steps": 1, "lengths": [1]}},
     )
     monkeypatch.setattr(run_env, "ReplayWrapper", lambda *args, **kwargs: replay_env)
     monkeypatch.setattr(run_env, "replay_auto", lambda *args, **kwargs: None)

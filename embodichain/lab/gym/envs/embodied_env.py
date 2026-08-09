@@ -65,6 +65,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
+from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
@@ -220,9 +221,12 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     record_trajectory: bool = False
-    """Whether to record per-object kinematic states (root pose + qpos) and the
-    pre-process action into a dedicated ``_traj_buffer`` each step. Uses a per-env
-    step counter so async parallel envs are supported."""
+    """Whether to record per-object states and pre-process actions.
+
+    Each saved row is a causal ``(state_t, action_t)`` pair, matching expert
+    trajectory frame alignment. Uses a per-env step counter so async parallel
+    environments are supported.
+    """
 
     trajectory_uids: list[str] | None = None
     """Optional allow-list of non-robot object uids to record. If None, all rigid
@@ -382,6 +386,75 @@ class EmbodiedEnv(BaseEnv):
         self._close_error: BaseException | None = None
         self._close_lock = threading.RLock()
 
+        all_env_ids = torch.arange(self.num_envs, device=self.device)
+        self._seed_recording_state(self._init_raw_obs, all_env_ids)
+
+    def reset(
+        self, seed: int | None = None, options: dict | None = None
+    ) -> tuple[EnvObs, Dict]:
+        """Reset environments and seed pre-action recording state.
+
+        Expert frames must pair the observation before an action with that
+        action. The base reset computes the authoritative post-reset
+        observation, so recording is seeded only after it returns.
+
+        Args:
+            seed: Optional random seed forwarded to :class:`BaseEnv`.
+            options: Reset options. ``reset_ids`` may select only some vector
+                environment rows.
+
+        Returns:
+            The reset observation and info dictionary.
+        """
+        obs, info = super().reset(seed=seed, options=options)
+        if options is None or "reset_ids" not in options:
+            reset_ids = torch.arange(self.num_envs, device=self.device)
+        else:
+            reset_ids = torch.as_tensor(
+                options["reset_ids"], dtype=torch.long, device=self.device
+            ).reshape(-1)
+        self._seed_recording_state(obs, reset_ids)
+        return obs, info
+
+    def _seed_recording_state(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
+        """Seed all enabled recorders from the current environment state."""
+        self._seed_expert_observations(obs, env_ids)
+        self._seed_trajectory_states(env_ids)
+
+    def _seed_expert_observations(self, obs: EnvObs, env_ids: torch.Tensor) -> None:
+        """Copy current observations into pending expert-transition slots."""
+        if (
+            self.rollout_buffer is None
+            or getattr(self, "_rollout_buffer_mode", "expert") == "rl"
+            or env_ids.numel() == 0
+        ):
+            return
+        eligible = self.rollout_steps[env_ids] < self._max_rollout_steps
+        env_ids = env_ids[eligible]
+        if env_ids.numel() == 0:
+            return
+        step_ids = self.rollout_steps[env_ids]
+        buffer_device = self.rollout_buffer.device
+        buffer_env_ids = env_ids.to(buffer_device)
+        buffer_step_ids = step_ids.to(buffer_device)
+        obs_device = getattr(obs, "device", None) or self.device
+        obs_env_ids = env_ids.to(obs_device)
+        self.rollout_buffer["obs"][buffer_env_ids, buffer_step_ids] = obs[
+            obs_env_ids
+        ].to(buffer_device)
+
+    def _seed_trajectory_states(self, env_ids: torch.Tensor) -> None:
+        """Copy current states into pending trajectory-transition slots."""
+        if self._traj_buffer is None or env_ids.numel() == 0:
+            return
+        env_ids = env_ids.to(device=self.device, dtype=torch.long)
+        eligible = self._traj_steps[env_ids] < self._traj_buffer.shape[1]
+        env_ids = env_ids[eligible]
+        if env_ids.numel() == 0:
+            return
+        step_ids = self._traj_steps[env_ids]
+        capture_trajectory_state(self, self._traj_buffer["states"], env_ids, step_ids)
+
     def set_rollout_buffer(self, rollout_buffer: TensorDict) -> None:
         """Set the rollout buffer for episode data collection.
 
@@ -422,9 +495,9 @@ class EmbodiedEnv(BaseEnv):
         self.rollout_steps.zero_()
         self.current_rollout_step = 0
         if self._rollout_buffer_mode != "rl":
-            self._clear_expert_rollout_rows(
-                torch.arange(self.num_envs, device=self.device)
-            )
+            env_ids = torch.arange(self.num_envs, device=self.device)
+            self._clear_expert_rollout_rows(env_ids)
+            self._seed_expert_observations(self.get_obs(), env_ids)
 
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
@@ -1017,27 +1090,29 @@ class EmbodiedEnv(BaseEnv):
         terminateds: torch.Tensor | None = None,
         truncateds: torch.Tensor | None = None,
     ) -> None:
-        """Write one expert step at each environment's independent cursor."""
+        """Complete one causally aligned expert transition per active env.
+
+        The observation at each cursor is seeded before its action is applied.
+        This method fills transition fields at that cursor, then seeds the
+        returned post-action observation as the next pending pre-action state.
+        """
         buffer_device = self.rollout_buffer.device
         active = self.rollout_steps < self._max_rollout_steps
         demo_active = getattr(self, "_demo_active_mask", None)
         if demo_active is not None:
             active &= demo_active.to(active.device)
-        if not bool(active.any()):
+        env_ids = active.nonzero(as_tuple=False).squeeze(-1)
+        if env_ids.numel() == 0:
             logger.log_warning(
                 "No active expert rollout row can accept another frame; "
                 "new frames are dropped."
             )
             return
 
-        env_ids = active.nonzero(as_tuple=False).squeeze(-1)
         step_ids = self.rollout_steps[env_ids]
         buffer_env_ids = env_ids.to(buffer_device)
         buffer_step_ids = step_ids.to(buffer_device)
 
-        self.rollout_buffer["obs"][buffer_env_ids, buffer_step_ids] = obs[env_ids].to(
-            buffer_device
-        )
         if isinstance(action, TensorDict):
             action_to_store = (
                 action["qpos"]
@@ -1100,7 +1175,7 @@ class EmbodiedEnv(BaseEnv):
             truncateds = torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
-        terminal = terminateds | truncateds
+        terminal = terminateds.to(self.device) | truncateds.to(self.device)
         if "terminated" in buffer_keys:
             self.rollout_buffer["terminated"][buffer_env_ids, buffer_step_ids] = (
                 terminateds[env_ids].to(buffer_device)
@@ -1115,44 +1190,30 @@ class EmbodiedEnv(BaseEnv):
             )
 
         self.rollout_steps[env_ids] += 1
+        next_env_ids = env_ids[self.rollout_steps[env_ids] < self._max_rollout_steps]
+        self._seed_expert_observations(obs, next_env_ids)
         self.current_rollout_step = int(self.rollout_steps.max().item())
 
     def _write_trajectory_step(self) -> None:
-        """Write one step of per-env ``states`` + pre-process ``action`` into ``_traj_buffer``."""
+        """Complete one pre-action ``state`` + ``action`` trajectory row."""
         if self._traj_buffer is None:
             return
         max_steps = self._traj_buffer.shape[1]
-        env_idx = torch.arange(self.num_envs, device=self.device)
         step = self._traj_steps
         mask = step < max_steps
         demo_active = getattr(self, "_demo_active_mask", None)
         if demo_active is not None:
             mask &= demo_active.to(mask.device)
-        if not bool(mask.any()):
+        idx = mask.nonzero(as_tuple=False).squeeze(-1)
+        if idx.numel() == 0:
             return
-        idx = env_idx[mask]
-        st = step[mask]
-        states = self._traj_buffer["states"]
-        # Advanced indexing here returns a copy, so ``copy_`` would silently drop
-        # writes; use assignment (`[idx, st] = ...`) which scatters in-place.
-        states["robot"]["root_pose"][idx, st] = self.robot.get_local_pose()[idx]
-        states["robot"]["qpos"][idx, st] = self.robot.get_qpos()[idx]
-        if "articulations" in states.keys():
-            for uid, art in self.sim._articulations.items():
-                if uid in states["articulations"].keys():
-                    states["articulations"][uid]["root_pose"][
-                        idx, st
-                    ] = art.get_local_pose()[idx]
-                    states["articulations"][uid]["qpos"][idx, st] = art.get_qpos()[idx]
-        if "rigid_objects" in states.keys():
-            for uid, obj in self.sim._rigid_objects.items():
-                if uid in states["rigid_objects"].keys():
-                    states["rigid_objects"][uid]["pose"][
-                        idx, st
-                    ] = obj.get_local_pose()[idx]
+        st = step[idx]
         if self._traj_raw_action is not None:
             self._traj_buffer["actions"][idx, st] = self._traj_raw_action[idx]
         self._traj_steps[idx] += 1
+        next_env_ids = idx[self._traj_steps[idx] < self._traj_buffer.shape[1]]
+        self._seed_trajectory_states(next_env_ids)
+        self._traj_raw_action = None
 
     def _write_rl_rollout_step(
         self,
@@ -1490,7 +1551,9 @@ class EmbodiedEnv(BaseEnv):
     def _preprocess_action(self, action: EnvAction) -> EnvAction:
         """Delegate to ActionManager when configured; stash raw action for trajectory."""
         if self._traj_buffer is not None:
-            self._traj_raw_action = action
+            self._traj_raw_action = (
+                action.clone() if hasattr(action, "clone") else action
+            )
         if self.action_manager is not None:
             action = self.action_manager.process_action(action, mode="pre")
         else:
@@ -1721,7 +1784,10 @@ class EmbodiedEnv(BaseEnv):
         return (DemoSegment(actions=actions, name="legacy"),)
 
     def save_trajectory(self, path: str, env_ids: Sequence[int] | None = None) -> str:
-        """Save recorded trajectory (states + actions) to a ``.pt`` file.
+        """Save a causally aligned trajectory to a ``.pt`` file.
+
+        ``states[t]`` is the state immediately before ``actions[t]`` is applied,
+        matching the frame alignment used by expert/LeRobot trajectories.
 
         Args:
             path: Destination ``.pt`` file path.
@@ -1737,7 +1803,10 @@ class EmbodiedEnv(BaseEnv):
             )
         if env_ids is None:
             env_ids = list(range(self.num_envs))
-        env_ids_t = torch.as_tensor(list(env_ids), dtype=torch.long, device=self.device)
+        env_ids = list(env_ids)
+        if not env_ids:
+            raise ValueError("env_ids must contain at least one environment row.")
+        env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         lengths = self._traj_steps[env_ids_t]
         max_len = int(lengths.max().item()) if len(env_ids) > 0 else 0
         sub = self._traj_buffer[env_ids_t]

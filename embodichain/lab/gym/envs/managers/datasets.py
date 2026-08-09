@@ -337,7 +337,9 @@ class LeRobotRecorder(Functor):
             logger.log_warning(f"No episode data to save for env {env_id}")
             return False
 
-        # Align obs and action (obs may be one longer than action)
+        # Native expert buffers provide causal (s_t, a_t) pairs of equal length.
+        # Keep the trim for legacy/external callers that still pass a trailing
+        # next observation.
         if len(obs_list) > len(action_list):
             obs_list = obs_list[:-1]
         episode_length = min(len(obs_list), len(action_list))

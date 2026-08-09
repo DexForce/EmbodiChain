@@ -491,14 +491,18 @@ class _RolloutWriterStub:
     """Attributes required by EmbodiedEnv's pure rollout writer method."""
 
     num_envs = 2
+    device = torch.device("cpu")
     _max_rollout_steps = 5
     _demo_active_segment_id = 4
+    _seed_expert_observations = EmbodiedEnv._seed_expert_observations
 
     def __init__(self) -> None:
         self.rollout_buffer = _make_rollout_buffer(2, 5)
         self.rollout_steps = torch.tensor([0, 2], dtype=torch.long)
         self.current_rollout_step = 2
         self._demo_active_segment_start_steps = torch.tensor([0, 2])
+        self.rollout_buffer["obs"]["state"][0, 0] = 10.0
+        self.rollout_buffer["obs"]["state"][1, 2] = 20.0
 
 
 def test_expert_rollout_writer_uses_independent_per_env_lengths() -> None:
@@ -521,6 +525,18 @@ def test_expert_rollout_writer_uses_independent_per_env_lengths() -> None:
     assert env.rollout_buffer["segment_id"][0, 0].item() == 4
     assert env.rollout_buffer["segment_step"][1, 2].item() == 0
     assert env.rollout_buffer["segment_end"][1, 2]
+    assert torch.equal(
+        env.rollout_buffer["obs"]["state"][0, 0], torch.tensor([10.0, 10.0])
+    )
+    assert torch.equal(
+        env.rollout_buffer["obs"]["state"][1, 2], torch.tensor([20.0, 20.0])
+    )
+    assert torch.equal(
+        env.rollout_buffer["obs"]["state"][0, 1], torch.tensor([1.0, 1.0])
+    )
+    assert torch.equal(
+        env.rollout_buffer["obs"]["state"][1, 3], torch.tensor([2.0, 2.0])
+    )
     assert env.current_rollout_step == 3
 
 
@@ -647,6 +663,7 @@ class _TrajectoryRobotStub:
 class _TrajectoryWriterStub:
     num_envs = 2
     device = torch.device("cpu")
+    _seed_trajectory_states = EmbodiedEnv._seed_trajectory_states
 
     def __init__(self) -> None:
         self._traj_buffer = TensorDict(
@@ -670,6 +687,7 @@ class _TrajectoryWriterStub:
             (),
             {"_articulations": {}, "_rigid_objects": {}},
         )()
+        self._traj_buffer["states"]["robot"]["qpos"][1, 1] = torch.tensor([0.3, 0.4])
 
 
 def test_trajectory_writer_freezes_inactive_demo_row() -> None:
@@ -686,6 +704,7 @@ def test_trajectory_writer_freezes_inactive_demo_row() -> None:
         env._traj_buffer["states"]["robot"]["qpos"][1, 1],
         torch.tensor([0.3, 0.4]),
     )
+    assert torch.equal(env._traj_buffer["actions"][1, 1], torch.tensor([8.0, 8.0]))
 
 
 def test_success_status_freezes_after_staggered_demo_completion() -> None:
