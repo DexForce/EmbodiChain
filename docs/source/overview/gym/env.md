@@ -39,7 +39,24 @@ Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it incl
   The seed for the random number generator. Defaults to ``None``, in which case the seed is not set. The seed is set at the beginning of the environment initialization to ensure deterministic behavior across different runs.
 
 * **sim_steps_per_control** (int): 
-  Number of simulation steps per control (environment) step. This parameter determines the relationship between the simulation timestep and the control timestep. For instance, if the simulation dt is 0.01s and the control dt is 0.1s, then ``sim_steps_per_control`` should be 10. This means that the control action is updated every 10 simulation steps. Defaults to ``4``.
+  Number of physics simulation steps per control (environment) step. This integer decimation determines the actual environment cadence. For instance, if the physics timestep is 0.01 s and ``sim_steps_per_control`` is 10, each environment step represents 0.1 s. Defaults to ``4``.
+
+* **target_control_frequency** (float | None):
+  Optional convenience setting for a desired control frequency. EmbodiChain converts it to an integer ``sim_steps_per_control`` using the configured physics timestep, taking precedence over a directly configured step count. The requested frequency must be exactly representable; otherwise initialization raises an error instead of changing the physics timestep or silently approximating the rate. Defaults to ``None``.
+
+### Environment Timing
+
+The simulation timestep and the environment sampling timestep have different responsibilities:
+
+```text
+physics_dt = sim_cfg.physics_dt
+step_dt = physics_dt * sim_steps_per_control
+control_frequency = 1 / step_dt
+```
+
+Choose ``physics_dt`` according to physics stability and contact accuracy. To change how often a policy, controller, or expert trajectory supplies an action, change the integer ``sim_steps_per_control`` instead. The environment exposes ``physics_dt``, ``step_dt``, ``physics_frequency``, and ``control_frequency`` as derived runtime properties.
+
+If configuration is easier in hertz, set ``target_control_frequency``. For example, a 0.01 s physics timestep can represent 25 Hz exactly with four physics steps per environment step. It cannot represent 30 Hz exactly, so that combination is rejected.
 
 * **ignore_terminations** (bool): 
   Whether to ignore terminations when deciding when to auto reset. Terminations can be caused by the task reaching a success or fail state as defined in a task's evaluation function. If set to ``False``, episodes will stop early when termination conditions are met. If set to ``True``, episodes will only stop due to the timelimit, which is useful for modeling tasks as infinite horizon. Defaults to ``False``.
@@ -195,7 +212,7 @@ class MyDatasetCfg:
         func="LeRobotRecorder",
         params={
             "save_path": "./outputs/datasets/my_task",
-            "robot_meta": {"robot_type": "my_robot", "control_freq": 25},
+            "robot_meta": {"robot_type": "my_robot"},
             "instruction": {"lang": "move the cube to the goal"},
             "use_videos": False,
         },

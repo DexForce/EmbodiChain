@@ -123,6 +123,11 @@ def test_save_trajectory_round_trip(tmp_path):
         assert data["meta"]["lengths"] == [n, n]
         assert data["meta"]["num_steps"] == n
         assert data["meta"]["num_envs"] == 2
+        assert data["meta"]["dt"] == pytest.approx(env.step_dt)
+        assert data["meta"]["physics_dt"] == pytest.approx(env.physics_dt)
+        assert data["meta"]["sim_steps_per_control"] == 4
+        assert data["meta"]["step_dt"] == pytest.approx(env.step_dt)
+        assert data["meta"]["control_frequency"] == pytest.approx(env.control_frequency)
         assert tuple(data["states"]["robot"]["qpos"].shape) == (2, n, 6)
         assert data["actions"].shape == (2, n, 6)
         assert "cube" in data["states"]["rigid_objects"].keys()

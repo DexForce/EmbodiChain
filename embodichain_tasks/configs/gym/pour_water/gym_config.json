@@ -213,8 +213,7 @@
                 "mode": "save",
                 "params": {
                     "robot_meta": {
-                        "robot_type": "CobotMagic",
-                        "control_freq": 25
+                        "robot_type": "CobotMagic"
                     },
                     "instruction": {
                         "lang": "Pour water from bottle to cup"

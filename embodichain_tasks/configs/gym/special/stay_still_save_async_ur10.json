@@ -10,8 +10,7 @@
                 "save_failed_episodes": true,
                 "params": {
                     "robot_meta": {
-                        "robot_type": "UR10",
-                        "control_freq": 25
+                        "robot_type": "UR10"
                     },
                     "instruction": {
                         "lang": "Hold still while recording"
