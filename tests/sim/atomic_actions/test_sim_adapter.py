@@ -199,6 +199,39 @@ def test_simulation_adapter_supplies_time_and_ids_to_scene_provider() -> None:
     assert context.scene.version == 3
 
 
+def test_simulation_adapter_supplies_elapsed_time_to_scene_callback() -> None:
+    simulation, robot = _simulation_and_robot()
+    timestamps: list[float] = []
+
+    def scene_supplier(timestamp: float) -> SceneSnapshot:
+        timestamps.append(timestamp)
+        return SceneSnapshot(timestamp=timestamp, version=3)
+
+    adapter = SimulationExecutionAdapter(
+        simulation,
+        robot,
+        scene_supplier=scene_supplier,
+    )
+    adapter.sleep(PHYSICS_DT)
+
+    context = adapter.observe(TaskState.empty(BATCH_SIZE, "cpu"))
+
+    assert timestamps == pytest.approx([PHYSICS_DT])
+    assert context.scene.version == 3
+
+
+def test_simulation_adapter_rejects_two_scene_sources() -> None:
+    simulation, robot = _simulation_and_robot()
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        SimulationExecutionAdapter(
+            simulation,
+            robot,
+            scene_provider=Mock(),
+            scene_supplier=Mock(),
+        )
+
+
 def test_rigid_object_scene_provider_tracks_per_environment_collision_revision() -> (
     None
 ):

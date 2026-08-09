@@ -442,6 +442,7 @@ topics:
       - ObservationProvider
       - CommandSink
       - SimulationExecutionAdapter
+      - SceneSnapshotSupplier
       - SceneProvider
       - RigidObjectSceneProvider
       - collision world revision

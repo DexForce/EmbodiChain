@@ -123,6 +123,7 @@ from .scene import SceneProvider
 from .sim_adapter import (
     RigidObjectSceneProvider,
     RigidObjectSceneProviderCfg,
+    SceneSnapshotSupplier,
     SimulationExecutionAdapter,
 )
 from .state import (
@@ -226,6 +227,7 @@ __all__ = [
     "RunnerStepCallback",
     "SceneProvider",
     "SceneSnapshot",
+    "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
     "StateDelta",

@@ -505,6 +505,10 @@ runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
 result = runner.run_until_blocked()
 ```
 
+For a lightweight scene source that does not need environment correlation IDs,
+pass a `scene_supplier(timestamp)` callback instead. `scene_provider` and
+`scene_supplier` are mutually exclusive.
+
 `ExecutionRunner.step()` is the non-blocking entry point for an application
 that already owns its event loop. It observes only when the previous command's
 `hold_duration` has elapsed, dispatches active commands through `CommandSink`,

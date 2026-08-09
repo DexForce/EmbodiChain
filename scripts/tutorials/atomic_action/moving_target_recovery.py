@@ -109,28 +109,23 @@ class _MovingTargetScene:
         self.version = 0
         self.moved = False
 
-    def snapshot(
-        self,
-        *,
-        timestamp: float,
-        env_ids: torch.Tensor,
-    ) -> SceneSnapshot:
+    def snapshot(self, timestamp: float) -> SceneSnapshot:
         """Return the target pose used to ground the late-bound goal.
 
         Args:
             timestamp: Current elapsed simulation time.
-            env_ids: Stable ordered environment correlation IDs.
 
         Returns:
             Versioned scene snapshot containing the target pose.
         """
-        pose = self.target.get_local_pose(to_matrix=True)
-        if pose.shape[0] != env_ids.numel():
-            raise ValueError("Target pose rows must match the supplied env_ids.")
         return SceneSnapshot(
             timestamp=timestamp,
             version=self.version,
-            entities={TARGET_ENTITY_ID: EntityState(pose)},
+            entities={
+                TARGET_ENTITY_ID: EntityState(
+                    self.target.get_local_pose(to_matrix=True)
+                )
+            },
         )
 
     def push(
@@ -255,7 +250,7 @@ def main() -> None:
     sim_runtime = SimulationExecutionAdapter(
         sim,
         robot,
-        scene_provider=target_scene,
+        scene_supplier=target_scene.snapshot,
     )
     motion_gen = create_toppra_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)

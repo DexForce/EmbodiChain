@@ -281,6 +281,10 @@ must be resolved from the latest scene snapshot:
    runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
    result = runner.run_until_blocked()
 
+For a lightweight scene source that does not need environment correlation IDs,
+pass a ``scene_supplier(timestamp)`` callback instead. ``scene_provider`` and
+``scene_supplier`` are mutually exclusive.
+
 The session owns planning progress and bounded recovery. The runner owns the
 outer lifecycle: it requests fresh observations, schedules each command from
 the :class:`~embodichain.lab.sim.atomic_actions.TimedTrajectory` time deltas,

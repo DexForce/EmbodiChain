@@ -163,6 +163,9 @@ identifies obstacle poses consumed by a planner, while
 revision invalidates only affected batch rows. `RigidObjectSceneProvider`
 tracks live simulation objects, filters sub-threshold pose noise, advances the
 general scene version, and maintains per-environment collision revisions.
+For lightweight sources that do not need environment correlation IDs,
+`SimulationExecutionAdapter` also accepts a mutually exclusive
+`SceneSnapshotSupplier(timestamp)` callback.
 
 The public `AtomicAction.plan()` copies `MotionPolicy` and forwards collision
 entity poses through `BasePlanner.with_collision_world()`. Backends opt in via

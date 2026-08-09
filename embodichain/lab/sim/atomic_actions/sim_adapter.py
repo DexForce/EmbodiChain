@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import math
 from typing import TYPE_CHECKING
 
@@ -223,6 +223,10 @@ class RigidObjectSceneProvider:
         )
 
 
+SceneSnapshotSupplier = Callable[[float], SceneSnapshot]
+"""Callback that returns the latest scene snapshot for a simulation timestamp."""
+
+
 class SimulationExecutionAdapter:
     """Adapt a simulation robot to observation, command, and clock protocols.
 
@@ -238,6 +242,8 @@ class SimulationExecutionAdapter:
         env_ids: Optional stable correlation IDs matching every robot row. They
             are not used as simulator indices; row order maps to robot instances.
         scene_provider: Optional provider for versioned scene observations.
+        scene_supplier: Optional callback for versioned scene observations.
+            It is mutually exclusive with ``scene_provider``.
         initial_time: Initial elapsed simulation time in seconds.
     """
 
@@ -249,6 +255,7 @@ class SimulationExecutionAdapter:
         physics_dt: float | None = None,
         env_ids: torch.Tensor | None = None,
         scene_provider: SceneProvider | None = None,
+        scene_supplier: SceneSnapshotSupplier | None = None,
         initial_time: float = 0.0,
     ) -> None:
         if not math.isfinite(initial_time) or initial_time < 0.0:
@@ -281,9 +288,16 @@ class SimulationExecutionAdapter:
         self.physics_dt = resolved_physics_dt
         self.env_ids = env_ids.clone()
         self._robot_env_indices = list(range(qpos.shape[0]))
+        if scene_provider is not None and scene_supplier is not None:
+            raise ValueError(
+                "scene_provider and scene_supplier are mutually exclusive."
+            )
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
         self.scene_provider = scene_provider
+        if scene_supplier is not None and not callable(scene_supplier):
+            raise TypeError("scene_supplier must be callable.")
+        self.scene_supplier = scene_supplier
         self._elapsed_time = float(initial_time)
 
     def now(self) -> float:
@@ -324,16 +338,20 @@ class SimulationExecutionAdapter:
         qeffort = self._read_optional_tensor("get_qf")
         if qeffort is None:
             qeffort = self._read_optional_proprioception_tensor("qf")
-        scene = (
-            SceneSnapshot(timestamp=self._elapsed_time, version=0)
-            if self.scene_provider is None
-            else self.scene_provider.snapshot(
+        if self.scene_provider is not None:
+            scene = self.scene_provider.snapshot(
                 timestamp=self._elapsed_time,
                 env_ids=self.env_ids,
             )
-        )
+            scene_source = "scene_provider"
+        elif self.scene_supplier is not None:
+            scene = self.scene_supplier(self._elapsed_time)
+            scene_source = "scene_supplier"
+        else:
+            scene = SceneSnapshot(timestamp=self._elapsed_time, version=0)
+            scene_source = "default scene"
         if not isinstance(scene, SceneSnapshot):
-            raise TypeError("scene_provider must return a SceneSnapshot.")
+            raise TypeError(f"{scene_source} must return a SceneSnapshot.")
         return PlanningContext(
             robot=RobotObservation(
                 timestamp=self._elapsed_time,
@@ -481,5 +499,6 @@ class SimulationExecutionAdapter:
 __all__ = [
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
+    "SceneSnapshotSupplier",
     "SimulationExecutionAdapter",
 ]
