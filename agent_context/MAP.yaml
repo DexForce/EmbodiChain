@@ -455,7 +455,7 @@ topics:
       - motion primitive
       - action primitive
       - AtomicAction
-      - ActionTarget
+      - ActionInvocation
       - AtomicActionEngine
       - TrajectoryBuilder
       - 原子动作
@@ -465,26 +465,46 @@ topics:
       - AtomicAction
       - AtomicActionEngine
       - TrajectoryBuilder
-      - ActionResult
-      - WorldState
+      - ActionPlan
+      - PlanningContext
+      - ExecutionSession
+      - StateDelta
       - held_objects
-      - ObjectActionTarget
-      - PlaceTarget
-      - PressTarget
-      - target ownership
-      - ActionCfg
-      - motion_source
+      - ActionBinding
+      - SceneEntityPose
+      - dynamic goal
+      - error recovery
+      - ActionOptions
+      - ResolvedActionRequest
+      - ControlPartCommandProfile
+      - ActionControlOverrides
+      - JointPositionCommand
+      - invocation revision
+      - MotionPolicy
+      - RecoveryPolicy
       - plan_arm_traj
       - register_action
+      - BUILTIN_ACTION_TYPES
+      - load_builtins
+      - engine.plan
+      - engine.compile
+      - engine.start
     paths:
       - topics/atomic-actions/atomic-actions.md
     source_of_truth:
       - embodichain/lab/sim/atomic_actions/core.py
-      - embodichain/lab/sim/atomic_actions/targets.py
+      - embodichain/lab/sim/atomic_actions/goals.py
+      - embodichain/lab/sim/atomic_actions/bindings.py
+      - embodichain/lab/sim/atomic_actions/control.py
+      - embodichain/lab/sim/atomic_actions/invocation.py
+      - embodichain/lab/sim/atomic_actions/policies.py
+      - embodichain/lab/sim/atomic_actions/runtime.py
+      - embodichain/lab/sim/atomic_actions/state.py
+      - embodichain/lab/sim/atomic_actions/plans.py
+      - embodichain/lab/sim/atomic_actions/execution.py
       - embodichain/lab/sim/atomic_actions/engine.py
       - embodichain/lab/sim/atomic_actions/trajectory.py
       - embodichain/lab/sim/atomic_actions/primitives/
-      - embodichain/lab/sim/atomic_actions/actions.py
       - embodichain/lab/sim/atomic_actions/__init__.py
     related_topics:
       - motion-planning

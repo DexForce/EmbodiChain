@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import torch
 
 from embodichain.data import get_data_path
@@ -32,6 +33,8 @@ from embodichain.lab.sim.cfg import JointDrivePropertiesCfg, RigidObjectCfg, Rob
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.gym.envs.managers.actions import DeltaQposTerm
 from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
+
+pytestmark = [pytest.mark.requires_sim, pytest.mark.slow]
 
 
 @register_env("ReplayTest-v1", max_episode_steps=100, override=True)
@@ -120,6 +123,11 @@ def test_save_trajectory_round_trip(tmp_path):
         assert data["meta"]["lengths"] == [n, n]
         assert data["meta"]["num_steps"] == n
         assert data["meta"]["num_envs"] == 2
+        assert data["meta"]["dt"] == pytest.approx(env.step_dt)
+        assert data["meta"]["physics_dt"] == pytest.approx(env.physics_dt)
+        assert data["meta"]["sim_steps_per_control"] == 4
+        assert data["meta"]["step_dt"] == pytest.approx(env.step_dt)
+        assert data["meta"]["control_frequency"] == pytest.approx(env.control_frequency)
         assert tuple(data["states"]["robot"]["qpos"].shape) == (2, n, 6)
         assert data["actions"].shape == (2, n, 6)
         assert "cube" in data["states"]["rigid_objects"].keys()

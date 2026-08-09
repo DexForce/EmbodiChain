@@ -1080,6 +1080,7 @@ class RigidObject(BatchEntity):
         mat: VisualMaterial,
         env_ids: Sequence[int] | None = None,
         shared: bool = False,
+        update_default: bool = False,
     ) -> None:
         """Set visual material for the rigid object.
 
@@ -1091,6 +1092,8 @@ class RigidObject(BatchEntity):
             mat (VisualMaterial): The material to set.
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
             shared (bool, optional): Whether to share the material instance among all specified environment indices. Defaults to False.
+            update_default: Whether the assigned material should become the baseline
+                restored by :meth:`reset`. Defaults to False.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -1102,12 +1105,22 @@ class RigidObject(BatchEntity):
             for env_idx in local_env_ids:
                 self._entities[env_idx].set_material(mat_inst.mat)
                 self._visual_material[env_idx] = mat_inst
+                if update_default:
+                    self._original_visual_material[env_idx] = _capture_render_materials(
+                        self._entities[env_idx].get_render_body()
+                    )
+                    self._original_visual_material_inst[env_idx] = mat_inst
             self.is_shared_visual_material = True
         else:
             for i, env_idx in enumerate(local_env_ids):
                 mat_inst = mat.create_instance(f"{mat.uid}_{self.uid}_{env_idx}")
                 self._entities[env_idx].set_material(mat_inst.mat)
                 self._visual_material[env_idx] = mat_inst
+                if update_default:
+                    self._original_visual_material[env_idx] = _capture_render_materials(
+                        self._entities[env_idx].get_render_body()
+                    )
+                    self._original_visual_material_inst[env_idx] = mat_inst
             self.is_shared_visual_material = False
 
     def get_visual_material_inst(

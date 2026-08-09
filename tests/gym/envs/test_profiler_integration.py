@@ -34,6 +34,8 @@ from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.objects import Robot
 
+pytestmark = pytest.mark.requires_sim
+
 
 @register_env("ProfilerProbe-v1", max_episode_steps=100, override=True)
 class _ProfilerProbeEnv(BaseEnv):

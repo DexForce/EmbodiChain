@@ -16,6 +16,9 @@
 
 from __future__ import annotations
 
+import math
+from numbers import Integral
+
 import torch
 import numpy as np
 import gymnasium as gym
@@ -59,6 +62,16 @@ class EnvCfg:
 
     For instance, if the simulation dt is 0.01s and the control dt is 0.1s, then the `sim_steps_per_control` is 10.
     This means that the control action is updated every 10 simulation steps.
+    """
+
+    target_control_frequency: float | None = None
+    """Optional requested control frequency in hertz.
+
+    When set, the environment resolves this value to an integer
+    :attr:`sim_steps_per_control` using the configured physics timestep and
+    takes precedence over the directly configured step count. The requested
+    frequency must be exactly representable; the physics timestep is never
+    changed and the frequency is never silently approximated.
     """
 
     ignore_terminations: bool = False
@@ -139,8 +152,7 @@ class BaseEnv(gym.Env):
         else:
             logger.log_info(f"No seed is set for the environment.")
 
-        self.sim_freq = int(1 / self.sim_cfg.physics_dt)
-        self.control_freq = self.sim_freq // self.cfg.sim_steps_per_control
+        self._configure_timing()
 
         self._setup_scene(**kwargs)
 
@@ -181,15 +193,119 @@ class BaseEnv(gym.Env):
         logger.log_info(f"\tEnvironment device    : {self.sim.device}")
         logger.log_info(f"\tNumber of environments: {self._num_envs}")
         logger.log_info(f"\tEnvironment seed      : {self.cfg.seed}")
-        logger.log_info(f"\tPhysics dt            : {self.sim_cfg.physics_dt}")
-        logger.log_info(
-            f"\tEnvironment dt        : {self.sim_cfg.physics_dt * self.cfg.sim_steps_per_control}"
-        )
+        logger.log_info(f"\tPhysics dt            : {self.physics_dt}")
+        logger.log_info(f"\tEnvironment dt        : {self.step_dt}")
+        logger.log_info(f"\tControl frequency     : {self.control_frequency} Hz")
+
+    def _configure_timing(self) -> None:
+        """Validate and expose the environment's simulation-derived timing."""
+        physics_dt = self.sim_cfg.physics_dt
+        try:
+            physics_dt_value = float(physics_dt)
+        except (TypeError, ValueError):
+            physics_dt_value = math.nan
+        if (
+            isinstance(physics_dt, bool)
+            or not math.isfinite(physics_dt_value)
+            or physics_dt_value <= 0.0
+        ):
+            raise ValueError(
+                f"physics_dt must be a finite positive number, got {physics_dt!r}."
+            )
+
+        target_frequency = self.cfg.target_control_frequency
+        if target_frequency is not None:
+            try:
+                target_frequency_value = float(target_frequency)
+            except (TypeError, ValueError):
+                target_frequency_value = math.nan
+            if (
+                isinstance(target_frequency, bool)
+                or not math.isfinite(target_frequency_value)
+                or target_frequency_value <= 0.0
+            ):
+                raise ValueError(
+                    "target_control_frequency must be a finite positive number, "
+                    f"got {target_frequency!r}."
+                )
+
+            ideal_steps = 1.0 / (physics_dt_value * target_frequency_value)
+            resolved_steps = max(1, round(ideal_steps))
+            if not math.isclose(
+                ideal_steps, float(resolved_steps), rel_tol=0.0, abs_tol=1e-9
+            ):
+                achievable_frequency = 1.0 / (physics_dt_value * resolved_steps)
+                raise ValueError(
+                    f"target_control_frequency={target_frequency!r} cannot be "
+                    f"represented exactly with physics_dt={physics_dt!r}. The nearest "
+                    f"integer sim_steps_per_control is {resolved_steps}, which gives "
+                    f"{achievable_frequency:g} Hz. Set sim_steps_per_control explicitly "
+                    "or choose an exactly representable target frequency."
+                )
+            self.cfg.sim_steps_per_control = resolved_steps
+
+        sim_steps = self.cfg.sim_steps_per_control
+        if isinstance(sim_steps, bool) or not isinstance(sim_steps, Integral):
+            raise ValueError(
+                "sim_steps_per_control must be a positive integer, "
+                f"got {sim_steps!r}."
+            )
+        if sim_steps <= 0:
+            raise ValueError(
+                "sim_steps_per_control must be a positive integer, "
+                f"got {sim_steps!r}."
+            )
+
+        # Backwards-compatible aliases. Unlike the previous integer division,
+        # these values preserve the exact rate implied by the simulation.
+        self.sim_freq = self.physics_frequency
+        self.control_freq = self.control_frequency
+
+        # Gym consumers (for example video recorders) should observe the same
+        # cadence as environment and dataset steps.
+        self.metadata = dict(self.metadata)
+        self.metadata["render_fps"] = self.control_frequency
 
     @property
     def num_envs(self) -> int:
         """Return the number of environments simulated in parallel."""
         return self._num_envs
+
+    @property
+    def physics_dt(self) -> float:
+        """Return the duration of one physics simulation step.
+
+        Returns:
+            Physics simulation step duration in seconds.
+        """
+        return float(self.sim_cfg.physics_dt)
+
+    @property
+    def step_dt(self) -> float:
+        """Return the duration of one environment control step.
+
+        Returns:
+            Environment control step duration in seconds.
+        """
+        return self.physics_dt * int(self.cfg.sim_steps_per_control)
+
+    @property
+    def physics_frequency(self) -> float:
+        """Return the physics simulation frequency.
+
+        Returns:
+            Physics simulation frequency in hertz.
+        """
+        return 1.0 / self.physics_dt
+
+    @property
+    def control_frequency(self) -> float:
+        """Return the environment control frequency.
+
+        Returns:
+            Environment control frequency in hertz.
+        """
+        return 1.0 / self.step_dt
 
     @property
     def device(self) -> torch.device:
@@ -667,7 +783,7 @@ class BaseEnv(gym.Env):
                 action = self._step_action(action=action)
 
             with self._profiler.section("sim_update"):
-                self.sim.update(self.sim_cfg.physics_dt, self.cfg.sim_steps_per_control)
+                self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
             with self._profiler.section("update_sim_state"):
                 self._update_sim_state(**kwargs)
 

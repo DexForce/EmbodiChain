@@ -102,7 +102,8 @@ The browser scene currently includes:
 - each constituent object in a `RigidObjectGroup`;
 - every visible link of `Robot` and `Articulation`;
 - dynamic `SoftObject` and `ClothObject` geometry;
-- camera frustums and low-frequency RGB previews;
+- camera frustums and low-frequency RGB previews, including the primary (left)
+  RGB view of stereo sensors;
 - read-only Gizmo frames, or interactive transform controls when commands are
   explicitly enabled;
 - a default XY ground grid with 1 m cells and 10 m major sections;
@@ -192,17 +193,24 @@ for large deformable meshes or multiple visible environments.
 
 ## Cameras and browser controls
 
-The **Cameras** panel lets you select one environment and sensor. It provides:
+The **Cameras** panel lets you select one environment and a sensor frustum. It
+provides:
 
 - a camera-frustum visibility switch;
-- an RGB-preview switch;
-- independent environment and camera selectors.
+- an RGB-previews switch;
+- independent environment and frustum-camera selectors.
 
-Only the selected frustum and RGB preview are shown. RGB images use a separate
-latest-frame queue and `sensor_image_fps`, so image rendering cannot build up a
-backlog behind simulation frames. Setting `sensor_image_fps=None` captures
-after each eligible simulation step; `run-env --viser` uses this mode by
-default.
+Only the selected frustum is shown. The expanded **RGB previews** folder shows
+every RGB-capable camera in the selected environment at the same time, split
+into separate **Record cameras** and **Sensor cameras** folders. Record cameras
+are created by event functors such as `record_camera_data`; sensor cameras
+include the primary (left) RGB observation of each `StereoCamera`. Both groups
+are expanded by default, and the camera selector controls only the frustum.
+
+RGB images use a separate latest-frame queue and `sensor_image_fps`, so image
+rendering cannot build up a backlog behind simulation frames. Setting
+`sensor_image_fps=None` captures after each eligible simulation step;
+`run-env --viser` uses this mode by default.
 
 The **Environments** panel independently hides or shows exported environments.
 For more than 16 environments, it switches to a scalable **Show all
@@ -211,6 +219,11 @@ one GUI checkbox per environment.
 The **Overlays** panel controls frames, trajectories, targets, and point clouds.
 Hiding an environment affects its static meshes, deformable meshes, and camera
 frustum together.
+
+When `run-env --replay --replay_mode control --viser` is active, the expanded
+**Replay control** panel adds an integer **Frame** slider. Browser seeks are
+coalesced and applied on the replay thread; dragging the slider pauses terminal
+auto-play, and terminal frame changes update the browser value.
 
 ## Configuration reference
 

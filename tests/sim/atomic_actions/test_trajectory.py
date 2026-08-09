@@ -23,6 +23,9 @@ import torch
 from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    resolve_object_target,
+)
 
 
 def _make_mock_motion_generator(num_envs: int = 2, arm_dof: int = 6) -> Mock:
@@ -71,6 +74,24 @@ class TestAllEnvsSuccess:
     def test_tensor_any_false(self):
         assert self.builder.all_envs_success(torch.tensor([True, False])) is False
 
+    def test_binary_integer_success_is_normalized_at_planner_boundary(self):
+        success = self.builder._resolve_success_mask(
+            torch.tensor([1, 0], dtype=torch.int32),
+            n_envs=2,
+            name="IK success",
+        )
+
+        assert success.dtype == torch.bool
+        assert success.tolist() == [True, False]
+
+    def test_non_binary_integer_success_is_rejected(self):
+        with pytest.raises(TypeError, match="binary integer"):
+            self.builder._resolve_success_mask(
+                torch.tensor([1, 2], dtype=torch.int32),
+                n_envs=2,
+                name="IK success",
+            )
+
 
 class TestResolvePoseTarget:
     def setup_method(self):
@@ -85,6 +106,12 @@ class TestResolvePoseTarget:
         pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
         out = self.builder.resolve_pose_target(pose, n_envs=2)
         assert torch.equal(out, pose)
+
+    def test_batched_pose_returns_owned_tensor(self):
+        pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
+        out = self.builder.resolve_pose_target(pose, n_envs=2)
+        out[:, 0, 0] = 2.0
+        assert torch.equal(pose, torch.eye(4).unsqueeze(0).repeat(2, 1, 1))
 
     def test_pose_converts_to_builder_dtype_and_device(self):
         pose = torch.eye(4, dtype=torch.float64)
@@ -115,6 +142,20 @@ class TestResolvePoseTarget:
             self.builder.resolve_pose_target(empty, n_envs=2)
 
 
+class TestResolveObjectTarget:
+    def test_batched_pose_returns_owned_tensor(self):
+        pose = torch.eye(4).unsqueeze(0).repeat(2, 1, 1)
+        out = resolve_object_target(
+            pose,
+            n_envs=2,
+            device=torch.device("cpu"),
+        )
+
+        out[:, 0, 0] = 2.0
+
+        assert torch.equal(pose, torch.eye(4).unsqueeze(0).repeat(2, 1, 1))
+
+
 class TestResolveJointTarget:
     def setup_method(self):
         self.builder = TrajectoryBuilder(_make_mock_motion_generator())
@@ -134,6 +175,15 @@ class TestResolveJointTarget:
             qpos, n_envs=2, joint_dof=6, control_part="arm"
         )
         assert torch.equal(out, qpos)
+
+    def test_batched_qpos_returns_owned_tensor(self):
+        qpos = torch.arange(12, dtype=torch.float32).reshape(2, 6)
+        expected = qpos.clone()
+        out = self.builder.resolve_joint_target(
+            qpos, n_envs=2, joint_dof=6, control_part="arm"
+        )
+        out.zero_()
+        assert torch.equal(qpos, expected)
 
     def test_wrong_shape_raises(self):
         with pytest.raises(Exception):
@@ -275,6 +325,25 @@ class TestPlanJointTraj:
         assert torch.equal(kwargs["trajectory"][:, 0, :], start)
         assert torch.equal(kwargs["trajectory"][:, 1, :], waypoints[:, 0, :])
         assert torch.equal(kwargs["trajectory"][:, 2, :], waypoints[:, 1, :])
+
+    def test_emits_every_multi_waypoint_as_exact_sample(self):
+        start = torch.zeros(2, 6)
+        waypoints = torch.stack([torch.ones(2, 6), torch.full((2, 6), 3.0)], dim=1)
+
+        result = self.builder.plan_joint_traj(start, waypoints, n_waypoints=5)
+
+        keyframes = torch.cat([start.unsqueeze(1), waypoints], dim=1)
+        matches = torch.all(result.unsqueeze(2) == keyframes.unsqueeze(1), dim=-1).any(
+            dim=1
+        )
+        assert torch.all(matches)
+
+    def test_rejects_sample_count_smaller_than_keyframe_count(self):
+        start = torch.zeros(2, 6)
+        waypoints = torch.stack([torch.ones(2, 6), torch.full((2, 6), 3.0)], dim=1)
+
+        with pytest.raises(ValueError, match="at least the number of keyframes"):
+            self.builder.plan_joint_traj(start, waypoints, n_waypoints=2)
 
 
 class TestIkSolve:

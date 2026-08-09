@@ -559,6 +559,8 @@ class TestConfigToCfgFromFile:
                 },
             },
             "env": {
+                "sim_steps_per_control": 2,
+                "target_control_frequency": 20.0,
                 "events": {},
                 "observations": {},
                 "rewards": {},
@@ -587,6 +589,8 @@ class TestConfigToCfgFromFile:
 
         assert cfg.max_episode_steps == 100
         assert cfg.robot.uid == "TestRobot"
+        assert cfg.sim_steps_per_control == 2
+        assert cfg.target_control_frequency == 20.0
         np.testing.assert_array_equal(
             cfg.sim_cfg.physics_config.gravity, [0.0, 0.0, -1.62]
         )

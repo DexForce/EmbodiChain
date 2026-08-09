@@ -23,6 +23,7 @@ import sys
 import time
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import gymnasium
 import numpy as np
@@ -41,8 +42,32 @@ from embodichain.lab.gym.utils.registration import (
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
 
+if TYPE_CHECKING:
+    from embodichain.lab.visualization import VisualizationRuntime
 
-def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
+_REPLAY_CONTROL_POLL_INTERVAL = 0.05
+
+
+def generate_and_execute_action_list(
+    env: gymnasium.Env,
+    idx: int,
+    debug_mode: bool,
+    *,
+    episode_idx: int = 0,
+    **kwargs: object,
+) -> bool:
+    """Generate and execute one demonstration action list.
+
+    Args:
+        env: Environment used to generate and execute the actions.
+        idx: Index of the action list within the current episode.
+        debug_mode: Whether debug mode is enabled.
+        episode_idx: Index of the current episode.
+        **kwargs: Additional arguments forwarded to action generation.
+
+    Returns:
+        Whether a non-empty action list was generated and executed.
+    """
 
     action_list = env.get_wrapper_attr("create_demo_action_list")(
         action_sentence=idx, **kwargs
@@ -53,7 +78,9 @@ def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
         return False
 
     for action in tqdm.tqdm(
-        action_list, desc=f"Executing action list #{idx}", unit="step"
+        action_list,
+        desc=f"Executing episode #{episode_idx}, action list #{idx}",
+        unit="step",
     ):
         # Step the environment with the current action
         # The environment will automatically detect truncation based on action_length
@@ -99,7 +126,11 @@ def generate_function(
         ret = []
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(
-                env, trajectory_idx, debug_mode, **kwargs
+                env,
+                trajectory_idx,
+                debug_mode,
+                episode_idx=time_id,
+                **kwargs,
             )
 
             if not valid:
@@ -258,99 +289,167 @@ def _read_replay_control_command(
 
 
 def _run_replay_control_loop(
-    replay_env: ReplayWrapper, control_input: _ReplayControlInput
+    replay_env: ReplayWrapper,
+    control_input: _ReplayControlInput,
+    *,
+    visualization_runtime: VisualizationRuntime | None = None,
 ) -> None:
     """Run the interactive replay loop using the provided input source."""
     num_steps = int(replay_env._lengths.min().item())
     max_step = num_steps - 1
     step = 0
-    replay_env.go_to_step(step)
     dt = (
         float(replay_env.env.sim_cfg.physics_dt)
         * replay_env.env.cfg.sim_steps_per_control
     )
     pending_command = None
     auto_playing = False
+    prompt_visible = False
+    terminal_active = True
 
-    print(f"Trajectory has {num_steps} steps (0..{max_step}).")
-    while True:
-        if auto_playing:
-            if step >= max_step:
-                auto_playing = False
-                print(f"\nAuto replay finished at step {step}.")
-                continue
-
-            step += 1
-            replay_env.go_to_step(step)
-            print(
-                f"\r[auto step {step}/{max_step}]  press any key to pause",
-                end="",
-                flush=True,
+    def publish_state(*, visible: bool = True) -> None:
+        if visualization_runtime is not None:
+            visualization_runtime.publish_replay_control(
+                step=step,
+                max_step=max_step,
+                visible=visible,
             )
-            try:
-                key = control_input.read_key(timeout=dt)
-            except (EOFError, KeyboardInterrupt):
-                print()
-                break
-            if key is None:
-                continue
 
-            auto_playing = False
-            print(f"\nPaused at step {step}.")
-            # Pause keys are consumed. Other keys also pause and then execute
-            # their normal command, so p/n/q/r remain responsive during auto.
-            if key not in ("a", " ", "\r", "\n"):
-                pending_command = key
-            continue
-
-        print(
-            f"[step {step}/{max_step}]  n=next  p=prev  <N>=jump  "
-            "a=auto  r=reset  q=quit"
-        )
-        if control_input.single_key:
-            print("> ", end="", flush=True)
-        try:
-            command = _read_replay_control_command(
-                control_input, initial=pending_command
-            )
-        except (EOFError, KeyboardInterrupt):
-            break
-        finally:
-            pending_command = None
-        if control_input.single_key and not command.isdigit():
-            print()
-
-        if command in ("q", "quit"):
-            break
-        if command in ("n", ""):
-            step = min(step + 1, max_step)
-        elif command in ("p", "b"):
-            step = max(step - 1, 0)
-        elif command == "r":
-            step = 0
-        elif command == "a":
-            auto_playing = True
-            continue
-        elif command.isdigit():
-            step = max(0, min(int(command), max_step))
-        elif command == " ":
-            continue
-        else:
-            print(f"Unknown command: {command!r}")
-            continue
+    def seek(target: int) -> None:
+        nonlocal step
+        step = max(0, min(int(target), max_step))
         replay_env.go_to_step(step)
+        publish_state()
+
+    def read_key(timeout: float | None) -> str | None:
+        nonlocal terminal_active
+        if not terminal_active:
+            time.sleep(timeout or _REPLAY_CONTROL_POLL_INTERVAL)
+            return None
+        try:
+            return control_input.read_key(timeout=timeout)
+        except EOFError:
+            if visualization_runtime is None:
+                raise
+            terminal_active = False
+            return None
+
+    seek(0)
+    print(f"Trajectory has {num_steps} steps (0..{max_step}).")
+    try:
+        while True:
+            if visualization_runtime is not None:
+                browser_step = visualization_runtime.drain_replay_control_command()
+                if browser_step is not None:
+                    if auto_playing:
+                        print(f"\nPaused at step {step}.")
+                    auto_playing = False
+                    pending_command = None
+                    seek(browser_step)
+                    prompt_visible = False
+                    continue
+
+            if auto_playing:
+                if step >= max_step:
+                    auto_playing = False
+                    prompt_visible = False
+                    print(f"\nAuto replay finished at step {step}.")
+                    continue
+
+                seek(step + 1)
+                print(
+                    f"\r[auto step {step}/{max_step}]  press any key to pause",
+                    end="",
+                    flush=True,
+                )
+                try:
+                    key = read_key(dt)
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if key is None:
+                    continue
+
+                auto_playing = False
+                prompt_visible = False
+                print(f"\nPaused at step {step}.")
+                if key not in ("a", " ", "\r", "\n"):
+                    pending_command = key
+                continue
+
+            if not prompt_visible:
+                print(
+                    f"[step {step}/{max_step}]  n=next  p=prev  <N>=jump  "
+                    "a=auto  r=reset  q=quit"
+                )
+                if control_input.single_key and terminal_active:
+                    print("> ", end="", flush=True)
+                prompt_visible = True
+            try:
+                if pending_command is not None:
+                    initial = pending_command
+                elif visualization_runtime is not None:
+                    initial = read_key(_REPLAY_CONTROL_POLL_INTERVAL)
+                    if initial is None:
+                        continue
+                else:
+                    initial = None
+                command = _read_replay_control_command(
+                    control_input,
+                    initial=initial,
+                )
+            except (EOFError, KeyboardInterrupt):
+                break
+            finally:
+                pending_command = None
+            if control_input.single_key and not command.isdigit():
+                print()
+            prompt_visible = False
+            if command in ("q", "quit"):
+                break
+            if command in ("n", ""):
+                seek(step + 1)
+            elif command in ("p", "b"):
+                seek(step - 1)
+            elif command == "r":
+                seek(0)
+            elif command == "a":
+                auto_playing = True
+            elif command.isdigit():
+                seek(int(command))
+            elif command == " ":
+                continue
+            else:
+                print(f"Unknown command: {command!r}")
+    finally:
+        publish_state(visible=False)
+
+
+def _replay_visualization_runtime(
+    replay_env: ReplayWrapper,
+) -> VisualizationRuntime | None:
+    """Return the running Viser runtime used by a replay environment."""
+    runtime = getattr(replay_env.env.sim, "visualization_runtime", None)
+    if runtime is None or not runtime.is_running:
+        return None
+    return runtime
 
 
 def replay_control(replay_env: ReplayWrapper) -> None:
     """Run an interactive, single-key kinematic trajectory scrubber."""
-    if replay_env.env.sim_cfg.headless:
+    visualization_runtime = _replay_visualization_runtime(replay_env)
+    if replay_env.env.sim_cfg.headless and visualization_runtime is None:
         log_warning(
             "control mode with --headless: no window to view the scrub. "
-            "Re-run without --headless to see the replay."
+            "Re-run without --headless or enable --viser to see the replay."
         )
     replay_env.reset()
     with _ReplayControlInput() as control_input:
-        _run_replay_control_loop(replay_env, control_input)
+        _run_replay_control_loop(
+            replay_env,
+            control_input,
+            visualization_runtime=visualization_runtime,
+        )
 
 
 def main(args, env, gym_config):

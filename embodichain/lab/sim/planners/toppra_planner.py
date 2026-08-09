@@ -396,13 +396,17 @@ class ToppraPlanner(BasePlanner):
 
         self._pool = None
 
+    def close(self) -> None:
+        """Release TOPPRA worker processes owned by this planner."""
+        self._shutdown_pool()
+
     def __del__(self):
         # Only matters for in-process GC of an abandoned planner (and as a
         # non-Linux fallback).  Process-exit cleanup is handled by the kernel
         # via PR_SET_PDEATHSIG installed in each worker, which survives the
         # os._exit(0) path that SimulationManager.destroy() takes.
         try:
-            self._shutdown_pool()
+            self.close()
         except Exception:
             pass
 
