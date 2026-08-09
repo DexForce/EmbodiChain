@@ -91,7 +91,7 @@ class JointCommand:
     active_mask: torch.Tensor
     env_ids: torch.Tensor
     hold_duration: torch.Tensor
-    """Per-environment arrival interval to wait after dispatching this command."""
+    """Per-environment delay before the next observation/command cycle."""
 
     def __post_init__(self) -> None:
         if self.positions.dim() != 2:
@@ -632,7 +632,14 @@ class ExecutionSession:
             )
         self._last_command = positions.clone()
         self._last_command_mask = active_mask.clone()
-        hold_duration = phase.trajectory.dt[:, waypoint_index]
+        # ``dt[:, i]`` leads to waypoint ``i``. After dispatching waypoint
+        # ``i``, wait for ``dt[:, i + 1]`` before the next dispatch. Reuse the
+        # final arrival interval as its terminal settling window.
+        next_waypoint_index = min(
+            waypoint_index + 1,
+            phase.trajectory.waypoint_count - 1,
+        )
+        hold_duration = phase.trajectory.dt[:, next_waypoint_index]
         return JointCommand(
             positions=positions,
             velocities=velocities,

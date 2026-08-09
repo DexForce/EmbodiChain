@@ -504,13 +504,14 @@ and records accepted, rejected, or timed-out acknowledgements. Cancellation,
 observation/session exceptions, and negative acknowledgements enter a
 best-effort cancel-then-hold path.
 
-`TimedTrajectory.dt[:, i]` is the interval leading to sample `i`; the final
-sample's interval is also its settling window before terminal validation. A
-batched runner uses the longest active row interval as its synchronized
-barrier. `SimulationExecutionAdapter.sleep()` converts that interval to an
-integral number of physics steps instead of using wall-clock sleep. Stable
-`env_ids` remain correlation identifiers and are not used as simulator array
-indices.
+`TimedTrajectory.dt[:, i]` is the interval leading to sample `i`.
+`ExecutionSession` maps each following arrival interval onto the preceding
+command's post-dispatch hold, while the final sample reuses its own interval as
+a settling window before terminal validation. A batched runner uses the longest
+active row interval as its synchronized barrier.
+`SimulationExecutionAdapter.sleep()` converts that interval to an integral
+number of physics steps instead of using wall-clock sleep. Stable `env_ids`
+remain correlation identifiers and are not used as simulator array indices.
 
 On each tick, the session can detect:
 
@@ -544,10 +545,11 @@ retain their runtime identity.
 Each emitted `JointCommand` carries a per-environment `hold_duration` derived
 from the plan's `TimedTrajectory.dt`. The application control loop must respect
 that timing after dispatching the command and before requesting the next
-observation. `dt[:, i]` is the arrival interval for waypoint `i`, so the first
-command normally carries zero duration. For a synchronized batch, the caller
-should wait for the longest duration among active rows. A passive hold command
-has zero duration.
+observation. `dt[:, i]` is the arrival interval leading to waypoint `i`, so the
+first waypoint is dispatched immediately and command `i` carries `dt[:, i + 1]`
+until the next waypoint is due. The final command reuses `dt[:, -1]` as a
+settling window. For a synchronized batch, the caller should wait for the
+longest duration among active rows. A passive hold command has zero duration.
 
 Use an explicit newer revision when the application or Action Agent decides to
 change runtime behavior:

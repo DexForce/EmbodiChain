@@ -89,9 +89,10 @@ result = runner.step(effect_success=None)
 
 `ExecutionSession` owns deterministic planning progress and recovery state. It
 emits at most one `JointCommand` per tick. The command's per-environment
-`hold_duration` preserves `TimedTrajectory.dt` for the caller's control loop:
-command `i` carries the arrival interval `dt[:, i]`, which is normally zero for
-the initial waypoint. The session monitors:
+`hold_duration` schedules the next feedback cycle from `TimedTrajectory.dt`:
+command `i` carries the arrival interval `dt[:, i + 1]` leading to the next
+waypoint. The final command reuses its own interval as a settling window. The
+session monitors:
 
 - joint tracking error against the previous command;
 - translation/rotation drift of referenced scene entities;
@@ -136,10 +137,11 @@ replans from the latest context.
   enter a best-effort cancel-then-hold path.
 
 `TimedTrajectory.dt[:, i]` is the interval leading to sample `i`.
-`ExecutionSession` maps this to `JointCommand.hold_duration`; the final sample
-uses its own interval as a settling window before terminal validation. Batched
-execution currently advances at a synchronized barrier using the longest active
-row interval.
+`ExecutionSession` dispatches sample zero immediately, then maps each following
+arrival interval to the preceding command's `JointCommand.hold_duration`. The
+final sample uses its own interval again as a settling window before terminal
+validation. Batched execution currently advances at a synchronized barrier
+using the longest active row interval.
 
 `SimulationExecutionAdapter` implements observation, command, and clock ports
 for a `SimulationManager`/`Robot` pair. Its `sleep()` advances an integral

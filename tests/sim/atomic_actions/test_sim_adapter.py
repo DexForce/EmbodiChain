@@ -43,14 +43,21 @@ def _simulation_and_robot() -> tuple[Mock, Mock]:
     robot.get_qpos.return_value = torch.zeros(BATCH_SIZE, ROBOT_DOF)
     robot.get_qvel.return_value = torch.full((BATCH_SIZE, ROBOT_DOF), 0.1)
     robot.get_qf.return_value = torch.full((BATCH_SIZE, ROBOT_DOF), 0.2)
+    robot.get_proprioception.return_value = {}
     return simulation, robot
 
 
-def _command(*, env_ids: torch.Tensor | None = None) -> JointCommand:
+def _command(
+    *,
+    env_ids: torch.Tensor | None = None,
+    active_mask: torch.Tensor | None = None,
+) -> JointCommand:
     return JointCommand(
         positions=torch.ones(BATCH_SIZE, ROBOT_DOF),
         velocities=torch.full((BATCH_SIZE, ROBOT_DOF), 0.5),
-        active_mask=torch.tensor([True, False]),
+        active_mask=(
+            torch.tensor([True, False]) if active_mask is None else active_mask
+        ),
         env_ids=(
             torch.arange(BATCH_SIZE, dtype=torch.long) if env_ids is None else env_ids
         ),
@@ -84,6 +91,18 @@ def test_simulation_adapter_treats_unavailable_effort_as_optional(
     assert context.robot.qeffort is None
 
 
+def test_simulation_adapter_falls_back_to_proprioception_effort() -> None:
+    simulation, robot = _simulation_and_robot()
+    robot.get_qf.side_effect = AttributeError("effort unavailable")
+    expected_qeffort = torch.full((BATCH_SIZE, ROBOT_DOF), 0.3)
+    robot.get_proprioception.return_value = {"qf": expected_qeffort}
+    adapter = SimulationExecutionAdapter(simulation, robot)
+
+    context = adapter.observe(TaskState.empty(BATCH_SIZE, "cpu"))
+
+    assert torch.equal(context.robot.qeffort, expected_qeffort)
+
+
 def test_simulation_adapter_sends_active_rows_and_inactive_holds_together() -> None:
     simulation, robot = _simulation_and_robot()
     adapter = SimulationExecutionAdapter(simulation, robot)
@@ -98,6 +117,18 @@ def test_simulation_adapter_sends_active_rows_and_inactive_holds_together() -> N
     assert torch.equal(sent_qvel, command.velocities)
     assert robot.set_qpos.call_args.kwargs["env_ids"] == [0, 1]
     assert robot.set_qvel.call_args.kwargs["env_ids"] == [0, 1]
+
+
+def test_simulation_adapter_send_writes_a_pure_hold_batch() -> None:
+    simulation, robot = _simulation_and_robot()
+    adapter = SimulationExecutionAdapter(simulation, robot)
+    command = _command(active_mask=torch.zeros(BATCH_SIZE, dtype=torch.bool))
+
+    acknowledgement = adapter.send(command, timeout=1.0)
+
+    assert acknowledgement.status is CommandAckStatus.ACCEPTED
+    robot.set_qpos.assert_called_once_with(command.positions, env_ids=[0, 1])
+    robot.set_qvel.assert_called_once_with(command.velocities, env_ids=[0, 1])
 
 
 def test_simulation_adapter_keeps_stable_ids_separate_from_robot_indices() -> None:

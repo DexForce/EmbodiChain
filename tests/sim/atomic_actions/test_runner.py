@@ -116,6 +116,7 @@ class FakeCommandSink:
         self.send_statuses: deque[CommandAckStatus] = deque()
         self.follow_commands: deque[bool] = deque()
         self.sent: list[JointCommand] = []
+        self.send_times: list[float] = []
         self.held: list[JointCommand] = []
         self.cancel_count = 0
 
@@ -127,6 +128,7 @@ class FakeCommandSink:
     ) -> CommandAcknowledgement:
         """Record an active command and optionally update observed qpos."""
         self.sent.append(command)
+        self.send_times.append(self.provider.clock.now())
         status = (
             self.send_statuses.popleft()
             if self.send_statuses
@@ -269,17 +271,20 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
 
     first = runner.step()
     early = runner.step()
-    clock.advance(MINIMUM_CYCLE_TIME)
-    second = runner.step()
     clock.advance(FIRST_INTERVAL)
+    second = runner.step()
+    clock.advance(SECOND_INTERVAL)
     third = runner.step()
 
     assert first.command_count == 1
-    assert first.wait_duration == pytest.approx(MINIMUM_CYCLE_TIME)
+    assert first.wait_duration == pytest.approx(FIRST_INTERVAL)
     assert early.is_waiting
     assert len(sink.sent) == 3
+    assert sink.send_times == pytest.approx(
+        [0.0, FIRST_INTERVAL, FIRST_INTERVAL + SECOND_INTERVAL]
+    )
     assert second.command_count == 2
-    assert second.wait_duration == pytest.approx(FIRST_INTERVAL)
+    assert second.wait_duration == pytest.approx(SECOND_INTERVAL)
     assert third.command_count == 3
     assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
 
@@ -288,20 +293,20 @@ def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
     runner, clock, _, _, _ = _make_runner(batch_size=2)
 
     first = runner.step()
-    clock.advance(MINIMUM_CYCLE_TIME)
+    clock.advance(2.0 * FIRST_INTERVAL)
     second = runner.step()
 
-    assert first.wait_duration == pytest.approx(MINIMUM_CYCLE_TIME)
-    assert second.wait_duration == pytest.approx(2.0 * FIRST_INTERVAL)
+    assert first.wait_duration == pytest.approx(2.0 * FIRST_INTERVAL)
+    assert second.wait_duration == pytest.approx(2.0 * SECOND_INTERVAL)
 
 
 def test_runner_completes_and_holds_after_last_command_settles() -> None:
     runner, clock, _, sink, _ = _make_runner()
 
     runner.step()
-    clock.advance(MINIMUM_CYCLE_TIME)
-    runner.step()
     clock.advance(FIRST_INTERVAL)
+    runner.step()
+    clock.advance(SECOND_INTERVAL)
     runner.step()
     clock.advance(SECOND_INTERVAL)
     completed = runner.step()
@@ -356,9 +361,9 @@ def test_runner_replans_from_observation_after_tracking_error() -> None:
     sink.follow_commands.extend([True, False, True])
 
     runner.step()
-    clock.advance(MINIMUM_CYCLE_TIME)
-    runner.step()
     clock.advance(FIRST_INTERVAL)
+    runner.step()
+    clock.advance(SECOND_INTERVAL)
     recovered = runner.step()
 
     assert action.plan_count == 2
@@ -422,7 +427,7 @@ def test_blocking_runner_uses_clock_and_completes() -> None:
     assert completed.status is RunnerStatus.COMPLETED
     assert completed.command_count == 3
     assert clock.sleeps == pytest.approx(
-        [MINIMUM_CYCLE_TIME, FIRST_INTERVAL, SECOND_INTERVAL]
+        [FIRST_INTERVAL, SECOND_INTERVAL, SECOND_INTERVAL]
     )
 
 
