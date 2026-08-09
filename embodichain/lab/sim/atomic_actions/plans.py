@@ -126,6 +126,24 @@ class TimedTrajectory:
         """Number of full-robot command columns."""
         return int(self.positions.shape[2])
 
+    def snapshot(self) -> TimedTrajectory:
+        """Return an independently owned copy of this trajectory.
+
+        Returns:
+            A trajectory whose tensor storage can be mutated without changing
+            the source trajectory.
+        """
+        return TimedTrajectory(
+            positions=self.positions.clone(),
+            velocities=(None if self.velocities is None else self.velocities.clone()),
+            accelerations=(
+                None if self.accelerations is None else self.accelerations.clone()
+            ),
+            dt=self.dt.clone(),
+            duration=self.duration.clone(),
+            env_ids=self.env_ids.clone(),
+        )
+
     @classmethod
     def from_positions(
         cls,

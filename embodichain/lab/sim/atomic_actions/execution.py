@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from .invocation import ActionInvocation, ResolvedActionRequest
-from .plans import ActionPlan, PlannedPhase
+from .plans import ActionPlan, PlannedPhase, TimedTrajectory
 from .state import EntityState, PlanningContext, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
@@ -281,6 +281,15 @@ class ExecutionSession:
     def latest_context(self) -> PlanningContext:
         """Latest validated context with the session's verified task state."""
         return self._context
+
+    @property
+    def active_trajectory(self) -> TimedTrajectory:
+        """Return an owned snapshot of the active phase trajectory.
+
+        This inspection surface is intended for diagnostics and visualization.
+        Mutating the returned tensors cannot affect execution state.
+        """
+        return self._current_phase().trajectory.snapshot()
 
     def tick(
         self,

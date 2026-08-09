@@ -220,6 +220,25 @@ def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
     assert torch.all(held.positions[1] == -1.0)
 
 
+def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
+    trajectory = TimedTrajectory.from_positions(
+        torch.arange(12, dtype=torch.float32).reshape(1, 3, 4),
+        env_ids=torch.tensor([4]),
+        control_dt=0.02,
+    )
+
+    snapshot = trajectory.snapshot()
+    snapshot.positions.zero_()
+    snapshot.dt.zero_()
+    snapshot.duration.zero_()
+    snapshot.env_ids.zero_()
+
+    assert torch.count_nonzero(trajectory.positions).item() > 0
+    assert torch.count_nonzero(trajectory.dt).item() > 0
+    assert trajectory.duration.item() > 0.0
+    assert trajectory.env_ids.tolist() == [4]
+
+
 def test_timed_trajectory_concatenates_metadata() -> None:
     first = TimedTrajectory.from_positions(
         torch.zeros(2, 2, 4),
