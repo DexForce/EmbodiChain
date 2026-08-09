@@ -261,7 +261,7 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert final.eligible_mask.tolist() == [True]
 
 
-def test_session_commands_preserve_waypoint_arrival_intervals() -> None:
+def test_session_commands_schedule_arrivals_and_final_settling() -> None:
     engine, _ = _engine()
     engine.register(NonuniformTimingAction())
     session = engine.start(
@@ -284,8 +284,8 @@ def test_session_commands_preserve_waypoint_arrival_intervals() -> None:
         ],
         dim=1,
     )
-    assert torch.allclose(command_durations, torch.tensor([[0.0, 0.1, 0.3]]))
-    assert torch.allclose(command_durations.sum(dim=1), torch.tensor([0.4]))
+    assert torch.allclose(command_durations, torch.tensor([[0.1, 0.3, 0.3]]))
+    assert torch.allclose(command_durations[:, :-1].sum(dim=1), torch.tensor([0.4]))
 
 
 def test_request_snapshot_preserves_live_entity_identity() -> None:

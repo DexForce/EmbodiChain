@@ -39,9 +39,23 @@ embodichain.lab.sim.atomic_actions
       AtomicAction
       AtomicActionEngine
       ExecutionSession
+      ExecutionRunner
+      ExecutionRunnerCfg
+      RunnerStep
+      RunnerStatus
+      ObservationProvider
+      CommandSink
+      CommandAcknowledgement
+      CommandAckStatus
+      CommandDispatch
+      CommandOperation
+      ExecutionClock
+      SimulationExecutionAdapter
       ExecutionTick
       JointCommand
       ExecutionEvent
+      ExecutionEventKind
+      ExecutionStatus
 
    .. rubric:: Built-in goals and actions
 
@@ -151,6 +165,46 @@ Engine and execution
 .. autoclass:: ExecutionSession
    :members:
 
+.. autoclass:: ExecutionRunner
+   :members:
+
+.. autoclass:: ExecutionRunnerCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
+
+.. autoclass:: ObservationProvider
+   :members:
+
+.. autoclass:: CommandSink
+   :members:
+
+.. autoclass:: ExecutionClock
+   :members:
+
+.. autoclass:: MonotonicExecutionClock
+   :members:
+
+.. autoclass:: SimulationExecutionAdapter
+   :members:
+
+.. autoclass:: CommandAcknowledgement
+   :members:
+
+.. autoclass:: CommandAckStatus
+   :members:
+
+.. autoclass:: CommandDispatch
+   :members:
+
+.. autoclass:: CommandOperation
+   :members:
+
+.. autoclass:: RunnerStep
+   :members:
+
+.. autoclass:: RunnerStatus
+   :members:
+
 .. autoclass:: ExecutionTick
    :members:
 
@@ -158,6 +212,12 @@ Engine and execution
    :members:
 
 .. autoclass:: ExecutionEvent
+   :members:
+
+.. autoclass:: ExecutionEventKind
+   :members:
+
+.. autoclass:: ExecutionStatus
    :members:
 
 Semantic objects and helpers

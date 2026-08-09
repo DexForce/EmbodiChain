@@ -99,6 +99,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``coordinated_pickment.py``
 * ``coordinated_placement.py``
 * ``hand_over.py``
+* ``moving_target_recovery.py``
 
 The scripts are interactive by default. Add ``--auto_play`` to skip prompts;
 combine it with ``--headless --device cpu`` for a headless run that records
@@ -260,18 +261,45 @@ must be resolved from the latest scene snapshot:
        ),
    )
 
-   latest_context = initial_context
-   session = engine.start((invocation,), latest_context)
-   while session.status.value == "running":
-       tick = session.tick(latest_context)
-       if tick.command is not None:
-           send_joint_command(tick.command)
-       latest_context = observe_context()
+   from embodichain.lab.sim.atomic_actions import (
+       ExecutionRunner,
+       SimulationExecutionAdapter,
+       TaskState,
+   )
 
-The session emits one command per tick. It compares observations with the last
-command, detects material motion of referenced scene entities, enforces phase
-timeouts, and replans from the latest observation within the recovery budget.
-It does not own the simulator or controller loop.
+   adapter = SimulationExecutionAdapter(sim, robot, scene_supplier=read_scene)
+   task = TaskState.empty(robot.get_qpos().shape[0], robot.device)
+   initial_context = adapter.observe(task)
+   session = engine.start((invocation,), initial_context)
+   runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
+   result = runner.run_until_blocked()
+
+The session owns planning progress and bounded recovery. The runner owns the
+outer lifecycle: it requests fresh observations, schedules each command from
+the :class:`~embodichain.lab.sim.atomic_actions.TimedTrajectory` time deltas,
+checks controller acknowledgements, and performs cancel-then-hold on failure.
+The simulation adapter advances physics instead of sleeping in wall-clock time.
+``ExecutionRunnerCfg`` contains runner-level transport and scheduling settings;
+it is not an atomic-action option and is not replaced by invocation revision.
+
+For an application that already owns its event loop, call the non-blocking
+:meth:`~embodichain.lab.sim.atomic_actions.ExecutionRunner.step` method. A step
+with ``is_waiting`` set has not consumed a new observation or effect result; use
+its ``wait_duration`` to schedule the next call.
+
+The complete simulation example starts with a visible cube directly in front of
+the robot, then applies a short horizontal force pulse so physics and friction
+slide it sideways during one ``PickUp`` invocation whose
+``GraspGoal.grasp_xpos`` is a ``SceneEntityPose``. The session observes
+``dynamic_goal_changed`` and ``replanned`` events, discards the entire stale
+approach/close/lift plan, and rebuilds it from the cube's new location. The
+replanned action closes the gripper, verifies the physical lift, and finishes
+while holding the cube. The original and regenerated goal axes remain visible
+for comparison:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
 
 Recovery replans reuse one immutable invocation-revision snapshot. If an
 application intentionally changes the goal, options, policy, binding, or a
@@ -311,13 +339,18 @@ external per-environment verification mask:
 
 .. code-block:: python
 
-   tick = session.tick(latest_context)
-   if any(event.kind.value == "effect_verification_required" for event in tick.events):
-       verified = verify_grasp_or_release()
-       tick = session.tick(latest_context, effect_success=verified)
+   def verify_effect(context, tick):
+       return verify_grasp_or_release(context)
+
+   result = runner.run_until_blocked(effect_verifier=verify_effect)
 
 This prevents a successful trajectory plan from being mistaken for a successful
-physical grasp or release.
+physical grasp or release. If verification is asynchronous, omit the callback;
+``run_until_blocked`` returns at the verification boundary and the application
+can later resume with ``runner.step(effect_success=verified)`` when the next
+cycle is due, or call ``run_until_blocked(effect_verifier=...)`` again. The
+runner remembers the pending boundary even though the session emits its event
+only once.
 
 Adding an action
 ----------------

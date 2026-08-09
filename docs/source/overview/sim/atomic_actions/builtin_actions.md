@@ -201,7 +201,8 @@ entity as a recovery dependency.
 | `Press.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
-| `PickUp` / `HandOver` semantic entity lookup | not through `SceneEntityPose` | no automatic scene dependency |
+| `PickUp.grasp_xpos` | yes | yes |
+| `PickUp` / `HandOver` `ObjectSemantics.entity` lookup | not through `SceneEntityPose` | no automatic scene dependency |
 | `AssembleGoal` base entity lookup | not through `SceneEntityPose` | latest pose is used when replanning, but base movement alone does not trigger it |
 
 ### Parameter ownership
@@ -310,10 +311,12 @@ bound manipulator.
 | Effect | write `HeldObjectState` for the bound manipulator and clear overlapping coordinated attachment state |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
-`grasp_xpos` may be `(4, 4)` or `(B, 4, 4)`. When omitted, the action samples
-valid affordance grasps, evaluates reachability, and stores the selected
-`object_to_eef` transform in the expected held-object state. Later
-object-centric skills reuse that transform.
+`grasp_xpos` may be `(4, 4)`, `(B, 4, 4)`, or a `SceneEntityPose`. A scene
+reference resolves the latest grasp pose and registers its entity as a recovery
+dependency, so material target motion invalidates and replans an executing
+`PickUp`. When omitted, the action samples valid affordance grasps, evaluates
+reachability, and stores the selected `object_to_eef` transform in the expected
+held-object state. Later object-centric skills reuse that transform.
 
 `PickUp` requires `open` and `grasp` commands on the bound end-effector profile.
 Important `PickUpOptions` fields:
@@ -327,9 +330,9 @@ Important `PickUpOptions` fields:
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
 | `obj_upright_direction`, `rotate_upright` | Optional orientation-selection behavior |
 
-The semantic entity pose is read when planning occurs, but it is not currently a
-`SceneEntityPose` dependency. Object motion alone therefore does not trigger
-automatic dynamic-goal replanning.
+Reading `ObjectSemantics.entity` remains a live planning lookup rather than an
+automatic dependency. Use an explicit `SceneEntityPose` in `grasp_xpos` when
+object motion should trigger dynamic-goal replanning.
 
 **Example:** `scripts/tutorials/atomic_action/pickup.py`
 
