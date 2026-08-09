@@ -91,15 +91,12 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         return blocks
 
     def _initialize_atomic_actions(self) -> None:
-        """Create one PickUp/Place pair for each manipulating arm."""
+        """Create the dual-arm atomic-action engine and object semantics."""
         from embodichain.lab.sim.atomic_actions import (
             Affordance,
             AtomicActionEngine,
+            ControlPartCommandProfile,
             ObjectSemantics,
-            PickUp,
-            PickUpCfg,
-            Place,
-            PlaceCfg,
         )
         from embodichain.lab.sim.planners import (
             MotionGenCfg,
@@ -110,48 +107,20 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         motion_generator = MotionGenerator(
             cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
         )
-        self._action_engine: AtomicActionEngine = AtomicActionEngine(motion_generator)
         self._object_semantics: dict[str, ObjectSemantics] = {}
+        control_profiles: dict[str, ControlPartCommandProfile] = {}
 
         for plan in BLOCK_PLANS:
             uid = str(plan["uid"])
-            arm = str(plan["arm"])
             hand = str(plan["hand"])
             hand_limits = self.robot.get_qpos_limits(name=hand)[0].to(
                 device=self.device, dtype=torch.float32
             )
             hand_close_qpos = hand_limits[:, 0]
             hand_open_qpos = hand_limits[:, 1]
-            self._action_engine.register(
-                PickUp(
-                    motion_generator,
-                    cfg=PickUpCfg(
-                        name=f"pick_up_{uid}",
-                        control_part=arm,
-                        hand_control_part=hand,
-                        hand_open_qpos=hand_open_qpos,
-                        hand_close_qpos=hand_close_qpos,
-                        pre_grasp_distance=0.12,
-                        lift_height=0.15,
-                        sample_interval=PICK_SAMPLE_INTERVAL,
-                        hand_interp_steps=HAND_INTERP_STEPS,
-                    ),
-                )
-            )
-            self._action_engine.register(
-                Place(
-                    motion_generator,
-                    cfg=PlaceCfg(
-                        name=f"place_{uid}",
-                        control_part=arm,
-                        hand_control_part=hand,
-                        hand_open_qpos=hand_open_qpos,
-                        hand_close_qpos=hand_close_qpos,
-                        lift_height=0.15,
-                        sample_interval=PLACE_SAMPLE_INTERVAL,
-                        hand_interp_steps=HAND_INTERP_STEPS,
-                    ),
-                )
+            control_profiles[hand] = ControlPartCommandProfile.joint_positions(
+                open=hand_open_qpos,
+                grasp=hand_close_qpos,
             )
             self._object_semantics[uid] = ObjectSemantics(
                 label=uid,
@@ -159,6 +128,10 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                 affordance=Affordance(),
                 entity=self._blocks[uid],
             )
+        self._action_engine: AtomicActionEngine = AtomicActionEngine(
+            motion_generator,
+            control_profiles=control_profiles,
+        )
 
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
         """Lazily plan one atomic pick/place segment per manipulated block.
@@ -181,6 +154,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             plan_success, actions, source_pose = self._plan_block_segment(
                 uid=uid,
                 arm=str(plan["arm"]),
+                hand=str(plan["hand"]),
                 target_position=target_position,
             )
             logger.log_info(
@@ -232,10 +206,19 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         *,
         uid: str,
         arm: str,
+        hand: str,
         target_position: torch.Tensor,
     ) -> tuple[torch.Tensor, Iterable[torch.Tensor], torch.Tensor]:
         """Plan an atomic PickUp followed by Place for one block."""
-        from embodichain.lab.sim.atomic_actions import GraspTarget, PlaceTarget
+        from embodichain.lab.sim.atomic_actions import (
+            ActionBinding,
+            ActionInvocation,
+            GraspGoal,
+            MotionPolicy,
+            PickUpOptions,
+            PlaceGoal,
+            PlaceOptions,
+        )
 
         block = self._blocks[uid]
         source_pose = block.get_local_pose(to_matrix=True).to(
@@ -250,16 +233,33 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
             source_pose[:, :3, :3], local_grasp_offset.unsqueeze(-1)
         ).squeeze(-1)
         grasp_pose[:, :3, 3] = source_pose[:, :3, 3] + world_grasp_offset
-        pick_success, pick_trajectory, picked_state = self._action_engine.run(
-            [
-                (
-                    f"pick_up_{uid}",
-                    GraspTarget(self._object_semantics[uid], grasp_xpos=grasp_pose),
-                )
-            ]
+        binding = ActionBinding(
+            manipulators={"primary": arm},
+            end_effectors={"primary": hand},
         )
+        pick_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="pick_up",
+                    goal=GraspGoal(
+                        self._object_semantics[uid],
+                        grasp_xpos=grasp_pose,
+                    ),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                    skill_options=PickUpOptions(
+                        pre_grasp_distance=0.12,
+                        lift_height=0.15,
+                        hand_interp_steps=HAND_INTERP_STEPS,
+                    ),
+                ),
+            )
+        )
+        pick_success = pick_compiled.plan_success
+        pick_trajectory = pick_compiled.trajectory.positions
+        picked_context = pick_compiled.projected_context
         pick_trajectory = self._insert_grasp_hold(pick_trajectory)
-        held = picked_state.get_held_object(arm)
+        held = picked_context.get_held_object(arm)
         if held is None or not bool(pick_success.all().item()):
             trajectory = self._ensure_nonempty_trajectory(pick_trajectory)
             return (
@@ -272,9 +272,23 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         desired_object_pose[:, :3, 3] = target_position
         desired_object_pose[:, 2, 3] += FREE_FALL_RELEASE_HEIGHT
         place_eef_pose = torch.bmm(desired_object_pose, held.object_to_eef)
-        place_success, place_trajectory, _ = self._action_engine.run(
-            [(f"place_{uid}", PlaceTarget(place_eef_pose))], state=picked_state
+        place_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="place",
+                    goal=PlaceGoal(place_eef_pose),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                    skill_options=PlaceOptions(
+                        lift_height=0.15,
+                        hand_interp_steps=HAND_INTERP_STEPS,
+                    ),
+                ),
+            ),
+            picked_context,
         )
+        place_success = place_compiled.plan_success
+        place_trajectory = place_compiled.trajectory.positions
         trajectory = self._ensure_nonempty_trajectory(
             torch.cat((pick_trajectory, place_trajectory), dim=1)
         )

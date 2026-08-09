@@ -261,10 +261,7 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         """Create the motion generator, action engine and cube semantics."""
         from embodichain.lab.sim.atomic_actions import (
             AtomicActionEngine,
-            PickUp,
-            PickUpCfg,
-            Place,
-            PlaceCfg,
+            ControlPartCommandProfile,
         )
         from embodichain.lab.sim.planners import (
             MotionGenCfg,
@@ -276,38 +273,22 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
             device=self.device, dtype=torch.float32
         )
         hand_open_qpos = hand_limits[:, 0]
-        hand_close_qpos = torch.minimum(
-            hand_limits[:, 1],
+        hand_close_qpos = torch.clamp(
             torch.full_like(hand_limits[:, 1], DEFAULT_GRIPPER_CLOSE_QPOS),
+            min=hand_limits[:, 0],
+            max=hand_limits[:, 1],
         )
         motion_generator = MotionGenerator(
             cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
         )
-        self._action_engine: AtomicActionEngine = AtomicActionEngine(motion_generator)
-        self._action_engine.register(
-            PickUp(
-                motion_generator,
-                cfg=PickUpCfg(
-                    hand_open_qpos=hand_open_qpos,
-                    hand_close_qpos=hand_close_qpos,
-                    pre_grasp_distance=0.15,
-                    lift_height=0.16,
-                    sample_interval=self.PICK_SAMPLE_INTERVAL,
-                    hand_interp_steps=self.HAND_INTERP_STEPS,
-                ),
-            )
-        )
-        self._action_engine.register(
-            Place(
-                motion_generator,
-                cfg=PlaceCfg(
-                    hand_open_qpos=hand_open_qpos,
-                    hand_close_qpos=hand_close_qpos,
-                    lift_height=0.14,
-                    sample_interval=self.PLACE_SAMPLE_INTERVAL,
-                    hand_interp_steps=self.HAND_INTERP_STEPS,
-                ),
-            )
+        self._action_engine: AtomicActionEngine = AtomicActionEngine(
+            motion_generator,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    open=hand_open_qpos,
+                    grasp=hand_close_qpos,
+                )
+            },
         )
         self._cube_semantics: ObjectSemantics = self._create_cube_semantics()
 
@@ -422,15 +403,42 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         self, target_position: torch.Tensor
     ) -> tuple[torch.Tensor, Iterable[torch.Tensor], torch.Tensor]:
         """Plan one pickup/place cycle from the cube's current measured pose."""
-        from embodichain.lab.sim.atomic_actions import GraspTarget, PlaceTarget
+        from embodichain.lab.sim.atomic_actions import (
+            ActionBinding,
+            ActionInvocation,
+            GraspGoal,
+            MotionPolicy,
+            PickUpOptions,
+            PlaceGoal,
+            PlaceOptions,
+        )
 
         source_pose = self._cube.get_local_pose(to_matrix=True).to(
             device=self.device, dtype=torch.float32
         )
-        pick_success, pick_trajectory, picked_state = self._action_engine.run(
-            [("pick_up", GraspTarget(self._cube_semantics))]
+        binding = ActionBinding(
+            manipulators={"primary": "arm"},
+            end_effectors={"primary": "hand"},
         )
-        held = picked_state.get_held_object("arm")
+        pick_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="pick_up",
+                    goal=GraspGoal(self._cube_semantics),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=self.PICK_SAMPLE_INTERVAL),
+                    skill_options=PickUpOptions(
+                        pre_grasp_distance=0.15,
+                        lift_height=0.16,
+                        hand_interp_steps=self.HAND_INTERP_STEPS,
+                    ),
+                ),
+            )
+        )
+        pick_success = pick_compiled.plan_success
+        pick_trajectory = pick_compiled.trajectory.positions
+        picked_context = pick_compiled.projected_context
+        held = picked_context.get_held_object("arm")
         if held is None or not bool(pick_success.all().item()):
             trajectory = self._ensure_nonempty_trajectory(pick_trajectory)
             return (
@@ -445,9 +453,23 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
             self.num_envs, -1
         )
         place_eef_pose = torch.bmm(desired_cube_pose, held.object_to_eef)
-        place_success, place_trajectory, _ = self._action_engine.run(
-            [("place", PlaceTarget(place_eef_pose))], state=picked_state
+        place_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="place",
+                    goal=PlaceGoal(place_eef_pose),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=self.PLACE_SAMPLE_INTERVAL),
+                    skill_options=PlaceOptions(
+                        lift_height=0.14,
+                        hand_interp_steps=self.HAND_INTERP_STEPS,
+                    ),
+                ),
+            ),
+            picked_context,
         )
+        place_success = place_compiled.plan_success
+        place_trajectory = place_compiled.trajectory.positions
         trajectory = self._ensure_nonempty_trajectory(
             torch.cat((pick_trajectory, place_trajectory), dim=1)
         )

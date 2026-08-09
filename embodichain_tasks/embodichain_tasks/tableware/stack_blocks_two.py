@@ -67,15 +67,12 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         self._initialize_atomic_actions()
 
     def _initialize_atomic_actions(self) -> None:
-        """Create the right-arm PickUp and Place primitives."""
+        """Create the right-arm atomic-action engine and object semantics."""
         from embodichain.lab.sim.atomic_actions import (
             Affordance,
             AtomicActionEngine,
+            ControlPartCommandProfile,
             ObjectSemantics,
-            PickUp,
-            PickUpCfg,
-            Place,
-            PlaceCfg,
         )
         from embodichain.lab.sim.planners import (
             MotionGenCfg,
@@ -93,35 +90,14 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         motion_generator = MotionGenerator(
             cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
         )
-        self._action_engine: AtomicActionEngine = AtomicActionEngine(motion_generator)
-        self._action_engine.register(
-            PickUp(
-                motion_generator,
-                PickUpCfg(
-                    control_part=CONTROL_PART,
-                    hand_control_part=HAND_CONTROL_PART,
-                    hand_open_qpos=hand_open_qpos,
-                    hand_close_qpos=hand_close_qpos,
-                    pre_grasp_distance=0.12,
-                    lift_height=0.15,
-                    sample_interval=PICK_SAMPLE_INTERVAL,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
-            )
-        )
-        self._action_engine.register(
-            Place(
-                motion_generator,
-                PlaceCfg(
-                    control_part=CONTROL_PART,
-                    hand_control_part=HAND_CONTROL_PART,
-                    hand_open_qpos=hand_open_qpos,
-                    hand_close_qpos=hand_close_qpos,
-                    lift_height=0.10,
-                    sample_interval=PLACE_SAMPLE_INTERVAL,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
-            )
+        self._action_engine: AtomicActionEngine = AtomicActionEngine(
+            motion_generator,
+            control_profiles={
+                HAND_CONTROL_PART: ControlPartCommandProfile.joint_positions(
+                    open=hand_open_qpos,
+                    grasp=hand_close_qpos,
+                )
+            },
         )
         self._stack_block_semantics: ObjectSemantics = ObjectSemantics(
             affordance=Affordance(),
@@ -156,7 +132,15 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         self,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Plan PickUp then Place while threading the held-object state."""
-        from embodichain.lab.sim.atomic_actions import GraspTarget, PlaceTarget
+        from embodichain.lab.sim.atomic_actions import (
+            ActionBinding,
+            ActionInvocation,
+            GraspGoal,
+            MotionPolicy,
+            PickUpOptions,
+            PlaceGoal,
+            PlaceOptions,
+        )
 
         source_pose = self._stack_block.get_local_pose(to_matrix=True).to(
             device=self.device, dtype=torch.float32
@@ -172,20 +156,37 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         grasp_pose[:, :3, 3] = source_pose[:, :3, 3] + torch.tensor(
             GRASP_OFFSET, dtype=torch.float32, device=self.device
         )
-        pick_success, pick_trajectory, picked_state = self._action_engine.run(
-            [
-                (
-                    "pick_up",
-                    GraspTarget(self._stack_block_semantics, grasp_xpos=grasp_pose),
-                )
-            ]
+        binding = ActionBinding(
+            manipulators={"primary": CONTROL_PART},
+            end_effectors={"primary": HAND_CONTROL_PART},
         )
+        pick_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="pick_up",
+                    goal=GraspGoal(
+                        self._stack_block_semantics,
+                        grasp_xpos=grasp_pose,
+                    ),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                    skill_options=PickUpOptions(
+                        pre_grasp_distance=0.12,
+                        lift_height=0.15,
+                        hand_interp_steps=HAND_INTERP_STEPS,
+                    ),
+                ),
+            )
+        )
+        pick_success = pick_compiled.plan_success
+        pick_trajectory = pick_compiled.trajectory.positions
+        picked_context = pick_compiled.projected_context
         pick_trajectory = self._insert_grasp_hold(pick_trajectory)
 
         target_pose = source_pose.clone()
         target_pose[:, :3, 3] = base_pose[:, :3, 3]
         target_pose[:, 2, 3] += BLOCK_HEIGHT
-        held = picked_state.get_held_object(CONTROL_PART)
+        held = picked_context.get_held_object(CONTROL_PART)
         if held is None or not bool(pick_success.all().item()):
             return (
                 torch.zeros_like(pick_success, dtype=torch.bool),
@@ -195,9 +196,23 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             )
 
         place_eef_pose = torch.bmm(target_pose, held.object_to_eef)
-        place_success, place_trajectory, _ = self._action_engine.run(
-            [("place", PlaceTarget(place_eef_pose))], state=picked_state
+        place_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="place",
+                    goal=PlaceGoal(place_eef_pose),
+                    binding=binding,
+                    motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                    skill_options=PlaceOptions(
+                        lift_height=0.10,
+                        hand_interp_steps=HAND_INTERP_STEPS,
+                    ),
+                ),
+            ),
+            picked_context,
         )
+        place_success = place_compiled.plan_success
+        place_trajectory = place_compiled.trajectory.positions
         trajectory = self._ensure_nonempty_trajectory(
             torch.cat((pick_trajectory, place_trajectory), dim=1)
         )

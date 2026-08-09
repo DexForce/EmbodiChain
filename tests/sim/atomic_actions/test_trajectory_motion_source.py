@@ -178,7 +178,7 @@ class TestPlanArmTrajMotionGen:
             10,
             control_part="arm",
             arm_dof=6,
-            cfg=ActionCfg(motion_source="ik_interp", control_part="arm"),
+            cfg=MotionPolicy(motion_source="ik_interp"),
         )
 
         assert success.dtype == torch.bool
