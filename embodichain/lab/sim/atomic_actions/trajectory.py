@@ -28,7 +28,10 @@ from embodichain.lab.sim.planners import PlanState, PlanResult, MoveType
 from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
 from embodichain.lab.sim.planners.toppra_planner import ToppraPlanOptions
 from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.utility.action_utils import interpolate_with_distance
+from embodichain.lab.sim.utility.action_utils import (
+    interpolate_with_distance,
+    resample_with_distance,
+)
 from embodichain.utils import logger
 
 from .core import resolve_runtime_device
@@ -43,9 +46,11 @@ if TYPE_CHECKING:
 class TrajectoryBuilder:
     """Stateless trajectory utilities shared by every atomic action.
 
-    Holds a reference to the motion generator (and through it, the robot and
-    device) so callers don't have to thread those through each helper call.
-    All methods are pure: no per-call state is kept on the builder.
+    :class:`~embodichain.lab.sim.atomic_actions.runtime.ActionPlanningServices`
+    creates one builder per engine. It holds a reference to the engine's motion
+    generator (and through it, the robot and device) so actions do not thread
+    those through each helper call. All methods are pure: no per-call state is
+    kept on the builder.
     """
 
     def __init__(self, motion_generator: MotionGenerator) -> None:
@@ -583,7 +588,7 @@ class TrajectoryBuilder:
         resampled = False
         if not self.motion_generator.planner.preserve_plan_samples:
             if positions.shape[1] != n_waypoints:
-                positions = interpolate_with_distance(
+                positions = resample_with_distance(
                     trajectory=positions, interp_num=n_waypoints, device=self.device
                 )
                 resampled = True
@@ -887,9 +892,9 @@ class TrajectoryBuilder:
         either a single waypoint ``(n_envs, joint_dof)`` or a sequence of
         waypoints ``(n_envs, n_waypoint, joint_dof)``. The start configuration is
         prepended to the target waypoints to build the keyframe sequence
-        ``(n_envs, 1 + n_waypoint, joint_dof)``, which is then resampled to
-        ``n_waypoints`` output samples by cumulative-distance piecewise-linear
-        interpolation — so each consecutive waypoint pair is traversed in turn.
+        ``(n_envs, 1 + n_waypoint, joint_dof)``, which is then interpolated to
+        ``n_waypoints`` output samples segment by segment. Every input waypoint
+        is retained as an exact output sample.
         """
         if target_qpos.dim() == 2:
             target_qpos = target_qpos.unsqueeze(1)

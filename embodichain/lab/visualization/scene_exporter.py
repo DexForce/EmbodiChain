@@ -34,6 +34,9 @@ from .protocol import (
     DynamicMeshUpdate,
     GizmoSpec,
     GizmoState,
+    JointControlProvider,
+    JointControlSpec,
+    JointControlState,
     MeshGeometry,
     PointCloudOverlay,
     SceneFrame,
@@ -169,6 +172,8 @@ class SceneExporter:
         self._dynamic_env_ids = np.empty((0,), dtype=np.int64)
         self._camera_sources: tuple[_CameraSource, ...] = ()
         self._gizmo_sources: tuple[_GizmoSource, ...] = ()
+        self._joint_control_provider: JointControlProvider | None = None
+        self._joint_control_specs: tuple[JointControlSpec, ...] = ()
         self._env_ids = (
             tuple(range(sim.num_envs)) if cfg.env_ids is None else tuple(cfg.env_ids)
         )
@@ -192,6 +197,17 @@ class SceneExporter:
     def has_deformables(self) -> bool:
         """Whether the current manifest contains soft-body or cloth nodes."""
         return any(source.node.dynamic_geometry for source in self._sources)
+
+    def set_joint_control_provider(
+        self,
+        provider: JointControlProvider | None,
+    ) -> None:
+        """Install an optional simulation-thread joint-control source.
+
+        The next :meth:`build_manifest` call snapshots the provider's static
+        controls. Dynamic values are then sampled by :meth:`capture`.
+        """
+        self._joint_control_provider = provider
 
     def _validate_env_ids(self) -> None:
         invalid = [env_id for env_id in self._env_ids if env_id >= self._sim.num_envs]
@@ -366,6 +382,14 @@ class SceneExporter:
         self._append_cameras(camera_sources)
         self._append_gizmos(gizmo_sources)
 
+        joint_control_specs: tuple[JointControlSpec, ...] = ()
+        if self._joint_control_provider is not None:
+            joint_control_specs = tuple(
+                spec
+                for spec in self._joint_control_provider.joint_control_specs()
+                if spec.env_id in self._env_ids
+            )
+
         self._scene_revision += 1
         self._sources = tuple(sources)
         self._pose_batches = self._build_pose_batches(self._sources)
@@ -390,6 +414,7 @@ class SceneExporter:
         )
         self._camera_sources = tuple(camera_sources)
         self._gizmo_sources = tuple(gizmo_sources)
+        self._joint_control_specs = joint_control_specs
         return SceneManifest(
             run_id=self.run_id,
             scene_revision=self._scene_revision,
@@ -397,7 +422,26 @@ class SceneExporter:
             geometries=tuple(geometries.values()),
             cameras=tuple(source.spec for source in camera_sources),
             gizmos=tuple(source.spec for source in gizmo_sources),
+            joint_controls=joint_control_specs,
         )
+
+    def _capture_joint_control_states(self) -> tuple[JointControlState, ...]:
+        if self._joint_control_provider is None or not self._joint_control_specs:
+            return ()
+        states = {
+            state.control_id: state
+            for state in self._joint_control_provider.joint_control_states()
+        }
+        missing = [
+            spec.control_id
+            for spec in self._joint_control_specs
+            if spec.control_id not in states
+        ]
+        if missing:
+            raise ValueError(
+                f"Joint control provider omitted states for controls: {missing}."
+            )
+        return tuple(states[spec.control_id] for spec in self._joint_control_specs)
 
     def _append_gizmos(self, sources: list[_GizmoSource]) -> None:
         if 0 not in self._env_ids:
@@ -574,9 +618,16 @@ class SceneExporter:
     def _append_cameras(self, sources: list[_CameraSource]) -> None:
         for uid in self._sim.get_sensor_uid_list():
             camera = self._sim.get_sensor(uid)
-            if camera is None or getattr(camera.cfg, "sensor_type", None) != "Camera":
+            sensor_type = getattr(getattr(camera, "cfg", None), "sensor_type", None)
+            if camera is None or sensor_type not in {"Camera", "StereoCamera"}:
                 continue
-            intrinsics = _to_numpy(camera.get_intrinsics(), np.float32)
+            camera_intrinsics = camera.get_intrinsics()
+            if sensor_type == "StereoCamera":
+                # A stereo sensor is represented by its primary (left) RGB
+                # observation. This keeps one preview per configured sensor,
+                # matching the environment's ``color`` observation key.
+                camera_intrinsics = camera_intrinsics[0]
+            intrinsics = _to_numpy(camera_intrinsics, np.float32)
             if intrinsics.shape[0] != self._sim.num_envs:
                 raise ValueError(
                     f"Camera {uid!r} returned {intrinsics.shape[0]} intrinsics "
@@ -598,6 +649,7 @@ class SceneExporter:
                             aspect=float(width) / float(height),
                             near=float(camera.cfg.near),
                             far=float(camera.cfg.far),
+                            role=getattr(camera.cfg, "visualization_role", "sensor"),
                         ),
                         camera=camera,
                     )
@@ -775,7 +827,14 @@ class SceneExporter:
             uid = source.spec.sensor_uid
             if uid in camera_pose_cache:
                 continue
-            pose = _to_numpy(source.camera.get_arena_pose(to_matrix=True), np.float32)
+            if getattr(source.camera.cfg, "sensor_type", None) == "StereoCamera":
+                primary_pose, _ = source.camera.get_left_right_arena_pose()
+                pose = _to_numpy(primary_pose, np.float32)
+            else:
+                pose = _to_numpy(
+                    source.camera.get_arena_pose(to_matrix=True),
+                    np.float32,
+                )
             if pose.shape != (self._sim.num_envs, 4, 4):
                 raise ValueError(
                     f"Camera {uid!r} arena poses must have shape "
@@ -825,6 +884,7 @@ class SceneExporter:
             camera_wxyz=camera_wxyz,
             dynamic_meshes=tuple(dynamic_meshes),
             gizmos=tuple(gizmo_states),
+            joint_controls=self._capture_joint_control_states(),
             overlays=self._prepare_overlays(overlays),
         )
         return CaptureResult(frame=frame, capture_seconds=perf_counter() - started)

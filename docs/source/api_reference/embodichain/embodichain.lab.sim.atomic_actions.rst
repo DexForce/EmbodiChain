@@ -9,7 +9,15 @@ embodichain.lab.sim.atomic_actions
 
       ActionGoal
       ActionBinding
+      ResolvedActionBinding
+      ResolvedControlPart
+      ControlCommand
+      JointPositionCommand
+      ControlPartCommandProfile
+      ActionControlOverrides
       ActionInvocation
+      ResolvedActionRequest
+      ActionOptions
       MotionPolicy
       RecoveryPolicy
       RobotObservation
@@ -55,7 +63,6 @@ embodichain.lab.sim.atomic_actions
 
       EndEffectorPoseGoal
       JointPositionGoal
-      NamedJointPositionGoal
       GraspGoal
       HeldObjectPoseGoal
       PlaceGoal
@@ -87,7 +94,31 @@ Planning and state
 .. autoclass:: ActionBinding
    :members:
 
+.. autoclass:: ResolvedActionBinding
+   :members:
+
+.. autoclass:: ResolvedControlPart
+   :members:
+
+.. autoclass:: ControlCommand
+   :members:
+
+.. autoclass:: JointPositionCommand
+   :members:
+
+.. autoclass:: ControlPartCommandProfile
+   :members:
+
+.. autoclass:: ActionControlOverrides
+   :members:
+
 .. autoclass:: ActionInvocation
+   :members:
+
+.. autoclass:: ResolvedActionRequest
+   :members:
+
+.. autoclass:: ActionOptions
    :members:
 
 .. autoclass:: MotionPolicy

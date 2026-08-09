@@ -113,7 +113,6 @@ def _targets_for_sequence(sequence_case: JointSequenceCase, device):
         ActionInvocation,
         JointPositionGoal,
         MotionPolicy,
-        NamedJointPositionGoal,
     )
 
     targets = []
@@ -121,9 +120,9 @@ def _targets_for_sequence(sequence_case: JointSequenceCase, device):
     policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
     for index, name in enumerate(sequence_case.sequence):
         if index == 0 and name == "ready":
-            goal = NamedJointPositionGoal(name="ready")
+            goal = JointPositionGoal(target="ready")
         else:
-            goal = JointPositionGoal(qpos=_qpos(JOINT_TARGETS[name], device))
+            goal = JointPositionGoal(target=_qpos(JOINT_TARGETS[name], device))
         targets.append(
             ActionInvocation(
                 skill_id="move_joints",
@@ -152,7 +151,7 @@ def _run_case(
     elapsed, mem_delta, peak_gpu, result = timed_call(
         lambda: atomic_engine.compile(steps)
     )
-    is_success = result.plan_success
+    is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
     video_path = None
     if should_record_case(args, recorded_count, bool(is_success)):
@@ -241,8 +240,7 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
     ensure_torch()
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
-        MoveJoints,
-        MoveJointsCfg,
+        ControlPartCommandProfile,
     )
     from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
     from embodichain.lab.sim.planners import ToppraPlannerCfg
@@ -272,16 +270,12 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
         cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=robot.uid))
     )
     ready_qpos = _qpos(READY_QPOS, sim.device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(
-        MoveJoints(
-            motion_gen,
-            cfg=MoveJointsCfg(
-                named_joint_positions={"ready": ready_qpos},
-            ),
-        )
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "arm": ControlPartCommandProfile.joint_positions(ready=ready_qpos),
+        },
     )
-
     results: list[dict[str, object]] = []
     video_paths: list[str] = []
     print("\n=== MoveJoints Sequence Sweep ===")

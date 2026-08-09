@@ -38,6 +38,7 @@ from embodichain.learning.rl.experimental.newton.train_planar_reach import (
     train_planar_reach,
 )
 from embodichain.learning.rl.models import ActorOnly
+from embodichain.learning.rl.utils import OptimizerCfg
 
 
 def _make_env() -> NewtonPlanarReachEnv:
@@ -307,7 +308,7 @@ def test_newton_rollout_drives_apg_policy_update() -> None:
     algorithm = APG(
         APGCfg(
             device="cpu",
-            learning_rate=0.01,
+            optimizer=OptimizerCfg(learning_rate=0.01),
             max_grad_norm=100.0,
         ),
         policy,
@@ -350,6 +351,7 @@ def test_evaluation_uses_eval_mode_and_restores_policy_mode(
     assert policy.training is initial_training_mode
 
 
+@pytest.mark.slow
 def test_apg_training_generalizes_to_held_out_reaches() -> None:
     result = train_planar_reach(
         NewtonPlanarReachTrainingCfg(

@@ -22,13 +22,15 @@ import select
 import sys
 import time
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Any
 
 import gymnasium
 import numpy as np
 import torch
 import tqdm
 
+from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -41,83 +43,261 @@ from embodichain.lab.gym.utils.registration import (
 )
 from embodichain.utils.logger import log_warning, log_info, log_error
 
+if TYPE_CHECKING:
+    from embodichain.lab.visualization import VisualizationRuntime
 
-def generate_and_execute_action_list(env, idx, debug_mode, **kwargs):
+_REPLAY_CONTROL_POLL_INTERVAL = 0.05
 
-    action_list = env.get_wrapper_attr("create_demo_action_list")(
-        action_sentence=idx, **kwargs
+
+def _progress_wrapper(actions: Iterable[Any], description: str) -> Iterable[Any]:
+    """Wrap a segment action iterable in the run-env progress bar."""
+    return tqdm.tqdm(actions, desc=description, unit="step")
+
+
+def _env_target(env: Any) -> Any:
+    """Return the underlying environment used for lifecycle introspection."""
+    return getattr(env, "unwrapped", env)
+
+
+def _normalize_save_env_ids(
+    env: Any,
+    env_ids: Sequence[int] | torch.Tensor | None,
+) -> tuple[int, ...]:
+    """Validate environment rows selected for one persisted episode batch."""
+    num_envs = int(getattr(_env_target(env), "num_envs", 1))
+    if num_envs < 1:
+        raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
+
+    if env_ids is None:
+        normalized = tuple(range(num_envs))
+    elif isinstance(env_ids, torch.Tensor):
+        normalized = tuple(
+            int(env_id) for env_id in env_ids.detach().cpu().reshape(-1).tolist()
+        )
+    else:
+        normalized = tuple(int(env_id) for env_id in env_ids)
+
+    if not normalized:
+        raise ValueError("save_env_ids must select at least one environment.")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError(f"save_env_ids contains duplicates: {normalized}.")
+    invalid = [env_id for env_id in normalized if not 0 <= env_id < num_envs]
+    if invalid:
+        raise ValueError(
+            f"save_env_ids {invalid} are outside the valid range [0, {num_envs})."
+        )
+    return normalized
+
+
+def _reset_episode_rows(
+    env: Any,
+    env_ids: Sequence[int] | torch.Tensor | None,
+    *,
+    save_data: bool,
+) -> None:
+    """Reset selected rows, committing or discarding their pending recordings."""
+    selected = _normalize_save_env_ids(env, env_ids)
+    target = _env_target(env)
+    num_envs = int(getattr(target, "num_envs", 1))
+    all_env_ids = tuple(range(num_envs))
+
+    if selected == all_env_ids:
+        if save_data:
+            env.reset()
+        else:
+            env.reset(options={"save_data": False})
+        return
+
+    reset_ids = torch.tensor(
+        selected,
+        dtype=torch.int32,
+        device=getattr(target, "device", None),
+    )
+    options: dict[str, Any] = {"reset_ids": reset_ids}
+    if not save_data:
+        options["save_data"] = False
+    env.reset(options=options)
+
+
+def _abort_pending_episode(
+    env: Any,
+    env_ids: Sequence[int] | torch.Tensor | None = None,
+) -> None:
+    """Discard buffered data before retrying or closing an environment."""
+    _reset_episode_rows(env, env_ids, save_data=False)
+
+
+def _commit_pending_episode(
+    env: Any,
+    save_env_ids: Sequence[int] | torch.Tensor | None,
+) -> None:
+    """Commit selected rows and discard unused rows from the same vector batch."""
+    selected = _normalize_save_env_ids(env, save_env_ids)
+    num_envs = int(getattr(_env_target(env), "num_envs", 1))
+    _reset_episode_rows(env, selected, save_data=True)
+
+    selected_set = set(selected)
+    discarded = tuple(
+        env_id for env_id in range(num_envs) if env_id not in selected_set
+    )
+    if discarded:
+        _reset_episode_rows(env, discarded, save_data=False)
+
+
+def _save_failed_episodes_enabled(env: Any) -> bool:
+    """Return whether the configured dataset manager keeps failed episodes."""
+    dataset_manager = getattr(_env_target(env), "dataset_manager", None)
+    return bool(
+        dataset_manager is not None
+        and getattr(dataset_manager, "save_failed_episodes", False)
     )
 
-    if action_list is None or len(action_list) == 0:
-        log_warning("Action is invalid. Skip to next generation.")
+
+def _selected_rows_have_frames(
+    result: DemoEpisodeResult,
+    save_env_ids: Sequence[int],
+) -> bool:
+    """Return whether every selected row contains a persistable frame."""
+    if result.lengths:
+        return all(result.lengths[env_id] > 0 for env_id in save_env_ids)
+    return result.length > 0
+
+
+def generate_and_execute_action_list(
+    env: gymnasium.Env,
+    idx: int,
+    debug_mode: bool,
+    *,
+    episode_idx: int = 0,
+    **kwargs: Any,
+) -> bool:
+    """Execute one legacy planner result through the common episode executor.
+
+    This compatibility helper now represents one complete task episode. New
+    multi-object tasks should implement ``create_demo_segments`` instead of
+    calling this function repeatedly.
+
+    Args:
+        env: Environment used to generate and execute the actions.
+        idx: Index of the legacy action list within the current episode.
+        debug_mode: Whether debug mode is enabled.
+        episode_idx: Index of the current episode.
+        **kwargs: Additional arguments forwarded to action generation.
+
+    Returns:
+        Whether a complete, successful episode was executed.
+    """
+    result = execute_demo_episode(
+        env,
+        episode_index=episode_idx,
+        progress=_progress_wrapper,
+        action_sentence=idx,
+        **kwargs,
+    )
+    if not result.completed or not result.all_success:
+        log_warning(
+            f"Demo episode {episode_idx} is invalid ({result.terminal_reason}); "
+            "it will not be saved."
+        )
         return False
-
-    for action in tqdm.tqdm(
-        action_list, desc=f"Executing action list #{idx}", unit="step"
-    ):
-        # Step the environment with the current action
-        # The environment will automatically detect truncation based on action_length
-        obs, reward, terminated, truncated, info = env.step(action)
-
-    # TODO: We may assume in export demonstration rollout, there is no truncation from the env.
-    # but truncation is useful to improve the generation efficiency.
-
     return True
 
 
 def generate_function(
-    env,
-    num_traj,
+    env: Any,
+    num_traj: int | None = None,
     time_id: int = 0,
     save_path: str = "",
     save_video: bool = False,
     debug_mode: bool = False,
-    **kwargs,
-):
-    """Generate and execute a sequence of actions in the environment.
+    save_env_ids: Sequence[int] | torch.Tensor | None = None,
+    **kwargs: Any,
+) -> bool:
+    """Generate, execute, and transactionally save one task episode batch.
 
-    This function resets the environment, generates and executes action trajectories,
-    collects data, and optionally saves videos of the episodes. It supports both online
-    and offline data generation modes.
+    A task owns its segment count through ``create_demo_segments``. The legacy
+    ``num_traj`` parameter is accepted only as ``None`` or ``1`` so callers do
+    not accidentally repeat a one-grasp planner inside the same episode. When
+    a dataset functor enables ``save_failed_episodes``, a failed result with at
+    least one frame in every selected row is committed instead of retried.
 
     Args:
         env: The environment instance.
-        num_traj (int): Number of trajectories to generate per episode.
+        num_traj: Deprecated compatibility value. Must be ``None`` or ``1``.
         time_id (int, optional): Identifier for the current time step or episode.
         save_path (str, optional): Path to save generated videos.
         save_video (bool, optional): Whether to save episode videos.
         debug_mode (bool, optional): Enable debug mode for visualization and logging.
+        save_env_ids: Environment rows to persist from this vector batch. Other
+            rows are explicitly discarded after the selected rows commit.
         **kwargs: Additional keyword arguments for data generation.
 
     Returns:
-        bool: True if data generation is successful, False otherwise.
+        True if one episode per selected environment row was committed. With
+        ``save_failed_episodes`` enabled, committed episodes may be unsuccessful.
     """
+    if num_traj not in (None, 1):
+        raise ValueError(
+            "num_traj no longer controls sub-trajectories. Implement "
+            "create_demo_segments() in the task to define multiple segments."
+        )
 
-    valid = True
-    _, _ = env.reset()
-    while True:
-        ret = []
-        for trajectory_idx in range(num_traj):
-            valid = generate_and_execute_action_list(
-                env, trajectory_idx, debug_mode, **kwargs
+    max_attempts = int(kwargs.pop("max_attempts", 3))
+    reset_before = bool(kwargs.pop("reset_before", True))
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
+    normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
+    save_failed_episodes = _save_failed_episodes_enabled(env)
+
+    if reset_before:
+        _abort_pending_episode(env)
+
+    for attempt in range(1, max_attempts + 1):
+        commit_succeeded = False
+        try:
+            result: DemoEpisodeResult = execute_demo_episode(
+                env,
+                episode_index=time_id,
+                progress=_progress_wrapper,
+                **kwargs,
             )
+            successful = result.completed and result.all_success
+            persistable_failure = (
+                not successful
+                and save_failed_episodes
+                and _selected_rows_have_frames(result, normalized_save_env_ids)
+            )
+            if successful or persistable_failure:
+                # reset() is the commit boundary: dataset functors consume the
+                # whole episode once, then buffers and scene state are reset.
+                _commit_pending_episode(env, normalized_save_env_ids)
+                commit_succeeded = True
+                if persistable_failure:
+                    log_warning(
+                        f"Episode {time_id} failed ({result.terminal_reason}) but "
+                        "was saved because save_failed_episodes is enabled."
+                    )
+                return True
+        finally:
+            # ``finally`` also covers KeyboardInterrupt, SystemExit, and
+            # GeneratorExit. A failed commit is aborted as well, so close()
+            # can never implicitly persist the pending partial episode.
+            if not commit_succeeded:
+                _abort_pending_episode(env)
 
-            if not valid:
-                # Failed execution: reset without saving invalid data
-                _, _ = env.reset(options={"save_data": False})
-                break
+        log_warning(
+            f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
+            f"{result.terminal_reason}. Discarding {result.length} frames."
+        )
 
-        if valid:
-            break
-        else:
-            log_warning("Reset valid flag to True.")
-            valid = True
-
-    return True
+    return False
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
     """Replay a recorded trajectory.
+
+    The caller retains ownership of ``env``. Wrapper-specific replay state is
+    restored before returning, but the environment is not closed here.
 
     Args:
         env: The environment built from the same config that recorded the
@@ -128,7 +308,7 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
     """
     data = load_trajectory(trajectory_path)
     meta = data["meta"]
-    lengths = meta.get("lengths", [meta["num_steps"]] * meta["num_envs"])
+    lengths = meta["lengths"]
     log_info(
         f"Replaying trajectory: num_envs={meta['num_envs']}, lengths={lengths}, "
         f"num_steps={meta['num_steps']}, mode={mode}",
@@ -141,7 +321,12 @@ def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
         else:
             replay_auto(replay_env, mode)
     finally:
-        replay_env.close()
+        # ReplayWrapper.close() also closes its wrapped environment. Restore
+        # its local state here and leave the single close() to cli().
+        try:
+            replay_env.env.sim.enable_physics(True)
+        finally:
+            replay_env.env._replay_no_auto_reset = False
 
 
 def replay_auto(replay_env: ReplayWrapper, mode: str) -> None:
@@ -258,102 +443,171 @@ def _read_replay_control_command(
 
 
 def _run_replay_control_loop(
-    replay_env: ReplayWrapper, control_input: _ReplayControlInput
+    replay_env: ReplayWrapper,
+    control_input: _ReplayControlInput,
+    *,
+    visualization_runtime: VisualizationRuntime | None = None,
 ) -> None:
     """Run the interactive replay loop using the provided input source."""
     num_steps = int(replay_env._lengths.min().item())
-    max_step = num_steps - 1
+    max_step = int(getattr(replay_env, "control_max_step", num_steps - 1))
     step = 0
-    replay_env.go_to_step(step)
     dt = (
         float(replay_env.env.sim_cfg.physics_dt)
         * replay_env.env.cfg.sim_steps_per_control
     )
     pending_command = None
     auto_playing = False
+    prompt_visible = False
+    terminal_active = True
 
-    print(f"Trajectory has {num_steps} steps (0..{max_step}).")
-    while True:
-        if auto_playing:
-            if step >= max_step:
-                auto_playing = False
-                print(f"\nAuto replay finished at step {step}.")
-                continue
-
-            step += 1
-            replay_env.go_to_step(step)
-            print(
-                f"\r[auto step {step}/{max_step}]  press any key to pause",
-                end="",
-                flush=True,
+    def publish_state(*, visible: bool = True) -> None:
+        if visualization_runtime is not None:
+            visualization_runtime.publish_replay_control(
+                step=step,
+                max_step=max_step,
+                visible=visible,
             )
-            try:
-                key = control_input.read_key(timeout=dt)
-            except (EOFError, KeyboardInterrupt):
-                print()
-                break
-            if key is None:
-                continue
 
-            auto_playing = False
-            print(f"\nPaused at step {step}.")
-            # Pause keys are consumed. Other keys also pause and then execute
-            # their normal command, so p/n/q/r remain responsive during auto.
-            if key not in ("a", " ", "\r", "\n"):
-                pending_command = key
-            continue
-
-        print(
-            f"[step {step}/{max_step}]  n=next  p=prev  <N>=jump  "
-            "a=auto  r=reset  q=quit"
-        )
-        if control_input.single_key:
-            print("> ", end="", flush=True)
-        try:
-            command = _read_replay_control_command(
-                control_input, initial=pending_command
-            )
-        except (EOFError, KeyboardInterrupt):
-            break
-        finally:
-            pending_command = None
-        if control_input.single_key and not command.isdigit():
-            print()
-
-        if command in ("q", "quit"):
-            break
-        if command in ("n", ""):
-            step = min(step + 1, max_step)
-        elif command in ("p", "b"):
-            step = max(step - 1, 0)
-        elif command == "r":
-            step = 0
-        elif command == "a":
-            auto_playing = True
-            continue
-        elif command.isdigit():
-            step = max(0, min(int(command), max_step))
-        elif command == " ":
-            continue
-        else:
-            print(f"Unknown command: {command!r}")
-            continue
+    def seek(target: int) -> None:
+        nonlocal step
+        step = max(0, min(int(target), max_step))
         replay_env.go_to_step(step)
+        publish_state()
+
+    def read_key(timeout: float | None) -> str | None:
+        nonlocal terminal_active
+        if not terminal_active:
+            time.sleep(timeout or _REPLAY_CONTROL_POLL_INTERVAL)
+            return None
+        try:
+            return control_input.read_key(timeout=timeout)
+        except EOFError:
+            if visualization_runtime is None:
+                raise
+            terminal_active = False
+            return None
+
+    seek(0)
+    print(f"Trajectory has {num_steps} transitions (state indices 0..{max_step}).")
+    try:
+        while True:
+            if visualization_runtime is not None:
+                browser_step = visualization_runtime.drain_replay_control_command()
+                if browser_step is not None:
+                    if auto_playing:
+                        print(f"\nPaused at step {step}.")
+                    auto_playing = False
+                    pending_command = None
+                    seek(browser_step)
+                    prompt_visible = False
+                    continue
+
+            if auto_playing:
+                if step >= max_step:
+                    auto_playing = False
+                    prompt_visible = False
+                    print(f"\nAuto replay finished at step {step}.")
+                    continue
+
+                seek(step + 1)
+                print(
+                    f"\r[auto step {step}/{max_step}]  press any key to pause",
+                    end="",
+                    flush=True,
+                )
+                try:
+                    key = read_key(dt)
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if key is None:
+                    continue
+
+                auto_playing = False
+                prompt_visible = False
+                print(f"\nPaused at step {step}.")
+                if key not in ("a", " ", "\r", "\n"):
+                    pending_command = key
+                continue
+
+            if not prompt_visible:
+                print(
+                    f"[step {step}/{max_step}]  n=next  p=prev  <N>=jump  "
+                    "a=auto  r=reset  q=quit"
+                )
+                if control_input.single_key and terminal_active:
+                    print("> ", end="", flush=True)
+                prompt_visible = True
+            try:
+                if pending_command is not None:
+                    initial = pending_command
+                elif visualization_runtime is not None:
+                    initial = read_key(_REPLAY_CONTROL_POLL_INTERVAL)
+                    if initial is None:
+                        continue
+                else:
+                    initial = None
+                command = _read_replay_control_command(
+                    control_input,
+                    initial=initial,
+                )
+            except (EOFError, KeyboardInterrupt):
+                break
+            finally:
+                pending_command = None
+            if control_input.single_key and not command.isdigit():
+                print()
+            prompt_visible = False
+            if command in ("q", "quit"):
+                break
+            if command in ("n", ""):
+                seek(step + 1)
+            elif command in ("p", "b"):
+                seek(step - 1)
+            elif command == "r":
+                seek(0)
+            elif command == "a":
+                auto_playing = True
+            elif command.isdigit():
+                seek(int(command))
+            elif command == " ":
+                continue
+            else:
+                print(f"Unknown command: {command!r}")
+    finally:
+        publish_state(visible=False)
+
+
+def _replay_visualization_runtime(
+    replay_env: ReplayWrapper,
+) -> VisualizationRuntime | None:
+    """Return the running Viser runtime used by a replay environment."""
+    runtime = getattr(replay_env.env.sim, "visualization_runtime", None)
+    if runtime is None or not runtime.is_running:
+        return None
+    return runtime
 
 
 def replay_control(replay_env: ReplayWrapper) -> None:
     """Run an interactive, single-key kinematic trajectory scrubber."""
-    if replay_env.env.sim_cfg.headless:
+    visualization_runtime = _replay_visualization_runtime(replay_env)
+    if replay_env.env.sim_cfg.headless and visualization_runtime is None:
         log_warning(
             "control mode with --headless: no window to view the scrub. "
-            "Re-run without --headless to see the replay."
+            "Re-run without --headless or enable --viser to see the replay."
         )
     replay_env.reset()
     with _ReplayControlInput() as control_input:
-        _run_replay_control_loop(replay_env, control_input)
+        _run_replay_control_loop(
+            replay_env,
+            control_input,
+            visualization_runtime=visualization_runtime,
+        )
 
 
-def main(args, env, gym_config):
+def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
+    """Run the selected workflow without taking ownership of ``env``."""
     if getattr(args, "replay", False):
         log_info("Replay mode.", color="green")
         replay(
@@ -371,52 +625,65 @@ def main(args, env, gym_config):
         return
 
     log_info("Start offline data generation.", color="green")
-    # TODO: Support multiple trajectories per episode generation.
-    num_traj = 1
-    try:
-        for i in range(gym_config.get("max_episodes", 1)):
-            generate_function(
-                env,
-                num_traj,
-                i,
-                save_path=getattr(args, "save_path", ""),
-                save_video=getattr(args, "save_video", False),
-                debug_mode=getattr(args, "debug_mode", False),
-                regenerate=getattr(args, "regenerate", False),
+    # Prepare one clean scene. max_episodes counts persisted per-environment
+    # episodes, not vector batches. Every successful generate_function call
+    # commits exactly the selected rows and leaves the next batch ready to plan.
+    _abort_pending_episode(env)
+    max_episodes = int(gym_config.get("max_episodes", 1))
+    if max_episodes < 0:
+        raise ValueError(f"max_episodes must be non-negative, got {max_episodes}.")
+    num_envs = int(getattr(_env_target(env), "num_envs", 1))
+    if num_envs < 1:
+        raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
+
+    saved_episodes = 0
+    generated_batches = 0
+    while saved_episodes < max_episodes:
+        batch_episode_count = min(num_envs, max_episodes - saved_episodes)
+        save_env_ids = tuple(range(batch_episode_count))
+        generated = generate_function(
+            env,
+            time_id=saved_episodes,
+            save_path=getattr(args, "save_path", ""),
+            save_video=getattr(args, "save_video", False),
+            debug_mode=getattr(args, "debug_mode", False),
+            save_env_ids=save_env_ids,
+            regenerate=getattr(args, "regenerate", False),
+            max_attempts=gym_config.get("demo_max_attempts", 3),
+            reset_before=False,
+        )
+        if not generated:
+            raise RuntimeError(
+                f"Failed to generate episode batch starting at {saved_episodes} after "
+                f"{gym_config.get('demo_max_attempts', 3)} attempts."
             )
+        saved_episodes += batch_episode_count
+        generated_batches += 1
 
-        # Final reset (saves the last completed episode).
-        _, _ = env.reset()
+    log_info(
+        f"Committed {saved_episodes} episode(s) in {generated_batches} vector batch(es).",
+        color="green",
+    )
 
-        # Log the trajectory save location BEFORE env.close() (in the finally
-        # below) tears down the sim and, by default, os._exit()s the process.
-        if getattr(args, "record_trajectory", False):
-            save_dir = args.trajectory_save_dir
-            if save_dir is None:
-                import os
+    # Log the trajectory save location before cli() tears down the sim and, by
+    # default, os._exit()s the process.
+    if getattr(args, "record_trajectory", False):
+        save_dir = args.trajectory_save_dir
+        if save_dir is None:
+            import os
 
-                from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
+            from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
-                save_dir = os.path.join(
-                    EMBODICHAIN_DEFAULT_DATA_ROOT,
-                    "trajectories",
-                    env.unwrapped._traj_run_id,
-                )
-            log_info(
-                f"Trajectories recorded to: {save_dir} "
-                "(replay with --replay --replay_trajectory <path>)",
-                color="green",
+            save_dir = os.path.join(
+                EMBODICHAIN_DEFAULT_DATA_ROOT,
+                "trajectories",
+                env.unwrapped._traj_run_id,
             )
-    finally:
-        # Drain the dataset recorder and finalize the LeRobot dataset before
-        # the process exits. This is REQUIRED for AsyncLeRobotRecorder: its
-        # background worker only *enqueues* episodes during reset, so without
-        # close() the worker is killed at exit and no data reaches disk.
-        # env.close() -> dataset_manager.finalize() drains the worker + flushes
-        # meta/stats, then sim.destroy() tears down the sim. sim.destroy() exits
-        # the process without returning, so this MUST be the last thing main()
-        # does.
-        env.close()
+        log_info(
+            f"Trajectories recorded to: {save_dir} "
+            "(replay with --replay --replay_trajectory <path>)",
+            color="green",
+        )
 
 
 def preview(env: gymnasium.Env) -> None:
@@ -461,7 +728,7 @@ def preview(env: gymnasium.Env) -> None:
         elif txt == "q":
             end = True
 
-    exit(0)
+    return
 
 
 def _create_parser() -> argparse.ArgumentParser:
@@ -494,6 +761,45 @@ def _create_parser() -> argparse.ArgumentParser:
         "control (interactive scrubber).",
     )
     return parser
+
+
+def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
+    """Abort pending data, then close the environment exactly once.
+
+    Args:
+        env: Gym environment or wrapper.
+        exit_process: Optional process-exit policy for ``EmbodiedEnv.close``.
+            An abort failure always forces ``False`` so the error can propagate.
+    """
+    abort_error: BaseException | None = None
+    close_error: BaseException | None = None
+    try:
+        _abort_pending_episode(env)
+    except BaseException as error:
+        abort_error = error
+    try:
+        if exit_process is None and abort_error is None:
+            env.close()
+        else:
+            target = getattr(env, "unwrapped", env)
+            target.close(
+                exit_process=False if abort_error is not None else exit_process
+            )
+    except BaseException as error:
+        close_error = error
+
+    # Recorder finalization is a durability barrier. Never turn a failed flush
+    # into a warning that lets an apparently successful data-generation run
+    # continue.
+    if close_error is not None:
+        if abort_error is not None:
+            close_error.add_note(
+                "Pending episode abort also failed: "
+                f"{type(abort_error).__name__}: {abort_error}"
+            )
+        raise close_error
+    if abort_error is not None:
+        raise abort_error
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
@@ -540,19 +846,41 @@ def cli(argv: Sequence[str] | None = None) -> None:
     # to skip the unsafe teardown entirely. When that env var is disabled (e.g.
     # dev/test), ``flush_cleanup_queue`` drains the queue and runs the deferred
     # destruction + GC + scene-barrier so we still exit cleanly.
+    body_error: BaseException | None = None
     try:
         main(args, env, gym_config)
+    except BaseException as error:
+        body_error = error
+        raise
     finally:
         try:
-            env.close()
-        except Exception as e:
-            log_warning(f"Failed to close environment: {e}")
-        try:
-            from embodichain.lab.sim.sim_manager import SimulationManager
+            # close() may auto-save trajectory state and finalizes asynchronous
+            # dataset writers. Resolve the pending transaction as an abort
+            # first, including when main() exits via an interrupt or SystemExit.
+            _abort_and_close_env(
+                env,
+                # Successful CLI runs keep the existing fast-exit default.
+                # While unwinding, cleanup must return so the original error
+                # (including Ctrl-C) remains observable to the caller/shell.
+                exit_process=False if body_error is not None else None,
+            )
+        except BaseException as cleanup_error:
+            if body_error is None:
+                raise
+            if isinstance(body_error, SystemExit) and body_error.code in (None, 0):
+                # A nominal zero exit must not hide a failed recorder barrier.
+                raise cleanup_error
+            body_error.add_note(
+                "Environment cleanup also failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        finally:
+            try:
+                from embodichain.lab.sim.sim_manager import SimulationManager
 
-            SimulationManager.flush_cleanup_queue()
-        except Exception as e:
-            log_warning(f"Failed to flush simulation cleanup queue: {e}")
+                SimulationManager.flush_cleanup_queue()
+            except Exception as error:
+                log_warning(f"Failed to flush simulation cleanup queue: {error}")
 
 
 if __name__ == "__main__":

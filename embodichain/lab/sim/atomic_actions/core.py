@@ -26,12 +26,17 @@ from typing import Any, ClassVar, Generic, TYPE_CHECKING
 import torch
 
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.utils import configclass
 
 from .affordance import Affordance
 from .effects import StateDelta
 from .goals import collect_scene_dependencies
-from .invocation import ActionInvocation, GoalT
+from .invocation import (
+    ActionInvocation,
+    ActionOptions,
+    GoalT,
+    OptionsT,
+    ResolvedActionRequest,
+)
 from .plans import (
     ActionPlan,
     CompletionCondition,
@@ -43,9 +48,12 @@ from .plans import (
 )
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
 
+    from .runtime import ActionPlanningServices
     from .state import PlanningContext
+    from .trajectory import TrajectoryBuilder
 
 
 def resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -100,6 +108,7 @@ class SkillDescriptor:
 
     skill_id: str
     goal_type: type[Any] | tuple[type[Any], ...]
+    options_type: type[ActionOptions]
     manipulator_roles: tuple[str, ...] = ()
     end_effector_roles: tuple[str, ...] = ()
     agent_visible: bool = True
@@ -112,6 +121,12 @@ class SkillDescriptor:
         )
         if not goal_types or not all(isinstance(item, type) for item in goal_types):
             raise TypeError("SkillDescriptor.goal_type must contain concrete types.")
+        if not isinstance(self.options_type, type) or not issubclass(
+            self.options_type, ActionOptions
+        ):
+            raise TypeError(
+                "SkillDescriptor.options_type must be an ActionOptions subclass."
+            )
         for field_name in ("manipulator_roles", "end_effector_roles"):
             roles = tuple(getattr(self, field_name))
             if len(set(roles)) != len(roles) or not all(
@@ -121,25 +136,22 @@ class SkillDescriptor:
             object.__setattr__(self, field_name, roles)
 
 
-@configclass
-class ActionCfg:
-    """Base configuration for implementation-owned skill behavior."""
+class AtomicAction(Generic[GoalT, OptionsT], ABC):
+    """Side-effect-free planner for one semantically meaningful robot skill.
 
-    name: str = "default"
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name:
-            raise ValueError("name must be a non-empty string.")
-
-
-class AtomicAction(Generic[GoalT], ABC):
-    """Side-effect-free planner for one semantically meaningful robot skill."""
+    Actions own only typed default runtime options. An
+    :class:`~embodichain.lab.sim.atomic_actions.engine.AtomicActionEngine` binds
+    its shared planning services before an action is invoked.
+    """
 
     skill_id: ClassVar[str]
     """Stable registry identifier for this skill."""
 
     GoalType: ClassVar[type[Any] | tuple[type[Any], ...]]
     """Concrete goal dataclass or dataclasses accepted by this skill."""
+
+    OptionsType: ClassVar[type[ActionOptions]] = ActionOptions
+    """Concrete per-invocation runtime options accepted by this skill."""
 
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     """Required semantic manipulator roles."""
@@ -161,13 +173,84 @@ class AtomicAction(Generic[GoalT], ABC):
 
     def __init__(
         self,
-        motion_generator: MotionGenerator,
-        cfg: ActionCfg | None = None,
+        default_options: OptionsT | None = None,
     ) -> None:
-        self.motion_generator = motion_generator
-        self.cfg = cfg if cfg is not None else ActionCfg()
-        self.robot = motion_generator.robot
-        self.device = resolve_runtime_device(self.robot.device)
+        selected_options = (
+            self.OptionsType() if default_options is None else default_options
+        )
+        if not isinstance(selected_options, self.OptionsType):
+            raise TypeError(
+                f"{type(self).__name__} expects default_options of type "
+                f"{self.OptionsType.__name__}, got "
+                f"{type(selected_options).__name__}."
+            )
+        self._default_options: OptionsT = deepcopy(selected_options)
+        self._planning_services: ActionPlanningServices | None = None
+
+    @property
+    def default_options(self) -> OptionsT:
+        """Return an owned copy of the action's default runtime options."""
+        return deepcopy(self._default_options)
+
+    @property
+    def is_bound(self) -> bool:
+        """Whether an engine has supplied this action's planning resources."""
+        return self._planning_services is not None
+
+    @property
+    def planning_services(self) -> ActionPlanningServices:
+        """Return the engine-owned services borrowed by this action.
+
+        Raises:
+            RuntimeError: If the action has not been registered or planned by
+                an
+                :class:`~embodichain.lab.sim.atomic_actions.engine.AtomicActionEngine`.
+        """
+        if self._planning_services is None:
+            raise RuntimeError(
+                f"Atomic action {self.skill_id!r} is not bound to an "
+                "AtomicActionEngine. Register it or call engine.plan_action()."
+            )
+        return self._planning_services
+
+    @property
+    def motion_generator(self) -> MotionGenerator:
+        """Return the engine-owned motion generator borrowed by this action."""
+        return self.planning_services.motion_generator
+
+    @property
+    def robot(self) -> Robot:
+        """Return the robot associated with the owning engine."""
+        return self.planning_services.robot
+
+    @property
+    def device(self) -> torch.device:
+        """Return the concrete runtime device associated with the engine."""
+        return self.planning_services.device
+
+    @property
+    def builder(self) -> TrajectoryBuilder:
+        """Return the engine-owned shared trajectory builder."""
+        return self.planning_services.trajectory_builder
+
+    def _bind(self, services: ActionPlanningServices) -> None:
+        """Bind engine-owned planning services exactly once."""
+        if self._planning_services is services:
+            return
+        if self._planning_services is not None:
+            raise ValueError(
+                f"Atomic action {self.skill_id!r} is already bound to another "
+                "AtomicActionEngine."
+            )
+        self._planning_services = services
+        try:
+            self._on_bind()
+        except Exception:
+            self._planning_services = None
+            raise
+
+    def _on_bind(self) -> None:
+        """Initialize implementation state that depends on engine resources."""
 
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
@@ -175,86 +258,27 @@ class AtomicAction(Generic[GoalT], ABC):
         return SkillDescriptor(
             skill_id=cls.skill_id,
             goal_type=cls.GoalType,
+            options_type=cls.OptionsType,
             manipulator_roles=cls.manipulator_roles,
             end_effector_roles=cls.end_effector_roles,
             agent_visible=cls.agent_visible,
         )
 
-    def plan(
+    def resolve_request(
         self,
-        invocation: ActionInvocation[GoalT],
-        context: PlanningContext,
-    ) -> ActionPlan:
-        """Plan one invocation against an immutable observed context.
-
-        The public entry point binds collision entities from the scene snapshot
-        into a copied motion policy before delegating to :meth:`_plan`. This
-        keeps dynamic obstacle plumbing out of individual skill parameters and
-        guarantees replanning consumes the latest collision-world snapshot.
+        invocation: ActionInvocation[GoalT, OptionsT],
+    ) -> ResolvedActionRequest[GoalT, OptionsT]:
+        """Validate and snapshot an invocation through engine-owned resources.
 
         Args:
-            invocation: Fully typed and embodiment-bound action request.
-            context: Latest observed robot, task, and scene state.
+            invocation: Caller-owned invocation to resolve.
 
         Returns:
-            Scene-bound action plan with expected, uncommitted effects.
-        """
-        self.require_goal(invocation)
-        prepared = self._prepare_invocation(invocation, context)
-        return self._plan(prepared, context)
-
-    def _prepare_invocation(
-        self,
-        invocation: ActionInvocation[GoalT],
-        context: PlanningContext,
-    ) -> ActionInvocation[GoalT]:
-        """Bind the current collision snapshot without mutating caller policy."""
-        if not self._uses_collision_world(invocation, context):
-            return invocation
-        planner = self.motion_generator.planner
-        policy = deepcopy(invocation.motion_policy)
-        options = (
-            deepcopy(policy.plan_opts)
-            if policy.plan_opts is not None
-            else planner.default_plan_options()
-        )
-        poses = context.scene.collision_obstacle_poses(
-            batch_size=context.batch_size,
-            device=context.robot.qpos.device,
-            dtype=context.robot.qpos.dtype,
-        )
-        policy.plan_opts = planner.with_collision_world(
-            options,
-            obstacle_poses=poses,
-        )
-        return replace(invocation, motion_policy=policy)
-
-    def _uses_collision_world(
-        self,
-        invocation: ActionInvocation[GoalT],
-        context: PlanningContext,
-    ) -> bool:
-        """Return whether this planning attempt consumes collision revisions."""
-        planner = getattr(self.motion_generator, "planner", None)
-        return (
-            invocation.motion_policy.motion_source == "motion_gen"
-            and invocation.motion_policy.collision_check
-            and bool(context.scene.collision_entity_ids)
-            and getattr(planner, "supports_collision_world_updates", False) is True
-        )
-
-    def require_goal(self, invocation: ActionInvocation[GoalT]) -> GoalT:
-        """Validate an invocation and return its concrete goal.
-
-        Args:
-            invocation: Grounded invocation to validate.
-
-        Returns:
-            Invocation goal narrowed to this action's declared type.
+            Immutable request reused by planning and recovery replans.
 
         Raises:
             ValueError: If the stable skill identifier does not match.
-            TypeError: If the goal type is incompatible.
+            TypeError: If the goal or options type is incompatible.
             KeyError: If a required binding role is missing.
         """
         if invocation.skill_id != self.skill_id:
@@ -276,21 +300,126 @@ class AtomicAction(Generic[GoalT], ABC):
             invocation.binding.manipulator(role)
         for role in self.end_effector_roles:
             invocation.binding.end_effector(role)
-        required_planner = invocation.motion_policy.planner
-        configured_planner = getattr(
-            getattr(self.motion_generator, "planner", None), "cfg", None
+        options = (
+            self._default_options
+            if invocation.skill_options is None
+            else invocation.skill_options
         )
-        configured_planner_name = getattr(configured_planner, "planner_type", None)
+        if not isinstance(options, self.OptionsType):
+            raise TypeError(
+                f"Skill {self.skill_id!r} expects options "
+                f"{self.OptionsType.__name__}, got {type(options).__name__}."
+            )
+        required_planner = invocation.motion_policy.planner
+        configured_planner_name = self.planning_services.planner_name
         if required_planner is not None and required_planner != configured_planner_name:
             raise ValueError(
                 f"Motion policy requires planner {required_planner!r}, but this "
                 f"action uses {configured_planner_name!r}."
             )
-        return invocation.goal
+        return ResolvedActionRequest(
+            skill_id=invocation.skill_id,
+            goal=invocation.goal,
+            binding=self.planning_services.resolve_binding(
+                invocation.binding,
+                invocation.control_overrides,
+            ),
+            motion_policy=invocation.motion_policy,
+            recovery_policy=invocation.recovery_policy,
+            skill_options=options,
+            invocation_id=invocation.invocation_id,
+            revision=invocation.revision,
+        )
+
+    def require_goal(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+    ) -> GoalT:
+        """Validate a resolved request and return its concrete goal."""
+        if request.skill_id != self.skill_id:
+            raise ValueError(
+                f"Request skill_id {request.skill_id!r} does not match "
+                f"{self.skill_id!r}."
+            )
+        if not isinstance(request.goal, self.GoalType):
+            raise TypeError(
+                f"Skill {self.skill_id!r} received incompatible goal "
+                f"{type(request.goal).__name__}."
+            )
+        if not isinstance(request.skill_options, self.OptionsType):
+            raise TypeError(
+                f"Skill {self.skill_id!r} received incompatible options "
+                f"{type(request.skill_options).__name__}."
+            )
+        for role in self.manipulator_roles:
+            request.binding.manipulator(role)
+        for role in self.end_effector_roles:
+            request.binding.end_effector(role)
+        return request.goal
+
+    def plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Bind the current collision scene and invoke the skill planner.
+
+        Args:
+            request: Immutable, typed, and embodiment-resolved action request.
+            context: Latest observed robot, task, and scene state.
+
+        Returns:
+            Scene-bound action plan with expected, uncommitted effects.
+        """
+        self.require_goal(request)
+        prepared = self._prepare_request(request, context)
+        return self._plan(prepared, context)
+
+    def _prepare_request(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ResolvedActionRequest[GoalT, OptionsT]:
+        """Bind snapshot obstacle poses without mutating the resolved request."""
+        if not self._uses_collision_world(request, context):
+            return request
+        planner = self.motion_generator.planner
+        options = (
+            deepcopy(request.motion_policy.plan_opts)
+            if request.motion_policy.plan_opts is not None
+            else planner.default_plan_options()
+        )
+        poses = context.scene.collision_obstacle_poses(
+            batch_size=context.batch_size,
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        policy = replace(
+            request.motion_policy,
+            plan_opts=planner.with_collision_world(
+                options,
+                obstacle_poses=poses,
+            ),
+        )
+        return replace(request, motion_policy=policy)
+
+    def _uses_collision_world(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> bool:
+        """Return whether this planning attempt consumes collision revisions."""
+        planner = getattr(self.motion_generator, "planner", None)
+        return (
+            request.motion_policy.motion_source == "motion_gen"
+            and request.motion_policy.collision_check
+            and bool(context.scene.collision_entity_ids)
+            and getattr(planner, "supports_collision_world_updates", False) is True
+        )
 
     def build_plan(
         self,
-        invocation: ActionInvocation[GoalT],
+        request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,
         *,
         success: bool | torch.Tensor,
@@ -307,12 +436,12 @@ class AtomicAction(Generic[GoalT], ABC):
         """Build a validated single-phase plan for a primitive implementation.
 
         Args:
-            invocation: Grounded invocation being planned.
+            request: Resolved invocation snapshot being planned.
             context: Planning input used for the plan.
             success: Per-environment planning success or scalar planner result.
             trajectory: Full-robot timed trajectory or position tensor.
             expected_effects: Symbolic effects to verify after execution.
-            phase_name: Optional phase name; defaults to the action config name.
+            phase_name: Optional phase name; defaults to the stable skill id.
             replannable: Whether the execution runtime may replan this phase.
             completion_kind: Completion condition category.
             completion_tolerance: Optional numerical completion tolerance.
@@ -321,7 +450,7 @@ class AtomicAction(Generic[GoalT], ABC):
         Returns:
             Side-effect-free action plan.
         """
-        self.require_goal(invocation)
+        self.require_goal(request)
         if isinstance(success, bool):
             success_mask = torch.full(
                 (context.batch_size,),
@@ -348,7 +477,7 @@ class AtomicAction(Generic[GoalT], ABC):
             timed = TimedTrajectory.from_positions(
                 trajectory,
                 env_ids=context.env_ids,
-                control_dt=invocation.motion_policy.control_dt,
+                control_dt=request.motion_policy.control_dt,
             )
         elif isinstance(trajectory, TimedTrajectory):
             timed = trajectory
@@ -360,25 +489,23 @@ class AtomicAction(Generic[GoalT], ABC):
             raise ValueError("Trajectory robot_dof must match the planning context.")
 
         if diagnostics is None:
-            backend = getattr(
-                getattr(getattr(self.motion_generator, "planner", None), "cfg", None),
-                "planner_type",
-                invocation.motion_policy.motion_source,
+            diagnostics = PlannerDiagnostics(
+                backend=self.planning_services.planner_name
             )
-            diagnostics = PlannerDiagnostics(backend=str(backend))
         phase = PlannedPhase(
             spec=PhaseSpec(
-                name=phase_name or self.cfg.name,
-                goal=invocation.goal,
+                name=phase_name or self.skill_id,
+                goal=request.goal,
                 replannable=replannable,
                 completion_condition=CompletionCondition(
                     kind=completion_kind,
                     tolerance=completion_tolerance,
                 ),
-                recovery_policy=invocation.recovery_policy,
-                scene_dependencies=collect_scene_dependencies(invocation.goal),
+                recovery_policy=request.recovery_policy,
+                scene_dependencies=collect_scene_dependencies(request.goal),
                 collision_world_sensitive=self._uses_collision_world(
-                    invocation, context
+                    request,
+                    context,
                 ),
             ),
             trajectory=timed,
@@ -393,12 +520,13 @@ class AtomicAction(Generic[GoalT], ABC):
             plan_success=success_mask,
             phases=(phase,),
             expected_effects=expected_effects or StateDelta(),
-            invocation_id=invocation.invocation_id,
+            invocation_id=request.invocation_id,
+            invocation_revision=request.revision,
         )
 
     def failed_plan(
         self,
-        invocation: ActionInvocation[GoalT],
+        request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,
         *,
         message: str | None = None,
@@ -406,20 +534,15 @@ class AtomicAction(Generic[GoalT], ABC):
         """Build a failed empty plan without changing task state.
 
         Args:
-            invocation: Grounded invocation that failed to plan.
+            request: Resolved invocation that failed to plan.
             context: Planning input used for the attempt.
             message: Optional diagnostic message.
 
         Returns:
             Failed action plan with an empty phase trajectory.
         """
-        backend = getattr(
-            getattr(getattr(self.motion_generator, "planner", None), "cfg", None),
-            "planner_type",
-            invocation.motion_policy.motion_source,
-        )
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=torch.zeros(
                 context.batch_size, dtype=torch.bool, device=self.device
@@ -432,20 +555,21 @@ class AtomicAction(Generic[GoalT], ABC):
             ),
             replannable=True,
             diagnostics=PlannerDiagnostics(
-                backend=str(backend), messages=(() if message is None else (message,))
+                backend=self.planning_services.planner_name,
+                messages=(() if message is None else (message,)),
             ),
         )
 
     @abstractmethod
     def _plan(
         self,
-        invocation: ActionInvocation[GoalT],
+        request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Implement skill-specific side-effect-free planning.
+        """Plan one invocation without stepping simulation or committing state.
 
         Args:
-            invocation: Request with context-bound motion planner options.
+            request: Immutable, typed, and embodiment-resolved action request.
             context: Latest observed robot, task, and scene state.
 
         Returns:
@@ -454,7 +578,6 @@ class AtomicAction(Generic[GoalT], ABC):
 
 
 __all__ = [
-    "ActionCfg",
     "AtomicAction",
     "ObjectSemantics",
     "SkillDescriptor",

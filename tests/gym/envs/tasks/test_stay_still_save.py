@@ -30,7 +30,7 @@ from embodichain.lab.gym.utils.registration import (
 # Trigger task auto-registration (idempotent).
 discover_task_packages()
 
-from embodichain_tasks.embodichain_tasks.special.stay_still_save import (  # noqa: E402
+from embodichain_tasks.special.stay_still_save import (  # noqa: E402
     StayStillSaveEnv,
 )
 
@@ -40,7 +40,7 @@ class TestStayStillSaveEnv:
 
     def test_module_all(self):
         """``__all__`` exports the env class."""
-        from embodichain_tasks.embodichain_tasks.special import stay_still_save
+        from embodichain_tasks.special import stay_still_save
 
         assert "StayStillSaveEnv" in stay_still_save.__all__
 
@@ -49,11 +49,12 @@ class TestStayStillSaveEnv:
         assert "StayStillSave-v1" in REGISTERED_ENVS
         spec = REGISTERED_ENVS["StayStillSave-v1"]
         assert spec.cls.__name__ == "StayStillSaveEnv"
-        assert spec.max_episode_steps == 100
+        # The 100-action expert plan must finish before the strict time limit.
+        assert spec.max_episode_steps == 101
 
     def test_uses_future_annotations(self):
         """Module source starts with ``from __future__ import annotations``."""
-        from embodichain_tasks.embodichain_tasks.special import stay_still_save
+        from embodichain_tasks.special import stay_still_save
 
         src = Path(stay_still_save.__file__).read_text()
         assert "from __future__ import annotations" in src

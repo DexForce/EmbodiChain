@@ -38,7 +38,6 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionRunner,
     ExecutionRunnerCfg,
     MotionPolicy,
-    MoveEndEffector,
     RecoveryPolicy,
     RigidObjectSceneProvider,
     RunnerStatus,
@@ -141,7 +140,6 @@ def main() -> None:
         device=target_pose.device,
     )
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(MoveEndEffector(motion_gen))
     invocation = ActionInvocation(
         skill_id="move_end_effector",
         goal=EndEffectorPoseGoal(target_pose),

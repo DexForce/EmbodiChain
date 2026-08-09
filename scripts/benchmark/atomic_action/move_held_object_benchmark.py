@@ -178,13 +178,11 @@ def _prepare_held_state(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         EndEffectorPoseGoal,
         GraspGoal,
-        MoveEndEffector,
-        MoveEndEffectorCfg,
         MotionPolicy,
-        PickUp,
-        PickUpCfg,
+        PickUpOptions,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
         build_grasp_generator_cfg,
@@ -194,24 +192,14 @@ def _prepare_held_state(
     )
 
     hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
-    atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-    atomic_engine.register(MoveEndEffector(motion_gen, cfg=MoveEndEffectorCfg()))
-    atomic_engine.register(
-        PickUp(
-            motion_gen,
-            cfg=PickUpCfg(
-                control_part="arm",
-                hand_control_part="hand",
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                approach_direction=resolve_pickup_approach_direction(
-                    pickup_approach, position_case, sim.device
-                ),
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    atomic_engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
     )
     semantics = create_antipodal_object_semantics(
         obj=obj,
@@ -241,10 +229,18 @@ def _prepare_held_state(
                 GraspGoal(semantics=semantics),
                 binding,
                 MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    approach_direction=resolve_pickup_approach_direction(
+                        pickup_approach, position_case, sim.device
+                    ),
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
         )
     )
-    is_success = result.plan_success
+    is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
     state = result.projected_context
     if not is_success or state.get_held_object("arm") is None:
@@ -276,9 +272,8 @@ def _run_case(
         ActionBinding,
         ActionInvocation,
         AtomicActionEngine,
+        ControlPartCommandProfile,
         HeldObjectPoseGoal,
-        MoveHeldObject,
-        MoveHeldObjectCfg,
         MotionPolicy,
     )
     from scripts.tutorials.atomic_action.move_held_object import (
@@ -315,16 +310,13 @@ def _run_case(
             pickup_approach_direction_tuple(pickup_approach, position_case)
         )
         precondition_waypoints = int(precondition_traj.shape[1])
-        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-        atomic_engine.register(
-            MoveHeldObject(
-                motion_gen,
-                cfg=MoveHeldObjectCfg(
-                    control_part="arm",
-                    hand_control_part="hand",
-                    hand_close_qpos=hand_close,
-                ),
-            )
+        atomic_engine = AtomicActionEngine(
+            motion_generator=motion_gen,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    grasp=hand_close,
+                )
+            },
         )
         target_pose = _make_object_target_pose(sim.device, case.xyz)
         elapsed, mem_delta, peak_gpu, result = timed_call(
@@ -345,7 +337,7 @@ def _run_case(
                 context=state,
             )
         )
-        is_success = result.plan_success
+        is_success = bool(result.plan_success.all().item())
         traj = result.trajectory.positions
         final_state = result.projected_context
         torch = ensure_torch()

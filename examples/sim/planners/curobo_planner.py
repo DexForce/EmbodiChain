@@ -30,8 +30,8 @@ Run from the repository root::
     python examples/sim/planners/curobo_planner.py --headless --num_envs 4
     python examples/sim/planners/curobo_planner.py --headless --device cuda:1
 
-Requirements: an NVIDIA CUDA device and the CUDA-matched EmbodiChain cuRobo V2
-extra installed in the active environment.  Installation instructions:
+Requirements: an NVIDIA CUDA device and the CUDA-matched cuRobo V2 source
+package installed in the active environment. Installation instructions:
 https://nvlabs.github.io/curobo/latest/getting-started/installation.html
 """
 
@@ -63,8 +63,6 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
-    MoveEndEffector,
-    MoveEndEffectorCfg,
     MotionPolicy,
 )
 from embodichain.data import get_data_path
@@ -223,10 +221,11 @@ def _check_runtime(curobo_gpu_id: int) -> None:
         import curobo  # noqa: F401
     except ImportError as exc:
         raise ImportError(
-            "cuRobo V2 is not installed. From the EmbodiChain repository root, "
-            "install the extra matching the CUDA environment: "
-            '`uv pip install ".[curobo-cu12]"` for CUDA 12.x or '
-            '`uv pip install ".[curobo-cu13]"` for CUDA 13.x '
+            "cuRobo V2 is not installed. Install NVIDIA's source package "
+            "matching the CUDA environment: "
+            "`uv pip install 'nvidia-curobo[cu12] @ "
+            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "or replace `cu12` with `cu13` for CUDA 13.x "
             f"(see {CUROBO_INSTALL_URL})."
         ) from exc
     if curobo_gpu_id < 0 or curobo_gpu_id >= torch.cuda.device_count():
@@ -750,7 +749,6 @@ def main() -> None:
             )
         )
         engine = AtomicActionEngine(motion_generator)
-        engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
         binding = ActionBinding(manipulators={"primary": control_part})
         motion_policy = MotionPolicy(
             motion_source="motion_gen",

@@ -16,13 +16,14 @@
 
 """Typed planning contracts and built-in atomic actions.
 
-An action consumes an :class:`ActionInvocation` and a :class:`PlanningContext`
-through :meth:`AtomicAction.plan`. Planning is side-effect free: it returns an
-:class:`ActionPlan` with timed motion, completion criteria, diagnostics, and
-uncommitted expected task-state effects. :class:`AtomicActionEngine` can compile
-a static sequence. For closed-loop use, :class:`ExecutionSession` owns recovery
-state while :class:`ExecutionRunner` connects it to observations, commands, and
-time.
+The engine resolves an :class:`ActionInvocation` into a
+:class:`ResolvedActionRequest`, which an action combines with a
+:class:`PlanningContext` through :meth:`AtomicAction.plan`. Planning is
+side-effect free: it returns an :class:`ActionPlan` with timed motion,
+completion criteria, diagnostics, and uncommitted expected task-state effects.
+:class:`AtomicActionEngine` can compile a static sequence. For closed-loop use,
+:class:`ExecutionSession` owns recovery and invocation-revision state while
+:class:`ExecutionRunner` connects it to observations, commands, and time.
 """
 
 from __future__ import annotations
@@ -33,8 +34,16 @@ from .affordance import (
     AssembleAffordance,
     InteractionPoints,
 )
-from .bindings import ActionBinding
-from .core import ActionCfg, AtomicAction, ObjectSemantics, SkillDescriptor
+from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
+from .control import (
+    ActionControlOverrides,
+    ControlCommand,
+    ControlPartCommandProfile,
+    GRASP_COMMAND,
+    JointPositionCommand,
+    OPEN_COMMAND,
+)
+from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
 from .engine import (
     AtomicActionEngine,
@@ -51,7 +60,7 @@ from .execution import (
     JointCommand,
 )
 from .goals import ActionGoal, ObjectActionGoal, PoseGoalValue, SceneEntityPose
-from .invocation import ActionInvocation
+from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
@@ -63,35 +72,36 @@ from .plans import (
     TimedTrajectory,
 )
 from .policies import MotionPolicy, RecoveryPolicy
+from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
+    BUILTIN_ACTION_TYPES,
     CoordinatedPickGoal,
     CoordinatedPickment,
-    CoordinatedPickmentCfg,
+    CoordinatedPickmentOptions,
     CoordinatedPlacement,
-    CoordinatedPlacementCfg,
     CoordinatedPlacementGoal,
+    CoordinatedPlacementOptions,
     EndEffectorPoseGoal,
     GraspGoal,
     HandOver,
-    HandOverCfg,
+    HandOverOptions,
     HeldObjectPoseGoal,
     JointPositionGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
+    MoveEndEffectorOptions,
     MoveHeldObject,
-    MoveHeldObjectCfg,
+    MoveHeldObjectOptions,
     MoveJoints,
-    MoveJointsCfg,
-    NamedJointPositionGoal,
+    MoveJointsOptions,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     Place,
-    PlaceCfg,
     PlaceGoal,
+    PlaceOptions,
     Press,
-    PressCfg,
     PressGoal,
+    PressOptions,
 )
 from .runner import (
     CommandAcknowledgement,
@@ -128,16 +138,19 @@ from .trajectory import TrajectoryBuilder
 
 __all__ = [
     "ActionBinding",
-    "ActionCfg",
+    "ActionControlOverrides",
     "ActionGoal",
     "ActionInvocation",
+    "ActionOptions",
     "ActionPlan",
+    "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
     "AssembleAffordance",
     "AssembleGoal",
     "AtomicAction",
     "AtomicActionEngine",
+    "BUILTIN_ACTION_TYPES",
     "CompiledTrajectory",
     "CommandAcknowledgement",
     "CommandAckStatus",
@@ -146,13 +159,15 @@ __all__ = [
     "CommandSink",
     "CompletionCondition",
     "CompletionConditionKind",
+    "ControlCommand",
+    "ControlPartCommandProfile",
     "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
-    "CoordinatedPickmentCfg",
+    "CoordinatedPickmentOptions",
     "CoordinatedPlacement",
-    "CoordinatedPlacementCfg",
     "CoordinatedPlacementGoal",
+    "CoordinatedPlacementOptions",
     "EndEffectorPoseGoal",
     "EntityState",
     "EffectVerifier",
@@ -164,42 +179,47 @@ __all__ = [
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
+    "GRASP_COMMAND",
     "GraspGoal",
     "HandOver",
-    "HandOverCfg",
+    "HandOverOptions",
     "HeldObjectPoseGoal",
     "HeldObjectState",
     "InteractionPoints",
     "JointPositionGoal",
     "JointCommand",
+    "JointPositionCommand",
     "MotionPolicy",
     "MonotonicExecutionClock",
     "MoveEndEffector",
-    "MoveEndEffectorCfg",
+    "MoveEndEffectorOptions",
     "MoveHeldObject",
-    "MoveHeldObjectCfg",
+    "MoveHeldObjectOptions",
     "MoveJoints",
-    "MoveJointsCfg",
-    "NamedJointPositionGoal",
+    "MoveJointsOptions",
     "ObjectActionGoal",
     "ObjectSemantics",
+    "OPEN_COMMAND",
     "ObservationProvider",
     "PhaseSpec",
     "PickUp",
-    "PickUpCfg",
+    "PickUpOptions",
     "Place",
-    "PlaceCfg",
     "PlaceGoal",
+    "PlaceOptions",
     "PlannedPhase",
     "PlannerDiagnostics",
     "PlanningContext",
     "PoseGoalValue",
     "Press",
-    "PressCfg",
     "PressGoal",
+    "PressOptions",
     "RecoveryPolicy",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
+    "ResolvedActionRequest",
+    "ResolvedActionBinding",
+    "ResolvedControlPart",
     "RobotObservation",
     "RunnerStatus",
     "RunnerStep",

@@ -25,6 +25,7 @@ collision-planning coverage remains in ``test_curobo_integration.py``.
 from __future__ import annotations
 
 import importlib
+import logging
 import math
 
 import pytest
@@ -37,6 +38,7 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlanner,
     CuroboPlannerCfg as CuroboPlannerCfgDirect,
     CuroboWorldCfg,
+    _configure_curobo_logging,
     _matrix_to_position_quaternion,
     _require_curobo,
     _resolve_curobo_device,
@@ -97,6 +99,20 @@ _NO_MIMIC_URDF = """\
 """
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_torch_precision_settings():
+    """Keep cuRobo's process-wide TF32 changes local to this test module."""
+    matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
+    matmul_precision = torch.get_float32_matmul_precision()
+
+    yield
+
+    torch.set_float32_matmul_precision(matmul_precision)
+    torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
+    torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+
+
 def _raise_module_not_found(*args, **kwargs):
     raise ModuleNotFoundError("curobo not installed")
 
@@ -153,6 +169,7 @@ def test_curobo_plan_options_carries_context_fields():
 def test_curobo_planner_cfg_defaults():
     cfg = CuroboPlannerCfg(robot_uid="franka")
     assert cfg.planner_type == "curobo"
+    assert cfg.log_level == "error"
     assert cfg.warmup_iterations == 1
     assert cfg.max_attempts == 5
     assert cfg.cuda_device is None
@@ -165,6 +182,33 @@ def test_curobo_planner_cfg_defaults():
     assert cfg.sim_base_to_curobo_base is None
     assert not hasattr(cfg, "robot_profiles")
     assert not hasattr(cfg.world, "world_config_path")
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("debug", logging.DEBUG),
+        ("INFO", logging.INFO),
+        ("warn", logging.WARNING),
+        ("warning", logging.WARNING),
+        ("error", logging.ERROR),
+    ],
+)
+def test_configure_curobo_logging_sets_package_logger(
+    monkeypatch, configured, expected
+):
+    configured_levels = []
+    curobo_logger = logging.getLogger("curobo")
+    monkeypatch.setattr(curobo_logger, "setLevel", configured_levels.append)
+
+    _configure_curobo_logging(configured)
+
+    assert configured_levels == [expected]
+
+
+def test_configure_curobo_logging_rejects_unknown_level():
+    with pytest.raises(ValueError, match="CuroboPlannerCfg.log_level"):
+        _configure_curobo_logging("silent")
 
 
 def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
@@ -648,8 +692,6 @@ def _make_curobo_engine(
 ) -> object:
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
-        MoveEndEffector,
-        MoveEndEffectorCfg,
     )
     from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 
@@ -663,7 +705,6 @@ def _make_curobo_engine(
         )
     )
     engine = AtomicActionEngine(motion_generator)
-    engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
     return engine
 
 

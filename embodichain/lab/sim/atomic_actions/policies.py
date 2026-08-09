@@ -18,17 +18,22 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-from embodichain.utils import configclass
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import PlanOptions
 
 
-@configclass
+@dataclass(frozen=True, slots=True)
 class MotionPolicy:
-    """Reusable motion-generation policy supplied with an action invocation."""
+    """Immutable motion-generation policy for one action invocation.
+
+    The policy is a runtime value object rather than application configuration.
+    ``plan_opts`` is copied on construction so a caller-owned planner config
+    cannot change an invocation after it has been created.
+    """
 
     planner: str | None = None
     """Optional required planner backend name; ``None`` accepts the configured one."""
@@ -77,9 +82,10 @@ class MotionPolicy:
             raise ValueError("velocity_limit must be greater than zero when set.")
         if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
             raise ValueError("acceleration_limit must be greater than zero when set.")
+        object.__setattr__(self, "plan_opts", deepcopy(self.plan_opts))
 
 
-@configclass
+@dataclass(frozen=True, slots=True)
 class RecoveryPolicy:
     """Bounded local recovery policy used by the execution runtime."""
 

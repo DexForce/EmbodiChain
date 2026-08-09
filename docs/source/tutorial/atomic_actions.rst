@@ -1,26 +1,193 @@
 Atomic actions
 ==============
 
-Atomic actions are typed, side-effect-free motion planners. An action receives a
-grounded :class:`~embodichain.lab.sim.atomic_actions.ActionInvocation` and the
-latest :class:`~embodichain.lab.sim.atomic_actions.PlanningContext`, then returns
-an :class:`~embodichain.lab.sim.atomic_actions.ActionPlan`.
+Atomic actions are typed, side-effect-free motion planners. The engine resolves
+a grounded :class:`~embodichain.lab.sim.atomic_actions.ActionInvocation` into a
+:class:`~embodichain.lab.sim.atomic_actions.ResolvedActionRequest`; an action
+combines that snapshot with the latest
+:class:`~embodichain.lab.sim.atomic_actions.PlanningContext` and returns an
+:class:`~embodichain.lab.sim.atomic_actions.ActionPlan`.
 
-The contracts deliberately separate four concerns:
+For the complete architecture and ownership model, see
+:doc:`/overview/sim/atomic_actions/index`. For the capability matrix and visual
+demonstrations of every built-in skill, see
+:doc:`/overview/sim/atomic_actions/builtin_actions`.
+
+The contracts deliberately separate six concerns:
 
 * a **goal** describes what should happen;
 * an **ActionBinding** maps semantic roles such as ``primary`` or ``source`` to
-  robot control resources;
+  names declared in the engine robot's ``control_parts`` mapping;
+* a **ControlPartCommandProfile** maps embodiment-specific meanings such as
+  ``open``, ``grasp``, or ``ready`` to typed commands;
+* typed **ActionOptions** contain behavior that may vary for one skill call;
 * a **MotionPolicy** and **RecoveryPolicy** describe reusable planning and
   bounded-recovery choices;
 * a **PlanningContext** contains measured robot state, verified task state, and
   a versioned scene snapshot.
 
+Binding values are keys from ``RobotCfg.control_parts``. They are not joint,
+link, TCP-frame, or scene-object names. The engine validates them and resolves
+their full-robot joint indices before planning. The ``end_effectors`` map names
+an actuated hand/tool control part rather than an IK end frame.
+
+A role is an action-defined semantic participant slot, not a control part. In
+``{"primary": "left_arm"}``, ``primary`` means the principal participant of
+that single-participant action, while ``left_arm`` is the concrete control-part
+key. It has no inherent left/right or default-arm meaning. Actions publish their
+required slots through ``manipulator_roles`` and ``end_effector_roles``. When a
+role such as ``primary`` occurs in both maps, the entries select the arm and
+hand/tool serving the same functional participant, but the caller is still
+responsible for choosing a physically compatible pair.
+
+The engine exclusively owns the ``MotionGenerator``, shared trajectory builder,
+and control-part profiles. It creates and binds all built-in actions by default;
+callers select them by stable ``skill_id`` without a separate ``register()``
+step. Put invocation-varying behavior in ``ActionInvocation.skill_options``.
+``register()`` remains available for custom implementations, and
+``load_builtins=False`` creates an isolated or fully custom engine.
+
+Choosing an engine entry point
+------------------------------
+
+Application code normally uses one of three engine entry points:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 26 22 34
+
+   * - API
+     - Choose it when
+     - Returns
+     - State and observation behavior
+   * - ``engine.plan()``
+     - Planning or inspecting one action
+     - ``ActionPlan``
+     - Reads one context and does not project a next context
+   * - ``engine.compile()``
+     - Planning a fixed sequence whose goals are already known
+     - ``CompiledTrajectory``
+     - Propagates hypothetical qpos and expected effects, without observing execution
+   * - ``engine.start()``
+     - Executing from fresh observations with bounded recovery
+     - ``ExecutionSession``
+     - ``tick()`` consumes measured context, emits commands, requests effect verification, and can replan
+
+As a short rule: use ``plan`` for one action, ``compile`` for a static action
+sequence, and ``start`` followed by ``tick`` for observed execution and error
+recovery. None of these APIs steps the simulator directly. The application
+sends commands returned by an execution session and supplies new observations.
+
+``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
+It is the implementation method overridden by an atomic-action author, not an
+additional application execution entry point. Similarly,
+``engine.plan_action()`` is reserved for extensions and isolated tests that
+need to plan an unregistered instance.
+
+Runnable examples
+-----------------
+
+Focused examples live under ``scripts/tutorials/atomic_action``:
+
+* ``move_end_effector.py``
+* ``move_joints.py``
+* ``pickup.py``
+* ``move_held_object.py``
+* ``place.py``
+* ``assemble.py``
+* ``press.py``
+* ``coordinated_pickment.py``
+* ``coordinated_placement.py``
+* ``hand_over.py``
+* ``moving_target_recovery.py``
+* ``dynamic_obstacle_recovery.py``
+
+The scripts are interactive by default. Add ``--auto_play`` to skip prompts;
+combine it with ``--headless --device cpu`` for a headless run that records
+video under ``outputs/videos``:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
+
+The ``motion_generator`` variable in the snippets below is a configured
+:class:`~embodichain.lab.sim.planners.MotionGenerator`; its robot, planner,
+device, cache, and collision world become the resources owned by the engine.
+
+Control-part commands
+---------------------
+
+Hand qpos and named robot postures are robot knowledge rather than action
+configuration. Register them by concrete ``Robot.control_parts`` key when the
+engine is built:
+
+.. code-block:: python
+
+   from embodichain.lab.sim.atomic_actions import (
+       AtomicActionEngine,
+       ControlPartCommandProfile,
+   )
+
+   engine = AtomicActionEngine(
+       motion_generator,
+       control_profiles={
+           "left_hand": ControlPartCommandProfile.joint_positions(
+               open=left_open_qpos,
+               grasp=left_grasp_qpos,
+           ),
+           "left_arm": ControlPartCommandProfile.joint_positions(
+               ready=left_ready_qpos,
+           ),
+       },
+   )
+
+``PickUp``, ``Place``, and the other manipulation skills resolve ``open`` and
+``grasp`` from their bound end effector. ``MoveJoints`` resolves a string target
+from its bound manipulator. Joint limits validate possible commands, but do not
+define their semantic meaning; supply calibrated robot commands in production.
+
+Planning one action
+-------------------
+
+Use :meth:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine.plan` when one
+registered action needs to be inspected, tested, or passed through
+application-owned orchestration:
+
+.. code-block:: python
+
+   from embodichain.lab.sim.atomic_actions import (
+       ActionBinding,
+       ActionInvocation,
+       EndEffectorPoseGoal,
+       MotionPolicy,
+   )
+
+   invocation = ActionInvocation(
+       skill_id="move_end_effector",
+       goal=EndEffectorPoseGoal(xpos=target_pose),
+       binding=ActionBinding(manipulators={"primary": "left_arm"}),
+       motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+   )
+
+   plan = engine.plan(invocation, latest_context)
+   if plan.plan_success.all():
+       trajectory = plan.trajectory.positions
+       phase_diagnostics = tuple(phase.diagnostics for phase in plan.phases)
+
+The returned :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` describes
+only that invocation. Its expected effects are not committed, and ``plan`` does
+not produce a projected context for a following action. Use ``compile`` when
+the engine should propagate hypothetical state through a sequence.
+
 Static compilation
 ------------------
 
 Use :meth:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine.compile` when
-the scene is treated as fixed during planning:
+the scene is treated as fixed and all goals in a sequence are known during
+planning:
 
 .. code-block:: python
 
@@ -30,26 +197,43 @@ the scene is treated as fixed during planning:
        AtomicActionEngine,
        EndEffectorPoseGoal,
        MotionPolicy,
-       MoveEndEffector,
-       MoveEndEffectorCfg,
    )
 
    engine = AtomicActionEngine(motion_generator)
-   engine.register(MoveEndEffector(motion_generator, MoveEndEffectorCfg()))
+   binding = ActionBinding(manipulators={"primary": "left_arm"})
+   motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
 
-   invocation = ActionInvocation(
+   approach = ActionInvocation(
        skill_id="move_end_effector",
-       goal=EndEffectorPoseGoal(xpos=target_pose),
-       binding=ActionBinding(manipulators={"primary": "left_arm"}),
-       motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+       goal=EndEffectorPoseGoal(xpos=approach_pose),
+       binding=binding,
+       motion_policy=motion_policy,
    )
-   compiled = engine.compile((invocation,))
-   trajectory = compiled.trajectory.positions
+   retreat = ActionInvocation(
+       skill_id="move_end_effector",
+       goal=EndEffectorPoseGoal(xpos=retreat_pose),
+       binding=binding,
+       motion_policy=motion_policy,
+   )
+
+   initial_context = engine.initial_context()
+   compiled = engine.compile((approach, retreat), initial_context)
+   if compiled.plan_success.all():
+       trajectory = compiled.trajectory.positions
+       approach_plan, retreat_plan = compiled.action_plans
+       final_context = compiled.projected_context
 
 ``compile`` never steps the simulator. It applies each plan's expected
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta` only to the returned
 ``projected_context`` so a following action can be planned against hypothetical
-state.
+state. Calling it with one invocation is valid, but ``plan`` is simpler when a
+projected context and sequence-shaped result are unnecessary.
+
+Do not compile across a point where later targets depend on physical execution.
+The coordinated-placement tutorial, for example, compiles both pick-ups,
+executes them, rebuilds held-object state from measured poses, and then compiles
+the placement phase. Use ``start`` when that observation and recovery loop
+should remain active throughout execution.
 
 Dynamic goals and closed-loop execution
 ---------------------------------------
@@ -102,35 +286,66 @@ outer lifecycle: it requests fresh observations, schedules each command from
 the :class:`~embodichain.lab.sim.atomic_actions.TimedTrajectory` time deltas,
 checks controller acknowledgements, and performs cancel-then-hold on failure.
 The simulation adapter advances physics instead of sleeping in wall-clock time.
+``ExecutionRunnerCfg`` contains runner-level transport and scheduling settings;
+it is not an atomic-action option and is not replaced by invocation revision.
 
 For an application that already owns its event loop, call the non-blocking
 :meth:`~embodichain.lab.sim.atomic_actions.ExecutionRunner.step` method. A step
 with ``is_waiting`` set has not consumed a new observation or effect result; use
 its ``wait_duration`` to schedule the next call.
 
-The complete simulation example deliberately changes a measured joint position,
-observes ``tracking_error`` and ``replanned`` events, and finishes the regenerated
-trajectory:
+The complete simulation example starts with a visible cube directly in front of
+the robot, then applies a short horizontal force pulse so physics and friction
+slide it sideways during one ``PickUp`` invocation whose
+``GraspGoal.grasp_xpos`` is a ``SceneEntityPose``. The session observes
+``dynamic_goal_changed`` and ``replanned`` events, discards the entire stale
+approach/close/lift plan, and rebuilds it from the cube's new location. The
+replanned action closes the gripper, verifies the physical lift, and finishes
+while holding the cube. The original and regenerated goal axes remain visible
+for comparison:
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/tracking_error_recovery.py --headless
+   python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
 
-The moving-goal counterpart changes a rigid object's pose while an
-``EndEffectorPoseGoal(SceneEntityPose(...))`` is executing:
-
-.. code-block:: bash
-
-   python scripts/tutorials/atomic_action/moving_target_recovery.py --headless
-
-For collision-aware execution, declare tracked rigid objects as collision
-entities. The provider advances a per-environment collision-world revision when
-an obstacle moves; the active phase is invalidated and a supporting planner,
-such as cuRobo, receives the latest obstacle poses during replanning:
+For collision-aware execution, list pose-updatable obstacles in
+``RigidObjectSceneProvider.collision_entity_ids`` and configure matching
+dynamic obstacle names on a supporting planner such as cuRobo. The provider
+advances per-environment collision-world revisions when an obstacle moves;
+the session invalidates affected rows and the framework binds the latest poses
+before replanning:
 
 .. code-block:: bash
 
-   python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless
+   python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless --auto_play
+
+Recovery replans reuse one immutable invocation-revision snapshot. If an
+application intentionally changes the goal, options, policy, binding, or a
+control command while the action is active, submit a strictly newer revision:
+
+.. code-block:: python
+
+   revised = ActionInvocation(
+       skill_id=invocation.skill_id,
+       goal=updated_goal,
+       binding=invocation.binding,
+       motion_policy=invocation.motion_policy,
+       recovery_policy=invocation.recovery_policy,
+       skill_options=updated_options,
+       control_overrides=updated_control_commands,
+       invocation_id=invocation.invocation_id,
+       revision=invocation.revision + 1,
+   )
+   session.revise_current(revised)
+
+The session replans from its latest context and emits an
+``invocation_revised`` event. ``skill_id`` and ``invocation_id`` must still
+identify the active logical call.
+
+Only entities referenced through ``SceneEntityPose`` become automatic
+scene-motion dependencies. A skill may query a simulation entity's live pose
+when it plans, but that query alone does not cause an executing session to
+replan when the entity moves.
 
 Task-state effects
 ------------------
@@ -159,9 +374,10 @@ Adding an action
 ----------------
 
 Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-implement the protected ``_plan(invocation, context)`` hook and declare the
-stable skill metadata. The inherited public ``plan()`` method must not be
-overridden because it binds the latest collision scene first:
+define typed runtime options when needed, implement the protected
+``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
+override the inherited public ``plan()`` method because it binds the latest
+collision scene first:
 
 .. code-block:: python
 
@@ -173,21 +389,30 @@ overridden because it binds the latest collision scene first:
        goal_kind: ClassVar[str] = "push"
        contact_pose: torch.Tensor
 
-   class Push(AtomicAction[PushGoal]):
+   @dataclass(frozen=True, slots=True)
+   class PushOptions(ActionOptions):
+       retreat_distance: float = 0.1
+
+   class Push(AtomicAction[PushGoal, PushOptions]):
        skill_id: ClassVar[str] = "push"
        GoalType: ClassVar[type] = PushGoal
+       OptionsType: ClassVar[type] = PushOptions
        manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+
+       def __init__(self, default_options: PushOptions | None = None) -> None:
+           super().__init__(default_options)
 
        def _plan(
            self,
-           invocation: ActionInvocation[PushGoal],
+           request: ResolvedActionRequest[PushGoal, PushOptions],
            context: PlanningContext,
        ) -> ActionPlan:
-           goal = self.require_goal(invocation)
+           goal = self.require_goal(request)
+           options = request.skill_options
            # Resolve the bound resource, plan from context.robot.qpos, and
            # return a full-robot TimedTrajectory or position tensor.
            return self.build_plan(
-               invocation,
+               request,
                context,
                success=success_mask,
                trajectory=full_robot_positions,

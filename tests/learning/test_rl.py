@@ -22,6 +22,12 @@ import pytest
 import tempfile
 from pathlib import Path
 
+pytestmark = [
+    pytest.mark.requires_sim,
+    pytest.mark.requires_tasks,
+    pytest.mark.slow,
+]
+
 
 class TestRLTraining:
     """Test suite for RL training pipeline."""
@@ -53,7 +59,6 @@ class TestRLTraining:
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10_DH_Gripper",
-                        "control_freq": 25,
                     },
                     "instruction": {"lang": "push_cube_to_target"},
                     "extra": {

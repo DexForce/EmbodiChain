@@ -18,64 +18,73 @@
 
 from __future__ import annotations
 
+from ..core import AtomicAction
 from .coordinated_pickment import (
     CoordinatedPickGoal,
     CoordinatedPickment,
-    CoordinatedPickmentCfg,
+    CoordinatedPickmentOptions,
 )
 from .coordinated_placement import (
     CoordinatedPlacement,
-    CoordinatedPlacementCfg,
     CoordinatedPlacementGoal,
+    CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverCfg
+from .hand_over import HandOver, HandOverOptions
 from .move_end_effector import (
     EndEffectorPoseGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
+    MoveEndEffectorOptions,
 )
 from .move_held_object import (
     HeldObjectPoseGoal,
     MoveHeldObject,
-    MoveHeldObjectCfg,
+    MoveHeldObjectOptions,
 )
-from .move_joints import (
-    JointPositionGoal,
+from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
+from .pick_up import GraspGoal, PickUp, PickUpOptions
+from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
+from .press import Press, PressGoal, PressOptions
+
+BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
+    MoveEndEffector,
     MoveJoints,
-    MoveJointsCfg,
-    NamedJointPositionGoal,
+    PickUp,
+    MoveHeldObject,
+    Place,
+    Press,
+    CoordinatedPickment,
+    CoordinatedPlacement,
+    HandOver,
 )
-from .pick_up import GraspGoal, PickUp, PickUpCfg
-from .place import AssembleGoal, Place, PlaceCfg, PlaceGoal
-from .press import Press, PressCfg, PressGoal
+"""Built-in action implementations instantiated once per action engine."""
 
 __all__ = [
     "AssembleGoal",
+    "BUILTIN_ACTION_TYPES",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
-    "CoordinatedPickmentCfg",
+    "CoordinatedPickmentOptions",
     "CoordinatedPlacement",
-    "CoordinatedPlacementCfg",
     "CoordinatedPlacementGoal",
+    "CoordinatedPlacementOptions",
     "EndEffectorPoseGoal",
     "GraspGoal",
     "HandOver",
-    "HandOverCfg",
+    "HandOverOptions",
     "HeldObjectPoseGoal",
     "JointPositionGoal",
     "MoveEndEffector",
-    "MoveEndEffectorCfg",
+    "MoveEndEffectorOptions",
     "MoveHeldObject",
-    "MoveHeldObjectCfg",
+    "MoveHeldObjectOptions",
     "MoveJoints",
-    "MoveJointsCfg",
-    "NamedJointPositionGoal",
+    "MoveJointsOptions",
     "PickUp",
-    "PickUpCfg",
+    "PickUpOptions",
     "Place",
-    "PlaceCfg",
     "PlaceGoal",
+    "PlaceOptions",
     "Press",
-    "PressCfg",
     "PressGoal",
+    "PressOptions",
 ]

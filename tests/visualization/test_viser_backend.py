@@ -27,6 +27,8 @@ from embodichain.lab.visualization import (
     DynamicMeshUpdate,
     GizmoSpec,
     GizmoState,
+    JointControlSpec,
+    JointControlState,
     MeshGeometry,
     SceneFrame,
     SceneManifest,
@@ -35,10 +37,16 @@ from embodichain.lab.visualization import (
 )
 from embodichain.lab.visualization.backends.viser import ViserBackend
 
+REPLAY_INITIAL_STEP = 2
+REPLAY_TARGET_STEP = 7
+REPLAY_MAX_STEP = 9
+
 
 class _Handle(SimpleNamespace):
     def remove(self) -> None:
         self.removed = True
+        if hasattr(self, "visible"):
+            self.visible = False
 
 
 class _TransformControls(_Handle):
@@ -55,12 +63,13 @@ class _TransformControls(_Handle):
         return callback
 
 
-class _Folder:
+class _Folder(_Handle):
     def __enter__(self) -> _Folder:
+        self.gui._folder_stack.append(self.label)
         return self
 
     def __exit__(self, *args: object) -> None:
-        pass
+        assert self.gui._folder_stack.pop() == self.label
 
 
 class _Checkbox:
@@ -82,22 +91,52 @@ class _Dropdown:
         return callback
 
 
+class _ValueControl(_Handle):
+    def on_update(self, callback: object) -> object:
+        self.callback = callback
+        return callback
+
+
+class _Button(_Handle):
+    def on_click(self, callback: object) -> object:
+        self.callback = callback
+        return callback
+
+
 class _Gui:
     def __init__(self) -> None:
         self.checkboxes: dict[str, _Checkbox] = {}
         self.dropdowns: dict[str, _Dropdown] = {}
+        self.sliders: dict[str, _ValueControl] = {}
+        self.numbers: dict[str, _ValueControl] = {}
+        self.buttons: dict[str, _Button] = {}
+        self.folders: dict[str, _Folder] = {}
         self.image_handles: list[_Handle] = []
+        self._folder_stack: list[str] = []
 
     def reset(self) -> None:
         self.checkboxes.clear()
         self.dropdowns.clear()
+        self.sliders.clear()
+        self.numbers.clear()
+        self.buttons.clear()
+        self.folders.clear()
         self.image_handles.clear()
+        self._folder_stack.clear()
 
     def add_markdown(self, content: str) -> _Handle:
         return _Handle(content=content)
 
-    def add_folder(self, label: str) -> _Folder:
-        return _Folder()
+    def add_folder(self, label: str, **kwargs: object) -> _Folder:
+        folder = _Folder(
+            gui=self,
+            label=label,
+            parent_folder=self._folder_stack[-1] if self._folder_stack else None,
+            removed=False,
+            **kwargs,
+        )
+        self.folders[label] = folder
+        return folder
 
     def add_checkbox(self, label: str, initial_value: bool) -> _Checkbox:
         checkbox = _Checkbox(initial_value)
@@ -114,7 +153,63 @@ class _Gui:
         self.dropdowns[label] = dropdown
         return dropdown
 
+    def add_slider(
+        self,
+        label: str,
+        *,
+        min: float,
+        max: float,
+        step: float,
+        initial_value: float,
+        marks: tuple[object, ...],
+        disabled: bool,
+        hint: str,
+    ) -> _ValueControl:
+        slider = _ValueControl(
+            value=initial_value,
+            min=min,
+            max=max,
+            step=step,
+            marks=marks,
+            disabled=disabled,
+            hint=hint,
+        )
+        self.sliders[label] = slider
+        return slider
+
+    def add_number(
+        self,
+        label: str,
+        *,
+        initial_value: float,
+        min: float | None,
+        max: float | None,
+        step: float,
+        disabled: bool,
+        hint: str,
+    ) -> _ValueControl:
+        number = _ValueControl(
+            value=initial_value,
+            min=min,
+            max=max,
+            step=step,
+            disabled=disabled,
+            hint=hint,
+        )
+        self.numbers[label] = number
+        return number
+
+    def add_button(self, label: str) -> _Button:
+        button = _Button(label=label)
+        self.buttons[label] = button
+        return button
+
     def add_image(self, image: np.ndarray, **kwargs: object) -> _Handle:
+        kwargs.setdefault("visible", True)
+        kwargs.setdefault(
+            "parent_folder",
+            self._folder_stack[-1] if self._folder_stack else None,
+        )
         handle = _Handle(image=image, removed=False, **kwargs)
         self.image_handles.append(handle)
         return handle
@@ -302,13 +397,25 @@ def test_viser_backend_uploads_static_mesh_once_and_updates_only_poses() -> None
         ),
     )
     assert backend.publish_camera_images(image_frame)
-    assert np.all(server.gui.image_handles[-1].image == 1)
+    visible_images = [
+        handle
+        for handle in server.gui.image_handles
+        if not handle.removed and handle.visible
+    ]
+    assert len(visible_images) == 1
+    assert np.all(visible_images[0].image == 1)
     camera_environment = server.gui.dropdowns["Environment"]
     camera_environment.callback(SimpleNamespace(target=SimpleNamespace(value="1")))
     backend.poll()
     assert not server.scene.camera_handles[0].visible
     assert server.scene.camera_handles[1].visible
-    assert np.all(server.gui.image_handles[-1].image == 2)
+    visible_images = [
+        handle
+        for handle in server.gui.image_handles
+        if not handle.removed and handle.visible
+    ]
+    assert len(visible_images) == 1
+    assert np.all(visible_images[0].image == 2)
 
     environment_one = server.gui.checkboxes["Environment 1"]
     environment_one.callback(SimpleNamespace(target=SimpleNamespace(value=False)))
@@ -345,6 +452,174 @@ def test_viser_backend_uploads_static_mesh_once_and_updates_only_poses() -> None
 
     assert server.scene.mesh_uploads == 1
     assert server.stopped
+
+
+def test_viser_backend_groups_sensor_and_record_camera_previews() -> None:
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+    cameras = tuple(
+        CameraSpec(
+            camera_id=f"env:0/camera:{sensor_uid}",
+            sensor_uid=sensor_uid,
+            env_id=0,
+            path=f"/envs/0/cameras/{sensor_uid}",
+            fov_y=0.8,
+            aspect=4.0 / 3.0,
+            near=0.01,
+            far=10.0,
+            role=role,
+        )
+        for sensor_uid, role in (
+            ("cam_high", "sensor"),
+            ("record_camera", "record"),
+        )
+    )
+    manifest = SceneManifest("run", 1, (), (), cameras)
+
+    backend.start()
+    backend.publish_manifest(manifest)
+
+    preview_folder = server.gui.folders["RGB previews"]
+    record_folder = server.gui.folders["Record cameras"]
+    sensor_folder = server.gui.folders["Sensor cameras"]
+    assert preview_folder.expand_by_default is True
+    assert preview_folder.visible is True
+    assert record_folder.parent_folder == "RGB previews"
+    assert sensor_folder.parent_folder == "RGB previews"
+    assert record_folder.expand_by_default is True
+    assert sensor_folder.expand_by_default is True
+    previews = {
+        handle.label: handle
+        for handle in server.gui.image_handles
+        if not handle.removed and handle.visible
+    }
+    assert previews["record_camera RGB"].parent_folder == "Record cameras"
+    assert previews["cam_high RGB"].parent_folder == "Sensor cameras"
+
+    image_frame = CameraImageFrame(
+        run_id="run",
+        scene_revision=1,
+        sequence=1,
+        sim_step=1,
+        sim_time=0.01,
+        images=tuple(
+            CameraImage(
+                camera_id=camera.camera_id,
+                image=np.full((2, 3, 3), index + 1, dtype=np.uint8),
+            )
+            for index, camera in enumerate(cameras)
+        ),
+    )
+    assert backend.publish_camera_images(image_frame)
+    previews = {
+        handle.label: handle.image
+        for handle in server.gui.image_handles
+        if not handle.removed
+    }
+    assert np.all(previews["cam_high RGB"] == 1)
+    assert np.all(previews["record_camera RGB"] == 2)
+
+    rgb_preview = server.gui.checkboxes["RGB previews"]
+    rgb_preview.callback(SimpleNamespace(target=SimpleNamespace(value=False)))
+    backend.poll()
+    assert preview_folder.visible is False
+    assert record_folder.visible is False
+    assert sensor_folder.visible is False
+    assert not any(
+        not handle.removed and handle.visible for handle in server.gui.image_handles
+    )
+    backend.stop()
+
+
+def test_viser_backend_replay_slider_emits_client_seek_once() -> None:
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    commands: list[int] = []
+    backend.set_replay_control_command_sink(commands.append)
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_replay_control(
+        step=REPLAY_INITIAL_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    slider = server.gui.sliders["Frame"]
+    slider.callback(
+        SimpleNamespace(
+            client_id="client-a",
+            target=SimpleNamespace(value=REPLAY_TARGET_STEP),
+        )
+    )
+    backend.poll()
+
+    assert commands == [REPLAY_TARGET_STEP]
+    backend.stop()
+
+
+def test_viser_backend_ignores_server_originated_replay_slider_update() -> None:
+    """Viser invokes callbacks with no client when backend code sets value."""
+    server = _Server()
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    commands: list[int] = []
+    backend.set_replay_control_command_sink(commands.append)
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_replay_control(
+        step=REPLAY_INITIAL_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    slider = server.gui.sliders["Frame"]
+    slider.callback(
+        SimpleNamespace(
+            client_id=None,
+            target=SimpleNamespace(value=REPLAY_TARGET_STEP),
+        )
+    )
+    backend.poll()
+
+    assert commands == []
+    backend.stop()
+
+
+def test_viser_backend_replay_slider_tracks_progress_and_hides() -> None:
+    server = _Server()
+    backend = ViserBackend(ViserServerCfg(port=8765), server_factory=lambda **_: server)
+
+    backend.start()
+    backend.publish_manifest(SceneManifest("run", 1, (), ()))
+    backend.publish_replay_control(
+        step=REPLAY_INITIAL_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    folder = server.gui.folders["Replay control"]
+    slider = server.gui.sliders["Frame"]
+    backend.publish_replay_control(
+        step=REPLAY_TARGET_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=True,
+    )
+    assert slider.value == REPLAY_TARGET_STEP
+
+    backend.publish_replay_control(
+        step=REPLAY_TARGET_STEP,
+        max_step=REPLAY_MAX_STEP,
+        visible=False,
+    )
+    assert folder.removed is True
+    assert slider.removed is True
+    backend.stop()
 
 
 def test_viser_backend_batches_large_scenes_without_per_env_gui_nodes() -> None:
@@ -583,3 +858,133 @@ def test_viser_backend_keeps_gizmos_read_only_without_command_permission() -> No
 
     assert not server.scene.transform_controls
     backend.stop()
+
+
+def test_viser_backend_controls_articulation_joints_in_display_units() -> None:
+    server = _Server()
+    commands = []
+    backend = ViserBackend(
+        ViserServerCfg(port=8765),
+        server_factory=lambda **_: server,
+        allow_commands=True,
+    )
+    backend.set_joint_control_command_sink(commands.append)
+    revolute = JointControlSpec(
+        control_id="door-hinge",
+        articulation_uid="door",
+        env_id=0,
+        joint_id=0,
+        joint_name="base_to_lower_arm",
+        joint_type="revolute",
+        lower=-np.pi / 2.0,
+        upper=np.pi / 2.0,
+        step=np.pi / 180.0,
+        initial_value=0.0,
+    )
+    prismatic = JointControlSpec(
+        control_id="door-slide",
+        articulation_uid="door",
+        env_id=0,
+        joint_id=1,
+        joint_name="slide",
+        joint_type="prismatic",
+        lower=0.0,
+        upper=None,
+        step=0.001,
+        initial_value=0.2,
+    )
+
+    def frame(
+        sequence: int,
+        hinge_value: float,
+        applied_sequence: int,
+    ) -> SceneFrame:
+        return SceneFrame(
+            run_id="run",
+            scene_revision=1,
+            sequence=sequence,
+            sim_step=sequence,
+            sim_time=sequence * 0.01,
+            node_ids=(),
+            positions=np.empty((0, 3), dtype=np.float32),
+            wxyz=np.empty((0, 4), dtype=np.float32),
+            visible=np.empty((0,), dtype=np.bool_),
+            joint_controls=(
+                JointControlState(
+                    "door-hinge",
+                    value=hinge_value,
+                    applied_sequence=applied_sequence,
+                ),
+                JointControlState("door-slide", value=0.2),
+            ),
+        )
+
+    backend.start()
+    backend.publish_manifest(
+        SceneManifest(
+            "run",
+            1,
+            (),
+            (),
+            joint_controls=(revolute, prismatic),
+        )
+    )
+    assert backend.publish_frame(frame(1, -1.0e-9, 0))
+
+    hinge = server.gui.sliders["lower arm (°)"]
+    slide = server.gui.numbers["slide (m)"]
+    assert hinge.min == -90.0
+    assert hinge.max == 90.0
+    assert hinge.step == 1.0
+    assert hinge.value == 0.0
+    assert not np.signbit(hinge.value)
+    assert hinge.marks == ()
+    assert "base_to_lower_arm" in hinge.hint
+    assert "range -90.00 … 90.00 °" in hinge.hint
+    assert slide.min == 0.0
+    assert slide.max is None
+
+    hinge.value = 45.0
+    hinge.callback(SimpleNamespace(client_id="client-a", target=hinge))
+    backend.poll()
+
+    assert len(commands) == 1
+    assert commands[0].control_id == "door-hinge"
+    np.testing.assert_allclose(commands[0].value, np.pi / 4.0)
+
+    assert backend.publish_frame(frame(2, 0.0, 0))
+    assert hinge.value == 45.0
+    assert backend.publish_frame(frame(3, np.pi / 6.0, commands[0].sequence))
+    np.testing.assert_allclose(hinge.value, 30.0)
+
+    reset = server.gui.buttons["Reset articulation"]
+    reset.callback(SimpleNamespace(client_id="client-a"))
+    backend.poll()
+    assert commands[-2].control_id == "door-hinge"
+    assert commands[-2].value == 0.0
+    assert commands[-1].control_id == "door-slide"
+    assert commands[-1].value == 0.2
+    backend.stop()
+
+
+def test_viser_backend_disambiguates_compact_joint_labels() -> None:
+    specs = tuple(
+        JointControlSpec(
+            control_id=f"arm-{joint_id}",
+            articulation_uid="robot",
+            env_id=0,
+            joint_id=joint_id,
+            joint_name=joint_name,
+            joint_type="revolute",
+            lower=-1.0,
+            upper=1.0,
+            step=np.pi / 180.0,
+            initial_value=0.0,
+        )
+        for joint_id, joint_name in enumerate(("base_to_arm", "shoulder_to_arm"))
+    )
+
+    assert ViserBackend._joint_control_labels(specs) == {
+        "arm-0": "arm [0] (°)",
+        "arm-1": "arm [1] (°)",
+    }

@@ -29,6 +29,8 @@ from embodichain.lab.sim.cfg import RigidConstraintCfg
 from embodichain.lab.sim.objects.constraint import RigidConstraint
 from embodichain.lab.sim.sim_manager import SimulationManager
 
+pytestmark = pytest.mark.no_sim
+
 
 def test_rigid_constraint_cfg_defaults():
     """RigidConstraintCfg requires name + both object uids; frames default None."""

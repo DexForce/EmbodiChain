@@ -57,6 +57,7 @@ class TimedTrajectory:
     velocities: torch.Tensor | None
     accelerations: torch.Tensor | None
     dt: torch.Tensor
+    """Per-waypoint arrival intervals; the first sample normally has zero dt."""
     duration: torch.Tensor
     env_ids: torch.Tensor
 
@@ -418,10 +419,16 @@ class ActionPlan:
     phases: tuple[PlannedPhase, ...]
     expected_effects: StateDelta = field(default_factory=StateDelta)
     invocation_id: str | None = None
+    invocation_revision: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
             raise ValueError("ActionPlan.skill_id must be non-empty.")
+        if (
+            not isinstance(self.invocation_revision, int)
+            or self.invocation_revision < 0
+        ):
+            raise ValueError("invocation_revision must be a non-negative integer.")
         if not isinstance(self.plan_success, torch.Tensor):
             raise TypeError("plan_success must be a torch.Tensor.")
         if self.plan_success.dtype != torch.bool or self.plan_success.dim() != 1:

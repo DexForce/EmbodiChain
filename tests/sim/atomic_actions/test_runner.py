@@ -27,8 +27,8 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
-    ActionCfg,
     ActionInvocation,
+    ActionOptions,
     ActionPlan,
     Affordance,
     AtomicAction,
@@ -46,6 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
+    ResolvedActionRequest,
     RobotObservation,
     RunnerStatus,
     SceneSnapshot,
@@ -58,6 +59,7 @@ BATCH_SIZE = 1
 ROBOT_DOF = 2
 FIRST_INTERVAL = 0.1
 SECOND_INTERVAL = 0.2
+MINIMUM_CYCLE_TIME = 0.01
 TARGET_POSITION = 1.0
 
 
@@ -114,6 +116,7 @@ class FakeCommandSink:
         self.send_statuses: deque[CommandAckStatus] = deque()
         self.follow_commands: deque[bool] = deque()
         self.sent: list[JointCommand] = []
+        self.send_times: list[float] = []
         self.held: list[JointCommand] = []
         self.cancel_count = 0
 
@@ -125,6 +128,7 @@ class FakeCommandSink:
     ) -> CommandAcknowledgement:
         """Record an active command and optionally update observed qpos."""
         self.sent.append(command)
+        self.send_times.append(self.provider.clock.now())
         status = (
             self.send_statuses.popleft()
             if self.send_statuses
@@ -152,25 +156,25 @@ class FakeCommandSink:
         return CommandAcknowledgement.accepted_ack()
 
 
-class TimedAction(AtomicAction[EndEffectorPoseGoal]):
+class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
     """Test action with explicit non-uniform command intervals."""
 
     skill_id: ClassVar[str] = "timed"
     GoalType: ClassVar[type] = EndEffectorPoseGoal
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(self, motion_generator, *, with_effect: bool = False) -> None:
-        super().__init__(motion_generator, ActionCfg(name="timed"))
+    def __init__(self, *, with_effect: bool = False) -> None:
+        super().__init__()
         self.with_effect = with_effect
         self.plan_count = 0
 
     def _plan(
         self,
-        invocation: ActionInvocation[EndEffectorPoseGoal],
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan three samples with intervals 0.1 s and 0.2 s."""
-        goal = self.require_goal(invocation)
+        goal = self.require_goal(request)
         self.plan_count += 1
         assert isinstance(goal.xpos, torch.Tensor)
         target_value = float(goal.xpos[0, 3])
@@ -186,7 +190,7 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal]):
         trajectory = TimedTrajectory.from_positions(
             positions,
             env_ids=context.env_ids,
-            control_dt=invocation.motion_policy.control_dt,
+            control_dt=request.motion_policy.control_dt,
             dt=dt,
         )
         effects = StateDelta()
@@ -201,7 +205,7 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal]):
             )
             effects = StateDelta(held_object_updates={"arm": held})
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=True,
             trajectory=trajectory,
@@ -226,12 +230,14 @@ def _make_runner(
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = ROBOT_DOF
+    robot.control_parts = {"arm": object()}
     robot.get_qpos.return_value = torch.zeros(batch_size, ROBOT_DOF)
+    robot.get_joint_ids.return_value = list(range(ROBOT_DOF))
     generator = Mock()
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
-    action = TimedAction(generator, with_effect=with_effect)
+    action = TimedAction(with_effect=with_effect)
     engine = AtomicActionEngine(generator)
     engine.register(action)
     initial_task = TaskState.empty(batch_size, "cpu")
@@ -255,7 +261,7 @@ def _make_runner(
         provider,
         sink,
         clock=clock,
-        cfg=ExecutionRunnerCfg(minimum_cycle_time=0.01),
+        cfg=ExecutionRunnerCfg(minimum_cycle_time=MINIMUM_CYCLE_TIME),
     )
     return runner, clock, provider, sink, action
 
@@ -267,21 +273,31 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
     early = runner.step()
     clock.advance(FIRST_INTERVAL)
     second = runner.step()
+    clock.advance(SECOND_INTERVAL)
+    third = runner.step()
 
     assert first.command_count == 1
     assert first.wait_duration == pytest.approx(FIRST_INTERVAL)
     assert early.is_waiting
-    assert len(sink.sent) == 2
+    assert len(sink.sent) == 3
+    assert sink.send_times == pytest.approx(
+        [0.0, FIRST_INTERVAL, FIRST_INTERVAL + SECOND_INTERVAL]
+    )
     assert second.command_count == 2
     assert second.wait_duration == pytest.approx(SECOND_INTERVAL)
+    assert third.command_count == 3
+    assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
 
 
 def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
-    runner, _, _, _, _ = _make_runner(batch_size=2)
+    runner, clock, _, _, _ = _make_runner(batch_size=2)
 
     first = runner.step()
+    clock.advance(2.0 * FIRST_INTERVAL)
+    second = runner.step()
 
     assert first.wait_duration == pytest.approx(2.0 * FIRST_INTERVAL)
+    assert second.wait_duration == pytest.approx(2.0 * SECOND_INTERVAL)
 
 
 def test_runner_completes_and_holds_after_last_command_settles() -> None:
@@ -356,6 +372,35 @@ def test_runner_replans_from_observation_after_tracking_error() -> None:
     assert ExecutionEventKind.TRACKING_ERROR in event_kinds
     assert ExecutionEventKind.REPLANNED in event_kinds
     assert recovered.status is RunnerStatus.RUNNING
+
+
+def test_runner_surfaces_explicit_invocation_revision() -> None:
+    runner, _, _, _, action = _make_runner()
+    revised_pose = torch.eye(4)
+    revised_pose[0, 3] = 2.0 * TARGET_POSITION
+    revised = ActionInvocation(
+        skill_id="timed",
+        goal=EndEffectorPoseGoal(revised_pose),
+        binding=ActionBinding(manipulators={"primary": "arm"}),
+        motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
+        recovery_policy=RecoveryPolicy(
+            max_replans=2,
+            tracking_error_threshold=0.05,
+            phase_timeout=10.0,
+        ),
+        revision=1,
+    )
+
+    runner.session.revise_current(revised)
+    result = runner.step()
+
+    assert action.plan_count == 2
+    assert result.tick is not None
+    assert any(
+        event.kind is ExecutionEventKind.INVOCATION_REVISED
+        and event.invocation_revision == 1
+        for event in result.tick.events
+    )
 
 
 def test_runner_fails_safely_when_observation_provider_raises() -> None:

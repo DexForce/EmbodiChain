@@ -24,14 +24,11 @@ from typing import ClassVar
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass
-
-from ..core import ActionCfg, AtomicAction
+from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionInvocation
+from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, CompletionConditionKind
 from ..state import PlanningContext
-from ..trajectory import TrajectoryBuilder
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -47,38 +44,36 @@ class EndEffectorPoseGoal:
         validate_pose_goal(self.xpos, "xpos", allow_waypoints=True)
 
 
-@configclass
-class MoveEndEffectorCfg(ActionCfg):
-    """Skill-specific MoveEndEffector configuration."""
-
-    name: str = "move_end_effector"
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveEndEffectorOptions(ActionOptions):
+    """Per-invocation behavior for :class:`MoveEndEffector`."""
 
 
-class MoveEndEffector(AtomicAction[EndEffectorPoseGoal]):
+class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions]):
     """Plan a free-space move for a bound manipulator."""
 
     skill_id: ClassVar[str] = "move_end_effector"
     GoalType: ClassVar[type] = EndEffectorPoseGoal
+    OptionsType: ClassVar[type] = MoveEndEffectorOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self,
-        motion_generator,
-        cfg: MoveEndEffectorCfg | None = None,
+        default_options: MoveEndEffectorOptions | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveEndEffectorCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(default_options)
 
     def _plan(
         self,
-        invocation: ActionInvocation[EndEffectorPoseGoal],
+        request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
-        goal = self.require_goal(invocation)
-        control_part = invocation.binding.manipulator("primary")
-        joint_ids = self.robot.get_joint_ids(name=control_part)
-        arm_dof = len(joint_ids)
+        goal = self.require_goal(request)
+        manipulator = request.binding.manipulator("primary")
+        control_part = manipulator.name
+        joint_ids = list(manipulator.joint_ids)
+        arm_dof = manipulator.dof
         move_xpos = self.builder.resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
             n_envs=context.batch_size,
@@ -93,20 +88,20 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal]):
         result = self.builder.generate_arm_plan(
             target_states,
             start_qpos,
-            invocation.motion_policy.sample_count,
+            request.motion_policy.sample_count,
             control_part=control_part,
             arm_dof=arm_dof,
-            cfg=invocation.motion_policy,
+            cfg=request.motion_policy,
         )
         success, trajectory = self.builder.to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=invocation.motion_policy.control_dt,
+            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=success,
             trajectory=trajectory,
@@ -130,4 +125,8 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal]):
         ]
 
 
-__all__ = ["EndEffectorPoseGoal", "MoveEndEffector", "MoveEndEffectorCfg"]
+__all__ = [
+    "EndEffectorPoseGoal",
+    "MoveEndEffector",
+    "MoveEndEffectorOptions",
+]

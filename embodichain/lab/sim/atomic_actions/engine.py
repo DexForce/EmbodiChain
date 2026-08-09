@@ -18,26 +18,33 @@
 
 from __future__ import annotations
 
-from typing import Iterable, TYPE_CHECKING
+from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
-from .core import AtomicAction, resolve_runtime_device
-from .invocation import ActionInvocation
+from .core import AtomicAction
+from .control import ControlPartCommandProfile
+from .invocation import ActionInvocation, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
 
     from .execution import ExecutionSession
 
 
-_global_action_registry: dict[str, type[AtomicAction]] = {}
+_global_extension_registry: dict[str, type[AtomicAction]] = {}
 
 
 def register_action(action_class: type[AtomicAction]) -> None:
-    """Register an atomic action class under its stable skill identifier.
+    """Register an extension action type for process-wide discovery.
+
+    This catalog does not bind the type to an engine or automatically load it.
+    Built-in types live in ``BUILTIN_ACTION_TYPES`` and are loaded separately
+    by each :class:`AtomicActionEngine`.
 
     Args:
         action_class: Concrete :class:`AtomicAction` subclass.
@@ -49,64 +56,230 @@ def register_action(action_class: type[AtomicAction]) -> None:
     if not isinstance(action_class, type) or not issubclass(action_class, AtomicAction):
         raise TypeError("action_class must be an AtomicAction subclass.")
     descriptor = action_class.descriptor()
-    existing = _global_action_registry.get(descriptor.skill_id)
+    existing = _global_extension_registry.get(descriptor.skill_id)
     if existing is not None and existing is not action_class:
         raise ValueError(
             f"Skill id {descriptor.skill_id!r} is already registered by "
             f"{existing.__name__}."
         )
-    _global_action_registry[descriptor.skill_id] = action_class
+    _global_extension_registry[descriptor.skill_id] = action_class
 
 
 def unregister_action(skill_id: str) -> None:
-    """Remove a globally registered skill class if present.
+    """Remove a globally discoverable extension action type if present.
 
     Args:
         skill_id: Stable registered skill identifier.
     """
-    _global_action_registry.pop(skill_id, None)
+    _global_extension_registry.pop(skill_id, None)
 
 
 def get_registered_actions() -> dict[str, type[AtomicAction]]:
-    """Return a copy of the global skill-class registry."""
-    return dict(_global_action_registry)
+    """Return a copy of the process-wide extension action-type registry."""
+    return dict(_global_extension_registry)
 
 
 class AtomicActionEngine:
-    """Compile grounded atomic invocations without stepping the environment."""
+    """Own planning resources and coordinate side-effect-free atomic actions."""
 
-    def __init__(self, motion_generator: MotionGenerator) -> None:
-        self.motion_generator = motion_generator
-        self.robot = motion_generator.robot
-        self.device = resolve_runtime_device(motion_generator.device)
+    def __init__(
+        self,
+        motion_generator: MotionGenerator,
+        control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
+        *,
+        load_builtins: bool = True,
+    ) -> None:
+        """Initialize one engine and bind its built-in action implementations.
+
+        Args:
+            motion_generator: Engine-owned motion-generation backend.
+            control_profiles: Semantic commands keyed by robot control-part name.
+            load_builtins: Whether to instantiate and register every built-in
+                action. Disable this for isolated tests or fully custom engines.
+        """
+        self._planning_services = ActionPlanningServices(
+            motion_generator,
+            control_profiles=control_profiles,
+        )
         self._actions: dict[str, AtomicAction] = {}
+        if load_builtins:
+            self._load_builtin_actions()
+
+    @property
+    def motion_generator(self) -> MotionGenerator:
+        """Return the single motion generator owned by this engine."""
+        return self._planning_services.motion_generator
+
+    @property
+    def robot(self) -> Robot:
+        """Return the robot controlled by this engine."""
+        return self._planning_services.robot
+
+    @property
+    def device(self) -> torch.device:
+        """Return the concrete planning device used by this engine."""
+        return self._planning_services.device
+
+    @property
+    def planning_services(self) -> ActionPlanningServices:
+        """Engine-owned resources shared by every bound atomic action."""
+        return self._planning_services
+
+    @property
+    def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:
+        """Semantic command profiles registered for robot control parts."""
+        return self._planning_services.control_profiles
 
     @property
     def actions(self) -> dict[str, AtomicAction]:
         """Registered action instances keyed by stable skill identifier."""
         return dict(self._actions)
 
-    def register(self, action: AtomicAction) -> None:
+    def register(self, action: AtomicAction, *, replace: bool = False) -> None:
         """Register one action instance using its descriptor.
 
         Args:
             action: Configured action instance.
+            replace: Whether to replace an implementation already registered
+                under the same stable skill identifier. Replacement is always
+                explicit so extensions cannot silently shadow built-ins.
 
         Raises:
             TypeError: If ``action`` is not an AtomicAction.
-            ValueError: If its robot or skill identifier is incompatible.
+            ValueError: If it belongs to another engine or its skill identifier
+                conflicts with an existing action.
         """
         if not isinstance(action, AtomicAction):
             raise TypeError("action must be an AtomicAction instance.")
-        if action.robot is not self.robot:
-            raise ValueError("Registered actions must use the engine robot.")
         descriptor = action.descriptor()
         existing = self._actions.get(descriptor.skill_id)
-        if existing is not None and existing is not action:
+        if existing is not None and existing is not action and not replace:
             raise ValueError(
                 f"Skill id {descriptor.skill_id!r} is already registered in this engine."
             )
+        action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
+
+    def _load_builtin_actions(self) -> None:
+        """Create and bind fresh built-in action instances for this engine."""
+        # Import lazily to keep the engine/core dependency independent from the
+        # concrete primitive modules and to avoid package import cycles.
+        from .primitives import BUILTIN_ACTION_TYPES
+
+        for action_type in BUILTIN_ACTION_TYPES:
+            self.register(action_type())
+
+    def plan_action(
+        self,
+        action: AtomicAction,
+        invocation: ActionInvocation,
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan with a configured action using this engine's resources.
+
+        Unlike :meth:`plan`, the supplied action does not need to be in the
+        skill registry. This is an advanced extension and testing escape hatch;
+        built-in parameter variants should use ``ActionInvocation.skill_options``
+        with the engine's registered implementation.
+
+        Args:
+            action: Configured action implementation to invoke.
+            invocation: Grounded request matching the action's skill identifier.
+            context: Latest measured planning state.
+
+        Returns:
+            Validated side-effect-free action plan.
+
+        Raises:
+            TypeError: If ``action`` is not an :class:`AtomicAction`.
+            ValueError: If the action, invocation, context, or plan is invalid.
+        """
+        if not isinstance(action, AtomicAction):
+            raise TypeError("action must be an AtomicAction instance.")
+        self._validate_context(context)
+        action._bind(self._planning_services)
+        request = action.resolve_request(invocation)
+        plan = action.plan(request, context)
+        self._validate_plan(plan, context, request)
+        return plan
+
+    def resolve(
+        self,
+        invocation: ActionInvocation,
+    ) -> ResolvedActionRequest:
+        """Resolve one registered invocation into an engine-owned snapshot.
+
+        The returned request owns its policy and skill-option values. Closed-loop
+        recovery reuses the same request so a replan cannot observe later
+        mutations of caller-owned configuration objects.
+
+        Args:
+            invocation: Grounded request for a registered skill.
+
+        Returns:
+            Validated and embodiment-resolved request snapshot.
+
+        Raises:
+            KeyError: If the invocation references an unregistered skill.
+        """
+        action = self._actions.get(invocation.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {invocation.skill_id!r}."
+            )
+        return action.resolve_request(invocation)
+
+    def plan_request(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext | None = None,
+    ) -> ActionPlan:
+        """Plan an already-resolved request without rebuilding its snapshot.
+
+        This is the planning entry point used by execution recovery. Callers
+        normally use :meth:`plan`, while an execution session resolves once and
+        calls this method for every replan.
+
+        Args:
+            request: Immutable request previously returned by :meth:`resolve`.
+            context: Optional latest planning state; captured when omitted.
+
+        Returns:
+            Validated side-effect-free action plan.
+        """
+        if not isinstance(request, ResolvedActionRequest):
+            raise TypeError("request must be a ResolvedActionRequest.")
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        current = self.initial_context() if context is None else context
+        self._validate_context(current)
+        plan = action.plan(request, current)
+        self._validate_plan(plan, current, request)
+        return plan
+
+    def plan(
+        self,
+        invocation: ActionInvocation,
+        context: PlanningContext | None = None,
+    ) -> ActionPlan:
+        """Plan one registered invocation through the engine-owned backend.
+
+        Args:
+            invocation: Grounded request for a registered skill.
+            context: Optional latest planning state; captured when omitted.
+
+        Returns:
+            Validated action plan.
+
+        Raises:
+            KeyError: If the invocation references an unregistered skill.
+        """
+        current = self.initial_context() if context is None else context
+        request = self.resolve(invocation)
+        return self.plan_request(request, current)
 
     def initial_context(
         self,
@@ -178,16 +351,10 @@ class AtomicActionEngine:
         projected = context
 
         for invocation in invocations:
-            action = self._actions.get(invocation.skill_id)
-            if action is None:
-                raise KeyError(
-                    f"No atomic action registered for skill {invocation.skill_id!r}."
-                )
             if not alive.any():
                 break
             previous_qpos = projected.robot.qpos
-            plan = action.plan(invocation, projected)
-            self._validate_plan(plan, projected, invocation)
+            plan = self.plan(invocation, projected)
             step_success = alive & plan.plan_success.to(self.device)
             trajectory = plan.trajectory.hold_rows(step_success, previous_qpos)
             plans.append(plan)
@@ -253,17 +420,21 @@ class AtomicActionEngine:
         self,
         plan: ActionPlan,
         context: PlanningContext,
-        invocation: ActionInvocation,
+        request: ResolvedActionRequest,
     ) -> None:
         """Validate one action result before it is composed."""
-        if plan.skill_id != invocation.skill_id:
+        if plan.skill_id != request.skill_id:
             raise ValueError(
-                "ActionPlan.skill_id must match its invocation, "
-                f"got {plan.skill_id!r} and {invocation.skill_id!r}."
+                "ActionPlan.skill_id must match its request, "
+                f"got {plan.skill_id!r} and {request.skill_id!r}."
             )
-        if plan.invocation_id != invocation.invocation_id:
+        if plan.invocation_id != request.invocation_id:
             raise ValueError(
                 "ActionPlan.invocation_id must preserve the invocation correlation id."
+            )
+        if plan.invocation_revision != request.revision:
+            raise ValueError(
+                "ActionPlan.invocation_revision must preserve the request revision."
             )
         trajectory = plan.trajectory
         if trajectory.batch_size != context.batch_size:

@@ -26,7 +26,11 @@ from embodichain.lab.visualization.protocol import (
     GizmoCommand,
     GizmoSpec,
     GizmoState,
+    JointControlCommand,
+    JointControlSpec,
+    JointControlState,
     MeshGeometry,
+    SceneManifest,
     pose_to_position_wxyz,
 )
 
@@ -99,6 +103,22 @@ def test_camera_spec_accepts_valid_pinhole_parameters() -> None:
     )
 
     assert spec.aspect == 4.0 / 3.0
+    assert spec.role == "sensor"
+
+
+def test_camera_spec_rejects_unknown_role() -> None:
+    with pytest.raises(ValueError, match="Camera role"):
+        CameraSpec(
+            camera_id="env:0/camera:wrist",
+            sensor_uid="wrist",
+            env_id=0,
+            path="/envs/0/cameras/wrist",
+            fov_y=0.8,
+            aspect=4.0 / 3.0,
+            near=0.01,
+            far=10.0,
+            role="debug",  # type: ignore[arg-type]
+        )
 
 
 def test_camera_image_owns_rgb_copy() -> None:
@@ -151,3 +171,50 @@ def test_gizmo_spec_rejects_unsupported_target_type() -> None:
             env_id=0,
             path="/interactions/gizmos/bad",
         )
+
+
+def _joint_control_spec(**overrides: object) -> JointControlSpec:
+    values = {
+        "control_id": "articulation:door/env:0/joint:0",
+        "articulation_uid": "door",
+        "env_id": 0,
+        "joint_id": 0,
+        "joint_name": "hinge",
+        "joint_type": "revolute",
+        "lower": -1.0,
+        "upper": 1.0,
+        "step": 0.01,
+        "initial_value": 0.0,
+    }
+    values.update(overrides)
+    return JointControlSpec(**values)
+
+
+def test_joint_control_protocol_accepts_single_sided_limits() -> None:
+    spec = _joint_control_spec(lower=0.0, upper=None, initial_value=0.25)
+    state = JointControlState(spec.control_id, value=0.25, applied_sequence=3)
+    command = JointControlCommand(
+        run_id="run",
+        scene_revision=2,
+        sequence=4,
+        client_id="client-a",
+        control_id=spec.control_id,
+        value=0.5,
+    )
+
+    assert spec.lower == 0.0
+    assert spec.upper is None
+    assert state.applied_sequence == 3
+    assert command.value == 0.5
+
+
+def test_joint_control_spec_rejects_invalid_initial_value() -> None:
+    with pytest.raises(ValueError, match="above its upper limit"):
+        _joint_control_spec(initial_value=2.0)
+
+
+def test_scene_manifest_rejects_duplicate_joint_control_ids() -> None:
+    spec = _joint_control_spec()
+
+    with pytest.raises(ValueError, match="duplicate joint control"):
+        SceneManifest("run", 1, (), (), joint_controls=(spec, spec))

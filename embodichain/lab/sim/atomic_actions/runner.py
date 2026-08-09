@@ -661,13 +661,15 @@ class ExecutionRunner:
         """Call one sink operation and convert exceptions to rejection acks."""
         try:
             if operation is CommandOperation.SEND:
-                assert command is not None
+                if command is None:
+                    raise ValueError("SEND requires a JointCommand.")
                 acknowledgement = self._command_sink.send(
                     command,
                     timeout=self.cfg.command_timeout,
                 )
             elif operation is CommandOperation.HOLD:
-                assert command is not None
+                if command is None:
+                    raise ValueError("HOLD requires a JointCommand.")
                 acknowledgement = self._command_sink.hold(
                     command,
                     timeout=self.cfg.safe_stop_timeout,

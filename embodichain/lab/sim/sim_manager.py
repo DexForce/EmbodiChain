@@ -573,7 +573,7 @@ class SimulationManager:
             not in {"127.0.0.1", "localhost", "::1"}
         ):
             logger.log_warning(
-                "Viser Gizmo commands are enabled on a non-loopback interface. "
+                "Viser simulation commands are enabled on a non-loopback interface. "
                 "Only expose this endpoint behind a trusted, authenticated boundary."
             )
         runtime = VisualizationRuntime(
@@ -1242,7 +1242,7 @@ class SimulationManager:
 
         if cfg.shape.visual_material:
             mat = self.create_visual_material(cfg.shape.visual_material)
-            rigid_obj.set_visual_material(mat)
+            rigid_obj.set_visual_material(mat, update_default=True)
 
         self._rigid_objects[uid] = rigid_obj
         self.notify_visualization_topology_changed()
@@ -2183,7 +2183,7 @@ class SimulationManager:
         sensor = self.SUPPORTED_SENSOR_TYPES[sensor_type](sensor_cfg, self.device)
 
         self._sensors[sensor_uid] = sensor
-        if sensor_type == "Camera":
+        if isinstance(sensor, Camera):
             self.notify_visualization_topology_changed()
 
         # Check if the sensor needs to change the parent frame.
@@ -3151,19 +3151,33 @@ class SimulationManager:
         gc.collect()
 
     @staticmethod
-    def flush_cleanup_queue():
-        """Dequeue executor and synchronization barrier provided for top-level main loop / Pytest Fixture calls"""
+    def flush_cleanup_queue() -> None:
+        """Run pending destruction tasks and wait for their scenes to disappear.
+
+        An empty queue means that no manager requested destruction.  In that
+        case, returning immediately is important: other managers may still own
+        live worlds, and waiting for the global world count to reach zero would
+        block until the timeout even though there is nothing to clean up.
+        """
         import gc
 
-        while not SimulationManager._cleanup_queue.empty():
-            task = SimulationManager._cleanup_queue.get_nowait()
+        drained_task = False
+        while True:
+            try:
+                task = SimulationManager._cleanup_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            drained_task = True
             try:
                 task()
             except Exception as e:
                 from embodichain.utils import logger
 
                 logger.log_error(f"Error during delayed destruction: {e}")
-                pass
+
+        if not drained_task:
+            return
 
         # After the queue is emptied, perform a top-level full GC to thoroughly reclaim dead objects that haven't released their RefPtrs yet
         gc.collect()

@@ -9,8 +9,10 @@ headless servers, SSH workflows, multi-environment inspection, and lightweight
 debugging when opening the native DexSim window is inconvenient.
 
 Programmatic Viser configurations are read-only by default. The common
-`--viser` launcher enables Gizmo target commands for trusted clients, but does
-not allow arbitrary physics, action, or asset operations. Simulation remains owned by
+`--viser` launcher enables registered simulation controls for trusted clients,
+including Gizmo targets and the articulation panel used by `preview-asset`, but
+does not allow arbitrary physics, action, or asset operations. Simulation
+remains owned by
 {class}`~embodichain.lab.sim.SimulationManager`; Viser runs on a background
 update thread and keeps only the latest unconsumed frame so a slow browser
 cannot accumulate simulation lag.
@@ -100,7 +102,8 @@ The browser scene currently includes:
 - each constituent object in a `RigidObjectGroup`;
 - every visible link of `Robot` and `Articulation`;
 - dynamic `SoftObject` and `ClothObject` geometry;
-- camera frustums and low-frequency RGB previews;
+- camera frustums and low-frequency RGB previews, including the primary (left)
+  RGB view of stereo sensors;
 - read-only Gizmo frames, or interactive transform controls when commands are
   explicitly enabled;
 - a default XY ground grid with 1 m cells and 10 m major sections;
@@ -145,11 +148,31 @@ corner, tag, and ring styling.
 
 Programmatic configurations remain explicit:
 `VisualizationCfg(backend="viser", allow_commands=True)` enables interaction,
-while `allow_commands=False` creates read-only Gizmo frames. Command-line
+while `allow_commands=False` creates read-only Gizmo frames and disabled joint
+inputs. Command-line
 `--viser` grants connected browser clients permission to mutate the simulation,
 and Viser does not add application authentication here. Keep the default
 loopback bind for local use; expose the server only behind an authenticated,
 trusted network boundary.
+
+## Asset-preview joint controls
+
+`embodichain preview-asset --asset_path <articulation> --viser` registers a
+simulation-thread joint-control provider. Its static control descriptions are
+included in the scene manifest and its authoritative values in each scene
+frame. Browser callbacks enqueue immutable scalar commands; the preview loop
+validates their run and scene revision before writing articulation state.
+
+The **Articulation joints** panel uses degree sliders for bounded revolute
+joints, meter sliders for bounded prismatic joints, and numeric inputs when one
+or both limits are absent. Mimic joints are omitted. The controller writes both
+current and target positions and clears velocity and effort before each step,
+which makes the preview independent of drive configuration. Use
+`--no-joint-control` to disable it.
+
+This controller is currently specific to the Viser asset-preview path. The
+protocol and backend command sink are kept separate from the controller so a
+native DexSim GUI can reuse the simulation-side behavior later.
 
 ## Deformable objects
 
@@ -170,17 +193,24 @@ for large deformable meshes or multiple visible environments.
 
 ## Cameras and browser controls
 
-The **Cameras** panel lets you select one environment and sensor. It provides:
+The **Cameras** panel lets you select one environment and a sensor frustum. It
+provides:
 
 - a camera-frustum visibility switch;
-- an RGB-preview switch;
-- independent environment and camera selectors.
+- an RGB-previews switch;
+- independent environment and frustum-camera selectors.
 
-Only the selected frustum and RGB preview are shown. RGB images use a separate
-latest-frame queue and `sensor_image_fps`, so image rendering cannot build up a
-backlog behind simulation frames. Setting `sensor_image_fps=None` captures
-after each eligible simulation step; `run-env --viser` uses this mode by
-default.
+Only the selected frustum is shown. The expanded **RGB previews** folder shows
+every RGB-capable camera in the selected environment at the same time, split
+into separate **Record cameras** and **Sensor cameras** folders. Record cameras
+are created by event functors such as `record_camera_data`; sensor cameras
+include the primary (left) RGB observation of each `StereoCamera`. Both groups
+are expanded by default, and the camera selector controls only the frustum.
+
+RGB images use a separate latest-frame queue and `sensor_image_fps`, so image
+rendering cannot build up a backlog behind simulation frames. Setting
+`sensor_image_fps=None` captures after each eligible simulation step;
+`run-env --viser` uses this mode by default.
 
 The **Environments** panel independently hides or shows exported environments.
 For more than 16 environments, it switches to a scalable **Show all
@@ -189,6 +219,11 @@ one GUI checkbox per environment.
 The **Overlays** panel controls frames, trajectories, targets, and point clouds.
 Hiding an environment affects its static meshes, deformable meshes, and camera
 frustum together.
+
+When `run-env --replay --replay_mode control --viser` is active, the expanded
+**Replay control** panel adds an integer **Frame** slider. Browser seeks are
+coalesced and applied on the replay thread; dragging the slider pauses terminal
+auto-play, and terminal frame changes update the browser value.
 
 ## Configuration reference
 
@@ -203,7 +238,7 @@ frustum together.
 | `point_cloud_max_points` | `100000` | Per-overlay point-cloud limit. |
 | `sensor_image_fps` | `2.0` | Maximum RGB preview capture rate; `None` synchronizes capture to simulation steps. |
 | `soft_body_fps` | `5.0` | Maximum cloth and soft-body vertex rate. |
-| `allow_commands` | `False` | Allow trusted Viser clients to drag exported Gizmos and mutate simulation targets. |
+| `allow_commands` | `False` | Allow trusted Viser clients to use registered Gizmos and joint controls that mutate simulation targets. |
 | `viser_server` | `ViserServerCfg()` | HTTP/WebSocket bind settings. |
 
 ### `ViserServerCfg`
@@ -221,7 +256,7 @@ Scripts using the common environment launcher accept:
 
 | Option | Default | Description |
 |---|---:|---|
-| `--viser` | disabled | Enable headless Viser with trusted browser Gizmo dragging. |
+| `--viser` | disabled | Enable headless Viser with trusted browser simulation controls. |
 | `--viser-host` | `127.0.0.1` | Bind interface. |
 | `--viser-port` | `8080` | Server port. |
 | `--viser-fps` | `15.0` | Scene pose update limit. |

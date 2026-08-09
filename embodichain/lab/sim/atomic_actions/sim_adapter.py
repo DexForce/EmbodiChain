@@ -322,6 +322,8 @@ class SimulationExecutionAdapter:
         if qvel is None:
             qvel = torch.zeros_like(qpos)
         qeffort = self._read_optional_tensor("get_qf")
+        if qeffort is None:
+            qeffort = self._read_optional_proprioception_tensor("qf")
         scene = (
             SceneSnapshot(timestamp=self._elapsed_time, version=0)
             if self.scene_provider is None
@@ -365,8 +367,6 @@ class SimulationExecutionAdapter:
         self._validate_timeout(timeout)
         try:
             self._validate_command(command)
-            if not command.active_mask.any():
-                return CommandAcknowledgement.accepted_ack("No active rows.")
             self.robot.set_qpos(
                 command.positions,
                 env_ids=self._robot_env_indices,
@@ -441,6 +441,20 @@ class SimulationExecutionAdapter:
         try:
             value = method()
         except (AttributeError, NotImplementedError):
+            return None
+        return value if isinstance(value, torch.Tensor) else None
+
+    def _read_optional_proprioception_tensor(
+        self,
+        field_name: str,
+    ) -> torch.Tensor | None:
+        """Read an optional tensor from the robot proprioception mapping."""
+        method = getattr(self.robot, "get_proprioception", None)
+        if not callable(method):
+            return None
+        try:
+            value = method()[field_name]
+        except (AttributeError, KeyError, NotImplementedError, TypeError):
             return None
         return value if isinstance(value, torch.Tensor) else None
 

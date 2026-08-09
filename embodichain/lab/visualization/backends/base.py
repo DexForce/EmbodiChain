@@ -19,7 +19,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-from ..protocol import CameraImageFrame, GizmoCommand, SceneFrame, SceneManifest
+from ..protocol import (
+    CameraImageFrame,
+    GizmoCommand,
+    JointControlCommand,
+    SceneFrame,
+    SceneManifest,
+)
 
 __all__ = ["VisualizationBackend"]
 
@@ -33,6 +39,24 @@ class VisualizationBackend(ABC):
     ) -> None:
         """Set the thread-safe sink used for browser Gizmo commands."""
         self._gizmo_command_sink = sink
+
+    def set_joint_control_command_sink(
+        self,
+        sink: Callable[[JointControlCommand], None] | None,
+    ) -> None:
+        """Set the thread-safe sink used for browser joint commands."""
+        self._joint_control_command_sink = sink
+
+    def set_replay_control_command_sink(
+        self,
+        sink: Callable[[int], None] | None,
+    ) -> None:
+        """Set the thread-safe sink used for browser replay seeks.
+
+        Args:
+            sink: Callback receiving the newest requested trajectory step.
+        """
+        self._replay_control_command_sink = sink
 
     @property
     @abstractmethod
@@ -59,6 +83,21 @@ class VisualizationBackend(ABC):
     @abstractmethod
     def publish_camera_images(self, frame: CameraImageFrame) -> bool:
         """Publish low-frequency camera images."""
+
+    def publish_replay_control(
+        self,
+        *,
+        step: int,
+        max_step: int,
+        visible: bool,
+    ) -> None:
+        """Publish the replay frame slider state.
+
+        Args:
+            step: Current trajectory step.
+            max_step: Largest valid trajectory step.
+            visible: Whether the replay control should be visible.
+        """
 
     @abstractmethod
     def poll(self) -> None:

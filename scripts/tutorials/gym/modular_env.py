@@ -105,7 +105,6 @@ class ExampleCfg(EmbodiedEnvCfg):
         {
             "uid": "dexforce_w1",
             "version": "v021",
-            "arm_kind": "anthropomorphic",
             "init_pos": [0.0, 0, 0.0],
         }
     )

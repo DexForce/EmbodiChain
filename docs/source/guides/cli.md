@@ -80,6 +80,11 @@ embodichain preview-asset \
 embodichain preview-asset \
     --asset_path /path/to/asset.usda \
     --headless
+
+# Control articulation joints in Viser
+embodichain preview-asset \
+    --asset_path /path/to/robot.urdf \
+    --viser
 ```
 
 ### Arguments
@@ -98,6 +103,12 @@ embodichain preview-asset \
 | ``--headless`` | ``False`` | Run without rendering window |
 | ``--renderer`` | ``hybrid`` | Renderer backend: ``hybrid``, ``fast-rt``, or ``rt`` |
 | ``--preview`` | ``False`` | Enter interactive embed mode after loading |
+| ``--joint-control`` / ``--no-joint-control`` | ``True`` | Enable or disable articulation joint controls in Viser previews |
+
+The Viser articulation panel displays rotational joints in degrees and
+prismatic joints in meters. It excludes mimic joints, leaves articulations with
+unsupported multi-DOF mappings read-only, and provides per-articulation reset
+buttons. The native DexSim window does not yet expose these controls.
 
 ### Preview Mode
 
@@ -109,16 +120,22 @@ When ``--preview`` is enabled, an interactive REPL is available:
 
 ---
 
+(cli-run-environment)=
 ## Run Environment
 
 Launch a Gymnasium environment for data generation, interactive preview, or trajectory replay.
 
+For an end-to-end explanation of mode selection, preview, the differences
+between dataset/video/trajectory recording, and all three replay modes, see
+{doc}`run_env`.
+
 Task environments are **auto-discovered**: any installed package that declares
-an ``embodichain.tasks`` entry point (e.g. the official ``embodichain_tasks``
-package) is imported at startup, registering its environments via
-``@register_env``. Make sure your task package is pip-installed
-(``pip install -e .``) so its tasks are visible to the CLI. The task to launch
-is selected by the ``"id"`` field of the gym config.
+an ``embodichain.tasks`` entry point is imported at startup, registering its
+environments via ``@register_env``. The main ``embodichain`` distribution
+already includes and registers the official ``embodichain_tasks`` import
+package, so no separate task installation is needed. Repository-style task
+config paths resolve from the source checkout or installed wheel. The task to
+launch is selected by the ``"id"`` field of the gym config.
 
 ```bash
 # Run an environment with a gym config file
@@ -180,7 +197,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--preview`` | ``False`` | Enter interactive preview mode |
 | ``--filter_visual_rand`` | ``False`` | Filter out visual randomization |
 | ``--filter_dataset_saving`` | ``False`` | Filter out dataset saving |
-| ``--max_episodes`` | *(from config)* | Override the maximum number of rollout episodes |
+| ``--max_episodes`` | *(from config)* | Override the exact number of persisted per-environment episodes; vector batches are trimmed to this count |
 | ``--record_trajectory`` | ``False`` | Record per-object kinematic trajectories during generation (for replay). Episodes auto-save to ``--trajectory_save_dir`` (or ``~/.cache/embodichain_data/trajectories/<run_id>/``) |
 | ``--trajectory_save_dir`` | ``None`` | Directory for auto-saved trajectories (default: ``~/.cache/embodichain_data/trajectories/<run_id>/``) |
 | ``--replay`` | ``False`` | Replay a recorded trajectory (``--replay_trajectory`` required; mutually exclusive with ``--preview``) |
@@ -208,6 +225,10 @@ When ``--preview`` is enabled, an interactive REPL is available:
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
 
+See {doc}`run_env` for examples of inspecting and stepping ``env`` from the
+embedded session, and for the distinction between interactive preview and the
+Viser browser backend.
+
 ### Replay Mode
 
 When ``--replay`` is enabled (with ``--replay_trajectory <path>``), the env loads a recorded ``.pt`` trajectory and drives it via ``ReplayWrapper``. The replay env must use the same gym config (robot/objects/ActionManager) as the recording env.
@@ -231,6 +252,10 @@ Trajectories are recorded by passing ``--record_trajectory`` (or setting ``recor
   Dataset saving is disabled automatically in this mode.
 
 ``--replay`` and ``--preview`` are mutually exclusive.
+
+See {doc}`run_env` for the recorded file contents, environment compatibility
+requirements, vectorized replay behavior, and a complete record/replay
+workflow.
 
 ### Profiling
 
@@ -322,6 +347,41 @@ reported separately as ``window_record_capture`` and
 
 ---
 
+(cli-preview-lerobot-data)=
+## Preview LeRobot Data
+
+Print and validate one recorded LeRobot episode without launching the
+simulator:
+
+```bash
+embodichain preview_lerobot_data \
+    outputs/lerobot/multi_segments \
+    --latest \
+    --episode 0 \
+    --expect-segments 3
+```
+
+The positional path must be an exact dataset root containing
+`meta/info.json`, unless `--latest` is used to select the newest direct child.
+`--expect-segments` is an optional exact-count assertion; it does not select,
+split, or modify segments.
+
+| Argument | Default | Description |
+|---|---|---|
+| ``dataset_root`` | *(required)* | Dataset root, or parent directory with ``--latest`` |
+| ``--episode`` | ``0`` | Episode index to inspect |
+| ``--expect-segments`` | *(unchecked)* | Fail unless the episode has exactly this many segments |
+| ``--latest`` | ``False`` | Select the newest direct child dataset |
+
+The command prints dataset format, robot, FPS, state/action shapes and ranges,
+task text, segment frame ranges, subtask descriptions, and sidecar success. It
+returns status 0 when all checks pass, 1 for a validation mismatch, and 2 when
+the path, episode, or dataset cannot be loaded. For the complete validation
+contract and a comparison with LeRobot's official Rerun visualization, see
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>`.
+
+---
+
 ## Train RL
 
 Launch reinforcement learning training from a JSON or YAML config file.
@@ -351,8 +411,10 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/agent
 |---|---|---|
 | ``--config`` | *(required)* | Path to the RL training config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--distributed`` | ``None`` | Enable multi-GPU distributed training. If omitted, uses ``trainer.distributed`` from the config. Use ``--no-distributed`` to force single-process training. |
+| ``--profile`` | ``False`` | Same as ``run-env --profile``; profiles the training gym env during rollouts. Requires ``trainer.gym_config``. |
+| ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
 
-Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
+See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
 
 ---
 
@@ -392,9 +454,9 @@ Run the packaged benchmark suites through the same CLI:
 # RL train/evaluate/report workflow
 embodichain benchmark rl --tasks push_cube --algorithms ppo
 
-# Kinematic solver and neural planner benchmarks
+# Kinematic solver and motion-generation benchmarks
 embodichain benchmark robotics-kinematic-solver --solvers all
-embodichain benchmark planners-neural-planner --num-waypoints 1 3 5
+embodichain benchmark motion-generation --suite smoke
 
 # Atomic actions, grasp generation, and workspace analysis
 embodichain benchmark atomic-action --smoke

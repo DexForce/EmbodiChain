@@ -28,14 +28,13 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
+    ControlPartCommandProfile,
     GraspGoal,
-    PickUp,
-    PickUpCfg,
+    PickUpOptions,
     MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
@@ -47,10 +46,12 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    make_clear_dynamics_callback,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -70,16 +71,14 @@ APPROACH_DIRECTIONS = {
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the PickUp tutorial."""
-    parser = argparse.ArgumentParser(description="Demonstrate PickUp on a cube.")
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--n_sample", type=int, default=10000)
-    parser.add_argument("--force_reannotate", action="store_true")
-    parser.add_argument("--auto_play", action="store_true")
+    parser = create_tutorial_argument_parser(
+        "Demonstrate PickUp on a cube.",
+        features=("grasp_sampling", "visualize_axes"),
+    )
     parser.add_argument(
         "--approach", choices=[*APPROACH_DIRECTIONS, "custom"], default="top"
     )
     parser.add_argument("--custom_approach_direction", type=float, nargs=3)
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -133,19 +132,14 @@ def main() -> None:
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_toppra_motion_generator(robot)
 
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        PickUp(
-            motion_gen,
-            cfg=PickUpCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                approach_direction=resolve_approach_direction(args, sim.device),
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
     )
     semantics = create_antipodal_semantics(
         obj,
@@ -169,6 +163,12 @@ def main() -> None:
                     end_effectors={"primary": "hand"},
                 ),
                 motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    approach_direction=resolve_approach_direction(args, sim.device),
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
         )
     )
@@ -181,14 +181,6 @@ def main() -> None:
     clear_after_step = (
         round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
     )
-    dynamics_cleared = False
-
-    def clear_object_dynamics(step_idx: int, _: int) -> None:
-        nonlocal dynamics_cleared
-        if not dynamics_cleared and step_idx + 1 >= clear_after_step:
-            obj.clear_dynamics()
-            dynamics_cleared = True
-
     replay_trajectory(
         sim,
         robot,
@@ -196,7 +188,7 @@ def main() -> None:
         args,
         video_prefix="pickup_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
-        on_trajectory_step=clear_object_dynamics,
+        on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")

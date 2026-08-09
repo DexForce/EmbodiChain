@@ -43,7 +43,6 @@ def main(visualization: VisualizationCfg | None = None) -> None:
         {
             "uid": "dexforce_w1",
             "version": "v021",
-            "arm_kind": "anthropomorphic",
             "with_default_eef": False,
             "control_parts": {
                 "left_eef": ["LEFT_FINGER1_JOINT", "LEFT_FINGER2_JOINT"],

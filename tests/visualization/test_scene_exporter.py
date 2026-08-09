@@ -21,6 +21,8 @@ from types import SimpleNamespace
 import numpy as np
 
 from embodichain.lab.visualization import (
+    JointControlSpec,
+    JointControlState,
     PointCloudOverlay,
     SceneExporter,
     SceneOverlays,
@@ -281,6 +283,38 @@ class _EmptySimulation:
         raise AssertionError(f"Unexpected sensor lookup: {uid}")
 
 
+class _JointControlProvider:
+    def __init__(self) -> None:
+        self.specs = tuple(
+            JointControlSpec(
+                control_id=f"joint-{env_id}",
+                articulation_uid="door",
+                env_id=env_id,
+                joint_id=0,
+                joint_name="hinge",
+                joint_type="revolute",
+                lower=-1.0,
+                upper=1.0,
+                step=0.01,
+                initial_value=0.0,
+            )
+            for env_id in range(2)
+        )
+
+    def joint_control_specs(self) -> tuple[JointControlSpec, ...]:
+        return self.specs
+
+    def joint_control_states(self) -> tuple[JointControlState, ...]:
+        return tuple(
+            JointControlState(
+                control_id=spec.control_id,
+                value=0.25 + spec.env_id,
+                applied_sequence=spec.env_id + 1,
+            )
+            for spec in self.specs
+        )
+
+
 class _Gizmo:
     target = SimpleNamespace(cfg=SimpleNamespace(uid="cube"))
     target_type = "rigid_object"
@@ -309,7 +343,7 @@ class _GizmoSimulation(_EmptySimulation):
 
 
 class _Camera:
-    def __init__(self) -> None:
+    def __init__(self, visualization_role: str = "sensor") -> None:
         self.cfg = SimpleNamespace(
             sensor_type="Camera",
             width=4,
@@ -317,6 +351,7 @@ class _Camera:
             near=0.01,
             far=10.0,
             enable_color=True,
+            visualization_role=visualization_role,
         )
         self.update_count = 0
         self._poses = np.tile(np.eye(4, dtype=np.float32), (2, 1, 1))
@@ -356,6 +391,37 @@ class _CameraSimulation(_Simulation):
     def get_sensor(self, uid: str) -> _Camera:
         assert uid == "wrist/camera"
         return self.camera
+
+
+class _StereoCamera(_Camera):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cfg.sensor_type = "StereoCamera"
+
+    def get_intrinsics(self) -> tuple[np.ndarray, np.ndarray]:
+        intrinsics = super().get_intrinsics()
+        return intrinsics, intrinsics.copy()
+
+    def get_left_right_arena_pose(self) -> tuple[np.ndarray, np.ndarray]:
+        return self._poses, self._poses.copy()
+
+    def get_arena_pose(self, to_matrix: bool) -> np.ndarray:
+        raise AssertionError("Stereo cameras should use their primary eye pose.")
+
+
+class _SensorPreviewSimulation(_Simulation):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cameras = {
+            "cam_high": _StereoCamera(),
+            "record_camera": _Camera(visualization_role="record"),
+        }
+
+    def get_sensor_uid_list(self) -> list[str]:
+        return list(self.cameras)
+
+    def get_sensor(self, uid: str) -> _Camera:
+        return self.cameras[uid]
 
 
 class _CompleteSimulation(_Simulation):
@@ -469,6 +535,23 @@ def test_empty_scene_can_publish_a_current_frame() -> None:
     assert result.frame.positions.shape == (0, 3)
 
 
+def test_joint_control_provider_is_filtered_and_captured() -> None:
+    exporter = SceneExporter(
+        _EmptySimulation(),
+        VisualizationCfg(backend="viser", env_ids=[0]),
+        run_id="joint-run",
+    )
+    exporter.set_joint_control_provider(_JointControlProvider())
+
+    manifest = exporter.build_manifest()
+    result = exporter.capture(sim_step=1, sim_time=0.01)
+
+    assert [control.control_id for control in manifest.joint_controls] == ["joint-0"]
+    assert result.frame.joint_controls == (
+        JointControlState("joint-0", value=0.25, applied_sequence=1),
+    )
+
+
 def test_gizmo_manifest_and_authoritative_pose_are_exported() -> None:
     exporter = SceneExporter(
         _GizmoSimulation(),
@@ -515,6 +598,36 @@ def test_camera_frustum_pose_and_low_frequency_rgb_are_exported() -> None:
         image_result.frame.images[1].image[0, 0],
         [40, 50, 60],
     )
+
+
+def test_stereo_sensor_and_record_camera_primary_rgb_are_exported() -> None:
+    simulation = _SensorPreviewSimulation()
+    exporter = SceneExporter(
+        simulation,
+        VisualizationCfg(backend="viser", env_ids=[0]),
+        run_id="sensor-preview-run",
+    )
+
+    manifest = exporter.build_manifest()
+    scene_result = exporter.capture(sim_step=1, sim_time=0.01)
+    image_result = exporter.capture_camera_images(sim_step=1, sim_time=0.01)
+
+    assert [camera.sensor_uid for camera in manifest.cameras] == [
+        "cam_high",
+        "record_camera",
+    ]
+    assert [camera.role for camera in manifest.cameras] == ["sensor", "record"]
+    assert [image.camera_id for image in image_result.frame.images] == [
+        "env:0/camera:cam_high",
+        "env:0/camera:record_camera",
+    ]
+    np.testing.assert_allclose(scene_result.frame.camera_positions[0], [0.1, 0.2, 0.3])
+    np.testing.assert_array_equal(
+        image_result.frame.images[0].image[0, 0],
+        [10, 20, 30],
+    )
+    assert simulation.cameras["cam_high"].update_count == 1
+    assert simulation.cameras["record_camera"].update_count == 1
 
 
 def test_rigid_groups_and_deformable_meshes_are_exported() -> None:

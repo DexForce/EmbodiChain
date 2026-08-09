@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -26,8 +27,8 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
-    ActionCfg,
     ActionInvocation,
+    ActionOptions,
     ActionPlan,
     Affordance,
     AtomicAction,
@@ -36,43 +37,50 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     ExecutionEventKind,
     ExecutionStatus,
+    GraspGoal,
     HeldObjectState,
     MotionPolicy,
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
+    ResolvedActionBinding,
+    ResolvedActionRequest,
     RobotObservation,
     SceneEntityPose,
     SceneSnapshot,
     StateDelta,
     TaskState,
+    TimedTrajectory,
 )
+from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 from embodichain.lab.sim.planners import PlanOptions
 
 
-class DynamicAction(AtomicAction[EndEffectorPoseGoal]):
+class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
     """Test action whose terminal joint command follows a scene entity x pose."""
 
     skill_id: ClassVar[str] = "dynamic"
     GoalType: ClassVar[type] = EndEffectorPoseGoal
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(self, motion_generator) -> None:
-        super().__init__(motion_generator, ActionCfg(name="dynamic"))
+    def __init__(self) -> None:
+        super().__init__()
         self.plan_count = 0
+        self.requests: list[ResolvedActionRequest] = []
 
     def _plan(
         self,
-        invocation: ActionInvocation[EndEffectorPoseGoal],
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        goal = self.require_goal(invocation)
+        goal = self.require_goal(request)
         self.plan_count += 1
+        self.requests.append(request)
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=True,
             trajectory=torch.stack([context.robot.qpos, target], dim=1),
@@ -86,10 +94,10 @@ class EffectAction(DynamicAction):
 
     def _plan(
         self,
-        invocation: ActionInvocation[EndEffectorPoseGoal],
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        goal = self.require_goal(invocation)
+        goal = self.require_goal(request)
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
         semantics = ObjectSemantics(
@@ -101,7 +109,7 @@ class EffectAction(DynamicAction):
             grasp_xpos=torch.eye(4),
         )
         return self.build_plan(
-            invocation,
+            request,
             context,
             success=True,
             trajectory=torch.stack([context.robot.qpos, target], dim=1),
@@ -109,41 +117,109 @@ class EffectAction(DynamicAction):
         )
 
 
+class NonuniformTimingAction(DynamicAction):
+    """Test action with explicit nonuniform waypoint arrival intervals."""
+
+    skill_id: ClassVar[str] = "nonuniform_timing"
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        positions = torch.stack(
+            [context.robot.qpos, torch.lerp(context.robot.qpos, target, 0.5), target],
+            dim=1,
+        )
+        dt = torch.tensor(
+            [0.0, 0.1, 0.3], dtype=torch.float32, device=positions.device
+        ).expand(context.batch_size, -1)
+        trajectory = TimedTrajectory.from_positions(
+            positions,
+            env_ids=context.env_ids,
+            control_dt=request.motion_policy.control_dt,
+            dt=dt,
+            duration=dt.sum(dim=1),
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=trajectory,
+        )
+
+
+class UncopyableEntity(BatchEntity):
+    """Minimal live entity whose simulator identity must not be copied."""
+
+    def __init__(self) -> None:
+        self._pose = torch.eye(4).unsqueeze(0)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> UncopyableEntity:
+        raise AssertionError("Live simulator entities must not be deep-copied.")
+
+    def set_local_pose(
+        self,
+        pose: torch.Tensor,
+        env_ids: Sequence[int] | None = None,
+    ) -> None:
+        self._pose = pose.clone()
+
+    def get_local_pose(self, to_matrix: bool = False) -> torch.Tensor:
+        return self._pose.clone()
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        return None
+
+
 def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, DynamicAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 2
+    robot.control_parts = {"arm": object()}
     robot.get_qpos.return_value = torch.zeros(batch_size, 2)
     robot.get_qvel.return_value = torch.zeros(batch_size, 2)
+    robot.get_joint_ids.return_value = [0, 1]
     generator = Mock()
     generator.robot = robot
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
-    engine = AtomicActionEngine(generator)
-    action = DynamicAction(generator)
+    engine = AtomicActionEngine(generator, load_builtins=False)
+    action = DynamicAction()
     engine.register(action)
     return engine, action
 
 
 def _context(
-    timestamp: float, qpos: float, entity_x: float, version: int
+    timestamp: float,
+    qpos: float | tuple[float, ...],
+    entity_x: float | tuple[float, ...],
+    version: int,
 ) -> PlanningContext:
-    positions = torch.full((1, 2), qpos)
-    pose = torch.eye(4).unsqueeze(0)
-    pose[:, 0, 3] = entity_x
+    qpos_values = torch.as_tensor(qpos, dtype=torch.float32).reshape(-1)
+    entity_x_values = torch.as_tensor(entity_x, dtype=torch.float32).reshape(-1)
+    if qpos_values.shape != entity_x_values.shape:
+        raise ValueError("qpos and entity_x must describe the same batch.")
+    batch_size = int(qpos_values.shape[0])
+    positions = qpos_values[:, None].expand(-1, 2).clone()
+    pose = torch.eye(4).repeat(batch_size, 1, 1)
+    pose[:, 0, 3] = entity_x_values
     return PlanningContext(
         robot=RobotObservation(
             timestamp=timestamp,
             qpos=positions,
             qvel=torch.zeros_like(positions),
         ),
-        task=TaskState.empty(batch_size=1, device="cpu"),
+        task=TaskState.empty(batch_size=batch_size, device="cpu"),
         scene=SceneSnapshot(
             timestamp=timestamp,
             version=version,
             entities={"target": EntityState(pose)},
         ),
-        env_ids=torch.tensor([0], dtype=torch.long),
+        env_ids=torch.arange(batch_size, dtype=torch.long),
     )
 
 
@@ -182,16 +258,22 @@ def _collision_context(
 
 def _invocation(
     *,
+    skill_id: str = "dynamic",
     max_replans: int = 2,
     max_phase_retries: int = 2,
     phase_timeout: float = 30.0,
+    control_dt: float = 1.0 / 60.0,
     motion_source: str = "ik_interp",
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     return ActionInvocation(
-        skill_id="dynamic",
+        skill_id=skill_id,
         goal=EndEffectorPoseGoal(SceneEntityPose("target")),
         binding=ActionBinding(manipulators={"primary": "arm"}),
-        motion_policy=MotionPolicy(sample_count=2, motion_source=motion_source),
+        motion_policy=MotionPolicy(
+            sample_count=2,
+            control_dt=control_dt,
+            motion_source=motion_source,
+        ),
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
             max_phase_retries=max_phase_retries,
@@ -218,6 +300,66 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert final.eligible_mask.tolist() == [True]
 
 
+def test_session_commands_schedule_arrivals_and_final_settling() -> None:
+    engine, _ = _engine()
+    engine.register(NonuniformTimingAction())
+    session = engine.start(
+        (_invocation(skill_id="nonuniform_timing"),),
+        _context(0.0, 0.0, 0.2, 0),
+    )
+
+    first = session.tick(_context(0.0, 0.0, 0.2, 0))
+    second = session.tick(_context(0.0, 0.0, 0.2, 0))
+    third = session.tick(_context(0.1, 0.1, 0.2, 0))
+
+    assert first.command is not None
+    assert second.command is not None
+    assert third.command is not None
+    command_durations = torch.stack(
+        [
+            first.command.hold_duration,
+            second.command.hold_duration,
+            third.command.hold_duration,
+        ],
+        dim=1,
+    )
+    assert torch.allclose(command_durations, torch.tensor([[0.1, 0.3, 0.3]]))
+    assert torch.allclose(command_durations[:, :-1].sum(dim=1), torch.tensor([0.4]))
+
+
+def test_request_snapshot_preserves_live_entity_identity() -> None:
+    entity = UncopyableEntity()
+    grasp_xpos = torch.eye(4).unsqueeze(0)
+    geometry_extent = torch.tensor([0.1, 0.2, 0.3])
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={"extent": geometry_extent},
+        label="object",
+        entity=entity,
+    )
+    goal = GraspGoal(semantics=semantics, grasp_xpos=grasp_xpos)
+
+    request = ResolvedActionRequest(
+        skill_id="pick_up",
+        goal=goal,
+        binding=ResolvedActionBinding(),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+    grasp_xpos.fill_(9.0)
+    geometry_extent.fill_(9.0)
+
+    assert request.goal is not goal
+    assert request.goal.semantics is not semantics
+    assert request.goal.semantics.entity is entity
+    assert torch.equal(request.goal.grasp_xpos, torch.eye(4).unsqueeze(0))
+    assert torch.equal(
+        request.goal.semantics.geometry["extent"],
+        torch.tensor([0.1, 0.2, 0.3]),
+    )
+
+
 def test_scene_motion_replans_late_bound_goal() -> None:
     engine, action = _engine()
     session = engine.start((_invocation(),), _context(0.0, 0.0, 0.1, 0))
@@ -229,6 +371,7 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in kinds
     assert ExecutionEventKind.REPLANNED in kinds
     assert action.plan_count == 2
+    assert action.requests[0] is action.requests[1]
     assert tick.command is not None
 
 
@@ -322,6 +465,140 @@ def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
     assert tick.command.active_mask.tolist() == [True, False]
 
 
+def test_resolved_goal_snapshot_is_reused_during_recovery() -> None:
+    engine, action = _engine()
+    target = torch.eye(4).unsqueeze(0)
+    target[:, 0, 3] = 0.2
+    base = _invocation()
+    invocation = ActionInvocation(
+        skill_id=base.skill_id,
+        goal=EndEffectorPoseGoal(target),
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+        invocation_id=base.invocation_id,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.0, 0))
+    target[:, 0, 3] = 0.8
+    session.tick(_context(0.0, 0.0, 0.0, 0))
+
+    session.tick(_context(0.1, 1.0, 0.0, 0))
+
+    assert action.plan_count == 2
+    assert action.requests[0] is action.requests[1]
+    snapshot = action.requests[1].goal.xpos
+    assert isinstance(snapshot, torch.Tensor)
+    assert torch.equal(snapshot[:, 0, 3], torch.tensor([0.2]))
+
+
+def test_subset_replan_restarts_synchronized_active_cohort() -> None:
+    engine, action = _engine(batch_size=2)
+    session = engine.start(
+        (_invocation(),),
+        _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
+    )
+    session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
+
+    replanned = session.tick(_context(0.1, (0.0, 0.0), (0.4, 0.2), 1))
+    next_command = session.tick(_context(0.2, (0.0, 0.0), (0.4, 0.2), 1))
+
+    changed = next(
+        event
+        for event in replanned.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
+    cohort = next(
+        event
+        for event in replanned.events
+        if event.kind is ExecutionEventKind.REPLANNED
+    )
+    assert changed.env_mask.tolist() == [True, False]
+    assert cohort.env_mask.tolist() == [True, True]
+    assert replanned.eligible_mask.tolist() == [True, True]
+    assert replanned.command is not None
+    assert torch.all(replanned.command.positions == 0.0)
+    assert next_command.command is not None
+    assert torch.equal(next_command.command.positions[:, 0], torch.tensor([0.4, 0.2]))
+    assert action.plan_count == 2
+
+
+def test_replan_exhaustion_disables_only_triggering_row() -> None:
+    engine, _ = _engine(batch_size=2)
+    session = engine.start(
+        (_invocation(max_replans=1),),
+        _context(0.0, (0.0, 0.0), (0.1, 0.2), 0),
+    )
+    session.tick(_context(0.0, (0.0, 0.0), (0.1, 0.2), 0))
+    session.tick(_context(0.1, (0.0, 0.0), (0.4, 0.2), 1))
+
+    exhausted = session.tick(_context(0.2, (0.0, 0.0), (0.6, 0.2), 2))
+
+    event = next(
+        event
+        for event in exhausted.events
+        if event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED
+    )
+    assert event.env_mask.tolist() == [True, False]
+    assert exhausted.eligible_mask.tolist() == [False, True]
+    assert exhausted.status is ExecutionStatus.RUNNING
+    assert exhausted.command is not None
+    assert exhausted.command.active_mask.tolist() == [False, True]
+
+
+def test_session_revision_replans_from_latest_context() -> None:
+    engine, action = _engine()
+    original = _invocation()
+    session = engine.start((original,), _context(0.0, 0.0, 0.1, 0))
+    revised_pose = torch.eye(4).unsqueeze(0)
+    revised_pose[:, 0, 3] = 0.8
+    revised = ActionInvocation(
+        skill_id=original.skill_id,
+        goal=EndEffectorPoseGoal(revised_pose),
+        binding=original.binding,
+        motion_policy=original.motion_policy,
+        recovery_policy=original.recovery_policy,
+        invocation_id=original.invocation_id,
+        revision=1,
+    )
+
+    session.revise_current(revised)
+    first = session.tick(_context(0.0, 0.0, 0.1, 0))
+    second = session.tick(_context(0.1, 0.0, 0.1, 0))
+
+    assert action.plan_count == 2
+    assert action.requests[0] is not action.requests[1]
+    assert [request.revision for request in action.requests] == [0, 1]
+    assert any(
+        event.kind is ExecutionEventKind.INVOCATION_REVISED
+        and event.invocation_revision == 1
+        for event in first.events
+    )
+    assert second.command is not None
+    assert torch.all(second.command.positions == 0.8)
+
+
+def test_session_revision_must_advance_same_invocation() -> None:
+    engine, _ = _engine()
+    original = _invocation()
+    session = engine.start((original,), _context(0.0, 0.0, 0.1, 0))
+
+    with pytest.raises(ValueError, match="must advance"):
+        session.revise_current(original)
+
+    with pytest.raises(ValueError, match="invocation_id"):
+        session.revise_current(
+            ActionInvocation(
+                skill_id=original.skill_id,
+                goal=original.goal,
+                binding=original.binding,
+                motion_policy=original.motion_policy,
+                recovery_policy=original.recovery_policy,
+                invocation_id="another-call",
+                revision=1,
+            )
+        )
+
+
 def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     engine, _ = _engine()
     session = engine.start(
@@ -406,7 +683,7 @@ def test_session_rejects_regressing_collision_world_revision() -> None:
 
 def test_nonempty_effect_is_committed_only_after_external_verification() -> None:
     engine, _ = _engine()
-    effect = EffectAction(engine.motion_generator)
+    effect = EffectAction()
     engine.register(effect)
     invocation = _invocation()
     invocation = ActionInvocation(
@@ -438,7 +715,7 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
 
 def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
     engine, _ = _engine()
-    engine.register(EffectAction(engine.motion_generator))
+    engine.register(EffectAction())
     base = _invocation(max_phase_retries=0)
     invocation = ActionInvocation(
         skill_id="effect",
