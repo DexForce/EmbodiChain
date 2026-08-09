@@ -123,10 +123,13 @@ def _run_case(
 ):
     """Run one PickUp benchmark case."""
     from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
         AtomicActionEngine,
-        GraspTarget,
-        PickUp,
-        PickUpCfg,
+        ControlPartCommandProfile,
+        GraspGoal,
+        PickUpOptions,
+        MotionPolicy,
     )
     from scripts.tutorials.atomic_action.pickup import (
         build_grasp_generator_cfg,
@@ -156,22 +159,14 @@ def _run_case(
         approach_direction_text = format_vector3(
             pickup_approach_direction_tuple(approach, position_case)
         )
-        atomic_engine = AtomicActionEngine(motion_generator=motion_gen)
-        atomic_engine.register(
-            PickUp(
-                motion_gen,
-                cfg=PickUpCfg(
-                    control_part="arm",
-                    hand_control_part="hand",
-                    hand_open_qpos=hand_open,
-                    hand_close_qpos=hand_close,
-                    approach_direction=approach_direction,
-                    pre_grasp_distance=0.15,
-                    lift_height=0.16,
-                    sample_interval=PICK_SAMPLE_INTERVAL,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
-            )
+        atomic_engine = AtomicActionEngine(
+            motion_generator=motion_gen,
+            control_profiles={
+                "hand": ControlPartCommandProfile.joint_positions(
+                    open=hand_open,
+                    grasp=hand_close,
+                )
+            },
         )
         semantics = create_antipodal_object_semantics(
             obj=obj,
@@ -181,11 +176,29 @@ def _run_case(
             build_grasp_generator_cfg=build_grasp_generator_cfg,
         )
         elapsed, mem_delta, peak_gpu, result = timed_call(
-            lambda: atomic_engine.run(
-                steps=[("pick_up", GraspTarget(semantics=semantics))]
+            lambda: atomic_engine.compile(
+                (
+                    ActionInvocation(
+                        skill_id="pick_up",
+                        goal=GraspGoal(semantics=semantics),
+                        binding=ActionBinding(
+                            manipulators={"primary": "arm"},
+                            end_effectors={"primary": "hand"},
+                        ),
+                        motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                        skill_options=PickUpOptions(
+                            approach_direction=approach_direction,
+                            pre_grasp_distance=0.15,
+                            lift_height=0.16,
+                            hand_interp_steps=HAND_INTERP_STEPS,
+                        ),
+                    ),
+                )
             )
         )
-        is_success, traj, final_state = result
+        is_success = bool(result.plan_success.all().item())
+        traj = result.trajectory.positions
+        final_state = result.projected_context
         final_obj_position = None
         object_lift_delta_m = None
         object_xy_drift_m = None

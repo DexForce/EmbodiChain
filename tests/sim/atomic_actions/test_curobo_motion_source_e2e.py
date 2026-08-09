@@ -46,12 +46,11 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboWorldCfg,
 )
 from embodichain.lab.sim.atomic_actions import (  # noqa: E402
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    EndEffectorPoseTarget,
-)
-from embodichain.lab.sim.atomic_actions.actions import (  # noqa: E402
-    MoveEndEffector,
-    MoveEndEffectorCfg,
+    EndEffectorPoseGoal,
+    MotionPolicy,
 )
 
 ROBOT_UID = "curobo_franka"
@@ -88,17 +87,6 @@ def _make_franka_curobo_engine():
         )
     )
     engine = AtomicActionEngine(mg)
-    engine.register(
-        MoveEndEffector(
-            mg,
-            MoveEndEffectorCfg(
-                motion_source="motion_gen",
-                control_part=CONTROL_PART,
-                sample_interval=SAMPLE_INTERVAL,
-            ),
-        ),
-        name="move_end_effector",
-    )
     return sim, robot, engine
 
 
@@ -140,11 +128,22 @@ def test_atomic_move_end_effector_uses_curobo_v2():
     sim, robot, engine = _make_franka_curobo_engine()
     try:
         target = _reachable_target_beyond_demo_block(robot)
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target))]
+        result = engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="move_end_effector",
+                    goal=EndEffectorPoseGoal(xpos=target),
+                    binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
+                    motion_policy=MotionPolicy(
+                        motion_source="motion_gen",
+                        sample_count=SAMPLE_INTERVAL,
+                    ),
+                ),
+            )
         )
-        assert success.shape == (1,)
-        assert bool(success.item())
+        trajectory = result.trajectory.positions
+        assert result.plan_success.shape == (1,)
+        assert bool(result.plan_success.item())
         assert trajectory.shape[2] == robot.dof
         # Default preserve_plan_samples=False resamples cuRobo's raw samples to
         # the action's sample_interval waypoint count.

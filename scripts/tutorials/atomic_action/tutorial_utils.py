@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import argparse
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
+from typing import Literal
 
 import torch
 
-from embodichain.data import get_data_path
+from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
@@ -73,6 +74,67 @@ TOP_DOWN_EEF_ROTATION = (
     (-0.9977, 0.0540, -0.0401),
     (0.0401, 0.0000, -0.9992),
 )
+
+TutorialCliFeature = Literal[
+    "debug_state",
+    "diagnose_plan",
+    "grasp_sampling",
+    "headless_play",
+    "visualize_axes",
+]
+
+
+def create_tutorial_argument_parser(
+    description: str,
+    *,
+    features: Collection[TutorialCliFeature] = (),
+    default_device: str | None = None,
+    default_renderer: str | None = None,
+) -> argparse.ArgumentParser:
+    """Create a launcher parser with the shared atomic-tutorial switches."""
+    parser = argparse.ArgumentParser(description=description)
+    add_env_launcher_args_to_parser(parser)
+    defaults = {}
+    if default_device is not None:
+        defaults["device"] = default_device
+    if default_renderer is not None:
+        defaults["renderer"] = default_renderer
+    if defaults:
+        parser.set_defaults(**defaults)
+
+    parser.add_argument(
+        "--auto_play",
+        action="store_true",
+        help="Run the demo without waiting for keyboard input.",
+    )
+    if "debug_state" in features:
+        parser.add_argument(
+            "--debug_state",
+            action="store_true",
+            help="Log robot and object state during execution.",
+        )
+    if "diagnose_plan" in features:
+        parser.add_argument(
+            "--diagnose_plan",
+            action="store_true",
+            help="Plan and print diagnostics without playing the trajectory.",
+        )
+    if "grasp_sampling" in features:
+        parser.add_argument("--n_sample", type=int, default=10000)
+        parser.add_argument("--force_reannotate", action="store_true")
+    if "headless_play" in features:
+        parser.add_argument(
+            "--headless_play",
+            action="store_true",
+            help="Execute trajectories without opening the viewer window.",
+        )
+    if "visualize_axes" in features:
+        parser.add_argument(
+            "--no_vis_eef_axis",
+            action="store_true",
+            help="Skip drawing target coordinate-frame markers.",
+        )
+    return parser
 
 
 def make_ur5_solver_cfg(tcp_z: float) -> URSolverCfg:
@@ -206,8 +268,10 @@ def get_hand_open_close_qpos(
     hand_limits = robot.get_qpos_limits(name=hand_control_part)[0].to(
         device=robot.device, dtype=torch.float32
     )
-    return hand_limits[:, 0], torch.minimum(
-        hand_limits[:, 1], torch.full_like(hand_limits[:, 1], close_qpos)
+    return hand_limits[:, 0], torch.clamp(
+        torch.full_like(hand_limits[:, 1], close_qpos),
+        min=hand_limits[:, 0],
+        max=hand_limits[:, 1],
     )
 
 
@@ -483,6 +547,22 @@ def replay_trajectory(
         stop_auto_play_recording(sim, recording_started)
 
 
+def make_clear_dynamics_callback(
+    obj: RigidObject,
+    clear_after_step: int,
+) -> Callable[[int, int], None]:
+    """Create a one-shot replay callback that freezes an attached object."""
+    dynamics_cleared = False
+
+    def clear_dynamics(step_idx: int, _: int) -> None:
+        nonlocal dynamics_cleared
+        if not dynamics_cleared and step_idx + 1 >= clear_after_step:
+            obj.clear_dynamics()
+            dynamics_cleared = True
+
+    return clear_dynamics
+
+
 def get_tutorial_window_size(args: argparse.Namespace) -> tuple[int, int]:
     """Return the viewer window size used by atomic-action tutorials."""
     return VIEWER_WIDTH, VIEWER_HEIGHT
@@ -712,12 +792,14 @@ __all__ = [
     "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
     "TOP_DOWN_EEF_ROTATION",
+    "TutorialCliFeature",
     "add_ur5_gripper_robot",
     "broadcast_pose_batch",
     "broadcast_waypoint_pose_batch",
     "clone_local_pose_from_first_env",
     "create_antipodal_semantics",
     "create_toppra_motion_generator",
+    "create_tutorial_argument_parser",
     "create_tutorial_simulation",
     "create_ur5_gripper_robot_cfg",
     "format_tensor",
@@ -725,6 +807,7 @@ __all__ = [
     "initialize_pre_pick_robot_pose",
     "make_ur5_solver_cfg",
     "make_eef_pose_at",
+    "make_clear_dynamics_callback",
     "make_top_down_eef_pose",
     "get_tutorial_window_size",
     "prepare_tutorial_scene",

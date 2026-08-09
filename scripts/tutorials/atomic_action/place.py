@@ -28,15 +28,16 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    GraspTarget,
-    PickUp,
-    PickUpCfg,
-    Place,
-    PlaceCfg,
-    PlaceTarget,
+    ControlPartCommandProfile,
+    GraspGoal,
+    PickUpOptions,
+    PlaceGoal,
+    PlaceOptions,
+    MotionPolicy,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
@@ -49,10 +50,12 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    make_clear_dynamics_callback,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -69,14 +72,10 @@ PLACE_LIFT_HEIGHT = 0.14
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Place tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Pick up a cube and place it at a target pose."
+    parser = create_tutorial_argument_parser(
+        "Pick up a cube and place it at a target pose.",
+        features=("grasp_sampling", "visualize_axes"),
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--n_sample", type=int, default=10000)
-    parser.add_argument("--force_reannotate", action="store_true")
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -131,33 +130,15 @@ def main() -> None:
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        PickUp(
-            motion_gen,
-            cfg=PickUpCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                pre_grasp_distance=0.15,
-                lift_height=0.16,
-                sample_interval=PICK_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=hand_open,
+                grasp=hand_close,
+            )
+        },
     )
-    engine.register(
-        Place(
-            motion_gen,
-            cfg=PlaceCfg(
-                hand_open_qpos=hand_open,
-                hand_close_qpos=hand_close,
-                lift_height=PLACE_LIFT_HEIGHT,
-                sample_interval=PLACE_SAMPLE_INTERVAL,
-                hand_interp_steps=HAND_INTERP_STEPS,
-            ),
-        )
-    )
-
     semantics = create_antipodal_semantics(
         obj,
         label="cube",
@@ -175,20 +156,40 @@ def main() -> None:
         sim, args, "Inspect the cube, then press Enter to plan PickUp -> Place..."
     )
 
-    success, trajectory, _ = engine.run(
-        [
-            ("pick_up", GraspTarget(semantics)),
-            (
+    binding = ActionBinding(
+        manipulators={"primary": "arm"},
+        end_effectors={"primary": "hand"},
+    )
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "pick_up",
+                GraspGoal(semantics),
+                binding,
+                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                skill_options=PickUpOptions(
+                    pre_grasp_distance=0.15,
+                    lift_height=0.16,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
+            ),
+            ActionInvocation(
                 "place",
-                PlaceTarget(
+                PlaceGoal(
                     broadcast_waypoint_pose_batch(
                         place_poses, robot.get_qpos().shape[0]
                     )
                 ),
+                binding,
+                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                skill_options=PlaceOptions(
+                    lift_height=PLACE_LIFT_HEIGHT,
+                    hand_interp_steps=HAND_INTERP_STEPS,
+                ),
             ),
-        ]
+        )
     )
-    if not success.all():
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 
@@ -197,22 +198,14 @@ def main() -> None:
     clear_after_step = (
         round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
     )
-    dynamics_cleared = False
-
-    def clear_object_dynamics(step_idx: int, _: int) -> None:
-        nonlocal dynamics_cleared
-        if not dynamics_cleared and step_idx + 1 >= clear_after_step:
-            obj.clear_dynamics()
-            dynamics_cleared = True
-
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory.positions,
         args,
         video_prefix="place_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
-        on_trajectory_step=clear_object_dynamics,
+        on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")

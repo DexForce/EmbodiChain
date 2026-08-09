@@ -24,49 +24,38 @@ from typing import ClassVar
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass, logger
+from embodichain.utils import logger
 from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..core import (
-    ActionTarget,
-    ActionCfg,
-    ActionResult,
-    AtomicAction,
-    WorldState,
-    _validate_pose_tensor,
-)
-from ..trajectory import TrajectoryBuilder
+from ..control import GRASP_COMMAND
+from ..core import AtomicAction
+from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
+from ..invocation import ActionOptions, ResolvedActionRequest
+from ..plans import ActionPlan
+from ..state import PlanningContext
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class HeldObjectPoseTarget(ActionTarget):
+class HeldObjectPoseGoal:
     """Desired pose for the object held by this action's control part."""
 
-    object_target_pose: torch.Tensor
+    goal_kind: ClassVar[str] = "held_object_pose"
+
+    object_target_pose: PoseGoalValue
     """Target object pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
 
     def __post_init__(self) -> None:
-        _validate_pose_tensor(
+        validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
             allow_waypoints=False,
         )
 
 
-@configclass
-class MoveHeldObjectCfg(ActionCfg):
-    name: str = "move_held_object"
-    """Name of the action, used for identification and logging."""
-
-    sample_interval: int = 50
-    """Number of waypoints in the planned trajectory."""
-
-    hand_control_part: str = "hand"
-    """Name of the robot part that controls the hand joints."""
-
-    hand_close_qpos: torch.Tensor | None = None
-    """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+@dataclass(frozen=True, slots=True, eq=False)
+class MoveHeldObjectOptions(ActionOptions):
+    """Per-invocation held-object transport behavior."""
 
     obj_upright_direction: torch.Tensor | None = None
     """Optional object-local direction to align with world up while moving."""
@@ -74,56 +63,92 @@ class MoveHeldObjectCfg(ActionCfg):
     pick_rotate_upright: float | None = None
     """Optional rotation in radians used by the legacy upright transport mode."""
 
+    def __post_init__(self) -> None:
+        if self.obj_upright_direction is not None:
+            if (
+                self.obj_upright_direction.shape != (3,)
+                or not torch.isfinite(self.obj_upright_direction).all()
+            ):
+                raise ValueError(
+                    "obj_upright_direction must be a finite tensor with shape (3,)."
+                )
+            object.__setattr__(
+                self, "obj_upright_direction", self.obj_upright_direction.clone()
+            )
 
-class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
+
+class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     """Move the held object to a target object pose; keep the gripper closed."""
 
-    TargetType: ClassVar[type] = HeldObjectPoseTarget
+    skill_id: ClassVar[str] = "move_held_object"
+    GoalType: ClassVar[type] = HeldObjectPoseGoal
+    OptionsType: ClassVar[type] = MoveHeldObjectOptions
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self,
-        motion_generator,
-        cfg: MoveHeldObjectCfg | None = None,
+        default_options: MoveHeldObjectOptions | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or MoveHeldObjectCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(default_options)
+
+    def _on_bind(self) -> None:
+        """Resolve engine-wide resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.arm_dof = len(self.arm_joint_ids)
         self.robot_dof = self.robot.dof
 
-        if self.cfg.hand_close_qpos is None:
-            logger.log_error(
-                "hand_close_qpos must be specified in MoveHeldObjectCfg", ValueError
-            )
-        self.hand_close_qpos = self.cfg.hand_close_qpos.to(self.device)
-
-    def execute(self, target: HeldObjectPoseTarget, state: WorldState) -> ActionResult:
-        held_object = state.get_held_object(self.cfg.control_part)
+    def plan(
+        self,
+        request: ResolvedActionRequest[HeldObjectPoseGoal, MoveHeldObjectOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan held-object transport without changing the attachment relation."""
+        target = self.require_goal(request)
+        options = request.skill_options
+        binding = request.binding
+        manipulator = binding.manipulator()
+        end_effector = binding.end_effector()
+        control_part = manipulator.name
+        arm_joint_ids = list(manipulator.joint_ids)
+        hand_joint_ids = list(end_effector.joint_ids)
+        hand_grasp_qpos = end_effector.joint_positions(
+            GRASP_COMMAND,
+            n_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        state = context
+        held_object = state.get_held_object(control_part)
         if held_object is None:
             logger.log_error(
                 "MoveHeldObject requires an object held by control part "
-                f"{self.cfg.control_part!r} - run PickUp first.",
+                f"{control_part!r} - run PickUp first.",
                 ValueError,
             )
         object_target_pose = resolve_object_target(
-            target.object_target_pose, n_envs=self.n_envs, device=self.device
+            resolve_pose_goal(
+                target.object_target_pose,
+                context,
+                name="object_target_pose",
+            ),
+            n_envs=self.n_envs,
+            device=self.device,
         )
         start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
+            arm_qpos_from_state(state, arm_joint_ids),
             n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
+            arm_dof=manipulator.dof,
+            control_part=control_part,
         )
         end_arm_xpos = self.robot.compute_fk(
-            start_arm_qpos, name=self.cfg.control_part, to_matrix=True
+            start_arm_qpos, name=control_part, to_matrix=True
         )
-        if self.cfg.pick_rotate_upright is not None:
+        if options.pick_rotate_upright is not None:
             self._apply_configured_upright_rotation(
                 object_target_pose,
                 end_arm_xpos,
                 held_object.semantics.entity.get_local_pose(to_matrix=True),
+                options,
             )
         object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
@@ -132,7 +157,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-        if self.cfg.pick_rotate_upright is None:
+        if options.pick_rotate_upright is None:
             self._apply_automatic_transport_rotation(move_eef_xpos, end_arm_xpos)
 
         target_states_list = [
@@ -142,10 +167,10 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
         success, arm_traj = self.builder.plan_arm_traj(
             target_states_list,
             start_arm_qpos,
-            self.cfg.sample_interval,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
+            request.motion_policy.sample_count,
+            control_part=control_part,
+            arm_dof=manipulator.dof,
+            cfg=request.motion_policy,
         )
 
         full = torch.empty(
@@ -154,15 +179,15 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :, self.arm_joint_ids] = arm_traj
-        full[:, :, self.hand_joint_ids] = self.hand_close_qpos
+        full[:, :, arm_joint_ids] = arm_traj
+        full[:, :, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
 
-        return ActionResult(
+        return self.build_plan(
+            request,
+            context,
             success=success,
             trajectory=full,
-            next_state=state.with_updates(
-                last_qpos=full[:, -1, :].clone(),
-            ),
+            phase_name="transport",
         )
 
     def _apply_configured_upright_rotation(
@@ -170,20 +195,21 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
         object_target_pose: torch.Tensor,
         end_arm_xpos: torch.Tensor,
         held_object_xpos: torch.Tensor,
+        options: MoveHeldObjectOptions,
     ) -> None:
-        if self.cfg.obj_upright_direction is None:
+        if options.obj_upright_direction is None:
             upright_direction = torch.tensor(
                 [0.0, 0.0, 1.0], device=self.device, dtype=torch.float32
             )
         else:
-            upright_direction = self.cfg.obj_upright_direction.to(
+            upright_direction = options.obj_upright_direction.to(
                 device=self.device, dtype=torch.float32
             )
         object_upright = torch.matmul(held_object_xpos[:, :3, :3], upright_direction)
         dot_result = torch.sum(end_arm_xpos[:, :3, 1] * object_upright, dim=-1)
         revert_flag = torch.where(dot_result < 0, 1.0, -1.0)
         axis_angle = (
-            -float(self.cfg.pick_rotate_upright)
+            -float(options.pick_rotate_upright)
             * revert_flag.unsqueeze(-1)
             * end_arm_xpos[:, :3, 0]
         )
@@ -244,16 +270,9 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseTarget]):
             move_eef_xpos[:, :3, :3],
         )
 
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            next_state=state,
-        )
 
-
-__all__ = ["HeldObjectPoseTarget", "MoveHeldObject", "MoveHeldObjectCfg"]
+__all__ = [
+    "HeldObjectPoseGoal",
+    "MoveHeldObject",
+    "MoveHeldObjectOptions",
+]

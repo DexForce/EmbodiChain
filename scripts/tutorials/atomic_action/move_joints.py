@@ -28,18 +28,19 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    JointPositionTarget,
-    MoveJoints,
-    MoveJointsCfg,
-    NamedJointPositionTarget,
+    ControlPartCommandProfile,
+    JointPositionGoal,
+    MotionPolicy,
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     prepare_tutorial_scene,
@@ -53,12 +54,10 @@ POST_TRAJECTORY_STEPS = 120
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the MoveJoints tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Demonstrate MoveJoints with named and explicit qpos targets."
+    parser = create_tutorial_argument_parser(
+        "Demonstrate MoveJoints with named and explicit qpos targets.",
+        features=("visualize_axes",),
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -77,17 +76,12 @@ def main() -> None:
             [0.0, -1.57, 1.57, -1.57, -1.57, 0.0],
         )
     )
-    engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        MoveJoints(
-            motion_gen,
-            cfg=MoveJointsCfg(
-                sample_interval=MOVE_JOINTS_SAMPLE_INTERVAL,
-                named_joint_positions={"ready": ready},
-            ),
-        )
+    engine = AtomicActionEngine(
+        motion_generator=motion_gen,
+        control_profiles={
+            "arm": ControlPartCommandProfile.joint_positions(ready=ready),
+        },
     )
-
     if not args.no_vis_eef_axis:
         draw_axis_marker(
             sim,
@@ -101,13 +95,19 @@ def main() -> None:
     waypoints = (
         torch.stack([mid, home]).unsqueeze(0).repeat(robot.get_qpos().shape[0], 1, 1)
     )
-    success, trajectory, _ = engine.run(
-        [
-            ("move_joints", NamedJointPositionTarget("ready")),
-            ("move_joints", JointPositionTarget(waypoints)),
-        ]
+    binding = ActionBinding(manipulators={"primary": "arm"})
+    policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                "move_joints", JointPositionGoal("ready"), binding, policy
+            ),
+            ActionInvocation(
+                "move_joints", JointPositionGoal(waypoints), binding, policy
+            ),
+        )
     )
-    if not success.all():
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveJoints demo trajectory.")
         return
 
@@ -116,7 +116,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory.positions,
         args,
         video_prefix="move_joints_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

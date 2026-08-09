@@ -107,14 +107,14 @@ one Markdown report with exactly three tables:
 
 ### 2.3 Atomic Action integration
 
-`ActionCfg.motion_source` defaults to `"ik_interp"`. Existing Atomic Action
-benchmarks construct a TOPPRA `MotionGenerator`, but cases that do not
+`MotionPolicy.motion_source` defaults to `"ik_interp"`. Existing Atomic Action
+benchmarks construct a TOPPRA `MotionGenerator`, but invocations that do not
 explicitly change `motion_source` still use local IK plus interpolation.
 
 NMG and cuRobo Atomic Action evaluation must explicitly set:
 
 ```python
-cfg.motion_source = "motion_gen"
+motion_policy = MotionPolicy(motion_source="motion_gen")
 ```
 
 The NMG checkpoint must remain confined to `NeuralPlannerCfg`. Atomic Action

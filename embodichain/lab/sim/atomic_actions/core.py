@@ -14,296 +14,496 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Core semantic objects and planning contract for atomic actions."""
+
 from __future__ import annotations
 
-import torch
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Generic, Mapping, TYPE_CHECKING, TypeVar
+from typing import Any, ClassVar, Generic, TYPE_CHECKING
+
+import torch
 
 from embodichain.lab.sim.common import BatchEntity
-from embodichain.utils import configclass
 
 from .affordance import Affordance
+from .effects import StateDelta
+from .goals import collect_scene_dependencies
+from .invocation import (
+    ActionInvocation,
+    ActionOptions,
+    GoalT,
+    OptionsT,
+    ResolvedActionRequest,
+)
+from .plans import (
+    ActionPlan,
+    CompletionCondition,
+    CompletionConditionKind,
+    PhaseSpec,
+    PlannedPhase,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
 
+    from .runtime import ActionPlanningServices
+    from .state import PlanningContext
+    from .trajectory import TrajectoryBuilder
 
-# =============================================================================
-# ObjectSemantics
-# =============================================================================
+
+def resolve_runtime_device(device: torch.device | str) -> torch.device:
+    """Resolve an indexless CUDA device to the active concrete GPU index.
+
+    Args:
+        device: PyTorch device or device string.
+
+    Returns:
+        Concrete runtime device.
+    """
+    resolved = torch.device(device)
+    if resolved.type == "cuda" and resolved.index is None:
+        return torch.device(f"cuda:{torch.cuda.current_device()}")
+    return resolved
 
 
 @dataclass
 class ObjectSemantics:
-    """Semantic information about an interaction target."""
+    """Semantic and geometric information about an interaction object."""
 
     affordance: Affordance
-    """Affordance data describing how the object can be interacted with."""
+    """Affordance data describing supported interactions."""
 
     geometry: dict[str, Any]
-    """Non-affordance geometric metadata (e.g., bounding_box). Mesh tensors live
-    on AntipodalAffordance, not here."""
+    """Non-affordance geometric metadata."""
 
     properties: dict[str, Any] = field(default_factory=dict)
-    """Physical properties: mass, friction, etc."""
+    """Physical properties such as mass and friction."""
 
     label: str = "none"
-    """Object category label (e.g., 'mug', 'apple')."""
+    """Semantic object category."""
 
     entity: BatchEntity | None = None
-    """Optional reference to the simulation entity for this object."""
+    """Optional simulation entity used by deterministic grounding."""
 
     def __post_init__(self) -> None:
-        # Bind only the label onto the affordance for convenience. DO NOT
-        # alias the geometry dict — that was the footgun fixed by this redesign.
+        if not isinstance(self.affordance, Affordance):
+            raise TypeError("affordance must be an Affordance instance.")
+        if not isinstance(self.geometry, dict):
+            raise TypeError("geometry must be a dict.")
+        if not isinstance(self.properties, dict):
+            raise TypeError("properties must be a dict.")
+        if not isinstance(self.label, str) or not self.label:
+            raise ValueError("label must be a non-empty string.")
         self.affordance.object_label = self.label
 
 
-# =============================================================================
-# Target foundation
-# =============================================================================
+@dataclass(frozen=True, slots=True)
+class SkillDescriptor:
+    """Machine-readable metadata for one registered atomic skill."""
 
-
-class ActionTarget:
-    """Open marker base for atomic-action target value objects.
-
-    Third-party actions should define a target dataclass that inherits from this
-    class. The engine performs the action-specific runtime check using
-    :attr:`AtomicAction.TargetType`; the marker keeps the public engine contract
-    open to targets outside the built-in set.
-    """
-
-    __slots__ = ()
-
-
-TargetT = TypeVar("TargetT", bound=ActionTarget)
-
-
-def _validate_pose_tensor(
-    value: torch.Tensor,
-    name: str,
-    *,
-    allow_waypoints: bool,
-) -> None:
-    """Validate the environment-independent part of a pose tensor contract."""
-    if not isinstance(value, torch.Tensor):
-        raise TypeError(f"{name} must be a torch.Tensor, got {type(value).__name__}.")
-    valid_dims = {2, 3, 4} if allow_waypoints else {2, 3}
-    if value.dim() not in valid_dims or value.shape[-2:] != (4, 4):
-        supported = "(4, 4), (n_envs, 4, 4)"
-        if allow_waypoints:
-            supported += ", or (n_envs, n_waypoint, 4, 4)"
-        raise ValueError(
-            f"{name} must have shape {supported}, got {tuple(value.shape)}."
-        )
-
-
-# ``Target`` used to be a closed union of built-in target classes. Keep the
-# public name as an open compatibility alias so extension targets are accepted.
-Target = ActionTarget
-
-
-# =============================================================================
-# World state threaded between actions
-# =============================================================================
-
-
-@dataclass(slots=True, eq=False)
-class HeldObjectState:
-    """State of an object currently held by the robot."""
-
-    semantics: ObjectSemantics
-    """Semantics of the held object."""
-
-    object_to_eef: torch.Tensor
-    """Batched transform from object frame to end-effector frame, shape [n_envs, 4, 4]."""
-
-    grasp_xpos: torch.Tensor
-    """Batched end-effector pose used to grasp the object, shape [n_envs, 4, 4]."""
-
-
-@dataclass(slots=True, eq=False)
-class CoordinatedHeldObjectState:
-    """State of a single object jointly held by two robot hands."""
-
-    semantics: ObjectSemantics
-    """Semantic object currently held by the two grippers."""
-
-    left_object_to_eef: torch.Tensor
-    """Transform from object frame to left end-effector frame, shape ``[n_envs, 4, 4]``."""
-
-    right_object_to_eef: torch.Tensor
-    """Transform from object frame to right end-effector frame, shape ``[n_envs, 4, 4]``."""
-
-    left_grasp_xpos: torch.Tensor
-    """Left end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
-
-    right_grasp_xpos: torch.Tensor
-    """Right end-effector grasp pose for the shared object, shape ``[n_envs, 4, 4]``."""
-
-
-@dataclass(slots=True, eq=False)
-class WorldState:
-    """State the engine threads through a sequence of actions."""
-
-    last_qpos: torch.Tensor
-    """Robot joint positions at the start of the next action, shape [n_envs, robot.dof]."""
-
-    held_objects: dict[str, HeldObjectState] = field(default_factory=dict)
-    """Objects held by individual control parts, keyed by control-part name."""
-
-    coordinated_held_objects: dict[tuple[str, str], CoordinatedHeldObjectState] = field(
-        default_factory=dict
-    )
-    """Objects jointly held by two control parts, keyed by their ordered pair."""
-
-    def get_held_object(self, control_part: str) -> HeldObjectState | None:
-        """Return the object held by ``control_part``, if any."""
-        return self.held_objects.get(control_part)
-
-    def get_coordinated_held_object(
-        self,
-        first_control_part: str,
-        second_control_part: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return the object jointly held by an ordered control-part pair."""
-        return self.coordinated_held_objects.get(
-            (first_control_part, second_control_part)
-        )
-
-    def with_updates(
-        self,
-        *,
-        last_qpos: torch.Tensor | None = None,
-        held_objects: Mapping[str, HeldObjectState] | None = None,
-        coordinated_held_objects: (
-            Mapping[tuple[str, str], CoordinatedHeldObjectState] | None
-        ) = None,
-    ) -> WorldState:
-        """Return a successor state without aliasing held-state dictionaries."""
-        return WorldState(
-            last_qpos=self.last_qpos if last_qpos is None else last_qpos,
-            held_objects=dict(
-                self.held_objects if held_objects is None else held_objects
-            ),
-            coordinated_held_objects=dict(
-                self.coordinated_held_objects
-                if coordinated_held_objects is None
-                else coordinated_held_objects
-            ),
-        )
-
-
-@dataclass(slots=True, eq=False)
-class ActionResult:
-    """Return value of every AtomicAction.execute call."""
-
-    success: bool | torch.Tensor
-    """Whether the action produced a valid full-DoF trajectory.
-    Can be a bool or a per-environment boolean tensor of shape (n_envs,)."""
-
-    trajectory: torch.Tensor
-    """Full-robot trajectory, shape (n_envs, n_waypoints, robot.dof)."""
-
-    next_state: WorldState
-    """World state to feed into the next action."""
-
-    @property
-    def success_all(self) -> bool:
-        """True only if all environments succeeded."""
-        if isinstance(self.success, torch.Tensor):
-            return bool(torch.all(self.success).item())
-        return bool(self.success)
-
-    def __bool__(self) -> bool:
-        import warnings as _w
-
-        _w.warn(
-            "ActionResult bool() is deprecated; use .success_all",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.success_all
-
-
-# =============================================================================
-# Configuration base
-# =============================================================================
-
-
-@configclass
-class ActionCfg:
-    """Configuration shared by all atomic actions."""
-
-    name: str = "default"
-    control_part: str = "arm"
-    interpolation_type: str = "linear"
-    velocity_limit: float | None = None
-    acceleration_limit: float | None = None
-    motion_source: str = "ik_interp"
-    """Trajectory source: 'ik_interp' (default, batched IK + linear interp)
-    or 'motion_gen' (batched MotionGenerator)."""
+    skill_id: str
+    goal_type: type[Any] | tuple[type[Any], ...]
+    options_type: type[ActionOptions]
+    manipulator_roles: tuple[str, ...] = ()
+    end_effector_roles: tuple[str, ...] = ()
+    agent_visible: bool = True
 
     def __post_init__(self) -> None:
-        valid_sources = {"ik_interp", "motion_gen"}
-        if self.motion_source not in valid_sources:
-            raise ValueError(
-                f"motion_source must be one of {sorted(valid_sources)}, "
-                f"but got {self.motion_source!r}."
+        if not isinstance(self.skill_id, str) or not self.skill_id:
+            raise ValueError("SkillDescriptor.skill_id must be non-empty.")
+        goal_types = (
+            self.goal_type if isinstance(self.goal_type, tuple) else (self.goal_type,)
+        )
+        if not goal_types or not all(isinstance(item, type) for item in goal_types):
+            raise TypeError("SkillDescriptor.goal_type must contain concrete types.")
+        if not isinstance(self.options_type, type) or not issubclass(
+            self.options_type, ActionOptions
+        ):
+            raise TypeError(
+                "SkillDescriptor.options_type must be an ActionOptions subclass."
             )
+        for field_name in ("manipulator_roles", "end_effector_roles"):
+            roles = tuple(getattr(self, field_name))
+            if len(set(roles)) != len(roles) or not all(
+                isinstance(role, str) and role for role in roles
+            ):
+                raise ValueError(f"{field_name} must contain unique non-empty roles.")
+            object.__setattr__(self, field_name, roles)
 
 
-# =============================================================================
-# AtomicAction ABC (slim)
-# =============================================================================
+class AtomicAction(Generic[GoalT, OptionsT], ABC):
+    """Side-effect-free planner for one semantically meaningful robot skill.
 
-
-class AtomicAction(Generic[TargetT], ABC):
-    """Abstract base for atomic actions.
-
-    Subclasses declare ``TargetType`` to advertise the concrete target dataclass
-    they accept. ``execute`` is the only required method; ``validate`` has been
-    dropped from the contract in this redesign.
+    Actions own only typed default runtime options. An
+    :class:`~embodichain.lab.sim.atomic_actions.engine.AtomicActionEngine` binds
+    its shared planning services before an action is invoked.
     """
 
-    TargetType: ClassVar[type[ActionTarget] | tuple[type[ActionTarget], ...]]
-    """Concrete target dataclass or dataclasses accepted by ``execute``."""
+    skill_id: ClassVar[str]
+    """Stable registry identifier for this skill."""
+
+    GoalType: ClassVar[type[Any] | tuple[type[Any], ...]]
+    """Concrete goal dataclass or dataclasses accepted by this skill."""
+
+    OptionsType: ClassVar[type[ActionOptions]] = ActionOptions
+    """Concrete per-invocation runtime options accepted by this skill."""
+
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    """Required semantic manipulator roles."""
+
+    end_effector_roles: ClassVar[tuple[str, ...]] = ()
+    """Required semantic end-effector roles."""
+
+    agent_visible: ClassVar[bool] = True
+    """Whether an Action Agent should expose this skill by default."""
 
     def __init__(
         self,
-        motion_generator: MotionGenerator,
-        cfg: ActionCfg | None = None,
+        default_options: OptionsT | None = None,
     ) -> None:
-        self.motion_generator = motion_generator
-        self.cfg = cfg if cfg is not None else ActionCfg()
-        self.robot = motion_generator.robot
-        self.device = self.robot.device
-        self.control_part = self.cfg.control_part
+        selected_options = (
+            self.OptionsType() if default_options is None else default_options
+        )
+        if not isinstance(selected_options, self.OptionsType):
+            raise TypeError(
+                f"{type(self).__name__} expects default_options of type "
+                f"{self.OptionsType.__name__}, got "
+                f"{type(selected_options).__name__}."
+            )
+        self._default_options: OptionsT = deepcopy(selected_options)
+        self._planning_services: ActionPlanningServices | None = None
 
-    @abstractmethod
-    def execute(self, target: TargetT, state: WorldState) -> ActionResult:
-        """Plan and return a full-DoF trajectory for this action.
+    @property
+    def default_options(self) -> OptionsT:
+        """Return an owned copy of the action's default runtime options."""
+        return deepcopy(self._default_options)
+
+    @property
+    def is_bound(self) -> bool:
+        """Whether an engine has supplied this action's planning resources."""
+        return self._planning_services is not None
+
+    @property
+    def planning_services(self) -> ActionPlanningServices:
+        """Return the engine-owned services borrowed by this action.
+
+        Raises:
+            RuntimeError: If the action has not been registered or planned by
+                an
+                :class:`~embodichain.lab.sim.atomic_actions.engine.AtomicActionEngine`.
+        """
+        if self._planning_services is None:
+            raise RuntimeError(
+                f"Atomic action {self.skill_id!r} is not bound to an "
+                "AtomicActionEngine. Register it or call engine.plan_action()."
+            )
+        return self._planning_services
+
+    @property
+    def motion_generator(self) -> MotionGenerator:
+        """Return the engine-owned motion generator borrowed by this action."""
+        return self.planning_services.motion_generator
+
+    @property
+    def robot(self) -> Robot:
+        """Return the robot associated with the owning engine."""
+        return self.planning_services.robot
+
+    @property
+    def device(self) -> torch.device:
+        """Return the concrete runtime device associated with the engine."""
+        return self.planning_services.device
+
+    @property
+    def builder(self) -> TrajectoryBuilder:
+        """Return the engine-owned shared trajectory builder."""
+        return self.planning_services.trajectory_builder
+
+    def _bind(self, services: ActionPlanningServices) -> None:
+        """Bind engine-owned planning services exactly once."""
+        if self._planning_services is services:
+            return
+        if self._planning_services is not None:
+            raise ValueError(
+                f"Atomic action {self.skill_id!r} is already bound to another "
+                "AtomicActionEngine."
+            )
+        self._planning_services = services
+        try:
+            self._on_bind()
+        except Exception:
+            self._planning_services = None
+            raise
+
+    def _on_bind(self) -> None:
+        """Initialize implementation state that depends on engine resources."""
+
+    @classmethod
+    def descriptor(cls) -> SkillDescriptor:
+        """Return stable metadata used by registries and Action Agent adapters."""
+        return SkillDescriptor(
+            skill_id=cls.skill_id,
+            goal_type=cls.GoalType,
+            options_type=cls.OptionsType,
+            manipulator_roles=cls.manipulator_roles,
+            end_effector_roles=cls.end_effector_roles,
+            agent_visible=cls.agent_visible,
+        )
+
+    def resolve_request(
+        self,
+        invocation: ActionInvocation[GoalT, OptionsT],
+    ) -> ResolvedActionRequest[GoalT, OptionsT]:
+        """Validate and snapshot an invocation through engine-owned resources.
 
         Args:
-            target: Typed target dataclass; must be an instance of ``self.TargetType``.
-            state: World state inherited from the previous action (or the engine seed).
+            invocation: Caller-owned invocation to resolve.
 
         Returns:
-            ActionResult with the planned trajectory and the successor world state.
+            Immutable request reused by planning and recovery replans.
+
+        Raises:
+            ValueError: If the stable skill identifier does not match.
+            TypeError: If the goal or options type is incompatible.
+            KeyError: If a required binding role is missing.
+        """
+        if invocation.skill_id != self.skill_id:
+            raise ValueError(
+                f"Invocation skill_id {invocation.skill_id!r} does not match "
+                f"{self.skill_id!r}."
+            )
+        if not isinstance(invocation.goal, self.GoalType):
+            expected = (
+                " | ".join(item.__name__ for item in self.GoalType)
+                if isinstance(self.GoalType, tuple)
+                else self.GoalType.__name__
+            )
+            raise TypeError(
+                f"Skill {self.skill_id!r} expects goal {expected}, got "
+                f"{type(invocation.goal).__name__}."
+            )
+        for role in self.manipulator_roles:
+            invocation.binding.manipulator(role)
+        for role in self.end_effector_roles:
+            invocation.binding.end_effector(role)
+        options = (
+            self._default_options
+            if invocation.skill_options is None
+            else invocation.skill_options
+        )
+        if not isinstance(options, self.OptionsType):
+            raise TypeError(
+                f"Skill {self.skill_id!r} expects options "
+                f"{self.OptionsType.__name__}, got {type(options).__name__}."
+            )
+        required_planner = invocation.motion_policy.planner
+        configured_planner_name = self.planning_services.planner_name
+        if required_planner is not None and required_planner != configured_planner_name:
+            raise ValueError(
+                f"Motion policy requires planner {required_planner!r}, but this "
+                f"action uses {configured_planner_name!r}."
+            )
+        return ResolvedActionRequest(
+            skill_id=invocation.skill_id,
+            goal=invocation.goal,
+            binding=self.planning_services.resolve_binding(
+                invocation.binding,
+                invocation.control_overrides,
+            ),
+            motion_policy=invocation.motion_policy,
+            recovery_policy=invocation.recovery_policy,
+            skill_options=options,
+            invocation_id=invocation.invocation_id,
+            revision=invocation.revision,
+        )
+
+    def require_goal(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+    ) -> GoalT:
+        """Validate a resolved request and return its concrete goal."""
+        if request.skill_id != self.skill_id:
+            raise ValueError(
+                f"Request skill_id {request.skill_id!r} does not match "
+                f"{self.skill_id!r}."
+            )
+        if not isinstance(request.goal, self.GoalType):
+            raise TypeError(
+                f"Skill {self.skill_id!r} received incompatible goal "
+                f"{type(request.goal).__name__}."
+            )
+        if not isinstance(request.skill_options, self.OptionsType):
+            raise TypeError(
+                f"Skill {self.skill_id!r} received incompatible options "
+                f"{type(request.skill_options).__name__}."
+            )
+        for role in self.manipulator_roles:
+            request.binding.manipulator(role)
+        for role in self.end_effector_roles:
+            request.binding.end_effector(role)
+        return request.goal
+
+    def build_plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        success: bool | torch.Tensor,
+        trajectory: TimedTrajectory | torch.Tensor,
+        expected_effects: StateDelta | None = None,
+        phase_name: str | None = None,
+        replannable: bool = True,
+        completion_kind: CompletionConditionKind = (
+            CompletionConditionKind.TRAJECTORY_COMPLETE
+        ),
+        completion_tolerance: float | None = None,
+        diagnostics: PlannerDiagnostics | None = None,
+    ) -> ActionPlan:
+        """Build a validated single-phase plan for a primitive implementation.
+
+        Args:
+            request: Resolved invocation snapshot being planned.
+            context: Planning input used for the plan.
+            success: Per-environment planning success or scalar planner result.
+            trajectory: Full-robot timed trajectory or position tensor.
+            expected_effects: Symbolic effects to verify after execution.
+            phase_name: Optional phase name; defaults to the stable skill id.
+            replannable: Whether the execution runtime may replan this phase.
+            completion_kind: Completion condition category.
+            completion_tolerance: Optional numerical completion tolerance.
+            diagnostics: Optional retained planner diagnostics.
+
+        Returns:
+            Side-effect-free action plan.
+        """
+        self.require_goal(request)
+        if isinstance(success, bool):
+            success_mask = torch.full(
+                (context.batch_size,),
+                success,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        elif isinstance(success, torch.Tensor):
+            success_mask = success.to(device=self.device)
+            if success_mask.dtype != torch.bool:
+                raise TypeError("Planning success must have dtype torch.bool.")
+            if success_mask.dim() == 0 or success_mask.shape == (1,):
+                success_mask = success_mask.reshape(1).expand(context.batch_size)
+            if success_mask.shape != (context.batch_size,):
+                raise ValueError(
+                    "Planning success must have shape "
+                    f"({context.batch_size},), got {tuple(success_mask.shape)}."
+                )
+            success_mask = success_mask.clone()
+        else:
+            raise TypeError("Planning success must be bool or torch.Tensor.")
+
+        if isinstance(trajectory, torch.Tensor):
+            timed = TimedTrajectory.from_positions(
+                trajectory,
+                env_ids=context.env_ids,
+                control_dt=request.motion_policy.control_dt,
+            )
+        elif isinstance(trajectory, TimedTrajectory):
+            timed = trajectory
+        else:
+            raise TypeError("trajectory must be TimedTrajectory or torch.Tensor.")
+        if timed.batch_size != context.batch_size:
+            raise ValueError("Trajectory and planning context batch sizes must match.")
+        if timed.robot_dof != context.robot.robot_dof:
+            raise ValueError("Trajectory robot_dof must match the planning context.")
+
+        if diagnostics is None:
+            diagnostics = PlannerDiagnostics(
+                backend=self.planning_services.planner_name
+            )
+        phase = PlannedPhase(
+            spec=PhaseSpec(
+                name=phase_name or self.skill_id,
+                goal=request.goal,
+                replannable=replannable,
+                completion_condition=CompletionCondition(
+                    kind=completion_kind,
+                    tolerance=completion_tolerance,
+                ),
+                recovery_policy=request.recovery_policy,
+                scene_dependencies=collect_scene_dependencies(request.goal),
+            ),
+            trajectory=timed,
+            planned_scene_version=context.scene.version,
+            diagnostics=diagnostics,
+        )
+        return ActionPlan(
+            skill_id=self.skill_id,
+            plan_success=success_mask,
+            phases=(phase,),
+            expected_effects=expected_effects or StateDelta(),
+            invocation_id=request.invocation_id,
+            invocation_revision=request.revision,
+        )
+
+    def failed_plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        message: str | None = None,
+    ) -> ActionPlan:
+        """Build a failed empty plan without changing task state.
+
+        Args:
+            request: Resolved invocation that failed to plan.
+            context: Planning input used for the attempt.
+            message: Optional diagnostic message.
+
+        Returns:
+            Failed action plan with an empty phase trajectory.
+        """
+        return self.build_plan(
+            request,
+            context,
+            success=torch.zeros(
+                context.batch_size, dtype=torch.bool, device=self.device
+            ),
+            trajectory=TimedTrajectory.empty(
+                batch_size=context.batch_size,
+                robot_dof=context.robot.robot_dof,
+                device=self.device,
+                env_ids=context.env_ids,
+            ),
+            replannable=True,
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                messages=(() if message is None else (message,)),
+            ),
+        )
+
+    @abstractmethod
+    def plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan one invocation without stepping simulation or committing state.
+
+        Args:
+            request: Immutable, typed, and embodiment-resolved action request.
+            context: Latest observed robot, task, and scene state.
+
+        Returns:
+            Scene-bound action plan with expected, uncommitted effects.
         """
 
 
 __all__ = [
-    "ActionTarget",
-    "ActionCfg",
-    "ActionResult",
     "AtomicAction",
-    "CoordinatedHeldObjectState",
-    "HeldObjectState",
     "ObjectSemantics",
-    "Target",
-    "TargetT",
-    "WorldState",
+    "SkillDescriptor",
+    "resolve_runtime_device",
 ]

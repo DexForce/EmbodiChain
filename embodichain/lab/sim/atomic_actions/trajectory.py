@@ -34,30 +34,29 @@ from embodichain.lab.sim.utility.action_utils import (
 )
 from embodichain.utils import logger
 
+from .core import resolve_runtime_device
+from .plans import TimedTrajectory
+
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
 
-
-def _resolve_runtime_device(device: torch.device | str) -> torch.device:
-    """Resolve an indexless CUDA device to the active concrete GPU index."""
-    resolved = torch.device(device)
-    if resolved.type == "cuda" and resolved.index is None:
-        return torch.device(f"cuda:{torch.cuda.current_device()}")
-    return resolved
+    from .policies import MotionPolicy
 
 
 class TrajectoryBuilder:
     """Stateless trajectory utilities shared by every atomic action.
 
-    Holds a reference to the motion generator (and through it, the robot and
-    device) so callers don't have to thread those through each helper call.
-    All methods are pure: no per-call state is kept on the builder.
+    :class:`~embodichain.lab.sim.atomic_actions.runtime.ActionPlanningServices`
+    creates one builder per engine. It holds a reference to the engine's motion
+    generator (and through it, the robot and device) so actions do not thread
+    those through each helper call. All methods are pure: no per-call state is
+    kept on the builder.
     """
 
     def __init__(self, motion_generator: MotionGenerator) -> None:
         self.motion_generator = motion_generator
         self.robot = motion_generator.robot
-        self.device = _resolve_runtime_device(self.robot.device)
+        self.device = resolve_runtime_device(self.robot.device)
 
     # ------------------------------------------------------------------
     # Success / shape helpers
@@ -68,6 +67,49 @@ class TrajectoryBuilder:
         if isinstance(is_success, torch.Tensor):
             return bool(torch.all(is_success).item())
         return bool(is_success)
+
+    def _resolve_success_mask(
+        self,
+        success: bool | torch.Tensor,
+        *,
+        n_envs: int,
+        name: str,
+    ) -> torch.Tensor:
+        """Normalize planner success to a boolean tensor with shape ``(n_envs,)``."""
+        if isinstance(success, bool):
+            return torch.full((n_envs,), success, dtype=torch.bool, device=self.device)
+        if not isinstance(success, torch.Tensor):
+            logger.log_error(
+                f"{name} must be a bool or torch.Tensor, got "
+                f"{type(success).__name__}.",
+                TypeError,
+            )
+        success = success.to(self.device)
+        if success.dtype != torch.bool:
+            integer_dtypes = {
+                torch.uint8,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
+            }
+            if success.dtype not in integer_dtypes or not torch.all(
+                (success == 0) | (success == 1)
+            ):
+                logger.log_error(
+                    f"{name} must be boolean or a binary integer tensor, "
+                    f"got dtype {success.dtype}.",
+                    TypeError,
+                )
+            success = success.to(dtype=torch.bool)
+        if success.dim() == 0 or success.shape == (1,):
+            success = success.reshape(1).expand(n_envs)
+        if success.shape != (n_envs,):
+            logger.log_error(
+                f"{name} must have shape ({n_envs},), got {tuple(success.shape)}.",
+                ValueError,
+            )
+        return success.clone()
 
     def resolve_pose_target(self, target: torch.Tensor, *, n_envs: int) -> torch.Tensor:
         """Resolve an end-effector pose target into batched homogeneous transforms.
@@ -88,7 +130,7 @@ class TrajectoryBuilder:
                 f"or ({n_envs}, n_waypoint, 4, 4)",
                 TypeError,
             )
-        target = target.to(device=self.device, dtype=torch.float32)
+        target = target.to(device=self.device, dtype=torch.float32).clone()
         if target.shape == (4, 4):
             target = target.unsqueeze(0).repeat(n_envs, 1, 1)
         if target.dim() == 3:
@@ -168,7 +210,7 @@ class TrajectoryBuilder:
                 f"({n_envs}, n_waypoint, {joint_dof})",
                 TypeError,
             )
-        target_qpos = target_qpos.to(device=self.device, dtype=torch.float32)
+        target_qpos = target_qpos.to(device=self.device, dtype=torch.float32).clone()
         if target_qpos.shape == (joint_dof,):
             target_qpos = target_qpos.unsqueeze(0).repeat(n_envs, 1)
         if target_qpos.dim() == 2:
@@ -302,6 +344,50 @@ class TrajectoryBuilder:
     # Arm trajectory planning
     # ------------------------------------------------------------------
 
+    def generate_arm_plan(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+        cfg: "MotionPolicy | None" = None,
+    ) -> PlanResult:
+        """Generate a normalized arm plan while retaining backend timing.
+
+        Args:
+            target_states_list: Cartesian planner states grouped by environment.
+            start_qpos: Controlled-joint start positions.
+            n_waypoints: Requested output sample count.
+            control_part: Bound robot control resource.
+            arm_dof: Number of controlled joints.
+            cfg: Motion-generation policy.
+
+        Returns:
+            Normalized planner result. Failed rows contain hold positions.
+        """
+        motion_source = (
+            getattr(cfg, "motion_source", "ik_interp") if cfg else "ik_interp"
+        )
+        if motion_source == "motion_gen":
+            return self._generate_motion_gen_plan(
+                target_states_list,
+                start_qpos,
+                n_waypoints,
+                control_part=control_part,
+                arm_dof=arm_dof,
+                cfg=cfg,
+            )
+        success, positions = self._plan_ik_interp(
+            target_states_list,
+            start_qpos,
+            n_waypoints,
+            control_part=control_part,
+            arm_dof=arm_dof,
+        )
+        return PlanResult(success=success, positions=positions)
+
     def plan_arm_traj(
         self,
         target_states_list: list[list[PlanState]],
@@ -310,31 +396,29 @@ class TrajectoryBuilder:
         *,
         control_part: str,
         arm_dof: int,
-        cfg: "ActionCfg | None" = None,
+        cfg: "MotionPolicy | None" = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Plan batched arm trajectories for all environments.
 
         Returns ``(success:(B,), trajectory:(B, n_waypoints, arm_dof))``.
         ``cfg.motion_source`` selects 'ik_interp' (default) or 'motion_gen'.
         """
-        motion_source = (
-            getattr(cfg, "motion_source", "ik_interp") if cfg else "ik_interp"
-        )
-        if motion_source == "motion_gen":
-            return self._plan_motion_gen(
-                target_states_list,
-                start_qpos,
-                n_waypoints,
-                control_part=control_part,
-                arm_dof=arm_dof,
-                cfg=cfg,
-            )
-        return self._plan_ik_interp(
+        result = self.generate_arm_plan(
             target_states_list,
             start_qpos,
             n_waypoints,
             control_part=control_part,
             arm_dof=arm_dof,
+            cfg=cfg,
+        )
+        assert result.positions is not None
+        return (
+            self._resolve_success_mask(
+                result.success,
+                n_envs=start_qpos.shape[0],
+                name="Arm plan success",
+            ),
+            result.positions,
         )
 
     def _plan_ik_interp(
@@ -365,6 +449,11 @@ class TrajectoryBuilder:
             is_success, qpos = self.robot.compute_ik(
                 pose=xpos_traj[:, j], name=control_part, joint_seed=qpos_seed
             )
+            is_success = self._resolve_success_mask(
+                is_success,
+                n_envs=n_envs,
+                name=f"IK success for target state {j}",
+            )
             if not self.all_envs_success(is_success):
                 logger.log_warning(
                     f"Failed to compute IK for target state {j} in some environments."
@@ -390,9 +479,38 @@ class TrajectoryBuilder:
         *,
         control_part: str,
         arm_dof: int,
-        cfg: "ActionCfg | None",
+        cfg: "MotionPolicy | None",
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Motion-generator trajectory source for Cartesian (EEF) targets."""
+        result = self._generate_motion_gen_plan(
+            target_states_list,
+            start_qpos,
+            n_waypoints,
+            control_part=control_part,
+            arm_dof=arm_dof,
+            cfg=cfg,
+        )
+        assert result.positions is not None
+        return (
+            self._resolve_success_mask(
+                result.success,
+                n_envs=start_qpos.shape[0],
+                name="MotionGenerator PlanResult.success",
+            ),
+            result.positions,
+        )
+
+    def _generate_motion_gen_plan(
+        self,
+        target_states_list: list[list[PlanState]],
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+        cfg: "MotionPolicy | None",
+    ) -> PlanResult:
+        """Generate and normalize one Cartesian motion-generator result."""
         if self.motion_generator is None:
             logger.log_error(
                 "motion_source='motion_gen' requires a MotionGenerator on the engine",
@@ -410,7 +528,9 @@ class TrajectoryBuilder:
                 is_interpolate=True,
             ),
         )
-        return self._process_motion_gen_result(result, start_qpos, n_waypoints, arm_dof)
+        return self._normalize_motion_gen_result(
+            result, start_qpos, n_waypoints, arm_dof
+        )
 
     def _process_motion_gen_result(
         self,
@@ -420,13 +540,34 @@ class TrajectoryBuilder:
         arm_dof: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Validate a MotionGenerator PlanResult and apply sample/hold policy."""
-        success = (
-            result.success.to(self.device)
-            if isinstance(result.success, torch.Tensor)
-            else torch.tensor(result.success, device=self.device)
+        normalized = self._normalize_motion_gen_result(
+            result, start_qpos, n_waypoints, arm_dof
+        )
+        assert normalized.positions is not None
+        return (
+            self._resolve_success_mask(
+                normalized.success,
+                n_envs=start_qpos.shape[0],
+                name="MotionGenerator PlanResult.success",
+            ),
+            normalized.positions,
+        )
+
+    def _normalize_motion_gen_result(
+        self,
+        result: PlanResult,
+        start_qpos: torch.Tensor,
+        n_waypoints: int,
+        arm_dof: int,
+    ) -> PlanResult:
+        """Validate a planner result and retain compatible timing metadata."""
+        n_envs = start_qpos.shape[0]
+        success = self._resolve_success_mask(
+            result.success,
+            n_envs=n_envs,
+            name="MotionGenerator PlanResult.success",
         )
         positions = result.positions
-        n_envs = start_qpos.shape[0]
         if positions is None or positions.ndim != 3:
             logger.log_error(
                 "MotionGenerator returned no (B, N, controlled_dof) positions",
@@ -444,17 +585,74 @@ class TrajectoryBuilder:
                 "MotionGenerator returned non-finite or wrong-device positions",
                 ValueError,
             )
+        resampled = False
         if not self.motion_generator.planner.preserve_plan_samples:
             if positions.shape[1] != n_waypoints:
                 positions = resample_with_distance(
                     trajectory=positions, interp_num=n_waypoints, device=self.device
                 )
+                resampled = True
         positions = positions.to(self.device)
+
+        def normalize_derivative(
+            value: torch.Tensor | None,
+            name: str,
+        ) -> torch.Tensor | None:
+            if value is None or resampled:
+                return None
+            if value.shape != positions.shape:
+                logger.log_error(
+                    f"MotionGenerator {name} must match positions shape, "
+                    f"got {tuple(value.shape)} and {tuple(positions.shape)}.",
+                    ValueError,
+                )
+            value = value.to(self.device)
+            if not torch.isfinite(value).all():
+                logger.log_error(
+                    f"MotionGenerator returned non-finite {name}.", ValueError
+                )
+            return value
+
+        velocities = normalize_derivative(result.velocities, "velocities")
+        accelerations = normalize_derivative(result.accelerations, "accelerations")
+        dt = None if resampled else result.dt
+        if dt is not None:
+            dt = dt.to(device=self.device, dtype=torch.float32)
+            if dt.shape != positions.shape[:2]:
+                logger.log_error(
+                    "MotionGenerator dt must match the positions batch and sample "
+                    f"dimensions, got {tuple(dt.shape)} and {tuple(positions.shape[:2])}.",
+                    ValueError,
+                )
+            if not torch.isfinite(dt).all() or (dt < 0).any():
+                logger.log_error(
+                    "MotionGenerator returned invalid time deltas.", ValueError
+                )
+            duration: float | torch.Tensor = dt.sum(dim=1)
+        else:
+            duration = result.duration
         # Failed envs hold start qpos across all waypoints.
         if not success.all():
             held = start_qpos.unsqueeze(1).repeat(1, positions.shape[1], 1)
             positions = torch.where(success[:, None, None], positions, held)
-        return success, positions
+            if velocities is not None:
+                velocities = torch.where(
+                    success[:, None, None], velocities, torch.zeros_like(velocities)
+                )
+            if accelerations is not None:
+                accelerations = torch.where(
+                    success[:, None, None],
+                    accelerations,
+                    torch.zeros_like(accelerations),
+                )
+        return PlanResult(
+            success=success,
+            positions=positions,
+            velocities=velocities,
+            accelerations=accelerations,
+            dt=dt,
+            duration=duration,
+        )
 
     def _to_batched_plan_states(
         self, target_states_list: list[list[PlanState]], n_envs: int
@@ -492,7 +690,11 @@ class TrajectoryBuilder:
                 )
         return batched
 
-    def _build_plan_opts(self, cfg: "ActionCfg | None", n_waypoints: int):
+    def _build_plan_opts(
+        self,
+        cfg: "MotionPolicy | None",
+        n_waypoints: int,
+    ):
         """Build planner options from action configuration (three-way factory)."""
         configured_plan_opts = getattr(cfg, "plan_opts", None)
         if configured_plan_opts is not None:
@@ -527,7 +729,7 @@ class TrajectoryBuilder:
             ValueError,
         )
 
-    def plan_joint_motion(
+    def generate_joint_plan(
         self,
         start_qpos: torch.Tensor,
         target_qpos: torch.Tensor,
@@ -535,9 +737,9 @@ class TrajectoryBuilder:
         *,
         control_part: str,
         arm_dof: int,
-        cfg: "ActionCfg | None" = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Plan a joint-space trajectory through one or more target waypoints.
+        cfg: "MotionPolicy | None" = None,
+    ) -> PlanResult:
+        """Generate a joint-space plan while retaining backend timing.
 
         For ``motion_source='motion_gen'``, this delegates only when the
         selected backend includes :attr:`MoveType.JOINT_MOVE` in its supported
@@ -547,7 +749,7 @@ class TrajectoryBuilder:
         interpolation.
 
         Returns:
-            ``(success:(B,), trajectory:(B, N, arm_dof))``.
+            Normalized planner result. Failed rows contain hold positions.
         """
         motion_source = (
             getattr(cfg, "motion_source", "ik_interp") if cfg else "ik_interp"
@@ -575,12 +777,108 @@ class TrajectoryBuilder:
                         is_interpolate=True,
                     ),
                 )
-                return self._process_motion_gen_result(
+                return self._normalize_motion_gen_result(
                     result, start_qpos, n_waypoints, arm_dof
                 )
         success = torch.ones(start_qpos.shape[0], dtype=torch.bool, device=self.device)
         trajectory = self.plan_joint_traj(start_qpos, target_qpos, n_waypoints)
-        return success, trajectory
+        return PlanResult(success=success, positions=trajectory)
+
+    def plan_joint_motion(
+        self,
+        start_qpos: torch.Tensor,
+        target_qpos: torch.Tensor,
+        n_waypoints: int,
+        *,
+        control_part: str,
+        arm_dof: int,
+        cfg: "MotionPolicy | None" = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the position-only view used by phased complex skills."""
+        result = self.generate_joint_plan(
+            start_qpos,
+            target_qpos,
+            n_waypoints,
+            control_part=control_part,
+            arm_dof=arm_dof,
+            cfg=cfg,
+        )
+        assert result.positions is not None
+        return (
+            self._resolve_success_mask(
+                result.success,
+                n_envs=start_qpos.shape[0],
+                name="Joint plan success",
+            ),
+            result.positions,
+        )
+
+    def to_full_robot_trajectory(
+        self,
+        result: PlanResult,
+        *,
+        base_qpos: torch.Tensor,
+        joint_ids: list[int],
+        env_ids: torch.Tensor,
+        control_dt: float,
+    ) -> tuple[torch.Tensor, TimedTrajectory]:
+        """Embed a controlled-joint planner result into a timed robot trajectory.
+
+        Args:
+            result: Normalized controlled-joint planner result.
+            base_qpos: Full-robot start positions with shape ``(B, robot_dof)``.
+            joint_ids: Full-robot columns controlled by the plan.
+            env_ids: Stable environment identifiers.
+            control_dt: Fallback command period when timing is absent.
+
+        Returns:
+            Per-environment success and full-robot timed trajectory.
+        """
+        positions = result.positions
+        if positions is None or positions.dim() != 3:
+            raise ValueError(
+                "PlanResult.positions must have shape (B, N, control_dof)."
+            )
+        if positions.shape[0] != base_qpos.shape[0]:
+            raise ValueError("PlanResult and base_qpos batch sizes must match.")
+        if positions.shape[2] != len(joint_ids):
+            raise ValueError("PlanResult controlled DoF does not match joint_ids.")
+        full_positions = (
+            base_qpos.unsqueeze(1).expand(-1, positions.shape[1], -1).clone()
+        )
+        full_positions[:, :, joint_ids] = positions
+
+        def embed_derivative(value: torch.Tensor | None) -> torch.Tensor | None:
+            if value is None:
+                return None
+            full = torch.zeros_like(full_positions)
+            full[:, :, joint_ids] = value
+            return full
+
+        duration: float | torch.Tensor | None = result.duration
+        if result.dt is None:
+            duration_tensor = torch.as_tensor(
+                result.duration,
+                dtype=torch.float32,
+                device=base_qpos.device,
+            )
+            if not bool((duration_tensor > 0.0).any().item()):
+                duration = None
+        timed = TimedTrajectory.from_positions(
+            full_positions,
+            env_ids=env_ids,
+            control_dt=control_dt,
+            velocities=embed_derivative(result.velocities),
+            accelerations=embed_derivative(result.accelerations),
+            dt=result.dt,
+            duration=duration,
+        )
+        success = self._resolve_success_mask(
+            result.success,
+            n_envs=base_qpos.shape[0],
+            name="PlanResult.success",
+        )
+        return success, timed
 
     def plan_joint_traj(
         self,
