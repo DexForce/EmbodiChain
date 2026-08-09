@@ -19,7 +19,7 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 | `qpos_limits` | `Tensor` / `Dict[str, List[float]]` | `None` | Override joint position limits. Replaces asset limits and may either tighten or expand the range. |
 | `body_scale` | `List[float]` | `[1.0, 1.0, 1.0]` | Scaling factors for the articulation links. |
 | `disable_self_collisions` | `bool` | `True` | Whether to disable self-collisions. |
-| `drive_props` | `JointDrivePropertiesCfg` | `...` | Default drive properties. |
+| `drive_pros` | `JointDrivePropertiesCfg` | `drive_type="none"` | Default drive properties. |
 | `attrs` | `RigidBodyAttributesCfg` | `...` | Default rigid body attributes applied to all links. |
 | `link_attrs` | `dict[str, LinkPhysicsOverrideCfg]` | `None` | Optional per-link overrides keyed by group name; each group matches link names via regex. |
 
@@ -57,7 +57,7 @@ for the same partial-override behavior.
 
 ### Drive Configuration
 
-The `drive_props` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. For articulation object without internal drive force, like cabinet and drawer, better set `drive_type` to `"none"`.
+The `drive_pros` parameter controls the joint physics behavior. It is defined using the `JointDrivePropertiesCfg` class. Generic articulations default to `drive_type="none"`, so passive assets such as cabinets and drawers do not receive internal drive forces unless explicitly configured.
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -160,7 +160,7 @@ usd_art_cfg_override = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
     init_pos=(0, 0, 0.5),
     use_usd_properties=False,  # Use config instead
-    drive_props=JointDrivePropertiesCfg(stiffness=5000, damping=500)
+    drive_pros=JointDrivePropertiesCfg(stiffness=5000, damping=500)
 )
 robot = sim.add_articulation(cfg=usd_art_cfg_override)
 ```
@@ -184,6 +184,7 @@ State data is accessed via getter methods that return batched tensors (`N` envir
 | `get_qpos(target=False)` | `(N, dof)` | Current joint positions (or joint targets if `target=True`). |
 | `get_qvel(target=False)` | `(N, dof)` | Current joint velocities (or velocity targets if `target=True`). |
 | `get_joint_drive()` | `Tuple[Tensor, ...]` | Returns `(stiffness, damping, max_effort, max_velocity, friction, armature)`, each shaped `(N, dof)`. |
+| `get_joint_drive_type()` | `list[list[DriveType]]` | Backend drive type for each selected environment and joint. |
 
 ```python
 # Example: Accessing state

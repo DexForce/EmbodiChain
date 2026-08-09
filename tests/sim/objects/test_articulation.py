@@ -35,7 +35,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.utility.sim_utils import _resolve_link_physics_groups
 from embodichain.data import get_data_path
-from dexsim.types import ActorType
+from dexsim.types import ActorType, DriveType
 
 ART_PATH = "SlidingBoxDrawer/SlidingBoxDrawer.urdf"
 NUM_ARENAS = 10
@@ -312,6 +312,20 @@ class BaseArticulationTest:
         assert torch.allclose(
             armature, expected_armature, atol=1e-5
         ), "FAIL: armature does not match expected filtered values"
+
+    def test_default_drive_type_is_none_after_construction(self):
+        """A default ArticulationCfg creates passive backend joint drives."""
+        passive_articulation = self.sim.add_articulation(
+            cfg=ArticulationCfg(
+                uid="passive_drawer",
+                fpath=get_data_path(ART_PATH),
+            )
+        )
+
+        expected_drive_types = [
+            [DriveType.NONE] * passive_articulation.dof for _ in range(NUM_ARENAS)
+        ]
+        assert passive_articulation.get_joint_drive_type() == expected_drive_types
 
     def test_joint_limit_getters_support_env_and_joint_filters(self):
         """Test joint limit getters support joint_ids and env_ids filtering."""
