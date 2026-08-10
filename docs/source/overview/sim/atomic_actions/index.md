@@ -33,8 +33,8 @@ and whole-body control are not implemented by this module yet.
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- agent adapter: schema validation,                    |
- scene grounding, capability binding                  |
+ semantic adapter: schema validation,                 |
+ SceneRegistry grounding, capability binding          |
                 |                                     |
                 +------------------+------------------+
                                    |
@@ -75,11 +75,11 @@ The boundary is deliberate:
 |---|---|---|
 | Task intent and sequencing | Action Agent, task graph, or user-authored application | Selects skills, goals, and execution order |
 | Invocation construction | Agent adapter or user-authored code/config loader | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
-| Perception and grounding | Agent adapter or user application | Builds scene snapshots and resource bindings, or supplies already-grounded values directly |
+| Perception and grounding | `SceneRegistry` on the canonical path; adapter or user application on the advanced path | Normalizes aliases to canonical typed references and publishes snapshots, or supplies already-grounded values directly |
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
 | Recovery state | `ExecutionSession` | Consumes fresh contexts, emits at most one `JointCommand` per tick, and owns bounded recovery/revision state |
-| Scene observation | `SceneProvider` | Captures ordered entities plus monotonic global or per-environment collision-world revisions |
+| Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `CommandSink`, and `ExecutionClock` adapters | Isolates observation, command transport, and time/physics advancement from planning and session state |
 | Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
@@ -319,6 +319,10 @@ entity poses from the current `SceneSnapshot` into copied backend options, then
 calls the skill-specific `_plan()` hook. Individual skills therefore do not
 own dynamic-obstacle parameters or mutate caller-owned motion policies.
 
+For a canonical integration, construct the snapshot provider and collision
+world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
+`RigidObjectSceneProvider` remains an advanced-core path.
+
 Registration means that an implementation is installed, not that every robot
 can execute it. Required roles, control parts, profiles, and task-state
 preconditions are validated while an invocation is resolved and planned. Agent
@@ -512,7 +516,8 @@ while session.status is ExecutionStatus.RUNNING:
 ```
 
 For most applications, use `ExecutionRunner` to keep scheduling and controller
-acknowledgement handling outside the session:
+acknowledgement handling outside the session. The following snippet shows the
+advanced direct-core provider path:
 
 ```python
 scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
@@ -568,16 +573,37 @@ per-environment action scheduling belongs in a higher-level scheduler rather tha
 this atomic-action session.
 
 `SceneProvider.snapshot(timestamp=..., env_ids=...)` is the scene-observation
-boundary. `SceneSnapshot.collision_entity_ids` identifies obstacle poses
-consumed by a planner, while `collision_world_revision` can be global or
-per-environment. `RigidObjectSceneProvider` tracks live simulation objects,
-filters sub-threshold pose noise, and advances those revisions. Its threshold
-baseline is the last materially published pose for each entity/environment, so
-cumulative sub-threshold motion cannot remain hidden indefinitely. Backends opt
-in through `supports_collision_world_updates` and `with_collision_world()`;
+boundary. On the canonical planning path,
+`SceneRegistry.make_planning_scene_provider()` derives an independent provider
+and eagerly validates its collision contract against the motion generator.
+Its snapshots expose canonical registry IDs only.
+The registry owns static identity, aliases, geometry, affordances, hierarchy,
+and collision roles; `SceneSnapshot` owns versioned dynamic pose/confidence and
+collision revisions. Snapshot states are defensively copied on construction and
+public read.
+
+`SceneSnapshot.collision_entity_ids` identifies obstacle poses consumed by a
+planner, while `collision_world_revision` can be global or per-environment.
+Registry-derived providers filter sub-threshold pose noise and advance those
+revisions from the last materially published pose, so cumulative motion cannot
+remain hidden indefinitely. Backends opt in through
+`supports_collision_world_updates` and `with_collision_world()`;
 `MotionGenerator.bind_collision_world()` owns that backend boundary, and cuRobo
 maps the snapshot poses to `CuroboPlanOptions.dynamic_obstacle_poses`. A newer
 revision invalidates only affected rows before synchronized cohort replanning.
+
+`make_planning_scene_provider()` requires two exact canonical-ID agreements:
+the registry's complete `STATIC ∪ DYNAMIC` set must equal the planner's
+complete collision-world set, and the registry, derived provider, and planner
+dynamic subsets must equal one another. It also requires planner update support
+for a non-empty dynamic subset and matching shared or per-environment world
+semantics. A one-environment registry may infer `SHARED`; a multi-environment
+dynamic registry must choose `SHARED` or `PER_ENV` explicitly. External
+perception/hardware providers use
+`validate_collision_integration(..., scene_provider=...)` directly. Plain
+`make_scene_provider()` and `RigidObjectSceneProvider` are perception or
+advanced direct-core paths without eager planner agreement. See
+{doc}`../scene_registry` for setup.
 
 `MotionPolicy.dynamic_collision_mode` controls this live-scene path. `AUTO`
 (the default) consumes collision entities when the selected motion strategy and
@@ -720,6 +746,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 
 ## Further reading
 
+- {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples

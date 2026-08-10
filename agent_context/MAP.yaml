@@ -280,6 +280,8 @@ topics:
       - toppra
       - motion generator
       - trajectory planning
+      - curobo collision world
+      - dynamic collision integration
       - 运动生成
       - 运动规划
       - 轨迹规划
@@ -296,6 +298,16 @@ topics:
       - waypoint
       - velocity
       - acceleration
+      - canonical obstacle ID
+      - logical collision source ID
+      - physical YAML obstacle name
+      - sphere derived obstacle names
+      - empty collision mesh
+      - dynamic_collision_entity_ids
+      - collision_world_entity_ids
+      - collision_world_batch_mode
+      - collision_geometry_by_id
+      - make_planning_scene_provider
     paths:
       - topics/motion-planning/motion-planning.md
     source_of_truth:
@@ -304,9 +316,11 @@ topics:
       - embodichain/lab/sim/planners/curobo/curobo_planner.py
       - embodichain/lab/sim/planners/curobo/curobo_yaml.py
       - embodichain/lab/sim/planners/motion_generator.py
+      - embodichain/lab/sim/skills/scene.py
     related_topics:
       - robot-system
       - ik-solvers
+      - atomic-actions
     status: active
 
   - id: rl-learning
@@ -429,6 +443,8 @@ topics:
       - action primitive
       - object semantics
       - scene grounding
+      - scene registry
+      - semantic scene
       - AtomicAction
       - ActionInvocation
       - AtomicActionEngine
@@ -453,6 +469,28 @@ topics:
       - SceneSnapshotSupplier
       - SceneProvider
       - RigidObjectSceneProvider
+      - SceneRegistry
+      - RegistrySceneProvider
+      - SceneEntityRef
+      - SceneObjectRef
+      - SceneArticulationRef
+      - SceneLinkRef
+      - SceneAffordanceRef
+      - SceneEntityRegistration
+      - SceneCollisionRole
+      - SceneCollisionWorldMode
+      - from_simulation
+      - validate_collision_integration
+      - make_planning_scene_provider
+      - collision_geometry_by_id
+      - collision_world_entity_ids
+      - canonical scene ID
+      - logical collision source ID
+      - sphere derived obstacle names
+      - empty collision mesh
+      - flat entity namespace
+      - native_name
+      - parent native source identity
       - ObjectSemantics
       - entity_id
       - frozen ObjectSemantics
@@ -515,6 +553,8 @@ topics:
       - embodichain/lab/sim/atomic_actions/trajectory_ops.py
       - embodichain/lab/sim/atomic_actions/primitives/
       - embodichain/lab/sim/atomic_actions/__init__.py
+      - embodichain/lab/sim/skills/scene.py
+      - embodichain/lab/sim/skills/__init__.py
     related_topics:
       - motion-planning
       - robot-system

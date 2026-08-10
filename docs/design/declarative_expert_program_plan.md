@@ -1,6 +1,7 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
-- Status: design plan
+- Status: implementation in progress; Phase 0 and PR1 complete, PR2A implemented
+  on the feature branch
 - Baseline: `main@e445133c79c8b32019dab1c844b799b43a1658d6`
 - Last updated: 2026-08-10
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
@@ -90,8 +91,11 @@ sessions, or verifiers.
 
 ## 4. Baseline on current `main`
 
-This plan is updated against committed `main@e445133c` after PR #475 rather
-than uncommitted working-tree changes.
+This plan is updated against committed `main@e445133c` after PR #475. The
+implementation series is stacked from that baseline: PR1 is complete on
+`refactor/atomic-actions-phase0`, and PR2A is implemented by the
+`feat/atomic-action-pr2a-scene-registry` change. Neither status statement
+implies that the stacked changes have landed on `main`.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -114,7 +118,7 @@ hard break: the project will not provide a compatibility adapter or deprecation
 window for that former extension contract. Custom actions must migrate to
 `_plan()` so framework-owned scene binding cannot be bypassed.
 
-The remaining #474 prerequisites on this baseline are:
+The remaining #474 prerequisites on `main` are:
 
 - scene pose, semantics, affordance, and collision registration still have
   multiple sources of truth;
@@ -125,6 +129,12 @@ The remaining #474 prerequisites on this baseline are:
   construction time;
 - `MotionPolicy` still exposes implementation-level tuning that should be
   hidden behind semantic presets for ordinary users.
+
+PR1 closes the snapshot-grounding and stable-identity bridge. PR2A closes the
+first and third gaps for registry-backed integrations by introducing one
+authoritative registration boundary, a registry-derived scene provider, and
+construction-time collision-world validation. The semantic facade and named
+presets remain later-phase work.
 
 One #474 finding has changed since its review branch: the ambiguous
 `collision_check` switch has been replaced by `DynamicCollisionMode.OFF`,
@@ -288,26 +298,61 @@ Rules:
    registry ID; they never replace the authoritative ID. Duplicate registry IDs,
    ambiguous aliases, or an alias colliding with another registry ID fail during
    registry construction.
-3. Grounding reads pose and geometry from one immutable snapshot. It must not
-   mix a snapshot with a live simulation entity pose.
+   For links and affordances, one typed `(parent, native_name)` physical source
+   may have only one canonical ID; changing the canonical spelling does not
+   create a second entity.
+3. Grounding reads dynamic pose/confidence from one immutable snapshot and
+   static geometry/affordance metadata from the immutable registry that
+   produced it. It must not mix a snapshot with a live simulation entity pose.
 4. Automatic grasp selection declares a target dependency automatically.
-5. Dynamic collision setup is derived from authoritative registry IDs. Registry
-   construction performs the complete provider/planner cross-validation: the
-   registry's dynamic-collision ID set, the provider's `collision_entity_ids`,
-   and the planner's dynamic-obstacle names must agree after alias normalization;
-   every ID must have the required geometry, and the selected planner must
-   support the declared update mode. The current
+5. Collision setup is derived from authoritative registry IDs.
+   `collision_geometry_by_id()` derives planner geometry while excluding
+   non-collision registrations, and `make_planning_scene_provider()` performs
+   the complete provider/planner cross-validation. The registry's full
+   `STATIC ∪ DYNAMIC` collision ID set must exactly equal the planner's complete
+   collision-world ID set. Within it, the registry's dynamic subset, the
+   provider's `collision_entity_ids`, and the planner's dynamic-obstacle IDs must
+   also agree exactly. Every collision ID must have the required geometry, and
+   the selected planner must support the declared dynamic update mode. Aliases
+   are resolved before these contracts are constructed, never inside the
+   planner. The current
    planner-local name check remains a lower-level defensive validation, not the
    integration contract.
 6. The `safe` preset requests `DynamicCollisionMode.REQUIRED` when the registry
    declares dynamic collision entities and fails early if the active planner
    cannot satisfy it.
-7. Environment scene configuration should populate the registry automatically;
-   explicit providers are reserved for perception and hardware integration.
+7. Environment scene configuration opts into registry population explicitly;
+   it is not inferred by scanning the simulation. Explicit providers remain
+   available for perception and hardware integration.
 
-Before PR2A introduces this registry, PR1 provides only a core migration bridge.
-`ObjectSemantics.entity_id` is a caller-supplied `SceneSnapshot` key, not yet a
-registry reference. `ObjectSemantics` is shallow-frozen so top-level fields,
+PR2A fixes three public identity and collision-world choices:
+
+- **Authoritative planner IDs:** registry-backed cuRobo configuration passes an
+  explicit `registry_id -> RigidObject` mapping derived by
+  `collision_geometry_by_id()`. Mapping keys are canonical logical/source IDs
+  for cache identity and the complete registry/planner collision-world
+  contract. Cuboid and mesh worlds also use them unchanged as physical YAML
+  obstacle names and runtime pose-update keys. A static sphere source expands
+  to derived physical names such as `registry_id_0`; dynamic sphere worlds are
+  rejected. A registry mapping with geometry missing for the selected
+  representation fails fast instead of silently omitting that source. The list
+  form remains an advanced direct-core path and continues to derive names from
+  simulator UIDs or fallback names.
+- **Flat reference IDs:** object, articulation, link, and affordance IDs share
+  one globally unique flat namespace. Link and affordance ancestry is stored in
+  `SceneEntityRegistration.parent`; callers do not encode hierarchy into an ID.
+  Within one reference type, the same `(parent, native_name)` cannot be assigned
+  more than one canonical ID.
+- **Explicit vectorized-world semantics:** one-environment dynamic collision
+  setup may infer a shared collision world. A multi-environment registry with
+  dynamic collision entities must explicitly select shared or per-environment
+  collision worlds, and integration validation requires the planner mode to
+  match that selection.
+
+PR1 provides the core migration bridge consumed by the registry.
+`ObjectSemantics.entity_id` remains a string lowering target in the typed core;
+the canonical semantic path obtains that value from a resolved
+`SceneEntityRef`. `ObjectSemantics` is shallow-frozen so top-level fields,
 including `entity_id`, cannot be rebound after attachment state captures the
 semantics; identity changes require a new instance. Nested affordance and
 metadata objects remain mutable but never establish identity.
@@ -330,11 +375,14 @@ The same boundary applies to `AssembleGoal.base_pose`: the snapshot reference is
 canonical, while an omitted reference permits the deprecated direct-core
 `AssembleAffordance.base_object_entity` path.
 
-The current `SceneSnapshot` owns copies of input pose tensors, but exposed
-`EntityState.pose` tensors are not deeply read-only. PR1 therefore requires
-callers to treat snapshot values as immutable and uses the scene version for
-publication/recovery semantics. Enforced deep immutability belongs to the PR2A
-registry/snapshot hardening rather than this bridge.
+PR2A hardens `SceneSnapshot` at the public boundary. Construction owns a copy of
+every dynamic `EntityState`, and every public entity lookup returns a defensive
+copy, so mutating an input state or a previously returned pose cannot mutate the
+published snapshot. The registry continues to own static integration metadata,
+including typed identity, aliases, parent relationships, geometry, collision
+role, dynamics classification, semantic type, and affordances. A snapshot owns
+only versioned dynamic pose/confidence plus collision revision metadata; it does
+not duplicate the registration catalog.
 
 ### 7.2 Robot skill profiles
 
@@ -736,11 +784,12 @@ tests. The dependency order is:
 Phase 0 correctness (complete)
         |
         v
-PR1 snapshot/identity bridge
+PR1 snapshot/identity bridge (complete)
         |
         +-----------------------+
         v                       v
 PR2A SceneRegistry      PR2B RobotSkillProfile
+   (implemented)              (next)
         +-----------+-----------+
                     v
 Semantic calls/compiler --> SkillRuntime/effect monitors
@@ -779,11 +828,11 @@ Landed on `main` through #475:
   core check. Complete provider/planner cross-validation is deliberately owned
   by the authoritative `SceneRegistry` integration in Phase 1.
 
-Exit criteria are met on `main@e445133c`. Implementation may proceed to the
-focused PR1 bridge without adding a legacy `plan()` adapter or a pre-registry
-duplicate of the integration-level obstacle validator.
+Exit criteria are met on `main@e445133c`; this remains the foundation for the
+completed PR1 bridge. That bridge adds neither a legacy `plan()` adapter nor a
+pre-registry duplicate of the integration-level obstacle validator.
 
-### PR1: core snapshot and identity bridge
+### PR1: core snapshot and identity bridge (complete)
 
 PR1 is deliberately smaller than Phase 1. It establishes the core seams that
 the later registry and profile integrations consume:
@@ -823,17 +872,18 @@ cross-source uniqueness or collision validation, a `RobotSkillProfile`, or
 semantic presets. It does not require official task environments to migrate;
 they remain on the compatibility path until a later opt-in vertical slice.
 
-Exit criteria: canonical object grounding never mixes snapshot and live poses;
-explicit missing IDs fail; dependency metadata matches the poses actually
-consumed; stable-identity merges are deterministic; and existing direct-core
-callers remain usable only through the documented deprecated fallbacks.
+Exit criteria are met on `refactor/atomic-actions-phase0`: canonical object
+grounding never mixes snapshot and live poses; explicit missing IDs fail;
+dependency metadata matches the poses actually consumed; stable-identity merges
+are deterministic; and existing direct-core callers remain usable only through
+the documented deprecated fallbacks.
 
 ### Phase 1: unified integration data
 
 Phase 1 is implemented as two focused follow-up PRs that join before the
 semantic facade/compiler work.
 
-#### PR2A: SceneRegistry
+#### PR2A: SceneRegistry (implemented on the feature branch)
 
 Deliverables:
 
@@ -843,15 +893,34 @@ Deliverables:
 - immutable snapshots as the only grounding pose authority for the canonical
   semantic/compiler path;
 - opt-in environment-to-registry population and collision/provider derivation;
-- complete construction-time agreement checks across registry collision IDs,
-  provider collision IDs, planner dynamic-obstacle names, geometry, and planner
-  capability;
+- complete construction-time agreement checks between registry and planner
+  full collision-world IDs, plus registry/provider/planner dynamic subsets,
+  geometry, mode, and planner capability;
 - explicit catalog-discovery versus engine-installation terminology.
+
+The implemented scope also records the A+C+E decisions from the PR2A API
+review:
+
+- registry-backed cuRobo worlds use a canonical-ID mapping, while the list form
+  remains an advanced direct-core escape hatch;
+- all reference IDs are globally unique and flat, with link/affordance parent
+  relations retained only by their registrations;
+- one-environment dynamic worlds may default to shared, while vectorized
+  dynamic worlds require an explicit shared/per-environment choice.
 
 `ObjectSemantics.entity_id` and `AssembleGoal.base_pose` already provide the
 lowering targets from PR1. PR2A replaces manually coordinated IDs/providers with
 one authoritative registration and performs alias normalization exactly once at
 the integration boundary.
+
+PR2A exit criteria are met by the feature change: registry-ID and alias
+collisions fail at construction, typed lookups cannot silently change entity
+kind, one typed parent/native physical source cannot be registered twice,
+registry-derived snapshots contain only canonical keys, independent providers
+keep independent revision state, full registry/planner collision-world IDs and
+dynamic registry/provider/planner subsets are validated before execution, the
+collision-world batch mode agrees, and cuRobo uses canonical mapping keys end
+to end as logical source IDs (and as physical keys for cuboid/mesh worlds).
 
 #### PR2B: RobotSkillProfile
 
@@ -989,8 +1058,9 @@ independent of adoption of the new path.
 
 - strict decoder, unknown fields, schema versioning, bounded repeats, and
   registry reference errors;
-- authoritative registry-ID normalization, legacy-`uid` alias collisions, and
-  complete registry/provider/planner obstacle-set agreement;
+- authoritative registry-ID normalization, legacy-`uid` alias collisions,
+  typed parent/native-source collisions, complete registry/planner collision-
+  world agreement, and registry/provider/planner dynamic-subset agreement;
 - cumulative scene movement and collision dependency revision behavior;
 - profile capability matching, deterministic binding, and ambiguity errors;
 - `AssembleGoal.base_pose` snapshot resolution and its automatic scene
