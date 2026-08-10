@@ -275,6 +275,7 @@ def main() -> None:
         geometry={},
         label="cube",
         entity=target,
+        entity_id=TARGET_ENTITY_ID,
     )
     binding = ActionBinding(
         manipulators={"primary": "arm"},

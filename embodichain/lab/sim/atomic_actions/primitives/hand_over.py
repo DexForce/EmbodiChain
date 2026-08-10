@@ -28,7 +28,7 @@ from embodichain.utils.math import pose_inv
 
 from ..bindings import ResolvedControlPart
 from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction, ObjectSemantics
+from ..core import AtomicAction, ObjectSemantics, _same_object_identity
 from ..effects import StateDelta
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
@@ -149,6 +149,14 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[GraspGoal, HandOverOptions],
+    ) -> tuple[str, ...]:
+        """Return no goal-pose dependency because handover ignores grasp_xpos."""
+        del request
+        return ()
+
     def _resolve_resources(
         self,
         request: ResolvedActionRequest[GraspGoal, HandOverOptions],
@@ -224,7 +232,13 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         state = context
         semantics = target.semantics
         transfer_object_to_eef = self._resolve_transfer_object_to_eef(
-            state, resources.transfer_arm.name
+            state,
+            resources.transfer_arm.name,
+            semantics,
+        )
+        transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
+            state,
+            resources,
         )
         assert options.middle_object_pose is not None
         assert options.final_object_pose is not None
@@ -241,8 +255,17 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_approach_direction
             / torch.linalg.vector_norm(receive_approach_direction)
         )
-        # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
-        current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
+        # Keep the requested object orientation consistent with the verified
+        # attachment and the transferring arm's current measured pose.
+        transfer_current_eef = self.robot.compute_fk(
+            qpos=transfer_start_qpos,
+            name=resources.transfer_arm.name,
+            to_matrix=True,
+        )
+        current_object_pose = torch.bmm(
+            transfer_current_eef,
+            pose_inv(transfer_object_to_eef),
+        )
         middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
         final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
@@ -285,9 +308,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             ),
         )
 
-        transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
-            state, resources
-        )
         segments = self._compute_segment_lengths(
             request.motion_policy.sample_count, options
         )
@@ -507,7 +527,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 )
 
     def _resolve_matrix(self, matrix: torch.Tensor, name: str) -> torch.Tensor:
-        matrix = matrix.to(device=self.device, dtype=torch.float32)
+        matrix = matrix.to(device=self.device, dtype=torch.float32).clone()
         if matrix.shape == (4, 4):
             matrix = matrix.unsqueeze(0).repeat(self.n_envs, 1, 1)
         if matrix.shape != (self.n_envs, 4, 4):
@@ -522,6 +542,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         self,
         state: PlanningContext,
         transfer_control_part: str,
+        target_semantics: ObjectSemantics,
     ) -> torch.Tensor:
         held = state.get_held_object(transfer_control_part)
         if held is None:
@@ -529,6 +550,11 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 "HandOver requires an object held by transfer control part "
                 f"{transfer_control_part!r} (run PickUp first).",
                 ValueError,
+            )
+        if not _same_object_identity(target_semantics, held.semantics):
+            raise ValueError(
+                "HandOver target semantics must identify the object held by "
+                f"transfer control part {transfer_control_part!r}."
             )
         return self._resolve_matrix(held.object_to_eef, "held_object.object_to_eef")
 
