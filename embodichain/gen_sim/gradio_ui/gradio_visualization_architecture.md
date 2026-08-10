@@ -59,7 +59,7 @@ conda run -n embodichain python gradio_app.py
 | `ARTICRAFT_CONDA_ENV` | `articraft` | 运行 Articraft CLI 的 Conda 环境。 |
 | `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft 记录、运行日志和导出 bundle。 |
 
-`app.launch()` 仅开放 EmbodiChain 根目录、`assets/` 和 `.gen_sim/` 给浏览器读取。pipeline 子进程由 `build_pipeline_env()` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*`、关闭 Gradio analytics，并把非空的 SimReady 配置映射为 `OPENAI_*`。这不会改写启动 Gradio 的父进程环境。
+`app.launch()` 仅开放 EmbodiChain 根目录、`assets/` 和 `.gen_sim/` 给浏览器读取。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`；Scene Engine、DexSim、Viser 和 Articraft 直接继承 `.env` 中的原始配置。这不会改写启动 Gradio 的父进程环境。
 
 ## 页面与引擎
 

@@ -87,8 +87,20 @@ def build_run_agent_command(*, robot_profile: str | None = None) -> list[str]:
     )
 
 
-def start_pipeline(command: list[str]) -> subprocess.Popen[str]:
-    env = build_pipeline_env()
+def start_pipeline(
+    command: list[str], *, use_simready_llm: bool = False
+) -> subprocess.Popen[str]:
+    """Start a managed pipeline subprocess with its scoped dotenv settings.
+
+    Args:
+        command: Command and arguments to execute.
+        use_simready_llm: Whether to map the dotenv ``SIMREADY_OPENAI_*`` values
+            to the upstream SimReady CLI's ``OPENAI_*`` variable names.
+
+    Returns:
+        The registered subprocess.
+    """
+    env = build_pipeline_env(use_simready_llm=use_simready_llm)
     env["PYTHONUNBUFFERED"] = "1"
     return register_managed_process(
         subprocess.Popen(
@@ -104,10 +116,19 @@ def start_pipeline(command: list[str]) -> subprocess.Popen[str]:
     )
 
 
-def build_pipeline_env() -> dict[str, str]:
+def build_pipeline_env(*, use_simready_llm: bool = False) -> dict[str, str]:
+    """Build a child environment from the shared GenSim dotenv configuration.
+
+    Args:
+        use_simready_llm: Whether to apply the SimReady-specific LLM mapping.
+
+    Returns:
+        A copy of the loaded process environment configured for the child.
+    """
     env = os.environ.copy()
     configure_direct_network_env(env)
-    configure_simready_llm_env(env)
+    if use_simready_llm:
+        configure_simready_llm_env(env)
     return env
 
 

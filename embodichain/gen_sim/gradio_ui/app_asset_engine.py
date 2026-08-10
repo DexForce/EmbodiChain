@@ -221,7 +221,7 @@ def run_simready_asset(upload_value: Any, category: str):
     )
 
     try:
-        process = start_pipeline(command)
+        process = start_pipeline(command, use_simready_llm=True)
     except Exception as exc:
         if _simready_run_is_active(token):
             yield input_preview.as_posix(), None, None, f"**Pipeline start failed:** {exc}", "\n".join(
