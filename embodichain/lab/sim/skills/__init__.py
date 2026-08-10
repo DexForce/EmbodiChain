@@ -38,6 +38,10 @@ from .profiles import (
     UnsupportedSkillError,
 )
 from .scene import (
+    AmbiguousSceneAffordanceError,
+    GRASP_AFFORDANCE_CAPABILITY,
+    PLACE_IN_AFFORDANCE_CAPABILITY,
+    PLACE_ON_AFFORDANCE_CAPABILITY,
     RegistrySceneProvider,
     SceneAffordanceRef,
     SceneArticulationRef,
@@ -45,20 +49,26 @@ from .scene import (
     SceneCollisionWorldMode,
     SceneDynamics,
     SceneEntityRef,
+    SceneEntityMetadata,
     SceneEntityRegistration,
     SceneEntityStateProvider,
     SceneGeometryProvider,
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
+    UnsupportedSceneAffordanceError,
 )
 
 __all__ = [
+    "AmbiguousSceneAffordanceError",
     "AmbiguousSkillBindingError",
     "BoundRobotSkillProfile",
     "ControlPartEndpoint",
     "ControlPartEndpointAdapter",
     "EndpointResolution",
+    "GRASP_AFFORDANCE_CAPABILITY",
+    "PLACE_IN_AFFORDANCE_CAPABILITY",
+    "PLACE_ON_AFFORDANCE_CAPABILITY",
     "ProfileValidationError",
     "RegistrySceneProvider",
     "ResolvedRobotResource",
@@ -76,6 +86,7 @@ __all__ = [
     "SceneCollisionWorldMode",
     "SceneDynamics",
     "SceneEntityRef",
+    "SceneEntityMetadata",
     "SceneEntityRegistration",
     "SceneEntityStateProvider",
     "SceneGeometryProvider",
@@ -84,4 +95,5 @@ __all__ = [
     "SceneRegistry",
     "SkillPolicyPreset",
     "UnsupportedSkillError",
+    "UnsupportedSceneAffordanceError",
 ]
