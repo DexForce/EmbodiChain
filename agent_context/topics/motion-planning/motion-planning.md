@@ -126,6 +126,9 @@ them into `CuroboPlanOptions.dynamic_obstacle_poses`.
 to the backend hook. Atomic actions use that facade from their framework-owned
 `plan()` template when a `SceneSnapshot` declares collision entities;
 individual skills must not construct backend obstacle options themselves.
+`CuroboWorldCfg` rejects duplicate obstacle names and requires every
+`dynamic_obstacle_name` to match an object registered in `rigid_objects`, so a
+planner-local mismatch fails before backend construction.
 
 `MotionGenerator.resolve_plan_options()` is the corresponding option-ownership
 boundary. It copies caller-supplied typed options, otherwise obtains backend
@@ -261,6 +264,9 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
   accepts only `EEF_MOVE` and `JOINT_MOVE` and raises for other target types.
 - **Missing interpolation inputs** — `strategy="ik_interp"` requires explicit
   `start_qpos` and `sample_count`; it never reads live robot state implicitly.
+- **CUDA requested on a CPU-only runtime** — planner success-mask normalization
+  raises a direct `ValueError` before querying the active CUDA device. It never
+  silently falls back to CPU.
 - **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
 - **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
 - **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.

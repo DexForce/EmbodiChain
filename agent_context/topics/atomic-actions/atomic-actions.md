@@ -87,6 +87,11 @@ their last successful qpos.
 Use invocation `skill_options` for multiple variants with the same stable
 `skill_id`; do not create per-variant built-in instances.
 
+Composite actions allocate their named trajectory segments from the total
+sample budget with `split_three_segments()`. The first motion allocation rounds
+`(sample_count - hand_interp_steps) * first_segment_ratio`; callers must not
+reproduce that calculation or assume truncation.
+
 ## Dynamic execution and recovery
 
 `SceneEntityPose(entity_id, relative_pose)` is resolved from the latest scene

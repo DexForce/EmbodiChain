@@ -178,7 +178,7 @@ class CuroboWorldCfg:
     """
 
     dynamic_obstacle_names: list[str] = []
-    """Obstacle names whose poses may be updated between plans."""
+    """Registered rigid-object names whose poses may be updated between plans."""
 
     multi_env: bool = False
     """Whether cuRobo allocates one collision-world instance per environment.
@@ -211,6 +211,35 @@ class CuroboWorldCfg:
     """
 
     def __post_init__(self) -> None:
+        dynamic_names = list(self.dynamic_obstacle_names)
+        if len(set(dynamic_names)) != len(dynamic_names) or not all(
+            isinstance(name, str) and name for name in dynamic_names
+        ):
+            raise ValueError(
+                "dynamic_obstacle_names must contain unique non-empty names."
+            )
+
+        rigid_objects = list(self.rigid_objects or ())
+        rigid_names = [
+            getattr(obj, "uid", None) or f"obstacle_{index}"
+            for index, obj in enumerate(rigid_objects)
+        ]
+        if not all(isinstance(name, str) and name for name in rigid_names):
+            raise ValueError(
+                "CuroboWorldCfg.rigid_objects must have non-empty string names."
+            )
+        if len(set(rigid_names)) != len(rigid_names):
+            raise ValueError(
+                "CuroboWorldCfg.rigid_objects must have unique obstacle names."
+            )
+        missing = set(dynamic_names).difference(rigid_names)
+        if missing:
+            raise ValueError(
+                "dynamic_obstacle_names reference objects not present in "
+                f"rigid_objects: {sorted(missing)}."
+            )
+        self.dynamic_obstacle_names = dynamic_names
+
         # Wrap live RigidObjects so the @configclass field-deepcopy (run right
         # after this by custom_post_init) shares references instead of trying to
         # pickle non-pickleable C++ dexsim handles held by each RigidObject.

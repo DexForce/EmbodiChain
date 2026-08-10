@@ -218,6 +218,44 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
     assert cfg.obstacle_representation == "sphere"
 
 
+def test_curobo_world_cfg_accepts_registered_dynamic_obstacle():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    cfg = CuroboWorldCfg(
+        rigid_objects=[obstacle],
+        dynamic_obstacle_names=["known"],
+    )
+
+    assert cfg.dynamic_obstacle_names == ["known"]
+
+
+def test_curobo_world_cfg_rejects_unregistered_dynamic_obstacle():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(ValueError, match="not present in rigid_objects"):
+        CuroboWorldCfg(
+            rigid_objects=[obstacle],
+            dynamic_obstacle_names=["unknown"],
+        )
+
+
+def test_curobo_world_cfg_rejects_duplicate_dynamic_obstacle_names():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(ValueError, match="unique non-empty"):
+        CuroboWorldCfg(
+            rigid_objects=[obstacle],
+            dynamic_obstacle_names=["known", "known"],
+        )
+
+
+def test_curobo_world_cfg_rejects_duplicate_rigid_object_names():
+    obstacle_type = type("NamedObstacle", (), {"uid": "duplicate"})
+
+    with pytest.raises(ValueError, match="unique obstacle names"):
+        CuroboWorldCfg(rigid_objects=[obstacle_type(), obstacle_type()])
+
+
 def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
     planner = object.__new__(CuroboPlanner)
     configured_pose = torch.eye(4).unsqueeze(0)

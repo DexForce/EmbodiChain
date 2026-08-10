@@ -83,6 +83,21 @@ class TestNormalizeSuccessMask:
                 name="IK success",
             )
 
+    def test_cuda_device_requires_available_runtime(self, monkeypatch):
+        def unexpected_current_device():
+            raise AssertionError("current_device must not be queried")
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        monkeypatch.setattr(torch.cuda, "current_device", unexpected_current_device)
+
+        with pytest.raises(ValueError, match="CUDA device requested"):
+            normalize_success_mask(
+                True,
+                n_envs=2,
+                device="cuda",
+                name="IK success",
+            )
+
 
 class TestResolvePoseTarget:
     def test_unbatched_pose_broadcasts(self):
@@ -278,6 +293,11 @@ class TestSplitThreeSegments:
     def test_raises_when_first_segment_too_small(self):
         with pytest.raises(ValueError):
             split_three_segments(6, 5)
+
+    def test_ratio_is_rounded_after_multiplication(self):
+        first, hand, third = split_three_segments(10, 2)
+
+        assert (first, hand, third) == (5, 2, 3)
 
 
 class TestTranslatePoseWorld:
