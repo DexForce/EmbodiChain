@@ -1404,4 +1404,20 @@ def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
         _ = bound.skills
 
 
+def test_bound_profile_rejects_equal_descriptor_implementation_replacement() -> None:
+    engine = _engine(control_profiles=_command_profiles())
+    bound = _profile().bind(engine)
+    action_type = BUILTIN_ACTION_TYPES[0]
+
+    class EquivalentReplacement(action_type):
+        binding_contract: ClassVar[SkillBindingContract] = action_type.binding_contract
+
+    assert EquivalentReplacement.descriptor() == action_type.descriptor()
+
+    engine.register(EquivalentReplacement(), replace=True)
+
+    with pytest.raises(RuntimeError, match="changed after"):
+        _ = bound.skills
+
+
 __all__ = []

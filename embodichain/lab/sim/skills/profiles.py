@@ -1131,6 +1131,7 @@ class BoundRobotSkillProfile:
         self._resources = self._resolve_resources()
         self._validate_engine_control_profiles()
         self._validate_leaf_ownership()
+        self._skill_catalog_revision = engine.skill_catalog_revision
         self._installed_skills = MappingProxyType(dict(engine.skills))
         self._validate_named_skill_configuration()
         self._validate_defaults()
@@ -1146,6 +1147,16 @@ class BoundRobotSkillProfile:
     def profile_id(self) -> str:
         """Return the stable profile identifier."""
         return self._profile.profile_id
+
+    @property
+    def engine(self) -> AtomicActionEngine:
+        """Return the exact action engine that owns this bound profile."""
+        return self._engine
+
+    @property
+    def source_profile(self) -> RobotSkillProfile:
+        """Return the immutable profile object used to create this binding."""
+        return self._profile
 
     @property
     def resources(self) -> Mapping[str, ResolvedRobotResource]:
@@ -1274,7 +1285,7 @@ class BoundRobotSkillProfile:
 
     def _assert_catalog_current(self) -> None:
         """Prevent stale contracts after engine registration or replacement."""
-        if dict(self._engine.skills) != dict(self._installed_skills):
+        if self._engine.skill_catalog_revision != self._skill_catalog_revision:
             raise RuntimeError(
                 "AtomicActionEngine semantic skills changed after the robot skill "
                 "profile was bound; bind the profile again before discovery or "

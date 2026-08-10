@@ -18,6 +18,19 @@
 
 from __future__ import annotations
 
+from .calls import (
+    DeclarativeValue,
+    HandOver,
+    Pick,
+    Place,
+    PlaceRelationTarget,
+    RegisteredSemanticCall,
+    SemanticCallCatalog,
+    SemanticCallDescriptor,
+    SemanticCallSpec,
+    SemanticPose,
+    builtin_semantic_call_catalog,
+)
 from .profiles import (
     AmbiguousSkillBindingError,
     BoundRobotSkillProfile,
@@ -65,10 +78,15 @@ __all__ = [
     "BoundRobotSkillProfile",
     "ControlPartEndpoint",
     "ControlPartEndpointAdapter",
+    "DeclarativeValue",
     "EndpointResolution",
     "GRASP_AFFORDANCE_CAPABILITY",
+    "HandOver",
     "PLACE_IN_AFFORDANCE_CAPABILITY",
     "PLACE_ON_AFFORDANCE_CAPABILITY",
+    "Pick",
+    "Place",
+    "PlaceRelationTarget",
     "ProfileValidationError",
     "RegistrySceneProvider",
     "ResolvedRobotResource",
@@ -78,6 +96,7 @@ __all__ = [
     "ResourceClaim",
     "ResourceEndpoint",
     "ResourceEndpointAdapter",
+    "RegisteredSemanticCall",
     "RobotResource",
     "RobotSkillProfile",
     "SceneAffordanceRef",
@@ -93,7 +112,12 @@ __all__ = [
     "SceneLinkRef",
     "SceneObjectRef",
     "SceneRegistry",
+    "SemanticCallCatalog",
+    "SemanticCallDescriptor",
+    "SemanticCallSpec",
+    "SemanticPose",
     "SkillPolicyPreset",
     "UnsupportedSkillError",
     "UnsupportedSceneAffordanceError",
+    "builtin_semantic_call_catalog",
 ]
