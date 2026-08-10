@@ -69,7 +69,7 @@ def reset_simready_asset(
     Returns:
         Reset values for the SimReady panel widgets.
     """
-    _simready_runs.reset(get_request_session_id(request))
+    _simready_runs.reset(get_request_session_id(request), force=True)
     return None, "rigid_object", None, None, None, _SIMREADY_IDLE_STATUS, ""
 
 
@@ -80,7 +80,7 @@ def cleanup_asset_engine_session(request: gr.Request) -> None:
         request: Gradio request for the disconnecting browser session.
     """
     session_id = get_request_session_id(request)
-    _simready_runs.reset(session_id)
+    _simready_runs.reset(session_id, force=True)
     cleanup_articraft_session(session_id)
 
 

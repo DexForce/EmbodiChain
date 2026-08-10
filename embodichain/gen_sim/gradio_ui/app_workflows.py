@@ -364,7 +364,7 @@ def reset_scene_engine(
             runtime.log_lines.clear()
         runtime.image_path = None
         runtime.scene_engine_is_running = False
-        _scene_runs.reset(session_id)
+        _scene_runs.reset(session_id, force=True)
 
     message = (
         "Scene Engine reset."
@@ -675,8 +675,8 @@ def stop_action_engine(request: gr.Request) -> tuple[object, ...]:
     session_id = get_request_session_id(request)
     with runtime_lock:
         runtime = runtime_registry.get(session_id)
-        _action_runs.reset(session_id)
-        _action_preview_runs.reset(session_id)
+        _action_runs.reset(session_id, force=True)
+        _action_preview_runs.reset(session_id, force=True)
         if not runtime.scene_engine_is_running:
             runtime.is_busy = False
             set_runtime_phase_locked(runtime, "idle")
@@ -705,9 +705,9 @@ def cleanup_workflow_session(request: gr.Request) -> None:
     """
     session_id = get_request_session_id(request)
     with runtime_lock:
-        _scene_runs.reset(session_id)
-        _action_runs.reset(session_id)
-        _action_preview_runs.reset(session_id)
+        _scene_runs.reset(session_id, force=True)
+        _action_runs.reset(session_id, force=True)
+        _action_preview_runs.reset(session_id, force=True)
         runtime_registry.reset(session_id)
 
 

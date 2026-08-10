@@ -56,6 +56,7 @@ from app_processes import (
     build_codex_env,
     build_pipeline_env,
     get_request_session_id,
+    kill_process_group,
     read_process_output,
     redact_sensitive_text,
     register_managed_process,
@@ -148,8 +149,8 @@ def cleanup_articraft_session(session_id: str) -> None:
     Args:
         session_id: Stable Gradio session identifier.
     """
-    _articraft_runs.reset(session_id)
-    stop_articraft_viser_preview(session_id)
+    _articraft_runs.reset(session_id, force=True)
+    stop_articraft_viser_preview(session_id, force=True)
 
 
 def _command_path(name: str) -> str | None:
@@ -528,7 +529,7 @@ class _ArticraftViserPreview:
             self._processes[session_id] = (process, port)
         return _articraft_viser_iframe(record_id, port)
 
-    def stop(self, session_id: str | None = None) -> None:
+    def stop(self, session_id: str | None = None, *, force: bool = False) -> None:
         """Stop one session's preview, or every preview during shutdown."""
         with self._lock:
             if session_id is None:
@@ -539,8 +540,9 @@ class _ArticraftViserPreview:
             else:
                 current = self._processes.pop(session_id, None)
                 processes = () if current is None else (current[0],)
+        stop_process = kill_process_group if force else terminate_process_group
         for process in processes:
-            terminate_process_group(process)
+            stop_process(process)
 
     def _command(self, urdf_path: Path, port: int) -> list[str]:
         return [
@@ -596,14 +598,22 @@ class _ArticraftViserPreview:
 _articraft_viser_preview = _ArticraftViserPreview(ARTICRAFT_VISER_PORT)
 
 
-def stop_articraft_viser_preview(session_id: str | None = None) -> None:
+def stop_articraft_viser_preview(
+    session_id: str | None = None,
+    *,
+    force: bool = False,
+) -> None:
     """Stop the Viser subprocess currently owned by the Articraft panel.
 
     The preview runs independently from Gradio so it can be embedded through an
-    iframe.  Expose its cleanup explicitly so application shutdown can release
+    iframe. Expose its cleanup explicitly so application shutdown can release
     the dedicated port instead of leaving an orphaned Viser server behind.
+
+    Args:
+        session_id: Optional owning Gradio session. ``None`` stops all previews.
+        force: Whether to immediately send ``SIGKILL`` for interactive cleanup.
     """
-    _articraft_viser_preview.stop(session_id)
+    _articraft_viser_preview.stop(session_id, force=force)
 
 
 atexit.register(stop_articraft_viser_preview)

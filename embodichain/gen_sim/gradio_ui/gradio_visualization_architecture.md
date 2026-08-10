@@ -177,7 +177,7 @@ python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent \
 
 ## 会话状态、并发和进度
 
-Scene engine 和 Action engine 的 UI 状态存放在 `SessionRuntimeRegistry`，键为 `request.session_hash`。`RuntimeState` 只包含当前会话的输入、预览、日志和阶段，不再保存服务器级全局进程引用。Scene 生成/Viser、Action DexSim 和 Action Viser 有独立的 `SessionProcessRegistry`；每个 registry 的 token 用于丢弃同会话内过期线程的更新。SimReady 和 Articraft 使用相同的会话键。Reset、Stop 和页面卸载只清理所属会话，应用退出时再统一清理全部已注册子进程。
+Scene engine 和 Action engine 的 UI 状态存放在 `SessionRuntimeRegistry`，键为 `request.session_hash`。`RuntimeState` 只包含当前会话的输入、预览、日志和阶段，不再保存服务器级全局进程引用。Scene 生成/Viser、Action DexSim 和 Action Viser 有独立的 `SessionProcessRegistry`；每个 registry 的 token 用于丢弃同会话内过期线程的更新。SimReady 和 Articraft 使用相同的会话键。Reset、Stop 和页面卸载只清理所属会话，并直接向该会话所属进程组发送 `SIGKILL`，不等待交互式任务优雅退出。Gradio 应用正常关闭仍统一清理全部已注册子进程，并保留 `SIGTERM` 宽限期后再升级为 `SIGKILL` 的原有逻辑。
 
 `app.queue(default_concurrency_limit=1)` 将队列中的高成本回调串行化。Action engine 的 `Timer(2.0)` 通过当前请求的 `session_hash` 只读取该会话状态。Asset/Articraft 使用各自的会话状态，但仍会受 Gradio 队列限制。
 

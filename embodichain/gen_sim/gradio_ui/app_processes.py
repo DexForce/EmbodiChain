@@ -42,6 +42,7 @@ __all__ = [
     "build_run_agent_command",
     "force_stop_all_child_processes",
     "get_request_session_id",
+    "kill_process_group",
     "read_process_output",
     "register_managed_process",
     "run_agent_cli_supports_robot_profile",
@@ -54,6 +55,7 @@ _RUN_AGENT_SUPPORTS_ROBOT_PROFILE: bool | None = None
 _managed_processes: dict[int, subprocess.Popen[str]] = {}
 _managed_processes_lock = threading.Lock()
 _shutdown_requested = False
+_PROCESS_KILL_REAP_TIMEOUT_S = 0.1
 _CODEX_ENV_ALLOWLIST = {
     "CODEX_HOME",
     "COLORTERM",
@@ -197,16 +199,19 @@ class SessionProcessRegistry:
             if current == (token, process):
                 self._runs[session_id] = (token, None)
 
-    def reset(self, session_id: str) -> None:
-        """Invalidate and terminate only one session's process.
+    def reset(self, session_id: str, *, force: bool = False) -> None:
+        """Invalidate and stop only one session's process.
 
         Args:
             session_id: Stable Gradio session identifier.
+            force: Whether to send ``SIGKILL`` immediately instead of allowing
+                a graceful shutdown period.
         """
         with self._lock:
             current = self._runs.pop(session_id, None)
         if current is not None and current[1] is not None:
-            terminate_process_group(current[1])
+            stop_process = kill_process_group if force else terminate_process_group
+            stop_process(current[1])
 
     def reset_all(self) -> None:
         """Invalidate and terminate every process tracked by this registry."""
@@ -460,6 +465,7 @@ def force_stop_all_child_processes() -> None:
 
 
 def terminate_process_group(process: subprocess.Popen[str]) -> None:
+    """Gracefully stop a process group, escalating after the shutdown timeout."""
     try:
         if process.poll() is not None:
             return
@@ -482,6 +488,36 @@ def terminate_process_group(process: subprocess.Popen[str]) -> None:
             return
         except Exception:
             process.kill()
+    finally:
+        _unregister_managed_process(process)
+
+
+def kill_process_group(process: subprocess.Popen[str]) -> None:
+    """Immediately send ``SIGKILL`` to a UI-owned subprocess group.
+
+    This path is intended for interactive Reset and Stop actions whose contract
+    is to discard the active run. Application shutdown continues to use
+    :func:`terminate_process_group` so child processes retain a graceful cleanup
+    window.
+
+    Args:
+        process: Group-leading subprocess created with ``start_new_session``.
+    """
+    try:
+        if process.poll() is not None:
+            return
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        except Exception:
+            process.kill()
+        try:
+            process.wait(timeout=_PROCESS_KILL_REAP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            # SIGKILL has already been delivered. Do not hold the UI callback
+            # open for an uninterruptible process; its monitor can reap it.
+            pass
     finally:
         _unregister_managed_process(process)
 
