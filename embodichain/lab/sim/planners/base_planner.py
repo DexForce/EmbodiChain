@@ -22,6 +22,7 @@ import functools
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import MISSING
+from typing import Literal
 
 from embodichain.utils import logger
 from embodichain.utils import configclass
@@ -177,6 +178,21 @@ class BasePlanner(ABC):
 
     supports_collision_world_updates: bool = False
     """Whether per-plan dynamic obstacle poses can update the collision world."""
+
+    @property
+    def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
+        """Return canonical entity IDs accepted for dynamic pose updates."""
+        return ()
+
+    @property
+    def collision_world_entity_ids(self) -> tuple[str, ...]:
+        """Return every entity ID represented in the planner collision world."""
+        return ()
+
+    @property
+    def collision_world_batch_mode(self) -> Literal["shared", "per_env"] | None:
+        """Return the planner collision world's batch-sharing mode, if any."""
+        return None
 
     def supports_move_type(self, move_type: MoveType) -> bool:
         """Return whether the planner accepts a movement target type directly.
