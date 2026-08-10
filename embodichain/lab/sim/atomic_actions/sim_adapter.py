@@ -56,10 +56,13 @@ class RigidObjectSceneProviderCfg:
     """Minimum rotation in radians considered a scene change."""
 
     def __post_init__(self) -> None:
-        if self.translation_threshold < 0.0:
-            raise ValueError("translation_threshold must be non-negative.")
-        if self.rotation_threshold < 0.0:
-            raise ValueError("rotation_threshold must be non-negative.")
+        thresholds = (
+            ("translation_threshold", self.translation_threshold),
+            ("rotation_threshold", self.rotation_threshold),
+        )
+        for name, value in thresholds:
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative.")
 
 
 class RigidObjectSceneProvider:

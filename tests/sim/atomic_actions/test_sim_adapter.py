@@ -258,6 +258,28 @@ def test_rigid_object_scene_provider_tracks_per_environment_collision_revision()
     assert torch.equal(changed.entities["obstacle"].pose, moved_pose)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [-1.0, float("nan"), float("inf"), float("-inf")],
+)
+def test_rigid_object_scene_provider_cfg_rejects_invalid_translation_threshold(
+    value: float,
+) -> None:
+    with pytest.raises(ValueError, match="translation_threshold"):
+        RigidObjectSceneProviderCfg(translation_threshold=value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [-1.0, float("nan"), float("inf"), float("-inf")],
+)
+def test_rigid_object_scene_provider_cfg_rejects_invalid_rotation_threshold(
+    value: float,
+) -> None:
+    with pytest.raises(ValueError, match="rotation_threshold"):
+        RigidObjectSceneProviderCfg(rotation_threshold=value)
+
+
 def test_rigid_object_scene_provider_filters_subthreshold_pose_noise() -> None:
     obstacle = Mock()
     initial_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)

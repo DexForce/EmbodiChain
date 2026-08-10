@@ -79,8 +79,9 @@ recovery. None of these APIs steps the simulator directly. The application
 sends commands returned by an execution session and supplies new observations.
 
 ``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
-It is the implementation method overridden by an atomic-action author, not an
-additional application execution entry point. Similarly,
+It is the framework-owned template method called by the engine, not an
+additional application execution entry point. Atomic-action authors implement
+the protected ``_plan()`` hook instead. Similarly,
 ``engine.plan_action()`` is reserved for extensions and isolated tests that
 need to plan an unregistered instance.
 
