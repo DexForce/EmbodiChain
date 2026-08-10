@@ -445,6 +445,11 @@ topics:
       - scene grounding
       - scene registry
       - semantic scene
+      - robot skill profile
+      - resource graph
+      - resource DAG
+      - semantic skill catalog
+      - capability binding
       - AtomicAction
       - ActionInvocation
       - AtomicActionEngine
@@ -506,6 +511,38 @@ topics:
       - StateDelta
       - held_objects
       - ActionBinding
+      - ActionBindingRoute
+      - SkillBindingContract
+      - SkillResourceSlot
+      - SkillEndpointRequirement
+      - DisjointSlotEndpoints
+      - DisjointResourceSlots
+      - RobotSkillProfile
+      - BoundRobotSkillProfile
+      - RobotResource
+      - ResourceEndpoint
+      - ResourceEndpointAdapter
+      - ControlPartEndpoint
+      - ControlPartEndpointAdapter
+      - EndpointResolution
+      - ResolvedResourceEndpoint
+      - ResourceBinding
+      - ResourceClaim
+      - ResolvedRobotResource
+      - ResolvedSkillBinding
+      - SkillPolicyPreset
+      - binding_contract
+      - engine.skills
+      - skill_profile
+      - command_profiles
+      - action_control_profiles
+      - endpoint_adapters
+      - endpoint snapshot
+      - requires_command_profile
+      - claim_tokens
+      - capability
+      - whole body resource
+      - leaf resource claim
       - SceneEntityPose
       - dynamic goal
       - error recovery
@@ -541,6 +578,7 @@ topics:
       - embodichain/lab/sim/atomic_actions/control.py
       - embodichain/lab/sim/atomic_actions/invocation.py
       - embodichain/lab/sim/atomic_actions/policies.py
+      - embodichain/lab/sim/atomic_actions/requirements.py
       - embodichain/lab/sim/atomic_actions/runtime.py
       - embodichain/lab/sim/atomic_actions/state.py
       - embodichain/lab/sim/atomic_actions/plans.py
@@ -553,6 +591,7 @@ topics:
       - embodichain/lab/sim/atomic_actions/primitives/
       - embodichain/lab/sim/atomic_actions/__init__.py
       - embodichain/lab/sim/skills/scene.py
+      - embodichain/lab/sim/skills/profiles.py
       - embodichain/lab/sim/skills/__init__.py
     related_topics:
       - motion-planning

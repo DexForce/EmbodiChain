@@ -29,7 +29,7 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..affordance import AssembleAffordance
-from ..control import GRASP_COMMAND, OPEN_COMMAND
+from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..effects import StateDelta
 from ..goals import (
@@ -40,6 +40,16 @@ from ..goals import (
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
+from ..requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from ..state import PlanningContext
 from ..trajectory_ops import (
     build_pose_plan_states,
@@ -162,6 +172,35 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     OptionsType: ClassVar[type] = PlaceOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset(
+                            {
+                                CARTESIAN_POSE_CAPABILITY,
+                                FORWARD_KINEMATICS_CAPABILITY,
+                            }
+                        ),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={
+                            OPEN_COMMAND: JointPositionCommand,
+                            GRASP_COMMAND: JointPositionCommand,
+                        },
+                        route=ActionBindingRoute("end_effector", "primary"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+    )
 
     def __init__(
         self,

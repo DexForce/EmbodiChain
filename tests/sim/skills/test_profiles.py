@@ -1,0 +1,1207 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Tests for generic robot resources and declarative skill profiles."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import ClassVar
+from unittest.mock import Mock
+
+import pytest
+import torch
+
+from embodichain.lab.sim.atomic_actions import (
+    ActionBindingRoute,
+    ActionOptions,
+    ActionPlan,
+    AtomicAction,
+    AtomicActionEngine,
+    BATCH_INVERSE_KINEMATICS_CAPABILITY,
+    BUILTIN_ACTION_TYPES,
+    CARTESIAN_POSE_CAPABILITY,
+    ControlCommand,
+    ControlPartCommandProfile,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    GRASP_COMMAND,
+    INVERSE_KINEMATICS_CAPABILITY,
+    JOINT_POSITION_CAPABILITY,
+    JointPositionCommand,
+    JointPositionGoal,
+    MotionPolicy,
+    OPEN_COMMAND,
+    ResolvedActionRequest,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.skills import (
+    AmbiguousSkillBindingError,
+    ControlPartEndpoint,
+    ControlPartEndpointAdapter,
+    EndpointResolution,
+    ProfileValidationError,
+    ResourceBinding,
+    ResourceEndpoint,
+    ResourceEndpointAdapter,
+    RobotResource,
+    RobotSkillProfile,
+    SkillPolicyPreset,
+    UnsupportedSkillError,
+)
+
+_JOINT_IDS = {
+    "left_arm": [0, 1],
+    "left_hand": [2],
+    "right_arm": [3, 4],
+    "right_hand": [5],
+    "base": [6, 7],
+    "torso": [8],
+    "full_body": [0, 1, 3, 4, 6, 7, 8],
+}
+
+_MOTION_CAPABILITIES = frozenset(
+    {
+        BATCH_INVERSE_KINEMATICS_CAPABILITY,
+        CARTESIAN_POSE_CAPABILITY,
+        FORWARD_KINEMATICS_CAPABILITY,
+        INVERSE_KINEMATICS_CAPABILITY,
+        JOINT_POSITION_CAPABILITY,
+    }
+)
+
+
+def _command_profiles() -> dict[str, ControlPartCommandProfile]:
+    return {
+        hand: ControlPartCommandProfile.joint_positions(
+            open=torch.tensor([0.0]),
+            grasp=torch.tensor([1.0]),
+        )
+        for hand in ("left_hand", "right_hand")
+    }
+
+
+def _engine(
+    *,
+    control_profiles: dict[str, ControlPartCommandProfile] | None = None,
+    load_builtins: bool = True,
+) -> AtomicActionEngine:
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.dof = 9
+    robot.control_parts = {name: object() for name in _JOINT_IDS}
+    robot.get_qpos.return_value = torch.zeros(2, 9)
+    robot.get_qvel.return_value = torch.zeros(2, 9)
+    robot.get_joint_ids.side_effect = lambda name: list(_JOINT_IDS[name])
+    robot.get_solver.side_effect = lambda name=None: (
+        object() if name in {"left_arm", "right_arm"} else None
+    )
+    generator = Mock()
+    generator.robot = robot
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "stub_planner"
+    return AtomicActionEngine(
+        generator,
+        control_profiles=control_profiles,
+        load_builtins=load_builtins,
+    )
+
+
+def _resources(*, include_right: bool = True) -> dict[str, RobotResource]:
+    resources = {
+        "left_arm": RobotResource(
+            "left_arm",
+            endpoints={"control": ControlPartEndpoint("left_arm")},
+        ),
+        "left_hand": RobotResource(
+            "left_hand",
+            endpoints={"control": ControlPartEndpoint("left_hand")},
+        ),
+        "left_actor": RobotResource(
+            "left_actor",
+            endpoints={
+                "motion": ControlPartEndpoint(
+                    "left_arm", capabilities=_MOTION_CAPABILITIES
+                ),
+                "grasp": ControlPartEndpoint(
+                    "left_hand", capabilities=frozenset({GRASP_CAPABILITY})
+                ),
+            },
+            members=("left_arm", "left_hand"),
+        ),
+        "base": RobotResource(
+            "base",
+            endpoints={
+                "motion": ControlPartEndpoint(
+                    "base", capabilities=frozenset({"motion.base.se2"})
+                )
+            },
+        ),
+        "torso": RobotResource(
+            "torso",
+            endpoints={"control": ControlPartEndpoint("torso")},
+        ),
+    }
+    if include_right:
+        resources.update(
+            {
+                "right_arm": RobotResource(
+                    "right_arm",
+                    endpoints={"control": ControlPartEndpoint("right_arm")},
+                ),
+                "right_hand": RobotResource(
+                    "right_hand",
+                    endpoints={"control": ControlPartEndpoint("right_hand")},
+                ),
+                "right_actor": RobotResource(
+                    "right_actor",
+                    endpoints={
+                        "motion": ControlPartEndpoint(
+                            "right_arm", capabilities=_MOTION_CAPABILITIES
+                        ),
+                        "grasp": ControlPartEndpoint(
+                            "right_hand",
+                            capabilities=frozenset({GRASP_CAPABILITY}),
+                        ),
+                    },
+                    members=("right_arm", "right_hand"),
+                ),
+            }
+        )
+    whole_body_members = ["base", "torso", "left_arm"]
+    if include_right:
+        whole_body_members.append("right_arm")
+    if include_right:
+        resources["whole_body"] = RobotResource(
+            "whole_body",
+            endpoints={
+                "motion": ControlPartEndpoint(
+                    "full_body", capabilities=frozenset({"motion.whole_body"})
+                )
+            },
+            members=tuple(whole_body_members),
+        )
+    return resources
+
+
+def _profile(
+    *,
+    defaults: dict[str, ResourceBinding] | None = None,
+    resources: dict[str, RobotResource] | None = None,
+    command_profiles: dict[str, ControlPartCommandProfile] | None = None,
+) -> RobotSkillProfile:
+    return RobotSkillProfile(
+        profile_id="test_robot",
+        resources=_resources() if resources is None else resources,
+        command_profiles=(
+            _command_profiles() if command_profiles is None else command_profiles
+        ),
+        defaults={} if defaults is None else defaults,
+    )
+
+
+class _WholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
+    skill_id: ClassVar[str] = "whole_body_reach"
+    GoalType: ClassVar[type] = JointPositionGoal
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                "body",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        "motion",
+                        capabilities=frozenset({"motion.whole_body"}),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        raise NotImplementedError
+
+
+class _NavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
+    skill_id: ClassVar[str] = "navigate"
+    GoalType: ClassVar[type] = JointPositionGoal
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                "body",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        "motion",
+                        capabilities=frozenset({"motion.base.se2"}),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class _BaseVelocityEndpoint(ResourceEndpoint):
+    """Future non-joint endpoint used to prove the resource API stays generic."""
+
+    controller_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _MutableMetadataEndpoint(ResourceEndpoint):
+    """Endpoint with mutable metadata used to verify ownership snapshots."""
+
+    controller_id: str
+    aliases: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _TwistCommand(ControlCommand):
+    """Test-only non-joint command for a mobile controller."""
+
+    value: tuple[float, float, float]
+
+    def snapshot(self) -> _TwistCommand:
+        """Return an independently owned immutable command."""
+        return _TwistCommand(tuple(self.value))
+
+    def equivalent_to(self, other: ControlCommand) -> bool:
+        """Return whether another twist command has the same value."""
+        return isinstance(other, _TwistCommand) and self.value == other.value
+
+
+class _BaseVelocityEndpointAdapter(ResourceEndpointAdapter):
+    """Resolve the test mobile controller without profile-resolver changes."""
+
+    adapter_id: ClassVar[str] = "test.base_velocity"
+    endpoint_type: ClassVar[type[ResourceEndpoint]] = _BaseVelocityEndpoint
+
+    def resolve(
+        self,
+        endpoint: ResourceEndpoint,
+        *,
+        engine: AtomicActionEngine,
+    ) -> EndpointResolution:
+        """Resolve one mobile controller to a generic exclusive claim."""
+        del engine
+        assert isinstance(endpoint, _BaseVelocityEndpoint)
+        return EndpointResolution(
+            command_profile_key=endpoint.controller_id,
+            claim_tokens=frozenset({f"controller:{endpoint.controller_id}"}),
+        )
+
+
+class _VelocityNavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
+    """Semantic test skill consuming a non-core controller endpoint."""
+
+    skill_id: ClassVar[str] = "navigate_velocity"
+    GoalType: ClassVar[type] = JointPositionGoal
+    manipulator_roles: ClassVar[tuple[str, ...]] = ()
+    end_effector_roles: ClassVar[tuple[str, ...]] = ()
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                "body",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        "motion",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                        required_commands={"stop": _TwistCommand},
+                    ),
+                ),
+            ),
+        )
+    )
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        raise NotImplementedError
+
+
+class _RoutedVelocityAction(AtomicAction[JointPositionGoal, ActionOptions]):
+    """Test skill requiring a current-core route from a custom endpoint."""
+
+    skill_id: ClassVar[str] = "navigate_velocity_routed"
+    GoalType: ClassVar[type] = JointPositionGoal
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    end_effector_roles: ClassVar[tuple[str, ...]] = ()
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                "body",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        "motion",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        raise NotImplementedError
+
+
+def test_engine_skills_only_exposes_visible_explicit_installed_contracts() -> None:
+    engine = _engine(control_profiles=_command_profiles())
+    expected = {
+        action_type.skill_id
+        for action_type in BUILTIN_ACTION_TYPES
+        if action_type.agent_visible
+    }
+
+    assert set(engine.skills) == expected
+    assert "move_joints" in engine.actions
+    assert "move_joints" not in engine.skills
+
+
+def test_new_skill_subclass_must_redeclare_binding_contract() -> None:
+    base_contract = BUILTIN_ACTION_TYPES[0].descriptor().binding_contract
+
+    class Derived(BUILTIN_ACTION_TYPES[0]):
+        skill_id: ClassVar[str] = "derived_without_explicit_contract"
+
+    assert base_contract is not None
+    assert Derived.descriptor().binding_contract is None
+
+
+def test_descriptor_contract_must_exactly_cover_current_core_roles() -> None:
+    class InvalidRouteAction(AtomicAction[JointPositionGoal, ActionOptions]):
+        skill_id: ClassVar[str] = "invalid_route"
+        GoalType: ClassVar[type] = JointPositionGoal
+        binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract()
+
+        def _plan(
+            self,
+            request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+            context: PlanningContext,
+        ) -> ActionPlan:
+            raise NotImplementedError
+
+    with pytest.raises(ValueError, match="do not exactly cover"):
+        InvalidRouteAction.descriptor()
+
+
+def test_profile_owns_input_mappings_and_command_tensors() -> None:
+    resources = _resources()
+    open_positions = torch.tensor([0.0])
+    profiles = {
+        "left_hand": ControlPartCommandProfile.joint_positions(open=open_positions)
+    }
+    profile = _profile(resources=resources, command_profiles=profiles)
+
+    resources.clear()
+    profiles.clear()
+    open_positions.fill_(9.0)
+
+    assert "left_actor" in profile.resources
+    command = profile.command_profiles["left_hand"].commands[OPEN_COMMAND]
+    assert isinstance(command, JointPositionCommand)
+    assert command.positions.tolist() == [0.0]
+
+
+def test_profile_owns_custom_endpoint_nested_payloads() -> None:
+    source_aliases = ["base"]
+    resource = RobotResource(
+        "mobile_base",
+        endpoints={
+            "motion": _MutableMetadataEndpoint(
+                "base_controller",
+                aliases=source_aliases,
+            )
+        },
+    )
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={"mobile_base": resource},
+    )
+
+    source_aliases.append("source_mutation")
+    resource_endpoint = resource.endpoints["motion"]
+    assert isinstance(resource_endpoint, _MutableMetadataEndpoint)
+    resource_endpoint.aliases.append("resource_mutation")
+    profile_endpoint = profile.resources["mobile_base"].endpoints["motion"]
+    assert isinstance(profile_endpoint, _MutableMetadataEndpoint)
+
+    assert profile_endpoint.aliases == ["base"]
+
+
+def test_resource_graph_rejects_unknown_member_and_cycle() -> None:
+    with pytest.raises(ValueError, match="unknown members"):
+        RobotSkillProfile(
+            "unknown_member",
+            resources={
+                "group": RobotResource("group", members=("missing",)),
+            },
+        )
+
+    with pytest.raises(ValueError, match="contains a cycle"):
+        RobotSkillProfile(
+            "cycle",
+            resources={
+                "a": RobotResource("a", members=("b",)),
+                "b": RobotResource("b", members=("a",)),
+            },
+        )
+
+
+def test_identifier_sets_do_not_accept_one_string_as_characters() -> None:
+    with pytest.raises(TypeError, match="not a string"):
+        ControlPartEndpoint("left_arm", capabilities="motion.cartesian_pose")
+    with pytest.raises(TypeError, match="not a string"):
+        RobotResource(
+            "left_arm",
+            endpoints={"control": ControlPartEndpoint("left_arm")},
+            members="left_arm",
+        )
+    with pytest.raises(TypeError, match="iterable of endpoint IDs"):
+        DisjointSlotEndpoints("motion")
+
+
+def test_slot_constraint_rejects_unknown_endpoint() -> None:
+    with pytest.raises(ValueError, match="unknown endpoints"):
+        SkillResourceSlot(
+            "primary",
+            endpoints=(SkillEndpointRequirement("motion"),),
+            constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+        )
+
+
+def test_bind_rejects_unknown_control_part() -> None:
+    resources = _resources()
+    resources["camera_gimbal"] = RobotResource(
+        "camera_gimbal",
+        endpoints={"motion": ControlPartEndpoint("missing")},
+    )
+
+    with pytest.raises(ProfileValidationError, match="unknown control part 'missing'"):
+        _profile(resources=resources).bind(
+            _engine(control_profiles=_command_profiles())
+        )
+
+
+def test_resource_graph_accepts_extensible_endpoint_before_adapter_installation() -> (
+    None
+):
+    resource = RobotResource(
+        "mobile_base",
+        endpoints={
+            "motion": _BaseVelocityEndpoint(
+                "base_controller",
+                capabilities=frozenset({"motion.base.velocity"}),
+            )
+        },
+    )
+    profile = RobotSkillProfile("mobile", resources={"mobile_base": resource})
+
+    assert (
+        profile.resources["mobile_base"].endpoints["motion"]
+        == resource.endpoints["motion"]
+    )
+    with pytest.raises(ProfileValidationError, match="ResourceEndpointAdapter"):
+        profile.bind(_engine(control_profiles={}, load_builtins=False))
+
+
+def test_custom_endpoint_adapter_resolves_commands_and_physical_claim() -> None:
+    resource = RobotResource(
+        "mobile_base",
+        endpoints={
+            "motion": _BaseVelocityEndpoint(
+                "base_velocity",
+                capabilities=frozenset({"motion.base.velocity"}),
+            )
+        },
+    )
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={"mobile_base": resource},
+        command_profiles={
+            "base_velocity": ControlPartCommandProfile(
+                commands={"stop": _TwistCommand((0.0, 0.0, 0.0))}
+            )
+        },
+    )
+    engine = _engine(control_profiles={}, load_builtins=False)
+    engine.register(_VelocityNavigateAction())
+
+    bound = engine.bind_skill_profile(
+        profile,
+        endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
+    )
+    resolved = bound.resolve("navigate_velocity")
+    endpoint = resolved.resources["body"].endpoints["motion"]
+
+    assert endpoint.adapter_id == "test.base_velocity"
+    assert isinstance(endpoint.commands["stop"], _TwistCommand)
+    assert resolved.claim.claim_tokens == frozenset({"controller:base_velocity"})
+    assert resolved.action_binding.manipulators == {}
+    assert resolved.action_binding.end_effectors == {}
+
+
+def test_engine_constructor_forwards_custom_endpoint_adapters() -> None:
+    source = _engine(control_profiles={}, load_builtins=False)
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={
+                    "motion": _BaseVelocityEndpoint(
+                        "base_velocity",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                    )
+                },
+            )
+        },
+    )
+
+    engine = AtomicActionEngine(
+        source.motion_generator,
+        load_builtins=False,
+        skill_profile=profile,
+        endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
+    )
+
+    assert engine.skill_profile is not None
+    assert engine.skill_profile.resources["mobile_base"].claim.claim_tokens == (
+        frozenset({"controller:base_velocity"})
+    )
+
+
+def test_custom_endpoint_claim_tokens_protect_distinct_leaf_aliases() -> None:
+    endpoint = _BaseVelocityEndpoint(
+        "base_velocity",
+        capabilities=frozenset({"motion.base.velocity"}),
+    )
+    profile = RobotSkillProfile(
+        "aliased_mobile",
+        resources={
+            "base_a": RobotResource("base_a", endpoints={"motion": endpoint}),
+            "base_b": RobotResource("base_b", endpoints={"motion": endpoint}),
+        },
+    )
+
+    with pytest.raises(ProfileValidationError, match="adapter claims"):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
+        )
+
+
+def test_missing_adapter_binding_target_filters_skill_with_diagnostic() -> None:
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={
+                    "motion": _BaseVelocityEndpoint(
+                        "base_velocity",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                    )
+                },
+            )
+        },
+    )
+    engine = _engine(control_profiles={}, load_builtins=False)
+    engine.register(_RoutedVelocityAction())
+    bound = profile.bind(
+        engine,
+        endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
+    )
+
+    assert "navigate_velocity_routed" not in bound.skills
+    with pytest.raises(UnsupportedSkillError, match="cannot lower.*manipulator"):
+        bound.resolve("navigate_velocity_routed")
+
+
+def test_exclusive_custom_endpoint_requires_a_physical_claim() -> None:
+    class EmptyClaimAdapter(ResourceEndpointAdapter):
+        adapter_id: ClassVar[str] = "test.empty_claim"
+        endpoint_type: ClassVar[type[ResourceEndpoint]] = _BaseVelocityEndpoint
+
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del endpoint, engine
+            return EndpointResolution()
+
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={"motion": _BaseVelocityEndpoint("base_velocity")},
+            )
+        },
+    )
+
+    with pytest.raises(
+        ProfileValidationError,
+        match="test.empty_claim.*mobile_base.*motion.*joint_ids or claim_tokens",
+    ):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={_BaseVelocityEndpoint: EmptyClaimAdapter()},
+        )
+
+
+def test_nonexclusive_custom_endpoint_may_omit_a_physical_claim() -> None:
+    class VirtualEndpointAdapter(ResourceEndpointAdapter):
+        adapter_id: ClassVar[str] = "test.virtual"
+        endpoint_type: ClassVar[type[ResourceEndpoint]] = _BaseVelocityEndpoint
+
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del endpoint, engine
+            return EndpointResolution(exclusive=False)
+
+    profile = RobotSkillProfile(
+        "virtual",
+        resources={
+            "virtual_channel": RobotResource(
+                "virtual_channel",
+                endpoints={"motion": _BaseVelocityEndpoint("virtual")},
+            )
+        },
+    )
+
+    bound = profile.bind(
+        _engine(control_profiles={}, load_builtins=False),
+        endpoint_adapters={_BaseVelocityEndpoint: VirtualEndpointAdapter()},
+    )
+
+    assert not bound.resources["virtual_channel"].endpoints["motion"].exclusive
+
+
+def test_endpoint_adapter_registration_validates_declared_type() -> None:
+    class MissingMetadataAdapter(ResourceEndpointAdapter):
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del endpoint, engine
+            return EndpointResolution(exclusive=False)
+
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={"motion": _BaseVelocityEndpoint("base_velocity")},
+            )
+        },
+    )
+
+    with pytest.raises(TypeError, match="must declare.*endpoint_type"):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={_BaseVelocityEndpoint: MissingMetadataAdapter()},
+        )
+
+
+def test_builtin_control_part_adapter_cannot_be_overridden() -> None:
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        _profile().bind(
+            _engine(control_profiles=_command_profiles()),
+            endpoint_adapters={ControlPartEndpoint: ControlPartEndpointAdapter()},
+        )
+
+
+def test_endpoint_adapter_must_return_endpoint_resolution() -> None:
+    class WrongReturnAdapter(ResourceEndpointAdapter):
+        adapter_id: ClassVar[str] = "test.wrong_return"
+        endpoint_type: ClassVar[type[ResourceEndpoint]] = _BaseVelocityEndpoint
+
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del endpoint, engine
+            return object()  # type: ignore[return-value]
+
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={"motion": _BaseVelocityEndpoint("base_velocity")},
+            )
+        },
+    )
+
+    with pytest.raises(ProfileValidationError, match="expected EndpointResolution"):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={_BaseVelocityEndpoint: WrongReturnAdapter()},
+        )
+
+
+def test_bind_rejects_overlapping_physical_leaves() -> None:
+    resources = _resources()
+    resources["left_arm_alias"] = RobotResource(
+        "left_arm_alias",
+        endpoints={"control": ControlPartEndpoint("left_arm")},
+    )
+
+    with pytest.raises(ProfileValidationError, match="overlap on robot joints"):
+        _profile(resources=resources).bind(
+            _engine(control_profiles=_command_profiles())
+        )
+
+
+def test_bind_rejects_composite_endpoint_outside_member_claim() -> None:
+    resources = _resources()
+    resources["bad_composite"] = RobotResource(
+        "bad_composite",
+        endpoints={"motion": ControlPartEndpoint("right_arm")},
+        members=("left_arm",),
+    )
+
+    with pytest.raises(ProfileValidationError, match="not claimed by its members"):
+        _profile(resources=resources).bind(
+            _engine(control_profiles=_command_profiles())
+        )
+
+
+def test_bind_rejects_profile_commands_not_installed_on_engine() -> None:
+    with pytest.raises(ProfileValidationError, match="is not installed"):
+        _profile().bind(_engine(control_profiles={}))
+
+
+def test_explicit_endpoint_command_profile_must_exist() -> None:
+    profile = RobotSkillProfile(
+        "missing_commands",
+        resources={
+            "arm": RobotResource(
+                "arm",
+                endpoints={
+                    "motion": ControlPartEndpoint(
+                        "left_arm",
+                        command_profile="missing_profile",
+                    )
+                },
+            )
+        },
+    )
+
+    with pytest.raises(ProfileValidationError, match="required command profile"):
+        profile.bind(_engine(control_profiles={}, load_builtins=False))
+
+
+def test_bind_rejects_engine_command_payload_that_differs_from_profile() -> None:
+    engine_profiles = _command_profiles()
+    engine_profiles["left_hand"] = ControlPartCommandProfile.joint_positions(
+        open=torch.tensor([0.5]),
+        grasp=torch.tensor([1.0]),
+    )
+
+    with pytest.raises(ProfileValidationError, match="not semantically equivalent"):
+        _profile().bind(_engine(control_profiles=engine_profiles))
+
+
+def test_profile_rejects_conflicting_endpoint_command_profiles() -> None:
+    resources = {
+        "hand": RobotResource(
+            "hand",
+            endpoints={
+                "first": ControlPartEndpoint(
+                    "left_hand",
+                    command_profile="first_hand",
+                ),
+                "second": ControlPartEndpoint(
+                    "left_hand",
+                    command_profile="second_hand",
+                ),
+            },
+        )
+    }
+    with pytest.raises(ValueError, match="non-equivalent 'grasp'"):
+        RobotSkillProfile(
+            "conflicting_commands",
+            resources=resources,
+            command_profiles={
+                "first_hand": ControlPartCommandProfile.joint_positions(
+                    grasp=torch.tensor([0.5])
+                ),
+                "second_hand": ControlPartCommandProfile.joint_positions(
+                    grasp=torch.tensor([1.0])
+                ),
+            },
+        )
+
+
+def test_bind_rejects_joint_command_with_wrong_endpoint_dof() -> None:
+    profiles = _command_profiles()
+    profiles["left_hand"] = ControlPartCommandProfile.joint_positions(
+        open=torch.zeros(2),
+        grasp=torch.ones(2),
+    )
+
+    with pytest.raises(ProfileValidationError, match="2 joints, expected 1"):
+        _profile(command_profiles=profiles).bind(_engine(control_profiles=profiles))
+
+
+def test_profile_commands_must_be_broadcastable_across_environments() -> None:
+    profiles = _command_profiles()
+    profiles["left_hand"] = ControlPartCommandProfile.joint_positions(
+        open=torch.zeros(2, 1),
+        grasp=torch.ones(2, 1),
+    )
+
+    with pytest.raises(ProfileValidationError, match="must be one-dimensional"):
+        _profile(command_profiles=profiles).bind(_engine(control_profiles=profiles))
+
+
+def test_bind_rejects_unverified_standard_solver_capability() -> None:
+    engine = _engine(control_profiles=_command_profiles())
+    engine.robot.get_solver.side_effect = lambda name=None: None
+
+    with pytest.raises(ProfileValidationError, match="has no configured solver"):
+        _profile().bind(engine)
+
+
+def test_unique_capability_binding_lowers_to_exact_action_binding() -> None:
+    profile = _profile(resources=_resources(include_right=False))
+    bound = profile.bind(_engine(control_profiles=_command_profiles()))
+
+    resolved = bound.resolve("pick_up")
+
+    assert resolved.resource_ids == {"primary": "left_actor"}
+    assert resolved.action_binding.manipulators == {"primary": "left_arm"}
+    assert resolved.action_binding.end_effectors == {"primary": "left_hand"}
+    assert resolved.claim.leaf_resource_ids == frozenset({"left_arm", "left_hand"})
+    assert resolved.claim.joint_ids == (0, 1, 2)
+
+
+def test_ambiguous_binding_requires_complete_per_skill_default() -> None:
+    engine = _engine(control_profiles=_command_profiles())
+    bound = _profile().bind(engine)
+
+    with pytest.raises(AmbiguousSkillBindingError, match="2 valid resource bindings"):
+        bound.resolve("pick_up")
+
+    selected = _profile(
+        defaults={
+            "pick_up": ResourceBinding({"primary": "right_actor"}),
+        }
+    ).bind(engine)
+    assert selected.resolve("pick_up").resource_ids == {"primary": "right_actor"}
+
+
+@pytest.mark.parametrize(
+    "default",
+    [
+        ResourceBinding({}),
+        ResourceBinding({"primary": "left_actor", "stale": "right_actor"}),
+    ],
+)
+def test_profile_rejects_partial_or_extra_default_slots(
+    default: ResourceBinding,
+) -> None:
+    with pytest.raises(ProfileValidationError, match="must cover exactly"):
+        _profile(defaults={"pick_up": default}).bind(
+            _engine(control_profiles=_command_profiles())
+        )
+
+
+def test_explicit_slot_selection_overrides_profile_default() -> None:
+    bound = _profile(
+        defaults={
+            "pick_up": ResourceBinding({"primary": "left_actor"}),
+        }
+    ).bind(_engine(control_profiles=_command_profiles()))
+
+    resolved = bound.resolve("pick_up", {"primary": "right_actor"})
+
+    assert resolved.resource_ids == {"primary": "right_actor"}
+
+
+def test_missing_required_command_filters_skill_and_reports_reason() -> None:
+    profiles = _command_profiles()
+    profiles = {
+        name: ControlPartCommandProfile.joint_positions(grasp=torch.tensor([1.0]))
+        for name in profiles
+    }
+    bound = _profile(command_profiles=profiles).bind(_engine(control_profiles=profiles))
+
+    assert "pick_up" not in bound.skills
+    with pytest.raises(UnsupportedSkillError, match="missing command 'open'"):
+        bound.resolve("pick_up")
+
+
+def test_one_participant_cannot_use_overlapping_required_endpoints() -> None:
+    resources = _resources(include_right=False)
+    resources["left_actor"] = RobotResource(
+        "left_actor",
+        endpoints={
+            "motion": ControlPartEndpoint(
+                "left_arm", capabilities=_MOTION_CAPABILITIES
+            ),
+            "grasp": ControlPartEndpoint(
+                "left_arm", capabilities=frozenset({GRASP_CAPABILITY})
+            ),
+        },
+        members=("left_arm",),
+    )
+    profiles = _command_profiles()
+    profiles["left_arm"] = ControlPartCommandProfile.joint_positions(
+        open=torch.zeros(2),
+        grasp=torch.ones(2),
+    )
+    bound = _profile(resources=resources, command_profiles=profiles).bind(
+        _engine(control_profiles=profiles)
+    )
+
+    assert "pick_up" not in bound.skills
+    with pytest.raises(UnsupportedSkillError, match="overlap on joints"):
+        bound.resolve("pick_up")
+
+
+def test_coupled_endpoint_views_are_allowed_without_disjoint_constraint() -> None:
+    class CoupledWholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
+        skill_id: ClassVar[str] = "coupled_whole_body"
+        GoalType: ClassVar[type] = JointPositionGoal
+        manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+        binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+            slots=(
+                SkillResourceSlot(
+                    "body",
+                    endpoints=(
+                        SkillEndpointRequirement(
+                            "motion",
+                            capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                            route=ActionBindingRoute("manipulator", "primary"),
+                        ),
+                        SkillEndpointRequirement(
+                            "posture",
+                            capabilities=frozenset({"control.posture"}),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        def _plan(
+            self,
+            request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+            context: PlanningContext,
+        ) -> ActionPlan:
+            raise NotImplementedError
+
+    resources = _resources()
+    resources["coupled_body"] = RobotResource(
+        "coupled_body",
+        endpoints={
+            "motion": ControlPartEndpoint(
+                "full_body",
+                capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+            ),
+            "posture": ControlPartEndpoint(
+                "full_body",
+                capabilities=frozenset({"control.posture"}),
+            ),
+        },
+        members=("base", "torso", "left_arm", "right_arm"),
+    )
+    engine = _engine(control_profiles=_command_profiles(), load_builtins=False)
+    engine.register(CoupledWholeBodyAction())
+    bound = _profile(resources=resources).bind(engine)
+
+    assert bound.resolve("coupled_whole_body").resource_ids == {"body": "coupled_body"}
+
+
+def test_disjoint_slot_constraint_rejects_one_actor_for_two_participants() -> None:
+    profile = _profile(resources=_resources(include_right=False))
+    bound = profile.bind(_engine(control_profiles=_command_profiles()))
+
+    assert "hand_over" not in bound.skills
+    with pytest.raises(UnsupportedSkillError, match="violate constraints"):
+        bound.resolve("hand_over")
+
+
+def test_composite_claim_conflicts_with_nested_arm_but_not_hand() -> None:
+    bound = _profile().bind(_engine(control_profiles=_command_profiles()))
+
+    whole_body = bound.resources["whole_body"].claim
+    left_actor = bound.resources["left_actor"].claim
+    left_hand = bound.resources["left_hand"].claim
+
+    assert whole_body.conflicts_with(left_actor)
+    assert not whole_body.conflicts_with(left_hand)
+
+
+def test_generic_profile_supports_base_and_whole_body_without_arm_tool_fields() -> None:
+    engine = _engine(control_profiles=_command_profiles(), load_builtins=False)
+    engine.register(_WholeBodyAction())
+    engine.register(_NavigateAction())
+    bound = _profile().bind(engine)
+
+    whole_body = bound.resolve("whole_body_reach")
+    navigation = bound.resolve("navigate")
+
+    assert set(bound.skills) == {"navigate", "whole_body_reach"}
+    assert whole_body.resource_ids == {"body": "whole_body"}
+    assert whole_body.action_binding.manipulators == {"primary": "full_body"}
+    assert whole_body.claim.leaf_resource_ids == frozenset(
+        {"base", "torso", "left_arm", "right_arm"}
+    )
+    assert navigation.resource_ids == {"body": "base"}
+    assert navigation.action_binding.manipulators == {"primary": "base"}
+
+
+def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
+    preset = SkillPolicyPreset(
+        "safe",
+        motion_policy=MotionPolicy(planner="stub_planner", sample_count=80),
+    )
+    profile = RobotSkillProfile(
+        "presets",
+        resources=_resources(),
+        command_profiles=_command_profiles(),
+        presets={"safe": preset},
+        default_preset="safe",
+        skill_presets={"pick_up": "safe"},
+    )
+    bound = profile.bind(_engine(control_profiles=_command_profiles()))
+
+    first = bound.preset(skill_id="pick_up")
+    second = bound.preset()
+
+    assert first is not second
+    assert first.schema_version == 1
+    assert first.motion_policy.sample_count == 80
+    mutable_runner = first.runner_cfg
+    mutable_runner.command_timeout = 99.0
+    assert bound.preset().runner_cfg.command_timeout == 1.0
+    with pytest.raises(KeyError, match="not an installed"):
+        bound.preset(skill_id="typo")
+    with pytest.raises(KeyError, match="not an installed"):
+        bound.preset("safe", skill_id="typo")
+    with pytest.raises(ValueError, match=r"supported versions are \[1\]"):
+        SkillPolicyPreset("future", schema_version=2)
+
+    incompatible = RobotSkillProfile(
+        "bad_preset",
+        resources=_resources(),
+        command_profiles=_command_profiles(),
+        presets={
+            "other": SkillPolicyPreset(
+                "other",
+                motion_policy=MotionPolicy(planner="other_planner"),
+            )
+        },
+    )
+    with pytest.raises(ProfileValidationError, match="requires planner"):
+        incompatible.bind(_engine(control_profiles=_command_profiles()))
+
+
+def test_profile_rejects_default_for_uninstalled_skill() -> None:
+    with pytest.raises(ProfileValidationError, match="not installed"):
+        _profile(defaults={"missing": ResourceBinding({"primary": "left_actor"})}).bind(
+            _engine(control_profiles=_command_profiles())
+        )
+
+
+def test_engine_can_install_profile_as_authoritative_command_source() -> None:
+    source_engine = _engine(control_profiles=_command_profiles())
+    profile = _profile(defaults={"pick_up": ResourceBinding({"primary": "left_actor"})})
+
+    engine = AtomicActionEngine(source_engine.motion_generator, skill_profile=profile)
+
+    assert engine.skill_profile is not None
+    assert engine.skill_profile.resolve("pick_up").resource_ids == {
+        "primary": "left_actor"
+    }
+    assert set(engine.control_profiles) == {"left_hand", "right_hand"}
+
+
+def test_engine_rejects_endpoint_adapters_without_skill_profile() -> None:
+    source = _engine(control_profiles={}, load_builtins=False)
+
+    with pytest.raises(ValueError, match="requires skill_profile"):
+        AtomicActionEngine(
+            source.motion_generator,
+            load_builtins=False,
+            endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
+        )
+
+
+def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
+    engine = _engine(control_profiles=_command_profiles())
+    bound = _profile().bind(engine)
+    action_type = BUILTIN_ACTION_TYPES[0]
+
+    class Replacement(action_type):
+        binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+            slots=(
+                SkillResourceSlot(
+                    "primary",
+                    endpoints=(
+                        SkillEndpointRequirement(
+                            "motion",
+                            capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                            route=ActionBindingRoute("manipulator", "primary"),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    engine.register(Replacement(), replace=True)
+
+    assert engine.skill_profile is None
+    with pytest.raises(RuntimeError, match="changed after"):
+        _ = bound.skills
+
+
+__all__ = []

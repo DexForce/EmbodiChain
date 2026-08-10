@@ -18,6 +18,25 @@
 
 from __future__ import annotations
 
+from .profiles import (
+    AmbiguousSkillBindingError,
+    BoundRobotSkillProfile,
+    ControlPartEndpoint,
+    ControlPartEndpointAdapter,
+    EndpointResolution,
+    ProfileValidationError,
+    ResolvedResourceEndpoint,
+    ResolvedRobotResource,
+    ResolvedSkillBinding,
+    ResourceBinding,
+    ResourceClaim,
+    ResourceEndpoint,
+    ResourceEndpointAdapter,
+    RobotResource,
+    RobotSkillProfile,
+    SkillPolicyPreset,
+    UnsupportedSkillError,
+)
 from .scene import (
     RegistrySceneProvider,
     SceneAffordanceRef,
@@ -35,7 +54,22 @@ from .scene import (
 )
 
 __all__ = [
+    "AmbiguousSkillBindingError",
+    "BoundRobotSkillProfile",
+    "ControlPartEndpoint",
+    "ControlPartEndpointAdapter",
+    "EndpointResolution",
+    "ProfileValidationError",
     "RegistrySceneProvider",
+    "ResolvedRobotResource",
+    "ResolvedResourceEndpoint",
+    "ResolvedSkillBinding",
+    "ResourceBinding",
+    "ResourceClaim",
+    "ResourceEndpoint",
+    "ResourceEndpointAdapter",
+    "RobotResource",
+    "RobotSkillProfile",
     "SceneAffordanceRef",
     "SceneArticulationRef",
     "SceneCollisionRole",
@@ -48,4 +82,6 @@ __all__ = [
     "SceneLinkRef",
     "SceneObjectRef",
     "SceneRegistry",
+    "SkillPolicyPreset",
+    "UnsupportedSkillError",
 ]

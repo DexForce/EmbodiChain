@@ -38,7 +38,7 @@ recompute private sample splits in callers.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
-control-part command profiles. `MotionGenerator.generate()` is the only
+the legacy core's control-part command profiles. `MotionGenerator.generate()` is the only
 stateful motion-planning entry point. `MotionPolicy.to_motion_gen_options()`
 passes the invocation's `strategy` directly into `MotionGenOptions`; it is either
 `"motion_gen"` or `"ik_interp"`. Target shaping, world-frame pose translation,
@@ -74,6 +74,126 @@ escape hatch for an unregistered instance.
 The `_plan()` extension boundary is an intentional hard break with no legacy
 adapter. A subclass that defines `plan()` raises `TypeError` at class definition;
 migrate an older custom action by renaming that implementation to `_plan()`.
+
+## Robot skill profiles and resource binding
+
+`embodichain.lab.sim.skills.RobotSkillProfile` is the authoritative
+embodiment-level catalog for semantic resource binding. Its resource model is a
+generic DAG, not a fixed arm/tool schema:
+
+- `RobotResource.resource_id` is a stable logical ID. `endpoints` maps
+  skill-local endpoint protocol names such as `motion` or `grasp` to
+  `ResourceEndpoint` values, and `members` declares physical composition.
+- `members` determines transitive claim closure only. It does not inherit or
+  synthesize endpoint capabilities. A whole-body composite must declare its own
+  whole-body capability and endpoint explicitly.
+- `ResourceEndpoint` is the extension boundary for controller kinds. An exact
+  endpoint-type `ResourceEndpointAdapter` resolves each declaration against the
+  engine into an `EndpointResolution`: lowering values, an optional generic
+  command-profile key, joint IDs, adapter-defined claim tokens, and exclusivity.
+  `ControlPartEndpointAdapter` is installed by default for
+  `ControlPartEndpoint`; integrations pass additional `endpoint_adapters` to
+  profile or engine binding for mobile bases, whole-body controllers, or other
+  endpoint kinds. Registration is by exact endpoint type, and the built-in
+  adapter cannot be overridden; distinct controller semantics use a distinct
+  endpoint subtype.
+- Resources, profiles, and resolved bindings own independent endpoint
+  snapshots. A custom endpoint whose nested payload cannot be deep-copied must
+  override `snapshot()` and return a new value of its exact type.
+- Binding snapshots adapter output as a `ResolvedResourceEndpoint`, including
+  its resolved commands and claims. An exclusive resolution must declare at
+  least one joint ID or claim token; a deliberately non-exclusive endpoint may
+  omit both.
+- A leaf must expose at least one endpoint. Member references must exist and the
+  graph must be acyclic. On engine binding, physical leaves must own disjoint
+  robot joints and adapter claim tokens; a composite endpoint may control only
+  joints already covered by its transitive members.
+
+Skills own the robot-independent side of the contract. A concrete
+`AtomicAction` opts into semantic discovery by declaring a
+`SkillBindingContract` in its own class body. The contract contains
+skill-local `SkillResourceSlot` values; every slot requires named
+`SkillEndpointRequirement` values with all-of capabilities, optional typed
+semantic commands, and an optional `ActionBindingRoute`. Selecting one resource
+per slot keeps related endpoints together, so a manipulation participant cannot
+silently combine one arm with an unrelated tool. Endpoint views within that
+resource may overlap by default, which permits an arm, mobile base, and
+whole-body view to describe the same physical system. Add
+`DisjointSlotEndpoints` to a slot only when selected endpoint views must be
+physically disjoint. `DisjointResourceSlots` separately expresses pairwise
+claim separation between selected participant resources.
+
+`ActionBindingRoute` is only a transition adapter into the current core's
+`manipulators` and `end_effectors` maps. Contract routes must cover the action's
+declared core roles exactly. `BoundRobotSkillProfile.resolve()` returns a
+`ResolvedSkillBinding` that retains the selected logical resources, the lowered
+concrete `ActionBinding`, each resource's resolved endpoint data, and one
+combined `ResourceClaim`. Direct-core callers may still construct
+`ActionBinding` themselves, but that path does not perform profile capability
+matching.
+
+Discovery boundaries are distinct:
+
+- `engine.actions` contains every installed action instance and is the
+  direct-core registry.
+- `engine.skills` contains descriptors only for installed, `agent_visible`
+  actions whose concrete class explicitly declares a binding contract. A
+  subclass does not inherit semantic exposure implicitly.
+- `engine.skill_profile.skills` filters `engine.skills` again to contracts with
+  at least one valid assignment on the bound robot. Registering or replacing an
+  action invalidates the engine's bound profile; an independently retained
+  `BoundRobotSkillProfile` also rejects use after the engine skill catalog
+  changes and must be rebound.
+
+Binding and policy authority is split deliberately:
+
+- the action class owns its slot/endpoint/command requirement contract;
+- the `RobotSkillProfile` owns the resource DAG, capability declarations,
+  complete per-skill default `ResourceBinding` values, semantic command
+  profiles keyed by generic profile IDs, and named `SkillPolicyPreset`
+  snapshots; endpoint declarations or adapters select those profile IDs;
+- the bound robot owns actual control-part membership and joint IDs, and its
+  configured solver is checked for known solver-backed capabilities;
+- endpoint adapters own controller-specific validation, physical claims, and
+  lowering metadata;
+- the engine owns installed actions, one planner backend, and the legacy
+  control-part command profiles used by the current action core.
+
+Constructing `AtomicActionEngine(..., skill_profile=profile)` makes the
+profile's generic `command_profiles` the single authoritative constructor
+source; passing `control_profiles` at the same time is rejected.
+`command_profiles` values currently use `ControlPartCommandProfile` as their
+immutable command container, but their mapping keys are generic profile IDs
+rather than necessarily being control-part names.
+`ControlPartEndpointAdapter` plus `RobotSkillProfile.action_control_profiles()`
+is only the bridge that lowers applicable endpoint commands into the current
+core's control-part-keyed profiles. Binding a profile to an already constructed
+engine instead requires equivalent bridge commands to have been installed
+already. A profile `JointPositionCommand` is one-dimensional and sized to the
+adapter-resolved endpoint joint IDs; invocation `ActionControlOverrides` remain
+the authority for one revision's per-environment replacements. Resolving a
+custom endpoint's commands does not by itself add their controller transport to
+the current action core.
+
+Resolution selects a sole valid assignment automatically. If several remain,
+it uses only a complete, currently valid per-skill default or enough explicit
+slot selections; partial defaults and mapping/lexical order never disambiguate.
+Preset lookup order is explicit preset, per-skill preset, then profile default,
+and every returned preset is an owned snapshot. Planner-pinned presets must
+match the engine's configured planner.
+
+`ResourceClaim` contains transitive leaf-resource IDs, sorted concrete joint
+IDs, and adapter-defined `claim_tokens`. Claims conflict when any category
+overlaps, so a `whole_body` composite conflicts with a contained arm even when
+their endpoint or control-part names differ. This is deterministic conflict
+metadata only: there is no resource lease manager, parallel scheduler,
+joint-mask command merger, or concurrency guarantee yet. `ExecutionSession`
+and `ExecutionRunner` still emit, cancel, and hold full-robot joint commands. A
+custom mobile/base endpoint can bind and participate in capability matching
+once its adapter resolves it, including a controller claim token, but that does
+not create a reusable navigation skill, planner/controller path, or command
+transport. Do not treat successful binding or a non-conflicting claim as proof
+of safe parallel or mobile execution.
 
 ## Object identity and pose grounding
 
@@ -367,13 +487,13 @@ offsets, and grasp selection behavior. An action constructor may accept
 There is no `ActionCfg` or built-in `*Cfg` layer.
 
 `engine.register(action)` is reserved for custom skill implementations. A
-built-in can be replaced only with explicit `replace=True`. Registration means
-an implementation is installed; it does not prove that the current embodiment
-has compatible control parts, profiles, bindings, or task state. Capability
-adapters must filter registered descriptors before exposing skills to an Agent.
-The module-level `register_action()` API is a process-wide extension-type
-discovery catalog only; it neither binds actions nor changes an engine's
-default built-in set.
+built-in can be replaced only with explicit `replace=True`. Registration puts
+the implementation in `engine.actions`; it does not prove that the current
+embodiment supports it. Semantic exposure additionally requires a concrete
+class-local `binding_contract` for `engine.skills` and a valid profile assignment
+for `engine.skill_profile.skills`. The module-level `register_action()` API is a
+process-wide extension-type discovery catalog only; it neither binds actions nor
+changes an engine's default built-in set.
 
 `ExecutionRunnerCfg` is intentionally separate from action options. It
 configures controller acknowledgement deadlines, scheduler cadence, and final
@@ -386,8 +506,9 @@ and resolve immutable `ResolvedControlPart` values containing full-robot joint
 indices. Built-ins use the binding as the only source for participating arm and
 hand names; attachment state and `StateDelta` keys use the bound manipulator.
 
-Embodiment-specific joint commands do not belong to Action options. Register
-them once by actual control-part name:
+Embodiment-specific joint commands do not belong to Action options. A caller
+using the legacy direct-core path without a `RobotSkillProfile` registers them
+by actual control-part name:
 
 ```python
 engine = AtomicActionEngine(
@@ -406,7 +527,11 @@ Actions request semantic commands (`open`, `grasp`, or a named joint target)
 from the `ResolvedControlPart`. `ActionControlOverrides` may replace commands
 by semantic binding role for one invocation revision. Joint limits constrain
 commands but do not define semantic open/grasp states; a robot integration or
-tutorial may derive a simple profile from limits explicitly.
+tutorial may derive a simple profile from limits explicitly. Profile-based
+integrations instead own commands under generic `command_profiles` IDs and let
+endpoint declarations/adapters resolve those IDs; only
+`action_control_profiles()` converts applicable control-part endpoints back to
+the legacy core mapping.
 
 ## Built-ins
 
@@ -441,7 +566,9 @@ snapshot-grounded object example.
 
 1. Define a frozen action-owned goal dataclass with `goal_kind`.
 2. Define a frozen `ActionOptions` subclass only when runtime behavior exists.
-3. Declare `skill_id`, `GoalType`, `OptionsType`, and required semantic roles.
+3. Declare `skill_id`, `GoalType`, `OptionsType`, and required core roles. Also
+   declare a class-local `SkillBindingContract` when the skill should appear in
+   `engine.skills`; route every current core role exactly once.
 4. Implement `_plan()`; do not override the framework-owned `plan()` method.
 5. Validate with `require_goal(request)` and consume only the resolved binding.
 6. Plan from `context.robot.qpos`; never read an implicit live start state.

@@ -1,7 +1,7 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
-- Status: implementation in progress; Phase 0 and PR1 complete, PR2A implemented
-  on the feature branch
+- Status: implementation in progress; Phase 0 and PR1 complete, PR2A and PR2B
+  implemented on stacked feature branches
 - Baseline: `main@e445133c79c8b32019dab1c844b799b43a1658d6`
 - Last updated: 2026-08-10
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
@@ -66,7 +66,7 @@ sessions, or verifiers.
    verification, and recovery path.
 3. Make object identity, observation, geometry, affordance, and collision data
    come from one scene registry.
-4. Infer robot-part bindings and stable runtime policies from reusable profiles;
+4. Infer robot-resource bindings and stable runtime policies from reusable profiles;
    require explicit choices only when the request is genuinely ambiguous.
 5. Preserve lazy observation and per-environment recovery for programs whose
    later goals depend on earlier physical effects.
@@ -93,9 +93,10 @@ sessions, or verifiers.
 
 This plan is updated against committed `main@e445133c` after PR #475. The
 implementation series is stacked from that baseline: PR1 is complete on
-`refactor/atomic-actions-phase0`, and PR2A is implemented by the
-`feat/atomic-action-pr2a-scene-registry` change. Neither status statement
-implies that the stacked changes have landed on `main`.
+`refactor/atomic-actions-phase0`, PR2A is implemented by
+`feat/atomic-action-pr2a-scene-registry`, and PR2B is implemented by
+`feat/atomic-action-pr2b-robot-skill-profile`. These status statements do not
+imply that the stacked changes have landed on `main`.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -124,6 +125,8 @@ The remaining #474 prerequisites on `main` are:
   multiple sources of truth;
 - ordinary callers still see a large low-level public surface and must perform
   semantic transform and verifier plumbing;
+- robot capability declarations, resource selection, semantic commands, and
+  stable policies do not yet have an embodiment-owned source of truth;
 - dynamic-obstacle validation is planner-local; provider collision entity IDs
   and planner-declared names are not yet fully cross-validated at integration
   construction time;
@@ -133,8 +136,10 @@ The remaining #474 prerequisites on `main` are:
 PR1 closes the snapshot-grounding and stable-identity bridge. PR2A closes the
 first and third gaps for registry-backed integrations by introducing one
 authoritative registration boundary, a registry-derived scene provider, and
-construction-time collision-world validation. The semantic facade and named
-presets remain later-phase work.
+construction-time collision-world validation. PR2B closes the robot-profile
+gap on its stacked branch with generic resources, deterministic binding,
+profile-owned commands, and named policy presets. The semantic facade remains
+later-phase work.
 
 One #474 finding has changed since its review branch: the ambiguous
 `collision_check` switch has been replaced by `DynamicCollisionMode.OFF`,
@@ -385,28 +390,106 @@ not duplicate the registration catalog.
 
 ### 7.2 Robot skill profiles
 
-A `RobotSkillProfile` is reusable per embodiment and contains:
+A `RobotSkillProfile` is reusable per embodiment, but its resource model is not
+an `arm + tool` schema. It contains a generic resource DAG:
 
-- capability declarations for arms, grippers, hands, and tools;
-- mappings from semantic roles to compatible control parts;
-- semantic commands such as `open`, `grasp`, `release`, and `ready`;
-- available planners/motion strategies and their constraints;
-- default grasp, effect-monitor, and runtime preset selections;
-- optional preference rules when more than one binding is valid.
+- each `RobotResource` has a stable logical ID, zero or more named execution
+  endpoints, and optional member resources;
+- each endpoint declares open, namespaced capabilities explicitly and lowers
+  through a `ResourceEndpoint` implementation; `ControlPartEndpoint` is the
+  current joint/control-part declaration, while registered
+  `ResourceEndpointAdapter`s resolve any endpoint kind into generic
+  `EndpointResolution` metadata (binding values, commands, physical claim
+  tokens, and optional joint IDs) without changing the graph, matcher, or slot
+  model. Adapters register by exact endpoint type; the built-in control-part
+  adapter is not overrideable, and different controller semantics use a new
+  endpoint subtype;
+- members describe physical composition and claim closure, not capability
+  inheritance. A composite must explicitly declare `motion.whole_body`; it
+  does not acquire that capability because it contains a base, torso, or arms;
+- semantic control commands such as `open`, `grasp`, or a future `stop` remain
+  embodiment data owned by generic profile IDs selected by each endpoint
+  adapter; only the current core bridge lowers applicable profiles to robot
+  control-part keys;
+- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy;
+- per-skill defaults map every skill-local slot to one resource ID.
 
-The compiler resolves the only valid binding automatically. If two arms are
-equally valid and the profile has no deterministic preference, validation asks
-for a semantic choice such as `arm: left`; it never asks the task to construct
-an `ActionBinding`.
+Resource and endpoint declarations are owned snapshots. A custom endpoint with
+non-trivial nested payloads implements `snapshot()` to return an independent
+value of its exact type, so caller-owned mutation cannot rewrite a bound
+profile.
+
+Skills own the robot-independent half of the contract. A concrete atomic action
+must explicitly publish a `SkillBindingContract`; inheriting the default
+`primary` role or inheriting another action's contract does not expose a new
+semantic skill. The contract declares skill-local participant slots and the
+endpoint requirements inside each participant. For example, `pick_up` has one
+`primary` participant with a `motion` endpoint and a `grasp` endpoint. A profile
+can satisfy it with `left_actor`, whose endpoints lower to `left_arm` and
+`left_hand`. Selecting the participant as one unit prevents invalid cross-side
+combinations such as `left_arm + right_hand`.
+
+Endpoint names are local protocols, not global robot-part categories. A future
+`navigate` skill can require `body.motion: motion.base.se2`; a
+`whole_body_reach` skill can require `body.motion: motion.whole_body`. Neither
+requires new `RobotSkillProfile` fields. The current `ActionBindingRoute` is a
+transition adapter from generic endpoints to the core's existing
+`manipulators`/`end_effectors` maps; those maps are not part of the Profile
+resource model.
+
+Binding follows strict rules:
+
+1. Filter each slot by endpoint presence, all required capabilities, typed
+   semantic commands, explicit caller selection, and installed endpoint
+   support.
+2. Apply explicit physical-claim constraints. Built-in manipulation contracts
+   declare their `motion` and `grasp` views disjoint, while coupled whole-body
+   views may overlap when the skill omits that constraint. Multi-participant
+   contracts such as handover use pairwise-disjoint resource claims.
+3. No candidates means the skill is unsupported on this profile and is omitted
+   from the profile-backed semantic catalog.
+4. One complete candidate is selected automatically.
+5. Multiple candidates are resolved only by a complete, still-valid per-skill
+   default or enough explicit slot selections. Partial defaults, mapping order,
+   and lexical order never break ambiguity.
+
+`ResourceClaim` contains transitive leaf-resource IDs, concrete joint IDs, and
+adapter-defined physical/controller claim tokens. It makes `whole_body`
+conflict with `base`, `torso`, or a contained arm even when the underlying
+`Robot.control_parts` names are different, and lets a non-joint base adapter
+claim a controller without inventing joints. PR2B
+exposes deterministic claim/conflict data only. Current runners emit and hold
+full-robot commands, so claims do not imply safe parallel execution. Parallel
+scheduling still requires one coordinator, joint-mask command merge, planner
+serialization or isolation, cancellation semantics, and inter-trajectory
+collision checks.
+
+`AtomicActionEngine.actions` remains the direct-core implementation registry.
+`engine.skills` contains only installed, agent-visible actions whose concrete
+class explicitly declares a binding contract. A bound profile filters that
+catalog again by the current robot resources. Constructing an engine with
+`skill_profile=...` installs the profile's command snapshots as the single
+authoritative source and binds the validated profile after built-ins load.
+Known FK/IK capabilities on the control-part adapter are checked against the
+selected control part's configured solver; Cartesian motion is not equated with
+solver presence because native planners may provide it directly. Profile joint
+commands must be one-dimensional and broadcastable; per-environment values
+belong in invocation overrides.
 
 ### 7.3 Semantic call specification
 
 Version 1 should provide first-class calls for:
 
-- `Pick(object, grasp?, arm?)`;
-- `Place(object, pose?|on?|in?, arm?)`;
-- `HandOver(object, receiver?, final_target?)`;
+- `Pick(object, grasp?, resources?)`;
+- `Place(object, pose?|on?|in?, resources?)`;
+- `HandOver(object, receiver?, final_target?, resources?)`;
 - a registered semantic call for shared extensions.
+
+`resources`, when present, is a mapping from the selected skill's local slot
+IDs to profile resource IDs (for example, `{"primary": "left_actor"}` or
+`{"body": "mobile_base"}`). It is an explicit ambiguity override, not a
+fixed arm/tool field. Ordinary calls omit it and use unique or profile-default
+resolution.
 
 `Place` consumes verified held-object state. The compiler computes the release
 EEF pose from the requested object-space target and the verified
@@ -765,10 +848,11 @@ OperateArticulation(
 )
 ```
 
-Its compiler selects an affordance pose, binds an arm/tool, builds the approach
-and constrained operation, and installs an articulation effect monitor. Once
-implemented once in the shared layer, Open Drawer variants should differ only
-in scene/affordance data, target state, presets, and validators.
+Its compiler selects an affordance pose, resolves one participant resource and
+its required motion/interaction endpoints, builds the approach and constrained
+operation, and installs an articulation effect monitor. Once implemented once
+in the shared layer, Open Drawer variants should differ only in
+scene/affordance data, target state, resource defaults, presets, and validators.
 
 This is the precise meaning of "almost no action-layer code": task expansion is
 configuration-only when a compatible semantic capability already exists; new
@@ -788,7 +872,7 @@ PR1 snapshot/identity bridge (complete)
         +-----------------------+
         v                       v
 PR2A SceneRegistry      PR2B RobotSkillProfile
-   (implemented)              (next)
+   (implemented)          (implemented)
         +-----------+-----------+
                     v
 Semantic calls/compiler --> SkillRuntime/effect monitors
@@ -921,14 +1005,31 @@ dynamic registry/provider/planner subsets are validated before execution, the
 collision-world batch mode agrees, and cuRobo uses canonical mapping keys end
 to end as logical source IDs (and as physical keys for cuboid/mesh worlds).
 
-#### PR2B: RobotSkillProfile
+#### PR2B: RobotSkillProfile (implemented on the feature branch)
 
 Deliverables:
 
-- `RobotSkillProfile` and reusable capability declarations;
-- capability-based deterministic binding and explicit ambiguity errors;
-- semantic tool commands and stable runtime/planning presets;
-- profile validation against installed engine skills and robot control parts.
+- a generic `RobotResource` DAG whose named `ResourceEndpoint`s are not tied to
+  arm/tool categories, plus a formal `ResourceEndpointAdapter` registry and
+  `EndpointResolution` protocol; `ControlPartEndpointAdapter` is the first
+  implementation;
+- action-owned `SkillBindingContract`s with participant-local endpoint,
+  capability, typed-command, lowering-route, and disjoint-claim requirements;
+- capability-based candidate filtering, complete per-skill defaults, explicit
+  selection overrides, and deterministic ambiguity/unsupported diagnostics;
+- profile-owned semantic commands plus immutable, versioned planning/recovery/
+  runner presets;
+- validation against installed agent-visible engine skills, robot control
+  parts, joint ownership, endpoint overlap, configured solvers, commands, and
+  presets;
+- immutable leaf/joint/adapter-token `ResourceClaim` data and explicit
+  same-slot endpoint disjointness for future conflict analysis without claiming
+  that the current full-robot command runner supports safe parallel execution.
+
+The profile API can represent mobile-base and whole-body resources today. A
+new endpoint kind still needs one shared adapter and a compatible shared atomic
+skill before the current core can execute it; adding tasks that reuse that
+capability then remains configuration-only.
 
 PR2B may proceed in parallel with PR2A after the PR1 bridge. Neither follow-up
 requires official task migration; the repeated-cube vertical slice opts in only
@@ -1107,6 +1208,9 @@ The design is complete when all of the following hold:
       typed atomic-action core, and runtime.
 - [ ] A common new task using existing semantic skills needs no task-specific
       motion-generation code.
+- [x] Robot capability binding is expressed through generic participant
+      resources and endpoints, so mobile-base and whole-body skills do not
+      require new arm/tool-shaped profile fields.
 - [ ] Each scene entity is registered once under an authoritative registry ID
       across semantics, observation, affordance, and collision handling;
       simulation `uid` values are legacy aliases only.

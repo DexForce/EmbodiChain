@@ -28,7 +28,7 @@ from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
 from ..affordance import AntipodalAffordance
 from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
+from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction, ObjectSemantics
 from ..effects import StateDelta
 from ..goals import (
@@ -40,6 +40,16 @@ from ..goals import (
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
+from ..requirements import (
+    ActionBindingRoute,
+    DisjointResourceSlots,
+    DisjointSlotEndpoints,
+    GRASP_CAPABILITY,
+    INVERSE_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from ..state import CoordinatedHeldObjectState, PlanningContext
 from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
 
@@ -342,6 +352,32 @@ class CoordinatedPickment(
     OptionsType: ClassVar[type] = CoordinatedPickmentOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("left", "right")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("left", "right")
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=tuple(
+            SkillResourceSlot(
+                slot_id=role,
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
+                        route=ActionBindingRoute("manipulator", role),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={
+                            OPEN_COMMAND: JointPositionCommand,
+                            GRASP_COMMAND: JointPositionCommand,
+                        },
+                        route=ActionBindingRoute("end_effector", role),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            )
+            for role in ("left", "right")
+        ),
+        constraints=(DisjointResourceSlots(("left", "right")),),
+    )
 
     _assemble_segment = _DualArmHelpers._assemble_segment
     _expand_qpos = _DualArmHelpers._expand_qpos

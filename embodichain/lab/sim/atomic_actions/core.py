@@ -46,6 +46,7 @@ from .plans import (
     normalize_success_mask,
 )
 from .policies import DynamicCollisionMode
+from .requirements import SkillBindingContract
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -150,6 +151,8 @@ class SkillDescriptor:
     manipulator_roles: tuple[str, ...] = ()
     end_effector_roles: tuple[str, ...] = ()
     agent_visible: bool = True
+    binding_contract: SkillBindingContract | None = None
+    """Explicit generic resource contract used by the semantic skill layer."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -172,6 +175,16 @@ class SkillDescriptor:
             ):
                 raise ValueError(f"{field_name} must contain unique non-empty roles.")
             object.__setattr__(self, field_name, roles)
+        if self.binding_contract is not None:
+            if not isinstance(self.binding_contract, SkillBindingContract):
+                raise TypeError(
+                    "SkillDescriptor.binding_contract must be a "
+                    "SkillBindingContract or None."
+                )
+            self.binding_contract.validate_action_roles(
+                manipulator_roles=self.manipulator_roles,
+                end_effector_roles=self.end_effector_roles,
+            )
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -199,6 +212,14 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
+
+    binding_contract: ClassVar[SkillBindingContract | None] = None
+    """Explicit robot-independent requirements for semantic discovery.
+
+    Concrete action classes must declare this attribute in their own class
+    body to opt into the semantic catalog. Inheriting another action's contract
+    does not silently expose a new skill identifier.
+    """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Reject skill classes that bypass framework-owned scene binding."""
@@ -295,6 +316,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             manipulator_roles=cls.manipulator_roles,
             end_effector_roles=cls.end_effector_roles,
             agent_visible=cls.agent_visible,
+            binding_contract=cls.__dict__.get("binding_contract"),
         )
 
     def resolve_request(
