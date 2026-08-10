@@ -31,7 +31,7 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
 | `app_ui.py` | 顶部图标、引擎面板切换和回调绑定；不实现 pipeline。 |
 | `app_asset_engine.py` | SimReady 上传适配、输入/输出 GLB 预览、处理日志，以及 Asset engine 的 Articraft 标签页。 |
 | `app_articraft.py` | Articraft checkout/环境检查、外部记录创建、Codex 生成与校验、URDF bundle 和 Viser 关节预览。 |
-| `app_workflows.py` | Scene Engine 工作流、Action Engine 所需的共享状态、GLB 预览和 DexSim。 |
+| `app_workflows.py` | Scene Engine 工作流、Action Engine 的会话状态、Viser 预览和 DexSim。 |
 | `app_processes.py` | 子进程环境、进程组终止、stdout 读取和 pipeline 阶段检测。 |
 | `app_state.py` | `RuntimeState`、互斥锁、进度阶段、运行 token 和耗时统计。 |
 | `app_commands.py` | Action engine 的 `run_agent` 参数构造。 |
@@ -55,8 +55,9 @@ conda run -n embodichain python gradio_app.py
 | `GRADIO_SERVER_PORT` | `7860` | Gradio 监听端口。 |
 | `GRADIO_AUTH_USERNAME` | 空 | 非本机部署的 Gradio 用户名。 |
 | `GRADIO_AUTH_PASSWORD` | 空 | 非本机部署的 Gradio 密码。 |
-| `SCENE_ENGINE_VISER_PORT` | `8080` | 独立 Scene Engine 的 Viser 端口。 |
+| `SCENE_ENGINE_VISER_PORT` | `8080` | Scene Engine 的首选 Viser 端口；占用时为会话分配其他可用端口。 |
 | `ARTICRAFT_VISER_PORT` | `8081` | Articraft 关节预览的首选 Viser 端口；占用时为会话分配其他可用端口。 |
+| `ACTION_ENGINE_VISER_PORT` | `8082` | Action Engine 已保存场景预览的首选 Viser 端口；占用时为会话分配其他可用端口。 |
 | `ARTICRAFT_ROOT` | `<项目>/.articraft` | Articraft checkout。 |
 | `ARTICRAFT_CONDA_ENV` | `articraft` | 运行 Articraft CLI 的 Conda 环境。 |
 | `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft 记录、运行日志和导出 bundle。 |
@@ -75,6 +76,8 @@ conda run -n embodichain python gradio_app.py
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
 因此，Scene engine 是独立的图像条件场景生成器；它不会提升、复制或转换输出到 `gym_project/current`。Action engine 只消费已有的 `current` Gym 场景。界面中的 “Scene engine” 文案表达的是所需场景类型，并不意味着独立 Scene Engine 输出已自动连到 Action engine。
+
+Scene/Action 与 Asset engine 使用同一会话边界：Gradio 回调从 `request.session_hash` 取得会话 ID。每个 ID 拥有独立的 `RuntimeState`，Scene 生成/Viser、Action DexSim 和 Action Viser 分别由以该 ID 为键的进程 registry 管理。Reset、Stop、同会话新任务替换及页面卸载只会终止该会话的进程；其他浏览器会话的进程和 UI 状态不受影响。
 
 ## Asset engine
 
@@ -136,13 +139,13 @@ image
        --image <input.png>
        --output_root <hash-dir>
   → <hash-dir>/scene_export/scene_config.json
-  → preview.py <hash-dir> --viser --viser-host 0.0.0.0 --viser-port 8080
+  → preview.py <hash-dir> --viser --viser-host 0.0.0.0 --viser-port <session-port>
   → Gradio iframe
 ```
 
-当 `scene_export/scene_config.json` 存在且生成进程返回成功时，应用才启动 Viser。iframe 使用 Gradio 页面当前的协议和主机名转向 Viser 端口，因此从其他设备访问时，浏览器必须能访问该端口。每次新 Scene Engine 任务开始前会终止旧的 Scene Viser 进程。输出目录会显示在 UI 中，便于检查 hash 命名的场景导出。
+当 `scene_export/scene_config.json` 存在且生成进程返回成功时，应用才启动 Viser。iframe 使用 Gradio 页面当前的协议和主机名转向 Viser 端口，因此从其他设备访问时，浏览器必须能访问该端口。每个会话优先使用 `SCENE_ENGINE_VISER_PORT`，占用时选择其他可用端口；同会话的新 Scene Engine 任务会终止该会话旧的 Scene Viser，不会终止其他会话的预览。输出目录会显示在 UI 中，便于检查 hash 命名的场景导出。
 
-`Reset Scene Engine` 会清空图像、进度、输出目录和 iframe，并终止当前生成命令与 Scene Viser 的进程组；运行 token 会使已经失效的生成器停止回写界面。
+`Reset Scene Engine` 会清空当前会话的图像、进度、输出目录和 iframe，并终止该会话当前生成命令与 Scene Viser 的进程组；registry 运行 token 会使已经失效的生成器停止回写界面。
 
 ## Action engine：Gym 场景契约
 
@@ -170,11 +173,13 @@ python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent \
 
 `--robot-profile` 仅在通过 `run_agent --help` 探测到该参数时加入。DexSim 完成后会寻找本次运行产生的 audience 视频并显示在 Action engine 中。
 
-## 共享状态、并发和进度
+`Stop Action Engine` 仅重置当前会话的 Action 进程 registry，终止该会话的 DexSim 进程组和已保存场景 Viser。它不终止同会话的 Scene Engine，也不影响其他浏览器会话。
 
-Scene engine 和 Action engine 共享 `RuntimeState` 与 `runtime_lock`，其中包含运行 token、DexSim/Scene Viser 进程、输入、预览、日志和阶段。运行 token 用于丢弃过期线程的更新。SimReady 和 Articraft 使用按 `request.session_hash` 隔离的进程注册表；Reset 和页面卸载只清理所属会话，应用退出时再统一清理全部已注册子进程。
+## 会话状态、并发和进度
 
-`app.queue(default_concurrency_limit=1)` 将队列中的高成本回调串行化。Action engine 的 `Timer(2.0)` 读取共享状态。Asset/Articraft 面板不写入这一状态，但仍会受 Gradio 队列限制。
+Scene engine 和 Action engine 的 UI 状态存放在 `SessionRuntimeRegistry`，键为 `request.session_hash`。`RuntimeState` 只包含当前会话的输入、预览、日志和阶段，不再保存服务器级全局进程引用。Scene 生成/Viser、Action DexSim 和 Action Viser 有独立的 `SessionProcessRegistry`；每个 registry 的 token 用于丢弃同会话内过期线程的更新。SimReady 和 Articraft 使用相同的会话键。Reset、Stop 和页面卸载只清理所属会话，应用退出时再统一清理全部已注册子进程。
+
+`app.queue(default_concurrency_limit=1)` 将队列中的高成本回调串行化。Action engine 的 `Timer(2.0)` 通过当前请求的 `session_hash` 只读取该会话状态。Asset/Articraft 使用各自的会话状态，但仍会受 Gradio 队列限制。
 
 共享阶段如下；独立 Scene Engine 将其日志映射到相同的进度条：
 
@@ -234,5 +239,5 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 
 1. SimReady 上传简单网格后能显示输入预览；执行后显示 SimReady 输出或明确错误。
 2. Articulation 环境检查能报告 checkout、Conda 和 Codex 状态；成功生成后有 zip、记录目录和 Viser 或明确的预览错误。
-3. Scene engine 从图像生成 `scene_export/scene_config.json`，并在 `8080` 显示 Viser；它不应改写 `gym_project/current`。
+3. Scene engine 从图像生成 `scene_export/scene_config.json`，并以 `8080` 为首选端口显示 Viser；它不应改写 `gym_project/current`。
 4. Action engine 在没有 `current` Gym/action 配置或缺少 CLI 时给出预检错误。

@@ -25,6 +25,7 @@ from typing import Any
 from embodichain.gen_sim.env import get_embodichain_root, load_gen_sim_env
 
 __all__ = [
+    "ACTION_ENGINE_VISER_PORT",
     "ARTICRAFT_CONDA_ENV",
     "ARTICRAFT_OUTPUT_ROOT",
     "ARTICRAFT_REPOSITORY_URL",
@@ -87,6 +88,7 @@ ARTICRAFT_OUTPUT_ROOT = Path(
 ).expanduser()
 SCENE_ENGINE_VISER_PORT = int(_getenv("SCENE_ENGINE_VISER_PORT", "8080"))
 ARTICRAFT_VISER_PORT = int(_getenv("ARTICRAFT_VISER_PORT", "8081"))
+ACTION_ENGINE_VISER_PORT = int(_getenv("ACTION_ENGINE_VISER_PORT", "8082"))
 SERVER_NAME = _getenv("GRADIO_SERVER_NAME", "127.0.0.1")
 SERVER_PORT = int(_getenv("GRADIO_SERVER_PORT", "7860"))
 GRADIO_AUTH_USERNAME = _getenv("GRADIO_AUTH_USERNAME", "")

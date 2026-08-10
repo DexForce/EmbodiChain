@@ -36,13 +36,16 @@ from app_config import (
     ROBOT_PROFILES,
     UI_TEXT,
 )
+from app_processes import get_request_session_id
 from app_workflows import (
+    cleanup_workflow_session,
     format_status,
     preview_saved_scene,
     refresh_saved_scenes,
     reset_scene_engine,
     run_action_engine_from_current,
     run_scene_engine,
+    stop_action_engine,
     ui_snapshot,
 )
 
@@ -63,16 +66,29 @@ def select_engine(selected_engine: str):
     )
 
 
-def action_engine_snapshot():
-    """Adapt the shared runtime snapshot to the Action-engine status widgets."""
-    video, task, progress, status, _initial, _edited, _objects = ui_snapshot()
+def action_engine_snapshot(request: gr.Request) -> tuple[object, ...]:
+    """Adapt this session's runtime snapshot to the Action status widgets."""
+    session_id = get_request_session_id(request)
+    video, task, progress, status, _initial, _edited, _objects = ui_snapshot(session_id)
     return video, task, progress, status
 
 
-def run_action_engine_panel(task_text: str, robot_profile: str | None):
+def run_action_engine_panel(
+    task_text: str,
+    robot_profile: str | None,
+    request: gr.Request,
+) -> tuple[object, ...]:
     """Run the Action engine and return its latest UI snapshot."""
-    run_action_engine_from_current(task_text, robot_profile)
-    return action_engine_snapshot()
+    video, task, progress, status, _initial, _edited, _objects = (
+        run_action_engine_from_current(task_text, robot_profile, request)
+    )
+    return video, task, progress, status
+
+
+def cleanup_app_session(request: gr.Request) -> None:
+    """Stop every engine process owned by a disconnected Gradio session."""
+    cleanup_workflow_session(request)
+    cleanup_asset_engine_session(request)
 
 
 def build_app() -> gr.Blocks:
@@ -159,7 +175,12 @@ def build_app() -> gr.Blocks:
                         value=DEFAULT_ROBOT_PROFILE,
                         label=UI_TEXT[LANGUAGE_EN]["robot"],
                     )
-                    action_run = gr.Button("Run DexSim", variant="primary")
+                    with gr.Row():
+                        action_run = gr.Button("Run DexSim", variant="primary")
+                        action_stop = gr.Button(
+                            "Stop Action Engine",
+                            variant="stop",
+                        )
                 with gr.Column(scale=2):
                     action_scene = gr.HTML(
                         "<div style='padding: 1rem; color: #6b7280;'>"
@@ -251,6 +272,18 @@ def build_app() -> gr.Blocks:
                 action_status,
             ],
         )
+        action_stop.click(
+            stop_action_engine,
+            outputs=[
+                action_scene,
+                action_scene_status,
+                action_video,
+                action_current_task,
+                action_progress,
+                action_status,
+            ],
+            queue=False,
+        )
         action_refresh_timer.tick(
             action_engine_snapshot,
             outputs=[
@@ -262,6 +295,6 @@ def build_app() -> gr.Blocks:
             queue=False,
         )
 
-        app.unload(cleanup_asset_engine_session)
+        app.unload(cleanup_app_session)
 
     return app

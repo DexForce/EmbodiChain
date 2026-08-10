@@ -30,7 +30,7 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import gradio as gr
@@ -44,27 +44,53 @@ from app_config import (
     GEN_SIM_SCENE_ROOT,
     FAST_GYM_CONFIG,
 )
-from app_env import SCENE_ENGINE_VISER_PORT, configure_direct_network_env
+from app_env import (
+    ACTION_ENGINE_VISER_PORT,
+    SCENE_ENGINE_VISER_PORT,
+    configure_direct_network_env,
+)
 from app_media import latest_audience_output_video
 from app_processes import (
+    SessionProcessRegistry,
     build_run_agent_command,
+    get_request_session_id,
     read_process_output,
     start_pipeline,
     terminate_process_group,
 )
-from app_state import PHASES, Phase, runtime, runtime_lock, set_runtime_phase_locked
+from app_state import (
+    PHASES,
+    Phase,
+    RuntimeState,
+    runtime_lock,
+    runtime_registry,
+    set_runtime_phase_locked,
+)
 
 __all__ = [
+    "cleanup_workflow_session",
     "format_status",
     "preview_saved_scene",
     "refresh_saved_scenes",
     "reset_scene_engine",
     "run_action_engine_from_current",
     "run_scene_engine",
+    "stop_action_engine",
     "ui_snapshot",
 ]
 
 configure_direct_network_env()
+
+_scene_runs = SessionProcessRegistry()
+_action_runs = SessionProcessRegistry()
+_action_preview_runs = SessionProcessRegistry()
+_preview_start_lock = threading.Lock()
+
+_ACTION_IDLE_PREVIEW = (
+    "<div style='padding: 1rem; color: #6b7280;'>"
+    "Select a generated scene to preview it."
+    "</div>"
+)
 
 
 def _drain_output_queue(output_queue: queue.Queue[str]) -> list[str]:
@@ -93,6 +119,7 @@ def _scene_engine_phase_from_log(line: str, current_key: str) -> str:
 
 
 def _scene_engine_updates(
+    runtime: RuntimeState,
     output_root: Path | None = None,
     preview_html: str | None = None,
 ) -> tuple[int, str, str | None, str]:
@@ -149,6 +176,18 @@ def _wait_for_viser(port: int, process: subprocess.Popen[str]) -> bool:
         except OSError:
             time.sleep(0.25)
     return False
+
+
+def _select_available_port(preferred_port: int) -> int:
+    """Return the preferred Viser port, or an ephemeral port when occupied."""
+    for port in (preferred_port, 0):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            try:
+                listener.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return int(listener.getsockname()[1])
+    raise RuntimeError("Could not allocate a local Viser port.")
 
 
 def _viser_iframe(port: int, scene_hash: str) -> str:
@@ -232,55 +271,66 @@ def refresh_saved_scenes(selected_scene: str | None = None):
     return gr.update(choices=choices, value=value), status
 
 
-def preview_saved_scene(scene_name: str | None):
-    """Start a Viser preview for the explicitly selected generated scene."""
-    idle_preview = (
-        "<div style='padding: 1rem; color: #6b7280;'>"
-        "Select a generated scene to preview it."
-        "</div>"
-    )
+def preview_saved_scene(
+    scene_name: str | None,
+    request: gr.Request,
+) -> tuple[str, str]:
+    """Start a session-owned Viser preview for one saved scene.
+
+    Args:
+        scene_name: Hash-named generated scene selected in the Action panel.
+        request: Gradio request carrying the owning session hash.
+
+    Returns:
+        Preview iframe HTML and a human-readable preview status.
+    """
+    session_id = get_request_session_id(request)
     if not scene_name:
-        return idle_preview, "**Scene preview:** no scene selected."
+        return _ACTION_IDLE_PREVIEW, "**Scene preview:** no scene selected."
 
     try:
         scene_root = _saved_scene_root(scene_name)
     except (ValueError, FileNotFoundError) as exc:
-        return idle_preview, f"**Scene preview error:** {exc}"
+        return _ACTION_IDLE_PREVIEW, f"**Scene preview error:** {exc}"
 
     with runtime_lock:
+        runtime = runtime_registry.get(session_id)
         if runtime.scene_engine_is_running:
-            return idle_preview, "**Scene preview:** Scene Engine is still running."
-        old_preview = runtime.scene_preview_process
-        runtime.scene_preview_process = None
+            return (
+                _ACTION_IDLE_PREVIEW,
+                "**Scene preview:** Scene Engine is still running.",
+            )
+        token = _action_preview_runs.begin(session_id)
 
-    if old_preview is not None:
-        terminate_process_group(old_preview)
+    with _preview_start_lock:
+        port = _select_available_port(ACTION_ENGINE_VISER_PORT)
+        preview_command = [
+            sys.executable,
+            COMMANDS["scene_engine"]["preview_script"],
+            "--output_root",
+            str(scene_root),
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            str(port),
+        ]
+        try:
+            preview_process = start_pipeline(preview_command)
+        except Exception as exc:
+            return _ACTION_IDLE_PREVIEW, f"**Scene preview error:** {exc}"
 
-    port = SCENE_ENGINE_VISER_PORT
-    preview_command = [
-        sys.executable,
-        COMMANDS["scene_engine"]["preview_script"],
-        "--output_root",
-        str(scene_root),
-        "--viser",
-        "--viser-host",
-        "0.0.0.0",
-        "--viser-port",
-        str(port),
-    ]
-    try:
-        preview_process = start_pipeline(preview_command)
-    except Exception as exc:
-        return idle_preview, f"**Scene preview error:** {exc}"
+        if not _action_preview_runs.attach(session_id, token, preview_process):
+            terminate_process_group(preview_process)
+            return _ACTION_IDLE_PREVIEW, "**Scene preview:** request was superseded."
+        if not _wait_for_viser(port, preview_process):
+            terminate_process_group(preview_process)
+            _action_preview_runs.finish(session_id, token, preview_process)
+            return _ACTION_IDLE_PREVIEW, "**Scene preview error:** Viser did not start."
 
-    with runtime_lock:
-        runtime.scene_preview_process = preview_process
-    if not _wait_for_viser(port, preview_process):
+    if not _action_preview_runs.is_active(session_id, token, preview_process):
         terminate_process_group(preview_process)
-        with runtime_lock:
-            if runtime.scene_preview_process is preview_process:
-                runtime.scene_preview_process = None
-        return idle_preview, "**Scene preview error:** Viser did not start."
+        return _ACTION_IDLE_PREVIEW, "**Scene preview:** request was superseded."
 
     return (
         _viser_iframe(port, scene_name),
@@ -288,29 +338,33 @@ def preview_saved_scene(scene_name: str | None):
     )
 
 
-def reset_scene_engine():
-    """Clear Scene Engine widgets and stop its owned process groups."""
+def reset_scene_engine(
+    request: gr.Request,
+) -> tuple[None, int, str, str, str]:
+    """Reset only the requesting session's Scene Engine state and processes.
+
+    Args:
+        request: Gradio request carrying the owning session hash.
+
+    Returns:
+        Reset values for the Scene Engine input, progress, status, output, and
+        preview widgets.
+    """
+    session_id = get_request_session_id(request)
     with runtime_lock:
-        generator_process = runtime.scene_engine_process
-        preview_process = runtime.scene_preview_process
+        runtime = runtime_registry.get(session_id)
         owns_runtime = runtime.scene_engine_is_running
-        action_running = runtime.sim_process is not None
+        action_running = runtime.is_busy and not owns_runtime
         if owns_runtime:
-            runtime.run_token = uuid.uuid4().hex
             runtime.is_busy = False
         if not action_running:
-            set_runtime_phase_locked("idle")
+            set_runtime_phase_locked(runtime, "idle")
             runtime.status = "Scene Engine reset."
             runtime.last_error = None
             runtime.log_lines.clear()
         runtime.image_path = None
-        runtime.scene_engine_process = None
-        runtime.scene_preview_process = None
         runtime.scene_engine_is_running = False
-
-    for process in {generator_process, preview_process}:
-        if process is not None:
-            terminate_process_group(process)
+        _scene_runs.reset(session_id)
 
     message = (
         "Scene Engine reset."
@@ -328,54 +382,61 @@ def reset_scene_engine():
     )
 
 
-def run_scene_engine(image_value: str | np.ndarray | Image.Image):
-    """Generate one image-conditioned scene and expose its Viser preview."""
+def run_scene_engine(
+    image_value: str | np.ndarray | Image.Image,
+    request: gr.Request,
+) -> Iterator[tuple[int, str, str | None, str]]:
+    """Generate one scene for the requesting Gradio session.
+
+    Args:
+        image_value: Uploaded image path, array, or PIL image.
+        request: Gradio request carrying the owning session hash.
+
+    Yields:
+        Progress, status, output directory, and Viser preview updates.
+    """
+    session_id = get_request_session_id(request)
     output_root: Path | None = None
     preview_html = ""
-    token = uuid.uuid4().hex
     with runtime_lock:
+        runtime = runtime_registry.get(session_id)
         if runtime.is_busy:
-            runtime.status = "Another engine is already running."
+            runtime.status = "Another engine is already running in this session."
             runtime.last_error = runtime.status
             busy_message = runtime.status
         else:
-            runtime.run_token = token
+            token = _scene_runs.begin(session_id)
             runtime.is_busy = True
             runtime.scene_engine_is_running = True
-            set_runtime_phase_locked("received")
+            set_runtime_phase_locked(runtime, "received")
             runtime.status = "Preparing Scene Engine input."
             runtime.last_error = None
             runtime.log_lines.clear()
             busy_message = None
 
     if busy_message is not None:
-        yield _scene_engine_updates(output_root, preview_html)
+        yield _scene_engine_updates(runtime, output_root, preview_html)
         return
 
     try:
         scene_hash, output_root, image_path = _prepare_scene_engine_input(image_value)
     except Exception as exc:
         with runtime_lock:
-            if runtime.run_token != token:
+            if not _scene_runs.is_active(session_id, token):
                 return
             runtime.is_busy = False
             runtime.scene_engine_is_running = False
-            set_runtime_phase_locked("failed")
+            set_runtime_phase_locked(runtime, "failed")
             runtime.status = f"Input error: {exc}"
             runtime.last_error = str(exc)
-        yield _scene_engine_updates(output_root, preview_html)
+        yield _scene_engine_updates(runtime, output_root, preview_html)
         return
 
     with runtime_lock:
-        if runtime.run_token != token:
+        if not _scene_runs.is_active(session_id, token):
             return
-        old_preview = runtime.scene_preview_process
-        runtime.scene_preview_process = None
         runtime.status = f"Image saved. Generating Scene Engine output {scene_hash}."
         runtime.image_path = image_path
-
-    if old_preview is not None:
-        terminate_process_group(old_preview)
 
     command = [
         sys.executable,
@@ -391,20 +452,25 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
     scene_engine_log.write_text("$ " + " ".join(command) + "\n", encoding="utf-8")
     with runtime_lock:
         runtime.log_lines.append("$ " + " ".join(command))
-    yield _scene_engine_updates(output_root, preview_html)
+    yield _scene_engine_updates(runtime, output_root, preview_html)
 
     try:
         process = start_pipeline(command)
     except Exception as exc:
         with runtime_lock:
+            if not _scene_runs.is_active(session_id, token):
+                return
             runtime.is_busy = False
             runtime.scene_engine_is_running = False
-            set_runtime_phase_locked("failed")
+            set_runtime_phase_locked(runtime, "failed")
             runtime.status = f"Scene Engine start failed: {exc}"
             runtime.last_error = str(exc)
-        yield _scene_engine_updates(output_root, preview_html)
+        yield _scene_engine_updates(runtime, output_root, preview_html)
         return
 
+    if not _scene_runs.attach(session_id, token, process):
+        terminate_process_group(process)
+        return
     output_queue: queue.Queue[str] = queue.Queue()
     reader = threading.Thread(
         target=read_process_output,
@@ -412,43 +478,41 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
         daemon=True,
     )
     with runtime_lock:
-        if runtime.run_token != token:
+        if not _scene_runs.is_active(session_id, token, process):
             terminate_process_group(process)
             return
-        runtime.scene_engine_process = process
-        set_runtime_phase_locked("started")
+        set_runtime_phase_locked(runtime, "started")
         runtime.status = "Scene Engine generation started."
     reader.start()
 
     while process.poll() is None:
         drained = _drain_output_queue(output_queue)
         with runtime_lock:
-            if (
-                runtime.run_token != token
-                or runtime.scene_engine_process is not process
-            ):
+            if not _scene_runs.is_active(session_id, token, process):
                 return
             for line in drained:
                 runtime.log_lines.append(line)
                 set_runtime_phase_locked(
-                    _scene_engine_phase_from_log(line, runtime.phase_key)
+                    runtime,
+                    _scene_engine_phase_from_log(line, runtime.phase_key),
                 )
             if (output_root / "scene_export" / "scene_config.json").is_file():
-                set_runtime_phase_locked("gym_export")
+                set_runtime_phase_locked(runtime, "gym_export")
             runtime.status = PHASES[runtime.phase_key].label + "."
-        yield _scene_engine_updates(output_root, preview_html)
+        yield _scene_engine_updates(runtime, output_root, preview_html)
         time.sleep(0.5)
 
     reader.join(timeout=1.0)
     with runtime_lock:
-        if runtime.run_token != token or runtime.scene_engine_process is not process:
+        if not _scene_runs.is_active(session_id, token, process):
             return
         for line in _drain_output_queue(output_queue):
             runtime.log_lines.append(line)
             set_runtime_phase_locked(
-                _scene_engine_phase_from_log(line, runtime.phase_key)
+                runtime,
+                _scene_engine_phase_from_log(line, runtime.phase_key),
             )
-        runtime.scene_engine_process = None
+    _scene_runs.finish(session_id, token, process)
 
     scene_export = output_root / "scene_export" / "scene_config.json"
     if process.returncode != 0 or not scene_export.is_file():
@@ -458,80 +522,71 @@ def run_scene_engine(image_value: str | np.ndarray | Image.Image):
             else f"Scene Engine did not create {scene_export}."
         )
         with runtime_lock:
-            if runtime.run_token != token:
+            if not _scene_runs.is_active(session_id, token):
                 return
             runtime.is_busy = False
             runtime.scene_engine_is_running = False
-            set_runtime_phase_locked("failed")
+            set_runtime_phase_locked(runtime, "failed")
             runtime.status = detail
             runtime.last_error = detail
-        yield _scene_engine_updates(output_root, preview_html)
+        yield _scene_engine_updates(runtime, output_root, preview_html)
         return
 
-    port = SCENE_ENGINE_VISER_PORT
-    preview_command = [
-        sys.executable,
-        COMMANDS["scene_engine"]["preview_script"],
-        "--output_root",
-        str(output_root),
-        "--viser",
-        "--viser-host",
-        "0.0.0.0",
-        "--viser-port",
-        str(port),
-    ]
-    try:
-        preview_process = start_pipeline(preview_command)
-    except Exception as exc:
+    preview_error: str | None = None
+    with _preview_start_lock:
+        port = _select_available_port(SCENE_ENGINE_VISER_PORT)
+        preview_command = [
+            sys.executable,
+            COMMANDS["scene_engine"]["preview_script"],
+            "--output_root",
+            str(output_root),
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            str(port),
+        ]
+        try:
+            preview_process = start_pipeline(preview_command)
+        except Exception as exc:
+            preview_error = f"Viser preview start failed: {exc}"
+        else:
+            if not _scene_runs.attach(session_id, token, preview_process):
+                terminate_process_group(preview_process)
+                return
+            with runtime_lock:
+                runtime.log_lines.append("$ " + " ".join(preview_command))
+                set_runtime_phase_locked(runtime, "preview")
+                runtime.status = "Starting Viser preview..."
+
+            if not _wait_for_viser(port, preview_process):
+                terminate_process_group(preview_process)
+                _scene_runs.finish(session_id, token, preview_process)
+                preview_error = "Viser preview did not start."
+
+    if preview_error is not None:
         with runtime_lock:
-            if runtime.run_token != token:
+            if not _scene_runs.is_active(session_id, token):
                 return
             runtime.is_busy = False
             runtime.scene_engine_is_running = False
-            set_runtime_phase_locked("failed")
-            runtime.status = f"Viser preview start failed: {exc}"
-            runtime.last_error = str(exc)
-        yield _scene_engine_updates(output_root, preview_html)
-        return
-
-    with runtime_lock:
-        if runtime.run_token != token:
-            terminate_process_group(preview_process)
-            return
-        runtime.scene_preview_process = preview_process
-        runtime.log_lines.append("$ " + " ".join(preview_command))
-        set_runtime_phase_locked("preview")
-        runtime.status = "Starting Viser preview..."
-    yield _scene_engine_updates(output_root, preview_html)
-
-    if not _wait_for_viser(port, preview_process):
-        terminate_process_group(preview_process)
-        with runtime_lock:
-            if runtime.run_token != token:
-                return
-            runtime.scene_preview_process = None
-            runtime.is_busy = False
-            runtime.scene_engine_is_running = False
-            set_runtime_phase_locked("failed")
-            runtime.status = "Viser preview did not start."
-            runtime.last_error = runtime.status
-        yield _scene_engine_updates(output_root, preview_html)
+            set_runtime_phase_locked(runtime, "failed")
+            runtime.status = preview_error
+            runtime.last_error = preview_error
+        yield _scene_engine_updates(runtime, output_root, preview_html)
         return
 
     preview_html = _viser_iframe(port, scene_hash)
     with runtime_lock:
-        if (
-            runtime.run_token != token
-            or runtime.scene_preview_process is not preview_process
-        ):
+        if not _scene_runs.is_active(session_id, token, preview_process):
             terminate_process_group(preview_process)
             return
         runtime.is_busy = False
         runtime.scene_engine_is_running = False
-        set_runtime_phase_locked("complete")
+        set_runtime_phase_locked(runtime, "complete")
         runtime.status = "Scene generated successfully. Viser preview is ready."
         runtime.last_error = None
-    yield _scene_engine_updates(output_root, preview_html)
+    yield _scene_engine_updates(runtime, output_root, preview_html)
 
 
 def _action_scene_is_available() -> bool:
@@ -545,45 +600,120 @@ def _action_agent_cli_is_available() -> bool:
         return False
 
 
-def run_action_engine_from_current(task_text: str, robot_profile: str | None):
-    """Launch DexSim for the existing ``current`` Gym scene."""
+def run_action_engine_from_current(
+    task_text: str,
+    robot_profile: str | None,
+    request: gr.Request,
+) -> tuple[object, ...]:
+    """Launch DexSim for the requesting Gradio session.
+
+    Args:
+        task_text: Natural-language task for the action agent.
+        robot_profile: Optional robot selection exposed by the UI.
+        request: Gradio request carrying the owning session hash.
+
+    Returns:
+        Current Action Engine widget values for the session.
+    """
+    session_id = get_request_session_id(request)
     task_text = (task_text or "").strip()
     with runtime_lock:
+        runtime = runtime_registry.get(session_id)
         if not task_text:
             failure = "Enter a task description first."
         elif not _action_scene_is_available():
             failure = "Current Gym scene/config is unavailable."
-        elif runtime.is_busy or runtime.sim_process is not None:
-            failure = "Another engine is already running."
+        elif runtime.is_busy:
+            failure = "Another engine is already running in this session."
         elif not _action_agent_cli_is_available():
             failure = "Action-agent CLI is unavailable in this environment."
         else:
             failure = None
-            token = uuid.uuid4().hex
-            runtime.run_token = token
+            token = _action_runs.begin(session_id)
             runtime.is_busy = True
             runtime.task_text = task_text
             runtime.status = "Starting DexSim action simulation..."
             runtime.last_error = None
             runtime.log_lines.clear()
-            set_runtime_phase_locked("started")
+            set_runtime_phase_locked(runtime, "started")
 
         if failure is not None:
             runtime.status = failure
             runtime.last_error = failure
 
     if failure is None:
-        error = _launch_current_simulation(token, robot_profile=robot_profile)
+        error = _launch_current_simulation(
+            session_id,
+            runtime,
+            token,
+            robot_profile=robot_profile,
+        )
         if error:
             with runtime_lock:
-                runtime.is_busy = False
-                set_runtime_phase_locked("failed")
-                runtime.status = error
-                runtime.last_error = error
-    return ui_snapshot()
+                if _action_runs.is_active(session_id, token):
+                    runtime.is_busy = False
+                    set_runtime_phase_locked(runtime, "failed")
+                    runtime.status = error
+                    runtime.last_error = error
+    return ui_snapshot(session_id)
+
+
+def stop_action_engine(request: gr.Request) -> tuple[object, ...]:
+    """Stop only the requesting session's Action processes and reset its UI.
+
+    The DexSim process group includes any child processes it launches. The
+    separately managed Action scene preview is also stopped. Other sessions and
+    the requesting session's Scene and Asset processes remain untouched.
+
+    Args:
+        request: Gradio request for the browser session initiating Stop.
+
+    Returns:
+        Reset values for the Action preview, status, video, task, and progress
+        widgets.
+    """
+    session_id = get_request_session_id(request)
+    with runtime_lock:
+        runtime = runtime_registry.get(session_id)
+        _action_runs.reset(session_id)
+        _action_preview_runs.reset(session_id)
+        if not runtime.scene_engine_is_running:
+            runtime.is_busy = False
+            set_runtime_phase_locked(runtime, "idle")
+            runtime.status = "Action Engine stopped."
+            runtime.last_error = None
+            runtime.log_lines.clear()
+        runtime.task_text = ""
+        runtime.video_path = None
+        runtime.last_sent_video_signature = None
+
+    return (
+        _ACTION_IDLE_PREVIEW,
+        "**Scene preview:** Action Engine stopped.",
+        None,
+        "",
+        PHASES["idle"].progress,
+        format_status("Action Engine stopped."),
+    )
+
+
+def cleanup_workflow_session(request: gr.Request) -> None:
+    """Stop Scene and Action processes owned by a disconnected session.
+
+    Args:
+        request: Gradio unload request carrying the disconnected session hash.
+    """
+    session_id = get_request_session_id(request)
+    with runtime_lock:
+        _scene_runs.reset(session_id)
+        _action_runs.reset(session_id)
+        _action_preview_runs.reset(session_id)
+        runtime_registry.reset(session_id)
 
 
 def _launch_current_simulation(
+    session_id: str,
+    runtime: RuntimeState,
     token: str,
     *,
     robot_profile: str | None = None,
@@ -603,21 +733,18 @@ def _launch_current_simulation(
     )
     monitor = threading.Thread(
         target=_monitor_simulation,
-        args=(token, process, output_queue, reader, started_at_ns),
+        args=(session_id, runtime, token, process, output_queue, reader, started_at_ns),
         daemon=True,
     )
 
-    with runtime_lock:
-        if runtime.run_token != token:
-            stale = True
-        else:
-            stale = False
-            runtime.sim_process = process
-            runtime.log_lines.append("$ " + " ".join(command))
-
-    if stale:
+    if not _action_runs.attach(session_id, token, process):
         terminate_process_group(process)
         return None
+    with runtime_lock:
+        if not _action_runs.is_active(session_id, token, process):
+            terminate_process_group(process)
+            return None
+        runtime.log_lines.append("$ " + " ".join(command))
 
     reader.start()
     monitor.start()
@@ -625,6 +752,8 @@ def _launch_current_simulation(
 
 
 def _monitor_simulation(
+    session_id: str,
+    runtime: RuntimeState,
     token: str,
     process: subprocess.Popen[str],
     output_queue: queue.Queue[str],
@@ -632,11 +761,27 @@ def _monitor_simulation(
     started_at_ns: int,
 ) -> None:
     while process.poll() is None:
-        _append_simulation_logs(token, process, _drain_output_queue(output_queue))
+        _append_simulation_logs(
+            session_id,
+            runtime,
+            token,
+            process,
+            _drain_output_queue(output_queue),
+        )
+        if not _action_runs.is_active(session_id, token, process):
+            return
         time.sleep(0.5)
 
     reader.join(timeout=1.0)
-    _append_simulation_logs(token, process, _drain_output_queue(output_queue))
+    _append_simulation_logs(
+        session_id,
+        runtime,
+        token,
+        process,
+        _drain_output_queue(output_queue),
+    )
+    if not _action_runs.is_active(session_id, token, process):
+        return
     source_video = latest_audience_output_video(min_mtime_ns=started_at_ns)
     display_video: Path | None = None
     if source_video is not None:
@@ -647,30 +792,34 @@ def _monitor_simulation(
             display_video = destination
         except OSError as exc:
             _append_simulation_logs(
+                session_id,
+                runtime,
                 token,
                 process,
                 [f"Could not copy the simulation preview into the workspace: {exc}"],
             )
 
     with runtime_lock:
-        if runtime.run_token != token or runtime.sim_process is not process:
+        if not _action_runs.is_active(session_id, token, process):
             return
-        runtime.sim_process = None
         runtime.is_busy = False
         runtime.video_path = display_video
         if process.returncode == 0:
-            set_runtime_phase_locked("complete")
+            set_runtime_phase_locked(runtime, "complete")
             runtime.status = "DexSim simulation finished successfully."
             runtime.last_error = None
             if display_video is None:
                 runtime.log_lines.append("No simulation preview video was found.")
         else:
-            set_runtime_phase_locked("failed")
+            set_runtime_phase_locked(runtime, "failed")
             runtime.status = f"DexSim exited with return code {process.returncode}."
             runtime.last_error = runtime.status
+    _action_runs.finish(session_id, token, process)
 
 
 def _append_simulation_logs(
+    session_id: str,
+    runtime: RuntimeState,
     token: str,
     process: subprocess.Popen[str],
     lines: list[str],
@@ -678,13 +827,25 @@ def _append_simulation_logs(
     if not lines:
         return
     with runtime_lock:
-        if runtime.run_token == token and runtime.sim_process is process:
+        if _action_runs.is_active(session_id, token, process):
             runtime.log_lines.extend(lines)
 
 
-def ui_snapshot(extra_status: str | None = None):
-    """Return the current Action-engine widget values."""
+def ui_snapshot(
+    session_id: str,
+    extra_status: str | None = None,
+) -> tuple[object, ...]:
+    """Return Action-engine widget values for one Gradio session.
+
+    Args:
+        session_id: Stable Gradio session identifier.
+        extra_status: Optional text appended to the stored status.
+
+    Returns:
+        Video, task, progress, status, and compatibility placeholder values.
+    """
     with runtime_lock:
+        runtime = runtime_registry.get(session_id)
         phase = PHASES.get(runtime.phase_key, PHASES["idle"])
         video_value = None
         video_signature = None
