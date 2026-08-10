@@ -20,10 +20,29 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import PlanOptions
+
+
+class DynamicCollisionMode(str, Enum):
+    """Policy for consuming a live dynamic collision world.
+
+    This mode controls scene-snapshot obstacle binding and collision-world
+    revision recovery. It does not enable or disable a planner's configured
+    static-world or self-collision checks.
+    """
+
+    OFF = "off"
+    """Ignore scene-snapshot collision entities and their revisions."""
+
+    AUTO = "auto"
+    """Use live collision entities when the selected motion source supports them."""
+
+    REQUIRED = "required"
+    """Require live collision entities and a compatible motion planner."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,8 +75,8 @@ class MotionPolicy:
     acceleration_limit: float | None = None
     """Optional planner acceleration limit."""
 
-    collision_check: bool = True
-    """Whether collision-aware backends should enable collision checking."""
+    dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO
+    """How this invocation consumes live scene-snapshot collision entities."""
 
     plan_opts: PlanOptions | None = None
     """Optional typed planner-specific options."""
@@ -82,6 +101,20 @@ class MotionPolicy:
             raise ValueError("velocity_limit must be greater than zero when set.")
         if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
             raise ValueError("acceleration_limit must be greater than zero when set.")
+        mode = self.dynamic_collision_mode
+        if isinstance(mode, str):
+            try:
+                mode = DynamicCollisionMode(mode)
+            except ValueError as exc:
+                raise ValueError(
+                    "dynamic_collision_mode must be one of "
+                    f"{[item.value for item in DynamicCollisionMode]}, got {mode!r}."
+                ) from exc
+        elif not isinstance(mode, DynamicCollisionMode):
+            raise TypeError(
+                "dynamic_collision_mode must be a DynamicCollisionMode or string."
+            )
+        object.__setattr__(self, "dynamic_collision_mode", mode)
         object.__setattr__(self, "plan_opts", deepcopy(self.plan_opts))
 
 
@@ -123,4 +156,4 @@ class RecoveryPolicy:
                 raise ValueError(f"{name} must be greater than zero.")
 
 
-__all__ = ["MotionPolicy", "RecoveryPolicy"]
+__all__ = ["DynamicCollisionMode", "MotionPolicy", "RecoveryPolicy"]

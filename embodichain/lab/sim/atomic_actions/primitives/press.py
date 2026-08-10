@@ -80,7 +80,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[PressGoal, PressOptions],
         context: PlanningContext,

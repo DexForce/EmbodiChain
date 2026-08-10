@@ -19,11 +19,17 @@
 from __future__ import annotations
 
 from argparse import Namespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import torch
 
+from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
+    _animate_obstacle_to_pose,
+    _blocking_obstacle_pose,
+    _maximum_path_deviation,
+    _minimum_cuboid_clearance,
+)
 from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
@@ -32,6 +38,35 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     should_open_tutorial_window,
     should_wait_for_tutorial_input,
 )
+
+PHYSICS_DT = 0.1
+MOVE_DURATION = 0.25
+Y_OFFSET = 0.18
+EXPECTED_STEP_COUNT = 3
+CUBOID_SIZE = (0.2, 0.2, 0.2)
+
+
+def _run_obstacle_animation(*, pace_wall_time: bool) -> tuple[MagicMock, MagicMock]:
+    obstacle = MagicMock()
+    adapter = MagicMock()
+    adapter.physics_dt = PHYSICS_DT
+    start_pose = torch.eye(4).unsqueeze(0)
+    start_pose[:, 1, 3] = -0.2
+    target_pose = start_pose.clone()
+    target_pose[:, 1, 3] += Y_OFFSET
+
+    result = _animate_obstacle_to_pose(
+        obstacle,
+        adapter,
+        start_pose,
+        target_pose=target_pose,
+        duration=MOVE_DURATION,
+        pace_wall_time=pace_wall_time,
+    )
+
+    assert torch.equal(result, target_pose)
+    assert result.data_ptr() != target_pose.data_ptr()
+    return obstacle, adapter
 
 
 def test_should_wait_for_tutorial_input_is_disabled_for_headless_modes() -> None:
@@ -167,3 +202,88 @@ def test_broadcast_pose_batch_rejects_wrong_env_count() -> None:
 
     with pytest.raises(ValueError, match="num_envs"):
         broadcast_pose_batch(poses, num_envs=3)
+
+
+def test_obstacle_animation_interpolates_and_reaches_target_pose() -> None:
+    obstacle, adapter = _run_obstacle_animation(pace_wall_time=False)
+
+    poses = [entry.args[0] for entry in obstacle.set_local_pose.call_args_list]
+    expected_y = torch.tensor([-0.14, -0.08, -0.02])
+    actual_y = torch.stack([pose[0, 1, 3] for pose in poses])
+    assert actual_y.tolist() == pytest.approx(expected_y.tolist())
+    assert adapter.sleep.call_args_list == [call(PHYSICS_DT)] * EXPECTED_STEP_COUNT
+
+
+def test_obstacle_animation_paces_live_viewer_in_wall_time() -> None:
+    with patch(
+        "scripts.tutorials.atomic_action.dynamic_obstacle_recovery.time.sleep"
+    ) as sleep:
+        _run_obstacle_animation(pace_wall_time=True)
+
+    assert sleep.call_args_list == [call(PHYSICS_DT)] * EXPECTED_STEP_COUNT
+
+
+def test_blocking_pose_targets_the_selected_initial_path_waypoint() -> None:
+    start_pose = torch.eye(4).unsqueeze(0)
+    path = torch.tensor([[[0.4, -0.1, 0.3], [0.5, 0.0, 0.4], [0.6, 0.1, 0.5]]])
+
+    target_pose, waypoint_index = _blocking_obstacle_pose(
+        start_pose,
+        path,
+        path_fraction=0.5,
+    )
+
+    assert waypoint_index == 1
+    assert torch.equal(target_pose[:, :3, 3], path[:, waypoint_index])
+    assert torch.equal(start_pose, torch.eye(4).unsqueeze(0))
+
+
+def test_maximum_path_deviation_measures_detour_from_reference_polyline() -> None:
+    reference_path = torch.tensor([[[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [1.0, 0.0, 0.0]]])
+    detour_path = torch.tensor([[[0.0, 0.0, 0.0], [0.5, 0.2, 0.0], [1.0, 0.0, 0.0]]])
+
+    deviation = _maximum_path_deviation(detour_path, reference_path)
+
+    assert deviation.tolist() == pytest.approx([0.2])
+
+
+def test_minimum_cuboid_clearance_is_positive_outside_cuboid() -> None:
+    path = torch.tensor([[[0.25, 0.0, 0.0], [0.15, 0.0, 0.0]]])
+    cuboid_pose = torch.eye(4).unsqueeze(0)
+
+    clearance = _minimum_cuboid_clearance(
+        path,
+        cuboid_pose,
+        size=CUBOID_SIZE,
+    )
+
+    assert clearance.tolist() == pytest.approx([0.05])
+
+
+def test_minimum_cuboid_clearance_is_negative_inside_cuboid() -> None:
+    path = torch.tensor([[[0.05, 0.0, 0.0]]])
+    cuboid_pose = torch.eye(4).unsqueeze(0)
+
+    clearance = _minimum_cuboid_clearance(
+        path,
+        cuboid_pose,
+        size=CUBOID_SIZE,
+    )
+
+    assert clearance.tolist() == pytest.approx([-0.05])
+
+
+def test_minimum_cuboid_clearance_uses_cuboid_orientation() -> None:
+    path = torch.tensor([[[0.25, 0.0, 0.0]]])
+    cuboid_pose = torch.eye(4).unsqueeze(0)
+    cuboid_pose[0, :3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+
+    clearance = _minimum_cuboid_clearance(
+        path,
+        cuboid_pose,
+        size=(0.2, 0.4, 0.2),
+    )
+
+    assert clearance.tolist() == pytest.approx([0.05])

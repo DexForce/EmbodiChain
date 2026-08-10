@@ -168,7 +168,7 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         self.with_effect = with_effect
         self.plan_count = 0
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
@@ -287,6 +287,15 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
     assert second.wait_duration == pytest.approx(SECOND_INTERVAL)
     assert third.command_count == 3
     assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
+
+
+def test_session_active_trajectory_returns_an_owned_snapshot() -> None:
+    runner, _, _, _, _ = _make_runner()
+
+    trajectory = runner.session.active_trajectory
+    trajectory.positions.fill_(-1.0)
+
+    assert torch.all(runner.session.active_trajectory.positions >= 0.0)
 
 
 def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:

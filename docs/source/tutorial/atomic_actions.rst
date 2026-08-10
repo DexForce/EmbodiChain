@@ -79,8 +79,9 @@ recovery. None of these APIs steps the simulator directly. The application
 sends commands returned by an execution session and supplies new observations.
 
 ``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
-It is the implementation method overridden by an atomic-action author, not an
-additional application execution entry point. Similarly,
+It is the framework-owned template method called by the engine, not an
+additional application execution entry point. Atomic-action authors implement
+the protected ``_plan()`` hook instead. Similarly,
 ``engine.plan_action()`` is reserved for extensions and isolated tests that
 need to plan an unregistered instance.
 
@@ -100,6 +101,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``coordinated_placement.py``
 * ``hand_over.py``
 * ``moving_target_recovery.py``
+* ``dynamic_obstacle_recovery.py``
 
 The scripts are interactive by default. Add ``--auto_play`` to skip prompts;
 combine it with ``--headless --device cpu`` for a headless run that records
@@ -245,6 +247,7 @@ must be resolved from the latest scene snapshot:
    from embodichain.lab.sim.atomic_actions import (
        EndEffectorPoseGoal,
        RecoveryPolicy,
+       RigidObjectSceneProvider,
        SceneEntityPose,
    )
 
@@ -267,12 +270,21 @@ must be resolved from the latest scene snapshot:
        TaskState,
    )
 
-   adapter = SimulationExecutionAdapter(sim, robot, scene_supplier=read_scene)
+   scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
+   adapter = SimulationExecutionAdapter(
+       sim,
+       robot,
+       scene_provider=scene_provider,
+   )
    task = TaskState.empty(robot.get_qpos().shape[0], robot.device)
    initial_context = adapter.observe(task)
    session = engine.start((invocation,), initial_context)
    runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
    result = runner.run_until_blocked()
+
+For a lightweight scene source that does not need environment correlation IDs,
+pass a ``scene_supplier(timestamp)`` callback instead. ``scene_provider`` and
+``scene_supplier`` are mutually exclusive.
 
 The session owns planning progress and bounded recovery. The runner owns the
 outer lifecycle: it requests fresh observations, schedules each command from
@@ -300,6 +312,24 @@ for comparison:
 .. code-block:: bash
 
    python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
+
+For collision-aware execution, list pose-updatable obstacles in
+``RigidObjectSceneProvider.collision_entity_ids`` and configure matching
+dynamic obstacle names on a supporting planner such as cuRobo. The provider
+advances per-environment collision-world revisions when an obstacle moves;
+the session invalidates affected rows and the framework binds the latest poses
+before replanning:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless --auto_play
+
+``MotionPolicy.dynamic_collision_mode`` defaults to
+``DynamicCollisionMode.AUTO``. Use ``DynamicCollisionMode.REQUIRED`` when
+planning must fail unless the live collision world is available, or
+``DynamicCollisionMode.OFF`` to ignore snapshot collision entities and
+collision-world revisions. These modes do not disable static-world or
+self-collision checks configured by the selected planner.
 
 Recovery replans reuse one immutable invocation-revision snapshot. If an
 application intentionally changes the goal, options, policy, binding, or a
@@ -356,8 +386,10 @@ Adding an action
 ----------------
 
 Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-define typed runtime options when needed, implement ``plan(request, context)``,
-and declare the stable skill metadata:
+define typed runtime options when needed, implement the protected
+``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
+override the inherited public ``plan()`` method because it binds the latest
+collision scene first:
 
 .. code-block:: python
 
@@ -382,7 +414,7 @@ and declare the stable skill metadata:
        def __init__(self, default_options: PushOptions | None = None) -> None:
            super().__init__(default_options)
 
-       def plan(
+       def _plan(
            self,
            request: ResolvedActionRequest[PushGoal, PushOptions],
            context: PlanningContext,

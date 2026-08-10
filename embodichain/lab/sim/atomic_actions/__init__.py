@@ -71,7 +71,7 @@ from .plans import (
     PlannerDiagnostics,
     TimedTrajectory,
 )
-from .policies import MotionPolicy, RecoveryPolicy
+from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
@@ -119,7 +119,13 @@ from .runner import (
     RunnerStep,
     RunnerStepCallback,
 )
-from .sim_adapter import SceneSnapshotSupplier, SimulationExecutionAdapter
+from .scene import SceneProvider
+from .sim_adapter import (
+    RigidObjectSceneProvider,
+    RigidObjectSceneProviderCfg,
+    SceneSnapshotSupplier,
+    SimulationExecutionAdapter,
+)
 from .state import (
     CoordinatedHeldObjectState,
     EntityState,
@@ -163,6 +169,7 @@ __all__ = [
     "CoordinatedPlacement",
     "CoordinatedPlacementGoal",
     "CoordinatedPlacementOptions",
+    "DynamicCollisionMode",
     "EndEffectorPoseGoal",
     "EntityState",
     "EffectVerifier",
@@ -210,6 +217,8 @@ __all__ = [
     "PressGoal",
     "PressOptions",
     "RecoveryPolicy",
+    "RigidObjectSceneProvider",
+    "RigidObjectSceneProviderCfg",
     "ResolvedActionRequest",
     "ResolvedActionBinding",
     "ResolvedControlPart",
@@ -217,6 +226,7 @@ __all__ = [
     "RunnerStatus",
     "RunnerStep",
     "RunnerStepCallback",
+    "SceneProvider",
     "SceneSnapshot",
     "SceneSnapshotSupplier",
     "SceneEntityPose",

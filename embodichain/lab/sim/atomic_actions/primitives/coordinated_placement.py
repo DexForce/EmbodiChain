@@ -187,7 +187,7 @@ class CoordinatedPlacement(
             ),
         )
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[
             CoordinatedPlacementGoal, CoordinatedPlacementOptions

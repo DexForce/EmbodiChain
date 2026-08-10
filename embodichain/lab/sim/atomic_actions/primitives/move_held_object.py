@@ -97,7 +97,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[HeldObjectPoseGoal, MoveHeldObjectOptions],
         context: PlanningContext,

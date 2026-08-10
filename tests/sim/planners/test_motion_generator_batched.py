@@ -96,6 +96,66 @@ def test_direct_cartesian_planner_rejects_joint_targets():
         )
 
 
+def test_bind_collision_world_copies_caller_options() -> None:
+    planner = Mock()
+    planner.supports_collision_world_updates = True
+    original = PlanOptions()
+    obstacle_pose = torch.eye(4).unsqueeze(0)
+
+    def bind(options, *, obstacle_poses):
+        options.bound_obstacle_poses = obstacle_poses
+        return options
+
+    planner.with_collision_world.side_effect = bind
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    bound = generator.bind_collision_world(
+        original,
+        obstacle_poses={"obstacle": obstacle_pose},
+    )
+
+    assert generator.supports_dynamic_collision_world is True
+    assert bound is not original
+    assert not hasattr(original, "bound_obstacle_poses")
+    assert bound.bound_obstacle_poses["obstacle"] is obstacle_pose
+    planner.with_collision_world.assert_called_once()
+
+
+def test_bind_collision_world_rejects_unsupported_planner() -> None:
+    planner = Mock()
+    planner.supports_collision_world_updates = False
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    with pytest.raises(ValueError, match="does not support"):
+        generator.bind_collision_world(
+            PlanOptions(),
+            obstacle_poses={"obstacle": torch.eye(4).unsqueeze(0)},
+        )
+
+    assert generator.supports_dynamic_collision_world is False
+    planner.with_collision_world.assert_not_called()
+
+
+def test_bind_collision_world_uses_backend_default_options() -> None:
+    planner = Mock()
+    planner.supports_collision_world_updates = True
+    defaults = PlanOptions()
+    planner.default_plan_options.return_value = defaults
+    planner.with_collision_world.return_value = defaults
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    bound = generator.bind_collision_world(
+        None,
+        obstacle_poses={"obstacle": torch.eye(4).unsqueeze(0)},
+    )
+
+    assert bound is defaults
+    planner.default_plan_options.assert_called_once_with()
+
+
 def _mock_planner(b=3, n=15, dofs=6):
     planner = Mock()
     planner.supported_move_types = frozenset({MoveType.JOINT_MOVE})

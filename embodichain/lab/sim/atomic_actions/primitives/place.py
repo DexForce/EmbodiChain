@@ -149,7 +149,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
         context: PlanningContext,

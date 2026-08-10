@@ -825,7 +825,7 @@ class CoordinatedPickment(
             self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
         )
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[CoordinatedPickGoal, CoordinatedPickmentOptions],
         context: PlanningContext,

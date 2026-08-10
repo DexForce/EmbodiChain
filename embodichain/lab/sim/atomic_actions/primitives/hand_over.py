@@ -200,7 +200,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     # Public contract
     # ------------------------------------------------------------------
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[GraspGoal, HandOverOptions],
         context: PlanningContext,

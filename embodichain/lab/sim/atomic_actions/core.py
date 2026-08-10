@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -46,6 +46,7 @@ from .plans import (
     PlannerDiagnostics,
     TimedTrajectory,
 )
+from .policies import DynamicCollisionMode
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -161,6 +162,15 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Reject skill classes that bypass framework-owned scene binding."""
+        super().__init_subclass__(**kwargs)
+        if "plan" in cls.__dict__:
+            raise TypeError(
+                "AtomicAction subclasses must implement _plan(); the public "
+                "plan() method is framework-owned."
+            )
 
     def __init__(
         self,
@@ -348,6 +358,84 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request.binding.end_effector(role)
         return request.goal
 
+    def plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Bind the current collision scene and invoke the skill planner.
+
+        Args:
+            request: Immutable, typed, and embodiment-resolved action request.
+            context: Latest observed robot, task, and scene state.
+
+        Returns:
+            Scene-bound action plan with expected, uncommitted effects.
+        """
+        self.require_goal(request)
+        prepared = self._prepare_request(request, context)
+        return self._plan(prepared, context)
+
+    def _prepare_request(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ResolvedActionRequest[GoalT, OptionsT]:
+        """Bind snapshot obstacle poses without mutating the resolved request."""
+        if not self._uses_collision_world(request, context):
+            return request
+        poses = context.scene.collision_obstacle_poses(
+            batch_size=context.batch_size,
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        policy = replace(
+            request.motion_policy,
+            plan_opts=self.motion_generator.bind_collision_world(
+                request.motion_policy.plan_opts,
+                obstacle_poses=poses,
+            ),
+        )
+        return replace(request, motion_policy=policy)
+
+    def _uses_collision_world(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> bool:
+        """Return whether this planning attempt consumes collision revisions."""
+        mode = request.motion_policy.dynamic_collision_mode
+        if mode is DynamicCollisionMode.OFF:
+            return False
+
+        uses_motion_generator = request.motion_policy.motion_source == "motion_gen"
+        has_collision_entities = bool(context.scene.collision_entity_ids)
+        supports_updates = (
+            getattr(
+                self.motion_generator,
+                "supports_dynamic_collision_world",
+                False,
+            )
+            is True
+        )
+        available = (
+            uses_motion_generator and has_collision_entities and supports_updates
+        )
+        if mode is DynamicCollisionMode.REQUIRED and not available:
+            missing: list[str] = []
+            if not uses_motion_generator:
+                missing.append("motion_source='motion_gen'")
+            if not has_collision_entities:
+                missing.append("scene collision entities")
+            if not supports_updates:
+                missing.append("a planner with dynamic collision-world support")
+            raise ValueError(
+                "dynamic_collision_mode='required' cannot be satisfied; missing "
+                + ", ".join(missing)
+                + "."
+            )
+        return available
+
     def build_plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
@@ -434,9 +522,16 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 ),
                 recovery_policy=request.recovery_policy,
                 scene_dependencies=collect_scene_dependencies(request.goal),
+                collision_world_sensitive=self._uses_collision_world(
+                    request,
+                    context,
+                ),
             ),
             trajectory=timed,
             planned_scene_version=context.scene.version,
+            planned_collision_world_revision=(
+                context.scene.collision_world_revisions(context.batch_size)
+            ),
             diagnostics=diagnostics,
         )
         return ActionPlan(
@@ -485,7 +580,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         )
 
     @abstractmethod
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,

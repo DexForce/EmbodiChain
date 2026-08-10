@@ -77,7 +77,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     ) -> None:
         super().__init__(default_options)
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
         context: PlanningContext,

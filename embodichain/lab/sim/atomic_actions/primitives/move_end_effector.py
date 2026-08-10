@@ -63,7 +63,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     ) -> None:
         super().__init__(default_options)
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
         context: PlanningContext,

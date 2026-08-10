@@ -79,6 +79,7 @@ The boundary is deliberate:
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
 | Recovery state | `ExecutionSession` | Consumes fresh contexts, emits at most one `JointCommand` per tick, and owns bounded recovery/revision state |
+| Scene observation | `SceneProvider` | Captures ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `CommandSink`, and `ExecutionClock` adapters | Isolates observation, command transport, and time/physics advancement from planning and session state |
 | Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
@@ -169,7 +170,7 @@ from leaking into an Action Agent schema.
 | `ActionOptions` / built-in `*Options` | Frozen invocation-varying skill behavior: phase counts, offsets, grasp-selection rules | Robot resource names, hand qpos, planner backend |
 | `ControlPartCommandProfile` | Embodiment-specific semantic commands such as `open`, `grasp`, and `ready`, keyed by actual control-part name | Action roles, task goals, recovery state |
 | `ActionControlOverrides` | Optional role-scoped command replacements for one invocation revision | Persistent robot configuration |
-| `MotionPolicy` | Motion source, sample count, timing, limits, collision option, typed planner options | Skill semantics or robot-resource names |
+| `MotionPolicy` | Motion source, sample count, timing, limits, dynamic-collision mode, typed planner options | Skill semantics or robot-resource names |
 | `RecoveryPolicy` | Replan/retry budgets, tracking and dynamic-goal thresholds, phase timeout | Controller state or mutable counters |
 | `ExecutionRunnerCfg` | Runner-level acknowledgement deadlines, minimum feedback cadence, and completion hold policy | Skill behavior, planning resources, or invocation revision data |
 | `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs | Hypothetical simulator mutation |
@@ -308,6 +309,11 @@ Consequences of this ownership model:
 - an action instance cannot be silently reused by a different engine;
 - one registered instance exists per stable `skill_id` in an engine.
 
+The framework-owned `AtomicAction.plan()` template method binds collision
+entity poses from the current `SceneSnapshot` into copied backend options, then
+calls the skill-specific `_plan()` hook. Individual skills therefore do not
+own dynamic-obstacle parameters or mutate caller-owned motion policies.
+
 Registration means that an implementation is installed, not that every robot
 can execute it. Required roles, control parts, profiles, and task-state
 preconditions are validated while an invocation is resolved and planned. Agent
@@ -354,12 +360,13 @@ built-in set; instantiate a discovered extension and pass it to
 ### Implementation and advanced APIs
 
 The similarly named `AtomicAction.plan()` method is not a fourth application
-entry point. It is the polymorphic method implemented by each skill and called
-by the engine after resolving an invocation:
+entry point. It is a framework-owned template method called by the engine after
+resolving an invocation; skill implementations provide `_plan()`:
 
 | API | Intended caller | Behavior |
 |---|---|---|
-| `AtomicAction.plan(request, context)` | Atomic-action implementer | Consumes an immutable `ResolvedActionRequest` and returns an `ActionPlan` |
+| `AtomicAction.plan(request, context)` | `AtomicActionEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
+| `AtomicAction._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedActionRequest` and returns an `ActionPlan` |
 | `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
 | `session.revise_current(invocation)` | Runtime orchestrator or Action Agent | Replaces the active logical call with a newer revision and replans from the latest observed context |
 | `runner.step(effect_success=...)` | Non-blocking controller integration | Observes and dispatches only when the next timed command is due |
@@ -488,7 +495,8 @@ For most applications, use `ExecutionRunner` to keep scheduling and controller
 acknowledgement handling outside the session:
 
 ```python
-adapter = SimulationExecutionAdapter(sim, robot, scene_supplier=read_scene)
+scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
+adapter = SimulationExecutionAdapter(sim, robot, scene_provider=scene_provider)
 initial_context = adapter.observe(
     TaskState.empty(robot.get_qpos().shape[0], robot.device)
 )
@@ -496,6 +504,10 @@ session = engine.start((moving_goal,), initial_context)
 runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
 result = runner.run_until_blocked()
 ```
+
+For a lightweight scene source that does not need environment correlation IDs,
+pass a `scene_supplier(timestamp)` callback instead. `scene_provider` and
+`scene_supplier` are mutually exclusive.
 
 `ExecutionRunner.step()` is the non-blocking entry point for an application
 that already owns its event loop. It observes only when the previous command's
@@ -518,6 +530,7 @@ On each tick, the session can detect:
 - joint tracking error relative to the previously emitted command;
 - translation or rotation of a `SceneEntityPose` dependency beyond policy
   thresholds;
+- a newer collision-world revision for a collision-sensitive phase;
 - phase timeout;
 - planning or terminal-goal failure for individual batch rows.
 
@@ -533,6 +546,23 @@ trigger recovery keep their eligibility and do not spend recovery budget, but
 they receive the regenerated plan from its batch barrier. Fully asynchronous
 per-environment phase scheduling belongs in a higher-level scheduler rather than
 this atomic-action session.
+
+`SceneProvider.snapshot(timestamp=..., env_ids=...)` is the scene-observation
+boundary. `SceneSnapshot.collision_entity_ids` identifies obstacle poses
+consumed by a planner, while `collision_world_revision` can be global or
+per-environment. `RigidObjectSceneProvider` tracks live simulation objects,
+filters sub-threshold pose noise, and advances those revisions. Backends opt in
+through `supports_collision_world_updates` and `with_collision_world()`;
+`MotionGenerator.bind_collision_world()` owns that backend boundary, and cuRobo
+maps the snapshot poses to `CuroboPlanOptions.dynamic_obstacle_poses`. A newer
+revision invalidates only affected rows before synchronized cohort replanning.
+
+`MotionPolicy.dynamic_collision_mode` controls this live-scene path. `AUTO`
+(the default) consumes collision entities when the selected motion source and
+planner support them, `OFF` ignores snapshot collision entities and their
+revisions, and `REQUIRED` fails planning unless a compatible motion generator
+and collision entities are available. This mode does not enable or disable the
+planner's configured static-world or self-collision checks.
 
 Recovery does not re-read a mutable Action object or invocation. The engine
 resolves each call once into a `ResolvedActionRequest` containing an owned goal
@@ -580,6 +610,10 @@ Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
 directly queries a simulation entity during planning will use its latest pose
 when planning happens, but that query alone does not trigger scene-motion
 replanning.
+
+Dynamic collision invalidation is provider-driven. Only registered,
+pose-updatable collision entities are supported; adding/removing obstacles or
+changing their geometry requires rebuilding the planner world.
 ```
 
 ## Planning success versus physical success
@@ -641,8 +675,8 @@ A new primitive should:
    agent visibility;
 4. put reusable embodiment commands on control-part profiles and generic
    motion/recovery choices in invocation policies;
-5. implement side-effect-free `plan(request, context)` using the
-   engine-owned planning services;
+5. implement side-effect-free `_plan(request, context)` using the engine-owned
+   planning services; do not override the framework-owned public `plan()`;
 6. return full-robot timed motion, per-environment planning success,
    diagnostics, and uncommitted effects;
 7. add registration coverage, contract tests, execution/recovery tests, a
@@ -658,3 +692,5 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
 - `scripts/tutorials/atomic_action/moving_target_recovery.py` — runnable runner
   example that visibly moves a late-bound target, replans, and picks up the cube
+- `scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py` — cuRobo
+  collision-world revision and obstacle-pose replanning example

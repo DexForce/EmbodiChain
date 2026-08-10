@@ -246,7 +246,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         return is_success, full
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[GraspGoal, PickUpOptions],
         context: PlanningContext,

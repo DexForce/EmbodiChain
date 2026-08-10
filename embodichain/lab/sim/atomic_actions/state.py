@@ -430,12 +430,40 @@ class SceneSnapshot:
     timestamp: float
     version: int
     entities: Mapping[str, EntityState] = field(default_factory=dict)
+    collision_world_revision: int | tuple[int, ...] = 0
+    """Global or per-environment collision-world revision."""
+
+    collision_entity_ids: tuple[str, ...] = ()
+    """Entity IDs whose poses update a planner's dynamic collision world."""
 
     def __post_init__(self) -> None:
         if self.timestamp < 0.0:
             raise ValueError("SceneSnapshot.timestamp must be non-negative.")
         if self.version < 0:
             raise ValueError("SceneSnapshot.version must be non-negative.")
+        revision = self.collision_world_revision
+        if isinstance(revision, bool):
+            raise TypeError("collision_world_revision must contain integers.")
+        if isinstance(revision, int):
+            if revision < 0:
+                raise ValueError(
+                    "collision_world_revision must contain non-negative values."
+                )
+        else:
+            if not isinstance(revision, tuple) or not revision:
+                raise TypeError(
+                    "collision_world_revision must be an integer or a non-empty "
+                    "tuple of integers."
+                )
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in revision
+            ):
+                raise TypeError("collision_world_revision must contain integers.")
+            if any(value < 0 for value in revision):
+                raise ValueError(
+                    "collision_world_revision must contain non-negative values."
+                )
         normalized: dict[str, EntityState] = {}
         for entity_id, state in self.entities.items():
             if not isinstance(entity_id, str) or not entity_id:
@@ -445,7 +473,78 @@ class SceneSnapshot:
                     "SceneSnapshot entities must contain EntityState values."
                 )
             normalized[entity_id] = state
+        collision_entity_ids = tuple(self.collision_entity_ids)
+        if len(set(collision_entity_ids)) != len(collision_entity_ids) or not all(
+            isinstance(entity_id, str) and entity_id
+            for entity_id in collision_entity_ids
+        ):
+            raise ValueError(
+                "collision_entity_ids must contain unique non-empty entity IDs."
+            )
+        missing = set(collision_entity_ids).difference(normalized)
+        if missing:
+            raise ValueError(
+                "collision_entity_ids reference missing scene entities: "
+                f"{sorted(missing)}."
+            )
         object.__setattr__(self, "entities", MappingProxyType(normalized))
+        object.__setattr__(self, "collision_entity_ids", collision_entity_ids)
+
+    def collision_world_revisions(self, batch_size: int) -> tuple[int, ...]:
+        """Expand the collision revision to one value per environment.
+
+        Args:
+            batch_size: Number of environments represented by the planning context.
+
+        Returns:
+            Per-environment monotonic revision tuple.
+
+        Raises:
+            ValueError: If an explicit revision tuple does not match the batch.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive.")
+        revision = self.collision_world_revision
+        if isinstance(revision, int):
+            return (revision,) * batch_size
+        if len(revision) == 1:
+            return revision * batch_size
+        if len(revision) != batch_size:
+            raise ValueError(
+                "collision_world_revision must be global or have one value per "
+                f"environment; got {len(revision)} values for batch {batch_size}."
+            )
+        return revision
+
+    def collision_obstacle_poses(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Mapping[str, torch.Tensor]:
+        """Return collision obstacle poses in planning batch order.
+
+        Args:
+            batch_size: Number of planning environments.
+            device: Planner tensor device.
+            dtype: Planner tensor dtype.
+
+        Returns:
+            Mapping from configured collision entity ID to ``(B, 4, 4)`` pose.
+        """
+        poses: dict[str, torch.Tensor] = {}
+        for entity_id in self.collision_entity_ids:
+            pose = self.entities[entity_id].pose.to(device=device, dtype=dtype)
+            if pose.shape == (4, 4):
+                pose = pose.unsqueeze(0).expand(batch_size, -1, -1)
+            elif pose.shape != (batch_size, 4, 4):
+                raise ValueError(
+                    f"Collision entity {entity_id!r} pose must match planning "
+                    f"batch size {batch_size}."
+                )
+            poses[entity_id] = pose.clone()
+        return MappingProxyType(poses)
 
     @classmethod
     def empty(cls) -> SceneSnapshot:
@@ -473,6 +572,13 @@ class PlanningContext:
             raise ValueError("TaskState and RobotObservation batch sizes must match.")
         if self.task.device != self.robot.qpos.device:
             raise ValueError("TaskState and RobotObservation must share a device.")
+        self.scene.collision_world_revisions(self.robot.batch_size)
+        for entity_id, state in self.scene.entities.items():
+            if state.pose.dim() == 3 and state.pose.shape[0] != self.robot.batch_size:
+                raise ValueError(
+                    f"Scene entity {entity_id!r} pose batch must match the "
+                    "planning context."
+                )
         if not isinstance(self.env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor.")
         if self.env_ids.dtype != torch.long:
