@@ -1212,15 +1212,6 @@ class BoundSemanticIntegration:
                 )
             )
         linked = self._manifest.link_call(call, path=path)
-        if type(linked.call) is RegisteredSemanticCall:
-            raise SemanticValidationError(
-                SemanticDiagnostic(
-                    "semantic_lowerer_not_installed",
-                    (*path, "kind"),
-                    f"Registered semantic call {linked.call.semantic_id!r} was "
-                    "discovered but has no explicitly installed compiler lowerer.",
-                )
-            )
         installed = self._engine.skills.get(linked.descriptor.skill_id)
         if installed is None or installed != linked.descriptor.target_descriptor:
             raise SemanticValidationError(

@@ -33,6 +33,7 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
     EntityState,
+    ObjectSemantics,
     SceneProvider,
     SceneSnapshot,
 )
@@ -690,12 +691,18 @@ def _copy_affordance(affordance: Affordance | None) -> Affordance | None:
 
     visit(affordance)
     try:
-        return deepcopy(affordance, memo)
+        copied = deepcopy(affordance, memo)
     except Exception as exc:  # noqa: BLE001 - normalize opaque metadata failures
         raise TypeError(
             f"Affordance {type(affordance).__name__} must contain copyable "
             "registry metadata."
         ) from exc
+    if copied is affordance or type(copied) is not type(affordance):
+        raise TypeError(
+            f"Affordance {type(affordance).__name__} must deepcopy to a distinct "
+            "value of the exact same type."
+        )
+    return copied
 
 
 @dataclass(frozen=True, slots=True, eq=False, init=False)
@@ -1115,6 +1122,49 @@ class SceneRegistry:
             f"{[candidate.entity_id for candidate in candidates]}. Configure "
             "default_affordances for this parent and capability or select one "
             "explicitly."
+        )
+
+    def object_semantics(
+        self,
+        object_ref: str | SceneObjectRef,
+        *,
+        affordance: str | SceneAffordanceRef,
+    ) -> ObjectSemantics:
+        """Build one owned atomic-action semantic snapshot.
+
+        Args:
+            object_ref: Canonical object ID, alias, or typed reference.
+            affordance: Registered direct-child affordance for the object.
+
+        Returns:
+            Object semantics with an owned affordance payload and canonical ID.
+
+        Raises:
+            ValueError: If the affordance does not belong to the object.
+        """
+        canonical_object = self.resolve(
+            object_ref,
+            expected_type=SceneObjectRef,
+        )
+        object_registration = self._registrations_by_id[canonical_object.entity_id]
+        affordance_registration = self.lookup(
+            affordance,
+            expected_type=SceneAffordanceRef,
+        )
+        if affordance_registration.parent != canonical_object:
+            raise ValueError(
+                f"Affordance {affordance_registration.ref.entity_id!r} is not a "
+                f"direct child of object {canonical_object.entity_id!r}."
+            )
+        payload = affordance_registration.affordance
+        if payload is None:
+            raise AssertionError("Affordance registration lost its payload.")
+        return ObjectSemantics(
+            affordance=payload,
+            geometry={},
+            properties={},
+            label=object_registration.semantic_type or "none",
+            entity_id=canonical_object.entity_id,
         )
 
     def make_scene_provider(

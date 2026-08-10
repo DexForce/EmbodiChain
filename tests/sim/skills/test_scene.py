@@ -165,6 +165,14 @@ class _CopyTrackedAffordance(AntipodalAffordance):
         return _CopyTrackedAffordance()
 
 
+class _SelfCopyAffordance(AntipodalAffordance):
+    """Malicious payload that violates deepcopy ownership."""
+
+    def __deepcopy__(self, memo: dict[int, object]) -> _SelfCopyAffordance:
+        del memo
+        return self
+
+
 @pytest.mark.parametrize("entity_id", ["", " cube", "cube "])
 def test_scene_entity_ref_rejects_non_exact_identifier(entity_id: str) -> None:
     with pytest.raises(ValueError, match="entity_id"):
@@ -351,6 +359,66 @@ def test_registry_metadata_projection_does_not_copy_affordance_payload() -> None
 
     assert metadata[1].affordance_payload_type is _CopyTrackedAffordance
     assert _CopyTrackedAffordance.copies == 0
+
+
+def test_registry_rejects_affordance_that_cannot_produce_owned_copy() -> None:
+    cube = SceneObjectRef("cube")
+
+    with pytest.raises(TypeError, match="distinct value"):
+        SceneRegistry(
+            (
+                SceneEntityRegistration(ref=cube, state_provider=_StateProvider()),
+                SceneEntityRegistration(
+                    ref=SceneAffordanceRef("cube_grasp"),
+                    parent=cube,
+                    native_name="grasp",
+                    affordance=_SelfCopyAffordance(),
+                    relative_pose=torch.eye(4),
+                ),
+            )
+        )
+
+
+def test_registry_builds_owned_object_semantics_from_direct_child() -> None:
+    cube = SceneObjectRef("cube")
+    table = SceneObjectRef("table")
+    cube_grasp = SceneAffordanceRef("cube_grasp")
+    table_grasp = SceneAffordanceRef("table_grasp")
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=cube,
+                state_provider=_StateProvider(),
+                semantic_type="cube",
+            ),
+            SceneEntityRegistration(ref=table, state_provider=_StateProvider()),
+            SceneEntityRegistration(
+                ref=cube_grasp,
+                parent=cube,
+                native_name="grasp",
+                affordance=AntipodalAffordance(),
+                relative_pose=torch.eye(4),
+            ),
+            SceneEntityRegistration(
+                ref=table_grasp,
+                parent=table,
+                native_name="grasp",
+                affordance=AntipodalAffordance(),
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+
+    first = registry.object_semantics(cube, affordance=cube_grasp)
+    second = registry.object_semantics("cube", affordance="cube_grasp")
+
+    assert first.entity_id == "cube"
+    assert first.label == "cube"
+    assert first.affordance is not second.affordance
+    first.affordance.custom_config["mutated"] = True
+    assert "mutated" not in second.affordance.custom_config
+    with pytest.raises(ValueError, match="not a direct child"):
+        registry.object_semantics(cube, affordance=table_grasp)
 
 
 def test_collision_registration_requires_geometry_provider() -> None:

@@ -576,6 +576,7 @@ def test_scene_entity_pose_is_resolved_late_from_snapshot() -> None:
     offset = torch.eye(4)
     offset[2, 3] = 0.1
     reference = SceneEntityPose("cup", relative_pose=offset)
+    offset[2, 3] = 9.0
     context = _context(
         SceneSnapshot(
             timestamp=1.0,

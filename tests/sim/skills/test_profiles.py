@@ -1346,6 +1346,28 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         incompatible.bind(_engine(control_profiles=_command_profiles()))
 
 
+def test_profile_owns_named_grounding_provider_selections() -> None:
+    selections = {"hand_over": "dual_center"}
+    profile = RobotSkillProfile(
+        "grounding",
+        resources=_resources(),
+        command_profiles=_command_profiles(),
+        grounding_providers=selections,
+    )
+
+    selections["hand_over"] = "source_mutation"
+
+    assert profile.grounding_providers == {"hand_over": "dual_center"}
+    with pytest.raises(TypeError):
+        profile.grounding_providers["pick"] = "invalid"  # type: ignore[index]
+    with pytest.raises(ValueError, match="grounding_providers"):
+        RobotSkillProfile(
+            "invalid_grounding",
+            resources=_resources(),
+            grounding_providers={"hand_over": " provider"},
+        )
+
+
 def test_profile_rejects_default_for_uninstalled_skill() -> None:
     with pytest.raises(ProfileValidationError, match="not installed"):
         _profile(defaults={"missing": ResourceBinding({"primary": "left_actor"})}).bind(

@@ -970,6 +970,8 @@ class RobotSkillProfile:
     presets: Mapping[str, SkillPolicyPreset] = field(default_factory=dict)
     default_preset: str | None = None
     skill_presets: Mapping[str, str] = field(default_factory=dict)
+    grounding_providers: Mapping[str, str] = field(default_factory=dict)
+    """Semantic call ID to embodiment-owned named grounding provider ID."""
 
     def __post_init__(self) -> None:
         _validate_identifier(self.profile_id, field_name="RobotSkillProfile.profile_id")
@@ -1003,6 +1005,14 @@ class RobotSkillProfile:
                 f"skill_presets references unknown presets {unknown_presets}."
             )
         object.__setattr__(self, "skill_presets", skill_presets)
+        object.__setattr__(
+            self,
+            "grounding_providers",
+            _normalize_named_mapping(
+                self.grounding_providers,
+                field_name="grounding_providers",
+            ),
+        )
         self._validate_resource_graph(resources)
         self.action_control_profiles()
 
