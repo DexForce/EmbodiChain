@@ -77,23 +77,81 @@ migrate an older custom action by renaming that implementation to `_plan()`.
 
 ## Object identity and pose grounding
 
-`ObjectSemantics.entity_id` is the canonical pre-registry snapshot key. It is
-optional for direct-core compatibility but, when supplied, must be a non-empty
-string. Pose grounding with an explicit ID is strict: resolve it only from the
-current `PlanningContext.scene`; a missing snapshot entry is an error and never
-falls back to the live `entity`. Only when no ID is supplied may the core read
-`ObjectSemantics.entity`; that path emits `DeprecationWarning`, reads live state,
-and cannot declare a scene-motion dependency.
+`ObjectSemantics.entity_id` is the typed core's canonical snapshot-key lowering
+target. The registry-backed path obtains it from a resolved `SceneEntityRef`.
+It remains optional for advanced direct-core compatibility but, when supplied,
+must be a non-empty string. Pose grounding with an explicit ID is strict:
+resolve it only from the current `PlanningContext.scene`; a missing snapshot
+entry is an error and never falls back to the live `entity`. Only when no ID is
+supplied may the core read `ObjectSemantics.entity`; that path emits
+`DeprecationWarning`, reads live state, and cannot declare a scene-motion
+dependency.
 
 `ObjectSemantics` is shallow-frozen. Top-level fields such as `entity_id`,
 `entity`, and `label` cannot be rebound after construction; create a new
 semantics value to change identity. Nested affordance and metadata objects may
 remain mutable, but they never establish identity.
 
-`SceneSnapshot` owns copies of its input poses, but `EntityState.pose` tensors
-are not deeply read-only. Callers must treat published snapshot values as
-immutable and publish a newer scene version for changes. Enforced deep
-immutability is deferred to the SceneRegistry/snapshot hardening phase.
+`SceneSnapshot` owns copies of input entity states and returns a defensive
+`EntityState`/pose copy on every public mapping lookup. Mutating an input tensor
+or a previously returned pose cannot change the published snapshot. Publish a
+new scene version for every material dynamic-state change.
+
+## Scene registry integration
+
+`embodichain.lab.sim.skills.SceneRegistry` is the canonical integration catalog.
+It owns immutable registration metadata: typed identity, aliases, pose source,
+parent relationships, backend-local names, dynamics, geometry, collision role,
+semantic type, and affordance data. A `SceneSnapshot` does not duplicate that
+catalog; it contains only versioned dynamic pose/confidence and collision
+revision state.
+
+All object, articulation, link, and affordance IDs occupy one flat globally
+unique namespace. Store link/affordance ancestry in
+`SceneEntityRegistration.parent`, not by nesting or qualifying the ID. String
+lookups may resolve aliases once to a canonical typed reference. An already
+typed ref must contain a canonical ID and match the registered ref class.
+Duplicate IDs, ambiguous aliases, alias/canonical collisions, missing parents,
+and type mismatches fail at construction or lookup. Within one reference type,
+the same `(parent, native_name)` physical source cannot be assigned multiple
+canonical IDs; the same local name remains valid under different parents or
+for different reference types.
+
+`SceneRegistry.from_simulation()` is explicit opt-in. Its `rigid_objects` and
+`articulations` mappings are `registry_id -> simulation_uid`; selected UIDs are
+installed as aliases, and unlisted simulation entities are never scanned.
+Collision participation defaults to `NONE`, and every static/dynamic collision
+registration requires a geometry provider.
+
+`registry.make_planning_scene_provider(motion_generator, batch_size=...)`
+returns a fresh `RegistrySceneProvider` with independent baselines and revision
+counters after eager registry/provider/planner validation. Snapshots expose
+canonical IDs only. The provider requires stable ordered `env_ids` and
+monotonic timestamps, derives relative affordance poses from the same
+observation, compares movement against the last materially published pose, and
+maintains per-row collision revisions. Plain `make_scene_provider()` is only
+for perception and advanced direct-core consumers without planner agreement.
+
+For an external perception/hardware provider, call
+`registry.validate_collision_integration(..., scene_provider=provider)`
+directly. The registry's complete `STATIC ∪ DYNAMIC` ID set must exactly
+match `MotionGenerator.collision_world_entity_ids`; separately, the registry,
+provider, and planner dynamic ID sets must match exactly in the canonical
+namespace. The planner must support live updates for a non-empty dynamic set,
+and planner/registry batch mode must agree. With dynamic entities, one
+environment may infer `SHARED`; multiple environments must explicitly select
+`SceneCollisionWorldMode.SHARED` or `PER_ENV`.
+
+Construct a registry-backed cuRobo world with
+`registry.collision_geometry_by_id()`. Its default mapping includes only
+`STATIC` and `DYNAMIC` registrations and excludes `NONE`. Mapping keys are
+canonical logical/source IDs for cache identity and full-world validation. With
+`cuboid` or `mesh`, they are also the physical YAML and runtime-update keys.
+Static `sphere` sources expand to backend names such as `id_0`; dynamic sphere
+configuration is rejected, while cache/full-world identity stays on `id`.
+Registry mappings fail fast when a source lacks geometry required by the chosen
+representation. List-valued cuRobo worlds and `RigidObjectSceneProvider` remain
+advanced direct-core paths.
 
 Stable object identity follows these exact rules:
 
@@ -108,11 +166,10 @@ Stable object identity follows these exact rules:
    to the same live entity handle. `label` is descriptive and never establishes
    identity.
 
-This is a snapshot/identity bridge, not alias resolution. A future
-`SceneRegistry` owns uniqueness, aliases, normalization, and authoritative
-registry IDs. Partial-batch `StateDelta` attachment merges use the same stable
-identity rules, so equivalent semantic wrappers update one held object instead
-of creating label-based duplicates.
+The direct-core identity rules do not perform alias resolution; normalization
+belongs only to `SceneRegistry`. Partial-batch `StateDelta` attachment merges
+use the same stable identity rules, so equivalent semantic wrappers update one
+held object instead of creating label-based duplicates.
 
 For both individual and coordinated attachments, a same-identity partial merge
 preserves scalar metadata: if any previously active environment row remains,
@@ -251,11 +308,14 @@ acknowledgement timeout in their transport/controller layer.
 boundary used by execution adapters. `SceneSnapshot.collision_entity_ids`
 identifies obstacle poses consumed by a planner, while
 `collision_world_revision` is either global or per environment. A newer
-revision invalidates only affected batch rows. `RigidObjectSceneProvider`
-tracks live simulation objects, filters sub-threshold pose noise, advances the
-general scene version, and maintains per-environment collision revisions.
-Thresholds are measured from the last materially published pose per entity and
-environment, so repeated sub-threshold motion eventually becomes observable.
+revision invalidates only affected batch rows. `RegistrySceneProvider` is the
+canonical provider and derives its entity/collision sets from one immutable
+`SceneRegistry`. It filters sub-threshold pose noise, advances the general scene
+version, and maintains per-environment collision revisions. Thresholds are
+measured from the last materially published pose per entity and environment, so
+repeated sub-threshold motion eventually becomes observable.
+`RigidObjectSceneProvider` retains that lower-level revision behavior for
+advanced direct-core integrations.
 For lightweight sources that do not need environment correlation IDs,
 `SimulationExecutionAdapter` also accepts a mutually exclusive
 `SceneSnapshotSupplier(timestamp)` callback.
@@ -270,6 +330,14 @@ same scene snapshot that triggered invalidation without adding obstacle
 parameters to each skill. Add/remove/geometry mutations are not yet supported
 by this pose-update path; providers should revision only pose-updatable
 registered obstacles.
+
+`BasePlanner.collision_world_entity_ids`, `dynamic_collision_entity_ids`, and
+`collision_world_batch_mode` expose the backend's complete world, dynamic
+subset, and batching contract. `MotionGenerator` validates and forwards those
+properties for `SceneRegistry.make_planning_scene_provider()`. External
+providers call `validate_collision_integration(..., scene_provider=...)`.
+These construction checks are separate from per-plan
+`bind_collision_world()`.
 
 Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `tracking_error_recovery.py`, `moving_target_recovery.py`, and
