@@ -17,7 +17,9 @@
 
 The planning stack has two layers:
 1. **BasePlanner** — low-level trajectory planner that takes a list of `PlanState` waypoints and produces a `PlanResult` with joint trajectories.
-2. **MotionGenerator** — high-level wrapper that composes a planner with optional interpolation, IK resolution, and multi-part coordination.
+2. **MotionGenerator** — the single stateful planning facade that composes a
+   planner with strategy selection, interpolation, IK resolution, result
+   normalization, and multi-part coordination.
 
 All planners resolve their robot at init via `SimulationManager.get_instance().get_robot(cfg.robot_uid)`.
 
@@ -46,9 +48,10 @@ PlanOptions               (empty base)
   ├─ ToppraPlanOptions    constraints, sample_method, sample_interval
   └─ NeuralPlanOptions    control_part, start_qpos, max_steps
 
-MotionGenOptions          start_qpos (B, DOF), control_part, plan_opts, is_interpolate,
-                          interpolate_nums, is_linear, interpolate_position_step,
-                          interpolate_angle_step
+MotionGenOptions          strategy, sample_count, velocity/acceleration limits,
+                          start_qpos (B, DOF), control_part, plan_opts,
+                          is_interpolate, interpolate_nums, is_linear,
+                          interpolate_position_step, interpolate_angle_step
 ```
 
 ## Available Planners
@@ -124,20 +127,32 @@ to the backend hook. Atomic actions use that facade from their framework-owned
 `plan()` template when a `SceneSnapshot` declares collision entities;
 individual skills must not construct backend obstacle options themselves.
 
+`MotionGenerator.resolve_plan_options()` is the corresponding option-ownership
+boundary. It copies caller-supplied typed options, otherwise obtains backend
+defaults; for TOPPRA it maps the requested sample count and generic
+velocity/acceleration limits into `ToppraPlanOptions`. Atomic actions do not
+import or branch on concrete planner option types.
+
 ### MotionGenerator
 
 Unified interface for trajectory planning with optional pre-interpolation.
 
 - Wraps a `BasePlanner` instance (resolved from `planner_cfg.planner_type`).
-- Supported planner types: `{"toppra": (ToppraPlanner, ToppraPlannerCfg), "neural": (NeuralPlanner, NeuralPlannerCfg)}`.
+- Supported planner types: TOPPRA, NeuralPlanner, and cuRobo.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
+- `generate()` always returns a normalized `PlanResult`; failed rows hold the
+  supplied `start_qpos`.
 
 `MotionGenOptions` fields:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `start_qpos` | `torch.Tensor \| None` | `None` | Override starting joint config, shape `(B, DOF)`; `None` = use current robot state |
+| `strategy` | `"motion_gen" \| "ik_interp"` | `"motion_gen"` | Use the configured backend or deterministic waypoint IK/joint interpolation |
+| `sample_count` | `int \| None` | `None` | Requested normalized output count; backend default when omitted |
+| `velocity_limit` | `float \| None` | `None` | Optional backend-neutral velocity limit |
+| `acceleration_limit` | `float \| None` | `None` | Optional backend-neutral acceleration limit |
+| `start_qpos` | `torch.Tensor \| None` | `None` | Optional backend context, shape `(B, DOF)`; required by `strategy="ik_interp"` |
 | `control_part` | `str \| None` | `None` | Robot control part name (must match `RobotCfg.control_parts` key) |
 | `plan_opts` | `PlanOptions \| None` | `None` | Passed to the underlying planner |
 | `is_interpolate` | `bool` | `False` | Pre-interpolate waypoints before planning |
@@ -242,7 +257,10 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
 - **Batch dim mismatch** — `@validate_plan_options` raises `ValueError` if `PlanState` entries have inconsistent `B` or if `B` does not equal `robot.num_instances`.
 - **Single-env caller shape mismatch** — legacy callers passing `(DOF,)` qpos or `(4,4)` xpos must wrap with `PlanState.single(...)` or call `from_qpos`/`from_xpos` with a leading `B=1` dim.
 - **MotionGenerator planner_type not registered** — if `planner_cfg.planner_type` is not in `_support_planner_dict`, `MotionGenerator.__init__` fails. Register new planners there first.
-- **Interpolation with unsupported MoveType** — pre-interpolation in `MotionGenOptions` only works for `EEF_MOVE` and `JOINT_MOVE`. Using it with `TOOL`, `SYNC`, or `PAUSE` is ignored or produces unexpected results.
+- **IK interpolation with unsupported MoveType** — `strategy="ik_interp"`
+  accepts only `EEF_MOVE` and `JOINT_MOVE` and raises for other target types.
+- **Missing interpolation inputs** — `strategy="ik_interp"` requires explicit
+  `start_qpos` and `sample_count`; it never reads live robot state implicitly.
 - **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
 - **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
 - **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.

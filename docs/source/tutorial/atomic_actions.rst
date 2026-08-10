@@ -176,7 +176,13 @@ application-owned orchestration:
    plan = engine.plan(invocation, latest_context)
    if plan.plan_success.all():
        trajectory = plan.trajectory.positions
-       phase_diagnostics = tuple(phase.diagnostics for phase in plan.phases)
+       diagnostics = plan.diagnostics
+       segments = plan.segments
+
+Named segments use half-open action-local waypoint ranges. For a compiled
+sequence, call ``compiled.segment(action_index, name)`` to get the corresponding
+range in concatenated-trajectory coordinates. This is preferable to repeating
+a primitive's private sample-split formula in application or tutorial code.
 
 The returned :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` describes
 only that invocation. Its expected effects are not committed, and ``plan`` does
@@ -233,7 +239,7 @@ projected context and sequence-shaped result are unnecessary.
 Do not compile across a point where later targets depend on physical execution.
 The coordinated-placement tutorial, for example, compiles both pick-ups,
 executes them, rebuilds held-object state from measured poses, and then compiles
-the placement phase. Use ``start`` when that observation and recovery loop
+the placement stage. Use ``start`` when that observation and recovery loop
 should remain active throughout execution.
 
 Dynamic goals and closed-loop execution
@@ -318,7 +324,8 @@ For collision-aware execution, list pose-updatable obstacles in
 dynamic obstacle names on a supporting planner such as cuRobo. The provider
 advances per-environment collision-world revisions when an obstacle moves;
 the session invalidates affected rows and the framework binds the latest poses
-before replanning:
+before replanning. Pose thresholds use the last materially published pose as
+their baseline, so cumulative sub-threshold motion is eventually reported:
 
 .. code-block:: bash
 
@@ -380,7 +387,8 @@ physical grasp or release. If verification is asynchronous, omit the callback;
 can later resume with ``runner.step(effect_success=verified)`` when the next
 cycle is due, or call ``run_until_blocked(effect_verifier=...)`` again. The
 runner remembers the pending boundary even though the session emits its event
-only once.
+only once. The durable state is ``tick.pending_effect`` (an
+``EffectVerificationRequest``), not the presence of that one-time event.
 
 Adding an action
 ----------------
@@ -389,7 +397,13 @@ Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
 define typed runtime options when needed, implement the protected
 ``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
 override the inherited public ``plan()`` method because it binds the latest
-collision scene first:
+collision scene first.
+
+Return scalar or per-environment planner success through ``build_plan``. The
+framework normalizes the mask and holds failed rows at the observed qpos, so a
+new action should not reproduce that masking itself.
+
+A minimal implementation looks like:
 
 .. code-block:: python
 

@@ -30,7 +30,6 @@ import torch
 from embodichain.utils import configclass
 
 from .execution import (
-    ExecutionEventKind,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
@@ -333,7 +332,6 @@ class ExecutionRunner:
         self._last_context: PlanningContext | None = session.latest_context
         self._command_count = 0
         self._message: str | None = None
-        self._effect_verification_pending = False
         self._effect_context: PlanningContext | None = None
         self._effect_tick: ExecutionTick | None = None
 
@@ -355,7 +353,10 @@ class ExecutionRunner:
     @property
     def effect_verification_pending(self) -> bool:
         """Whether execution is waiting for an external semantic-effect result."""
-        return self._effect_verification_pending
+        return (
+            self._effect_tick is not None
+            and self._effect_tick.pending_effect is not None
+        )
 
     def step(
         self,
@@ -403,7 +404,7 @@ class ExecutionRunner:
                 f"Execution session failed: {type(exc).__name__}: {exc}",
                 context=context,
             )
-        self._update_effect_boundary(context, tick, effect_success)
+        self._update_effect_boundary(context, tick)
 
         dispatches: list[CommandDispatch] = []
         if tick.command is not None:
@@ -526,7 +527,7 @@ class ExecutionRunner:
         """
         if max_steps <= 0:
             raise ValueError("max_steps must be greater than zero.")
-        pending_effect: torch.Tensor | None = None
+        effect_success: torch.Tensor | None = None
         now = self._clock_now()
         last_result = self._result(
             timestamp=now,
@@ -534,7 +535,7 @@ class ExecutionRunner:
             context=self._effect_context,
             tick=self._effect_tick,
         )
-        if self._effect_verification_pending:
+        if self.effect_verification_pending:
             if (
                 effect_verifier is None
                 or self._effect_context is None
@@ -542,7 +543,7 @@ class ExecutionRunner:
             ):
                 return last_result
             try:
-                pending_effect = effect_verifier(
+                effect_success = effect_verifier(
                     self._effect_context,
                     self._effect_tick,
                 )
@@ -552,12 +553,12 @@ class ExecutionRunner:
                     context=self._effect_context,
                     tick=self._effect_tick,
                 )
-            if pending_effect is None:
+            if effect_success is None:
                 return last_result
         for _ in range(max_steps):
-            result = self.step(effect_success=pending_effect)
+            result = self.step(effect_success=effect_success)
             if result.tick is not None:
-                pending_effect = None
+                effect_success = None
             if on_step is not None:
                 try:
                     on_step(result)
@@ -571,15 +572,14 @@ class ExecutionRunner:
             last_result = result
             if result.status is not RunnerStatus.RUNNING:
                 return result
-            verification_required = result.tick is not None and any(
-                event.kind is ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED
-                for event in result.tick.events
+            verification_required = (
+                result.tick is not None and result.tick.pending_effect is not None
             )
             if verification_required:
                 if effect_verifier is None or result.context is None:
                     return result
                 try:
-                    pending_effect = effect_verifier(result.context, result.tick)
+                    effect_success = effect_verifier(result.context, result.tick)
                 except Exception as exc:
                     return self._fail(
                         f"Effect verifier failed: {type(exc).__name__}: {exc}",
@@ -587,7 +587,7 @@ class ExecutionRunner:
                         tick=result.tick,
                         dispatches=list(result.dispatches),
                     )
-                if pending_effect is None:
+                if effect_success is None:
                     return result
             if result.wait_duration > 0.0:
                 try:
@@ -610,23 +610,16 @@ class ExecutionRunner:
         self,
         context: PlanningContext,
         tick: ExecutionTick,
-        effect_success: torch.Tensor | None,
     ) -> None:
         """Remember or clear the external effect-verification boundary."""
-        verification_required = any(
-            event.kind is ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED
-            for event in tick.events
-        )
-        if verification_required:
-            self._effect_verification_pending = True
+        if tick.pending_effect is not None:
             self._effect_context = context
             self._effect_tick = tick
-        elif effect_success is not None and self._effect_verification_pending:
+        else:
             self._clear_effect_boundary()
 
     def _clear_effect_boundary(self) -> None:
         """Clear a remembered external effect-verification boundary."""
-        self._effect_verification_pending = False
         self._effect_context = None
         self._effect_tick = None
 

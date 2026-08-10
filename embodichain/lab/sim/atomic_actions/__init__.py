@@ -52,6 +52,7 @@ from .engine import (
     unregister_action,
 )
 from .execution import (
+    EffectVerificationRequest,
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionSession,
@@ -64,12 +65,9 @@ from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
-    CompletionCondition,
-    CompletionConditionKind,
-    PhaseSpec,
-    PlannedPhase,
     PlannerDiagnostics,
     TimedTrajectory,
+    TrajectorySegment,
 )
 from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
@@ -135,7 +133,6 @@ from .state import (
     SceneSnapshot,
     TaskState,
 )
-from .trajectory import TrajectoryBuilder
 
 __all__ = [
     "ActionBinding",
@@ -158,8 +155,6 @@ __all__ = [
     "CommandDispatch",
     "CommandOperation",
     "CommandSink",
-    "CompletionCondition",
-    "CompletionConditionKind",
     "ControlCommand",
     "ControlPartCommandProfile",
     "CoordinatedHeldObjectState",
@@ -172,6 +167,7 @@ __all__ = [
     "DynamicCollisionMode",
     "EndEffectorPoseGoal",
     "EntityState",
+    "EffectVerificationRequest",
     "EffectVerifier",
     "ExecutionClock",
     "ExecutionEvent",
@@ -203,13 +199,11 @@ __all__ = [
     "ObjectSemantics",
     "OPEN_COMMAND",
     "ObservationProvider",
-    "PhaseSpec",
     "PickUp",
     "PickUpOptions",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
-    "PlannedPhase",
     "PlannerDiagnostics",
     "PlanningContext",
     "PoseGoalValue",
@@ -235,7 +229,7 @@ __all__ = [
     "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
-    "TrajectoryBuilder",
+    "TrajectorySegment",
     "get_registered_actions",
     "register_action",
     "unregister_action",

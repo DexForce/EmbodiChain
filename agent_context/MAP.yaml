@@ -289,6 +289,9 @@ topics:
       - trajectory
       - toppra
       - motion generator
+      - resolve_plan_options
+      - MotionGenOptions.strategy
+      - ik_interp
       - path
       - waypoint
       - velocity
@@ -427,17 +430,20 @@ topics:
       - AtomicAction
       - ActionInvocation
       - AtomicActionEngine
-      - TrajectoryBuilder
+      - trajectory ops
       - 原子动作
     keywords:
       - atomic
       - action
       - AtomicAction
       - AtomicActionEngine
-      - TrajectoryBuilder
+      - MotionGenerator
       - ActionPlan
+      - TrajectorySegment
+      - TimedTrajectory
       - PlanningContext
       - ExecutionSession
+      - EffectVerificationRequest
       - ExecutionRunner
       - ObservationProvider
       - CommandSink
@@ -460,8 +466,14 @@ topics:
       - JointPositionCommand
       - invocation revision
       - MotionPolicy
+      - MotionPolicy.strategy
       - RecoveryPolicy
-      - plan_arm_traj
+      - MotionGenOptions.strategy
+      - motion_gen
+      - ik_interp
+      - trajectory_ops
+      - build_pose_plan_states
+      - build_joint_plan_states
       - register_action
       - BUILTIN_ACTION_TYPES
       - load_builtins
@@ -485,7 +497,7 @@ topics:
       - embodichain/lab/sim/atomic_actions/scene.py
       - embodichain/lab/sim/atomic_actions/sim_adapter.py
       - embodichain/lab/sim/atomic_actions/engine.py
-      - embodichain/lab/sim/atomic_actions/trajectory.py
+      - embodichain/lab/sim/atomic_actions/trajectory_ops.py
       - embodichain/lab/sim/atomic_actions/primitives/
       - embodichain/lab/sim/atomic_actions/__init__.py
     related_topics:

@@ -178,13 +178,11 @@ def main() -> None:
 
     if wait_for_user:
         input("Press Enter to replay the PickUp demo...")
-    clear_after_step = (
-        round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
-    )
+    clear_after_step = compiled.segment(0, "lift").start
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory.positions,
+        compiled.trajectory,
         args,
         video_prefix="pickup_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

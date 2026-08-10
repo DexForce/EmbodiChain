@@ -27,7 +27,7 @@ Inspect only the files relevant to the requested skill:
 | Robot/task/scene state | `embodichain/lab/sim/atomic_actions/state.py` |
 | Dynamic scene provider contract | `embodichain/lab/sim/atomic_actions/scene.py` |
 | Effects and plans | `embodichain/lab/sim/atomic_actions/effects.py`, `plans.py` |
-| Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory.py` |
+| Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory_ops.py` |
 | Engine-owned planning resources | `embodichain/lab/sim/atomic_actions/runtime.py` |
 | Reference implementations | `embodichain/lab/sim/atomic_actions/primitives/` |
 | Static compiler and execution session | `engine.py`, `execution.py` |
@@ -74,10 +74,10 @@ required.
 ## 2. Define runtime options and control commands
 
 Define a frozen `ActionOptions` subclass only when skill behavior may vary by
-invocation. Examples include distances, grasp constraints, and phase split
+invocation. Examples include distances, grasp constraints, and segment split
 counts. If no such behavior exists, use the base `ActionOptions`.
 
-Do not put `motion_source`, planner choice, sample count, control period,
+Do not put `strategy`, planner choice, sample count, control period,
 velocity limits, collision policy, or recovery thresholds in skill options;
 those belong to `MotionPolicy` or `RecoveryPolicy`.
 
@@ -112,6 +112,10 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     StateDelta,
 )
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_pose_plan_states,
+    to_full_robot_trajectory,
+)
 
 
 class Push(AtomicAction[PushGoal, PushOptions]):
@@ -137,15 +141,14 @@ class Push(AtomicAction[PushGoal, PushOptions]):
 
         # Build planner states and generate controlled-joint motion using
         # request.motion_policy. Embed it into full robot DoF.
-        result = self.builder.generate_arm_plan(
-            target_states,
-            start_qpos,
-            request.motion_policy.sample_count,
-            control_part=control_part,
-            arm_dof=manipulator.dof,
-            cfg=request.motion_policy,
+        result = self.motion_generator.generate(
+            build_pose_plan_states(target_poses),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+            ),
         )
-        success, trajectory = self.builder.to_full_robot_trajectory(
+        success, trajectory = to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
@@ -163,8 +166,11 @@ class Push(AtomicAction[PushGoal, PushOptions]):
 
 Follow these invariants:
 
-- Let the engine supply `self.robot`, `self.motion_generator`, and the shared
-  `self.builder`; use `_on_bind()` only for robot/device-dependent setup.
+- Let the engine supply `self.robot` and `self.motion_generator`; use
+  `_on_bind()` only for robot/device-dependent setup.
+- Import pure target-shaping, interpolation, pose-translation, and full-robot
+  embedding helpers directly from `atomic_actions.trajectory_ops`; keep
+  stateful planning inside `MotionGenerator`.
 - Call `require_goal()` before planning.
 - Implement `_plan()` rather than overriding the framework-owned public
   `plan()` method; the latter injects the latest dynamic obstacle poses into a
@@ -172,7 +178,12 @@ Follow these invariants:
 - Plan from `context.robot.qpos`, never an implicit live robot start state.
 - Return full-robot `(B, N, robot.dof)` motion as a tensor or
   `TimedTrajectory` with matching `env_ids`.
+- Preserve row-local planner success. `build_plan()` normalizes the mask and
+  replaces unsuccessful trajectory rows with the context's observed qpos.
 - Preserve backend timing/derivatives when available.
+- For a composite trajectory, pass an ordered `segment_lengths` mapping with
+  the actual returned waypoint counts. Segments are inspection metadata, not
+  independent planning or recovery boundaries.
 - Return `failed_plan(request, context, message=...)` for an expected soft
   planning failure.
 - Never mutate the context, step simulation, send commands, or claim a physical
@@ -261,6 +272,8 @@ then use the `pre-commit-check` skill before committing.
 | Pass a motion generator to each action | Pass it once to `AtomicActionEngine`; construct actions from default options only. |
 | Read `robot.get_qpos()` inside `plan()` | Use `context.robot.qpos`. |
 | Return an arm-only tensor | Embed into full robot DoF. |
+| Collapse or manually mask batched planner success | Return the row-local mask; let `build_plan()` hold unsuccessful rows. |
+| Model one action as independently recoverable phases | Return one trajectory with optional named segment metadata. |
 | Mutate held state after planning | Declare a `StateDelta`. |
 | Treat `plan_success` as physical success | Verify effects during execution. |
 | Step the simulator from the action | Emit plans; connect execution through `ExecutionRunner`. |

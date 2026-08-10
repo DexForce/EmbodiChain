@@ -462,14 +462,14 @@ def main() -> None:
         goal=EndEffectorPoseGoal(target_pose),
         binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
         motion_policy=MotionPolicy(
-            motion_source="motion_gen",
+            strategy="motion_gen",
             sample_count=SAMPLE_COUNT,
             control_dt=COMMAND_CYCLE_TIME,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
-            phase_timeout=30.0,
+            action_timeout=30.0,
         ),
         invocation_id="dynamic-obstacle-demo",
     )

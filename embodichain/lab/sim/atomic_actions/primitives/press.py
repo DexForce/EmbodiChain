@@ -23,7 +23,6 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import logger
 
 from ._helpers import arm_qpos_from_state
@@ -33,6 +32,12 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..state import PlanningContext
+from ..trajectory_ops import (
+    build_joint_plan_states,
+    build_pose_plan_states,
+    interpolate_hand_qpos,
+    resolve_pose_target,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -101,53 +106,53 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
-        press_xpos = self.builder.resolve_pose_target(
+        press_xpos = resolve_pose_target(
             resolve_pose_goal(target.xpos, context, name="xpos"),
             n_envs=self.n_envs,
+            device=self.device,
         )
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=manipulator.dof,
-            control_part=control_part,
-        )
+        start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
         start_hand_qpos = state.last_qpos[:, hand_joint_ids]
 
-        n_close, n_down, n_back = self._compute_phase_waypoints(
+        n_close, n_down, n_back = self._compute_segment_waypoints(
             request.motion_policy.sample_count, options
         )
 
-        hand_close_path = self.builder.interpolate_hand_qpos(
+        hand_close_path = interpolate_hand_qpos(
             start_hand_qpos,
             hand_close_qpos,
             n_waypoints=n_close,
         )
 
-        target_states_list = [
-            [PlanState(xpos=press_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
-        down_success, down_arm = self.builder.plan_arm_traj(
-            target_states_list,
-            start_arm_qpos,
-            n_down,
-            control_part=control_part,
-            arm_dof=manipulator.dof,
-            cfg=request.motion_policy,
+        down_result = self.motion_generator.generate(
+            build_pose_plan_states(press_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=control_part,
+                sample_count=n_down,
+            ),
         )
+        assert isinstance(down_result.success, torch.Tensor)
+        assert down_result.positions is not None
+        down_success = down_result.success
+        down_arm = down_result.positions
 
         press_arm_qpos = down_arm[:, -1, :]
-        back_success, back_arm = self.builder.plan_joint_motion(
-            press_arm_qpos,
-            start_arm_qpos,
-            n_back,
-            control_part=control_part,
-            arm_dof=manipulator.dof,
-            cfg=request.motion_policy,
+        back_result = self.motion_generator.generate(
+            build_joint_plan_states(start_arm_qpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=press_arm_qpos,
+                control_part=control_part,
+                sample_count=n_back,
+            ),
         )
+        assert isinstance(back_result.success, torch.Tensor)
+        assert back_result.positions is not None
+        back_success = back_result.success
+        back_arm = back_result.positions
         success = down_success & back_success
 
-        # Allocate from the actually-returned phase lengths so collision-aware
+        # Allocate from the actually returned segment lengths so collision-aware
         # planners (which preserve their own sample count) are accommodated.
         n_down_actual = down_arm.shape[1]
         n_back_actual = back_arm.shape[1]
@@ -173,13 +178,17 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             context,
             success=success,
             trajectory=full,
-            phase_name="press",
+            segment_lengths={
+                "close": n_close,
+                "press": n_down_actual,
+                "retract": n_back_actual,
+            },
         )
 
-    def _compute_phase_waypoints(
+    def _compute_segment_waypoints(
         self, sample_count: int, options: PressOptions
     ) -> tuple[int, int, int]:
-        """Split the invocation sample budget across press phases."""
+        """Split the invocation sample budget across press segments."""
         n_close = options.hand_interp_steps
 
         motion_waypoints = sample_count - n_close

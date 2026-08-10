@@ -305,7 +305,7 @@ def run_handover_demo(
     replay_trajectory(
         sim,
         robot,
-        traj,
+        compiled.trajectory,
         args,
         video_prefix="handover_auto_play",
         hold_steps=0,

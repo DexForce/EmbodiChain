@@ -211,6 +211,9 @@ def test_engine_compile_projects_terminal_state_between_actions() -> None:
     assert torch.equal(compiled.action_plans[1].trajectory.positions[:, 0], first)
     assert torch.equal(compiled.projected_context.robot.qpos, second)
     assert torch.count_nonzero(engine.robot.get_qpos()) == 0
+    assert compiled.action_waypoint_offset(1) == 2
+    assert compiled.segment(1, "stub").start == 2
+    assert compiled.segment(1, "stub").stop == 4
 
 
 def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
@@ -224,6 +227,7 @@ def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
     assert compiled.plan_success.tolist() == [True, False]
     assert torch.all(compiled.projected_context.robot.qpos[0] == 4.0)
     assert torch.all(compiled.projected_context.robot.qpos[1] == 0.0)
+    assert torch.all(compiled.action_plans[0].trajectory.positions[1] == 0.0)
     assert torch.all(compiled.trajectory.positions[1] == 0.0)
 
 
@@ -275,8 +279,8 @@ def test_engine_binds_one_planning_service_to_every_action() -> None:
 
     assert first.motion_generator is engine.motion_generator
     assert second.motion_generator is engine.motion_generator
-    assert first.builder is engine.planning_services.trajectory_builder
-    assert second.builder is first.builder
+    assert first.planning_services is engine.planning_services
+    assert second.planning_services is engine.planning_services
 
 
 def test_engine_resolves_action_binding_from_robot_control_parts() -> None:

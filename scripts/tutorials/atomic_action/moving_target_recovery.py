@@ -305,10 +305,10 @@ def main() -> None:
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
-            max_phase_retries=1,
+            max_action_retries=1,
             tracking_error_threshold=TRACKING_ERROR_THRESHOLD,
             goal_translation_threshold=GOAL_TRANSLATION_THRESHOLD,
-            phase_timeout=30.0,
+            action_timeout=30.0,
         ),
         skill_options=PickUpOptions(
             pre_grasp_distance=0.15,
@@ -336,12 +336,10 @@ def main() -> None:
     plan_start_command = 0
     pickup_dynamics_cleared = False
 
-    clear_after_pick_command = (
-        round((PICK_SAMPLE_COUNT - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
-    )
+    clear_after_pick_command = session.trajectory_segment("lift").start
 
     def on_step(step: RunnerStep) -> None:
-        nonlocal pickup_dynamics_cleared, plan_start_command
+        nonlocal clear_after_pick_command, pickup_dynamics_cleared, plan_start_command
         if (
             not args.no_target_motion
             and not target_scene.moved
@@ -388,7 +386,11 @@ def main() -> None:
                     f"{event.message}"
                 )
             if event.kind is ExecutionEventKind.REPLANNED:
-                plan_start_command = step.command_count
+                dispatched_active_command = step.tick.command is not None and bool(
+                    step.tick.command.active_mask.any().item()
+                )
+                plan_start_command = step.command_count - int(dispatched_active_command)
+                clear_after_pick_command = session.trajectory_segment("lift").start
                 logger.log_info(
                     "PickUp discarded the stale plan and restarted from the "
                     "latest cube pose.",
@@ -397,7 +399,7 @@ def main() -> None:
         if (
             (args.no_target_motion or target_scene.moved)
             and not pickup_dynamics_cleared
-            and step.command_count - plan_start_command > clear_after_pick_command
+            and step.command_count - plan_start_command >= clear_after_pick_command
         ):
             target.clear_dynamics()
             pickup_dynamics_cleared = True

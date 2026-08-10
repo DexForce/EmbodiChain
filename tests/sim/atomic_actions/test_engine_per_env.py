@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -116,6 +117,20 @@ class EffectAction(DynamicAction):
             trajectory=torch.stack([context.robot.qpos, target], dim=1),
             expected_effects=StateDelta(held_object_updates={"arm": held}),
         )
+
+
+class FailedEffectAction(EffectAction):
+    """Effect-declaring action whose planner fails for every environment."""
+
+    skill_id: ClassVar[str] = "failed_effect"
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        plan = super()._plan(request, context)
+        return replace(plan, plan_success=torch.zeros_like(plan.plan_success))
 
 
 class NonuniformTimingAction(DynamicAction):
@@ -262,10 +277,10 @@ def _invocation(
     *,
     skill_id: str = "dynamic",
     max_replans: int = 2,
-    max_phase_retries: int = 2,
-    phase_timeout: float = 30.0,
+    max_action_retries: int = 2,
+    action_timeout: float = 30.0,
     control_dt: float = 1.0 / 60.0,
-    motion_source: str = "ik_interp",
+    strategy: str = "ik_interp",
     dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     return ActionInvocation(
@@ -275,15 +290,15 @@ def _invocation(
         motion_policy=MotionPolicy(
             sample_count=2,
             control_dt=control_dt,
-            motion_source=motion_source,
+            strategy=strategy,
             dynamic_collision_mode=dynamic_collision_mode,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=max_replans,
-            max_phase_retries=max_phase_retries,
+            max_action_retries=max_action_retries,
             tracking_error_threshold=0.05,
             goal_translation_threshold=0.02,
-            phase_timeout=phase_timeout,
+            action_timeout=action_timeout,
         ),
         invocation_id="dynamic-call",
     )
@@ -394,7 +409,7 @@ def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
         (0,),
     )
     session = engine.start(
-        (_invocation(motion_source="motion_gen"),),
+        (_invocation(strategy="motion_gen"),),
         initial,
     )
     session.tick(initial)
@@ -434,7 +449,7 @@ def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
         (
             _invocation(
                 max_replans=0,
-                motion_source="motion_gen",
+                strategy="motion_gen",
             ),
         ),
         initial,
@@ -481,7 +496,7 @@ def test_dynamic_collision_off_skips_binding_and_revision_recovery() -> None:
     session = engine.start(
         (
             _invocation(
-                motion_source="motion_gen",
+                strategy="motion_gen",
                 dynamic_collision_mode=DynamicCollisionMode.OFF,
             ),
         ),
@@ -504,11 +519,11 @@ def test_dynamic_collision_off_skips_binding_and_revision_recovery() -> None:
     generator.bind_collision_world.assert_not_called()
 
 
-def test_required_dynamic_collision_rejects_incompatible_motion_source() -> None:
+def test_required_dynamic_collision_rejects_incompatible_strategy() -> None:
     engine, _ = _engine()
     engine.motion_generator.supports_dynamic_collision_world = True
 
-    with pytest.raises(ValueError, match="motion_source='motion_gen'"):
+    with pytest.raises(ValueError, match="strategy='motion_gen'"):
         engine.plan(
             _invocation(
                 dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
@@ -529,7 +544,7 @@ def test_required_dynamic_collision_rejects_missing_scene_entities() -> None:
     with pytest.raises(ValueError, match="scene collision entities"):
         engine.plan(
             _invocation(
-                motion_source="motion_gen",
+                strategy="motion_gen",
                 dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
             ),
             _context(0.0, 0.0, 0.2, 0),
@@ -542,7 +557,7 @@ def test_required_dynamic_collision_rejects_unsupported_planner() -> None:
     with pytest.raises(ValueError, match="dynamic collision-world support"):
         engine.plan(
             _invocation(
-                motion_source="motion_gen",
+                strategy="motion_gen",
                 dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
             ),
             _collision_context(
@@ -564,7 +579,7 @@ def test_required_dynamic_collision_binds_supported_scene() -> None:
 
     plan = engine.plan(
         _invocation(
-            motion_source="motion_gen",
+            strategy="motion_gen",
             dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
         ),
         _collision_context(
@@ -575,7 +590,7 @@ def test_required_dynamic_collision_binds_supported_scene() -> None:
         ),
     )
 
-    assert plan.phases[0].spec.collision_world_sensitive is True
+    assert plan.collision_world_sensitive is True
     generator.bind_collision_world.assert_called_once()
 
 
@@ -730,13 +745,13 @@ def test_tracking_error_fails_when_replan_budget_is_zero() -> None:
     assert tick.eligible_mask.tolist() == [False]
 
 
-def test_phase_timeout_retry_budget_is_bounded() -> None:
+def test_action_timeout_retry_budget_is_bounded() -> None:
     engine, action = _engine()
     session = engine.start(
         (
             _invocation(
-                max_phase_retries=1,
-                phase_timeout=0.05,
+                max_action_retries=1,
+                action_timeout=0.05,
             ),
         ),
         _context(0.0, 0.0, 0.2, 0),
@@ -747,12 +762,12 @@ def test_phase_timeout_retry_budget_is_bounded() -> None:
     exhausted = session.tick(_context(0.2, 0.0, 0.2, 0))
 
     retry_kinds = {event.kind for event in retry.events}
-    assert ExecutionEventKind.PHASE_TIMEOUT in retry_kinds
+    assert ExecutionEventKind.ACTION_TIMEOUT in retry_kinds
     assert ExecutionEventKind.ACTION_RETRY in retry_kinds
     assert ExecutionEventKind.REPLANNED in retry_kinds
     assert action.plan_count == 2
     exhausted_kinds = {event.kind for event in exhausted.events}
-    assert ExecutionEventKind.PHASE_TIMEOUT in exhausted_kinds
+    assert ExecutionEventKind.ACTION_TIMEOUT in exhausted_kinds
     assert ExecutionEventKind.RECOVERY_EXHAUSTED in exhausted_kinds
     assert exhausted.status is ExecutionStatus.FAILED
     assert exhausted.eligible_mask.tolist() == [False]
@@ -786,7 +801,7 @@ def test_session_rejects_regressing_collision_world_revision() -> None:
     qpos = torch.zeros(1, 2)
     initial = _collision_context(0.0, qpos, torch.tensor([0.4]), (2,))
     session = engine.start(
-        (_invocation(motion_source="motion_gen"),),
+        (_invocation(strategy="motion_gen"),),
         initial,
     )
     regressed = _collision_context(0.1, qpos, torch.tensor([0.4]), (1,))
@@ -812,6 +827,7 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
     session.tick(_context(0.1, 0.0, 0.2, 0))
 
     waiting = session.tick(_context(0.2, 0.2, 0.2, 0))
+    still_waiting = session.tick(_context(0.25, 0.2, 0.2, 0))
     completed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
         effect_success=torch.tensor([True]),
@@ -819,18 +835,33 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
 
     assert waiting.status is ExecutionStatus.RUNNING
     assert waiting.task_state.get_held_object("arm") is None
+    assert waiting.pending_effect is not None
+    assert waiting.pending_effect.skill_id == "effect"
+    assert waiting.pending_effect.terminal_segment == "effect"
+    assert waiting.pending_effect.env_mask.tolist() == [True]
+    assert not waiting.pending_effect.expected_effects.is_empty
     assert any(
         event.kind is ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED
         for event in waiting.events
     )
+    assert still_waiting.pending_effect is not None
+    assert not any(
+        event.kind
+        in {
+            ExecutionEventKind.TRAJECTORY_COMPLETED,
+            ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED,
+        }
+        for event in still_waiting.events
+    )
     assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.pending_effect is None
     assert completed.task_state.get_held_object("arm") is not None
 
 
 def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
     engine, _ = _engine()
     engine.register(EffectAction())
-    base = _invocation(max_phase_retries=0)
+    base = _invocation(max_action_retries=0)
     invocation = ActionInvocation(
         skill_id="effect",
         goal=base.goal,
@@ -849,6 +880,34 @@ def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
 
     assert failed.status is ExecutionStatus.FAILED
     assert failed.task_state.get_held_object("arm") is None
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED for event in failed.events
+    )
+
+
+def test_failed_effect_plan_retries_without_requesting_effect_verification() -> None:
+    engine, _ = _engine()
+    engine.register(FailedEffectAction())
+    base = _invocation(max_action_retries=0)
+    invocation = ActionInvocation(
+        skill_id="failed_effect",
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.1, 0.0, 0.2, 0))
+
+    failed = session.tick(_context(0.2, 0.0, 0.2, 0))
+
+    assert failed.status is ExecutionStatus.FAILED
+    assert failed.pending_effect is None
+    assert not any(
+        event.kind is ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED
+        for event in failed.events
+    )
     assert any(
         event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED for event in failed.events
     )

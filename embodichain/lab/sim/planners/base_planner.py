@@ -169,9 +169,9 @@ class BasePlanner(ABC):
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 
-    When ``True``, ``TrajectoryBuilder`` returns the planner's trajectory
+    When ``True``, :class:`MotionGenerator` returns the planner's trajectory
     without resampling, preserving collision-checked samples. When ``False``
-    (the default), the builder may normalize the trajectory to a requested
+    (the default), the generator may normalize the trajectory to a requested
     waypoint count.
     """
 

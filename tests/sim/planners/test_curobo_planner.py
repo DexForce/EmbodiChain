@@ -731,7 +731,7 @@ def test_curobo_reuses_non_graph_backend():
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )
@@ -750,7 +750,7 @@ def test_curobo_reuses_non_graph_backend():
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )
@@ -785,7 +785,7 @@ def test_curobo_uses_accelerator_with_cpu_physics():
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )

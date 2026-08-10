@@ -107,7 +107,7 @@ class RigidObjectSceneProvider:
         self.cfg = cfg if cfg is not None else RigidObjectSceneProviderCfg()
         self._last_timestamp: float | None = None
         self._env_ids: torch.Tensor | None = None
-        self._last_poses: dict[str, torch.Tensor] = {}
+        self._published_poses: dict[str, torch.Tensor] = {}
         self._scene_version = 0
         self._collision_revisions: list[int] = []
 
@@ -148,10 +148,10 @@ class RigidObjectSceneProvider:
             entity_id: self._read_pose(entity_id, entity, int(env_ids.numel()))
             for entity_id, entity in self.entities.items()
         }
-        if self._last_poses:
+        if self._published_poses:
             changed_by_entity = {
                 entity_id: self._pose_change_mask(
-                    self._last_poses[entity_id], current_pose
+                    self._published_poses[entity_id], current_pose
                 )
                 for entity_id, current_pose in poses.items()
             }
@@ -163,10 +163,22 @@ class RigidObjectSceneProvider:
             for row in collision_changed.nonzero(as_tuple=False).flatten().tolist():
                 self._collision_revisions[row] += 1
 
+            # Noise is measured against the last materially published pose,
+            # not the immediately preceding sample. Otherwise a slowly moving
+            # object can remain invisible forever when every individual step
+            # stays below the configured threshold.
+            for entity_id, changed in changed_by_entity.items():
+                if changed.any():
+                    changed_on_pose_device = changed.to(poses[entity_id].device)
+                    self._published_poses[entity_id][changed_on_pose_device] = poses[
+                        entity_id
+                    ][changed_on_pose_device]
+        else:
+            self._published_poses = {
+                entity_id: pose.clone() for entity_id, pose in poses.items()
+            }
+
         self._last_timestamp = timestamp
-        self._last_poses = {
-            entity_id: pose.clone() for entity_id, pose in poses.items()
-        }
         return SceneSnapshot(
             timestamp=timestamp,
             version=self._scene_version,
@@ -321,7 +333,21 @@ class SimulationExecutionAdapter:
             raise ValueError("duration must be finite and non-negative.")
         if duration == 0.0:
             return
-        step_count = max(1, math.ceil(duration / self.physics_dt))
+        step_ratio = duration / self.physics_dt
+        nearest_step_count = round(step_ratio)
+        step_count = max(
+            1,
+            (
+                nearest_step_count
+                if math.isclose(
+                    step_ratio,
+                    nearest_step_count,
+                    rel_tol=1.0e-6,
+                    abs_tol=1.0e-9,
+                )
+                else math.ceil(step_ratio)
+            ),
+        )
         self.simulation.update(physics_dt=self.physics_dt, step=step_count)
         self._elapsed_time += step_count * self.physics_dt
 

@@ -239,7 +239,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory,
         args,
         video_prefix="press_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

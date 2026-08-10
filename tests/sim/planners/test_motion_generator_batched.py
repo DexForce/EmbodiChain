@@ -27,6 +27,36 @@ from embodichain.lab.sim.planners.motion_generator import (
 from embodichain.lab.sim.planners.base_planner import PlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
 
+BATCH_SIZE = 2
+CONTROLLED_DOF = 6
+SAMPLE_COUNT = 8
+
+
+@pytest.fixture(autouse=True)
+def _torch_resampling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use deterministic Torch resampling without initializing Warp."""
+
+    def resample(
+        trajectory: torch.Tensor,
+        interp_num: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        indices = torch.linspace(
+            0,
+            trajectory.shape[1] - 1,
+            interp_num,
+            device=device,
+        )
+        lower = indices.floor().to(torch.long)
+        upper = indices.ceil().to(torch.long)
+        weights = (indices - lower).view(1, -1, 1)
+        return torch.lerp(trajectory[:, lower], trajectory[:, upper], weights)
+
+    monkeypatch.setattr(
+        "embodichain.lab.sim.planners.motion_generator.resample_with_distance",
+        resample,
+    )
+
 
 class _DirectCartesianPlanner:
     """Fake backend that consumes raw Cartesian targets (like cuRobo).
@@ -83,13 +113,13 @@ def test_direct_cartesian_planner_skips_preinterpolation_without_mutating_option
     assert planner.received[1] == "arm"
 
 
-def test_direct_cartesian_planner_rejects_joint_targets():
+def test_direct_cartesian_planner_requires_joint_fallback_inputs():
     planner = _DirectCartesianPlanner()
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     generator.device = torch.device("cpu")
 
-    with pytest.raises(ValueError, match="JOINT_MOVE"):
+    with pytest.raises(ValueError, match="start_qpos"):
         generator.generate(
             [PlanState.from_qpos(torch.zeros(1, 2))],
             MotionGenOptions(plan_opts=PlanOptions()),
@@ -158,6 +188,7 @@ def test_bind_collision_world_uses_backend_default_options() -> None:
 
 def _mock_planner(b=3, n=15, dofs=6):
     planner = Mock()
+    planner.cfg.planner_type = "toppra"
     planner.supported_move_types = frozenset({MoveType.JOINT_MOVE})
     planner.supports_move_type.side_effect = (
         lambda move_type: move_type in planner.supported_move_types
@@ -168,8 +199,52 @@ def _mock_planner(b=3, n=15, dofs=6):
         success=torch.ones(b, dtype=torch.bool),
         positions=torch.zeros(b, n, dofs),
     )
-    planner.default_plan_options.return_value = None
+    planner.preserve_plan_samples = False
+    planner.default_plan_options.return_value = PlanOptions()
+    planner.with_motion_context.side_effect = (
+        lambda options, *, start_qpos, control_part: options
+    )
     return planner
+
+
+def _mock_generator(
+    *,
+    batch_size: int = 2,
+    controlled_dof: int = 6,
+    supported_move_types: frozenset[MoveType] = frozenset(
+        {MoveType.EEF_MOVE, MoveType.JOINT_MOVE}
+    ),
+    preserve_plan_samples: bool = False,
+    result: PlanResult | None = None,
+) -> MotionGenerator:
+    robot = Mock()
+    robot.device = torch.device("cpu")
+    robot.num_instances = batch_size
+    robot.compute_ik.return_value = (
+        torch.ones(batch_size, dtype=torch.bool),
+        torch.zeros(batch_size, controlled_dof),
+    )
+    planner = Mock()
+    planner.cfg.planner_type = "toppra"
+    planner.robot = robot
+    planner.supported_move_types = supported_move_types
+    planner.supports_move_type.side_effect = (
+        lambda move_type: move_type in supported_move_types
+    )
+    planner.preserve_plan_samples = preserve_plan_samples
+    planner.default_plan_options.return_value = PlanOptions()
+    planner.with_motion_context.side_effect = (
+        lambda options, *, start_qpos, control_part: options
+    )
+    planner.plan.return_value = result or PlanResult(
+        success=torch.ones(batch_size, dtype=torch.bool),
+        positions=torch.zeros(batch_size, 5, controlled_dof),
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.robot = robot
+    generator.device = torch.device("cpu")
+    return generator
 
 
 class TestGenerateBatched:
@@ -228,3 +303,207 @@ class TestInterpolateBatched:
             options=MotionGenOptions(is_linear=False, interpolate_nums=10),
         )
         assert qpos_interpolated.shape[0] == B
+
+
+class TestMotionStrategy:
+    def test_options_accept_only_declared_strategy_values(self):
+        assert MotionGenOptions(strategy="motion_gen").strategy == "motion_gen"
+        assert MotionGenOptions(strategy="ik_interp").strategy == "ik_interp"
+        with pytest.raises(ValueError, match="strategy"):
+            MotionGenOptions(strategy="planner")  # type: ignore[arg-type]
+
+    def test_ik_interp_solves_batched_poses_without_calling_backend(self):
+        generator = _mock_generator()
+        generator.robot.compute_ik.return_value = (
+            torch.tensor([1, 0], dtype=torch.int64),
+            torch.ones(BATCH_SIZE, CONTROLLED_DOF),
+        )
+        start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
+        start[1] = 0.5
+        targets = [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))]
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="ik_interp",
+                sample_count=SAMPLE_COUNT,
+                start_qpos=start,
+                control_part="arm",
+            ),
+        )
+
+        assert isinstance(result.success, torch.Tensor)
+        assert result.success.tolist() == [True, False]
+        assert result.positions is not None
+        assert result.positions.shape == (
+            BATCH_SIZE,
+            SAMPLE_COUNT,
+            CONTROLLED_DOF,
+        )
+        assert torch.allclose(
+            result.positions[1],
+            start[1].unsqueeze(0).expand(SAMPLE_COUNT, -1),
+        )
+        generator.planner.plan.assert_not_called()
+
+    def test_motion_gen_delegates_and_resamples_backend_result(self):
+        raw_sample_count = 5
+        generator = _mock_generator(
+            result=PlanResult(
+                success=True,
+                positions=torch.zeros(
+                    BATCH_SIZE,
+                    raw_sample_count,
+                    CONTROLLED_DOF,
+                ),
+            )
+        )
+        targets = [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))]
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="motion_gen",
+                sample_count=SAMPLE_COUNT,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape == (
+            BATCH_SIZE,
+            SAMPLE_COUNT,
+            CONTROLLED_DOF,
+        )
+        generator.planner.plan.assert_called_once()
+
+    def test_motion_gen_preserves_backend_samples_when_required(self):
+        raw_sample_count = 5
+        generator = _mock_generator(
+            preserve_plan_samples=True,
+            result=PlanResult(
+                success=True,
+                positions=torch.zeros(
+                    BATCH_SIZE,
+                    raw_sample_count,
+                    CONTROLLED_DOF,
+                ),
+            ),
+        )
+
+        result = generator.generate(
+            [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+            MotionGenOptions(
+                strategy="motion_gen",
+                sample_count=SAMPLE_COUNT,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape[1] == raw_sample_count
+
+    def test_joint_target_falls_back_when_backend_has_no_joint_capability(self):
+        generator = _mock_generator(supported_move_types=frozenset({MoveType.EEF_MOVE}))
+        start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
+        target = torch.ones(BATCH_SIZE, CONTROLLED_DOF)
+
+        result = generator.generate(
+            [PlanState.from_qpos(target)],
+            MotionGenOptions(
+                strategy="motion_gen",
+                sample_count=SAMPLE_COUNT,
+                start_qpos=start,
+                control_part="arm",
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape == (
+            BATCH_SIZE,
+            SAMPLE_COUNT,
+            CONTROLLED_DOF,
+        )
+        assert torch.allclose(result.positions[:, 0], start)
+        assert torch.allclose(result.positions[:, -1], target)
+        generator.planner.plan.assert_not_called()
+
+    def test_generate_does_not_mutate_caller_plan_options(self):
+        generator = _mock_generator()
+        caller_options = PlanOptions()
+        options = MotionGenOptions(
+            strategy="motion_gen",
+            sample_count=SAMPLE_COUNT,
+            start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+            control_part="arm",
+            plan_opts=caller_options,
+        )
+
+        generator.generate(
+            [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+            options,
+        )
+
+        forwarded = generator.planner.with_motion_context.call_args.args[0]
+        assert forwarded is not caller_options
+        assert forwarded is not options.plan_opts
+
+
+class TestNormalizedPlanResult:
+    def test_non_finite_positions_are_rejected(self):
+        positions = torch.zeros(BATCH_SIZE, 5, CONTROLLED_DOF)
+        positions[0, 0, 0] = float("nan")
+        generator = _mock_generator(
+            result=PlanResult(success=True, positions=positions)
+        )
+
+        with pytest.raises(ValueError, match="non-finite"):
+            generator.generate(
+                [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+                MotionGenOptions(
+                    start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                    control_part="arm",
+                ),
+            )
+
+    def test_missing_positions_are_rejected(self):
+        generator = _mock_generator(
+            result=PlanResult(
+                success=torch.ones(BATCH_SIZE, dtype=torch.bool),
+                positions=None,
+            )
+        )
+
+        with pytest.raises(ValueError, match="positions"):
+            generator.generate(
+                [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+                MotionGenOptions(
+                    start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                    control_part="arm",
+                ),
+            )
+
+    def test_failed_rows_hold_start_qpos(self):
+        positions = torch.zeros(BATCH_SIZE, 5, CONTROLLED_DOF)
+        positions[1] = 1.0
+        generator = _mock_generator(
+            result=PlanResult(
+                success=torch.tensor([True, False]),
+                positions=positions,
+            )
+        )
+        start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
+        start[1] = 0.5
+
+        result = generator.generate(
+            [PlanState.from_xpos(torch.eye(4).repeat(BATCH_SIZE, 1, 1))],
+            MotionGenOptions(start_qpos=start, control_part="arm"),
+        )
+
+        assert result.positions is not None
+        assert torch.allclose(
+            result.positions[1],
+            start[1].unsqueeze(0).expand(positions.shape[1], -1),
+        )

@@ -101,6 +101,8 @@ def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
     assert policy.dynamic_collision_mode is DynamicCollisionMode.AUTO
     with pytest.raises(ValueError, match="sample_count"):
         MotionPolicy(sample_count=1)
+    with pytest.raises(ValueError, match="strategy"):
+        MotionPolicy(strategy="planner")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="max_replans"):
         RecoveryPolicy(max_replans=-1)
 
@@ -114,6 +116,30 @@ def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
         MotionPolicy(dynamic_collision_mode="unknown")
     with pytest.raises(TypeError, match="DynamicCollisionMode"):
         MotionPolicy(dynamic_collision_mode=object())  # type: ignore[arg-type]
+
+
+def test_motion_policy_maps_to_motion_generator_strategy() -> None:
+    policy = MotionPolicy(
+        strategy="ik_interp",
+        sample_count=24,
+        velocity_limit=0.2,
+        acceleration_limit=0.5,
+    )
+    start_qpos = torch.zeros(2, 6)
+
+    options = policy.to_motion_gen_options(
+        start_qpos=start_qpos,
+        control_part="arm",
+        sample_count=12,
+    )
+
+    assert options.strategy == "ik_interp"
+    assert options.sample_count == 12
+    assert options.start_qpos is not start_qpos
+    assert torch.equal(options.start_qpos, start_qpos)
+    assert options.control_part == "arm"
+    assert options.velocity_limit == 0.2
+    assert options.acceleration_limit == 0.5
 
 
 def test_task_state_normalizes_held_relations_and_masks_updates() -> None:

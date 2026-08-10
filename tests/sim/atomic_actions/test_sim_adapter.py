@@ -167,6 +167,17 @@ def test_simulation_adapter_sleep_advances_integral_physics_steps() -> None:
     assert adapter.now() == pytest.approx(0.03)
 
 
+def test_simulation_adapter_sleep_absorbs_float32_roundoff() -> None:
+    simulation, robot = _simulation_and_robot()
+    adapter = SimulationExecutionAdapter(simulation, robot, physics_dt=0.1)
+    duration = float(torch.tensor(0.2, dtype=torch.float32))
+
+    adapter.sleep(duration)
+
+    simulation.update.assert_called_once_with(physics_dt=0.1, step=2)
+    assert adapter.now() == pytest.approx(0.2)
+
+
 def test_simulation_adapter_supplies_time_and_ids_to_scene_provider() -> None:
     simulation, robot = _simulation_and_robot()
     timestamps: list[float] = []
@@ -299,6 +310,63 @@ def test_rigid_object_scene_provider_filters_subthreshold_pose_noise() -> None:
 
     assert unchanged.version == 0
     assert unchanged.collision_world_revisions(BATCH_SIZE) == (0, 0)
+
+
+def test_rigid_object_scene_provider_accumulates_subthreshold_translation() -> None:
+    obstacle = Mock()
+    pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    obstacle.get_local_pose.return_value = pose
+    provider = RigidObjectSceneProvider(
+        {"obstacle": obstacle},
+        collision_entity_ids=("obstacle",),
+        cfg=RigidObjectSceneProviderCfg(translation_threshold=0.01),
+    )
+    env_ids = torch.arange(BATCH_SIZE, dtype=torch.long)
+    provider.snapshot(timestamp=0.0, env_ids=env_ids)
+
+    pose = pose.clone()
+    pose[1, 0, 3] = 0.006
+    obstacle.get_local_pose.return_value = pose
+    first = provider.snapshot(timestamp=PHYSICS_DT, env_ids=env_ids)
+
+    pose = pose.clone()
+    pose[1, 0, 3] = 0.012
+    obstacle.get_local_pose.return_value = pose
+    second = provider.snapshot(timestamp=2 * PHYSICS_DT, env_ids=env_ids)
+
+    assert first.version == 0
+    assert first.collision_world_revisions(BATCH_SIZE) == (0, 0)
+    assert second.version == 1
+    assert second.collision_world_revisions(BATCH_SIZE) == (0, 1)
+
+
+def test_rigid_object_scene_provider_accumulates_subthreshold_rotation() -> None:
+    obstacle = Mock()
+    pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    obstacle.get_local_pose.return_value = pose
+    provider = RigidObjectSceneProvider(
+        {"obstacle": obstacle},
+        collision_entity_ids=("obstacle",),
+        cfg=RigidObjectSceneProviderCfg(rotation_threshold=0.1),
+    )
+    env_ids = torch.arange(BATCH_SIZE, dtype=torch.long)
+    provider.snapshot(timestamp=0.0, env_ids=env_ids)
+
+    for index, angle in enumerate((0.06, 0.12), start=1):
+        cosine = torch.cos(torch.tensor(angle))
+        sine = torch.sin(torch.tensor(angle))
+        rotated = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+        rotated[0, :2, :2] = torch.tensor(
+            [[cosine, -sine], [sine, cosine]], dtype=torch.float32
+        )
+        obstacle.get_local_pose.return_value = rotated
+        snapshot = provider.snapshot(
+            timestamp=index * PHYSICS_DT,
+            env_ids=env_ids,
+        )
+
+    assert snapshot.version == 1
+    assert snapshot.collision_world_revisions(BATCH_SIZE) == (1, 0)
 
 
 def test_simulation_adapter_rejects_changed_environment_identity() -> None:

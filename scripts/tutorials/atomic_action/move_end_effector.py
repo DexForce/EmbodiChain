@@ -111,7 +111,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory.positions,
+        compiled.trajectory,
         args,
         video_prefix="move_end_effector_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 from dataclasses import dataclass
@@ -29,10 +31,68 @@ __all__ = [
     "MoveType",
     "PlanState",
     "PlanResult",
+    "normalize_success_mask",
     "calculate_point_allocations",
     "interpolate_xpos",
     "interpolate_xpos_batched",
 ]
+
+
+def normalize_success_mask(
+    success: bool | torch.Tensor,
+    *,
+    n_envs: int,
+    device: torch.device | str,
+    name: str,
+) -> torch.Tensor:
+    """Normalize a scalar or batched success value to ``(n_envs,)``.
+
+    Args:
+        success: Scalar success or a boolean/binary-integer tensor.
+        n_envs: Required batch size.
+        device: Device of the resulting tensor.
+        name: Human-readable value name used in validation errors.
+
+    Returns:
+        Independently owned boolean success mask.
+
+    Raises:
+        TypeError: If ``success`` is neither boolean nor binary integer data.
+        ValueError: If a tensor does not match the required batch shape.
+    """
+    resolved_device = torch.device(device)
+    if resolved_device.type == "cuda" and resolved_device.index is None:
+        resolved_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    if isinstance(success, bool):
+        return torch.full((n_envs,), success, dtype=torch.bool, device=resolved_device)
+    if not isinstance(success, torch.Tensor):
+        raise TypeError(
+            f"{name} must be a bool or torch.Tensor, got {type(success).__name__}."
+        )
+    success = success.to(resolved_device)
+    if success.dtype != torch.bool:
+        integer_dtypes = {
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        }
+        if success.dtype not in integer_dtypes or not torch.all(
+            (success == 0) | (success == 1)
+        ):
+            raise TypeError(
+                f"{name} must be boolean or a binary integer tensor, "
+                f"got dtype {success.dtype}."
+            )
+        success = success.to(dtype=torch.bool)
+    if success.dim() == 0 or success.shape == (1,):
+        success = success.reshape(1).expand(n_envs)
+    if success.shape != (n_envs,):
+        raise ValueError(
+            f"{name} must have shape ({n_envs},), got {tuple(success.shape)}."
+        )
+    return success.clone()
 
 
 class TrajectorySampleMethod(Enum):

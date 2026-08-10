@@ -355,7 +355,7 @@ def run_assemble_demo(
     replay_trajectory(
         sim,
         robot,
-        traj,
+        compiled.trajectory,
         args,
         video_prefix="assemble_auto_play",
         hold_steps=0,
