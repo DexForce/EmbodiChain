@@ -1,10 +1,12 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
 - Status: design plan
-- Baseline: `main@26b69c22d7efbf96cb35f5487f6922c8645f91d7`
+- Baseline: `main@e445133c79c8b32019dab1c844b799b43a1658d6`
 - Last updated: 2026-08-10
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
+- Related implementation:
+  [#475](https://github.com/DexForce/EmbodiChain/pull/475)
 
 ## 1. Executive summary
 
@@ -88,8 +90,8 @@ sessions, or verifiers.
 
 ## 4. Baseline on current `main`
 
-This plan is based on commit `26b69c22` rather than uncommitted working-tree
-changes.
+This plan is updated against committed `main@e445133c` after PR #475 rather
+than uncommitted working-tree changes.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -97,24 +99,27 @@ changes.
 | Lazy `DemoSegment` execution and legacy demo compatibility (#460) | Available | Use a thin demo adapter; do not create a second dataset executor. |
 | Closed-loop `ExecutionRunner` and simulator ports (#449) | Available | `SkillRuntime` wraps/reuses the runner rather than scheduling commands itself. |
 | Dynamic scene recovery and `DynamicCollisionMode` (#450) | Available | Profiles select precise collision semantics and fail early when required capabilities are unavailable. |
+| Refined planning architecture (#475) | `MotionGenerator.generate()` is the single planning facade; each `ActionPlan` owns one trajectory and one recovery boundary; named `TrajectorySegment`s are metadata | Do not reintroduce `TrajectoryBuilder`, `MotionPlanningAdapter`, or trajectory-segment recovery. |
 | Environment cadence through `BaseEnv.step_dt` (#472) | Available | Expert configuration does not expose a separate control period. |
 | Adaptive dynamic-object settling (#470) | Reset/event implementation exists | Extract a reusable monitor; demo post-policies must advance through `env.step()`. |
 | Repeated cube pick/place demo | Manually constructs invocations and transform math | First configuration-only vertical slice. |
 | Open Drawer task (#473) | Manually builds approach, grasp, pull, and command trajectories | Evidence that the semantic layer needs articulation/link/affordance references and a reusable articulation skill. |
 | Action Bank | Configuration plus task-specific Python node/edge functions | Keep only as a compatibility path while semantic coverage is built. |
 
-Several #474 findings remain prerequisites on this baseline:
+PR #475 resolved cumulative translation/rotation publication, removed the dead
+`MotionPolicy.interpolation` field, and unified strategy dispatch. The
+remaining #474 prerequisites on this baseline are:
 
-- `RigidObjectSceneProvider` still updates its pose baseline on every snapshot,
-  so repeated sub-threshold movement may never publish a revision.
 - `AtomicAction` rejects the formerly documented `plan()` extension override
   and requires `_plan()` without a compatibility window.
 - scene pose, semantics, affordance, and collision registration still have
   multiple sources of truth;
 - ordinary callers still see a large low-level public surface and must perform
   semantic transform and verifier plumbing;
-- `MotionPolicy` still exposes implementation-level tuning, including an
-  unused/misleading interpolation option.
+- provider collision entity IDs and planner-declared dynamic obstacle names are
+  not cross-validated at integration construction time;
+- `MotionPolicy` still exposes implementation-level tuning that should be
+  hidden behind semantic presets for ordinary users.
 
 One #474 finding has changed since its review branch: the ambiguous
 `collision_check` switch has been replaced by `DynamicCollisionMode.OFF`,
@@ -130,7 +135,8 @@ The following #471 decisions remain valid:
 - lazy re-observation when later goals depend on physical effects;
 - distinct action-effect verification, segment post-policy, and task-level
   validation responsibilities;
-- named phases instead of trajectory indices;
+- stable named trajectory segments for tracing instead of recomputed trajectory
+  indices;
 - sequential execution first, then resource-aware parallel execution;
 - continued legacy compatibility during migration.
 
@@ -144,6 +150,22 @@ The following parts must be adjusted:
 | Object providers can be individually registered by the program. | A single `SceneRegistry` is authoritative for identity, pose source, geometry, affordance, and collision metadata. Programs reference registry IDs. |
 | Callers may supply place EEF poses and pickup look-ahead options. | `Place` is object-centric; the compiler derives EEF targets from verified held state and propagates downstream targets automatically. |
 | Configuration and handwritten code are separate entry paths. | Both construct the same semantic call specification and converge before binding or grounding. |
+
+### 5.1 Segment terminology after #475
+
+The design uses three different segment layers. Bare "segment" should be
+avoided wherever the layer would be ambiguous.
+
+| Term | Type | Meaning |
+|---|---|---|
+| Program segment | `SegmentCfg` | Expert Program logical transaction boundary; owns post-policies, validators, and re-observation semantics. |
+| Demo segment | `DemoSegment` | Lazy Gym/demo executor carrier and dataset boundary produced from a program segment. |
+| Trajectory segment | `TrajectorySegment` | Named half-open waypoint range within one `ActionPlan`; used for inspection, visualization, tracing, and terminal-effect correlation only. |
+
+A trajectory segment is not an independent planning, recovery, effect, or
+timeout boundary. One atomic action remains the recovery/effect boundary.
+"Phase 0" through "Phase 8" below refer only to implementation-plan stages;
+atomic motion structure is called a trajectory segment, not a phase.
 
 ## 6. Proposed architecture
 
@@ -332,7 +354,7 @@ the compiler partitions safe static stages and inserts observed boundaries.
 - persistent, per-environment verified `TaskState`;
 - built-in effect-monitor selection and feedback to `ExecutionSession`;
 - uniform `SkillResult`, cancellation, timeout, and safe-stop behavior;
-- semantic and named-phase events.
+- semantic action events and optional trajectory-segment trace metadata.
 
 Catalog discovery and runtime installation should have distinct names. For
 example, a catalog can `discover` a descriptor while an engine explicitly
@@ -463,13 +485,14 @@ examples. Stable names should be preferred over internal fields:
 
 ```yaml
 advanced:
-  phase_presets:
-    secure_grasp: precise
+  call_presets:
+    pick: precise
   recovery_preset: dynamic_scene
 ```
 
 Raw planner instances, callables, arbitrary imports, and environment paths are
-never serializable configuration values.
+never serializable configuration values. Version 1 does not attach motion or
+recovery policies to individual `TrajectorySegment`s.
 
 ## 9. Demonstration execution semantics
 
@@ -483,8 +506,8 @@ Gym-aware runtime ports:
 - command sink: buffers the next full-robot command for the environment action
   manager;
 - clock: advances only when the demo executor calls `env.step()`;
-- metadata sink: records compiler decisions, phases, effects, recovery, scene
-  revisions, and post-policy results.
+- metadata sink: records compiler decisions, action trajectory segments,
+  effects, recovery, scene revisions, and post-policy results.
 
 The existing `SimulationExecutionAdapter` is not the demo execution loop
 because direct simulator updates can bypass environment managers and recorders.
@@ -502,23 +525,27 @@ per yielded command. An incompatible command is rejected with a clear timing
 error; it is not silently resampled. Explicit timed-command resampling can be a
 later, separately tested feature.
 
-Timeout for a named phase starts when its first command is dispatched, not when
-an earlier phase or the whole segment is compiled.
+Recovery timeout and retry budgets are scoped to the enclosing action attempt.
+A `TrajectorySegment` does not start an independent timer or own a recovery
+policy. Program-segment settling and validation use separate post-policy
+deadlines.
 
-### 9.3 Named phases
+### 9.3 Named atomic trajectory segments
 
-Plans and execution events need stable semantic phase names. Initial built-ins
-should expose at least:
+Plans need stable semantic trajectory-segment names. Current built-ins expose:
 
-- pick: `approach`, `grasp_close`, `lift`;
-- place: `lower`, `release`, `retract`;
-- handover: role-specific approach, transfer, release, and retreat phases;
-- articulation operation: `approach`, `grasp_close`, `operate`, `release`,
-  `retract`.
+- pick: `approach`, `close`, `lift`;
+- place: `approach`, `release`, `retract`;
+- handover: `transfer`, `approach`, `close`, optional `hold`, `release`, and
+  `deliver`.
 
-Post-policies and effect monitors subscribe to names, not trajectory sample
-indices. The runtime validates requested phase names against the active skill
-descriptor before execution.
+Names are validated by `ActionPlan`; ranges may change after replanning when a
+backend returns a different sample count. Effect monitors run at the action
+effect boundary and may use `EffectVerificationRequest.terminal_segment` for
+correlation. Program post-policies and validators subscribe to program/demo
+segment boundaries, not trajectory segments. Articulation segment names should
+be stabilized with the reusable articulation skill rather than predeclared in
+the configuration schema.
 
 ### 9.4 Dynamic settling
 
@@ -542,7 +569,7 @@ clear object dynamics.
 All runtime state is indexed by stable environment IDs:
 
 - scene revisions and active collision dependencies;
-- current call/phase and command deadline;
+- current program segment, semantic call, action waypoint, and command deadline;
 - recovery budgets and failure masks;
 - verified held-object/effect state;
 - post-policy progress and segment validation;
@@ -559,7 +586,7 @@ capability parity.
 
 | Action Bank concept | Expert Program / semantic runtime |
 |---|---|
-| scope | `Segment` or nested `Sequence` |
+| scope | Program `SegmentCfg` or nested `SequenceCfg` |
 | custom node function | registered semantic call and shared compiler |
 | custom edge/target function | typed target provider or goal grounder |
 | graph edge | explicit sequence/effect dependency inferred by compiler |
@@ -641,20 +668,29 @@ Semantic calls/compiler --> SkillRuntime/effect monitors
 
 ### Phase 0: correctness and compatibility prerequisites
 
-Deliverables:
+Landed on `main` through #475:
 
-- fix cumulative sub-threshold translation and rotation publication in
-  `RigidObjectSceneProvider` by comparing with the last published/significant
-  pose;
-- add regression tests for target and collision-world revisions;
-- decide the supported `plan()`/`_plan()` custom-action extension contract and
-  provide a compatibility/deprecation path before enforcing a break;
-- remove or implement misleading `MotionPolicy` fields, keeping collision
-  semantics expressed by `DynamicCollisionMode`;
-- add early cross-validation for registry/provider/planner obstacle names.
+- cumulative sub-threshold translation and rotation compare against the last
+  published pose;
+- target/general-scene and per-environment collision revisions have regression
+  coverage;
+- the dead `MotionPolicy.interpolation` field is removed and strategy dispatch
+  is unified;
+- one action owns one trajectory and one recovery/effect boundary, while named
+  `TrajectorySegment`s remain metadata.
 
-Exit criteria: all #474 P0 items are resolved on main and custom actions have a
-documented, tested upgrade path.
+Remaining gates:
+
+- retain `_plan()` as the new extension hook and decide whether legacy
+  subclasses overriding `plan()` receive a tested compatibility/deprecation
+  adapter or continue to fail at class-definition time;
+- cross-validate provider collision entity IDs against planner-declared dynamic
+  obstacle names when both integrations are constructed. Phase 1 extends this
+  same validation to registry-derived configuration.
+
+Exit criteria: both remaining gates pass on `main`. Phase 1 must not depend on
+an undocumented custom-action break or defer mismatched obstacle names until
+planning/execution.
 
 ### Phase 1: unified integration data
 
@@ -703,16 +739,17 @@ compiler/runtime code and produce equivalent results.
 
 Deliverables:
 
-- stable named phases in plans/descriptors/events;
+- expose the existing named plan trajectory segments through optional demo
+  trace metadata without adding segment-level recovery;
 - reusable `DynamicSettleMonitor` shared by reset and demo paths;
 - Gym observation, buffered command, and environment-clock ports;
 - thin `AtomicDemoBridge` yielding lazy `DemoSegment`s;
 - exact `BaseEnv.step_dt` timing validation;
-- runtime metadata for calls, phases, effects, recovery, scene revisions,
-  settling, and validation.
+- runtime metadata for calls, trajectory segments, effects, recovery, scene
+  revisions, settling, and validation.
 
-Exit criteria: no demo command bypasses `env.step()`, and phase/post-policy
-behavior contains no hard-coded trajectory index.
+Exit criteria: no demo command bypasses `env.step()`, and no post-policy,
+effect, or trace integration contains a hard-coded trajectory index.
 
 ### Phase 5: Expert Program version 1 and repeated-cube vertical slice
 
@@ -740,7 +777,7 @@ Deliverables:
 
 - articulation/link/affordance registry integration;
 - reusable articulation-operation semantic call, compiler, effect monitor, and
-  named phases;
+  named trajectory segments;
 - configuration-based Open Drawer migration;
 - migrate additional sequential tasks to reveal missing reusable grounders,
   monitors, and validators.
@@ -789,7 +826,8 @@ independent of adoption of the new path.
 - object-centric place conversion from one immutable snapshot and verified
   held state;
 - effect monitor state transitions and timeout/recovery feedback;
-- named phase validation and exact step-duration conversion;
+- trajectory-segment coverage/name validation and exact step-duration
+  conversion;
 - Action Bank compatibility adapters where introduced.
 
 ### Integration tests with fake ports
@@ -802,7 +840,8 @@ independent of adoption of the new path.
 
 ### Simulation tests
 
-- three-segment repeated cube pick/place with free-fall re-observation;
+- three-program/demo-segment repeated cube pick/place with free-fall
+  re-observation;
 - moving target and dynamic collision recovery with the `safe` preset;
 - grasp/release/handover effect monitors;
 - settling success and timeout metadata;
@@ -834,9 +873,10 @@ The design is complete when all of the following hold:
 - [ ] Custom actions have a documented and tested compatibility path.
 - [ ] Demonstration timing is derived from `BaseEnv.step_dt` and commands pass
       through `env.step()`.
-- [ ] Phase hooks use stable names rather than trajectory indices.
+- [ ] No program post-policy, effect, or tracing integration depends on
+      hard-coded waypoint indices.
 - [ ] Repeated cube pick/place completes at least three lazy, independently
-      observed segments with settle/effect/validation metadata.
+      observed program/demo segments with settle/effect/validation metadata.
 - [ ] Multi-environment progress, effects, recovery, and failures remain
       independent.
 - [ ] Advanced users retain typed goals, invocations, policies, providers,
