@@ -41,7 +41,6 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
     CoordinatedPickGoal,
-    CoordinatedPickment,
     CoordinatedPickmentOptions,
     MotionPolicy,
 )
@@ -392,10 +391,6 @@ def run_coordinated_pickment_demo(
             ),
         },
     )
-    pickment_action = engine.actions["coordinated_pickment"]
-    if not isinstance(pickment_action, CoordinatedPickment):
-        raise RuntimeError("Unexpected coordinated_pickment implementation.")
-
     target_pose = build_object_target_pose(
         object_pose,
         object_vertices,
@@ -445,10 +440,10 @@ def run_coordinated_pickment_demo(
         "coordinated_pickment",
         traj,
         joint_ids,
-        pickment_action.get_segment_lengths(
-            PICKMENT_SAMPLE_INTERVAL,
-            pickment_options,
-        ),
+        {
+            segment.name: segment.waypoint_count
+            for segment in compiled.action_plans[0].segments
+        },
     )
 
     if args.diagnose_plan:
@@ -466,7 +461,7 @@ def run_coordinated_pickment_demo(
     replay_trajectory(
         sim,
         robot,
-        traj,
+        compiled.trajectory,
         args,
         video_prefix=f"coordinated_pickment_{args.object}_auto_play",
         hold_steps=0,

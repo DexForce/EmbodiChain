@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 import torch
 
+from embodichain.lab.sim.atomic_actions import TimedTrajectory
 from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
@@ -35,6 +36,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
+    replay_trajectory,
     should_open_tutorial_window,
     should_wait_for_tutorial_input,
 )
@@ -195,6 +197,31 @@ def test_create_antipodal_semantics_keeps_mesh_data_on_affordance() -> None:
     assert torch.equal(semantics.affordance.mesh_triangles, triangles)
     assert semantics.affordance.force_reannotate is True
     assert semantics.affordance.generator_cfg.antipodal_sampler_cfg.n_sample == 64
+
+
+def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
+    sim = MagicMock()
+    sim.sim_config.physics_dt = 0.1
+    robot = MagicMock()
+    trajectory = TimedTrajectory.from_positions(
+        torch.zeros(1, 3, 2),
+        env_ids=torch.tensor([0], dtype=torch.long),
+        control_dt=0.1,
+        dt=torch.tensor([[0.0, 0.2, 0.25]]),
+    )
+
+    with patch("scripts.tutorials.atomic_action.tutorial_utils.time.sleep"):
+        replay_trajectory(
+            sim,
+            robot,
+            trajectory,
+            Namespace(auto_play=False),
+            video_prefix="unused",
+            hold_steps=0,
+        )
+
+    assert sim.update.call_args_list == [call(step=2), call(step=3), call(step=3)]
+    assert robot.set_qpos.call_count == 3
 
 
 def test_broadcast_pose_batch_rejects_wrong_env_count() -> None:

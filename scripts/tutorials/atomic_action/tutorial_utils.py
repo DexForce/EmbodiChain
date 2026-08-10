@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from collections.abc import Callable, Collection, Sequence
 from typing import Literal
@@ -31,6 +32,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     ObjectSemantics,
+    TimedTrajectory,
 )
 from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
@@ -485,12 +487,12 @@ def serve_tutorial_scene(
 def replay_trajectory(
     sim: SimulationManager,
     robot: Robot,
-    trajectory: torch.Tensor,
+    trajectory: TimedTrajectory | torch.Tensor,
     args: argparse.Namespace,
     *,
     video_prefix: str,
     hold_steps: int,
-    trajectory_sim_steps: int = 4,
+    trajectory_sim_steps: int | None = None,
     hold_sim_steps: int = 2,
     joint_ids: list[int] | None = None,
     on_trajectory_step: Callable[[int, int], None] | None = None,
@@ -502,17 +504,29 @@ def replay_trajectory(
     Args:
         sim: Simulation manager to step and record.
         robot: Robot receiving full-DOF trajectory positions.
-        trajectory: Full robot trajectory with shape ``(n_envs, n_steps, dof)``.
+        trajectory: Timed full-robot trajectory, or a legacy position tensor
+            with shape ``(n_envs, n_steps, dof)``.
         args: Parsed tutorial arguments controlling auto-play recording.
         video_prefix: Output video filename prefix.
         hold_steps: Number of final-pose simulation updates after the trajectory.
-        trajectory_sim_steps: Physics steps for each trajectory waypoint.
+        trajectory_sim_steps: Optional fixed physics steps per waypoint. When
+            omitted for a ``TimedTrajectory``, its arrival intervals determine
+            the synchronized physics-step count. Legacy tensors default to four.
         hold_sim_steps: Physics steps for each final-pose update.
         joint_ids: Optional joint IDs when controlling a robot subset.
         on_trajectory_step: Optional callback run after each trajectory update.
         look_at: Optional recorder camera pose for auto-play videos.
         record: Whether to start auto-play recording for this replay.
     """
+    if trajectory_sim_steps is not None and trajectory_sim_steps <= 0:
+        raise ValueError("trajectory_sim_steps must be greater than zero.")
+    timed = trajectory if isinstance(trajectory, TimedTrajectory) else None
+    positions = timed.positions if timed is not None else trajectory
+    if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
+        raise ValueError("trajectory positions must have shape (B, N, D).")
+    if positions.shape[1] == 0:
+        raise ValueError("trajectory must contain at least one waypoint.")
+
     recording_started = (
         start_auto_play_recording(
             sim,
@@ -524,18 +538,37 @@ def replay_trajectory(
         else False
     )
     try:
-        total_steps = trajectory.shape[1]
+        total_steps = positions.shape[1]
         for step_idx in range(total_steps):
             if joint_ids is None:
-                robot.set_qpos(trajectory[:, step_idx, :])
+                robot.set_qpos(positions[:, step_idx, :])
             else:
-                robot.set_qpos(trajectory[:, step_idx, :], joint_ids=joint_ids)
-            sim.update(step=trajectory_sim_steps)
+                robot.set_qpos(positions[:, step_idx, :], joint_ids=joint_ids)
+            waypoint_sim_steps = trajectory_sim_steps
+            if waypoint_sim_steps is None and timed is not None:
+                next_index = min(step_idx + 1, total_steps - 1)
+                duration = float(timed.dt[:, next_index].max().item())
+                step_ratio = duration / float(sim.sim_config.physics_dt)
+                nearest_step_count = round(step_ratio)
+                waypoint_sim_steps = max(
+                    1,
+                    (
+                        nearest_step_count
+                        if math.isclose(
+                            step_ratio,
+                            nearest_step_count,
+                            rel_tol=1.0e-6,
+                            abs_tol=1.0e-9,
+                        )
+                        else math.ceil(step_ratio)
+                    ),
+                )
+            sim.update(step=4 if waypoint_sim_steps is None else waypoint_sim_steps)
             if on_trajectory_step is not None:
                 on_trajectory_step(step_idx, total_steps)
             time.sleep(1e-2)
 
-        final_qpos = trajectory[:, -1, :]
+        final_qpos = positions[:, -1, :]
         for _ in range(hold_steps):
             if joint_ids is None:
                 robot.set_qpos(final_qpos)

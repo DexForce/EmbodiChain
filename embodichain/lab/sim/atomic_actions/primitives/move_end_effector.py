@@ -23,12 +23,16 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, CompletionConditionKind
+from ..plans import ActionPlan
 from ..state import PlanningContext
+from ..trajectory_ops import (
+    build_pose_plan_states,
+    resolve_pose_target,
+    to_full_robot_trajectory,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -73,27 +77,20 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         manipulator = request.binding.manipulator("primary")
         control_part = manipulator.name
         joint_ids = list(manipulator.joint_ids)
-        arm_dof = manipulator.dof
-        move_xpos = self.builder.resolve_pose_target(
+        move_xpos = resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
             n_envs=context.batch_size,
+            device=self.device,
         )
-        start_qpos = self.builder.resolve_start_qpos(
-            context.robot.qpos[:, joint_ids],
-            n_envs=context.batch_size,
-            arm_dof=arm_dof,
-            control_part=control_part,
+        start_qpos = context.robot.qpos[:, joint_ids]
+        result = self.motion_generator.generate(
+            build_pose_plan_states(move_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+            ),
         )
-        target_states = self._build_target_states(move_xpos, context.batch_size)
-        result = self.builder.generate_arm_plan(
-            target_states,
-            start_qpos,
-            request.motion_policy.sample_count,
-            control_part=control_part,
-            arm_dof=arm_dof,
-            cfg=request.motion_policy,
-        )
-        success, trajectory = self.builder.to_full_robot_trajectory(
+        success, trajectory = to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
@@ -105,24 +102,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
             context,
             success=success,
             trajectory=trajectory,
-            completion_kind=CompletionConditionKind.EEF_GOAL_REACHED,
         )
-
-    @staticmethod
-    def _build_target_states(
-        move_xpos: torch.Tensor,
-        batch_size: int,
-    ) -> list[list[PlanState]]:
-        """Build per-environment planner states for pose waypoints."""
-        if move_xpos.dim() == 3:
-            move_xpos = move_xpos.unsqueeze(1)
-        return [
-            [
-                PlanState(xpos=move_xpos[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(move_xpos.shape[1])
-            ]
-            for i in range(batch_size)
-        ]
 
 
 __all__ = [

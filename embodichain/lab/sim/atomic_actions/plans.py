@@ -19,14 +19,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 import torch
 
+from embodichain.lab.sim.planners.utils import normalize_success_mask
+
 from .effects import StateDelta
-from .goals import ActionGoal
 from .policies import RecoveryPolicy
 from .state import PlanningContext
 
@@ -259,7 +259,12 @@ class TimedTrajectory:
             raise ValueError("hold_qpos must have shape (batch_size, robot_dof).")
         active_mask = active_mask.to(self.positions.device)
         held = (
-            hold_qpos.to(self.positions.device).unsqueeze(1).expand_as(self.positions)
+            hold_qpos.to(
+                device=self.positions.device,
+                dtype=self.positions.dtype,
+            )
+            .unsqueeze(1)
+            .expand_as(self.positions)
         )
         positions = torch.where(active_mask[:, None, None], self.positions, held)
 
@@ -332,27 +337,6 @@ class TimedTrajectory:
         )
 
 
-class CompletionConditionKind(str, Enum):
-    """Built-in phase completion-condition categories."""
-
-    TRAJECTORY_COMPLETE = "trajectory_complete"
-    JOINT_GOAL_REACHED = "joint_goal_reached"
-    EEF_GOAL_REACHED = "eef_goal_reached"
-    EFFECT_VERIFIED = "effect_verified"
-
-
-@dataclass(frozen=True, slots=True)
-class CompletionCondition:
-    """Declarative phase completion condition."""
-
-    kind: CompletionConditionKind = CompletionConditionKind.TRAJECTORY_COMPLETE
-    tolerance: float | None = None
-
-    def __post_init__(self) -> None:
-        if self.tolerance is not None and self.tolerance <= 0.0:
-            raise ValueError("Completion-condition tolerance must be positive.")
-
-
 @dataclass(frozen=True, slots=True)
 class PlannerDiagnostics:
     """Planner metadata retained for debugging and recovery decisions."""
@@ -369,72 +353,60 @@ class PlannerDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
-class PhaseSpec:
-    """Semantic and runtime contract for one sequential action phase."""
+class TrajectorySegment:
+    """Named half-open waypoint range inside an action trajectory.
+
+    Segments describe semantic structure for inspection, visualization, and
+    execution tracing. They do not create independent planning or recovery
+    boundaries; recovery continues to operate on the enclosing action plan.
+    """
 
     name: str
-    goal: ActionGoal
-    replannable: bool
-    completion_condition: CompletionCondition
-    recovery_policy: RecoveryPolicy
-    scene_dependencies: tuple[str, ...] = ()
-    """Scene entities whose motion can invalidate this phase plan."""
-
-    collision_world_sensitive: bool = False
-    """Whether collision-world revision changes invalidate this phase."""
+    start: int
+    stop: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
-            raise ValueError("PhaseSpec.name must be non-empty.")
-        dependencies = tuple(self.scene_dependencies)
-        if len(set(dependencies)) != len(dependencies) or not all(
-            isinstance(entity_id, str) and entity_id for entity_id in dependencies
-        ):
-            raise ValueError(
-                "scene_dependencies must contain unique non-empty entity ids."
-            )
-        object.__setattr__(self, "scene_dependencies", dependencies)
-        if not isinstance(self.collision_world_sensitive, bool):
-            raise TypeError("collision_world_sensitive must be a bool.")
+            raise ValueError("TrajectorySegment.name must be non-empty.")
+        if isinstance(self.start, bool) or not isinstance(self.start, int):
+            raise TypeError("TrajectorySegment.start must be an integer.")
+        if isinstance(self.stop, bool) or not isinstance(self.stop, int):
+            raise TypeError("TrajectorySegment.stop must be an integer.")
+        if self.start < 0:
+            raise ValueError("TrajectorySegment.start must be non-negative.")
+        if self.stop <= self.start:
+            raise ValueError("TrajectorySegment.stop must be greater than start.")
 
+    @property
+    def waypoint_count(self) -> int:
+        """Number of waypoints in this segment."""
+        return self.stop - self.start
 
-@dataclass(frozen=True, slots=True)
-class PlannedPhase:
-    """One scene-bound phase trajectory and its diagnostics."""
-
-    spec: PhaseSpec
-    trajectory: TimedTrajectory
-    planned_scene_version: int
-    planned_collision_world_revision: tuple[int, ...]
-    diagnostics: PlannerDiagnostics
-
-    def __post_init__(self) -> None:
-        if self.planned_scene_version < 0:
-            raise ValueError("planned_scene_version must be non-negative.")
-        revisions = tuple(self.planned_collision_world_revision)
-        if len(revisions) != self.trajectory.batch_size:
-            raise ValueError(
-                "planned_collision_world_revision must contain one value per "
-                "trajectory environment."
-            )
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 0
-            for value in revisions
-        ):
-            raise ValueError(
-                "planned_collision_world_revision must contain non-negative "
-                "integers."
-            )
-        object.__setattr__(self, "planned_collision_world_revision", revisions)
+    def contains(self, waypoint_index: int) -> bool:
+        """Return whether ``waypoint_index`` belongs to this segment."""
+        return self.start <= waypoint_index < self.stop
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ActionPlan:
-    """Planning result for one grounded atomic action invocation."""
+    """Scene-bound planning result for one grounded atomic action invocation.
+
+    An action owns one trajectory and one recovery boundary. Named
+    :class:`TrajectorySegment` values describe semantic structure within that
+    trajectory without implying independent planning or recovery boundaries.
+    """
 
     skill_id: str
     plan_success: torch.Tensor
-    phases: tuple[PlannedPhase, ...]
+    trajectory: TimedTrajectory
+    recovery_policy: RecoveryPolicy
+    planned_scene_version: int
+    planned_collision_world_revision: tuple[int, ...]
+    diagnostics: PlannerDiagnostics
+    segments: tuple[TrajectorySegment, ...] = ()
+    scene_dependencies: tuple[str, ...] = ()
+    collision_world_sensitive: bool = False
+    replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
     invocation_id: str | None = None
     invocation_revision: int = 0
@@ -451,36 +423,107 @@ class ActionPlan:
             raise TypeError("plan_success must be a torch.Tensor.")
         if self.plan_success.dtype != torch.bool or self.plan_success.dim() != 1:
             raise ValueError("plan_success must be a 1D bool tensor.")
-        if not self.phases:
-            raise ValueError("ActionPlan must contain at least one phase.")
-        phases = tuple(self.phases)
-        first = phases[0].trajectory
-        if first.batch_size != self.plan_success.shape[0]:
-            raise ValueError("plan_success batch must match phase trajectories.")
-        if first.positions.device != self.plan_success.device:
-            raise ValueError("plan_success and phase trajectories must share a device.")
-        for phase in phases[1:]:
-            trajectory = phase.trajectory
-            if trajectory.batch_size != first.batch_size:
-                raise ValueError("All action phases must share a batch size.")
-            if trajectory.robot_dof != first.robot_dof:
-                raise ValueError("All action phases must share robot_dof.")
-            if not torch.equal(trajectory.env_ids, first.env_ids):
-                raise ValueError("All action phases must share env_ids.")
+        if not isinstance(self.trajectory, TimedTrajectory):
+            raise TypeError("trajectory must be a TimedTrajectory.")
+        if self.trajectory.batch_size != self.plan_success.shape[0]:
+            raise ValueError("plan_success batch must match the trajectory.")
+        if self.trajectory.positions.device != self.plan_success.device:
+            raise ValueError("plan_success and trajectory must share a device.")
+        if not isinstance(self.recovery_policy, RecoveryPolicy):
+            raise TypeError("recovery_policy must be a RecoveryPolicy.")
+        if self.planned_scene_version < 0:
+            raise ValueError("planned_scene_version must be non-negative.")
+        revisions = tuple(self.planned_collision_world_revision)
+        if len(revisions) != self.trajectory.batch_size:
+            raise ValueError(
+                "planned_collision_world_revision must contain one value per "
+                "trajectory environment."
+            )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in revisions
+        ):
+            raise ValueError(
+                "planned_collision_world_revision must contain non-negative "
+                "integers."
+            )
+        if not isinstance(self.diagnostics, PlannerDiagnostics):
+            raise TypeError("diagnostics must be PlannerDiagnostics.")
+        dependencies = tuple(self.scene_dependencies)
+        if len(set(dependencies)) != len(dependencies) or not all(
+            isinstance(entity_id, str) and entity_id for entity_id in dependencies
+        ):
+            raise ValueError(
+                "scene_dependencies must contain unique non-empty entity ids."
+            )
+        if not isinstance(self.collision_world_sensitive, bool):
+            raise TypeError("collision_world_sensitive must be a bool.")
+        if not isinstance(self.replannable, bool):
+            raise TypeError("replannable must be a bool.")
+        if not isinstance(self.expected_effects, StateDelta):
+            raise TypeError("expected_effects must be a StateDelta.")
+        waypoint_count = self.trajectory.waypoint_count
+        segments = tuple(self.segments)
+        if not all(isinstance(segment, TrajectorySegment) for segment in segments):
+            raise TypeError("segments must contain only TrajectorySegment values.")
+        if not segments and waypoint_count > 0:
+            segments = (TrajectorySegment(self.skill_id, 0, waypoint_count),)
+        names = [segment.name for segment in segments]
+        if len(set(names)) != len(names):
+            raise ValueError("ActionPlan segment names must be unique.")
+        if waypoint_count == 0:
+            if segments:
+                raise ValueError("An empty trajectory cannot contain segments.")
+        elif (
+            not segments
+            or segments[0].start != 0
+            or segments[-1].stop != waypoint_count
+            or any(
+                previous.stop != current.start
+                for previous, current in zip(segments, segments[1:])
+            )
+        ):
+            raise ValueError(
+                "ActionPlan segments must cover the trajectory exactly without "
+                "gaps or overlaps."
+            )
         object.__setattr__(self, "plan_success", self.plan_success.clone())
-        object.__setattr__(self, "phases", phases)
-
-    @property
-    def trajectory(self) -> TimedTrajectory:
-        """Concatenate the sequential phase trajectories."""
-        return TimedTrajectory.concatenate(
-            tuple(phase.trajectory for phase in self.phases)
-        )
+        object.__setattr__(self, "planned_collision_world_revision", revisions)
+        object.__setattr__(self, "scene_dependencies", dependencies)
+        object.__setattr__(self, "segments", segments)
 
     @property
     def success_all(self) -> bool:
         """Whether every environment row planned successfully."""
         return bool(self.plan_success.all().item())
+
+    def segment(self, name: str) -> TrajectorySegment:
+        """Return a named trajectory segment.
+
+        Args:
+            name: Exact segment name.
+
+        Returns:
+            Matching segment metadata.
+
+        Raises:
+            KeyError: If the plan has no segment with that name.
+        """
+        for segment in self.segments:
+            if segment.name == name:
+                return segment
+        raise KeyError(f"Action plan {self.skill_id!r} has no segment {name!r}.")
+
+    def segment_at(self, waypoint_index: int) -> TrajectorySegment:
+        """Return the segment containing a global action waypoint index."""
+        if waypoint_index < 0 or waypoint_index >= self.trajectory.waypoint_count:
+            raise IndexError(
+                f"waypoint_index {waypoint_index} is outside the action trajectory."
+            )
+        for segment in self.segments:
+            if segment.contains(waypoint_index):
+                return segment
+        raise RuntimeError("Validated action plan has no segment for waypoint index.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -504,14 +547,32 @@ class CompiledTrajectory:
         object.__setattr__(self, "plan_success", self.plan_success.clone())
         object.__setattr__(self, "action_plans", tuple(self.action_plans))
 
+    def action_waypoint_offset(self, action_index: int) -> int:
+        """Return the global waypoint offset of one compiled action."""
+        if action_index < 0 or action_index >= len(self.action_plans):
+            raise IndexError(
+                f"action_index {action_index} is outside the compiled sequence."
+            )
+        return sum(
+            plan.trajectory.waypoint_count for plan in self.action_plans[:action_index]
+        )
+
+    def segment(self, action_index: int, name: str) -> TrajectorySegment:
+        """Return action segment metadata shifted into compiled coordinates."""
+        offset = self.action_waypoint_offset(action_index)
+        local = self.action_plans[action_index].segment(name)
+        return TrajectorySegment(
+            name=local.name,
+            start=offset + local.start,
+            stop=offset + local.stop,
+        )
+
 
 __all__ = [
     "ActionPlan",
     "CompiledTrajectory",
-    "CompletionCondition",
-    "CompletionConditionKind",
-    "PhaseSpec",
-    "PlannedPhase",
     "PlannerDiagnostics",
     "TimedTrajectory",
+    "TrajectorySegment",
+    "normalize_success_mask",
 ]

@@ -376,9 +376,10 @@ class CuroboPlannerCfg(BasePlannerCfg):
     preserve_plan_samples: bool = False
     """Whether callers must retain cuRobo's raw collision-checked samples exactly.
 
-    When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-    resamples the returned trajectory to the atomic action's ``sample_interval``
-    waypoint count - matching the documented contract of
+    When ``False`` (default),
+    :class:`~embodichain.lab.sim.planners.motion_generator.MotionGenerator`
+    resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
+    matching the documented contract of
     :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
@@ -386,7 +387,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     :attr:`interpolation_dt` and the trajectory duration, e.g. ~82 for a 2 s
     plan at 0.025 s).
 
-    When ``True``, the builder returns cuRobo's own samples unchanged. Use this
+    When ``True``, the generator returns cuRobo's own samples unchanged. Use this
     when you need cuRobo's exact time-parameterized, collision-checked samples
     rather than a fixed waypoint count.
     """
@@ -754,10 +755,9 @@ class CuroboPlanner(BasePlanner):
     def preserve_plan_samples(self) -> bool:
         """Whether callers must retain this planner's raw samples exactly.
 
-        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by
-        :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-        to decide whether to resample the returned trajectory to the action's
-        ``sample_interval``.
+        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by the
+        atomic-action motion adapter to decide whether to resample the returned
+        trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
 

@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from .effects import StateDelta
 from .invocation import ActionInvocation, ResolvedActionRequest
-from .plans import ActionPlan, PlannedPhase, TimedTrajectory
+from .plans import ActionPlan, TimedTrajectory, TrajectorySegment
 from .state import EntityState, PlanningContext, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
@@ -49,8 +50,8 @@ class ExecutionEventKind(str, Enum):
     TRACKING_ERROR = "tracking_error"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
     COLLISION_WORLD_CHANGED = "collision_world_changed"
-    PHASE_TIMEOUT = "phase_timeout"
-    PHASE_COMPLETED = "phase_completed"
+    ACTION_TIMEOUT = "action_timeout"
+    TRAJECTORY_COMPLETED = "trajectory_completed"
     EFFECT_VERIFICATION_REQUIRED = "effect_verification_required"
     ACTION_RETRY = "action_retry"
     ACTION_COMPLETED = "action_completed"
@@ -80,6 +81,42 @@ class ExecutionEvent:
             raise ValueError("invocation_revision must be non-negative.")
         if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
             raise ValueError("ExecutionEvent.env_mask must be a 1D bool tensor.")
+        object.__setattr__(self, "env_mask", self.env_mask.clone())
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class EffectVerificationRequest:
+    """Typed boundary describing a semantic effect awaiting verification."""
+
+    skill_id: str
+    invocation_id: str | None
+    invocation_revision: int
+    invocation_index: int
+    terminal_segment: str | None
+    env_mask: torch.Tensor
+    expected_effects: StateDelta
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.skill_id, str) or not self.skill_id:
+            raise ValueError("skill_id must be a non-empty string.")
+        if self.invocation_id is not None and (
+            not isinstance(self.invocation_id, str) or not self.invocation_id
+        ):
+            raise ValueError("invocation_id must be a non-empty string or None.")
+        if self.invocation_revision < 0:
+            raise ValueError("invocation_revision must be non-negative.")
+        if self.invocation_index < 0:
+            raise ValueError("invocation_index must be non-negative.")
+        if self.terminal_segment is not None and (
+            not isinstance(self.terminal_segment, str) or not self.terminal_segment
+        ):
+            raise ValueError("terminal_segment must be a non-empty string or None.")
+        if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
+            raise ValueError("env_mask must be a 1D bool tensor.")
+        if not isinstance(self.expected_effects, StateDelta):
+            raise TypeError("expected_effects must be a StateDelta.")
+        if self.expected_effects.is_empty:
+            raise ValueError("Effect verification requires a non-empty StateDelta.")
         object.__setattr__(self, "env_mask", self.env_mask.clone())
 
 
@@ -144,10 +181,17 @@ class ExecutionTick:
     command: JointCommand | None
     events: tuple[ExecutionEvent, ...]
     task_state: TaskState
+    pending_effect: EffectVerificationRequest | None = None
 
     def __post_init__(self) -> None:
         if self.eligible_mask.dtype != torch.bool or self.eligible_mask.dim() != 1:
             raise ValueError("eligible_mask must be a 1D bool tensor.")
+        if self.pending_effect is not None and not isinstance(
+            self.pending_effect, EffectVerificationRequest
+        ):
+            raise TypeError(
+                "pending_effect must be an EffectVerificationRequest or None."
+            )
         object.__setattr__(self, "eligible_mask", self.eligible_mask.clone())
         object.__setattr__(self, "events", tuple(self.events))
 
@@ -160,9 +204,9 @@ class ExecutionSession:
     command. Expected symbolic effects are committed only after the caller
     supplies ``effect_success`` for a non-empty :class:`StateDelta`.
 
-    Environment eligibility and recovery budgets are tracked per row. Phase and
-    waypoint cursors are batch-synchronized: a recoverable row replans the active
-    cohort from the latest observation and restarts its shared phase cursor.
+    Environment eligibility and recovery budgets are tracked per row. The
+    waypoint cursor is batch-synchronized: a recoverable row replans the active
+    cohort from the latest observation and restarts the action trajectory.
     """
 
     def __init__(
@@ -181,11 +225,10 @@ class ExecutionSession:
         self._task_state = context.task
         self._context = context
         self._invocation_index = 0
-        self._phase_index = 0
         self._waypoint_index = 0
         self._plan: ActionPlan | None = None
         self._planned_scene = context.scene
-        self._phase_started_at = context.robot.timestamp
+        self._action_started_at = context.robot.timestamp
         self._last_command: torch.Tensor | None = None
         self._last_command_mask = torch.zeros(
             context.batch_size, dtype=torch.bool, device=context.robot.qpos.device
@@ -196,7 +239,7 @@ class ExecutionSession:
             context.batch_size, dtype=torch.long, device=context.robot.qpos.device
         )
         self._replans = torch.zeros_like(self._action_retries)
-        self._effect_wait_emitted = False
+        self._pending_effect: EffectVerificationRequest | None = None
         self._status = ExecutionStatus.RUNNING
         self._queued_events: list[ExecutionEvent] = []
         self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
@@ -267,7 +310,6 @@ class ExecutionSession:
         requests = list(self._requests)
         requests[self._invocation_index] = replacement
         self._requests = tuple(requests)
-        self._phase_index = 0
         self._waypoint_index = 0
         self._action_retries.zero_()
         self._replans.zero_()
@@ -284,12 +326,22 @@ class ExecutionSession:
 
     @property
     def active_trajectory(self) -> TimedTrajectory:
-        """Return an owned snapshot of the active phase trajectory.
+        """Return an owned snapshot of the active action trajectory.
 
         This inspection surface is intended for diagnostics and visualization.
         Mutating the returned tensors cannot affect execution state.
         """
-        return self._current_phase().trajectory.snapshot()
+        assert self._plan is not None
+        return self._plan.trajectory.snapshot()
+
+    def trajectory_segment(self, name: str) -> TrajectorySegment:
+        """Return named segment metadata for the active action plan.
+
+        Segment ranges are action-local and may change after a replan when a
+        backend preserves its own sample count.
+        """
+        assert self._plan is not None
+        return self._plan.segment(name)
 
     def tick(
         self,
@@ -340,9 +392,20 @@ class ExecutionSession:
             return self._tick_result(command=None, events=events)
 
         assert self._plan is not None
-        phase = self._current_phase()
-        execution_mask = self._pending & self._plan.plan_success
-        recovery_events = self._recover_if_needed(phase, execution_mask)
+        if self._pending_effect is not None:
+            execution_mask = (
+                self._pending_effect.env_mask & self._pending & self._plan.plan_success
+            )
+            command, completion_events = self._finish_action(
+                execution_mask,
+                effect_success,
+            )
+            events.extend(completion_events)
+            return self._tick_result(command=command, events=events)
+
+        plan = self._plan
+        execution_mask = self._pending & plan.plan_success
+        recovery_events = self._recover_if_needed(plan, execution_mask)
         events.extend(recovery_events)
         if self._status is not ExecutionStatus.RUNNING:
             return self._tick_result(command=None, events=events)
@@ -355,18 +418,18 @@ class ExecutionSession:
             for event in recovery_events
         ):
             assert self._plan is not None
-            phase = self._current_phase()
+            plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
 
-        trajectory = phase.trajectory
+        trajectory = plan.trajectory
         if self._waypoint_index < trajectory.waypoint_count:
-            command = self._command_at(phase, self._waypoint_index, execution_mask)
+            command = self._command_at(plan, self._waypoint_index, execution_mask)
             self._waypoint_index += 1
             return self._tick_result(command=command, events=events)
 
-        terminal_error = self._terminal_error(phase)
+        terminal_error = self._terminal_error(plan)
         not_reached = execution_mask & (
-            terminal_error > phase.spec.recovery_policy.tracking_error_threshold
+            terminal_error > plan.recovery_policy.tracking_error_threshold
         )
         if not_reached.any():
             events.extend(
@@ -378,26 +441,20 @@ class ExecutionSession:
             )
             if self._status is not ExecutionStatus.RUNNING:
                 return self._tick_result(command=None, events=events)
-            phase = self._current_phase()
+            assert self._plan is not None
+            plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
-            command = self._command_at(phase, 0, execution_mask)
+            command = self._command_at(plan, 0, execution_mask)
             self._waypoint_index = 1
             return self._tick_result(command=command, events=events)
 
         events.append(
             self._event(
-                ExecutionEventKind.PHASE_COMPLETED,
+                ExecutionEventKind.TRAJECTORY_COMPLETED,
                 execution_mask,
-                f"Phase {phase.spec.name!r} completed.",
+                "Action trajectory completed.",
             )
         )
-        if self._phase_index + 1 < len(self._plan.phases):
-            self._phase_index += 1
-            self._waypoint_index = 0
-            self._replans.zero_()
-            self._phase_started_at = self._context.robot.timestamp
-            self._last_command = None
-            return self._tick_result(command=self._hold_command(), events=events)
 
         command, completion_events = self._finish_action(
             execution_mask,
@@ -424,26 +481,20 @@ class ExecutionSession:
     ) -> None:
         """Install an already validated plan as the current execution plan."""
         self._plan = plan
-        self._phase_index = min(self._phase_index, len(plan.phases) - 1)
         self._waypoint_index = 0
         self._planned_scene = context.scene
-        self._phase_started_at = context.robot.timestamp
+        self._action_started_at = context.robot.timestamp
         self._last_command = None
         self._last_command_mask.zero_()
-        self._effect_wait_emitted = False
+        self._pending_effect = None
         planned_mask = self._pending & plan.plan_success
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
         )
 
-    def _current_phase(self) -> PlannedPhase:
-        """Return the currently active planned phase."""
-        assert self._plan is not None
-        return self._plan.phases[self._phase_index]
-
     def _recover_if_needed(
         self,
-        phase: PlannedPhase,
+        plan: ActionPlan,
         execution_mask: torch.Tensor,
     ) -> list[ExecutionEvent]:
         """Detect tracking, scene, and timeout invalidation."""
@@ -451,15 +502,15 @@ class ExecutionSession:
         if not execution_mask.any():
             return events
         if (
-            self._context.robot.timestamp - self._phase_started_at
-            > phase.spec.recovery_policy.phase_timeout
+            self._context.robot.timestamp - self._action_started_at
+            > plan.recovery_policy.action_timeout
         ):
             return self._attempt_action_retry(
                 execution_mask,
-                ExecutionEventKind.PHASE_TIMEOUT,
-                "Phase timeout exceeded.",
+                ExecutionEventKind.ACTION_TIMEOUT,
+                "Action attempt timeout exceeded.",
             )
-        collision_mask = execution_mask & self._collision_world_change_mask(phase)
+        collision_mask = execution_mask & self._collision_world_change_mask(plan)
         if collision_mask.any():
             return self._attempt_replan(
                 collision_mask,
@@ -473,7 +524,7 @@ class ExecutionSession:
             tracking_mask = (
                 execution_mask
                 & self._last_command_mask
-                & (tracking_error > phase.spec.recovery_policy.tracking_error_threshold)
+                & (tracking_error > plan.recovery_policy.tracking_error_threshold)
             )
             if tracking_mask.any():
                 return self._attempt_replan(
@@ -481,7 +532,7 @@ class ExecutionSession:
                     ExecutionEventKind.TRACKING_ERROR,
                     "Observed joint tracking error exceeded the policy threshold.",
                 )
-        scene_mask = self._dynamic_scene_change_mask(phase)
+        scene_mask = self._dynamic_scene_change_mask(plan)
         if (execution_mask & scene_mask).any():
             return self._attempt_replan(
                 execution_mask & scene_mask,
@@ -497,12 +548,13 @@ class ExecutionSession:
         message: str,
     ) -> list[ExecutionEvent]:
         """Apply per-row budgets and replan the synchronized active cohort."""
-        phase = self._current_phase()
+        assert self._plan is not None
+        plan = self._plan
         events = [self._event(reason, trigger_mask, message)]
         allowed = (
             trigger_mask
-            & phase.spec.replannable
-            & (self._replans < phase.spec.recovery_policy.max_replans)
+            & plan.replannable
+            & (self._replans < plan.recovery_policy.max_replans)
         )
         exhausted = trigger_mask & ~allowed
         if exhausted.any():
@@ -529,9 +581,10 @@ class ExecutionSession:
         message: str,
     ) -> list[ExecutionEvent]:
         """Retry the current action or permanently fail exhausted rows."""
-        policy = self._current_phase().spec.recovery_policy
+        assert self._plan is not None
+        policy = self._plan.recovery_policy
         events = [self._event(reason, trigger_mask, message)]
-        allowed = trigger_mask & (self._action_retries < policy.max_phase_retries)
+        allowed = trigger_mask & (self._action_retries < policy.max_action_retries)
         exhausted = trigger_mask & ~allowed
         if exhausted.any():
             self._eligible &= ~exhausted
@@ -553,7 +606,6 @@ class ExecutionSession:
                     "Retrying the action from the latest observation.",
                 )
             )
-            self._phase_index = 0
             self._plan_current(self._context, ExecutionEventKind.REPLANNED)
             events.extend(self._drain_events())
         self._update_terminal_status()
@@ -567,10 +619,24 @@ class ExecutionSession:
         """Verify effects, update symbolic state, and advance the action barrier."""
         assert self._plan is not None
         events: list[ExecutionEvent] = []
+        planning_failed = self._pending & ~self._plan.plan_success
+        if not execution_mask.any() and planning_failed.any():
+            events.extend(
+                self._attempt_action_retry(
+                    planning_failed,
+                    ExecutionEventKind.ACTION_RETRY,
+                    "Planning failed for every pending environment.",
+                )
+            )
+            if self._status is not ExecutionStatus.RUNNING:
+                return None, events
+            return self._hold_command(), events
+
         if self._plan.expected_effects.is_empty:
             verified = execution_mask
         elif effect_success is None:
-            if not self._effect_wait_emitted:
+            if self._pending_effect is None:
+                self._pending_effect = self._effect_verification_request(execution_mask)
                 events.append(
                     self._event(
                         ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED,
@@ -578,11 +644,11 @@ class ExecutionSession:
                         "Expected symbolic effects require external verification.",
                     )
                 )
-                self._effect_wait_emitted = True
             return self._hold_command(), events
         else:
             verified_input = self._normalize_mask(effect_success, "effect_success")
             verified = execution_mask & verified_input
+            self._pending_effect = None
 
         if verified.any():
             self._task_state = self._plan.expected_effects.apply(
@@ -596,7 +662,6 @@ class ExecutionSession:
             )
             self._pending &= ~verified
         failed_effect = execution_mask & ~verified
-        planning_failed = self._pending & ~self._plan.plan_success
         retry_mask = failed_effect | planning_failed
         if retry_mask.any():
             events.extend(
@@ -636,26 +701,26 @@ class ExecutionSession:
             return None, events
 
         self._pending = self._eligible.clone()
+        self._pending_effect = None
         self._action_retries.zero_()
         self._replans.zero_()
-        self._phase_index = 0
         self._plan_current(self._context, ExecutionEventKind.ACTION_PLANNED)
         events.extend(self._drain_events())
         return self._hold_command(), events
 
     def _command_at(
         self,
-        phase: PlannedPhase,
+        plan: ActionPlan,
         waypoint_index: int,
         active_mask: torch.Tensor,
     ) -> JointCommand:
         """Build one command and retain it for tracking-error monitoring."""
-        positions = phase.trajectory.positions[:, waypoint_index]
+        positions = plan.trajectory.positions[:, waypoint_index]
         hold = self._context.robot.qpos
         positions = torch.where(active_mask[:, None], positions, hold)
         velocities = None
-        if phase.trajectory.velocities is not None:
-            values = phase.trajectory.velocities[:, waypoint_index]
+        if plan.trajectory.velocities is not None:
+            values = plan.trajectory.velocities[:, waypoint_index]
             velocities = torch.where(
                 active_mask[:, None], values, torch.zeros_like(values)
             )
@@ -666,14 +731,14 @@ class ExecutionSession:
         # final arrival interval as its terminal settling window.
         next_waypoint_index = min(
             waypoint_index + 1,
-            phase.trajectory.waypoint_count - 1,
+            plan.trajectory.waypoint_count - 1,
         )
-        hold_duration = phase.trajectory.dt[:, next_waypoint_index]
+        hold_duration = plan.trajectory.dt[:, next_waypoint_index]
         return JointCommand(
             positions=positions,
             velocities=velocities,
             active_mask=active_mask,
-            env_ids=phase.trajectory.env_ids,
+            env_ids=plan.trajectory.env_ids,
             hold_duration=hold_duration,
         )
 
@@ -691,25 +756,25 @@ class ExecutionSession:
             ),
         )
 
-    def _terminal_error(self, phase: PlannedPhase) -> torch.Tensor:
-        """Return per-row max joint error to the phase terminal command."""
-        if phase.trajectory.waypoint_count == 0:
+    def _terminal_error(self, plan: ActionPlan) -> torch.Tensor:
+        """Return per-row max joint error to the action terminal command."""
+        if plan.trajectory.waypoint_count == 0:
             return torch.full_like(self._eligible, float("inf"), dtype=torch.float32)
         return torch.amax(
-            torch.abs(self._context.robot.qpos - phase.trajectory.positions[:, -1]),
+            torch.abs(self._context.robot.qpos - plan.trajectory.positions[:, -1]),
             dim=1,
         )
 
-    def _dynamic_scene_change_mask(self, phase: PlannedPhase) -> torch.Tensor:
-        """Detect material motion of entities referenced by the phase goal."""
-        dependencies = phase.spec.scene_dependencies
+    def _dynamic_scene_change_mask(self, plan: ActionPlan) -> torch.Tensor:
+        """Detect material motion of entities referenced by the action goal."""
+        dependencies = plan.scene_dependencies
         changed = torch.zeros_like(self._eligible)
         if (
             not dependencies
             or self._context.scene.version == self._planned_scene.version
         ):
             return changed
-        policy = phase.spec.recovery_policy
+        policy = plan.recovery_policy
         for entity_id in dependencies:
             previous = self._planned_scene.entities.get(entity_id)
             current = self._context.scene.entities.get(entity_id)
@@ -734,9 +799,9 @@ class ExecutionSession:
             )
         return changed
 
-    def _collision_world_change_mask(self, phase: PlannedPhase) -> torch.Tensor:
-        """Detect collision-world revisions newer than the active phase plan."""
-        if not phase.spec.collision_world_sensitive:
+    def _collision_world_change_mask(self, plan: ActionPlan) -> torch.Tensor:
+        """Detect collision revisions newer than the active action plan."""
+        if not plan.collision_world_sensitive:
             return torch.zeros_like(self._eligible)
         current = torch.tensor(
             self._context.scene.collision_world_revisions(self._context.batch_size),
@@ -744,7 +809,7 @@ class ExecutionSession:
             device=self._eligible.device,
         )
         planned = torch.tensor(
-            phase.planned_collision_world_revision,
+            plan.planned_collision_world_revision,
             dtype=torch.long,
             device=self._eligible.device,
         )
@@ -769,6 +834,25 @@ class ExecutionSession:
                 f"{name} must be bool with shape ({self._context.batch_size},)."
             )
         return value.to(self._context.robot.qpos.device).clone()
+
+    def _effect_verification_request(
+        self,
+        env_mask: torch.Tensor,
+    ) -> EffectVerificationRequest:
+        """Describe the current action's pending semantic-effect boundary."""
+        assert self._plan is not None
+        request = self._requests[self._invocation_index]
+        return EffectVerificationRequest(
+            skill_id=request.skill_id,
+            invocation_id=request.invocation_id,
+            invocation_revision=request.revision,
+            invocation_index=self._invocation_index,
+            terminal_segment=(
+                self._plan.segments[-1].name if self._plan.segments else None
+            ),
+            env_mask=env_mask,
+            expected_effects=self._plan.expected_effects,
+        )
 
     def _event(
         self,
@@ -827,10 +911,12 @@ class ExecutionSession:
             command=command,
             events=tuple(events),
             task_state=self._task_state,
+            pending_effect=self._pending_effect,
         )
 
 
 __all__ = [
+    "EffectVerificationRequest",
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionSession",

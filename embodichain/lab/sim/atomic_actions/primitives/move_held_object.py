@@ -23,7 +23,6 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import logger
 from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
 
@@ -34,6 +33,7 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..state import PlanningContext
+from ..trajectory_ops import build_pose_plan_states
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -134,12 +134,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             n_envs=self.n_envs,
             device=self.device,
         )
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=manipulator.dof,
-            control_part=control_part,
-        )
+        start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
         end_arm_xpos = self.robot.compute_fk(
             start_arm_qpos, name=control_part, to_matrix=True
         )
@@ -160,18 +155,17 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         if options.pick_rotate_upright is None:
             self._apply_automatic_transport_rotation(move_eef_xpos, end_arm_xpos)
 
-        target_states_list = [
-            [PlanState(xpos=move_eef_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
-        success, arm_traj = self.builder.plan_arm_traj(
-            target_states_list,
-            start_arm_qpos,
-            request.motion_policy.sample_count,
-            control_part=control_part,
-            arm_dof=manipulator.dof,
-            cfg=request.motion_policy,
+        result = self.motion_generator.generate(
+            build_pose_plan_states(move_eef_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=control_part,
+            ),
         )
+        assert isinstance(result.success, torch.Tensor)
+        assert result.positions is not None
+        success = result.success
+        arm_traj = result.positions
 
         full = torch.empty(
             (self.n_envs, arm_traj.shape[1], self.robot_dof),
@@ -187,7 +181,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             context,
             success=success,
             trajectory=full,
-            phase_name="transport",
+            segment_lengths={"transport": full.shape[1]},
         )
 
     def _apply_configured_upright_rotation(

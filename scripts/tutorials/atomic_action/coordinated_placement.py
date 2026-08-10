@@ -42,7 +42,6 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
-    CoordinatedPlacement,
     CoordinatedPlacementOptions,
     CoordinatedPlacementGoal,
     GraspGoal,
@@ -600,9 +599,6 @@ def run_coordinated_placement_demo(
             ),
         },
     )
-    coordinated_action = engine.actions["coordinated_placement"]
-    if not isinstance(coordinated_action, CoordinatedPlacement):
-        raise RuntimeError("Unexpected coordinated_placement implementation.")
     full_joint_ids = list(range(robot.dof))
     state = engine.initial_context()
 
@@ -694,7 +690,7 @@ def run_coordinated_placement_demo(
         replay_trajectory(
             sim,
             robot,
-            left_pick_traj,
+            left_pick_result.trajectory,
             args,
             video_prefix="",
             hold_steps=0,
@@ -707,7 +703,7 @@ def run_coordinated_placement_demo(
         replay_trajectory(
             sim,
             robot,
-            right_pick_traj,
+            right_pick_result.trajectory,
             args,
             video_prefix="",
             hold_steps=0,
@@ -718,7 +714,7 @@ def run_coordinated_placement_demo(
         )
         pan.clear_dynamics()
         # Reconcile the projected task state with measurements before compiling
-        # placement. This keeps the second phase robust to pick-up execution error.
+        # placement. This keeps the second stage robust to pick-up execution error.
         bread_pose_batch = clone_local_pose_from_first_env(bread).to(
             device=sim.device, dtype=torch.float32
         )
@@ -825,11 +821,10 @@ def run_coordinated_placement_demo(
         "coordinated_placement",
         coordinated_traj,
         full_joint_ids,
-        coordinated_action._compute_segment_lengths(
-            coordinated_options.release,
-            COORDINATED_SAMPLE_INTERVAL,
-            coordinated_options,
-        ),
+        {
+            segment.name: segment.waypoint_count
+            for segment in placement_compiled.action_plans[0].segments
+        },
     )
 
     if args.diagnose_plan:
@@ -848,7 +843,7 @@ def run_coordinated_placement_demo(
     replay_trajectory(
         sim,
         robot,
-        coordinated_traj,
+        placement_compiled.trajectory,
         args,
         video_prefix="coordinated_placement_auto_play",
         hold_steps=80,

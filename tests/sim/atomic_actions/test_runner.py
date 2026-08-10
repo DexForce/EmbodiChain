@@ -252,7 +252,7 @@ def _make_runner(
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             tracking_error_threshold=0.05,
-            phase_timeout=10.0,
+            action_timeout=10.0,
         ),
     )
     session = engine.start((invocation,), initial_context)
@@ -395,7 +395,7 @@ def test_runner_surfaces_explicit_invocation_revision() -> None:
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             tracking_error_threshold=0.05,
-            phase_timeout=10.0,
+            action_timeout=10.0,
         ),
         revision=1,
     )
@@ -479,6 +479,8 @@ def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None
     blocked = runner.run_until_blocked()
 
     assert blocked.status is RunnerStatus.RUNNING
+    assert blocked.tick is not None
+    assert blocked.tick.pending_effect is not None
     assert runner.effect_verification_pending is True
 
     completed = runner.run_until_blocked(

@@ -30,7 +30,7 @@ The current manipulation primitives consume semantic `open` and `grasp`
 commands through the control-part command abstraction. The shipped command
 implementation is `JointPositionCommand`. A dexterous hand may register
 calibrated joint-position commands immediately; non-position hand policies or
-multi-stage in-hand manipulation require additional command types and phases.
+multi-stage in-hand manipulation require additional command types and segments.
 ```
 
 ## Visual catalog
@@ -213,11 +213,11 @@ Use this rule when configuring a built-in or adding a new one:
 - the **binding** carries semantic-role mappings to control-part names selected
   for this call; every value must be a key in the engine robot's
   `control_parts` mapping;
-- typed **skill options** carry phase-specific behavior that may vary by
+- typed **skill options** carry segment-specific behavior that may vary by
   invocation; an action may provide defaults;
 - the engine's **control-part profiles** carry embodiment-specific semantic
   commands such as `open`, `grasp`, and named postures;
-- `MotionPolicy` carries sample count, timing, motion source, limits,
+- `MotionPolicy` carries sample count, timing, motion strategy, limits,
   collision choice, and planner options;
 - `RecoveryPolicy` carries all replan/retry thresholds and budgets.
 
@@ -324,7 +324,7 @@ Important `PickUpOptions` fields:
 | Field | Purpose |
 |---|---|
 | `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and approach direction |
-| `lift_height`, `hand_interp_steps` | Lift distance and close-phase discretization |
+| `lift_height`, `hand_interp_steps` | Lift distance and close-segment discretization |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |
 | `approach_alignment_max_angle` | Optional TCP approach-alignment filter |
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
@@ -350,7 +350,7 @@ the action derives `target_object_pose @ object_to_eef` from verified task state
 | Goal | `HeldObjectPoseGoal(object_target_pose=...)` |
 | Binding | manipulator + end effector role `primary` |
 | Precondition | a `HeldObjectState` exists for the bound manipulator, normally from `PickUp` |
-| Motion | single object-centric transport phase with closed-hand qpos |
+| Motion | single object-centric transport segment with closed-hand qpos |
 | Effect | none; the existing attachment is preserved |
 | Dynamic target | explicit pose or `SceneEntityPose` |
 
@@ -390,7 +390,7 @@ The bound end-effector profile must provide `open` and `grasp`. Important
 | Field | Purpose |
 |---|---|
 | `lift_height` | Approach and retract height |
-| `hand_interp_steps` | Open-phase discretization |
+| `hand_interp_steps` | Open-segment discretization |
 | `max_approach_retract_z` | Optional world-Z ceiling for approach/retract poses |
 | `cartesian_waypoint_count` | Fixed-orientation translation keyframes per segment |
 
@@ -402,7 +402,7 @@ The bound end-effector profile must provide `open` and `grasp`. Important
 
 `Place` also accepts `AssembleGoal(affordance=...)`. There is no separate
 assembly skill: it derives the assemble-object target from the base object's
-live pose and reuses the normal place/release phases.
+live pose and reuses the normal place/release segments.
 
 ```text
 base_object_pose @ assemble_to_base_pose = assemble_object_target_pose
@@ -484,7 +484,7 @@ Both bound end-effector profiles must provide `open` and `grasp`. Important
   for affordance-based left/right grasp sampling.
 
 The left/right arms and hands come exclusively from the corresponding binding
-roles. Coordinated dual-arm planning with `motion_source="motion_gen"` is not
+roles. Coordinated dual-arm planning with `strategy="motion_gen"` is not
 supported by the cuRobo backend; use the supported IK/interpolation path for
 this primitive.
 
@@ -518,7 +518,7 @@ provide `grasp`. Important `CoordinatedPlacementOptions` fields group into:
 
 The placing/support arms and hands come exclusively from the corresponding
 binding roles. The same cuRobo restriction as coordinated pickment applies to dual-arm
-`motion_source="motion_gen"` planning.
+`strategy="motion_gen"` planning.
 
 **Example:** `scripts/tutorials/atomic_action/coordinated_placement.py`
 
@@ -541,7 +541,7 @@ retreats -> destination delivers**.
 
 Both source and destination end-effector profiles must provide `open` and
 `grasp`. `HandOverOptions` owns the destination grasp region and approach
-direction, middle/final object poses, and phase distances/counts. The
+direction, middle/final object poses, and segment distances/counts. The
 source/destination arm and hand control parts come exclusively from the
 corresponding `ActionBinding` roles.
 
@@ -554,7 +554,7 @@ orientation when replanning and preserves it at the supplied middle/final
 positions.
 
 As with the other coordinated primitive, cuRobo does not currently support its
-dual-arm `motion_source="motion_gen"` path.
+dual-arm `strategy="motion_gen"` path.
 
 **Example:** `scripts/tutorials/atomic_action/hand_over.py`
 
