@@ -79,7 +79,7 @@ def test_clients_load_their_required_dotenv_values(
         "SCENE_ENGINE_IMAGE_SEGMENTATION_TIMEOUT_S": "30",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_MAX_ATTEMPTS": "2",
         "SCENE_ENGINE_IMAGE_SEGMENTATION_HEALTH_PATH": "/health",
-        "SCENE_ENGINE_IMAGE_SEGMENTATION_SINGLE_OBJECT_PATH": "/predict",
+        "SCENE_ENGINE_IMAGE_SEGMENTATION_BY_PROMPT_PATH": "/segment_by_prompt",
     }
     llm_values = {
         "OPENAI_API_KEY": "test-key",
@@ -107,7 +107,7 @@ def test_clients_load_their_required_dotenv_values(
     assert geometry_client._base_url == "http://geometry"
     assert geometry_client._generate_objects_path == "/objects"
     assert segmentation_client._base_url == "http://segment"
-    assert segmentation_client._segment_single_object_path == "/predict"
+    assert segmentation_client._segment_by_prompt_path == "/segment_by_prompt"
     assert llm_client_config.default_query == {"api-version": "1"}
     assert llm_client_config.base_url == "http://llm/v1"
 
@@ -146,7 +146,7 @@ def test_service_health_checks_use_the_configured_health_path() -> None:
         timeout_s=30,
         max_attempts=1,
         health_path="/health",
-        segment_single_object_path="/predict",
+        segment_by_prompt_path="/segment_by_prompt",
         session=segmentation_session,
     )
 
@@ -170,7 +170,7 @@ def test_segmentation_client_posts_prompt_and_returns_rle_masks(tmp_path: Path) 
         timeout_s=30,
         max_attempts=1,
         health_path="/health",
-        segment_single_object_path="/predict",
+        segment_by_prompt_path="/segment_by_prompt",
         session=session,
     )
 
@@ -178,7 +178,7 @@ def test_segmentation_client_posts_prompt_and_returns_rle_masks(tmp_path: Path) 
         rle_mask
     ]
     assert session.post_call is not None
-    assert session.post_call["url"] == "http://segment/predict"
+    assert session.post_call["url"] == "http://segment/segment_by_prompt"
     assert session.post_call["data"] == {"prompt": "table"}
 
 
