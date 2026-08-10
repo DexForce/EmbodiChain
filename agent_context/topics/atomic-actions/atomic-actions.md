@@ -420,13 +420,23 @@ correlated `EffectVerificationResult`. Its disjoint `success_mask` and
 neither mask remain unresolved. Partial successes commit immediately while
 unresolved rows keep the barrier pending. `EffectVerificationRequest` carries a
 monotonic `verification_id`, stable `requested_at`/`deadline` values in the
-robot-observation timestamp domain, and an owned effect snapshot. Mask shrinkage
-creates a new ID without extending the deadline; whole-action retry creates a
-new attempt. Results for an old ID are rejected. `RecoveryPolicy.action_timeout`
+robot-observation timestamp domain, a session-local `attempt_generation`, and
+an owned effect snapshot. Mask shrinkage creates a new ID without extending the
+deadline or changing the generation; installing a replacement plan increments
+the generation. Results for an old ID are rejected. `RecoveryPolicy.action_timeout`
 covers the trajectory and terminal effect wait together, and only timestamps
 strictly greater than the deadline time out. While verification is outstanding,
 `ExecutionTick.pending_effect` retains the request on every tick;
 `EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+
+For synchronous verification, pass `effect_verifier(context, request)` to
+`runner.step()` or `run_until_blocked()`. The runner calls it after the fresh
+due-cycle observation and supplies its result to `session.tick()` in that same
+cycle. It does not call the verifier when the observation timestamp is already
+past the request deadline. A verifier must return an exact
+`EffectVerificationResult`; all-false masks mean unresolved. External
+asynchronous integrations instead pass `effect_result` explicitly on a due
+`step()` call.
 
 ```python
 request = tick.pending_effect

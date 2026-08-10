@@ -36,10 +36,11 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
     EntityState,
+    EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
-    ExecutionTick,
     GraspGoal,
     MotionPolicy,
     ObjectSemantics,
@@ -406,8 +407,8 @@ def main() -> None:
 
     def verify_pickup_effect(
         _context: PlanningContext,
-        _: ExecutionTick,
-    ) -> torch.Tensor:
+        request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
         """Verify that the cube rose with, and remains near, the end effector."""
         cube_position = target.get_local_pose(to_matrix=True)[:, :3, 3]
         eef_position = robot.compute_fk(
@@ -426,7 +427,12 @@ def main() -> None:
             f"cube-to-EEF={held_distance.detach().cpu().tolist()} m, "
             f"success={success.detach().cpu().tolist()}."
         )
-        return success
+        verified_success = request.env_mask & success
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=verified_success,
+            failure_mask=request.env_mask & ~success,
+        )
 
     recording_started = start_auto_play_recording(
         sim,

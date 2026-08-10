@@ -108,7 +108,9 @@ class EffectVerificationRequest:
 
     ``requested_at`` and ``deadline`` use the same timestamp domain as
     :class:`RobotObservation`. Request-mask shrinkage retains both values;
-    only a whole-action retry starts a new attempt deadline.
+    only a newly installed plan starts a new attempt deadline.
+    ``attempt_generation`` is session-local and remains stable when partial
+    resolution or row deactivation replaces only the request ID.
     """
 
     verification_id: int
@@ -116,6 +118,7 @@ class EffectVerificationRequest:
     invocation_id: str | None
     invocation_revision: int
     invocation_index: int
+    attempt_generation: int
     terminal_segment: str | None
     requested_at: float
     deadline: float
@@ -135,6 +138,8 @@ class EffectVerificationRequest:
             raise ValueError("invocation_revision must be non-negative.")
         if self.invocation_index < 0:
             raise ValueError("invocation_index must be non-negative.")
+        if type(self.attempt_generation) is not int or self.attempt_generation < 0:
+            raise ValueError("attempt_generation must be a non-negative integer.")
         if self.terminal_segment is not None and (
             not isinstance(self.terminal_segment, str) or not self.terminal_segment
         ):
@@ -166,6 +171,7 @@ class EffectVerificationRequest:
             invocation_id=self.invocation_id,
             invocation_revision=self.invocation_revision,
             invocation_index=self.invocation_index,
+            attempt_generation=self.attempt_generation,
             terminal_segment=self.terminal_segment,
             requested_at=self.requested_at,
             deadline=self.deadline,
@@ -304,6 +310,7 @@ class ExecutionSession:
         ] = {}
         self._planned_scene = context.scene
         self._action_started_at = context.robot.timestamp
+        self._attempt_generation = -1
         self._last_joint_command: torch.Tensor | None = None
         self._last_joint_ids: tuple[int, ...] = ()
         self._last_command_mask = torch.zeros(
@@ -887,6 +894,7 @@ class ExecutionSession:
         ):
             self._active_targets = replacement_targets
         self._plan = plan
+        self._attempt_generation += 1
         self._waypoint_index = 0
         self._planned_scene = context.scene
         self._action_started_at = context.robot.timestamp
@@ -1468,6 +1476,7 @@ class ExecutionSession:
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
             invocation_index=self._invocation_index,
+            attempt_generation=self._attempt_generation,
             terminal_segment=(
                 self._plan.segments[-1].name if self._plan.segments else None
             ),

@@ -37,11 +37,11 @@ from embodichain.lab.sim.atomic_actions import (
     CommandAckStatus,
     CommandOperation,
     EndEffectorPoseGoal,
+    EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
-    ExecutionTick,
     HeldObjectState,
     JOINT_POSITION_CAPABILITY,
     JointPositionPayload,
@@ -323,13 +323,11 @@ def _make_runner(
 
 def _successful_effect_result(
     context: PlanningContext,
-    tick: ExecutionTick,
+    request: EffectVerificationRequest,
 ) -> EffectVerificationResult:
     """Correlate a successful result with the pending effect boundary."""
-    pending_effect = tick.pending_effect
-    assert pending_effect is not None
     return EffectVerificationResult(
-        verification_id=pending_effect.verification_id,
+        verification_id=request.verification_id,
         success_mask=torch.ones(
             context.batch_size,
             dtype=torch.bool,
@@ -683,10 +681,10 @@ def test_resumed_effect_verifier_uses_a_fresh_observation() -> None:
 
     def record_fresh_context(
         context: PlanningContext,
-        tick: ExecutionTick,
+        request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
         observed_at.append(context.robot.timestamp)
-        return _successful_effect_result(context, tick)
+        return _successful_effect_result(context, request)
 
     completed = runner.run_until_blocked(effect_verifier=record_fresh_context)
 
@@ -695,32 +693,191 @@ def test_resumed_effect_verifier_uses_a_fresh_observation() -> None:
     assert observed_at[0] > blocked_at
 
 
+def test_due_effect_verifier_consumes_fresh_observation_in_the_same_step() -> None:
+    runner, clock, _, _, _ = _make_runner(with_effect=True)
+    blocked = runner.run_until_blocked()
+    assert blocked.context is not None
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    blocked_at = blocked.context.robot.timestamp
+    clock.advance(MINIMUM_CYCLE_TIME)
+    observed_at: list[float] = []
+
+    def verify_fresh_observation(
+        context: PlanningContext,
+        request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
+        observed_at.append(context.robot.timestamp)
+        return _successful_effect_result(context, request)
+
+    completed = runner.step(effect_verifier=verify_fresh_observation)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert completed.tick is not None and completed.tick.pending_effect is None
+    assert completed.tick.task_state.get_held_object("arm") is not None
+    assert completed.context is not None
+    assert observed_at == [completed.context.robot.timestamp]
+    assert observed_at[0] > blocked_at
+
+
+def test_effect_verifier_runs_and_succeeds_at_the_request_deadline() -> None:
+    runner, clock, _, _, _ = _make_runner(
+        with_effect=True,
+        action_timeout=2.0,
+    )
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    request = blocked.tick.pending_effect
+    clock.advance(request.deadline - clock.now())
+    observed_at: list[float] = []
+
+    def verify_at_deadline(
+        context: PlanningContext,
+        current_request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
+        observed_at.append(context.robot.timestamp)
+        return _successful_effect_result(context, current_request)
+
+    completed = runner.step(effect_verifier=verify_at_deadline)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert observed_at == pytest.approx([request.deadline])
+
+
+def test_effect_verifier_is_not_called_after_deadline_and_session_retries() -> None:
+    runner, clock, _, _, action = _make_runner(
+        with_effect=True,
+        max_action_retries=1,
+        action_timeout=2.0,
+    )
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    request = blocked.tick.pending_effect
+    plan_count = action.plan_count
+    clock.advance(request.deadline - clock.now() + MINIMUM_CYCLE_TIME)
+    verifier = Mock()
+
+    retry = runner.step(effect_verifier=verifier)
+
+    verifier.assert_not_called()
+    assert retry.status is RunnerStatus.RUNNING
+    assert retry.tick is not None and retry.tick.command is not None
+    assert action.plan_count == plan_count + 1
+    assert {
+        ExecutionEventKind.EFFECT_VERIFICATION_TIMEOUT,
+        ExecutionEventKind.ACTION_RETRY,
+        ExecutionEventKind.REPLANNED,
+    }.issubset({event.kind for event in retry.tick.events})
+
+
+def test_effect_result_and_effect_verifier_are_mutually_exclusive() -> None:
+    runner, _, _, sink, action = _make_runner(with_effect=True)
+    result = EffectVerificationResult(
+        verification_id=0,
+        success_mask=torch.tensor([True]),
+        failure_mask=torch.tensor([False]),
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        runner.step(
+            effect_result=result,
+            effect_verifier=_successful_effect_result,
+        )
+
+    assert action.plan_count == 1
+    assert sink.sent == []
+
+
+@pytest.mark.parametrize(
+    "invalid_result",
+    [None, True],
+    ids=["none", "wrong-type"],
+)
+def test_effect_verifier_invalid_result_fails_with_cancel_then_hold(
+    invalid_result: object | None,
+) -> None:
+    runner, clock, _, sink, _ = _make_runner(with_effect=True)
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    clock.advance(MINIMUM_CYCLE_TIME)
+
+    def invalid_verifier(
+        context: PlanningContext,
+        request: EffectVerificationRequest,
+    ) -> object | None:
+        del context, request
+        return invalid_result
+
+    failed = runner.step(effect_verifier=invalid_verifier)
+
+    assert failed.status is RunnerStatus.FAILED
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert failed.message is not None
+    assert "must return exactly EffectVerificationResult" in failed.message
+
+
+def test_all_false_effect_updates_keep_polling_the_same_request() -> None:
+    runner, clock, _, sink, _ = _make_runner(with_effect=True)
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    initial_request = blocked.tick.pending_effect
+    observed_requests: list[tuple[int, int]] = []
+
+    def report_no_progress(
+        context: PlanningContext,
+        request: EffectVerificationRequest,
+    ) -> EffectVerificationResult:
+        observed_requests.append((request.verification_id, request.attempt_generation))
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=torch.zeros(context.batch_size, dtype=torch.bool),
+            failure_mask=torch.zeros(context.batch_size, dtype=torch.bool),
+        )
+
+    clock.advance(MINIMUM_CYCLE_TIME)
+    first_poll = runner.step(effect_verifier=report_no_progress)
+    clock.advance(MINIMUM_CYCLE_TIME)
+    second_poll = runner.step(effect_verifier=report_no_progress)
+
+    assert first_poll.status is RunnerStatus.RUNNING
+    assert second_poll.status is RunnerStatus.RUNNING
+    assert first_poll.tick is not None and first_poll.tick.pending_effect is not None
+    assert second_poll.tick is not None and second_poll.tick.pending_effect is not None
+    assert observed_requests == [
+        (initial_request.verification_id, initial_request.attempt_generation),
+        (initial_request.verification_id, initial_request.attempt_generation),
+    ]
+    assert sink.cancel_count == 0
+    assert second_poll.tick.task_state.get_held_object("arm") is None
+
+
 def test_partial_effect_verifier_receives_the_committed_task_state() -> None:
     runner, _, _, _, _ = _make_runner(with_effect=True, batch_size=2)
     observations: list[list[bool] | None] = []
 
     def verify_in_two_updates(
         context: PlanningContext,
-        tick: ExecutionTick,
+        request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        pending_effect = tick.pending_effect
-        assert pending_effect is not None
         held = context.task.get_held_object("arm")
         observations.append(
             None if held is None or held.env_mask is None else held.env_mask.tolist()
         )
-        if pending_effect.env_mask.tolist() == [True, True]:
+        if request.env_mask.tolist() == [True, True]:
             return EffectVerificationResult(
-                verification_id=pending_effect.verification_id,
+                verification_id=request.verification_id,
                 success_mask=torch.tensor([True, False]),
                 failure_mask=torch.tensor([False, False]),
             )
-        assert pending_effect.env_mask.tolist() == [False, True]
+        assert request.env_mask.tolist() == [False, True]
         assert held is not None and held.env_mask is not None
         assert held.env_mask.tolist() == [True, False]
         assert torch.equal(context.task.held_objects["arm"].env_mask, held.env_mask)
         return EffectVerificationResult(
-            verification_id=pending_effect.verification_id,
+            verification_id=request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
         )
@@ -786,6 +943,7 @@ def test_runner_deactivation_refreshes_cached_effect_request() -> None:
     blocked = runner.run_until_blocked()
     assert blocked.tick is not None and blocked.tick.pending_effect is not None
     old_id = blocked.tick.pending_effect.verification_id
+    old_generation = blocked.tick.pending_effect.attempt_generation
 
     changed = runner.deactivate_rows(
         torch.tensor([False, True]),
@@ -797,15 +955,14 @@ def test_runner_deactivation_refreshes_cached_effect_request() -> None:
     assert refreshed.tick is not None and refreshed.tick.pending_effect is not None
     assert refreshed.tick.pending_effect.env_mask.tolist() == [True, False]
     assert refreshed.tick.pending_effect.verification_id != old_id
+    assert refreshed.tick.pending_effect.attempt_generation == old_generation
 
     def verify_remaining(
         context: PlanningContext,
-        tick: ExecutionTick,
+        request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        pending_effect = tick.pending_effect
-        assert pending_effect is not None
         return EffectVerificationResult(
-            verification_id=pending_effect.verification_id,
+            verification_id=request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
         )
@@ -822,12 +979,10 @@ def test_blocking_runner_fails_safely_for_a_mismatched_effect_result() -> None:
 
     def mismatched_effect_result(
         context: PlanningContext,
-        tick: ExecutionTick,
+        request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        pending_effect = tick.pending_effect
-        assert pending_effect is not None
         return EffectVerificationResult(
-            verification_id=pending_effect.verification_id + 1,
+            verification_id=request.verification_id + 1,
             success_mask=torch.ones(context.batch_size, dtype=torch.bool),
             failure_mask=torch.zeros(context.batch_size, dtype=torch.bool),
         )
