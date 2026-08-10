@@ -107,17 +107,22 @@ than uncommitted working-tree changes.
 | Action Bank | Configuration plus task-specific Python node/edge functions | Keep only as a compatibility path while semantic coverage is built. |
 
 PR #475 resolved cumulative translation/rotation publication, removed the dead
-`MotionPolicy.interpolation` field, and unified strategy dispatch. The
-remaining #474 prerequisites on this baseline are:
+`MotionPolicy.interpolation` field, and unified strategy dispatch. It also made
+`AtomicAction.plan()` framework-owned and `_plan()` the only custom-action
+extension hook. Rejecting a subclass that overrides `plan()` is an intentional
+hard break: the project will not provide a compatibility adapter or deprecation
+window for that former extension contract. Custom actions must migrate to
+`_plan()` so framework-owned scene binding cannot be bypassed.
 
-- `AtomicAction` rejects the formerly documented `plan()` extension override
-  and requires `_plan()` without a compatibility window.
+The remaining #474 prerequisites on this baseline are:
+
 - scene pose, semantics, affordance, and collision registration still have
   multiple sources of truth;
 - ordinary callers still see a large low-level public surface and must perform
   semantic transform and verifier plumbing;
-- provider collision entity IDs and planner-declared dynamic obstacle names are
-  not cross-validated at integration construction time;
+- dynamic-obstacle validation is planner-local; provider collision entity IDs
+  and planner-declared names are not yet fully cross-validated at integration
+  construction time;
 - `MotionPolicy` still exposes implementation-level tuning that should be
   hidden behind semantic presets for ordinary users.
 
@@ -138,7 +143,9 @@ The following #471 decisions remain valid:
 - stable named trajectory segments for tracing instead of recomputed trajectory
   indices;
 - sequential execution first, then resource-aware parallel execution;
-- continued legacy compatibility during migration.
+- continued Action Bank compatibility and only the explicitly documented
+  direct-core fallbacks during migration. This does not include the intentional
+  `plan()` to `_plan()` hard break.
 
 The following parts must be adjusted:
 
@@ -272,17 +279,61 @@ SceneEntityRef
 
 Rules:
 
-1. An entity is registered once. Planner obstacles, scene dependencies, effect
-   monitors, and semantic calls consume that registration.
-2. Grounding reads pose and geometry from one immutable snapshot. It must not
+1. The registry ID is the authoritative entity identity used by semantic calls,
+   snapshots, scene dependencies, effect monitors, and planner obstacles. An
+   entity is registered once under that ID.
+2. A simulation object's existing `uid` may be imported as a legacy alias only.
+   Aliases are resolved once at an integration boundary and normalized to the
+   registry ID; they never replace the authoritative ID. Duplicate registry IDs,
+   ambiguous aliases, or an alias colliding with another registry ID fail during
+   registry construction.
+3. Grounding reads pose and geometry from one immutable snapshot. It must not
    mix a snapshot with a live simulation entity pose.
-3. Automatic grasp selection declares a target dependency automatically.
-4. Dynamic collision setup is derived and cross-validated at construction
-   time. The `safe` preset requests `DynamicCollisionMode.REQUIRED` when the
-   registry declares dynamic collision entities and fails early if the active
-   planner cannot satisfy it.
-5. Environment scene configuration should populate the registry automatically;
+4. Automatic grasp selection declares a target dependency automatically.
+5. Dynamic collision setup is derived from authoritative registry IDs. Registry
+   construction performs the complete provider/planner cross-validation: the
+   registry's dynamic-collision ID set, the provider's `collision_entity_ids`,
+   and the planner's dynamic-obstacle names must agree after alias normalization;
+   every ID must have the required geometry, and the selected planner must
+   support the declared update mode. The current
+   planner-local name check remains a lower-level defensive validation, not the
+   integration contract.
+6. The `safe` preset requests `DynamicCollisionMode.REQUIRED` when the registry
+   declares dynamic collision entities and fails early if the active planner
+   cannot satisfy it.
+7. Environment scene configuration should populate the registry automatically;
    explicit providers are reserved for perception and hardware integration.
+
+Before PR2A introduces this registry, PR1 provides only a core migration bridge.
+`ObjectSemantics.entity_id` is a caller-supplied `SceneSnapshot` key, not yet a
+registry reference. `ObjectSemantics` is shallow-frozen so top-level fields,
+including `entity_id`, cannot be rebound after attachment state captures the
+semantics; identity changes require a new instance. Nested affordance and
+metadata objects remain mutable but never establish identity.
+
+For object identity, explicit and legacy namespaces stay separate. If either
+side supplies `entity_id`, both sides must supply the same explicit ID; a
+same-spelled simulation `entity.uid` is not sufficient. Only when both explicit
+IDs are absent may the bridge compare non-empty legacy UIDs, requiring both UIDs
+to exist and match. Only when neither side has an explicit ID or valid UID may
+comparison fall back to the same semantic object or live entity handle.
+Semantic labels are never identity. Arbitrary alias mapping, uniqueness
+enforcement, and normalization to an authoritative registry ID belong to PR2A.
+
+For pose grounding, an explicit `entity_id` is strict: the pose comes only from
+the current versioned `PlanningContext.scene`, and a missing entry is an error.
+The planner never falls back to a live entity after an explicit ID fails. A live
+`ObjectSemantics.entity` read remains temporarily available, with a deprecation
+warning and without a scene dependency, only when no `entity_id` was supplied.
+The same boundary applies to `AssembleGoal.base_pose`: the snapshot reference is
+canonical, while an omitted reference permits the deprecated direct-core
+`AssembleAffordance.base_object_entity` path.
+
+The current `SceneSnapshot` owns copies of input pose tensors, but exposed
+`EntityState.pose` tensors are not deeply read-only. PR1 therefore requires
+callers to treat snapshot values as immutable and uses the scene version for
+publication/recovery semantics. Enforced deep immutability belongs to the PR2A
+registry/snapshot hardening rather than this bridge.
 
 ### 7.2 Robot skill profiles
 
@@ -314,6 +365,14 @@ EEF pose from the requested object-space target and the verified
 `object_to_eef` relation. Task code and configuration never perform
 `desired_object_pose @ object_to_eef`.
 
+As the core migration path for assembly, `AssembleGoal` gains
+`base_pose: SceneEntityPose | None`. The semantic compiler always supplies a
+`SceneEntityPose` containing the authoritative base-object registry ID, so the
+base pose is resolved from the same immutable snapshot and automatically becomes
+a scene dependency. `None` preserves the existing live
+`AssembleAffordance.base_object_entity` lookup only for legacy direct-core
+callers; the semantic facade and Expert Program never emit that fallback.
+
 The workflow compiler inspects later calls and propagates downstream object
 targets to pickup/grasp selection. The caller does not repeat later goals in
 `PickUpOptions`.
@@ -326,7 +385,8 @@ Compilation has two stages.
    - validate references, presets, capabilities, resources, and bounded loops;
    - infer ordering and data/effect dependencies;
    - propagate downstream object goals for grasp selection;
-   - identify static stages versus observation-dependent boundaries;
+   - identify every call boundary that requires fresh observation or verified
+     effects, without coalescing calls in Version 1;
    - reject ambiguous bindings and unsupported semantic relations before
      execution.
 2. **Runtime grounding and lowering**
@@ -336,11 +396,18 @@ Compilation has two stages.
    - lower to a typed `ActionInvocation`;
    - dispatch through the canonical `SkillRuntime`.
 
-Static `engine.compile()` is valid only when later goals do not depend on
-observations or effects produced by earlier calls. `engine.start()` and observed
-execution are required for grasp/release verification, moving targets,
-recovery, post-settling, or any JIT-grounded goal. The default mode is `auto`:
-the compiler partitions safe static stages and inserts observed boundaries.
+Version 1 executes exactly one semantic call per `ExecutionSession`. The runtime
+captures a fresh registry snapshot, lowers one call to one `ActionInvocation`,
+constructs a one-invocation session, drives it through terminal effect
+verification, commits the verified per-environment task state, and only then
+advances to the next call. It never places multiple semantic calls in one
+`ExecutionSession`.
+
+Static `engine.compile()` remains an advanced core API for explicitly
+observation-independent offline planning. The Version 1 semantic runtime does
+not coalesce calls into static stages; such an optimization requires a later
+design proving that it preserves the call, effect, and re-observation
+boundaries.
 
 ### 7.5 Skill runtime
 
@@ -350,6 +417,7 @@ the compiler partitions safe static stages and inserts observed boundaries.
 - synchronous `run(...)` and non-blocking `step()` entry points;
 - planning-context refresh through registered observation ports;
 - JIT lowering of the next semantic call;
+- exactly one semantic call and one invocation per `ExecutionSession`;
 - persistent, per-environment verified `TaskState`;
 - built-in effect-monitor selection and feedback to `ExecutionSession`;
 - uniform `SkillResult`, cancellation, timeout, and safe-stop behavior;
@@ -531,12 +599,24 @@ deadlines.
 
 ### 9.3 Named atomic trajectory segments
 
-Plans need stable semantic trajectory-segment names. Current built-ins expose:
+Version 1 freezes the trajectory-segment names already emitted by current
+built-ins. A successful non-empty plan exposes the following ordered names;
+zero-length optional segments are omitted:
 
-- pick: `approach`, `close`, `lift`;
-- place: `approach`, `release`, `retract`;
-- handover: `transfer`, `approach`, `close`, optional `hold`, `release`, and
-  `deliver`.
+| Atomic skill ID | Ordered trajectory-segment names |
+|---|---|
+| `move_joints` | `move_joints` |
+| `move_end_effector` | `move_end_effector` |
+| `move_held_object` | `transport` |
+| `pick_up` | `approach`, `close`, `lift` |
+| `place` (including `AssembleGoal`) | `approach`, `release`, `retract` |
+| `press` | `close`, `press`, `retract` |
+| `hand_over` | `transfer`, `approach`, `close`, optional `hold`, `release`, `deliver` |
+| `coordinated_pickment` | `approach`, `close`, `lift`, `move`, optional `hold` |
+| `coordinated_placement` | `approach`, optional `hold`, optional `release`, `retreat` |
+
+These spellings are a trace/metadata contract. Renaming or removing one requires
+an explicit API review and migration rather than a silent change in a primitive.
 
 Names are validated by `ActionPlan`; ranges may change after replanning when a
 backend returns a different sample count. Effect monitors run at the action
@@ -574,9 +654,16 @@ All runtime state is indexed by stable environment IDs:
 - post-policy progress and segment validation;
 - result and metadata.
 
-One environment may finish, recover, settle, or fail without blocking or
-overwriting another. Program structure is shared, but runtime progress is
-masked per environment.
+Version 1 uses a shared program/call barrier for the environment batch; it does
+not maintain a divergent AST program counter or a separate `ExecutionSession`
+per environment. The runtime advances to the next semantic call or program
+segment only when every still-eligible active row reaches the current boundary.
+A slower or recovering active row therefore keeps the batch at that boundary.
+
+Within the shared barrier, task state, effects, recovery budgets, eligibility,
+success, and failure remain independent per environment. Completed, failed, or
+otherwise inactive rows emit hold behavior and cannot overwrite another row's
+state while the active cohort catches up.
 
 ## 10. Action Bank migration
 
@@ -600,7 +687,10 @@ Migration rules:
    working during the transition.
 2. Add `EmbodiedEnvCfg.expert_program` and a CLI input such as
    `--expert_program`; reject simultaneous legacy and new program inputs.
-3. Migrate sequential tasks first and compare generated metadata and outcomes.
+3. Do not require official-task migration in PR1. Start opt-in sequential-task
+   migration with the repeated-cube vertical slice after the registry, compiler,
+   runtime, and demo bridge contracts are available, then compare generated
+   metadata and outcomes.
 4. Add `Parallel` only with deterministic resource conflict checks, trajectory
    alignment, synchronization barriers, and per-environment `StateDelta`
    merging.
@@ -642,12 +732,16 @@ Each item below should remain a focused PR with its own public-API review and
 tests. The dependency order is:
 
 ```text
-Phase 0 correctness
+Phase 0 correctness (complete)
         |
         v
-SceneRegistry + RobotSkillProfile
+PR1 snapshot/identity bridge
         |
-        v
+        +-----------------------+
+        v                       v
+PR2A SceneRegistry      PR2B RobotSkillProfile
+        +-----------+-----------+
+                    v
 Semantic calls/compiler --> SkillRuntime/effect monitors
         |                              |
         +---------------+--------------+
@@ -665,7 +759,7 @@ Semantic calls/compiler --> SkillRuntime/effect monitors
               Action Bank deprecation
 ```
 
-### Phase 0: correctness and compatibility prerequisites
+### Phase 0: correctness and core-contract decisions (complete)
 
 Landed on `main` through #475:
 
@@ -676,34 +770,106 @@ Landed on `main` through #475:
 - the dead `MotionPolicy.interpolation` field is removed and strategy dispatch
   is unified;
 - one action owns one trajectory and one recovery/effect boundary, while named
-  `TrajectorySegment`s remain metadata.
+  `TrajectorySegment`s remain metadata;
+- `_plan()` is the only supported custom-action extension hook. The immediate
+  class-definition failure for a legacy `plan()` override is a documented,
+  tested, intentional hard break with no compatibility adapter;
+- planner-local dynamic-obstacle name validation remains in place as a defensive
+  core check. Complete provider/planner cross-validation is deliberately owned
+  by the authoritative `SceneRegistry` integration in Phase 1.
 
-Remaining gates:
+Exit criteria are met on `main@e445133c`. Implementation may proceed to the
+focused PR1 bridge without adding a legacy `plan()` adapter or a pre-registry
+duplicate of the integration-level obstacle validator.
 
-- retain `_plan()` as the new extension hook and decide whether legacy
-  subclasses overriding `plan()` receive a tested compatibility/deprecation
-  adapter or continue to fail at class-definition time;
-- cross-validate provider collision entity IDs against planner-declared dynamic
-  obstacle names when both integrations are constructed. Phase 1 extends this
-  same validation to registry-derived configuration.
+### PR1: core snapshot and identity bridge
 
-Exit criteria: both remaining gates pass on `main`. Phase 1 must not depend on
-an undocumented custom-action break or defer mismatched obstacle names until
-planning/execution.
+PR1 is deliberately smaller than Phase 1. It establishes the core seams that
+the later registry and profile integrations consume:
+
+- add optional, validated `ObjectSemantics.entity_id` as the stable
+  `SceneSnapshot` key for canonical object grounding;
+- resolve explicit IDs only from `PlanningContext.scene`, with a hard error and
+  no live fallback when the snapshot entry is missing;
+- keep `ObjectSemantics.entity` only as a deprecated no-ID compatibility path;
+- shallow-freeze `ObjectSemantics` fields so captured `entity_id` values cannot
+  be rebound without constructing a new semantic value;
+- define stable held-object identity and partial-batch `StateDelta` merging:
+  if either side has an explicit `entity_id`, both explicit IDs must exist and
+  match; only two explicit-ID-less values may compare matching legacy
+  `entity.uid` strings, and only values with neither ID form may fall back to the
+  same semantic object or live handle;
+- preserve scalar semantics during same-identity partial `StateDelta` merges:
+  while any previously active row remains, retain `previous.semantics` and
+  merge only per-environment masks, transforms, and grasp poses; adopt
+  `candidate.semantics` only when all previously active rows are replaced;
+- add an action-owned scene-dependency hook. `PickUp` declares its semantic
+  object ID, coordinated pickup declares it only for the implicit initial-pose
+  path, and goal-owned `SceneEntityPose` values remain automatic dependencies;
+- resolve each pickup object pose once per planning attempt and reuse that
+  tensor for grasp sampling, upright adjustment, and `object_to_eef`;
+- derive held-object pose for `MoveHeldObject` and `HandOver` from the observed
+  EEF pose and verified `object_to_eef` instead of a live entity read;
+- add `AssembleGoal.base_pose: SceneEntityPose | None`; the explicit reference
+  is snapshot-backed and dependency-tracked, while `None` retains the deprecated
+  `AssembleAffordance.base_object_entity` fallback;
+- add focused tests, documentation, and one canonical snapshot-grounded moving
+  target tutorial. Keep `scripts/tutorials/atomic_action/assemble.py` explicitly
+  documented as a legacy fallback example until its later registry migration.
+
+PR1 does not add a `SceneRegistry`, a `SceneEntityRef` hierarchy, alias maps,
+cross-source uniqueness or collision validation, a `RobotSkillProfile`, or
+semantic presets. It does not require official task environments to migrate;
+they remain on the compatibility path until a later opt-in vertical slice.
+
+Exit criteria: canonical object grounding never mixes snapshot and live poses;
+explicit missing IDs fail; dependency metadata matches the poses actually
+consumed; stable-identity merges are deterministic; and existing direct-core
+callers remain usable only through the documented deprecated fallbacks.
 
 ### Phase 1: unified integration data
+
+Phase 1 is implemented as two focused follow-up PRs that join before the
+semantic facade/compiler work.
+
+#### PR2A: SceneRegistry
 
 Deliverables:
 
 - `SceneEntityRef` hierarchy and `SceneRegistry`;
-- immutable snapshot as the only grounding pose authority;
-- environment-to-registry population and collision/provider derivation;
-- `RobotSkillProfile`, capability-based binding, semantic tool commands, and
-  stable presets;
+- authoritative registry IDs with simulation `uid` values accepted only as
+  normalized legacy aliases;
+- immutable snapshots as the only grounding pose authority for the canonical
+  semantic/compiler path;
+- opt-in environment-to-registry population and collision/provider derivation;
+- complete construction-time agreement checks across registry collision IDs,
+  provider collision IDs, planner dynamic-obstacle names, geometry, and planner
+  capability;
 - explicit catalog-discovery versus engine-installation terminology.
 
-Exit criteria: an object is registered once and a dynamic-object configuration
-error fails before execution with an entity-centric diagnostic.
+`ObjectSemantics.entity_id` and `AssembleGoal.base_pose` already provide the
+lowering targets from PR1. PR2A replaces manually coordinated IDs/providers with
+one authoritative registration and performs alias normalization exactly once at
+the integration boundary.
+
+#### PR2B: RobotSkillProfile
+
+Deliverables:
+
+- `RobotSkillProfile` and reusable capability declarations;
+- capability-based deterministic binding and explicit ambiguity errors;
+- semantic tool commands and stable runtime/planning presets;
+- profile validation against installed engine skills and robot control parts.
+
+PR2B may proceed in parallel with PR2A after the PR1 bridge. Neither follow-up
+requires official task migration; the repeated-cube vertical slice opts in only
+after the registry, profile, compiler, runtime, and demo bridge are available.
+
+Combined Phase 1 exit criteria: an object is registered once under an
+authoritative ID, aliases cannot introduce ambiguity, dynamic-object
+configuration mismatches fail before execution with an entity-centric
+diagnostic, and robot capabilities resolve bindings/presets without task-owned
+motion code.
 
 ### Phase 2: semantic facade and compiler
 
@@ -726,9 +892,12 @@ effect verifier.
 Deliverables:
 
 - `SkillRuntime` wrapping `ExecutionRunner` for sync and step-wise use;
+- exactly one semantic call lowered to one invocation in one
+  `ExecutionSession`;
 - built-in simulation effect monitors for grasp, release, and handover;
 - uniform per-environment `SkillResult` and persistent verified `TaskState`;
-- automatic static/observed stage selection;
+- a shared Version 1 program/call barrier with independent per-environment task,
+  effect, recovery, eligibility, and result state;
 - safe cancellation, timeout, and hold behavior inherited from the runner.
 
 Exit criteria: Python calls and a programmatic `SemanticCallSpec` use identical
@@ -762,12 +931,13 @@ Deliverables:
 
 Exit criteria:
 
-- three lazy segments complete in supported simulation;
-- each segment re-observes the cube after free-fall settling;
+- three lazy program/demo segments complete in supported simulation;
+- each program/demo segment re-observes the cube after free-fall settling;
 - grasp and release effects are verified;
 - placement uses verified held-object state;
 - settle and validation data are present in metadata;
-- multi-environment success, failure, and recovery masks remain independent;
+- the environment batch advances through the shared call barrier while success,
+  failure, effect, recovery, and eligibility masks remain independent;
 - the task contains no task-specific motion-generation code.
 
 ### Phase 6: sequential skill coverage and articulated interaction
@@ -818,9 +988,16 @@ independent of adoption of the new path.
 
 - strict decoder, unknown fields, schema versioning, bounded repeats, and
   registry reference errors;
+- authoritative registry-ID normalization, legacy-`uid` alias collisions, and
+  complete registry/provider/planner obstacle-set agreement;
 - cumulative scene movement and collision dependency revision behavior;
 - profile capability matching, deterministic binding, and ambiguity errors;
-- static versus observed stage partitioning;
+- `AssembleGoal.base_pose` snapshot resolution and its automatic scene
+  dependency, with the `None` fallback isolated to legacy direct-core use;
+- same-identity partial `StateDelta` merges retain previous scalar semantics
+  until every previously active row is replaced, for both individual and
+  coordinated attachments;
+- exactly one semantic call and one invocation per `ExecutionSession`;
 - downstream target propagation for grasp selection;
 - object-centric place conversion from one immutable snapshot and verified
   held state;
@@ -833,9 +1010,11 @@ independent of adoption of the new path.
 
 - Python facade and Expert Program lower to equivalent invocations;
 - runner scheduling, acknowledgement, safe stop, and cancellation are reused;
-- one environment can complete while another recovers or fails;
+- the Version 1 shared call barrier holds active rows together while completed,
+  recovering, and failed rows retain independent masks and state;
 - command buffering advances only through the environment clock;
-- segment metadata is deterministic and serializable.
+- program/demo-segment and trajectory-segment metadata are deterministic and
+  serializable.
 
 ### Simulation tests
 
@@ -858,8 +1037,9 @@ The design is complete when all of the following hold:
       typed atomic-action core, and runtime.
 - [ ] A common new task using existing semantic skills needs no task-specific
       motion-generation code.
-- [ ] Each scene entity is registered once across semantics, observation,
-      affordance, and collision handling.
+- [ ] Each scene entity is registered once under an authoritative registry ID
+      across semantics, observation, affordance, and collision handling;
+      simulation `uid` values are legacy aliases only.
 - [ ] The default pick/place path does not expose raw qpos, grasp/EEF matrix
       math, planner construction, session plumbing, or custom verification.
 - [ ] Automatic grasping tracks target revisions and receives downstream object
@@ -867,16 +1047,21 @@ The design is complete when all of the following hold:
 - [ ] `Place` is object-centric and consumes verified held-object state.
 - [ ] Built-in grasp, release, handover, and supported articulation effect
       monitors work in simulation.
-- [ ] Repeated sub-threshold motion eventually publishes the correct scene
+- [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
-- [ ] Custom actions have a documented and tested compatibility path.
+- [x] Custom actions have a documented and tested intentional hard-break
+      migration from overriding `plan()` to implementing `_plan()`; no
+      compatibility adapter is required.
+- [ ] Version 1 creates exactly one one-invocation `ExecutionSession` for each
+      semantic call and re-observes before lowering the next call.
 - [ ] Demonstration timing is derived from `BaseEnv.step_dt` and commands pass
       through `env.step()`.
 - [ ] No program post-policy, effect, or tracing integration depends on
       hard-coded waypoint indices.
 - [ ] Repeated cube pick/place completes at least three lazy, independently
       observed program/demo segments with settle/effect/validation metadata.
-- [ ] Multi-environment progress, effects, recovery, and failures remain
+- [ ] Version 1 uses one shared program/call barrier while per-environment task
+      state, effects, recovery, eligibility, success, and failure remain
       independent.
 - [ ] Advanced users retain typed goals, invocations, policies, providers,
       sessions, and planners as escape hatches.
@@ -894,7 +1079,7 @@ The design is complete when all of the following hold:
 | Automatic binding makes surprising choices | Use capability validation and deterministic profile preferences; surface semantic ambiguity rather than silently selecting. |
 | Presets become opaque or unstable | Version preset semantics, emit the resolved core policies in runtime metadata, and keep typed overrides available to advanced users. |
 | Built-in effect monitors overfit simulation | Keep the contract backend-neutral and provide replaceable hardware implementations; record monitor evidence and thresholds. |
-| Static compilation uses stale state | Default to dependency-driven `auto` partitioning and force observed boundaries after external effects or dynamic post-policies. |
+| Static compilation uses stale state | Version 1 never coalesces semantic calls into one session or static stage; keep `engine.compile()` as an explicit advanced-core API until a later optimization proves equivalent observation/effect boundaries. |
 | Demo bridge duplicates runner logic | Keep scheduling, acknowledgement, recovery, timeout, and safe stop in `ExecutionRunner`; bridge only the Gym step boundary. |
 | Configuration grows into a programming language | Keep version 1 bounded and discriminated; add only registered nodes and no expressions or arbitrary DAG scheduler. |
 | Articulation and parallel work delay useful delivery | Ship the sequential cube vertical slice first; add reusable capabilities independently. |

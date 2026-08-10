@@ -150,6 +150,12 @@ or live in an offset base frame, also declare their names in
 `"cuboid"` or `"mesh"` representation because sphere fitting expands one object
 into multiple independently named obstacles.
 
+`CuroboWorldCfg` validates this planner-local registration at construction:
+obstacle names must be unique, and every dynamic obstacle name must match the
+`uid` (or generated fallback name) of an entry in `rigid_objects`. The later
+`SceneRegistry` integration additionally cross-validates those names with the
+scene provider rather than duplicating them in task code.
+
 ### Shared and per-environment collision worlds
 
 `CuroboWorldCfg.multi_env` controls collision-world batching only. Robot start
