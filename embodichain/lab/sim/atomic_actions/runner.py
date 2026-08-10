@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import math
 import time
@@ -31,6 +31,7 @@ from embodichain.utils import configclass
 
 from .bindings import RuntimeEndpointTarget
 from .execution import (
+    EffectVerificationResult,
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
@@ -291,7 +292,10 @@ class RunnerStep:
         )
 
 
-EffectVerifier = Callable[[PlanningContext, ExecutionTick], torch.Tensor | None]
+EffectVerifier = Callable[
+    [PlanningContext, ExecutionTick],
+    EffectVerificationResult | None,
+]
 """Callback that verifies a pending semantic effect for each environment."""
 
 RunnerStepCallback = Callable[[RunnerStep], None]
@@ -307,6 +311,8 @@ class ExecutionRunner:
     :meth:`run_until_blocked` supplies the blocking loop for tutorials and simple
     applications. Controller rejection, timeout, observation failure, and
     session exceptions all trigger a best-effort cancel-then-hold sequence.
+    Runner methods are designed for serialized event-loop use and are not
+    thread-safe.
 
     Args:
         session: Stateful atomic-action execution session.
@@ -354,8 +360,9 @@ class ExecutionRunner:
     def session(self) -> ExecutionSession:
         """Execution session advanced by this runner.
 
-        Call :meth:`revise_current` on the runner, rather than mutating the
-        session directly, while this runner owns scheduling.
+        Call :meth:`revise_current` or :meth:`deactivate_rows` on the runner,
+        rather than mutating the session directly, while this runner owns
+        scheduling.
         """
         return self._session
 
@@ -410,16 +417,59 @@ class ExecutionRunner:
             )
         self._pending_revision = prepared
 
+    def deactivate_rows(
+        self,
+        env_mask: torch.Tensor,
+        *,
+        reason: str,
+    ) -> torch.Tensor:
+        """Permanently deactivate environment rows owned by this runner.
+
+        The runner refreshes its cached effect boundary so a verifier cannot
+        submit a result correlated with a request that deactivation replaced.
+        In-flight controller work is neutralized for those rows by the next
+        due command frame according to the :class:`CommandSink` contract.
+
+        Args:
+            env_mask: Rows requested for deactivation.
+            reason: Human-readable event message.
+
+        Returns:
+            Owned mask of rows that changed from eligible to inactive.
+
+        Raises:
+            RuntimeError: If the runner is already terminal.
+            TypeError: If ``env_mask`` is not a tensor.
+            ValueError: If the mask or reason is invalid.
+        """
+        if self._status is not RunnerStatus.RUNNING:
+            raise RuntimeError("Only a running execution runner can deactivate rows.")
+        changed = self._session.deactivate_rows(env_mask, reason=reason)
+        if self._session.status is not ExecutionStatus.RUNNING:
+            self._pending_revision = None
+        pending_effect = self._session.pending_effect
+        if pending_effect is None:
+            self._clear_effect_boundary()
+        elif self._effect_tick is not None:
+            self._effect_tick = replace(
+                self._effect_tick,
+                status=self._session.status,
+                eligible_mask=self._session.eligible_mask,
+                task_state=self._session.task_state,
+                pending_effect=pending_effect,
+            )
+        return changed
+
     def step(
         self,
         *,
-        effect_success: torch.Tensor | None = None,
+        effect_result: EffectVerificationResult | None = None,
     ) -> RunnerStep:
         """Perform one due observation/session/controller update without sleeping.
 
         Args:
-            effect_success: Optional per-environment verification mask. If this
-                call occurs before the next cycle is due, it is not consumed and
+            effect_result: Optional correlated effect result. If this call
+                occurs before the next cycle is due, it is not consumed and
                 must be supplied again on a later call.
 
         Returns:
@@ -456,7 +506,9 @@ class ExecutionRunner:
                     context,
                 )
                 self._pending_revision = None
-            tick = self._session.tick(context, effect_success=effect_success)
+            tick = self._session.tick(context, effect_result=effect_result)
+            context = self._session.latest_context
+            self._last_context = context
         except Exception as exc:
             return self._fail(
                 f"Execution session failed: {type(exc).__name__}: {exc}",
@@ -520,6 +572,8 @@ class ExecutionRunner:
                     dispatches=dispatches,
                 )
             self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
+        elif tick.pending_effect is not None:
+            self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
         else:
             self._next_step_at = self._clock_now()
 
@@ -549,7 +603,7 @@ class ExecutionRunner:
             self._next_step_at = self._clock_now()
         elif tick.status is ExecutionStatus.FAILED:
             return self._fail(
-                "Execution session exhausted its recovery budget.",
+                "Execution session failed; inspect its terminal events for the cause.",
                 context=context,
                 tick=tick,
                 dispatches=dispatches,
@@ -616,7 +670,7 @@ class ExecutionRunner:
         """
         if max_steps <= 0:
             raise ValueError("max_steps must be greater than zero.")
-        effect_success: torch.Tensor | None = None
+        effect_result: EffectVerificationResult | None = None
         now = self._clock_now()
         last_result = self._result(
             timestamp=now,
@@ -624,30 +678,12 @@ class ExecutionRunner:
             context=self._effect_context,
             tick=self._effect_tick,
         )
-        if self.effect_verification_pending:
-            if (
-                effect_verifier is None
-                or self._effect_context is None
-                or self._effect_tick is None
-            ):
-                return last_result
-            try:
-                effect_success = effect_verifier(
-                    self._effect_context,
-                    self._effect_tick,
-                )
-            except Exception as exc:
-                return self._fail(
-                    f"Effect verifier failed: {type(exc).__name__}: {exc}",
-                    context=self._effect_context,
-                    tick=self._effect_tick,
-                )
-            if effect_success is None:
-                return last_result
+        if self.effect_verification_pending and effect_verifier is None:
+            return last_result
         for _ in range(max_steps):
-            result = self.step(effect_success=effect_success)
+            result = self.step(effect_result=effect_result)
             if result.tick is not None:
-                effect_success = None
+                effect_result = None
             if on_step is not None:
                 try:
                     on_step(result)
@@ -668,7 +704,7 @@ class ExecutionRunner:
                 if effect_verifier is None or result.context is None:
                     return result
                 try:
-                    effect_success = effect_verifier(result.context, result.tick)
+                    effect_result = effect_verifier(result.context, result.tick)
                 except Exception as exc:
                     return self._fail(
                         f"Effect verifier failed: {type(exc).__name__}: {exc}",
@@ -676,7 +712,7 @@ class ExecutionRunner:
                         tick=result.tick,
                         dispatches=list(result.dispatches),
                     )
-                if effect_success is None:
+                if effect_result is None:
                     return result
             if result.wait_duration > 0.0:
                 try:

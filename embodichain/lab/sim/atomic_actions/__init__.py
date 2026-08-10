@@ -58,6 +58,7 @@ from .engine import (
 )
 from .execution import (
     EffectVerificationRequest,
+    EffectVerificationResult,
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionSession,
@@ -202,6 +203,7 @@ __all__ = [
     "EndpointCommandTransport",
     "EntityState",
     "EffectVerificationRequest",
+    "EffectVerificationResult",
     "EffectVerifier",
     "ExecutionClock",
     "ExecutionFeedbackMode",

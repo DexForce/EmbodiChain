@@ -332,7 +332,12 @@ must be resolved from the latest scene snapshot:
    )
    task = TaskState.empty(robot.get_qpos().shape[0], robot.device)
    initial_context = adapter.observe(task)
-   session = engine.start((invocation,), initial_context)
+   initial_eligible = determine_ready_rows(initial_context)
+   session = engine.start(
+       (invocation,),
+       initial_context,
+       eligible_mask=initial_eligible,
+   )
    router = EndpointCommandRouter((adapter,))
    runner = ExecutionRunner(session, adapter, router, clock=adapter)
    result = runner.run_until_blocked()
@@ -358,6 +363,25 @@ For an application that already owns its event loop, call the non-blocking
 :meth:`~embodichain.lab.sim.atomic_actions.ExecutionRunner.step` method. A step
 with ``is_waiting`` set has not consumed a new observation or effect result; use
 its ``wait_duration`` to schedule the next call.
+
+``eligible_mask`` is an owned initial cohort, not a one-tick filter. Eligibility
+can only shrink for the lifetime of the session and remains inactive across
+action barriers and replans. If an application later loses a row, deactivate it
+through the runner that owns scheduling:
+
+.. code-block:: python
+
+   changed = runner.deactivate_rows(
+       lost_tracking_mask,
+       reason="object tracking was lost",
+   )
+
+The operation is idempotent and the next command actively neutralizes changed
+rows. Deactivating rows while an effect is pending narrows the request and
+changes its ``verification_id``. Deactivating the last eligible row fails and
+terminates the session. Do not call ``session.deactivate_rows()`` directly while
+an ``ExecutionRunner`` owns the session because the runner must refresh its
+cached effect boundary.
 
 The complete simulation example starts with a visible cube directly in front of
 the robot, then applies a short horizontal force pulse so physics and friction
@@ -451,24 +475,58 @@ Task-state effects
 
 Pick, place, handover, and coordinated skills declare attachment changes as a
 :class:`~embodichain.lab.sim.atomic_actions.StateDelta`. Planning does not commit
-those changes. During closed-loop execution, a non-empty effect requires an
-external per-environment verification mask:
+those changes. During closed-loop execution, a non-empty effect requires a
+correlated per-environment verification result:
 
 .. code-block:: python
 
+   from embodichain.lab.sim.atomic_actions import EffectVerificationResult
+
    def verify_effect(context, tick):
-       return verify_grasp_or_release(context)
+       request = tick.pending_effect
+       assert request is not None
+       success_mask, failure_mask = verify_grasp_or_release(context, request.env_mask)
+       return EffectVerificationResult(
+           verification_id=request.verification_id,
+           success_mask=success_mask,
+           failure_mask=failure_mask,
+       )
 
    result = runner.run_until_blocked(effect_verifier=verify_effect)
 
 This prevents a successful trajectory plan from being mistaken for a successful
 physical grasp or release. If verification is asynchronous, omit the callback;
 ``run_until_blocked`` returns at the verification boundary and the application
-can later resume with ``runner.step(effect_success=verified)`` when the next
-cycle is due, or call ``run_until_blocked(effect_verifier=...)`` again. The
-runner remembers the pending boundary even though the session emits its event
-only once. The durable state is ``tick.pending_effect`` (an
-``EffectVerificationRequest``), not the presence of that one-time event.
+can later resume from the *current* pending request:
+
+.. code-block:: python
+
+   request = runner.session.pending_effect
+   assert request is not None
+   success_mask, failure_mask = await_effect_observation(request.env_mask)
+   verified = EffectVerificationResult(
+       verification_id=request.verification_id,
+       success_mask=success_mask,
+       failure_mask=failure_mask,
+   )
+   resumed = runner.step(effect_result=verified)
+   if resumed.is_waiting:
+       schedule_after(resumed.wait_duration)
+       # This call did not consume ``verified``. Re-read the current request
+       # and submit a result for that ID again at the due cycle.
+
+Alternatively, call ``run_until_blocked(effect_verifier=...)`` again. Success
+and failure masks must be disjoint subsets of the request mask; rows in neither
+mask remain unresolved. A result must reuse the current request's
+``verification_id``. Deactivation, partial resolution, or retry can replace the
+request, so re-read it before delayed submission and re-verify if its ID or mask
+changed. ``request.deadline`` uses the robot-observation timestamp domain;
+``RecoveryPolicy.action_timeout`` covers both trajectory execution and the
+terminal effect wait. A result submitted after timeout cannot satisfy the new
+retry attempt because its old ID is invalid. The runner remembers the pending
+boundary even though the session emits its event only once. The durable state is
+``tick.pending_effect`` (an ``EffectVerificationRequest``), not the presence of
+that one-time event.
 
 Adding an action
 ----------------

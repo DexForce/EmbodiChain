@@ -162,7 +162,7 @@ class RecoveryPolicy:
     """Dynamic-goal rotation threshold in radians (five degrees by default)."""
 
     action_timeout: float = 30.0
-    """Maximum execution time for one action attempt in seconds."""
+    """Maximum time for one action attempt, including terminal effect verification."""
 
     def __post_init__(self) -> None:
         if self.max_replans < 0:

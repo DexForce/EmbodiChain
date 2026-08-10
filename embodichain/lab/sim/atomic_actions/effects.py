@@ -18,11 +18,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass, field, fields, is_dataclass
 from types import MappingProxyType
-from typing import Mapping
+from typing import TYPE_CHECKING
 
 import torch
+
+from embodichain.lab.sim.common import BatchEntity
 
 from .state import (
     CoordinatedHeldObjectState,
@@ -32,6 +36,86 @@ from .state import (
     _normalize_held,
     _normalize_mask,
 )
+
+if TYPE_CHECKING:
+    from .core import ObjectSemantics
+
+
+def _effect_snapshot_memo(value: object) -> dict[int, object]:
+    """Preserve live entities and private runtime caches during effect copies."""
+    memo: dict[int, object] = {}
+    visited: set[int] = set()
+
+    def visit(nested: object) -> None:
+        nested_id = id(nested)
+        if nested_id in visited:
+            return
+        visited.add(nested_id)
+        if isinstance(nested, BatchEntity):
+            memo[nested_id] = nested
+            return
+        if is_dataclass(nested) and not isinstance(nested, type):
+            for data_field in fields(nested):
+                child = getattr(nested, data_field.name)
+                if data_field.name == "_generator" and child is not None:
+                    memo[id(child)] = None
+                elif not data_field.init and child is not None:
+                    memo[id(child)] = child
+                else:
+                    visit(child)
+            return
+        if isinstance(nested, Mapping):
+            for key, child in nested.items():
+                visit(key)
+                visit(child)
+            return
+        if isinstance(nested, (list, tuple, set, frozenset)):
+            for child in nested:
+                visit(child)
+
+    visit(value)
+    return memo
+
+
+def _snapshot_semantics(value: ObjectSemantics) -> ObjectSemantics:
+    """Copy semantic data while retaining live simulation-entity identity."""
+    try:
+        copied = deepcopy(value, _effect_snapshot_memo(value))
+    except Exception as exc:
+        raise TypeError(
+            "ObjectSemantics effect metadata must be copyable without cloning "
+            "live simulation entities."
+        ) from exc
+    if type(copied) is not type(value) or copied is value:
+        raise TypeError(
+            "ObjectSemantics effect snapshots must produce a distinct value "
+            "of the same exact type."
+        )
+    return copied
+
+
+def _snapshot_held(value: HeldObjectState) -> HeldObjectState:
+    """Return an independently owned held-object effect value."""
+    return HeldObjectState(
+        semantics=_snapshot_semantics(value.semantics),
+        object_to_eef=value.object_to_eef.clone(),
+        grasp_xpos=value.grasp_xpos.clone(),
+        env_mask=None if value.env_mask is None else value.env_mask.clone(),
+    )
+
+
+def _snapshot_coordinated(
+    value: CoordinatedHeldObjectState,
+) -> CoordinatedHeldObjectState:
+    """Return an independently owned coordinated held-object effect value."""
+    return CoordinatedHeldObjectState(
+        semantics=_snapshot_semantics(value.semantics),
+        left_object_to_eef=value.left_object_to_eef.clone(),
+        right_object_to_eef=value.right_object_to_eef.clone(),
+        left_grasp_xpos=value.left_grasp_xpos.clone(),
+        right_grasp_xpos=value.right_grasp_xpos.clone(),
+        env_mask=None if value.env_mask is None else value.env_mask.clone(),
+    )
 
 
 def _with_held_mask(
@@ -216,6 +300,26 @@ class StateDelta:
     def is_empty(self) -> bool:
         """Whether this delta declares no symbolic state changes."""
         return not self.held_object_updates and not self.coordinated_held_object_updates
+
+    def snapshot(self) -> StateDelta:
+        """Return an independently owned symbolic-effect snapshot.
+
+        Live simulation entities retain identity, while semantic metadata,
+        affordance data, and every attachment tensor are copied.
+
+        Returns:
+            Independently owned state delta.
+        """
+        return StateDelta(
+            held_object_updates={
+                resource: None if value is None else _snapshot_held(value)
+                for resource, value in self.held_object_updates.items()
+            },
+            coordinated_held_object_updates={
+                resources: (None if value is None else _snapshot_coordinated(value))
+                for resources, value in self.coordinated_held_object_updates.items()
+            },
+        )
 
     def apply(
         self,

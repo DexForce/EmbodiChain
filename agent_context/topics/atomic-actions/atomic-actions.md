@@ -378,7 +378,7 @@ runner = ExecutionRunner(
     command_sink,
     clock=execution_clock,
 )
-result = runner.step(effect_success=None)
+result = runner.step(effect_result=None)
 ```
 
 `ExecutionSession` owns deterministic planning progress and recovery state. It
@@ -404,15 +404,43 @@ active targets so the caller can still hold them. The session monitors:
 - action-attempt timeout;
 - planner and semantic-effect failure.
 
-It replans from the latest observation within per-environment budgets. The
-budgets and eligibility masks are row-local, while the action waypoint cursor
-is batch-synchronized: one allowed replan regenerates the active cohort and
-restarts its action trajectory without charging unaffected rows. Unknown
-or exhausted failures are reported as structured `ExecutionEvent` objects. A
-non-empty `StateDelta` is not committed until the caller supplies an external
-`effect_success` mask. While verification is outstanding,
-`ExecutionTick.pending_effect` retains a typed `EffectVerificationRequest` on
-every tick; `EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+It replans from the latest observation within per-environment budgets. Pass an
+owned boolean `eligible_mask` to `engine.start()` when a previous semantic call
+has already deactivated rows. Eligibility can only shrink; use
+`runner.deactivate_rows(mask, reason=...)` while a runner owns scheduling so its
+cached effect request stays correlated. The budgets, verified task state, and
+eligibility masks are row-local, while the action waypoint cursor and call
+barrier are batch-synchronized. One allowed replan regenerates the still-pending
+cohort without charging unaffected rows. Exhausted rows hold and never become
+eligible again.
+
+A non-empty `StateDelta` is not committed until the caller supplies a
+correlated `EffectVerificationResult`. Its disjoint `success_mask` and
+`failure_mask` must be subsets of the current request mask; requested rows in
+neither mask remain unresolved. Partial successes commit immediately while
+unresolved rows keep the barrier pending. `EffectVerificationRequest` carries a
+monotonic `verification_id`, stable `requested_at`/`deadline` values in the
+robot-observation timestamp domain, and an owned effect snapshot. Mask shrinkage
+creates a new ID without extending the deadline; whole-action retry creates a
+new attempt. Results for an old ID are rejected. `RecoveryPolicy.action_timeout`
+covers the trajectory and terminal effect wait together, and only timestamps
+strictly greater than the deadline time out. While verification is outstanding,
+`ExecutionTick.pending_effect` retains the request on every tick;
+`EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+
+```python
+request = tick.pending_effect
+effect_result = EffectVerificationResult(
+    verification_id=request.verification_id,
+    success_mask=observed_success,
+    failure_mask=observed_failure,
+)
+result = runner.step(effect_result=effect_result)
+```
+
+Cause events (`ACTION_PLANNING_FAILED`, `EFFECT_VERIFICATION_FAILED`, and
+`EFFECT_VERIFICATION_TIMEOUT`) are distinct from the `ACTION_RETRY` recovery
+event. `SESSION_COMPLETED` and `SESSION_FAILED` are distinct terminal events.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
 its owned goal snapshot. Mutable goal values are copied, while simulator-backed
