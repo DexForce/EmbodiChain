@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import ClassVar, Literal
 
@@ -30,7 +31,12 @@ from ..affordance import AssembleAffordance
 from ..control import GRASP_COMMAND, OPEN_COMMAND
 from ..core import AtomicAction
 from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
+from ..goals import (
+    PoseGoalValue,
+    SceneEntityPose,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..state import PlanningContext
@@ -76,15 +82,28 @@ class PlaceGoal:
 class AssembleGoal:
     """Place a held assemble object onto a base object at a relative pose.
 
-    The base object pose is read at planning time from
-    :attr:`AssembleAffordance.base_object_entity`, and the assemble object's
-    target pose is ``base_pose @ assemble_to_base_pose``. The held-object
-    transform (``object_to_eef``) is read from :class:`PlanningContext`
-    for the place control part, which a prior :class:`PickUp` populates.
+    The preferred base object pose is a late-bound :class:`SceneEntityPose`.
+    Omitting it temporarily falls back to
+    :attr:`AssembleAffordance.base_object_entity`. The assemble object's target
+    pose is ``base_pose @ assemble_to_base_pose``. The held-object transform
+    (``object_to_eef``) is read from :class:`PlanningContext` for the place
+    control part, which a prior :class:`PickUp` populates.
     """
 
     affordance: AssembleAffordance
     """Assembly affordance anchoring the assemble object to the base object."""
+
+    base_pose: SceneEntityPose | None = None
+    """Late-bound base-object pose used for snapshot-consistent planning."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.affordance, AssembleAffordance):
+            raise TypeError("affordance must be an AssembleAffordance instance.")
+        if self.base_pose is not None and not isinstance(
+            self.base_pose,
+            SceneEntityPose,
+        ):
+            raise TypeError("base_pose must be a SceneEntityPose or None.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -124,9 +143,10 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     joint positions are inherited from :class:`PlanningContext`.
 
     An :class:`AssembleGoal` replaces the explicit EEF pose with an assembly
-    affordance: the place pose is derived from the base object's current pose
-    and ``assemble_to_base_pose``, converted to an EEF pose through the held
-    object's ``object_to_eef`` (read from :class:`PlanningContext`).
+    affordance: the place pose is derived from the base object's snapshot pose
+    (or deprecated live fallback) and ``assemble_to_base_pose``, converted to an
+    EEF pose through the held object's ``object_to_eef`` (read from
+    :class:`PlanningContext`).
     """
 
     skill_id: ClassVar[str] = "place"
@@ -137,6 +157,17 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     OptionsType: ClassVar[type] = PlaceOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+    ) -> tuple[str, ...]:
+        """Include an explicitly snapshot-grounded assembly base."""
+        dependencies = set(super()._scene_dependencies(request))
+        target = request.goal
+        if isinstance(target, AssembleGoal) and target.base_pose is not None:
+            dependencies.add(target.base_pose.entity_id)
+        return tuple(sorted(dependencies))
 
     def _plan(
         self,
@@ -316,7 +347,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             Place EEF poses with shape ``(num_envs, 4, 4)``.
 
         Raises:
-            ValueError: If no held object or no base object entity is available.
+            ValueError: If no held object or base-pose source is available.
         """
         held = state.get_held_object(control_part)
         if held is None:
@@ -325,14 +356,36 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 f"part {control_part!r} (run PickUp first)."
             )
         affordance = target.affordance
-        if affordance.base_object_entity is None:
-            raise ValueError(
-                "AssembleAffordance.base_object_entity must be set to assemble "
-                "onto a base object."
+        if target.base_pose is not None:
+            base_pose = resolve_object_target(
+                resolve_pose_goal(
+                    target.base_pose,
+                    state,
+                    name="base_pose",
+                ),
+                num_envs=self.num_envs,
+                device=self.device,
+                name="base_pose",
             )
-        base_pose = affordance.base_object_entity.get_local_pose(to_matrix=True).to(
-            device=self.device, dtype=torch.float32
-        )
+        else:
+            if affordance.base_object_entity is None:
+                raise ValueError(
+                    "AssembleGoal requires base_pose or "
+                    "AssembleAffordance.base_object_entity."
+                )
+            warnings.warn(
+                "AssembleGoal without base_pose reads "
+                "AssembleAffordance.base_object_entity live; provide "
+                "base_pose=SceneEntityPose(...) instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            base_pose = resolve_object_target(
+                affordance.base_object_entity.get_local_pose(to_matrix=True),
+                num_envs=self.num_envs,
+                device=self.device,
+                name="legacy_base_pose",
+            )
         assemble_object_pose = affordance.get_assemble_object_pose(base_pose)
         object_to_eef = resolve_object_target(
             held.object_to_eef,

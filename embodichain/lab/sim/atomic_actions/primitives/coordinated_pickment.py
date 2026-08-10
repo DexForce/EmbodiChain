@@ -34,6 +34,7 @@ from ..effects import StateDelta
 from ..goals import (
     ObjectActionGoal,
     PoseGoalValue,
+    _resolve_object_pose,
     resolve_pose_goal,
     validate_pose_goal,
 )
@@ -62,7 +63,11 @@ class CoordinatedPickGoal(ObjectActionGoal):
     """Target pose for the shared object, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     object_initial_pose: PoseGoalValue | None = None
-    """Optional initial object pose. Defaults to ``semantics.entity`` pose."""
+    """Optional initial object pose.
+
+    When omitted, the pose is grounded through the semantic object's stable
+    scene identity, with its live entity retained only as a legacy fallback.
+    """
 
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
@@ -338,6 +343,22 @@ class CoordinatedPickment(
     _resolve_dual_arm_start = _DualArmHelpers._resolve_dual_arm_start
     _resolve_pose = _DualArmHelpers._resolve_pose
 
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[
+            CoordinatedPickGoal,
+            CoordinatedPickmentOptions,
+        ],
+    ) -> tuple[str, ...]:
+        """Track the semantic object only when it supplies the initial pose."""
+        dependencies = set(super()._scene_dependencies(request))
+        target = request.goal
+        if target.object_initial_pose is None:
+            entity_id = target.semantics.entity_id
+            if entity_id is not None:
+                dependencies.add(entity_id)
+        return tuple(sorted(dependencies))
+
     def _resolve_resources(
         self,
         request: ResolvedActionRequest[CoordinatedPickGoal, CoordinatedPickmentOptions],
@@ -403,13 +424,12 @@ class CoordinatedPickment(
                 ),
                 "object_initial_pose",
             )
-        if target.semantics.entity is None:
-            raise ValueError(
-                "CoordinatedPickGoal requires object_initial_pose when "
-                "semantics.entity is not provided."
-            )
         return self._resolve_pose(
-            target.semantics.entity.get_local_pose(to_matrix=True),
+            _resolve_object_pose(
+                target.semantics,
+                context,
+                name="object_initial_pose",
+            ),
             "object_initial_pose",
         )
 

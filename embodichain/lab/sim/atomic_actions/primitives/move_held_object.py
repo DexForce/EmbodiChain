@@ -23,7 +23,11 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+    get_relative_rotation,
+    pose_inv,
+)
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
 from ..control import GRASP_COMMAND
@@ -130,18 +134,19 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         end_arm_xpos = self.robot.compute_fk(
             start_arm_qpos, name=control_part, to_matrix=True
         )
-        if options.pick_rotate_upright is not None:
-            self._apply_configured_upright_rotation(
-                object_target_pose,
-                end_arm_xpos,
-                held_object.semantics.entity.get_local_pose(to_matrix=True),
-                options,
-            )
         object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
         if object_to_eef.shape == (4, 4):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        current_object_pose = torch.bmm(end_arm_xpos, pose_inv(object_to_eef))
+        if options.pick_rotate_upright is not None:
+            self._apply_configured_upright_rotation(
+                object_target_pose,
+                end_arm_xpos,
+                current_object_pose,
+                options,
+            )
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
         if options.pick_rotate_upright is None:
