@@ -34,7 +34,7 @@ from embodichain.utils.math import (
 
 from ._helpers import arm_qpos_from_state
 from ..affordance import AntipodalAffordance
-from ..bindings import ResolvedControlPart
+from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction, ObjectSemantics
 from ..effects import StateDelta
@@ -49,7 +49,6 @@ from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
 from ..policies import MotionPolicy
 from ..requirements import (
-    ActionBindingRoute,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     DisjointSlotEndpoints,
@@ -162,8 +161,6 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     skill_id: ClassVar[str] = "pick_up"
     GoalType: ClassVar[type] = GraspGoal
     OptionsType: ClassVar[type] = PickUpOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -178,7 +175,6 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                                 FORWARD_KINEMATICS_CAPABILITY,
                             }
                         ),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
@@ -187,7 +183,6 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                             OPEN_COMMAND: JointPositionCommand,
                             GRASP_COMMAND: JointPositionCommand,
                         },
-                        route=ActionBindingRoute("end_effector", "primary"),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -214,8 +209,8 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         motion_policy: MotionPolicy,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
-        manipulator: ResolvedControlPart,
-        end_effector: ResolvedControlPart,
+        manipulator: JointPositionTarget,
+        end_effector: JointPositionTarget,
         hand_open_qpos: torch.Tensor,
         hand_grasp_qpos: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
@@ -234,7 +229,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             build_pose_plan_states(torch.stack([pre_grasp_xpos, grasp_xpos], dim=1)),
             options=motion_policy.to_motion_gen_options(
                 start_qpos=start_arm_qpos,
-                control_part=manipulator.name,
+                control_part=manipulator.control_part,
                 sample_count=n_approach,
             ),
         )
@@ -252,7 +247,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             build_pose_plan_states(lift_xpos),
             options=motion_policy.to_motion_gen_options(
                 start_qpos=grasp_arm_qpos,
-                control_part=manipulator.name,
+                control_part=manipulator.control_part,
                 sample_count=n_lift,
             ),
         )
@@ -316,21 +311,23 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             approach_direction
         )
         binding = request.binding
-        manipulator = binding.manipulator()
-        end_effector = binding.end_effector()
-        hand_open_qpos = end_effector.joint_positions(
+        motion = binding.endpoint("primary", "motion")
+        grasp = binding.endpoint("primary", "grasp")
+        manipulator = motion.require_target(JointPositionTarget)
+        end_effector = grasp.require_target(JointPositionTarget)
+        hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        control_part = manipulator.name
+        control_part = manipulator.control_part
         state = context
         sem = target.semantics
         object_pose = _resolve_object_pose(
@@ -419,7 +416,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         semantics: ObjectSemantics,
         object_pose: torch.Tensor,
         start_qpos: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -472,7 +469,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         grasp_xpos: torch.Tensor,
         start_qpos: torch.Tensor,
         object_poses: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -554,7 +551,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
 
         start_xpos = self.robot.compute_fk(
             qpos=start_qpos,
-            name=manipulator.name,
+            name=manipulator.control_part,
             to_matrix=True,
         )
         start_quat = quat_from_matrix(start_xpos[:, :3, :3])
@@ -599,22 +596,23 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         self,
         poses: torch.Tensor,
         joint_seed: torch.Tensor,
-        manipulator: ResolvedControlPart,
+        manipulator: JointPositionTarget,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Solve candidate IK poses while preserving the candidate dimensions."""
         num_envs, n_pose, n_variant = poses.shape[:3]
         flat_poses = poses.reshape(num_envs, n_pose * n_variant, 4, 4)
         if joint_seed.dim() == 2:
             joint_seed = joint_seed[:, None, None, :].expand(-1, n_pose, n_variant, -1)
-        flat_seed = joint_seed.reshape(num_envs, n_pose * n_variant, manipulator.dof)
+        manipulator_dof = len(manipulator.joint_ids)
+        flat_seed = joint_seed.reshape(num_envs, n_pose * n_variant, manipulator_dof)
         is_success, qpos = self.robot.compute_batch_ik(
             pose=flat_poses,
-            name=manipulator.name,
+            name=manipulator.control_part,
             joint_seed=flat_seed,
         )
         return (
             is_success.reshape(num_envs, n_pose, n_variant),
-            qpos.reshape(num_envs, n_pose, n_variant, manipulator.dof),
+            qpos.reshape(num_envs, n_pose, n_variant, manipulator_dof),
         )
 
     def _upright_adjusted_grasp_poses(

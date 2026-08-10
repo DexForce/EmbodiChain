@@ -38,7 +38,6 @@ from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -620,6 +619,14 @@ def run_coordinated_placement_demo(
         sim.device,
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
+    left_pick_binding = engine.bind_control_parts(
+        "pick_up",
+        {"primary": {"motion": "left_arm", "grasp": "left_hand"}},
+    )
+    right_pick_binding = engine.bind_control_parts(
+        "pick_up",
+        {"primary": {"motion": "right_arm", "grasp": "right_hand"}},
+    )
     pick_invocations = (
         ActionInvocation(
             skill_id="pick_up",
@@ -627,10 +634,7 @@ def run_coordinated_placement_demo(
                 semantics=bread_semantics,
                 grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
             ),
-            binding=ActionBinding(
-                manipulators={"primary": "left_arm"},
-                end_effectors={"primary": "left_hand"},
-            ),
+            binding=left_pick_binding,
             motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
             skill_options=left_pick_options,
         ),
@@ -640,10 +644,7 @@ def run_coordinated_placement_demo(
                 semantics=pan_semantics,
                 grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
             ),
-            binding=ActionBinding(
-                manipulators={"primary": "right_arm"},
-                end_effectors={"primary": "right_hand"},
-            ),
+            binding=right_pick_binding,
             motion_policy=MotionPolicy(sample_count=PAN_PICK_SAMPLE_INTERVAL),
             skill_options=right_pick_options,
         ),
@@ -663,8 +664,12 @@ def run_coordinated_placement_demo(
     if not pick_compiled.plan_success.all():
         logger.log_warning("Failed to plan right pan pick-up trajectory.")
         return
-    left_pick_traj = left_pick_result.trajectory.positions
-    right_pick_traj = right_pick_result.trajectory.positions
+    left_pick_trajectory = left_pick_result.joint_trajectory
+    right_pick_trajectory = right_pick_result.joint_trajectory
+    if left_pick_trajectory is None or right_pick_trajectory is None:
+        raise RuntimeError("PickUp did not produce joint trajectories.")
+    left_pick_traj = left_pick_trajectory.positions
+    right_pick_traj = right_pick_trajectory.positions
     state = pick_compiled.projected_context
     bread_held_state = state.get_held_object("left_arm")
     if bread_held_state is None:
@@ -690,7 +695,7 @@ def run_coordinated_placement_demo(
         replay_trajectory(
             sim,
             robot,
-            left_pick_result.trajectory,
+            left_pick_trajectory,
             args,
             video_prefix="",
             hold_steps=0,
@@ -703,7 +708,7 @@ def run_coordinated_placement_demo(
         replay_trajectory(
             sim,
             robot,
-            right_pick_result.trajectory,
+            right_pick_trajectory,
             args,
             video_prefix="",
             hold_steps=0,
@@ -784,21 +789,19 @@ def run_coordinated_placement_demo(
         release=True,
     )
     start_time = time.time()
+    placement_binding = engine.bind_control_parts(
+        "coordinated_placement",
+        {
+            "placing": {"motion": "left_arm", "grasp": "left_hand"},
+            "support": {"motion": "right_arm", "grasp": "right_hand"},
+        },
+    )
     placement_compiled = engine.compile(
         (
             ActionInvocation(
                 skill_id="coordinated_placement",
                 goal=coordinated_target,
-                binding=ActionBinding(
-                    manipulators={
-                        "placing": "left_arm",
-                        "support": "right_arm",
-                    },
-                    end_effectors={
-                        "placing": "left_hand",
-                        "support": "right_hand",
-                    },
-                ),
+                binding=placement_binding,
                 motion_policy=MotionPolicy(sample_count=COORDINATED_SAMPLE_INTERVAL),
                 skill_options=coordinated_options,
             ),

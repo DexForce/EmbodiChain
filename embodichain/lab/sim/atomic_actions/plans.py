@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
@@ -26,8 +27,10 @@ import torch
 
 from embodichain.lab.sim.planners.utils import normalize_success_mask
 
+from .bindings import JointPositionTarget
 from .effects import StateDelta
 from .policies import RecoveryPolicy
+from .runtime_commands import JointPositionPayload, TimedCommandSequence
 from .state import PlanningContext
 
 
@@ -93,7 +96,25 @@ class TimedTrajectory:
             raise ValueError(f"env_ids must be int64 with shape ({batch_size},).")
         if self.env_ids.device != self.positions.device:
             raise ValueError("env_ids must share the positions device.")
-        object.__setattr__(self, "env_ids", self.env_ids.clone())
+        if torch.unique(self.env_ids).numel() != batch_size:
+            raise ValueError("env_ids must contain unique values.")
+        object.__setattr__(self, "positions", self.positions.detach().clone())
+        object.__setattr__(
+            self,
+            "velocities",
+            None if self.velocities is None else self.velocities.detach().clone(),
+        )
+        object.__setattr__(
+            self,
+            "accelerations",
+            (
+                None
+                if self.accelerations is None
+                else self.accelerations.detach().clone()
+            ),
+        )
+        object.__setattr__(self, "dt", self.dt.detach().clone())
+        object.__setattr__(self, "env_ids", self.env_ids.detach().clone())
 
     @property
     def batch_size(self) -> int:
@@ -336,6 +357,13 @@ class PlannerDiagnostics:
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
+class ExecutionFeedbackMode(str, Enum):
+    """Feedback contract used to decide whether an action reached its target."""
+
+    JOINT_POSITION = "joint_position"
+    TIMED = "timed"
+
+
 @dataclass(frozen=True, slots=True)
 class TrajectorySegment:
     """Named half-open waypoint range inside an action trajectory.
@@ -375,18 +403,20 @@ class TrajectorySegment:
 class ActionPlan:
     """Scene-bound planning result for one grounded atomic action invocation.
 
-    An action owns one trajectory and one recovery boundary. Named
+    An action owns one timed command sequence and one recovery boundary. Named
     :class:`TrajectorySegment` values describe semantic structure within that
-    trajectory without implying independent planning or recovery boundaries.
+    sequence without implying independent planning or recovery boundaries.
     """
 
     skill_id: str
     plan_success: torch.Tensor
-    trajectory: TimedTrajectory
+    commands: TimedCommandSequence
     recovery_policy: RecoveryPolicy
     planned_scene_version: int
     planned_collision_world_revision: tuple[int, ...]
     diagnostics: PlannerDiagnostics
+    feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED
+    joint_trajectory: TimedTrajectory | None = None
     segments: tuple[TrajectorySegment, ...] = ()
     scene_dependencies: tuple[str, ...] = ()
     collision_world_sensitive: bool = False
@@ -407,21 +437,179 @@ class ActionPlan:
             raise TypeError("plan_success must be a torch.Tensor.")
         if self.plan_success.dtype != torch.bool or self.plan_success.dim() != 1:
             raise ValueError("plan_success must be a 1D bool tensor.")
-        if not isinstance(self.trajectory, TimedTrajectory):
-            raise TypeError("trajectory must be a TimedTrajectory.")
-        if self.trajectory.batch_size != self.plan_success.shape[0]:
-            raise ValueError("plan_success batch must match the trajectory.")
-        if self.trajectory.positions.device != self.plan_success.device:
-            raise ValueError("plan_success and trajectory must share a device.")
+        if not isinstance(self.commands, TimedCommandSequence):
+            raise TypeError("commands must be a TimedCommandSequence.")
+        if self.commands.batch_size != self.plan_success.shape[0]:
+            raise ValueError("plan_success batch must match the command sequence.")
+        if self.commands.device != self.plan_success.device:
+            raise ValueError("plan_success and commands must share a device.")
+        if not isinstance(self.feedback_mode, ExecutionFeedbackMode):
+            raise TypeError("feedback_mode must be an ExecutionFeedbackMode.")
+        expected_target_types: dict[tuple[str, str], type[object]] | None = None
+        expected_target_fingerprints: dict[tuple[str, str], object] | None = None
+        for frame_index, frame in enumerate(self.commands.frames):
+            target_types = {
+                command.destination_key: type(command.target)
+                for command in frame.commands
+            }
+            target_fingerprints = {
+                command.destination_key: command.target.address_fingerprint
+                for command in frame.commands
+            }
+            if expected_target_types is None:
+                expected_target_types = target_types
+                expected_target_fingerprints = target_fingerprints
+                continue
+            if target_types.keys() != expected_target_types.keys():
+                raise ValueError(
+                    "ActionPlan command frames must preserve the same destination "
+                    f"set; frame {frame_index} differs from frame 0."
+                )
+            mismatched_types = sorted(
+                destination
+                for destination, target_type in target_types.items()
+                if target_type is not expected_target_types[destination]
+            )
+            if mismatched_types:
+                raise ValueError(
+                    "ActionPlan command frames must preserve the exact target type "
+                    f"for each destination; frame {frame_index} differs at "
+                    f"{mismatched_types}."
+                )
+            assert expected_target_fingerprints is not None
+            mismatched_fingerprints = sorted(
+                destination
+                for destination, fingerprint in target_fingerprints.items()
+                if fingerprint != expected_target_fingerprints[destination]
+            )
+            if mismatched_fingerprints:
+                raise ValueError(
+                    "ActionPlan command frames must preserve the target address "
+                    f"fingerprint for each destination; frame {frame_index} "
+                    f"differs at {mismatched_fingerprints}."
+                )
+        if self.joint_trajectory is not None:
+            if not isinstance(self.joint_trajectory, TimedTrajectory):
+                raise TypeError("joint_trajectory must be a TimedTrajectory or None.")
+            if self.joint_trajectory.batch_size != self.commands.batch_size:
+                raise ValueError(
+                    "joint_trajectory batch must match the command sequence."
+                )
+            if self.joint_trajectory.waypoint_count != self.commands.frame_count:
+                raise ValueError(
+                    "joint_trajectory waypoints must match command sequence frames."
+                )
+            if not torch.equal(self.joint_trajectory.env_ids, self.commands.env_ids):
+                raise ValueError(
+                    "joint_trajectory env_ids must match the command sequence."
+                )
+            if self.joint_trajectory.positions.device != self.commands.device:
+                raise ValueError("joint_trajectory and commands must share a device.")
+        if (
+            self.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
+            and self.joint_trajectory is None
+        ):
+            raise ValueError(
+                "joint_position feedback requires an owned joint_trajectory."
+            )
+        if self.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION:
+            if bool(self.plan_success.any().item()) and self.commands.frame_count == 0:
+                raise ValueError(
+                    "joint_position feedback requires command frames when any "
+                    "environment planned successfully."
+                )
+            assert self.joint_trajectory is not None
+            expected_destinations: dict[tuple[str, str], tuple[int, ...]] | None = None
+            for frame_index, frame in enumerate(self.commands.frames):
+                if not frame.commands:
+                    raise ValueError(
+                        "joint_position feedback requires at least one endpoint "
+                        f"command in frame {frame_index}."
+                    )
+                if any(
+                    not isinstance(command.target, JointPositionTarget)
+                    or not isinstance(command.payload, JointPositionPayload)
+                    for command in frame.commands
+                ):
+                    raise ValueError(
+                        "joint_position feedback accepts only JointPositionTarget "
+                        "and JointPositionPayload commands."
+                    )
+                for command in frame.commands:
+                    target = command.target
+                    payload = command.payload
+                    assert isinstance(target, JointPositionTarget)
+                    assert isinstance(payload, JointPositionPayload)
+                    if any(
+                        joint_id >= self.joint_trajectory.robot_dof
+                        for joint_id in target.joint_ids
+                    ):
+                        raise ValueError(
+                            f"Joint target {command.destination_key} contains joint "
+                            "IDs outside joint_trajectory robot_dof "
+                            f"{self.joint_trajectory.robot_dof}."
+                        )
+                    joint_ids = list(target.joint_ids)
+                    expected_positions = self.joint_trajectory.positions[
+                        :, frame_index, joint_ids
+                    ]
+                    if (
+                        payload.positions.dtype != expected_positions.dtype
+                        or not torch.equal(payload.positions, expected_positions)
+                    ):
+                        raise ValueError(
+                            f"Joint payload positions for {command.destination_key} "
+                            "must exactly match the corresponding joint_trajectory "
+                            f"slice at frame {frame_index}."
+                        )
+                    trajectory_velocities = self.joint_trajectory.velocities
+                    if (payload.velocities is None) != (trajectory_velocities is None):
+                        raise ValueError(
+                            f"Joint payload velocities for {command.destination_key} "
+                            "must have the same presence as joint_trajectory "
+                            "velocities."
+                        )
+                    if (
+                        payload.velocities is not None
+                        and trajectory_velocities is not None
+                    ):
+                        expected_velocities = trajectory_velocities[
+                            :, frame_index, joint_ids
+                        ]
+                        if (
+                            payload.velocities.dtype != expected_velocities.dtype
+                            or not torch.equal(
+                                payload.velocities,
+                                expected_velocities,
+                            )
+                        ):
+                            raise ValueError(
+                                "Joint payload velocities for "
+                                f"{command.destination_key} must exactly match the "
+                                "corresponding joint_trajectory slice at frame "
+                                f"{frame_index}."
+                            )
+                destinations = {
+                    command.destination_key: command.target.joint_ids
+                    for command in frame.commands
+                    if isinstance(command.target, JointPositionTarget)
+                }
+                if expected_destinations is None:
+                    expected_destinations = destinations
+                elif destinations != expected_destinations:
+                    raise ValueError(
+                        "joint_position feedback requires a stable joint endpoint "
+                        "set across every command frame."
+                    )
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
         if self.planned_scene_version < 0:
             raise ValueError("planned_scene_version must be non-negative.")
         revisions = tuple(self.planned_collision_world_revision)
-        if len(revisions) != self.trajectory.batch_size:
+        if len(revisions) != self.commands.batch_size:
             raise ValueError(
                 "planned_collision_world_revision must contain one value per "
-                "trajectory environment."
+                "command-sequence environment."
             )
         if any(
             isinstance(value, bool) or not isinstance(value, int) or value < 0
@@ -446,7 +634,7 @@ class ActionPlan:
             raise TypeError("replannable must be a bool.")
         if not isinstance(self.expected_effects, StateDelta):
             raise TypeError("expected_effects must be a StateDelta.")
-        waypoint_count = self.trajectory.waypoint_count
+        waypoint_count = self.commands.frame_count
         segments = tuple(self.segments)
         if not all(isinstance(segment, TrajectorySegment) for segment in segments):
             raise TypeError("segments must contain only TrajectorySegment values.")
@@ -457,7 +645,7 @@ class ActionPlan:
             raise ValueError("ActionPlan segment names must be unique.")
         if waypoint_count == 0:
             if segments:
-                raise ValueError("An empty trajectory cannot contain segments.")
+                raise ValueError("An empty command sequence cannot contain segments.")
         elif (
             not segments
             or segments[0].start != 0
@@ -468,10 +656,20 @@ class ActionPlan:
             )
         ):
             raise ValueError(
-                "ActionPlan segments must cover the trajectory exactly without "
+                "ActionPlan segments must cover the command sequence exactly without "
                 "gaps or overlaps."
             )
         object.__setattr__(self, "plan_success", self.plan_success.clone())
+        object.__setattr__(self, "commands", self.commands.snapshot())
+        object.__setattr__(
+            self,
+            "joint_trajectory",
+            (
+                None
+                if self.joint_trajectory is None
+                else self.joint_trajectory.snapshot()
+            ),
+        )
         object.__setattr__(self, "planned_collision_world_revision", revisions)
         object.__setattr__(self, "scene_dependencies", dependencies)
         object.__setattr__(self, "segments", segments)
@@ -500,9 +698,10 @@ class ActionPlan:
 
     def segment_at(self, waypoint_index: int) -> TrajectorySegment:
         """Return the segment containing a global action waypoint index."""
-        if waypoint_index < 0 or waypoint_index >= self.trajectory.waypoint_count:
+        if waypoint_index < 0 or waypoint_index >= self.commands.frame_count:
             raise IndexError(
-                f"waypoint_index {waypoint_index} is outside the action trajectory."
+                f"waypoint_index {waypoint_index} is outside the action command "
+                "sequence."
             )
         for segment in self.segments:
             if segment.contains(waypoint_index):
@@ -538,7 +737,12 @@ class CompiledTrajectory:
                 f"action_index {action_index} is outside the compiled sequence."
             )
         return sum(
-            plan.trajectory.waypoint_count for plan in self.action_plans[:action_index]
+            (
+                0
+                if plan.joint_trajectory is None
+                else plan.joint_trajectory.waypoint_count
+            )
+            for plan in self.action_plans[:action_index]
         )
 
     def segment(self, action_index: int, name: str) -> TrajectorySegment:
@@ -555,6 +759,7 @@ class CompiledTrajectory:
 __all__ = [
     "ActionPlan",
     "CompiledTrajectory",
+    "ExecutionFeedbackMode",
     "PlannerDiagnostics",
     "TimedTrajectory",
     "TrajectorySegment",

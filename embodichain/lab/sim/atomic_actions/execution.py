@@ -26,7 +26,17 @@ import torch
 
 from .effects import StateDelta
 from .invocation import ActionInvocation, ResolvedActionRequest
-from .plans import ActionPlan, TimedTrajectory, TrajectorySegment
+from .bindings import JointPositionTarget, RuntimeEndpointTarget
+from .plans import (
+    ActionPlan,
+    ExecutionFeedbackMode,
+    TrajectorySegment,
+)
+from .runtime_commands import (
+    JointPositionPayload,
+    RuntimeCommandFrame,
+    TimedCommandSequence,
+)
 from .state import EntityState, PlanningContext, SceneSnapshot, TaskState
 
 if TYPE_CHECKING:
@@ -121,64 +131,13 @@ class EffectVerificationRequest:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class JointCommand:
-    """Full-robot command produced by one session tick."""
-
-    positions: torch.Tensor
-    velocities: torch.Tensor | None
-    active_mask: torch.Tensor
-    env_ids: torch.Tensor
-    hold_duration: torch.Tensor
-    """Per-environment delay before the next observation/command cycle."""
-
-    def __post_init__(self) -> None:
-        if self.positions.dim() != 2:
-            raise ValueError("JointCommand.positions must have shape (B, robot_dof).")
-        if (
-            self.velocities is not None
-            and self.velocities.shape != self.positions.shape
-        ):
-            raise ValueError("JointCommand.velocities must match positions shape.")
-        if self.active_mask.dtype != torch.bool or self.active_mask.shape != (
-            self.positions.shape[0],
-        ):
-            raise ValueError("JointCommand.active_mask must be bool with shape (B,).")
-        if self.env_ids.dtype != torch.long or self.env_ids.shape != (
-            self.positions.shape[0],
-        ):
-            raise ValueError("JointCommand.env_ids must be int64 with shape (B,).")
-        if not isinstance(self.hold_duration, torch.Tensor):
-            raise TypeError("JointCommand.hold_duration must be a torch.Tensor.")
-        if self.hold_duration.shape != (self.positions.shape[0],):
-            raise ValueError("JointCommand.hold_duration must have shape (B,).")
-        if (
-            not torch.isfinite(self.hold_duration).all()
-            or (self.hold_duration < 0.0).any()
-        ):
-            raise ValueError(
-                "JointCommand.hold_duration must contain finite non-negative values."
-            )
-        if self.active_mask.device != self.positions.device:
-            raise ValueError("JointCommand tensors must share a device.")
-        if self.env_ids.device != self.positions.device:
-            raise ValueError("JointCommand tensors must share a device.")
-        if self.hold_duration.device != self.positions.device:
-            raise ValueError("JointCommand tensors must share a device.")
-        object.__setattr__(self, "positions", self.positions.clone())
-        if self.velocities is not None:
-            object.__setattr__(self, "velocities", self.velocities.clone())
-        object.__setattr__(self, "active_mask", self.active_mask.clone())
-        object.__setattr__(self, "env_ids", self.env_ids.clone())
-        object.__setattr__(self, "hold_duration", self.hold_duration.clone())
-
-
-@dataclass(frozen=True, slots=True, eq=False)
 class ExecutionTick:
     """Result returned after one closed-loop execution update."""
 
     status: ExecutionStatus
     eligible_mask: torch.Tensor
-    command: JointCommand | None
+    command: RuntimeCommandFrame | None
+    hold_targets: tuple[RuntimeEndpointTarget, ...]
     events: tuple[ExecutionEvent, ...]
     task_state: TaskState
     pending_effect: EffectVerificationRequest | None = None
@@ -192,16 +151,37 @@ class ExecutionTick:
             raise TypeError(
                 "pending_effect must be an EffectVerificationRequest or None."
             )
+        if self.command is not None and not isinstance(
+            self.command,
+            RuntimeCommandFrame,
+        ):
+            raise TypeError("command must be a RuntimeCommandFrame or None.")
+        if isinstance(self.hold_targets, (str, bytes)) or not all(
+            isinstance(target, RuntimeEndpointTarget) for target in self.hold_targets
+        ):
+            raise TypeError("hold_targets must contain RuntimeEndpointTarget values.")
+        if self.command is not None and self.hold_targets:
+            raise ValueError("A tick cannot send commands and request a hold together.")
+        hold_targets: list[RuntimeEndpointTarget] = []
+        for target in self.hold_targets:
+            snapshot = target.snapshot()
+            if type(snapshot) is not type(target) or snapshot is target:
+                raise TypeError(
+                    "RuntimeEndpointTarget.snapshot() must return an independently "
+                    "owned value of the same target type."
+                )
+            hold_targets.append(snapshot)
         object.__setattr__(self, "eligible_mask", self.eligible_mask.clone())
         object.__setattr__(self, "events", tuple(self.events))
+        object.__setattr__(self, "hold_targets", tuple(hold_targets))
 
 
 class ExecutionSession:
     """Execute grounded invocations incrementally with bounded local recovery.
 
     The session never steps a simulator itself. Each :meth:`tick` consumes the
-    latest observation and scene snapshot and emits at most one full-robot
-    command. Expected symbolic effects are committed only after the caller
+    latest observation and scene snapshot and emits at most one synchronized
+    endpoint-command frame. Expected symbolic effects are committed only after the caller
     supplies ``effect_success`` for a non-empty :class:`StateDelta`.
 
     Environment eligibility and recovery budgets are tracked per row. The
@@ -227,9 +207,14 @@ class ExecutionSession:
         self._invocation_index = 0
         self._waypoint_index = 0
         self._plan: ActionPlan | None = None
+        self._active_targets: dict[
+            tuple[str, str],
+            RuntimeEndpointTarget,
+        ] = {}
         self._planned_scene = context.scene
         self._action_started_at = context.robot.timestamp
-        self._last_command: torch.Tensor | None = None
+        self._last_joint_command: torch.Tensor | None = None
+        self._last_joint_ids: tuple[int, ...] = ()
         self._last_command_mask = torch.zeros(
             context.batch_size, dtype=torch.bool, device=context.robot.qpos.device
         )
@@ -264,60 +249,135 @@ class ExecutionSession:
         """Verified symbolic task state accumulated by this session."""
         return self._task_state
 
-    def revise_current(self, invocation: ActionInvocation) -> None:
+    @property
+    def effect_verification_pending(self) -> bool:
+        """Whether the current physical effect still requires verification."""
+        return self._pending_effect is not None
+
+    def revise_current(
+        self,
+        invocation: ActionInvocation,
+        *,
+        context: PlanningContext | None = None,
+    ) -> None:
         """Replace and replan the current invocation with a newer revision.
 
         The replacement is resolved into a new immutable request snapshot from
-        the latest observation. Retry and replan budgets restart for the new
-        revision, while verified task state, the current batch barrier, and
-        per-environment eligibility are preserved. Ordinary recovery replans
-        continue to reuse this snapshot until another explicit revision.
+        ``context`` or the session's latest observation. Retry and replan
+        budgets restart for the new revision, while verified task state, the
+        current batch barrier, and per-environment eligibility are preserved.
+        Ordinary recovery replans continue to reuse this snapshot until another
+        explicit revision. Once the action owns runtime destinations, the
+        replacement must preserve their exact address fingerprints; changing
+        controllers or safe-hold footprints requires a new invocation.
 
         Args:
             invocation: Grounded replacement for the currently active skill.
                 Its ``revision`` must be strictly greater than the active one,
                 and its ``skill_id`` and ``invocation_id`` must identify the
                 same logical call.
+            context: Optional fresh observation used to ground the replacement.
+                A manually ticked caller may omit it to reuse
+                :attr:`latest_context`. Runner-driven code stages revisions on
+                :class:`ExecutionRunner`, which supplies a due-time observation.
 
         Raises:
             TypeError: If ``invocation`` is not an ActionInvocation.
-            RuntimeError: If the session is no longer running.
+            RuntimeError: If the session is no longer running or a physical
+                effect is awaiting verification.
             ValueError: If the replacement identifies another invocation or
-                does not advance the revision.
+                does not advance the revision, or if its plan changes the
+                active runtime target addresses.
         """
+        replacement = self._prepare_revision(invocation)
+        replacement_context = self._context if context is None else context
+        self._install_prepared_revision(replacement, replacement_context)
+
+    def _prepare_revision(
+        self,
+        invocation: ActionInvocation,
+    ) -> ResolvedActionRequest:
+        """Validate and snapshot one revision without planning or installing it."""
         if not isinstance(invocation, ActionInvocation):
             raise TypeError("invocation must be an ActionInvocation.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
-        current = self._requests[self._invocation_index]
-        if invocation.skill_id != current.skill_id:
-            raise ValueError(
-                f"Revision skill_id {invocation.skill_id!r} does not match "
-                f"the active skill {current.skill_id!r}."
+        if self._pending_effect is not None:
+            raise RuntimeError(
+                "Cannot revise while a physical effect is awaiting verification; "
+                "verify it or cancel and start a new invocation."
             )
-        if invocation.invocation_id != current.invocation_id:
-            raise ValueError(
-                "Revision invocation_id must match the active invocation_id."
-            )
-        if invocation.revision <= current.revision:
-            raise ValueError(
-                f"Revision must advance beyond {current.revision}, got "
-                f"{invocation.revision}."
-            )
+        self._validate_revision_identity(
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            revision=invocation.revision,
+        )
+        return self._engine.resolve(invocation)
 
-        replacement = self._engine._resolve(invocation)
-        replacement_plan = self._engine._plan_request(replacement, self._context)
+    def _install_prepared_revision(
+        self,
+        replacement: ResolvedActionRequest,
+        context: PlanningContext,
+    ) -> None:
+        """Plan and transactionally install a previously snapshotted revision."""
+        if not isinstance(replacement, ResolvedActionRequest):
+            raise TypeError("replacement must be a ResolvedActionRequest.")
+        if self._status is not ExecutionStatus.RUNNING:
+            raise RuntimeError("Only a running execution session can be revised.")
+        if self._pending_effect is not None:
+            raise RuntimeError(
+                "Cannot revise while a physical effect is awaiting verification; "
+                "verify it or cancel and start a new invocation."
+            )
+        self._validate_revision_identity(
+            skill_id=replacement.skill_id,
+            invocation_id=replacement.invocation_id,
+            revision=replacement.revision,
+        )
+        replacement_context = self._validated_context(context)
+        replacement_plan = self._engine.plan_request(
+            replacement,
+            replacement_context,
+        )
+        self._validate_destination_continuity(
+            replacement_plan,
+            ExecutionEventKind.INVOCATION_REVISED,
+        )
         requests = list(self._requests)
         requests[self._invocation_index] = replacement
         self._requests = tuple(requests)
+        self._context = replacement_context
         self._waypoint_index = 0
         self._action_retries.zero_()
         self._replans.zero_()
         self._install_plan(
             replacement_plan,
-            self._context,
+            replacement_context,
             ExecutionEventKind.INVOCATION_REVISED,
         )
+
+    def _validate_revision_identity(
+        self,
+        *,
+        skill_id: str,
+        invocation_id: str | None,
+        revision: int,
+    ) -> None:
+        """Validate identity and ordering shared by staged and direct revisions."""
+        current = self._requests[self._invocation_index]
+        if skill_id != current.skill_id:
+            raise ValueError(
+                f"Revision skill_id {skill_id!r} does not match "
+                f"the active skill {current.skill_id!r}."
+            )
+        if invocation_id != current.invocation_id:
+            raise ValueError(
+                "Revision invocation_id must match the active invocation_id."
+            )
+        if revision <= current.revision:
+            raise ValueError(
+                f"Revision must advance beyond {current.revision}, got " f"{revision}."
+            )
 
     @property
     def latest_context(self) -> PlanningContext:
@@ -325,14 +385,14 @@ class ExecutionSession:
         return self._context
 
     @property
-    def active_trajectory(self) -> TimedTrajectory:
-        """Return an owned snapshot of the active action trajectory.
+    def active_commands(self) -> TimedCommandSequence:
+        """Return an owned snapshot of the active action command sequence.
 
         This inspection surface is intended for diagnostics and visualization.
         Mutating the returned tensors cannot affect execution state.
         """
         assert self._plan is not None
-        return self._plan.trajectory.snapshot()
+        return self._plan.commands.snapshot()
 
     def trajectory_segment(self, name: str) -> TrajectorySegment:
         """Return named segment metadata for the active action plan.
@@ -360,33 +420,7 @@ class ExecutionSession:
         Returns:
             Status, optional command, events, and current verified task state.
         """
-        self._engine._validate_context(context)
-        if context.robot.timestamp < self._context.robot.timestamp:
-            raise ValueError("Execution tick timestamps must be monotonic.")
-        if context.scene.timestamp < self._context.scene.timestamp:
-            raise ValueError("Scene snapshot timestamps must be monotonic.")
-        if context.scene.version < self._context.scene.version:
-            raise ValueError("Scene snapshot versions must be monotonic.")
-        previous_collision_revision = torch.tensor(
-            self._context.scene.collision_world_revisions(context.batch_size),
-            dtype=torch.long,
-            device=context.robot.qpos.device,
-        )
-        current_collision_revision = torch.tensor(
-            context.scene.collision_world_revisions(context.batch_size),
-            dtype=torch.long,
-            device=context.robot.qpos.device,
-        )
-        if (current_collision_revision < previous_collision_revision).any():
-            raise ValueError("Collision-world revisions must be monotonic.")
-        if not torch.equal(context.env_ids, self._context.env_ids):
-            raise ValueError("Execution tick env_ids must remain stable and ordered.")
-        self._context = PlanningContext(
-            robot=context.robot,
-            task=self._task_state,
-            scene=context.scene,
-            env_ids=context.env_ids,
-        )
+        self._context = self._validated_context(context)
         events = self._drain_events()
         if self._status is not ExecutionStatus.RUNNING:
             return self._tick_result(command=None, events=events)
@@ -396,12 +430,16 @@ class ExecutionSession:
             execution_mask = (
                 self._pending_effect.env_mask & self._pending & self._plan.plan_success
             )
-            command, completion_events = self._finish_action(
+            command, hold_targets, completion_events = self._finish_action(
                 execution_mask,
                 effect_success,
             )
             events.extend(completion_events)
-            return self._tick_result(command=command, events=events)
+            return self._tick_result(
+                command=command,
+                hold_targets=hold_targets,
+                events=events,
+            )
 
         plan = self._plan
         execution_mask = self._pending & plan.plan_success
@@ -421,8 +459,8 @@ class ExecutionSession:
             plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
 
-        trajectory = plan.trajectory
-        if self._waypoint_index < trajectory.waypoint_count:
+        commands = plan.commands
+        if self._waypoint_index < commands.frame_count:
             command = self._command_at(plan, self._waypoint_index, execution_mask)
             self._waypoint_index += 1
             return self._tick_result(command=command, events=events)
@@ -444,9 +482,27 @@ class ExecutionSession:
             assert self._plan is not None
             plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
-            command = self._command_at(plan, 0, execution_mask)
-            self._waypoint_index = 1
-            return self._tick_result(command=command, events=events)
+            if plan.commands.frame_count > 0:
+                command = self._command_at(plan, 0, execution_mask)
+                self._waypoint_index = 1
+                return self._tick_result(command=command, events=events)
+            events.append(
+                self._event(
+                    ExecutionEventKind.TRAJECTORY_COMPLETED,
+                    execution_mask,
+                    "Replanned action has no executable command frame.",
+                )
+            )
+            command, hold_targets, completion_events = self._finish_action(
+                execution_mask,
+                effect_success,
+            )
+            events.extend(completion_events)
+            return self._tick_result(
+                command=command,
+                hold_targets=hold_targets,
+                events=events,
+            )
 
         events.append(
             self._event(
@@ -456,12 +512,46 @@ class ExecutionSession:
             )
         )
 
-        command, completion_events = self._finish_action(
+        command, hold_targets, completion_events = self._finish_action(
             execution_mask,
             effect_success,
         )
         events.extend(completion_events)
-        return self._tick_result(command=command, events=events)
+        return self._tick_result(
+            command=command,
+            hold_targets=hold_targets,
+            events=events,
+        )
+
+    def _validated_context(self, context: PlanningContext) -> PlanningContext:
+        """Validate one monotonic observation and attach verified task state."""
+        self._engine._validate_context(context)
+        if context.robot.timestamp < self._context.robot.timestamp:
+            raise ValueError("Execution tick timestamps must be monotonic.")
+        if context.scene.timestamp < self._context.scene.timestamp:
+            raise ValueError("Scene snapshot timestamps must be monotonic.")
+        if context.scene.version < self._context.scene.version:
+            raise ValueError("Scene snapshot versions must be monotonic.")
+        previous_collision_revision = torch.tensor(
+            self._context.scene.collision_world_revisions(context.batch_size),
+            dtype=torch.long,
+            device=context.robot.qpos.device,
+        )
+        current_collision_revision = torch.tensor(
+            context.scene.collision_world_revisions(context.batch_size),
+            dtype=torch.long,
+            device=context.robot.qpos.device,
+        )
+        if (current_collision_revision < previous_collision_revision).any():
+            raise ValueError("Collision-world revisions must be monotonic.")
+        if not torch.equal(context.env_ids, self._context.env_ids):
+            raise ValueError("Execution tick env_ids must remain stable and ordered.")
+        return PlanningContext(
+            robot=context.robot,
+            task=self._task_state,
+            scene=context.scene,
+            env_ids=context.env_ids,
+        )
 
     def _plan_current(
         self,
@@ -480,16 +570,93 @@ class ExecutionSession:
         event_kind: ExecutionEventKind,
     ) -> None:
         """Install an already validated plan as the current execution plan."""
+        replacement_targets = {
+            (target.transport_id, target.target_id): target.snapshot()
+            for target in plan.commands.targets
+        }
+        replacement_destinations = frozenset(replacement_targets)
+        self._validate_destination_continuity(plan, event_kind)
+        if (
+            event_kind
+            not in (
+                ExecutionEventKind.REPLANNED,
+                ExecutionEventKind.INVOCATION_REVISED,
+            )
+            or replacement_destinations
+        ):
+            self._active_targets = replacement_targets
         self._plan = plan
         self._waypoint_index = 0
         self._planned_scene = context.scene
         self._action_started_at = context.robot.timestamp
-        self._last_command = None
+        self._last_joint_command = None
+        self._last_joint_ids = ()
         self._last_command_mask.zero_()
         self._pending_effect = None
         planned_mask = self._pending & plan.plan_success
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
+        )
+
+    def _validate_destination_continuity(
+        self,
+        plan: ActionPlan,
+        event_kind: ExecutionEventKind,
+    ) -> None:
+        """Reject in-place plans that change controller or safe-hold ownership."""
+        if event_kind not in (
+            ExecutionEventKind.REPLANNED,
+            ExecutionEventKind.INVOCATION_REVISED,
+        ):
+            return
+        replacement_targets = {
+            (target.transport_id, target.target_id): target
+            for target in plan.commands.targets
+        }
+        active_destinations = frozenset(self._active_targets)
+        replacement_destinations = frozenset(replacement_targets)
+        if not active_destinations:
+            return
+        if not replacement_destinations:
+            if event_kind is ExecutionEventKind.REPLANNED:
+                return
+            raise ValueError(
+                "Invocation revisions must declare the active runtime destination "
+                "set; an empty replacement plan cannot prove target continuity."
+            )
+        if replacement_destinations == active_destinations:
+            mismatched_fingerprints = sorted(
+                destination
+                for destination in active_destinations
+                if replacement_targets[destination].address_fingerprint
+                != self._active_targets[destination].address_fingerprint
+            )
+            if not mismatched_fingerprints:
+                return
+            prefix = (
+                "Recovery replans"
+                if event_kind is ExecutionEventKind.REPLANNED
+                else "Invocation revisions"
+            )
+            guidance = (
+                ""
+                if event_kind is ExecutionEventKind.REPLANNED
+                else " Start a new invocation to change runtime target addresses."
+            )
+            raise ValueError(
+                f"{prefix} must preserve each runtime target address fingerprint; "
+                f"changed={mismatched_fingerprints}.{guidance}"
+            )
+        if event_kind is ExecutionEventKind.REPLANNED:
+            prefix = "Recovery replans"
+            guidance = ""
+        else:
+            prefix = "Invocation revisions"
+            guidance = " Start a new invocation to change runtime destinations."
+        raise ValueError(
+            f"{prefix} must preserve the active runtime destination set; "
+            f"previous={sorted(active_destinations)}, "
+            f"replacement={sorted(replacement_destinations)}.{guidance}"
         )
 
     def _recover_if_needed(
@@ -517,9 +684,18 @@ class ExecutionSession:
                 ExecutionEventKind.COLLISION_WORLD_CHANGED,
                 "The collision world changed after this trajectory was planned.",
             )
-        if self._last_command is not None:
+        if (
+            plan.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
+            and self._last_joint_command is not None
+            and self._last_joint_ids
+        ):
+            joint_ids = list(self._last_joint_ids)
             tracking_error = torch.amax(
-                torch.abs(self._context.robot.qpos - self._last_command), dim=1
+                torch.abs(
+                    self._context.robot.qpos[:, joint_ids]
+                    - self._last_joint_command[:, joint_ids]
+                ),
+                dim=1,
             )
             tracking_mask = (
                 execution_mask
@@ -598,7 +774,7 @@ class ExecutionSession:
             )
         if allowed.any():
             self._action_retries[allowed] += 1
-            self._replans.zero_()
+            self._replans[allowed] = 0
             events.append(
                 self._event(
                     ExecutionEventKind.ACTION_RETRY,
@@ -615,9 +791,20 @@ class ExecutionSession:
         self,
         execution_mask: torch.Tensor,
         effect_success: torch.Tensor | None,
-    ) -> tuple[JointCommand | None, list[ExecutionEvent]]:
+    ) -> tuple[
+        RuntimeCommandFrame | None,
+        tuple[RuntimeEndpointTarget, ...],
+        list[ExecutionEvent],
+    ]:
         """Verify effects, update symbolic state, and advance the action barrier."""
         assert self._plan is not None
+        plan_targets = self._plan.commands.targets
+        active_targets = (
+            plan_targets
+            if plan_targets
+            else tuple(target.snapshot() for target in self._active_targets.values())
+        )
+        orphaned_targets = bool(active_targets) and not plan_targets
         events: list[ExecutionEvent] = []
         planning_failed = self._pending & ~self._plan.plan_success
         if not execution_mask.any() and planning_failed.any():
@@ -629,8 +816,8 @@ class ExecutionSession:
                 )
             )
             if self._status is not ExecutionStatus.RUNNING:
-                return None, events
-            return self._hold_command(), events
+                return None, active_targets, events
+            return None, active_targets, events
 
         if self._plan.expected_effects.is_empty:
             verified = execution_mask
@@ -644,7 +831,7 @@ class ExecutionSession:
                         "Expected symbolic effects require external verification.",
                     )
                 )
-            return self._hold_command(), events
+            return None, active_targets, events
         else:
             verified_input = self._normalize_mask(effect_success, "effect_success")
             verified = execution_mask & verified_input
@@ -672,11 +859,11 @@ class ExecutionSession:
                 )
             )
             if self._status is not ExecutionStatus.RUNNING:
-                return None, events
-            return self._hold_command(), events
+                return None, active_targets, events
+            return None, active_targets, events
 
         if self._pending.any():
-            return self._hold_command(), events
+            return None, active_targets, events
         events.append(
             self._event(
                 ExecutionEventKind.ACTION_COMPLETED,
@@ -698,7 +885,7 @@ class ExecutionSession:
                     "Invocation sequence completed.",
                 )
             )
-            return None, events
+            return None, (active_targets if orphaned_targets else ()), events
 
         self._pending = self._eligible.clone()
         self._pending_effect = None
@@ -706,64 +893,84 @@ class ExecutionSession:
         self._replans.zero_()
         self._plan_current(self._context, ExecutionEventKind.ACTION_PLANNED)
         events.extend(self._drain_events())
-        return self._hold_command(), events
+        return None, active_targets, events
 
     def _command_at(
         self,
         plan: ActionPlan,
         waypoint_index: int,
         active_mask: torch.Tensor,
-    ) -> JointCommand:
-        """Build one command and retain it for tracking-error monitoring."""
-        positions = plan.trajectory.positions[:, waypoint_index]
-        hold = self._context.robot.qpos
-        positions = torch.where(active_mask[:, None], positions, hold)
-        velocities = None
-        if plan.trajectory.velocities is not None:
-            values = plan.trajectory.velocities[:, waypoint_index]
-            velocities = torch.where(
-                active_mask[:, None], values, torch.zeros_like(values)
-            )
-        self._last_command = positions.clone()
-        self._last_command_mask = active_mask.clone()
-        # ``dt[:, i]`` leads to waypoint ``i``. After dispatching waypoint
-        # ``i``, wait for ``dt[:, i + 1]`` before the next dispatch. Reuse the
-        # final arrival interval as its terminal settling window.
-        next_waypoint_index = min(
-            waypoint_index + 1,
-            plan.trajectory.waypoint_count - 1,
-        )
-        hold_duration = plan.trajectory.dt[:, next_waypoint_index]
-        return JointCommand(
-            positions=positions,
-            velocities=velocities,
-            active_mask=active_mask,
-            env_ids=plan.trajectory.env_ids,
-            hold_duration=hold_duration,
-        )
-
-    def _hold_command(self) -> JointCommand:
-        """Build a passive hold command from the latest observation."""
-        return JointCommand(
-            positions=self._context.robot.qpos,
-            velocities=torch.zeros_like(self._context.robot.qpos),
-            active_mask=torch.zeros_like(self._eligible),
-            env_ids=self._context.env_ids,
-            hold_duration=torch.zeros(
-                self._context.batch_size,
-                dtype=torch.float32,
-                device=self._context.robot.qpos.device,
-            ),
-        )
+    ) -> RuntimeCommandFrame:
+        """Return one frame and retain joint targets when feedback requires it."""
+        frame = plan.commands.frames[waypoint_index]
+        frame = frame.with_active_mask(frame.active_mask & active_mask)
+        if plan.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION:
+            positions = self._context.robot.qpos.clone()
+            commanded_joint_ids: list[int] = []
+            for command in frame.commands:
+                if not isinstance(
+                    command.target, JointPositionTarget
+                ) or not isinstance(
+                    command.payload,
+                    JointPositionPayload,
+                ):
+                    raise TypeError(
+                        "joint_position feedback requires only joint-position "
+                        "targets and payloads."
+                    )
+                joint_ids = list(command.target.joint_ids)
+                commanded_joint_ids.extend(joint_ids)
+                positions[:, joint_ids] = torch.where(
+                    frame.active_mask[:, None],
+                    command.payload.positions,
+                    positions[:, joint_ids],
+                )
+            self._last_joint_command = positions
+            self._last_joint_ids = tuple(commanded_joint_ids)
+            self._last_command_mask = frame.active_mask.clone()
+        else:
+            self._last_joint_command = None
+            self._last_joint_ids = ()
+            self._last_command_mask.zero_()
+        return frame
 
     def _terminal_error(self, plan: ActionPlan) -> torch.Tensor:
-        """Return per-row max joint error to the action terminal command."""
-        if plan.trajectory.waypoint_count == 0:
-            return torch.full_like(self._eligible, float("inf"), dtype=torch.float32)
-        return torch.amax(
-            torch.abs(self._context.robot.qpos - plan.trajectory.positions[:, -1]),
-            dim=1,
-        )
+        """Return terminal error for the plan's explicit feedback contract."""
+        if plan.feedback_mode is ExecutionFeedbackMode.TIMED:
+            return torch.zeros(
+                self._context.batch_size,
+                dtype=self._context.robot.qpos.dtype,
+                device=self._context.robot.qpos.device,
+            )
+        if plan.commands.frame_count == 0:
+            return torch.full_like(
+                self._eligible,
+                float("inf"),
+                dtype=self._context.robot.qpos.dtype,
+            )
+        errors: list[torch.Tensor] = []
+        for command in plan.commands.frames[-1].commands:
+            if not isinstance(command.target, JointPositionTarget) or not isinstance(
+                command.payload,
+                JointPositionPayload,
+            ):
+                raise TypeError(
+                    "joint_position feedback requires only joint-position targets "
+                    "and payloads."
+                )
+            joint_ids = list(command.target.joint_ids)
+            errors.append(
+                torch.abs(
+                    self._context.robot.qpos[:, joint_ids] - command.payload.positions
+                )
+            )
+        if not errors:
+            return torch.full_like(
+                self._eligible,
+                float("inf"),
+                dtype=self._context.robot.qpos.dtype,
+            )
+        return torch.amax(torch.cat(errors, dim=1), dim=1)
 
     def _dynamic_scene_change_mask(self, plan: ActionPlan) -> torch.Tensor:
         """Detect material motion of entities referenced by the action goal."""
@@ -901,14 +1108,16 @@ class ExecutionSession:
     def _tick_result(
         self,
         *,
-        command: JointCommand | None,
+        command: RuntimeCommandFrame | None,
         events: list[ExecutionEvent],
+        hold_targets: tuple[RuntimeEndpointTarget, ...] = (),
     ) -> ExecutionTick:
         """Build an immutable tick result."""
         return ExecutionTick(
             status=self._status,
             eligible_mask=self._eligible,
             command=command,
+            hold_targets=hold_targets,
             events=tuple(events),
             task_state=self._task_state,
             pending_effect=self._pending_effect,
@@ -922,5 +1131,4 @@ __all__ = [
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
-    "JointCommand",
 ]

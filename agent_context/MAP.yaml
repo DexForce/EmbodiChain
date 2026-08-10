@@ -512,7 +512,9 @@ topics:
       - held_objects
       - HeldObjectState
       - ActionBinding
-      - ActionBindingRoute
+      - EndpointBinding
+      - RuntimeEndpointTarget
+      - JointPositionTarget
       - SkillBindingContract
       - SkillResourceSlot
       - SkillEndpointRequirement
@@ -552,6 +554,20 @@ topics:
       - ControlPartCommandProfile
       - ActionControlOverrides
       - JointPositionCommand
+      - RuntimeCommandPayload
+      - JointPositionPayload
+      - EndpointCommand
+      - RuntimeCommandFrame
+      - TimedCommandSequence
+      - EndpointCommandTransport
+      - EndpointCommandRouter
+      - endpoint transport
+      - transport_id
+      - target_id
+      - safe stop
+      - cancel then hold
+      - ActionPlan.commands
+      - joint_trajectory
       - invocation revision
       - MotionPolicy
       - MotionPolicy.strategy
@@ -581,6 +597,8 @@ topics:
       - embodichain/lab/sim/atomic_actions/policies.py
       - embodichain/lab/sim/atomic_actions/requirements.py
       - embodichain/lab/sim/atomic_actions/runtime.py
+      - embodichain/lab/sim/atomic_actions/runtime_commands.py
+      - embodichain/lab/sim/atomic_actions/transports.py
       - embodichain/lab/sim/atomic_actions/state.py
       - embodichain/lab/sim/atomic_actions/plans.py
       - embodichain/lab/sim/atomic_actions/execution.py

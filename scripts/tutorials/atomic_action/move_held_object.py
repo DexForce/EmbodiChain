@@ -30,7 +30,6 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -148,22 +147,32 @@ def main() -> None:
         sim, args, "Inspect the paper cup, then press Enter to plan..."
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
+    motion_mapping = {"primary": {"motion": "arm"}}
+    manipulation_mapping = {"primary": {"motion": "arm", "grasp": "hand"}}
+    move_binding = engine.bind_control_parts(
+        "move_end_effector",
+        motion_mapping,
+    )
+    pick_binding = engine.bind_control_parts(
+        "pick_up",
+        manipulation_mapping,
+    )
+    held_object_binding = engine.bind_control_parts(
+        "move_held_object",
+        manipulation_mapping,
     )
     compiled = engine.compile(
         (
             ActionInvocation(
                 "move_end_effector",
                 EndEffectorPoseGoal(move_target),
-                binding,
+                move_binding,
                 MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
             ),
             ActionInvocation(
                 "pick_up",
                 GraspGoal(semantics),
-                binding,
+                pick_binding,
                 MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                 skill_options=PickUpOptions(
                     pre_grasp_distance=0.15,
@@ -174,7 +183,7 @@ def main() -> None:
             ActionInvocation(
                 "move_held_object",
                 HeldObjectPoseGoal(object_target),
-                binding,
+                held_object_binding,
                 MotionPolicy(sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL),
             ),
         )

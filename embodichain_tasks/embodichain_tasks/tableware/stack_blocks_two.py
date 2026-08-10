@@ -133,7 +133,6 @@ class StackBlocksTwoEnv(EmbodiedEnv):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Plan PickUp then Place while threading the held-object state."""
         from embodichain.lab.sim.atomic_actions import (
-            ActionBinding,
             ActionInvocation,
             GraspGoal,
             MotionPolicy,
@@ -156,9 +155,19 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         grasp_pose[:, :3, 3] = source_pose[:, :3, 3] + torch.tensor(
             GRASP_OFFSET, dtype=torch.float32, device=self.device
         )
-        binding = ActionBinding(
-            manipulators={"primary": CONTROL_PART},
-            end_effectors={"primary": HAND_CONTROL_PART},
+        endpoints = {
+            "primary": {
+                "motion": CONTROL_PART,
+                "grasp": HAND_CONTROL_PART,
+            }
+        }
+        pick_binding = self._action_engine.bind_control_parts(
+            "pick_up",
+            endpoints,
+        )
+        place_binding = self._action_engine.bind_control_parts(
+            "place",
+            endpoints,
         )
         pick_compiled = self._action_engine.compile(
             (
@@ -168,7 +177,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                         self._stack_block_semantics,
                         grasp_xpos=grasp_pose,
                     ),
-                    binding=binding,
+                    binding=pick_binding,
                     motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                     skill_options=PickUpOptions(
                         pre_grasp_distance=0.12,
@@ -201,7 +210,7 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                 ActionInvocation(
                     skill_id="place",
                     goal=PlaceGoal(place_eef_pose),
-                    binding=binding,
+                    binding=place_binding,
                     motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
                     skill_options=PlaceOptions(
                         lift_height=0.10,

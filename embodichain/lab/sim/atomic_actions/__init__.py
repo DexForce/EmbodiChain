@@ -34,7 +34,12 @@ from .affordance import (
     AssembleAffordance,
     InteractionPoints,
 )
-from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
+from .bindings import (
+    ActionBinding,
+    EndpointBinding,
+    JointPositionTarget,
+    RuntimeEndpointTarget,
+)
 from .control import (
     ActionControlOverrides,
     ControlCommand,
@@ -53,20 +58,19 @@ from .execution import (
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
-    JointCommand,
 )
 from .goals import ObjectActionGoal, PoseGoalValue, SceneEntityPose
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
+    ExecutionFeedbackMode,
     PlannerDiagnostics,
     TimedTrajectory,
     TrajectorySegment,
 )
 from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
 from .requirements import (
-    ActionBindingRoute,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
@@ -80,6 +84,14 @@ from .requirements import (
     SkillResourceSlot,
 )
 from .runtime import ActionPlanningServices
+from .runtime_commands import (
+    EndpointCommand,
+    JointPositionPayload,
+    RuntimeCommandFrame,
+    RuntimeCommandPayload,
+    TimedCommandSequence,
+)
+from .transports import EndpointCommandRouter, EndpointCommandTransport
 from .primitives import (
     AssembleGoal,
     BUILTIN_ACTION_TYPES,
@@ -144,7 +156,6 @@ from .state import (
 
 __all__ = [
     "ActionBinding",
-    "ActionBindingRoute",
     "ActionControlOverrides",
     "ActionInvocation",
     "ActionOptions",
@@ -177,10 +188,15 @@ __all__ = [
     "DisjointResourceSlots",
     "DisjointSlotEndpoints",
     "EndEffectorPoseGoal",
+    "EndpointBinding",
+    "EndpointCommand",
+    "EndpointCommandRouter",
+    "EndpointCommandTransport",
     "EntityState",
     "EffectVerificationRequest",
     "EffectVerifier",
     "ExecutionClock",
+    "ExecutionFeedbackMode",
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionRunner",
@@ -199,8 +215,9 @@ __all__ = [
     "INVERSE_KINEMATICS_CAPABILITY",
     "InteractionPoints",
     "JointPositionGoal",
-    "JointCommand",
     "JointPositionCommand",
+    "JointPositionPayload",
+    "JointPositionTarget",
     "JOINT_POSITION_CAPABILITY",
     "MotionPolicy",
     "MonotonicExecutionClock",
@@ -229,9 +246,10 @@ __all__ = [
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
     "ResolvedActionRequest",
-    "ResolvedActionBinding",
-    "ResolvedControlPart",
     "RobotObservation",
+    "RuntimeCommandFrame",
+    "RuntimeCommandPayload",
+    "RuntimeEndpointTarget",
     "RunnerStatus",
     "RunnerStep",
     "RunnerStepCallback",
@@ -246,6 +264,7 @@ __all__ = [
     "StateDelta",
     "SimulationExecutionAdapter",
     "TaskState",
+    "TimedCommandSequence",
     "TimedTrajectory",
     "TrajectorySegment",
 ]

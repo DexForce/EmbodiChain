@@ -30,6 +30,7 @@ import torch
 from embodichain.lab.sim.common import BatchEntity
 
 from .affordance import Affordance
+from .bindings import EndpointBinding, JointPositionTarget
 from .effects import StateDelta
 from .goals import collect_scene_dependencies
 from .invocation import (
@@ -41,6 +42,7 @@ from .invocation import (
 )
 from .plans import (
     ActionPlan,
+    ExecutionFeedbackMode,
     PlannerDiagnostics,
     TimedTrajectory,
     TrajectorySegment,
@@ -48,6 +50,12 @@ from .plans import (
 )
 from .policies import DynamicCollisionMode
 from .requirements import SkillBindingContract
+from .runtime_commands import (
+    EndpointCommand,
+    JointPositionPayload,
+    RuntimeCommandFrame,
+    TimedCommandSequence,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -149,8 +157,6 @@ class SkillDescriptor:
     skill_id: str
     goal_type: type[Any] | tuple[type[Any], ...]
     options_type: type[ActionOptions]
-    manipulator_roles: tuple[str, ...] = ()
-    end_effector_roles: tuple[str, ...] = ()
     agent_visible: bool = True
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by the semantic skill layer."""
@@ -169,23 +175,12 @@ class SkillDescriptor:
             raise TypeError(
                 "SkillDescriptor.options_type must be an ActionOptions subclass."
             )
-        for field_name in ("manipulator_roles", "end_effector_roles"):
-            roles = tuple(getattr(self, field_name))
-            if len(set(roles)) != len(roles) or not all(
-                isinstance(role, str) and role for role in roles
-            ):
-                raise ValueError(f"{field_name} must contain unique non-empty roles.")
-            object.__setattr__(self, field_name, roles)
         if self.binding_contract is not None:
             if not isinstance(self.binding_contract, SkillBindingContract):
                 raise TypeError(
                     "SkillDescriptor.binding_contract must be a "
                     "SkillBindingContract or None."
                 )
-            self.binding_contract.validate_action_roles(
-                manipulator_roles=self.manipulator_roles,
-                end_effector_roles=self.end_effector_roles,
-            )
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -204,12 +199,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     OptionsType: ClassVar[type[ActionOptions]] = ActionOptions
     """Concrete per-invocation runtime options accepted by this skill."""
-
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    """Required semantic manipulator roles."""
-
-    end_effector_roles: ClassVar[tuple[str, ...]] = ()
-    """Required semantic end-effector roles."""
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
@@ -316,8 +305,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             skill_id=cls.skill_id,
             goal_type=cls.GoalType,
             options_type=cls.OptionsType,
-            manipulator_roles=cls.manipulator_roles,
-            end_effector_roles=cls.end_effector_roles,
             agent_visible=cls.agent_visible,
             binding_contract=cls.__dict__.get("binding_contract"),
         )
@@ -354,10 +341,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Skill {self.skill_id!r} expects goal {expected}, got "
                 f"{type(invocation.goal).__name__}."
             )
-        for role in self.manipulator_roles:
-            invocation.binding.manipulator(role)
-        for role in self.end_effector_roles:
-            invocation.binding.end_effector(role)
+        contract = type(self).__dict__.get("binding_contract")
+        if contract is None:
+            raise ValueError(
+                f"Skill {self.skill_id!r} has no explicit SkillBindingContract."
+            )
+        self.planning_services.validate_binding(invocation.binding, contract)
         options = (
             self._default_options
             if invocation.skill_options is None
@@ -378,7 +367,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         return ResolvedActionRequest(
             skill_id=invocation.skill_id,
             goal=invocation.goal,
-            binding=self.planning_services.resolve_binding(
+            binding=self.planning_services.apply_command_overrides(
                 invocation.binding,
                 invocation.control_overrides,
             ),
@@ -409,10 +398,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Skill {self.skill_id!r} received incompatible options "
                 f"{type(request.skill_options).__name__}."
             )
-        for role in self.manipulator_roles:
-            request.binding.manipulator(role)
-        for role in self.end_effector_roles:
-            request.binding.end_effector(role)
+        contract = type(self).__dict__.get("binding_contract")
+        if contract is None:
+            raise ValueError(
+                f"Skill {self.skill_id!r} has no explicit SkillBindingContract."
+            )
+        self.planning_services.validate_binding(request.binding, contract)
         return request.goal
 
     def plan(
@@ -431,7 +422,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         """
         self.require_goal(request)
         prepared = self._prepare_request(request, context)
-        return self._plan(prepared, context)
+        plan = self._plan(prepared, context)
+        if not isinstance(plan, ActionPlan):
+            raise TypeError("AtomicAction._plan() must return an ActionPlan.")
+        return replace(
+            plan,
+            commands=self._authorize_command_targets(prepared, plan.commands),
+        )
 
     def _prepare_request(
         self,
@@ -551,32 +548,70 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise ValueError("Trajectory robot_dof must match the planning context.")
         timed = timed.hold_rows(success_mask, context.robot.qpos)
 
-        segments: list[TrajectorySegment] = []
-        if segment_lengths is not None:
-            offset = 0
-            for name, length in segment_lengths.items():
-                if not isinstance(name, str) or not name:
-                    raise ValueError("Trajectory segment names must be non-empty.")
-                if isinstance(length, bool) or not isinstance(length, int):
-                    raise TypeError("Trajectory segment lengths must be integers.")
-                if length < 0:
-                    raise ValueError("Trajectory segment lengths must be non-negative.")
-                if length == 0:
-                    continue
-                segments.append(
-                    TrajectorySegment(
-                        name=name,
-                        start=offset,
-                        stop=offset + length,
-                    )
-                )
-                offset += length
-            if offset != timed.waypoint_count:
-                raise ValueError(
-                    "Trajectory segment lengths must sum to the trajectory "
-                    f"waypoint count ({timed.waypoint_count}), got {offset}."
-                )
+        commands = self._joint_command_sequence(
+            request,
+            timed,
+            active_mask=success_mask,
+        )
+        return self.build_command_plan(
+            request,
+            context,
+            success=success_mask,
+            commands=commands,
+            expected_effects=expected_effects,
+            replannable=replannable,
+            diagnostics=diagnostics,
+            segment_lengths=segment_lengths,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+            joint_trajectory=timed,
+        )
 
+    def build_command_plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        *,
+        success: bool | torch.Tensor,
+        commands: TimedCommandSequence,
+        expected_effects: StateDelta | None = None,
+        replannable: bool = True,
+        diagnostics: PlannerDiagnostics | None = None,
+        segment_lengths: Mapping[str, int] | None = None,
+        feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
+        joint_trajectory: TimedTrajectory | None = None,
+    ) -> ActionPlan:
+        """Build a plan from transport-neutral runtime command frames.
+
+        Non-joint command sequences use timed completion unless a future
+        endpoint-specific feedback evaluator is installed. Semantic effects
+        remain externally verified through the execution session.
+        """
+        if not isinstance(commands, TimedCommandSequence):
+            raise TypeError("commands must be a TimedCommandSequence.")
+        if commands.batch_size != context.batch_size:
+            raise ValueError(
+                "Command sequence and planning context batch sizes must match."
+            )
+        if not torch.equal(commands.env_ids, context.env_ids):
+            raise ValueError("Command sequence env_ids must match the context.")
+        commands = self._authorize_command_targets(request, commands)
+        success_mask = normalize_success_mask(
+            success,
+            num_envs=context.batch_size,
+            device=self.device,
+            name="Planning success",
+        )
+        masked_commands = TimedCommandSequence(
+            frames=tuple(
+                frame.with_active_mask(frame.active_mask & success_mask)
+                for frame in commands.frames
+            ),
+            env_ids=commands.env_ids,
+        )
+        segments = self._build_segments(
+            segment_lengths,
+            frame_count=masked_commands.frame_count,
+        )
         if diagnostics is None:
             diagnostics = PlannerDiagnostics(
                 backend=self.planning_services.planner_name
@@ -584,24 +619,210 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         return ActionPlan(
             skill_id=self.skill_id,
             plan_success=success_mask,
-            trajectory=timed,
+            commands=masked_commands,
             recovery_policy=request.recovery_policy,
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(
                 context.scene.collision_world_revisions(context.batch_size)
             ),
             diagnostics=diagnostics,
-            segments=tuple(segments),
+            feedback_mode=feedback_mode,
+            joint_trajectory=joint_trajectory,
+            segments=segments,
             scene_dependencies=self._scene_dependencies(request),
-            collision_world_sensitive=self._uses_collision_world(
-                request,
-                context,
-            ),
+            collision_world_sensitive=self._uses_collision_world(request, context),
             replannable=replannable,
             expected_effects=expected_effects or StateDelta(),
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
         )
+
+    @staticmethod
+    def _authorize_command_targets(
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        commands: TimedCommandSequence,
+    ) -> TimedCommandSequence:
+        """Bind every emitted command to an endpoint authorized by the request.
+
+        Actions may choose a subset of their bound endpoints for any frame, but
+        they cannot synthesize a destination outside the resolved resource
+        binding. The returned sequence replaces caller-provided target metadata
+        with the engine-owned binding snapshot, so transports never receive
+        altered joint claims or other target fields.
+        """
+        authorized: dict[tuple[str, str], list[EndpointBinding]] = {}
+        for endpoint in request.binding.endpoints:
+            authorized.setdefault(endpoint.destination_key, []).append(endpoint)
+        unknown = sorted(
+            {
+                command.destination_key
+                for frame in commands.frames
+                for command in frame.commands
+                if command.destination_key not in authorized
+            }
+        )
+        if unknown:
+            raise ValueError(
+                "Runtime commands reference destinations not authorized by the "
+                f"action binding: {unknown}."
+            )
+
+        frames: list[RuntimeCommandFrame] = []
+        for frame in commands.frames:
+            endpoint_commands: list[EndpointCommand] = []
+            joint_owners: dict[int, tuple[str, str]] = {}
+            token_owners: dict[str, tuple[str, str]] = {}
+            for command in frame.commands:
+                bound_endpoints = authorized[command.destination_key]
+                target = bound_endpoints[0].target
+                if any(
+                    type(endpoint.target) is not type(target)
+                    for endpoint in bound_endpoints[1:]
+                ):
+                    raise ValueError(
+                        f"Action binding destination {command.destination_key} has "
+                        "incompatible target declarations."
+                    )
+                if type(command.target) is not type(target):
+                    raise TypeError(
+                        f"Runtime command destination {command.destination_key} uses "
+                        f"target type {type(command.target).__name__}, but its bound "
+                        f"endpoint uses {type(target).__name__}."
+                    )
+                if isinstance(target, JointPositionTarget) and command.target != target:
+                    raise ValueError(
+                        f"Runtime command destination {command.destination_key} "
+                        "does not preserve its bound joint-position target."
+                    )
+                joint_ids = {
+                    joint_id
+                    for endpoint in bound_endpoints
+                    for joint_id in endpoint.joint_ids
+                }
+                claim_tokens = {
+                    token
+                    for endpoint in bound_endpoints
+                    for token in endpoint.claim_tokens
+                }
+                overlapping_joints = sorted(joint_ids & joint_owners.keys())
+                overlapping_tokens = sorted(claim_tokens & token_owners.keys())
+                if overlapping_joints or overlapping_tokens:
+                    conflicting_destinations = sorted(
+                        {joint_owners[joint_id] for joint_id in overlapping_joints}
+                        | {token_owners[token] for token in overlapping_tokens}
+                    )
+                    raise ValueError(
+                        f"Runtime command destination {command.destination_key} "
+                        f"conflicts with {conflicting_destinations} on bound joint "
+                        f"IDs {overlapping_joints} or claim tokens "
+                        f"{overlapping_tokens}."
+                    )
+                for joint_id in joint_ids:
+                    joint_owners[joint_id] = command.destination_key
+                for token in claim_tokens:
+                    token_owners[token] = command.destination_key
+                endpoint_commands.append(
+                    EndpointCommand(target=target, payload=command.payload)
+                )
+            frames.append(
+                RuntimeCommandFrame(
+                    commands=tuple(endpoint_commands),
+                    active_mask=frame.active_mask,
+                    env_ids=frame.env_ids,
+                    hold_duration=frame.hold_duration,
+                )
+            )
+        return TimedCommandSequence(frames=tuple(frames), env_ids=commands.env_ids)
+
+    def _joint_command_sequence(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        trajectory: TimedTrajectory,
+        *,
+        active_mask: torch.Tensor,
+    ) -> TimedCommandSequence:
+        """Lower one full-robot planner trajectory to endpoint commands."""
+        targets = tuple(
+            (
+                endpoint,
+                endpoint.require_target(JointPositionTarget),
+            )
+            for endpoint in request.binding.endpoints
+        )
+        if not targets:
+            raise ValueError(
+                "Joint trajectory plans require at least one bound "
+                "JointPositionTarget endpoint."
+            )
+        frames: list[RuntimeCommandFrame] = []
+        for waypoint_index in range(trajectory.waypoint_count):
+            endpoint_commands: list[EndpointCommand] = []
+            for _, target in targets:
+                joint_ids = list(target.joint_ids)
+                velocities = (
+                    None
+                    if trajectory.velocities is None
+                    else trajectory.velocities[:, waypoint_index, joint_ids]
+                )
+                endpoint_commands.append(
+                    EndpointCommand(
+                        target=target,
+                        payload=JointPositionPayload(
+                            positions=trajectory.positions[
+                                :, waypoint_index, joint_ids
+                            ],
+                            velocities=velocities,
+                        ),
+                    )
+                )
+            next_waypoint_index = min(
+                waypoint_index + 1,
+                trajectory.waypoint_count - 1,
+            )
+            # ``dt[:, i]`` is the arrival interval for waypoint ``i``. After
+            # dispatching it, wait for the next arrival interval; the terminal
+            # frame deliberately reuses its own interval as a settling window,
+            # preserving the closed-loop runner's pre-PR2C timing contract.
+            frames.append(
+                RuntimeCommandFrame(
+                    commands=tuple(endpoint_commands),
+                    active_mask=active_mask,
+                    env_ids=trajectory.env_ids,
+                    hold_duration=trajectory.dt[:, next_waypoint_index],
+                )
+            )
+        return TimedCommandSequence(frames=tuple(frames), env_ids=trajectory.env_ids)
+
+    @staticmethod
+    def _build_segments(
+        segment_lengths: Mapping[str, int] | None,
+        *,
+        frame_count: int,
+    ) -> tuple[TrajectorySegment, ...]:
+        """Validate optional named ranges for one command sequence."""
+        if segment_lengths is None:
+            return ()
+        segments: list[TrajectorySegment] = []
+        offset = 0
+        for name, length in segment_lengths.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("Trajectory segment names must be non-empty.")
+            if isinstance(length, bool) or not isinstance(length, int):
+                raise TypeError("Trajectory segment lengths must be integers.")
+            if length < 0:
+                raise ValueError("Trajectory segment lengths must be non-negative.")
+            if length == 0:
+                continue
+            segments.append(
+                TrajectorySegment(name=name, start=offset, stop=offset + length)
+            )
+            offset += length
+        if offset != frame_count:
+            raise ValueError(
+                "Trajectory segment lengths must sum to the command frame count "
+                f"({frame_count}), got {offset}."
+            )
+        return tuple(segments)
 
     def failed_plan(
         self,
@@ -620,23 +841,35 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         Returns:
             Failed action plan with an empty trajectory.
         """
-        return self.build_plan(
+        success = torch.zeros(context.batch_size, dtype=torch.bool, device=self.device)
+        diagnostics = PlannerDiagnostics(
+            backend=self.planning_services.planner_name,
+            messages=(() if message is None else (message,)),
+        )
+        if request.binding.endpoints and all(
+            isinstance(endpoint.target, JointPositionTarget)
+            for endpoint in request.binding.endpoints
+        ):
+            return self.build_plan(
+                request,
+                context,
+                success=success,
+                trajectory=TimedTrajectory.empty(
+                    batch_size=context.batch_size,
+                    robot_dof=context.robot.robot_dof,
+                    device=self.device,
+                    env_ids=context.env_ids,
+                ),
+                replannable=True,
+                diagnostics=diagnostics,
+            )
+        return self.build_command_plan(
             request,
             context,
-            success=torch.zeros(
-                context.batch_size, dtype=torch.bool, device=self.device
-            ),
-            trajectory=TimedTrajectory.empty(
-                batch_size=context.batch_size,
-                robot_dof=context.robot.robot_dof,
-                device=self.device,
-                env_ids=context.env_ids,
-            ),
+            success=success,
+            commands=TimedCommandSequence(frames=(), env_ids=context.env_ids),
             replannable=True,
-            diagnostics=PlannerDiagnostics(
-                backend=self.planning_services.planner_name,
-                messages=(() if message is None else (message,)),
-            ),
+            diagnostics=diagnostics,
         )
 
     @abstractmethod

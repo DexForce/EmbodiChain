@@ -26,7 +26,6 @@ import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBindingRoute,
     ActionOptions,
     ActionPlan,
     AtomicAction,
@@ -50,6 +49,10 @@ from embodichain.lab.sim.atomic_actions import (
     SkillBindingContract,
     SkillEndpointRequirement,
     SkillResourceSlot,
+)
+from embodichain.lab.sim.atomic_actions.bindings import (
+    JointPositionTarget,
+    RuntimeEndpointTarget,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.skills import (
@@ -228,7 +231,6 @@ class _WholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
                     SkillEndpointRequirement(
                         "motion",
                         capabilities=frozenset({"motion.whole_body"}),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                 ),
             ),
@@ -254,7 +256,6 @@ class _NavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
                     SkillEndpointRequirement(
                         "motion",
                         capabilities=frozenset({"motion.base.se2"}),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                 ),
             ),
@@ -274,6 +275,7 @@ class _BaseVelocityEndpoint(ResourceEndpoint):
     """Future non-joint endpoint used to prove the resource API stays generic."""
 
     controller_id: str
+    claim_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +284,41 @@ class _MutableMetadataEndpoint(ResourceEndpoint):
 
     controller_id: str
     aliases: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _BaseVelocityTarget(RuntimeEndpointTarget):
+    """Typed runtime destination for the test mobile controller."""
+
+    controller_id: str
+
+    @property
+    def transport_id(self) -> str:
+        """Return the fake base-velocity transport kind."""
+        return "test.base_velocity"
+
+    @property
+    def target_id(self) -> str:
+        """Return the addressed controller ID."""
+        return self.controller_id
+
+
+@dataclass(frozen=True, slots=True)
+class _MutableRuntimeTarget(RuntimeEndpointTarget):
+    """Target with nested mutable data used to prove snapshot ownership."""
+
+    controller_id: str
+    aliases: list[str]
+
+    @property
+    def transport_id(self) -> str:
+        """Return the fake mutable-target transport kind."""
+        return "test.mutable"
+
+    @property
+    def target_id(self) -> str:
+        """Return the addressed controller ID."""
+        return self.controller_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,9 +351,13 @@ class _BaseVelocityEndpointAdapter(ResourceEndpointAdapter):
         """Resolve one mobile controller to a generic exclusive claim."""
         del engine
         assert isinstance(endpoint, _BaseVelocityEndpoint)
+        claim_id = (
+            endpoint.controller_id if endpoint.claim_id is None else endpoint.claim_id
+        )
         return EndpointResolution(
+            runtime_target=_BaseVelocityTarget(endpoint.controller_id),
             command_profile_key=endpoint.controller_id,
-            claim_tokens=frozenset({f"controller:{endpoint.controller_id}"}),
+            claim_tokens=frozenset({f"controller:{claim_id}"}),
         )
 
 
@@ -325,8 +366,6 @@ class _VelocityNavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     skill_id: ClassVar[str] = "navigate_velocity"
     GoalType: ClassVar[type] = JointPositionGoal
-    manipulator_roles: ClassVar[tuple[str, ...]] = ()
-    end_effector_roles: ClassVar[tuple[str, ...]] = ()
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -336,36 +375,6 @@ class _VelocityNavigateAction(AtomicAction[JointPositionGoal, ActionOptions]):
                         "motion",
                         capabilities=frozenset({"motion.base.velocity"}),
                         required_commands={"stop": _TwistCommand},
-                    ),
-                ),
-            ),
-        )
-    )
-
-    def _plan(
-        self,
-        request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
-        context: PlanningContext,
-    ) -> ActionPlan:
-        raise NotImplementedError
-
-
-class _RoutedVelocityAction(AtomicAction[JointPositionGoal, ActionOptions]):
-    """Test skill requiring a current-core route from a custom endpoint."""
-
-    skill_id: ClassVar[str] = "navigate_velocity_routed"
-    GoalType: ClassVar[type] = JointPositionGoal
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ()
-    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
-        slots=(
-            SkillResourceSlot(
-                "body",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        "motion",
-                        capabilities=frozenset({"motion.base.velocity"}),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                 ),
             ),
@@ -401,23 +410,6 @@ def test_new_skill_subclass_must_redeclare_binding_contract() -> None:
 
     assert base_contract is not None
     assert Derived.descriptor().binding_contract is None
-
-
-def test_descriptor_contract_must_exactly_cover_current_core_roles() -> None:
-    class InvalidRouteAction(AtomicAction[JointPositionGoal, ActionOptions]):
-        skill_id: ClassVar[str] = "invalid_route"
-        GoalType: ClassVar[type] = JointPositionGoal
-        binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract()
-
-        def _plan(
-            self,
-            request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
-            context: PlanningContext,
-        ) -> ActionPlan:
-            raise NotImplementedError
-
-    with pytest.raises(ValueError, match="do not exactly cover"):
-        InvalidRouteAction.descriptor()
 
 
 def test_profile_owns_input_mappings_and_command_tensors() -> None:
@@ -462,6 +454,55 @@ def test_profile_owns_custom_endpoint_nested_payloads() -> None:
     assert isinstance(profile_endpoint, _MutableMetadataEndpoint)
 
     assert profile_endpoint.aliases == ["base"]
+
+
+def test_endpoint_resolution_requires_a_runtime_target() -> None:
+    with pytest.raises(TypeError, match="runtime_target"):
+        EndpointResolution(
+            runtime_target=None,  # type: ignore[arg-type]
+            exclusive=False,
+        )
+
+
+def test_endpoint_resolution_owns_runtime_target_snapshot() -> None:
+    aliases = ["base"]
+    target = _MutableRuntimeTarget("base_controller", aliases)
+
+    resolution = EndpointResolution(runtime_target=target, exclusive=False)
+    aliases.append("source_mutation")
+    target.aliases.append("target_mutation")
+
+    assert resolution.runtime_target is not target
+    assert type(resolution.runtime_target) is _MutableRuntimeTarget
+    assert resolution.runtime_target.aliases == ["base"]
+
+
+@pytest.mark.parametrize("returns_self", [False, True])
+def test_endpoint_resolution_rejects_invalid_target_snapshot(
+    returns_self: bool,
+) -> None:
+    @dataclass(frozen=True, slots=True)
+    class InvalidSnapshotTarget(RuntimeEndpointTarget):
+        controller_id: str
+
+        @property
+        def transport_id(self) -> str:
+            return "test.invalid_snapshot"
+
+        @property
+        def target_id(self) -> str:
+            return self.controller_id
+
+        def snapshot(self) -> RuntimeEndpointTarget:
+            if returns_self:
+                return self
+            return _BaseVelocityTarget(self.controller_id)
+
+    with pytest.raises(TypeError, match="same target type"):
+        EndpointResolution(
+            runtime_target=InvalidSnapshotTarget("base_controller"),
+            exclusive=False,
+        )
 
 
 def test_resource_graph_rejects_unknown_member_and_cycle() -> None:
@@ -568,12 +609,112 @@ def test_custom_endpoint_adapter_resolves_commands_and_physical_claim() -> None:
     )
     resolved = bound.resolve("navigate_velocity")
     endpoint = resolved.resources["body"].endpoints["motion"]
+    binding_endpoint = resolved.action_binding.endpoint("body", "motion")
 
     assert endpoint.adapter_id == "test.base_velocity"
+    assert isinstance(endpoint.runtime_target, _BaseVelocityTarget)
     assert isinstance(endpoint.commands["stop"], _TwistCommand)
     assert resolved.claim.claim_tokens == frozenset({"controller:base_velocity"})
-    assert resolved.action_binding.manipulators == {}
-    assert resolved.action_binding.end_effectors == {}
+    assert resolved.action_binding.owner_id == engine.binding_owner_id
+    assert binding_endpoint.resource_id == "mobile_base"
+    assert binding_endpoint.require_target(_BaseVelocityTarget).controller_id == (
+        "base_velocity"
+    )
+    assert isinstance(binding_endpoint.command("stop"), _TwistCommand)
+
+
+def test_custom_endpoint_joint_claim_survives_action_binding_lowering() -> None:
+    class JointClaimAdapter(_BaseVelocityEndpointAdapter):
+        """Attach robot-joint ownership to a non-joint runtime target."""
+
+        adapter_id: ClassVar[str] = "test.base_velocity_joint_claim"
+
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del engine
+            assert isinstance(endpoint, _BaseVelocityEndpoint)
+            return EndpointResolution(
+                runtime_target=_BaseVelocityTarget(endpoint.controller_id),
+                command_profile_key=endpoint.controller_id,
+                joint_ids=(6, 7),
+            )
+
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={
+                    "motion": _BaseVelocityEndpoint(
+                        "base_velocity",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                    )
+                },
+            )
+        },
+        command_profiles={
+            "base_velocity": ControlPartCommandProfile(
+                commands={"stop": _TwistCommand((0.0, 0.0, 0.0))}
+            )
+        },
+    )
+    engine = _engine(control_profiles={}, load_builtins=False)
+    engine.register(_VelocityNavigateAction())
+    bound = engine.bind_skill_profile(
+        profile,
+        endpoint_adapters={_BaseVelocityEndpoint: JointClaimAdapter()},
+    )
+
+    binding_endpoint = bound.resolve("navigate_velocity").action_binding.endpoint(
+        "body", "motion"
+    )
+
+    assert binding_endpoint.joint_ids == (6, 7)
+
+
+def test_custom_endpoint_joint_claim_must_fit_robot_dof() -> None:
+    class OutOfRangeJointClaimAdapter(_BaseVelocityEndpointAdapter):
+        adapter_id: ClassVar[str] = "test.out_of_range_joint_claim"
+
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del engine
+            assert isinstance(endpoint, _BaseVelocityEndpoint)
+            return EndpointResolution(
+                runtime_target=_BaseVelocityTarget(endpoint.controller_id),
+                joint_ids=(9,),
+            )
+
+    profile = RobotSkillProfile(
+        "mobile",
+        resources={
+            "mobile_base": RobotResource(
+                "mobile_base",
+                endpoints={
+                    "motion": _BaseVelocityEndpoint(
+                        "base_velocity",
+                        capabilities=frozenset({"motion.base.velocity"}),
+                    )
+                },
+            )
+        },
+    )
+
+    with pytest.raises(ProfileValidationError, match="outside robot DOF 9"):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={
+                _BaseVelocityEndpoint: OutOfRangeJointClaimAdapter(),
+            },
+        )
 
 
 def test_engine_constructor_forwards_custom_endpoint_adapters() -> None:
@@ -626,31 +767,67 @@ def test_custom_endpoint_claim_tokens_protect_distinct_leaf_aliases() -> None:
         )
 
 
-def test_missing_adapter_binding_target_filters_skill_with_diagnostic() -> None:
+def test_distinct_physical_leaves_cannot_share_one_runtime_target() -> None:
     profile = RobotSkillProfile(
-        "mobile",
+        "duplicate_runtime_target",
+        resources={
+            "base_a": RobotResource(
+                "base_a",
+                endpoints={
+                    "motion": _BaseVelocityEndpoint("shared", claim_id="base_a")
+                },
+            ),
+            "base_b": RobotResource(
+                "base_b",
+                endpoints={
+                    "motion": _BaseVelocityEndpoint("shared", claim_id="base_b")
+                },
+            ),
+        },
+    )
+
+    with pytest.raises(ProfileValidationError, match="share runtime targets"):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
+        )
+
+
+def test_endpoint_adapter_cannot_omit_runtime_target() -> None:
+    class MissingRuntimeTargetAdapter(ResourceEndpointAdapter):
+        adapter_id: ClassVar[str] = "test.missing_runtime_target"
+        endpoint_type: ClassVar[type[ResourceEndpoint]] = _BaseVelocityEndpoint
+
+        def resolve(
+            self,
+            endpoint: ResourceEndpoint,
+            *,
+            engine: AtomicActionEngine,
+        ) -> EndpointResolution:
+            del endpoint, engine
+            return EndpointResolution(
+                runtime_target=None,  # type: ignore[arg-type]
+                exclusive=False,
+            )
+
+    profile = RobotSkillProfile(
+        "missing_runtime_target",
         resources={
             "mobile_base": RobotResource(
                 "mobile_base",
-                endpoints={
-                    "motion": _BaseVelocityEndpoint(
-                        "base_velocity",
-                        capabilities=frozenset({"motion.base.velocity"}),
-                    )
-                },
+                endpoints={"motion": _BaseVelocityEndpoint("base_velocity")},
             )
         },
     )
-    engine = _engine(control_profiles={}, load_builtins=False)
-    engine.register(_RoutedVelocityAction())
-    bound = profile.bind(
-        engine,
-        endpoint_adapters={_BaseVelocityEndpoint: _BaseVelocityEndpointAdapter()},
-    )
 
-    assert "navigate_velocity_routed" not in bound.skills
-    with pytest.raises(UnsupportedSkillError, match="cannot lower.*manipulator"):
-        bound.resolve("navigate_velocity_routed")
+    with pytest.raises(
+        ProfileValidationError,
+        match="test.missing_runtime_target.*mobile_base.*motion.*runtime_target",
+    ):
+        profile.bind(
+            _engine(control_profiles={}, load_builtins=False),
+            endpoint_adapters={_BaseVelocityEndpoint: MissingRuntimeTargetAdapter()},
+        )
 
 
 def test_exclusive_custom_endpoint_requires_a_physical_claim() -> None:
@@ -665,7 +842,9 @@ def test_exclusive_custom_endpoint_requires_a_physical_claim() -> None:
             engine: AtomicActionEngine,
         ) -> EndpointResolution:
             del endpoint, engine
-            return EndpointResolution()
+            return EndpointResolution(
+                runtime_target=_BaseVelocityTarget("base_velocity")
+            )
 
     profile = RobotSkillProfile(
         "mobile",
@@ -699,7 +878,10 @@ def test_nonexclusive_custom_endpoint_may_omit_a_physical_claim() -> None:
             engine: AtomicActionEngine,
         ) -> EndpointResolution:
             del endpoint, engine
-            return EndpointResolution(exclusive=False)
+            return EndpointResolution(
+                runtime_target=_BaseVelocityTarget("virtual"),
+                exclusive=False,
+            )
 
     profile = RobotSkillProfile(
         "virtual",
@@ -728,7 +910,10 @@ def test_endpoint_adapter_registration_validates_declared_type() -> None:
             engine: AtomicActionEngine,
         ) -> EndpointResolution:
             del endpoint, engine
-            return EndpointResolution(exclusive=False)
+            return EndpointResolution(
+                runtime_target=_BaseVelocityTarget("base_velocity"),
+                exclusive=False,
+            )
 
     profile = RobotSkillProfile(
         "mobile",
@@ -912,13 +1097,21 @@ def test_bind_rejects_unverified_standard_solver_capability() -> None:
 
 def test_unique_capability_binding_lowers_to_exact_action_binding() -> None:
     profile = _profile(resources=_resources(include_right=False))
-    bound = profile.bind(_engine(control_profiles=_command_profiles()))
+    engine = _engine(control_profiles=_command_profiles())
+    bound = profile.bind(engine)
 
     resolved = bound.resolve("pick_up")
+    motion = resolved.action_binding.endpoint("primary", "motion")
+    grasp = resolved.action_binding.endpoint("primary", "grasp")
 
     assert resolved.resource_ids == {"primary": "left_actor"}
-    assert resolved.action_binding.manipulators == {"primary": "left_arm"}
-    assert resolved.action_binding.end_effectors == {"primary": "left_hand"}
+    assert resolved.action_binding.owner_id == engine.binding_owner_id
+    assert resolved.action_binding.endpoint_keys == (
+        ("primary", "motion"),
+        ("primary", "grasp"),
+    )
+    assert motion.require_target(JointPositionTarget).control_part == "left_arm"
+    assert grasp.require_target(JointPositionTarget).control_part == "left_hand"
     assert resolved.claim.leaf_resource_ids == frozenset({"left_arm", "left_hand"})
     assert resolved.claim.joint_ids == (0, 1, 2)
 
@@ -1011,7 +1204,6 @@ def test_coupled_endpoint_views_are_allowed_without_disjoint_constraint() -> Non
     class CoupledWholeBodyAction(AtomicAction[JointPositionGoal, ActionOptions]):
         skill_id: ClassVar[str] = "coupled_whole_body"
         GoalType: ClassVar[type] = JointPositionGoal
-        manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
         binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
             slots=(
                 SkillResourceSlot(
@@ -1020,7 +1212,6 @@ def test_coupled_endpoint_views_are_allowed_without_disjoint_constraint() -> Non
                         SkillEndpointRequirement(
                             "motion",
                             capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
-                            route=ActionBindingRoute("manipulator", "primary"),
                         ),
                         SkillEndpointRequirement(
                             "posture",
@@ -1091,12 +1282,22 @@ def test_generic_profile_supports_base_and_whole_body_without_arm_tool_fields() 
 
     assert set(bound.skills) == {"navigate", "whole_body_reach"}
     assert whole_body.resource_ids == {"body": "whole_body"}
-    assert whole_body.action_binding.manipulators == {"primary": "full_body"}
+    assert (
+        whole_body.action_binding.endpoint("body", "motion")
+        .require_target(JointPositionTarget)
+        .control_part
+        == "full_body"
+    )
     assert whole_body.claim.leaf_resource_ids == frozenset(
         {"base", "torso", "left_arm", "right_arm"}
     )
     assert navigation.resource_ids == {"body": "base"}
-    assert navigation.action_binding.manipulators == {"primary": "base"}
+    assert (
+        navigation.action_binding.endpoint("body", "motion")
+        .require_target(JointPositionTarget)
+        .control_part
+        == "base"
+    )
 
 
 def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
@@ -1190,7 +1391,6 @@ def test_bound_profile_rejects_stale_engine_skill_catalog() -> None:
                         SkillEndpointRequirement(
                             "motion",
                             capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
-                            route=ActionBindingRoute("manipulator", "primary"),
                         ),
                     ),
                 ),

@@ -26,14 +26,13 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
-from ..bindings import ResolvedControlPart
+from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction, ObjectSemantics, _same_object_identity
 from ..effects import StateDelta
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -128,10 +127,10 @@ class HandOverOptions(ActionOptions):
 class _HandOverResources:
     """Invocation-bound control parts and compatible hand commands."""
 
-    transfer_arm: ResolvedControlPart
-    receive_arm: ResolvedControlPart
-    transfer_hand: ResolvedControlPart
-    receive_hand: ResolvedControlPart
+    transfer_arm: JointPositionTarget
+    receive_arm: JointPositionTarget
+    transfer_hand: JointPositionTarget
+    receive_hand: JointPositionTarget
     transfer_hand_open_qpos: torch.Tensor
     transfer_hand_close_qpos: torch.Tensor
     receive_hand_open_qpos: torch.Tensor
@@ -150,8 +149,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     skill_id: ClassVar[str] = "hand_over"
     GoalType: ClassVar[type] = GraspGoal
     OptionsType: ClassVar[type] = HandOverOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -165,7 +162,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                                 FORWARD_KINEMATICS_CAPABILITY,
                             }
                         ),
-                        route=ActionBindingRoute("manipulator", "source"),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
@@ -174,7 +170,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                             OPEN_COMMAND: JointPositionCommand,
                             GRASP_COMMAND: JointPositionCommand,
                         },
-                        route=ActionBindingRoute("end_effector", "source"),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -185,7 +180,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                     SkillEndpointRequirement(
                         endpoint_id="motion",
                         capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "destination"),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
@@ -194,7 +188,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                             OPEN_COMMAND: JointPositionCommand,
                             GRASP_COMMAND: JointPositionCommand,
                         },
-                        route=ActionBindingRoute("end_effector", "destination"),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -218,16 +211,20 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     ) -> _HandOverResources:
         """Resolve source/destination roles from robot control parts."""
         binding = request.binding
-        transfer_arm = binding.manipulator("source")
-        receive_arm = binding.manipulator("destination")
-        transfer_hand = binding.end_effector("source")
-        receive_hand = binding.end_effector("destination")
-        if transfer_arm.name == receive_arm.name:
+        transfer_motion = binding.endpoint("source", "motion")
+        receive_motion = binding.endpoint("destination", "motion")
+        transfer_grasp = binding.endpoint("source", "grasp")
+        receive_grasp = binding.endpoint("destination", "grasp")
+        transfer_arm = transfer_motion.require_target(JointPositionTarget)
+        receive_arm = receive_motion.require_target(JointPositionTarget)
+        transfer_hand = transfer_grasp.require_target(JointPositionTarget)
+        receive_hand = receive_grasp.require_target(JointPositionTarget)
+        if transfer_arm.control_part == receive_arm.control_part:
             raise ValueError(
                 "HandOver source and destination must use different manipulator "
                 "control parts."
             )
-        if transfer_hand.name == receive_hand.name:
+        if transfer_hand.control_part == receive_hand.control_part:
             raise ValueError(
                 "HandOver source and destination must use different end-effector "
                 "control parts."
@@ -237,25 +234,25 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_arm=receive_arm,
             transfer_hand=transfer_hand,
             receive_hand=receive_hand,
-            transfer_hand_open_qpos=transfer_hand.joint_positions(
+            transfer_hand_open_qpos=transfer_grasp.joint_positions(
                 OPEN_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            transfer_hand_close_qpos=transfer_hand.joint_positions(
+            transfer_hand_close_qpos=transfer_grasp.joint_positions(
                 GRASP_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            receive_hand_open_qpos=receive_hand.joint_positions(
+            receive_hand_open_qpos=receive_grasp.joint_positions(
                 OPEN_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            receive_hand_close_qpos=receive_hand.joint_positions(
+            receive_hand_close_qpos=receive_grasp.joint_positions(
                 GRASP_COMMAND,
                 num_envs=self.num_envs,
                 device=self.device,
@@ -285,14 +282,15 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 "Coordinated dual-arm planning is not supported by the cuRobo backend."
             )
         state = context
+        transfer_control_part = resources.transfer_arm.control_part
         transfer_held_object = self._resolve_transfer_held_object(
-            state, resources.transfer_arm.name
+            state, transfer_control_part
         )
         self._validate_requested_object(
             target.semantics, transfer_held_object.semantics
         )
         semantics = transfer_held_object.semantics
-        eligible = context.task.exclusive_held_object_mask(resources.transfer_arm.name)
+        eligible = context.task.exclusive_held_object_mask(transfer_control_part)
         if not eligible.any():
             logger.log_warning("HandOver requires an exclusively held source object.")
             return self.failed_plan(
@@ -327,7 +325,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         # attachment and the transferring arm's current measured pose.
         transfer_current_eef = self.robot.compute_fk(
             qpos=transfer_start_qpos,
-            name=resources.transfer_arm.name,
+            name=resources.transfer_arm.control_part,
             to_matrix=True,
         )
         current_object_pose = torch.bmm(
@@ -383,7 +381,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
 
         segment_success, transfer_move_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.transfer_arm.name,
+            resources.transfer_arm.control_part,
             transfer_start_qpos,
             transfer_middle_eef.unsqueeze(1),
             segments["transfer"],
@@ -401,7 +399,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
 
         segment_success, receive_approach_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.receive_arm.name,
+            resources.receive_arm.control_part,
             receive_start_qpos,
             torch.stack([receive_pre_grasp_eef, receive_grasp_xpos], dim=1),
             segments["approach"],
@@ -424,7 +422,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
 
         segment_success, transfer_retreat_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.transfer_arm.name,
+            resources.transfer_arm.control_part,
             transfer_hold_qpos,
             transfer_retreat_eef.unsqueeze(1),
             segments["deliver"],
@@ -444,7 +442,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
 
         segment_success, receive_deliver_traj = plan_named_arm_trajectory(
             self.motion_generator,
-            resources.receive_arm.name,
+            resources.receive_arm.control_part,
             receive_grasp_qpos,
             receive_final_eef.unsqueeze(1),
             segments["deliver"],
@@ -580,8 +578,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.transfer_arm.name: None,
-                    resources.receive_arm.name: held_object,
+                    resources.transfer_arm.control_part: None,
+                    resources.receive_arm.control_part: held_object,
                 }
             ),
             segment_lengths=segment_lengths,

@@ -81,7 +81,6 @@ def _ensure_runtime_imports() -> None:
         import torch as torch_module
         from embodichain.lab.sim import SimulationManager as simulation_manager_cls
         from embodichain.lab.sim.atomic_actions import (
-            ActionBinding as action_binding_cls,
             ActionInvocation as action_invocation_cls,
             AtomicActionEngine as atomic_action_engine_cls,
             ControlPartCommandProfile as control_part_command_profile_cls,
@@ -125,7 +124,6 @@ def _ensure_runtime_imports() -> None:
             "SimulationManager": simulation_manager_cls,
             "AtomicActionEngine": atomic_action_engine_cls,
             "ControlPartCommandProfile": control_part_command_profile_cls,
-            "ActionBinding": action_binding_cls,
             "ActionInvocation": action_invocation_cls,
             "EndEffectorPoseGoal": end_effector_pose_target_cls,
             "MotionPolicy": motion_policy_cls,
@@ -562,27 +560,31 @@ def _timed_atomic_run(
     press_target: torch.Tensor,
 ) -> tuple[float, dict[str, float], float, bool, torch.Tensor]:
     """Run a timed atomic-action sequence and return timing/memory/results."""
+    move_binding = atomic_engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": "arm"}},
+    )
+    press_binding = atomic_engine.bind_control_parts(
+        "press",
+        {"primary": {"motion": "arm", "grasp": "hand"}},
+    )
     _reset_peak_gpu_memory()
     mem_before = _memory_snapshot()
     _sync_cuda()
 
     start = time.perf_counter()
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
     result = atomic_engine.compile(
         (
             ActionInvocation(
                 "move_end_effector",
                 EndEffectorPoseGoal(xpos=move_target),
-                binding,
+                move_binding,
                 MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
             ),
             ActionInvocation(
                 "press",
                 PressGoal(xpos=press_target),
-                binding,
+                press_binding,
                 MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,

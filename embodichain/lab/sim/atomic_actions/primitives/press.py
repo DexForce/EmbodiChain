@@ -24,13 +24,13 @@ from typing import ClassVar
 import torch
 
 from ._helpers import arm_qpos_from_state
+from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     DisjointSlotEndpoints,
     GRASP_CAPABILITY,
@@ -77,8 +77,6 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     skill_id: ClassVar[str] = "press"
     GoalType: ClassVar[type] = PressGoal
     OptionsType: ClassVar[type] = PressOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -92,13 +90,11 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                                 JOINT_POSITION_CAPABILITY,
                             }
                         ),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
                         capabilities=frozenset({GRASP_CAPABILITY}),
                         required_commands={GRASP_COMMAND: JointPositionCommand},
-                        route=ActionBindingRoute("end_effector", "primary"),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -115,12 +111,15 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         target = request.goal
         options = request.skill_options
         binding = request.binding
-        manipulator = binding.manipulator()
-        end_effector = binding.end_effector()
-        control_part = manipulator.name
-        arm_joint_ids = list(manipulator.joint_ids)
-        hand_joint_ids = list(end_effector.joint_ids)
-        hand_close_qpos = end_effector.joint_positions(
+        motion_target = binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        grasp = binding.endpoint("primary", "grasp")
+        grasp_target = grasp.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
+        hand_close_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=self.num_envs,
             device=self.device,

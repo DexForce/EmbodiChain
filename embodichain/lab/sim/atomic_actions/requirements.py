@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, Mapping
+from typing import Mapping
 
 from .control import ControlCommand
 
@@ -69,34 +69,6 @@ def _normalize_identifiers(
     return normalized
 
 
-@dataclass(frozen=True, slots=True)
-class ActionBindingRoute:
-    """Lower one generic resource endpoint into the current action core.
-
-    This is deliberately a transition adapter. Robot resources and skill-local
-    slots remain generic; only this route names the two maps currently exposed
-    by :class:`~embodichain.lab.sim.atomic_actions.ActionBinding`.
-    """
-
-    target: Literal["manipulator", "end_effector"]
-    """Current core binding namespace."""
-
-    role: str
-    """Action-local role within the selected namespace."""
-
-    def __post_init__(self) -> None:
-        if self.target not in ("manipulator", "end_effector"):
-            raise ValueError(
-                "ActionBindingRoute.target must be 'manipulator' or 'end_effector'."
-            )
-        _validate_identifier(self.role, field_name="ActionBindingRoute.role")
-
-    @property
-    def key(self) -> tuple[str, str]:
-        """Return the normalized core target key."""
-        return self.target, self.role
-
-
 def _normalize_required_commands(
     values: Mapping[str, type[ControlCommand]],
 ) -> Mapping[str, type[ControlCommand]]:
@@ -129,9 +101,6 @@ class SkillEndpointRequirement:
     required_commands: Mapping[str, type[ControlCommand]] = field(default_factory=dict)
     """Semantic command names and their required typed command contracts."""
 
-    route: ActionBindingRoute | None = None
-    """Optional lowering route into the current atomic-action core."""
-
     def __post_init__(self) -> None:
         _validate_identifier(
             self.endpoint_id,
@@ -150,8 +119,6 @@ class SkillEndpointRequirement:
             "required_commands",
             _normalize_required_commands(self.required_commands),
         )
-        if self.route is not None and not isinstance(self.route, ActionBindingRoute):
-            raise TypeError("route must be an ActionBindingRoute or None.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,14 +291,6 @@ class SkillBindingContract:
                     f"Resource constraint references unknown slots {unknown}; "
                     f"known slots are {sorted(known_slots)}."
                 )
-        routes = [
-            endpoint.route.key
-            for slot in slots
-            for endpoint in slot.endpoints
-            if endpoint.route is not None
-        ]
-        if len(set(routes)) != len(routes):
-            raise ValueError("Action binding routes must target unique core roles.")
         object.__setattr__(self, "slots", slots)
         object.__setattr__(self, "constraints", constraints)
 
@@ -340,32 +299,8 @@ class SkillBindingContract:
         """Return required slot identifiers in declaration order."""
         return tuple(slot.slot_id for slot in self.slots)
 
-    def validate_action_roles(
-        self,
-        *,
-        manipulator_roles: tuple[str, ...],
-        end_effector_roles: tuple[str, ...],
-    ) -> None:
-        """Require lowering routes to cover the current core roles exactly."""
-        expected = {("manipulator", role) for role in manipulator_roles}
-        expected.update(("end_effector", role) for role in end_effector_roles)
-        actual = {
-            endpoint.route.key
-            for slot in self.slots
-            for endpoint in slot.endpoints
-            if endpoint.route is not None
-        }
-        if actual != expected:
-            missing = sorted(expected - actual)
-            extra = sorted(actual - expected)
-            raise ValueError(
-                "Skill binding routes do not exactly cover the action roles: "
-                f"missing={missing}, extra={extra}."
-            )
-
 
 __all__ = [
-    "ActionBindingRoute",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
     "DisjointResourceSlots",
