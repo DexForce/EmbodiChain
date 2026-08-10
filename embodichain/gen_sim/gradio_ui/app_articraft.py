@@ -24,17 +24,18 @@ mutable run data is kept under ``ARTICRAFT_OUTPUT_ROOT``.
 from __future__ import annotations
 
 import atexit
+import html
+import json
 import os
 import queue
-import json
 import shutil
-import html
 import socket
 import subprocess
 import sys
 import threading
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,6 +78,29 @@ __all__ = [
 _VISER_START_TIMEOUT_SECONDS = 15.0
 _ARTICRAFT_PYTHON_VERSION = "3.12"
 _CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
+_INTERACTION_ANNOTATION_TIMEOUT_SECONDS = 600
+_ROTATE_JOINT_TYPES = frozenset({"revolute", "continuous"})
+_TRANSLATE_JOINT_TYPES = frozenset({"prismatic"})
+_INTERACTION_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["interactions"],
+    "properties": {
+        "interactions": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["link", "visual"],
+                "properties": {
+                    "link": {"type": "string", "minLength": 1},
+                    "visual": {"type": "string", "minLength": 1},
+                },
+            },
+        }
+    },
+}
 _articraft_environment_lock = threading.Lock()
 _articraft_runs = SessionProcessRegistry()
 _ARTICRAFT_IDLE_PREVIEW = (
@@ -467,24 +491,40 @@ def _active_model_path(record_dir: Path) -> Path:
     return candidates[0]
 
 
-def _make_result_bundle(record_id: str) -> tuple[Path, Path]:
-    materialized = (
+def _materialized_record_dir(record_id: str) -> Path:
+    """Return one record's immutable Articraft materialization directory."""
+    return (
         ARTICRAFT_OUTPUT_ROOT / "data" / "cache" / "record_materialization" / record_id
     )
+
+
+def _prepare_result_bundle(record_id: str) -> Path:
+    """Copy a materialized record into a mutable, record-scoped export directory."""
+    materialized = _materialized_record_dir(record_id)
     if not (materialized / "model.urdf").is_file():
         raise FileNotFoundError(
             "Articraft completed without a compiled model.urdf output."
         )
     exports_root = ARTICRAFT_OUTPUT_ROOT / "exports"
     exports_root.mkdir(parents=True, exist_ok=True)
+    result_dir = exports_root / record_id
+    if result_dir.exists():
+        raise FileExistsError(f"Articraft export already exists: {result_dir}")
+    shutil.copytree(materialized, result_dir)
+    shutil.copy2(result_dir / "model.urdf", result_dir / "model.raw.urdf")
+    return result_dir
+
+
+def _archive_result_bundle(record_id: str, result_dir: Path) -> Path:
+    """Archive one fully post-processed Articraft export directory."""
     archive = Path(
         shutil.make_archive(
-            (exports_root / record_id).as_posix(),
+            (result_dir.parent / record_id).as_posix(),
             "zip",
-            root_dir=materialized,
+            root_dir=result_dir,
         )
     )
-    return materialized, archive
+    return archive
 
 
 def _articraft_viser_iframe(record_id: str, port: int) -> str:
@@ -667,6 +707,258 @@ def _compile_report_failures(record_id: str) -> list[str]:
                 )
             )
     return failures
+
+
+def _build_interaction_annotation_prompt(*, prompt: str) -> str:
+    """Build the constrained Codex prompt used for interaction post-processing."""
+    return f"""You are performing semantic post-processing on one completed articulated URDF.
+
+Original user request:
+{prompt}
+
+Read model.urdf in the current directory and inspect its full link, visual, collision, and joint
+structure. You may inspect referenced local mesh files when names and primitive geometry are not
+enough. Do not modify any file.
+
+Identify the named visual geometry that a robot should physically contact to operate each
+user-facing articulated mechanism. Select the actual handle, grip, knob cap, button cap, lever, or
+other contact surface. Do not select frames, windows, decorative panels, hinge barrels, mounting
+blocks, hidden shafts, plungers, or an entire link merely because that link moves.
+
+Return only strict JSON in exactly this shape:
+{{"interactions":[{{"link":"child_link_name","visual":"visual_name"}}]}}
+
+Use names exactly as they appear in model.urdf. Include multiple entries only when there are
+multiple legitimate contact surfaces. Do not return a motion type: the application derives
+rotate or translate deterministically from the selected link's parent joint. Do not include
+Markdown fences, commentary, confidence values, or any additional keys."""
+
+
+def _parse_interaction_targets(response: str) -> list[tuple[str, str]]:
+    """Parse and validate Codex's strict interaction-target response."""
+    raw = response.strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Codex interaction response is not valid JSON.") from exc
+    if not isinstance(payload, dict) or set(payload) != {"interactions"}:
+        raise ValueError(
+            "Codex interaction response must contain only an 'interactions' array."
+        )
+    interactions = payload["interactions"]
+    if not isinstance(interactions, list):
+        raise ValueError("Codex interaction response 'interactions' must be an array.")
+    if len(interactions) > 256:
+        raise ValueError("Codex interaction response contains too many targets.")
+
+    targets: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for index, interaction in enumerate(interactions):
+        if not isinstance(interaction, dict) or set(interaction) != {"link", "visual"}:
+            raise ValueError(
+                f"Interaction target {index} must contain only 'link' and 'visual'."
+            )
+        link = interaction["link"]
+        visual = interaction["visual"]
+        if not isinstance(link, str) or not link.strip():
+            raise ValueError(f"Interaction target {index} has an invalid link name.")
+        if not isinstance(visual, str) or not visual.strip():
+            raise ValueError(f"Interaction target {index} has an invalid visual name.")
+        target = (link.strip(), visual.strip())
+        if target in seen:
+            raise ValueError(
+                f"Codex interaction response repeats target {target[0]!r}/{target[1]!r}."
+            )
+        seen.add(target)
+        targets.append(target)
+    return targets
+
+
+def _interaction_type_for_joint(joint_type: str) -> str:
+    """Map one URDF joint type to the supported interaction motion vocabulary."""
+    normalized = joint_type.strip().lower()
+    if normalized in _ROTATE_JOINT_TYPES:
+        return "rotate"
+    if normalized in _TRANSLATE_JOINT_TYPES:
+        return "translate"
+    raise ValueError(
+        f"Joint type {joint_type!r} cannot drive a rotate/translate interaction."
+    )
+
+
+def _inject_interaction_annotations(
+    urdf_path: Path,
+    *,
+    targets: list[tuple[str, str]],
+    metadata_path: Path,
+) -> list[dict[str, str]]:
+    """Validate targets, inject visual tags, and persist normalized metadata."""
+    try:
+        tree = ET.parse(urdf_path)
+    except (OSError, ET.ParseError) as exc:
+        raise ValueError(f"Could not parse generated URDF: {urdf_path}") from exc
+    root = tree.getroot()
+    if root.tag != "robot":
+        raise ValueError("Generated URDF root element must be <robot>.")
+
+    links: dict[str, ET.Element] = {}
+    for link_element in root.findall("link"):
+        link_name = (link_element.get("name") or "").strip()
+        if not link_name:
+            raise ValueError("Generated URDF contains a link without a name.")
+        if link_name in links:
+            raise ValueError(f"Generated URDF repeats link name {link_name!r}.")
+        links[link_name] = link_element
+
+    parent_joints: dict[str, tuple[str, str]] = {}
+    for joint_element in root.findall("joint"):
+        joint_name = (joint_element.get("name") or "").strip()
+        joint_type = (joint_element.get("type") or "").strip()
+        child_element = joint_element.find("child")
+        child_name = (
+            (child_element.get("link") or "").strip()
+            if child_element is not None
+            else ""
+        )
+        if not joint_name or not joint_type or not child_name:
+            raise ValueError("Generated URDF contains an incomplete joint declaration.")
+        if child_name in parent_joints:
+            raise ValueError(
+                f"Generated URDF gives link {child_name!r} multiple parent joints."
+            )
+        parent_joints[child_name] = (joint_name, joint_type)
+
+    for link_element in links.values():
+        for visual_element in link_element.findall("visual"):
+            for existing in visual_element.findall("interact"):
+                visual_element.remove(existing)
+
+    normalized: list[dict[str, str]] = []
+    for link_name, visual_name in targets:
+        link_element = links.get(link_name)
+        if link_element is None:
+            raise ValueError(
+                f"Interaction target references unknown link {link_name!r}."
+            )
+        matches = [
+            visual_element
+            for visual_element in link_element.findall("visual")
+            if (visual_element.get("name") or "").strip() == visual_name
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Interaction target {link_name!r}/{visual_name!r} must match exactly one visual."
+            )
+
+        collision_matches = [
+            collision_element
+            for collision_element in link_element.findall("collision")
+            if (collision_element.get("name") or "").strip() == visual_name
+        ]
+        if len(collision_matches) != 1:
+            raise ValueError(
+                f"Interaction target {link_name!r}/{visual_name!r} must have one same-named collision."
+            )
+
+        parent_joint = parent_joints.get(link_name)
+        if parent_joint is None:
+            raise ValueError(
+                f"Interaction target link {link_name!r} has no parent articulation."
+            )
+        joint_name, joint_type = parent_joint
+        interaction_type = _interaction_type_for_joint(joint_type)
+        ET.SubElement(matches[0], "interact", {"type": interaction_type})
+        normalized.append(
+            {
+                "link": link_name,
+                "visual": visual_name,
+                "joint": joint_name,
+                "type": interaction_type,
+            }
+        )
+
+    ET.indent(tree, space="  ")
+    temporary_path = urdf_path.with_name(f".{urdf_path.name}.interaction.tmp")
+    tree.write(temporary_path, encoding="unicode", xml_declaration=False)
+    os.replace(temporary_path, urdf_path)
+    metadata = {"schema_version": 1, "interactions": normalized}
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return normalized
+
+
+def _run_interaction_annotation_codex(
+    *,
+    codex: str,
+    prompt: str,
+    result_dir: Path,
+    run_root: Path,
+    reference_image: Path | None,
+    session_id: str,
+    token: str,
+) -> subprocess.CompletedProcess[str] | None:
+    """Run the isolated Codex semantic pass with reset-aware process ownership."""
+    response_path = run_root / "interaction_codex_response.json"
+    schema_path = run_root / "interaction_response_schema.json"
+    schema_path.write_text(
+        json.dumps(_INTERACTION_RESPONSE_SCHEMA, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    command = [
+        codex,
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "-c",
+        'web_search="disabled"',
+        "--color",
+        "never",
+        "-C",
+        str(result_dir),
+        "--output-schema",
+        str(schema_path),
+        "--output-last-message",
+        str(response_path),
+    ]
+    if reference_image:
+        command.extend(["--image", str(reference_image)])
+    command.append(_build_interaction_annotation_prompt(prompt=prompt))
+
+    process = register_managed_process(
+        subprocess.Popen(
+            command,
+            cwd=result_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+            env=build_codex_env(),
+        )
+    )
+    if not _articraft_runs.attach(session_id, token, process):
+        terminate_process_group(process)
+        return None
+    try:
+        stdout, _ = process.communicate(timeout=_INTERACTION_ANNOTATION_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        raise
+    finally:
+        _articraft_runs.finish(session_id, token, process)
+    if not _articraft_runs.is_active(session_id, token):
+        return None
+    if process.returncode == 0 and not response_path.is_file():
+        raise RuntimeError("Codex completed without an interaction JSON response.")
+    return subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        redact_sensitive_text(stdout or ""),
+    )
 
 
 def _build_codex_prompt(
@@ -1046,15 +1338,72 @@ def generate_articraft_asset(
     if not _articraft_runs.is_active(session_id, token):
         return
     try:
-        materialized, archive = _make_result_bundle(record_id)
+        result_dir = _prepare_result_bundle(record_id)
+    except Exception as exc:
+        yield None, record_dir.as_posix(), f"**Codex finished, but result staging failed:** {exc}", "\n".join(
+            log_lines[-300:]
+        ), ""
+        return
+
+    log_lines.append("$ codex exec … <interaction annotation prompt>")
+    yield (
+        None,
+        record_dir.as_posix(),
+        "**Articraft is complete. Codex is identifying robot interaction surfaces…**",
+        "\n".join(log_lines[-300:]),
+        "",
+    )
+    try:
+        annotated = _run_interaction_annotation_codex(
+            codex=codex,
+            prompt=prompt,
+            result_dir=result_dir,
+            run_root=run_root,
+            reference_image=reference_image,
+            session_id=session_id,
+            token=token,
+        )
+        if annotated is None:
+            return
+        log_lines.append(_short_output(annotated, limit=5000))
+    except Exception as exc:
+        yield None, record_dir.as_posix(), f"**Interaction annotation could not run:** {exc}", "\n".join(
+            log_lines[-300:]
+        ), ""
+        return
+    if annotated.returncode:
+        yield (
+            None,
+            record_dir.as_posix(),
+            "**Codex interaction analysis failed; no output bundle was published.**",
+            "\n".join(log_lines[-300:]),
+            "",
+        )
+        return
+
+    try:
+        interaction_response_path = run_root / "interaction_codex_response.json"
+        targets = _parse_interaction_targets(
+            interaction_response_path.read_text(encoding="utf-8")
+        )
+        interactions = _inject_interaction_annotations(
+            result_dir / "model.urdf",
+            targets=targets,
+            metadata_path=result_dir / "interactions.json",
+        )
+        log_lines.append(
+            f"Validated and injected {len(interactions)} interaction annotation(s)."
+        )
+        archive = _archive_result_bundle(record_id, result_dir)
         status = (
-            "**Articraft generation completed and passed the Codex validation workflow.**\n\n"
-            f"- Record: `{record_dir}`\n- Compiled output: `{materialized}`\n- Downloadable bundle: `{archive}`"
+            "**Articraft generation and interaction annotation completed.**\n\n"
+            f"- Record: `{record_dir}`\n- Annotated output: `{result_dir}`"
+            f"\n- Interaction targets: `{len(interactions)}`\n- Downloadable bundle: `{archive}`"
         )
         try:
             preview_html = _start_articraft_viser_preview(
                 session_id,
-                materialized,
+                result_dir,
                 record_id,
             )
             status += "\n- Interactive Viser preview: ready"
@@ -1066,7 +1415,7 @@ def generate_articraft_asset(
             log_lines[-300:]
         ), preview_html
     except Exception as exc:
-        yield None, record_dir.as_posix(), f"**Codex finished, but result packaging failed:** {exc}", "\n".join(
+        yield None, record_dir.as_posix(), f"**Interaction annotation validation or packaging failed:** {exc}", "\n".join(
             log_lines[-300:]
         ), ""
 

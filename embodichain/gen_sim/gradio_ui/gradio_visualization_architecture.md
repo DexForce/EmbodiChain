@@ -121,8 +121,14 @@ description + optional image
       └─ 旧版 CLI 无 check 时：compile --validate --strict-geom-qc + compile_report
   → Articraft external finalize
   → materialized model.urdf + meshes
+  → 复制到 exports/<record-id>/，保留 model.raw.urdf
+  → Codex 读取完整 URDF 并选择真实操作面（link + visual）
+  → 校验后按 joint 类型注入 <interact type="rotate|translate"/>
+  → interactions.json
   → exports/<record-id>.zip + Viser articulation preview
 ```
+
+交互后处理不修改 Articraft materialization cache。Codex 只选择应当接触的 visual；最终运动类型由程序根据 child link 的父 joint 确定：`revolute`/`continuous` 映射为 `rotate`，`prismatic` 映射为 `translate`。所选 visual 必须有同名 collision，否则不发布下载包。
 
 产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 按 Gradio 会话管理预览进程：首先尝试 `ARTICRAFT_VISER_PORT`，若已被占用则分配其他可用端口，不会查找或发送信号给占用端口的外部进程。
 
