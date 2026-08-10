@@ -84,6 +84,11 @@ additional application execution entry point. Atomic-action authors implement
 the protected ``_plan()`` hook instead. Register custom action instances with
 ``engine.register()`` before using the same public planning entry points.
 
+This extension contract is intentionally strict: a subclass that defines
+``plan()`` raises ``TypeError`` at class definition. There is no legacy adapter;
+custom actions must rename that implementation to ``_plan()`` so the
+framework-owned collision-scene preparation cannot be bypassed.
+
 Runnable examples
 -----------------
 
@@ -360,10 +365,12 @@ The session replans from its latest context and emits an
 ``invocation_revised`` event. ``skill_id`` and ``invocation_id`` must still
 identify the active logical call.
 
-Only entities referenced through ``SceneEntityPose`` become automatic
-scene-motion dependencies. A skill may query a simulation entity's live pose
-when it plans, but that query alone does not cause an executing session to
-replan when the entity moves.
+Entities referenced through ``SceneEntityPose`` become automatic scene-motion
+dependencies. Object-centric skills may additionally declare an explicit
+``ObjectSemantics.entity_id`` when they ground an object pose from the same
+scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
+legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
+create a scene dependency.
 
 Task-state effects
 ------------------
@@ -396,7 +403,8 @@ Define an action-owned frozen goal dataclass. Then define typed runtime options
 when needed, implement the protected
 ``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
 override the inherited public ``plan()`` method because it binds the latest
-collision scene first.
+collision scene first. Legacy custom actions that implemented ``plan()`` must
+rename it to ``_plan()``; defining ``plan()`` is rejected immediately.
 
 Return scalar or per-environment planner success through ``build_plan``. The
 framework normalizes the mask and holds failed rows at the observed qpos, so a

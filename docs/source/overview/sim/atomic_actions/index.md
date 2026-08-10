@@ -367,6 +367,10 @@ The similarly named `AtomicAction.plan()` method is not a fourth application
 entry point. It is a framework-owned template method called by the engine after
 resolving an invocation; skill implementations provide `_plan()`:
 
+This is a deliberate hard extension boundary. Defining `plan()` on a subclass
+raises `TypeError` at class definition and has no compatibility adapter. Migrate
+an older custom action by renaming its implementation to `_plan()`.
+
 | API | Intended caller | Behavior |
 |---|---|---|
 | `AtomicAction.plan(request, context)` | `AtomicActionEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
@@ -624,10 +628,11 @@ resets the new revision's local recovery counters, emits
 
 ```{attention}
 Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
-`SceneEntityPose` for the session to track that scene entity. A primitive that
-directly queries a simulation entity during planning will use its latest pose
-when planning happens, but that query alone does not trigger scene-motion
-replanning.
+`SceneEntityPose`, or an object-centric primitive must explicitly declare the
+`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp` and the
+implicit-initial-pose path of coordinated pickup declare that dependency
+automatically. The deprecated live-entity fallback does not trigger
+scene-motion replanning.
 
 Dynamic collision invalidation is provider-driven. Only registered,
 pose-updatable collision entities are supported; adding/removing obstacles or
@@ -703,7 +708,8 @@ A new primitive should:
 4. put reusable embodiment commands on control-part profiles and generic
    motion/recovery choices in invocation policies;
 5. implement side-effect-free `_plan(request, context)` using the engine-owned
-   planning services; do not override the framework-owned public `plan()`;
+   planning services; do not override the framework-owned public `plan()`—the
+   class definition is rejected if it does;
 6. return full-robot timed motion, per-environment planning success, optional
    named segment metadata, diagnostics, and uncommitted effects;
 7. add registration coverage, contract tests, execution/recovery tests, a

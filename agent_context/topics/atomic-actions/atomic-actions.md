@@ -71,6 +71,76 @@ to the skill-specific `_plan()` hook. New actions implement `_plan()` and must
 not override `plan()`. Custom actions must be installed with
 `engine.register()` before using the same public entry points.
 
+The `_plan()` extension boundary is an intentional hard break with no legacy
+adapter. A subclass that defines `plan()` raises `TypeError` at class definition;
+migrate an older custom action by renaming that implementation to `_plan()`.
+
+## Object identity and pose grounding
+
+`ObjectSemantics.entity_id` is the canonical pre-registry snapshot key. It is
+optional for direct-core compatibility but, when supplied, must be a non-empty
+string. Pose grounding with an explicit ID is strict: resolve it only from the
+current `PlanningContext.scene`; a missing snapshot entry is an error and never
+falls back to the live `entity`. Only when no ID is supplied may the core read
+`ObjectSemantics.entity`; that path emits `DeprecationWarning`, reads live state,
+and cannot declare a scene-motion dependency.
+
+`ObjectSemantics` is shallow-frozen. Top-level fields such as `entity_id`,
+`entity`, and `label` cannot be rebound after construction; create a new
+semantics value to change identity. Nested affordance and metadata objects may
+remain mutable, but they never establish identity.
+
+`SceneSnapshot` owns copies of its input poses, but `EntityState.pose` tensors
+are not deeply read-only. Callers must treat published snapshot values as
+immutable and publish a newer scene version for changes. Enforced deep
+immutability is deferred to the SceneRegistry/snapshot hardening phase.
+
+Stable object identity follows these exact rules:
+
+1. The same `ObjectSemantics` instance is identical to itself.
+2. If either side has an explicit `entity_id`, both sides must have an explicit
+   ID and the strings must match. Never compare an explicit ID directly with a
+   legacy UID, even when the spellings are equal.
+3. Only when both explicit IDs are absent, compare non-empty legacy
+   `entity.uid` values. If either side has a valid UID, both must have one and
+   the strings must match.
+4. Only when neither side has an explicit ID or valid UID may identity fall back
+   to the same live entity handle. `label` is descriptive and never establishes
+   identity.
+
+This is a snapshot/identity bridge, not alias resolution. A future
+`SceneRegistry` owns uniqueness, aliases, normalization, and authoritative
+registry IDs. Partial-batch `StateDelta` attachment merges use the same stable
+identity rules, so equivalent semantic wrappers update one held object instead
+of creating label-based duplicates.
+
+For both individual and coordinated attachments, a same-identity partial merge
+preserves scalar metadata: if any previously active environment row remains,
+the merged relation keeps `previous.semantics` and selects only the per-row
+mask, transforms, and grasp poses from previous/candidate values. It adopts
+`candidate.semantics` only when no previously active row survives the update.
+This prevents an update for some environments from silently replacing the
+semantic metadata shared by untouched rows.
+
+Scene dependencies must match the poses each primitive actually consumes:
+
+| Primitive | Scene dependencies |
+|---|---|
+| `MoveEndEffector` | A `SceneEntityPose` in `xpos`. |
+| `MoveJoints` | None; its target is qpos or a named control-profile command. |
+| `PickUp` | Always its semantic `entity_id`, when present, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. |
+| `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
+| `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
+| `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
+| `Press` | A `SceneEntityPose` in `xpos`. |
+| `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
+| `HandOver` | No semantic-object scene dependency. It verifies stable attachment identity and derives current pose from held state; its middle/final option poses are tensors, and the reused `GraspGoal.grasp_xpos` field is ignored. |
+
+`collect_scene_dependencies()` deliberately stops at `ObjectSemantics`.
+Therefore, a custom action that consumes a snapshot pose through semantic data
+must override `_scene_dependencies()`, union `super()` dependencies, and add the
+consumed semantic ID. Do not declare an ID merely because semantics are present.
+
 ## Static compilation
 
 Built-ins are already registered by their class-level stable `skill_id`; call:
@@ -295,7 +365,17 @@ tutorial may derive a simple profile from limits explicitly.
 `GraspGoal.grasp_xpos` accepts an explicit pose tensor, a late-bound
 `SceneEntityPose`, or `None` for affordance sampling. A `SceneEntityPose`
 registers the referenced entity as a recovery dependency, allowing an executing
-`PickUp` to replan when the grasp target moves.
+`PickUp` to replan when the grasp target moves. `PickUp` also resolves its
+semantic object's pose once per planning attempt and declares the semantic
+`entity_id` because grasp sampling, upright adjustment, and the held
+`object_to_eef` relation all consume that same pose.
+
+`AssembleGoal.base_pose=SceneEntityPose(...)` is the canonical assembly anchor
+and becomes a recovery dependency. An omitted `base_pose` permits the deprecated
+live `AssembleAffordance.base_object_entity` fallback for direct-core callers
+only; it is not dependency-tracked. The current `assemble.py` tutorial exercises
+that legacy fallback, while `moving_target_recovery.py` is the canonical
+snapshot-grounded object example.
 
 ## Extension rules
 
@@ -305,13 +385,18 @@ registers the referenced entity as a recovery dependency, allowing an executing
 4. Implement `_plan()`; do not override the framework-owned `plan()` method.
 5. Validate with `require_goal(request)` and consume only the resolved binding.
 6. Plan from `context.robot.qpos`; never read an implicit live start state.
-7. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
+7. If planning consumes a semantic object's snapshot pose, override
+   `_scene_dependencies()`, preserve `super()` dependencies, and add exactly
+   that semantic ID.
+8. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
    Build batched `list[PlanState]`, translate the policy with
    `request.motion_policy.to_motion_gen_options()`, and call
    `self.motion_generator.generate()`. Import pure operations directly from
    `trajectory_ops.py`.
-8. Declare symbolic changes with `StateDelta`; do not mutate context or commit
-   physical effects during planning.
-9. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
+9. Declare symbolic changes with `StateDelta`; do not mutate context or commit
+   physical effects during planning. For partial attachment updates, retain
+   previous scalar semantics while any previous row remains; merge only batched
+   masks/transforms and adopt candidate semantics only on full replacement.
+10. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
    atomic action. Put execution-loop I/O behind the runner protocols rather than
    calling a simulator or device from `plan()` or `ExecutionSession`.
