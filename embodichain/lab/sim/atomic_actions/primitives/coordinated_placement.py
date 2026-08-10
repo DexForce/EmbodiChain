@@ -26,7 +26,7 @@ import torch
 from embodichain.utils import logger
 
 from ._helpers import resolve_object_target
-from ..bindings import ResolvedControlPart
+from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..effects import StateDelta
@@ -35,7 +35,6 @@ from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
 from ..policies import MotionPolicy
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -123,10 +122,10 @@ class CoordinatedPlacementOptions(ActionOptions):
 class _CoordinatedPlacementResources:
     """Invocation-bound control parts and compatible hand commands."""
 
-    placing_arm: ResolvedControlPart
-    support_arm: ResolvedControlPart
-    placing_hand: ResolvedControlPart
-    support_hand: ResolvedControlPart
+    placing_arm: JointPositionTarget
+    support_arm: JointPositionTarget
+    placing_hand: JointPositionTarget
+    support_hand: JointPositionTarget
     placing_hand_open_qpos: torch.Tensor
     placing_hand_close_qpos: torch.Tensor
     support_hand_close_qpos: torch.Tensor
@@ -140,8 +139,6 @@ class CoordinatedPlacement(
     skill_id: ClassVar[str] = "coordinated_placement"
     GoalType: ClassVar[type] = CoordinatedPlacementGoal
     OptionsType: ClassVar[type] = CoordinatedPlacementOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -150,7 +147,6 @@ class CoordinatedPlacement(
                     SkillEndpointRequirement(
                         endpoint_id="motion",
                         capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "placing"),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
@@ -159,7 +155,6 @@ class CoordinatedPlacement(
                             OPEN_COMMAND: JointPositionCommand,
                             GRASP_COMMAND: JointPositionCommand,
                         },
-                        route=ActionBindingRoute("end_effector", "placing"),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -170,13 +165,11 @@ class CoordinatedPlacement(
                     SkillEndpointRequirement(
                         endpoint_id="motion",
                         capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "support"),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
                         capabilities=frozenset({GRASP_CAPABILITY}),
                         required_commands={GRASP_COMMAND: JointPositionCommand},
-                        route=ActionBindingRoute("end_effector", "support"),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -204,16 +197,20 @@ class CoordinatedPlacement(
     ) -> _CoordinatedPlacementResources:
         """Resolve placing/support roles from robot control parts."""
         binding = request.binding
-        placing_arm = binding.manipulator("placing")
-        support_arm = binding.manipulator("support")
-        placing_hand = binding.end_effector("placing")
-        support_hand = binding.end_effector("support")
-        if placing_arm.name == support_arm.name:
+        placing_motion = binding.endpoint("placing", "motion")
+        support_motion = binding.endpoint("support", "motion")
+        placing_grasp = binding.endpoint("placing", "grasp")
+        support_grasp = binding.endpoint("support", "grasp")
+        placing_arm = placing_motion.require_target(JointPositionTarget)
+        support_arm = support_motion.require_target(JointPositionTarget)
+        placing_hand = placing_grasp.require_target(JointPositionTarget)
+        support_hand = support_grasp.require_target(JointPositionTarget)
+        if placing_arm.control_part == support_arm.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
                 "different manipulator control parts."
             )
-        if placing_hand.name == support_hand.name:
+        if placing_hand.control_part == support_hand.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
                 "different end-effector control parts."
@@ -223,19 +220,19 @@ class CoordinatedPlacement(
             support_arm=support_arm,
             placing_hand=placing_hand,
             support_hand=support_hand,
-            placing_hand_open_qpos=placing_hand.joint_positions(
+            placing_hand_open_qpos=placing_grasp.joint_positions(
                 OPEN_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            placing_hand_close_qpos=placing_hand.joint_positions(
+            placing_hand_close_qpos=placing_grasp.joint_positions(
                 GRASP_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            support_hand_close_qpos=support_hand.joint_positions(
+            support_hand_close_qpos=support_grasp.joint_positions(
                 GRASP_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
@@ -291,7 +288,7 @@ class CoordinatedPlacement(
             device=self.device,
         )
         segment_success, placing_approach_traj = self._plan_named_arm_trajectory(
-            resources.placing_arm.name,
+            resources.placing_arm.control_part,
             placing_start_qpos,
             torch.stack([placing_lift_xpos, placing_xpos], dim=1),
             segments["approach"],
@@ -310,7 +307,7 @@ class CoordinatedPlacement(
             )
 
         segment_success, support_approach_traj = self._plan_named_arm_trajectory(
-            resources.support_arm.name,
+            resources.support_arm.control_part,
             support_start_qpos,
             support_xpos.unsqueeze(1),
             segments["approach"],
@@ -368,7 +365,7 @@ class CoordinatedPlacement(
             )
 
         segment_success, placing_retreat_traj = self._plan_named_arm_trajectory(
-            resources.placing_arm.name,
+            resources.placing_arm.control_part,
             placing_place_qpos,
             placing_lift_xpos.unsqueeze(1),
             segments["retreat"],
@@ -408,8 +405,8 @@ class CoordinatedPlacement(
             dim=1,
         )
         involved_control_parts = {
-            resources.placing_arm.name,
-            resources.support_arm.name,
+            resources.placing_arm.control_part,
+            resources.support_arm.control_part,
         }
         coordinated_removals = {
             key: None
@@ -423,10 +420,10 @@ class CoordinatedPlacement(
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.placing_arm.name: (
+                    resources.placing_arm.control_part: (
                         None if release else placing_held_object
                     ),
-                    resources.support_arm.name: support_held_object,
+                    resources.support_arm.control_part: support_held_object,
                 },
                 coordinated_held_object_updates=coordinated_removals,
             ),
@@ -510,8 +507,8 @@ class CoordinatedPlacement(
         HeldObjectState,
         HeldObjectState,
     ]:
-        placing_control_part = resources.placing_arm.name
-        support_control_part = resources.support_arm.name
+        placing_control_part = resources.placing_arm.control_part
+        support_control_part = resources.support_arm.control_part
         placing_held_object = state.get_held_object(placing_control_part)
         if placing_held_object is None:
             logger.log_error(

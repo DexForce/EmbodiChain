@@ -14,11 +14,13 @@ demonstrations of every built-in skill, see
 :doc:`/overview/sim/atomic_actions/builtin_actions`. Canonical scene identity and
 snapshot/provider setup are documented in :doc:`/overview/sim/scene_registry`.
 
-The contracts deliberately separate six concerns:
+The contracts deliberately separate seven concerns:
 
 * a **goal** describes what should happen;
-* an **ActionBinding** maps semantic roles such as ``primary`` or ``source`` to
-  names declared in the engine robot's ``control_parts`` mapping;
+* a **SkillBindingContract** declares action-local participant slots, endpoint
+  capabilities, typed commands, and physical disjointness;
+* an engine-owned **ActionBinding** contains adapter-resolved
+  **EndpointBinding** snapshots and immutable runtime targets for one call;
 * a **ControlPartCommandProfile** maps embodiment-specific meanings such as
   ``open``, ``grasp``, or ``ready`` to typed commands;
 * typed **ActionOptions** contain behavior that may vary for one skill call;
@@ -27,19 +29,32 @@ The contracts deliberately separate six concerns:
 * a **PlanningContext** contains measured robot state, verified task state, and
   a versioned scene snapshot.
 
-Binding values are keys from ``RobotCfg.control_parts``. They are not joint,
-link, TCP-frame, or scene-object names. The engine validates them and resolves
-their full-robot joint indices before planning. The ``end_effectors`` map names
-an actuated hand/tool control part rather than an IK end frame.
+Slots such as ``primary`` or ``source`` name participants only within one skill.
+Each slot exposes skill-local endpoint protocols such as ``motion`` and
+``grasp``. There are no global arm, hand, mobile-base, or whole-body binding
+fields. A profile matches endpoint capabilities to generic robot resources and
+uses an endpoint adapter to create the runtime target.
 
-A role is an action-defined semantic participant slot, not a control part. In
-``{"primary": "left_arm"}``, ``primary`` means the principal participant of
-that single-participant action, while ``left_arm`` is the concrete control-part
-key. It has no inherent left/right or default-arm meaning. Actions publish their
-required slots through ``manipulator_roles`` and ``end_effector_roles``. When a
-role such as ``primary`` occurs in both maps, the entries select the arm and
-hand/tool serving the same functional participant, but the caller is still
-responsible for choosing a physically compatible pair.
+For advanced direct-core use, joint-backed endpoint selections are concrete
+``RobotCfg.control_parts`` keys, not joint, link, TCP-frame, or scene-object
+names. Build them through :meth:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine.bind_control_parts`:
+
+.. code-block:: python
+
+   binding = engine.bind_control_parts(
+       "pick_up",
+       {
+           "primary": {
+               "motion": "left_arm",
+               "grasp": "left_hand",
+           }
+       },
+   )
+
+The helper validates the installed skill contract, resolves joint indices and
+commands, and returns the engine-owned generic binding. Profile endpoint
+adapters may instead resolve locomotion, whole-body, or custom controller
+targets without changing ``ActionBinding``.
 
 The engine exclusively owns the ``MotionGenerator``, shared trajectory builder,
 and control-part profiles. It creates and binds all built-in actions by default;
@@ -66,7 +81,7 @@ Application code normally uses one of three engine entry points:
      - ``ActionPlan``
      - Reads one context and does not project a next context
    * - ``engine.compile()``
-     - Planning a fixed sequence whose goals are already known
+     - Planning a fixed sequence whose goals are known and whose plans retain joint trajectories
      - ``CompiledTrajectory``
      - Propagates hypothetical qpos and expected effects, without observing execution
    * - ``engine.start()``
@@ -74,10 +89,11 @@ Application code normally uses one of three engine entry points:
      - ``ExecutionSession``
      - ``tick()`` consumes measured context, emits commands, requests effect verification, and can replan
 
-As a short rule: use ``plan`` for one action, ``compile`` for a static action
-sequence, and ``start`` followed by ``tick`` for observed execution and error
-recovery. None of these APIs steps the simulator directly. The application
-sends commands returned by an execution session and supplies new observations.
+As a short rule: use ``plan`` for one action, ``compile`` for a static
+joint-trajectory sequence, and ``start`` followed by ``tick`` for observed
+execution and error recovery. None of these APIs steps the simulator directly.
+The application sends commands returned by an execution session and supplies
+new observations.
 
 ``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
 It is the framework-owned template method called by the engine, not an
@@ -152,9 +168,10 @@ engine is built:
    )
 
 ``PickUp``, ``Place``, and the other manipulation skills resolve ``open`` and
-``grasp`` from their bound end effector. ``MoveJoints`` resolves a string target
-from its bound manipulator. Joint limits validate possible commands, but do not
-define their semantic meaning; supply calibrated robot commands in production.
+``grasp`` from their bound grasp endpoints. ``MoveJoints`` resolves a string
+target from ``primary.motion``. Joint limits validate possible commands, but do
+not define their semantic meaning; supply calibrated robot commands in
+production.
 
 Planning one action
 -------------------
@@ -166,22 +183,27 @@ application-owned orchestration:
 .. code-block:: python
 
    from embodichain.lab.sim.atomic_actions import (
-       ActionBinding,
        ActionInvocation,
        EndEffectorPoseGoal,
        MotionPolicy,
    )
 
+   binding = engine.bind_control_parts(
+       "move_end_effector",
+       {"primary": {"motion": "left_arm"}},
+   )
    invocation = ActionInvocation(
        skill_id="move_end_effector",
        goal=EndEffectorPoseGoal(xpos=target_pose),
-       binding=ActionBinding(manipulators={"primary": "left_arm"}),
+       binding=binding,
        motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
    )
 
    plan = engine.plan(invocation, latest_context)
    if plan.plan_success.all():
-       trajectory = plan.trajectory.positions
+       command_frames = plan.commands.frames
+       if plan.joint_trajectory is not None:
+           trajectory = plan.joint_trajectory.positions
        diagnostics = plan.diagnostics
        segments = plan.segments
 
@@ -190,22 +212,24 @@ sequence, call ``compiled.segment(action_index, name)`` to get the corresponding
 range in concatenated-trajectory coordinates. This is preferable to repeating
 a primitive's private sample-split formula in application or tutorial code.
 
-The returned :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` describes
-only that invocation. Its expected effects are not committed, and ``plan`` does
-not produce a projected context for a following action. Use ``compile`` when
-the engine should propagate hypothetical state through a sequence.
+The returned :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` always owns
+a transport-neutral ``commands`` sequence. Joint-planned actions may also retain
+``joint_trajectory`` for feedback, inspection, and static qpos projection. The
+plan describes only that invocation: expected effects are not committed, and
+``plan`` does not produce a projected context for a following action. Use
+``compile`` when the engine should propagate hypothetical state through a
+sequence.
 
 Static compilation
 ------------------
 
 Use :meth:`~embodichain.lab.sim.atomic_actions.AtomicActionEngine.compile` when
-the scene is treated as fixed and all goals in a sequence are known during
-planning:
+the scene is treated as fixed, all goals in a sequence are known during
+planning, and every action retains ``joint_trajectory``:
 
 .. code-block:: python
 
    from embodichain.lab.sim.atomic_actions import (
-       ActionBinding,
        ActionInvocation,
        AtomicActionEngine,
        EndEffectorPoseGoal,
@@ -213,7 +237,10 @@ planning:
    )
 
    engine = AtomicActionEngine(motion_generator)
-   binding = ActionBinding(manipulators={"primary": "left_arm"})
+   binding = engine.bind_control_parts(
+       "move_end_effector",
+       {"primary": {"motion": "left_arm"}},
+   )
    motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
 
    approach = ActionInvocation(
@@ -242,6 +269,10 @@ planning:
 state. Calling it with one invocation is valid, but ``plan`` is simpler when a
 projected context and sequence-shaped result are unnecessary.
 
+This is intentionally an offline joint-trajectory projection API. It rejects a
+generic command plan without ``joint_trajectory``; such plans remain valid for
+``plan`` and closed-loop ``start``/``tick`` execution.
+
 Do not compile across a point where later targets depend on physical execution.
 The coordinated-placement tutorial, for example, compiles both pick-ups,
 executes them, rebuilds held-object state from measured poses, and then compiles
@@ -267,7 +298,10 @@ must be resolved from the latest scene snapshot:
        goal=EndEffectorPoseGoal(
            xpos=SceneEntityPose("moving_tray", relative_pose=tray_to_tcp)
        ),
-       binding=ActionBinding(manipulators={"primary": "left_arm"}),
+       binding=engine.bind_control_parts(
+           "move_end_effector",
+           {"primary": {"motion": "left_arm"}},
+       ),
        recovery_policy=RecoveryPolicy(
            max_replans=3,
            tracking_error_threshold=0.05,
@@ -276,6 +310,7 @@ must be resolved from the latest scene snapshot:
    )
 
    from embodichain.lab.sim.atomic_actions import (
+       EndpointCommandRouter,
        ExecutionRunner,
        SimulationExecutionAdapter,
        TaskState,
@@ -298,7 +333,8 @@ must be resolved from the latest scene snapshot:
    task = TaskState.empty(robot.get_qpos().shape[0], robot.device)
    initial_context = adapter.observe(task)
    session = engine.start((invocation,), initial_context)
-   runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
+   router = EndpointCommandRouter((adapter,))
+   runner = ExecutionRunner(session, adapter, router, clock=adapter)
    result = runner.run_until_blocked()
 
 For a lightweight scene source that does not need environment correlation IDs,
@@ -306,10 +342,15 @@ pass a ``scene_supplier(timestamp)`` callback instead. ``scene_provider`` and
 ``scene_supplier`` are mutually exclusive.
 
 The session owns planning progress and bounded recovery. The runner owns the
-outer lifecycle: it requests fresh observations, schedules each command from
-the :class:`~embodichain.lab.sim.atomic_actions.TimedTrajectory` time deltas,
-checks controller acknowledgements, and performs cancel-then-hold on failure.
-The simulation adapter advances physics instead of sleeping in wall-clock time.
+outer lifecycle: it requests fresh observations, schedules each
+:class:`~embodichain.lab.sim.atomic_actions.RuntimeCommandFrame` from its
+``hold_duration``, checks controller acknowledgements, and performs
+cancel-then-hold on failure. ``EndpointCommandRouter`` preflights the whole
+frame, groups endpoint commands by exact transport ID, and aggregates their
+acknowledgements. Unknown or incompatible transports are rejected before any
+partial dispatch. Safe stop cancels every armed runtime target, then asks its
+transport to hold from the latest observed context. The simulation adapter
+advances physics instead of sleeping in wall-clock time.
 ``ExecutionRunnerCfg`` contains runner-level transport and scheduling settings;
 it is not an atomic-action option and is not replaced by invocation revision.
 
@@ -379,11 +420,24 @@ control command while the action is active, submit a strictly newer revision:
        invocation_id=invocation.invocation_id,
        revision=invocation.revision + 1,
    )
-   session.revise_current(revised)
+   runner.revise_current(revised)
 
 The session replans from its latest context and emits an
 ``invocation_revised`` event. ``skill_id`` and ``invocation_id`` must still
-identify the active logical call.
+identify the active logical call, and the replacement must preserve the
+current non-empty runtime destination set and exact target address fingerprints.
+Use a new invocation when changing from an arm endpoint to a base, whole-body
+controller, or another controller. The runner keeps the current frame deadline,
+then observes fresh state and installs the revision at that due boundary. It
+rejects revision while a physical effect is awaiting verification; verify the
+effect first, or cancel and start a new invocation. A manually ticked session
+can call ``session.revise_current(revised, context=fresh_context)`` directly.
+
+Every emitted command is authorized against the binding-owned target and
+physical claims. Non-empty plan frames and recovery replans keep a stable
+destination set. Transports must actively neutralize inactive batch rows for
+every addressed target; simply skipping those rows can leave a persistent
+controller command active.
 
 Entities referenced through ``SceneEntityPose`` become automatic scene-motion
 dependencies. Object-centric skills may additionally declare an explicit
@@ -437,6 +491,21 @@ A minimal implementation looks like:
    from dataclasses import dataclass
    from typing import ClassVar
 
+   import torch
+
+   from embodichain.lab.sim.atomic_actions import (
+       CARTESIAN_POSE_CAPABILITY,
+       ActionOptions,
+       ActionPlan,
+       AtomicAction,
+       JointPositionTarget,
+       PlanningContext,
+       ResolvedActionRequest,
+       SkillBindingContract,
+       SkillEndpointRequirement,
+       SkillResourceSlot,
+   )
+
    @dataclass(frozen=True, slots=True)
    class PushGoal:
        goal_kind: ClassVar[str] = "push"
@@ -450,7 +519,21 @@ A minimal implementation looks like:
        skill_id: ClassVar[str] = "push"
        GoalType: ClassVar[type] = PushGoal
        OptionsType: ClassVar[type] = PushOptions
-       manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+       binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+           slots=(
+               SkillResourceSlot(
+                   slot_id="primary",
+                   endpoints=(
+                       SkillEndpointRequirement(
+                           endpoint_id="motion",
+                           capabilities=frozenset(
+                               {CARTESIAN_POSE_CAPABILITY}
+                           ),
+                       ),
+                   ),
+               ),
+           ),
+       )
 
        def __init__(self, default_options: PushOptions | None = None) -> None:
            super().__init__(default_options)
@@ -462,14 +545,24 @@ A minimal implementation looks like:
        ) -> ActionPlan:
            goal = self.require_goal(request)
            options = request.skill_options
-           # Resolve the bound resource, plan from context.robot.qpos, and
-           # return a full-robot TimedTrajectory or position tensor.
+           motion = request.binding.endpoint("primary", "motion")
+           motion_target = motion.require_target(JointPositionTarget)
+           # Plan from context.robot.qpos using motion_target.joint_ids.
+           # The joint helper lowers the result into RuntimeCommandFrame values
+           # and retains the trajectory for joint-position feedback.
            return self.build_plan(
                request,
                context,
                success=success_mask,
                trajectory=full_robot_positions,
            )
+
+For a non-joint endpoint, define a typed ``RuntimeEndpointTarget`` and matching
+``RuntimeCommandPayload``, have the profile endpoint adapter produce that
+target, and call ``build_command_plan(commands=TimedCommandSequence(...))``.
+Register the matching ``EndpointCommandTransport`` with the runner's router.
+The skill contract, resource graph, binding, runner, and recovery model do not
+gain controller-specific fields.
 
 Do not step simulation, mutate ``PlanningContext``, commit ``StateDelta``, or
 expose planner-specific configuration through the goal. See the in-repository

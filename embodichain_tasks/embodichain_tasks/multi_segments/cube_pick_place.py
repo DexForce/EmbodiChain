@@ -404,7 +404,6 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
     ) -> tuple[torch.Tensor, Iterable[torch.Tensor], torch.Tensor]:
         """Plan one pickup/place cycle from the cube's current measured pose."""
         from embodichain.lab.sim.atomic_actions import (
-            ActionBinding,
             ActionInvocation,
             GraspGoal,
             MotionPolicy,
@@ -416,16 +415,26 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
         source_pose = self._cube.get_local_pose(to_matrix=True).to(
             device=self.device, dtype=torch.float32
         )
-        binding = ActionBinding(
-            manipulators={"primary": "arm"},
-            end_effectors={"primary": "hand"},
+        endpoints = {
+            "primary": {
+                "motion": "arm",
+                "grasp": "hand",
+            }
+        }
+        pick_binding = self._action_engine.bind_control_parts(
+            "pick_up",
+            endpoints,
+        )
+        place_binding = self._action_engine.bind_control_parts(
+            "place",
+            endpoints,
         )
         pick_compiled = self._action_engine.compile(
             (
                 ActionInvocation(
                     skill_id="pick_up",
                     goal=GraspGoal(self._cube_semantics),
-                    binding=binding,
+                    binding=pick_binding,
                     motion_policy=MotionPolicy(sample_count=self.PICK_SAMPLE_INTERVAL),
                     skill_options=PickUpOptions(
                         pre_grasp_distance=0.15,
@@ -458,7 +467,7 @@ class MultiSegmentsCubePickPlaceEnv(EmbodiedEnv):
                 ActionInvocation(
                     skill_id="place",
                     goal=PlaceGoal(place_eef_pose),
-                    binding=binding,
+                    binding=place_binding,
                     motion_policy=MotionPolicy(sample_count=self.PLACE_SAMPLE_INTERVAL),
                     skill_options=PlaceOptions(
                         lift_height=0.14,

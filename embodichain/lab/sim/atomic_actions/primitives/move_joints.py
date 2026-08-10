@@ -23,11 +23,11 @@ from typing import ClassVar
 
 import torch
 
+from ..bindings import JointPositionTarget
 from ..core import AtomicAction
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..requirements import (
-    ActionBindingRoute,
     JOINT_POSITION_CAPABILITY,
     SkillBindingContract,
     SkillEndpointRequirement,
@@ -80,7 +80,6 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     skill_id: ClassVar[str] = "move_joints"
     GoalType: ClassVar[type] = JointPositionGoal
     OptionsType: ClassVar[type] = MoveJointsOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -90,7 +89,6 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
                     SkillEndpointRequirement(
                         endpoint_id="motion",
                         capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                 ),
             ),
@@ -110,10 +108,11 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     ) -> ActionPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
         goal = self.require_goal(request)
-        manipulator = request.binding.manipulator("primary")
-        control_part = manipulator.name
-        joint_ids = list(manipulator.joint_ids)
-        joint_dof = manipulator.dof
+        motion = request.binding.endpoint("primary", "motion")
+        motion_target = motion.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
+        joint_dof = len(motion_target.joint_ids)
         target_qpos = resolve_joint_target(
             self._resolve_target_qpos(
                 goal,
@@ -157,7 +156,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
         """Resolve an explicit or named joint goal to a tensor."""
         if isinstance(goal.target, torch.Tensor):
             return goal.target
-        return request.binding.manipulator("primary").joint_positions(
+        return request.binding.endpoint("primary", "motion").joint_positions(
             goal.target,
             n_envs=context.batch_size,
             device=self.device,

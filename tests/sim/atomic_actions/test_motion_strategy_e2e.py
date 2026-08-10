@@ -25,7 +25,6 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
@@ -79,14 +78,16 @@ class TestMotionStrategyReachEquivalence:
         sim, robot, engine = self._setup()
         try:
             target, arm_ids = self._reachable_target(robot)
+            binding = engine.bind_control_parts(
+                "move_end_effector",
+                {"primary": {"motion": self.CONTROL_PART}},
+            )
             result = engine.compile(
                 (
                     ActionInvocation(
                         skill_id="move_end_effector",
                         goal=EndEffectorPoseGoal(xpos=target),
-                        binding=ActionBinding(
-                            manipulators={"primary": self.CONTROL_PART}
-                        ),
+                        binding=binding,
                         motion_policy=MotionPolicy(
                             strategy=strategy,
                             sample_count=self.SAMPLE_INTERVAL,
@@ -95,7 +96,10 @@ class TestMotionStrategyReachEquivalence:
                 )
             )
             assert result.plan_success.all().item(), f"{strategy} reported failure"
-            final_q = result.trajectory.positions[0, -1, arm_ids]
+            plan = result.action_plans[0]
+            assert plan.joint_trajectory is not None
+            assert plan.commands.frame_count == plan.joint_trajectory.waypoint_count
+            final_q = plan.joint_trajectory.positions[0, -1, arm_ids]
             fk = robot.compute_fk(
                 qpos=final_q[None], name=self.CONTROL_PART, to_matrix=True
             )[0]

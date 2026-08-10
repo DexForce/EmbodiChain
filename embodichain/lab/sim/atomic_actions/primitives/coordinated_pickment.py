@@ -27,7 +27,7 @@ from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
 from ..affordance import AntipodalAffordance
-from ..bindings import ResolvedControlPart
+from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction, ObjectSemantics
 from ..effects import StateDelta
@@ -41,7 +41,6 @@ from ..goals import (
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
 from ..requirements import (
-    ActionBindingRoute,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     GRASP_CAPABILITY,
@@ -159,10 +158,10 @@ class CoordinatedPickmentOptions(ActionOptions):
 class _CoordinatedPickResources:
     """Invocation-bound control parts and compatible hand commands."""
 
-    left_arm: ResolvedControlPart
-    right_arm: ResolvedControlPart
-    left_hand: ResolvedControlPart
-    right_hand: ResolvedControlPart
+    left_arm: JointPositionTarget
+    right_arm: JointPositionTarget
+    left_hand: JointPositionTarget
+    right_hand: JointPositionTarget
     left_hand_open_qpos: torch.Tensor
     left_hand_close_qpos: torch.Tensor
     right_hand_open_qpos: torch.Tensor
@@ -350,8 +349,6 @@ class CoordinatedPickment(
     skill_id: ClassVar[str] = "coordinated_pickment"
     GoalType: ClassVar[type] = CoordinatedPickGoal
     OptionsType: ClassVar[type] = CoordinatedPickmentOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("left", "right")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("left", "right")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=tuple(
             SkillResourceSlot(
@@ -360,7 +357,6 @@ class CoordinatedPickment(
                     SkillEndpointRequirement(
                         endpoint_id="motion",
                         capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", role),
                     ),
                     SkillEndpointRequirement(
                         endpoint_id="grasp",
@@ -369,7 +365,6 @@ class CoordinatedPickment(
                             OPEN_COMMAND: JointPositionCommand,
                             GRASP_COMMAND: JointPositionCommand,
                         },
-                        route=ActionBindingRoute("end_effector", role),
                     ),
                 ),
                 constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
@@ -422,16 +417,20 @@ class CoordinatedPickment(
     ) -> _CoordinatedPickResources:
         """Resolve left/right roles from robot control parts."""
         binding = request.binding
-        left_arm = binding.manipulator("left")
-        right_arm = binding.manipulator("right")
-        left_hand = binding.end_effector("left")
-        right_hand = binding.end_effector("right")
-        if left_arm.name == right_arm.name:
+        left_motion = binding.endpoint("left", "motion")
+        right_motion = binding.endpoint("right", "motion")
+        left_grasp = binding.endpoint("left", "grasp")
+        right_grasp = binding.endpoint("right", "grasp")
+        left_arm = left_motion.require_target(JointPositionTarget)
+        right_arm = right_motion.require_target(JointPositionTarget)
+        left_hand = left_grasp.require_target(JointPositionTarget)
+        right_hand = right_grasp.require_target(JointPositionTarget)
+        if left_arm.control_part == right_arm.control_part:
             raise ValueError(
                 "CoordinatedPickment left and right roles must use different "
                 "manipulator control parts."
             )
-        if left_hand.name == right_hand.name:
+        if left_hand.control_part == right_hand.control_part:
             raise ValueError(
                 "CoordinatedPickment left and right roles must use different "
                 "end-effector control parts."
@@ -441,25 +440,25 @@ class CoordinatedPickment(
             right_arm=right_arm,
             left_hand=left_hand,
             right_hand=right_hand,
-            left_hand_open_qpos=left_hand.joint_positions(
+            left_hand_open_qpos=left_grasp.joint_positions(
                 OPEN_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            left_hand_close_qpos=left_hand.joint_positions(
+            left_hand_close_qpos=left_grasp.joint_positions(
                 GRASP_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            right_hand_open_qpos=right_hand.joint_positions(
+            right_hand_open_qpos=right_grasp.joint_positions(
                 OPEN_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            right_hand_close_qpos=right_hand.joint_positions(
+            right_hand_close_qpos=right_grasp.joint_positions(
                 GRASP_COMMAND,
                 n_envs=self.n_envs,
                 device=self.device,
@@ -775,12 +774,12 @@ class CoordinatedPickment(
             )
             left_success, left_qpos = self.robot.compute_ik(
                 pose=left_xpos,
-                name=resources.left_arm.name,
+                name=resources.left_arm.control_part,
                 joint_seed=left_qpos_seed,
             )
             right_success, right_qpos = self.robot.compute_ik(
                 pose=right_xpos,
-                name=resources.right_arm.name,
+                name=resources.right_arm.control_part,
                 joint_seed=right_qpos_seed,
             )
             left_success = normalize_success_mask(
@@ -788,7 +787,7 @@ class CoordinatedPickment(
                 n_envs=self.n_envs,
                 device=self.device,
                 name=(
-                    f"IK success for {resources.left_arm.name} object waypoint "
+                    f"IK success for {resources.left_arm.control_part} object waypoint "
                     f"{waypoint_idx}"
                 ),
             )
@@ -797,17 +796,17 @@ class CoordinatedPickment(
                 n_envs=self.n_envs,
                 device=self.device,
                 name=(
-                    f"IK success for {resources.right_arm.name} object waypoint "
+                    f"IK success for {resources.right_arm.control_part} object waypoint "
                     f"{waypoint_idx}"
                 ),
             )
             self._log_ik_failures(
-                resources.left_arm.name,
+                resources.left_arm.control_part,
                 f"object waypoint {waypoint_idx}",
                 success_mask & ~left_success,
             )
             self._log_ik_failures(
-                resources.right_arm.name,
+                resources.right_arm.control_part,
                 f"object waypoint {waypoint_idx}",
                 success_mask & ~right_success,
             )
@@ -883,14 +882,14 @@ class CoordinatedPickment(
         )
         success_mask = grasp_success.clone()
         success_mask, left_approach_traj = self._plan_masked_arm_trajectory(
-            resources.left_arm.name,
+            resources.left_arm.control_part,
             left_start_qpos,
             left_approach_targets,
             segments["approach"],
             success_mask,
         )
         success_mask, right_approach_traj = self._plan_masked_arm_trajectory(
-            resources.right_arm.name,
+            resources.right_arm.control_part,
             right_start_qpos,
             right_approach_targets,
             segments["approach"],
@@ -1026,13 +1025,13 @@ class CoordinatedPickment(
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.left_arm.name: None,
-                    resources.right_arm.name: None,
+                    resources.left_arm.control_part: None,
+                    resources.right_arm.control_part: None,
                 },
                 coordinated_held_object_updates={
                     (
-                        resources.left_arm.name,
-                        resources.right_arm.name,
+                        resources.left_arm.control_part,
+                        resources.right_arm.control_part,
                     ): coordinated_held_object,
                 },
             ),

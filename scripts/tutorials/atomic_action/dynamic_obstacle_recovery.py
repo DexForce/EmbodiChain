@@ -33,13 +33,14 @@ import torch
 from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    JointPositionPayload,
+    JointPositionTarget,
     MotionPolicy,
     RecoveryPolicy,
     RigidObjectSceneProvider,
@@ -47,6 +48,7 @@ from embodichain.lab.sim.atomic_actions import (
     RunnerStep,
     SimulationExecutionAdapter,
     TaskState,
+    TimedCommandSequence,
 )
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
@@ -294,21 +296,35 @@ def _minimum_cuboid_clearance(
     return (outside_distance + inside_distance).amin(dim=1)
 
 
-def _trajectory_eef_positions(
+def _command_eef_positions(
     robot: Robot,
-    trajectory_positions: torch.Tensor,
+    commands: TimedCommandSequence,
     *,
     control_part: str,
 ) -> torch.Tensor:
-    """Convert a full-robot joint trajectory to batched EEF positions."""
-    if trajectory_positions.dim() != 3:
-        raise ValueError("trajectory_positions must have shape (B, N, robot_dof).")
-    joint_ids = robot.get_joint_ids(name=control_part)
-    arm_trajectory = trajectory_positions[:, :, joint_ids]
+    """Convert one endpoint command sequence to batched EEF positions."""
+    if not commands.frames:
+        raise ValueError("commands must contain at least one frame.")
     positions = []
-    for waypoint_index in range(arm_trajectory.shape[1]):
+    for frame in commands.frames:
+        matching_commands = tuple(
+            command
+            for command in frame.commands
+            if isinstance(command.target, JointPositionTarget)
+            and command.target.control_part == control_part
+        )
+        if len(matching_commands) != 1:
+            raise ValueError(
+                f"Expected one joint command for control part {control_part!r}, "
+                f"got {len(matching_commands)}."
+            )
+        payload = matching_commands[0].payload
+        if not isinstance(payload, JointPositionPayload):
+            raise TypeError(
+                f"Control part {control_part!r} did not receive joint positions."
+            )
         pose = robot.compute_fk(
-            qpos=arm_trajectory[:, waypoint_index],
+            qpos=payload.positions,
             name=control_part,
             to_matrix=True,
         )
@@ -457,10 +473,14 @@ def main() -> None:
         device=target_pose.device,
     )
     engine = AtomicActionEngine(motion_generator=motion_gen)
+    binding = engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": CONTROL_PART}},
+    )
     invocation = ActionInvocation(
         skill_id="move_end_effector",
         goal=EndEffectorPoseGoal(target_pose),
-        binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
+        binding=binding,
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=SAMPLE_COUNT,
@@ -475,9 +495,9 @@ def main() -> None:
     )
     task_state = TaskState.empty(robot.get_qpos().shape[0], robot.device)
     session = engine.start((invocation,), adapter.observe(task_state))
-    initial_eef_path = _trajectory_eef_positions(
+    initial_eef_path = _command_eef_positions(
         robot,
-        session.active_trajectory.positions,
+        session.active_commands,
         control_part=CONTROL_PART,
     )
     blocking_obstacle_pose, blocking_waypoint_index = _blocking_obstacle_pose(
@@ -586,9 +606,9 @@ def main() -> None:
                 and replanned_eef_path is None
                 and ExecutionEventKind.COLLISION_WORLD_CHANGED in observed_events
             ):
-                replanned_eef_path = _trajectory_eef_positions(
+                replanned_eef_path = _command_eef_positions(
                     robot,
-                    session.active_trajectory.positions,
+                    session.active_commands,
                     control_part=CONTROL_PART,
                 )
                 replan_detour = _maximum_path_deviation(

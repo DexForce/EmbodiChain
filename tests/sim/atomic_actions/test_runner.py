@@ -41,15 +41,22 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionRunner,
     ExecutionRunnerCfg,
     HeldObjectState,
-    JointCommand,
+    JOINT_POSITION_CAPABILITY,
+    JointPositionPayload,
+    JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
     RobotObservation,
+    RuntimeCommandFrame,
+    RuntimeEndpointTarget,
     RunnerStatus,
     SceneSnapshot,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
     StateDelta,
     TaskState,
     TimedTrajectory,
@@ -115,14 +122,15 @@ class FakeCommandSink:
         self.provider = provider
         self.send_statuses: deque[CommandAckStatus] = deque()
         self.follow_commands: deque[bool] = deque()
-        self.sent: list[JointCommand] = []
+        self.sent: list[RuntimeCommandFrame] = []
         self.send_times: list[float] = []
-        self.held: list[JointCommand] = []
+        self.held: list[tuple[tuple[RuntimeEndpointTarget, ...], PlanningContext]] = []
+        self.cancelled: list[tuple[RuntimeEndpointTarget, ...]] = []
         self.cancel_count = 0
 
     def send(
         self,
-        command: JointCommand,
+        command: RuntimeCommandFrame,
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
@@ -136,22 +144,41 @@ class FakeCommandSink:
         )
         follows = self.follow_commands.popleft() if self.follow_commands else True
         if status is CommandAckStatus.ACCEPTED and follows:
-            self.provider.qpos = command.positions.clone()
+            positions = self.provider.qpos.clone()
+            for endpoint_command in command.commands:
+                target = endpoint_command.target
+                payload = endpoint_command.payload
+                assert isinstance(target, JointPositionTarget)
+                assert isinstance(payload, JointPositionPayload)
+                joint_ids = list(target.joint_ids)
+                positions[:, joint_ids] = torch.where(
+                    command.active_mask[:, None],
+                    payload.positions,
+                    positions[:, joint_ids],
+                )
+            self.provider.qpos = positions
         return CommandAcknowledgement(status)
 
     def hold(
         self,
-        command: JointCommand,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        context: PlanningContext,
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Record and apply a hold command."""
-        self.held.append(command)
-        self.provider.qpos = command.positions.clone()
+        """Record targets and apply the supplied observed-state hold."""
+        self.held.append((tuple(targets), context))
+        self.provider.qpos = context.robot.qpos.clone()
         return CommandAcknowledgement.accepted_ack()
 
-    def cancel(self, *, timeout: float) -> CommandAcknowledgement:
+    def cancel(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
         """Record controller cancellation."""
+        self.cancelled.append(tuple(targets))
         self.cancel_count += 1
         return CommandAcknowledgement.accepted_ack()
 
@@ -161,7 +188,19 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
 
     skill_id: ClassVar[str] = "timed"
     GoalType: ClassVar[type] = EndEffectorPoseGoal
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                    ),
+                ),
+            ),
+        )
+    )
 
     def __init__(self, *, with_effect: bool = False) -> None:
         super().__init__()
@@ -213,10 +252,19 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         )
 
 
+def _timed_action_binding(action: TimedAction) -> ActionBinding:
+    """Bind the timed action's generic motion endpoint to the fake arm."""
+    return action.planning_services.bind_control_parts(
+        TimedAction.binding_contract,
+        {"primary": {"motion": "arm"}},
+    )
+
+
 def _make_runner(
     *,
     with_effect: bool = False,
     batch_size: int = BATCH_SIZE,
+    control_joint_ids: tuple[int, ...] | None = None,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -232,7 +280,9 @@ def _make_runner(
     robot.dof = ROBOT_DOF
     robot.control_parts = {"arm": object()}
     robot.get_qpos.return_value = torch.zeros(batch_size, ROBOT_DOF)
-    robot.get_joint_ids.return_value = list(range(ROBOT_DOF))
+    robot.get_joint_ids.return_value = list(
+        range(ROBOT_DOF) if control_joint_ids is None else control_joint_ids
+    )
     generator = Mock()
     generator.robot = robot
     generator.device = torch.device("cpu")
@@ -247,7 +297,7 @@ def _make_runner(
     invocation = ActionInvocation(
         skill_id="timed",
         goal=EndEffectorPoseGoal(goal_pose),
-        binding=ActionBinding(manipulators={"primary": "arm"}),
+        binding=_timed_action_binding(action),
         motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
@@ -264,6 +314,30 @@ def _make_runner(
         cfg=ExecutionRunnerCfg(minimum_cycle_time=MINIMUM_CYCLE_TIME),
     )
     return runner, clock, provider, sink, action
+
+
+def test_joint_feedback_ignores_motion_outside_bound_endpoint() -> None:
+    runner, clock, provider, sink, action = _make_runner(control_joint_ids=(0,))
+
+    runner.step()
+    provider.qpos[:, 1] = 42.0
+    clock.advance(FIRST_INTERVAL)
+    second = runner.step()
+    clock.advance(SECOND_INTERVAL)
+    runner.step()
+    clock.advance(SECOND_INTERVAL)
+    completed = runner.step()
+
+    assert action.plan_count == 1
+    assert len(sink.sent) == 3
+    assert not any(
+        event.kind is ExecutionEventKind.TRACKING_ERROR
+        for step in (second, completed)
+        if step.tick is not None
+        for event in step.tick.events
+    )
+    assert completed.status is RunnerStatus.COMPLETED
+    assert provider.qpos[0, 1].item() == 42.0
 
 
 def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
@@ -289,13 +363,34 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
     assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
 
 
-def test_session_active_trajectory_returns_an_owned_snapshot() -> None:
+def test_runner_dispatches_transport_neutral_endpoint_frames() -> None:
+    runner, _, _, sink, _ = _make_runner()
+
+    runner.step()
+
+    frame = sink.sent[0]
+    assert isinstance(frame, RuntimeCommandFrame)
+    assert len(frame.commands) == 1
+    endpoint_command = frame.commands[0]
+    assert isinstance(endpoint_command.target, JointPositionTarget)
+    assert endpoint_command.target.transport_id == "robot.joint_position"
+    assert endpoint_command.target.target_id == "arm"
+    assert endpoint_command.target.joint_ids == (0, 1)
+    assert isinstance(endpoint_command.payload, JointPositionPayload)
+    assert endpoint_command.payload.transport_id == endpoint_command.target.transport_id
+
+
+def test_session_active_commands_return_an_owned_endpoint_snapshot() -> None:
     runner, _, _, _, _ = _make_runner()
 
-    trajectory = runner.session.active_trajectory
-    trajectory.positions.fill_(-1.0)
+    commands = runner.session.active_commands
+    payload = commands.frames[0].commands[0].payload
+    assert isinstance(payload, JointPositionPayload)
+    payload.positions.fill_(-1.0)
 
-    assert torch.all(runner.session.active_trajectory.positions >= 0.0)
+    current_payload = runner.session.active_commands.frames[0].commands[0].payload
+    assert isinstance(current_payload, JointPositionPayload)
+    assert torch.all(current_payload.positions >= 0.0)
 
 
 def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
@@ -324,6 +419,11 @@ def test_runner_completes_and_holds_after_last_command_settles() -> None:
     assert completed.command_count == 3
     assert [item.operation for item in completed.dispatches] == [CommandOperation.HOLD]
     assert len(sink.held) == 1
+    held_targets, hold_context = sink.held[0]
+    assert [(target.transport_id, target.target_id) for target in held_targets] == [
+        ("robot.joint_position", "arm")
+    ]
+    assert torch.equal(hold_context.robot.qpos, sink.provider.qpos)
 
 
 @pytest.mark.parametrize(
@@ -345,6 +445,8 @@ def test_runner_safely_stops_when_command_is_not_accepted(
         CommandOperation.HOLD,
     ]
     assert sink.cancel_count == 1
+    assert [target.target_id for target in sink.cancelled[0]] == ["arm"]
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
     assert failed.message is not None and status.value in failed.message
 
 
@@ -363,6 +465,8 @@ def test_runner_cancel_performs_cancel_then_hold() -> None:
     assert repeated.status is RunnerStatus.CANCELLED
     assert repeated.dispatches == ()
     assert sink.cancel_count == 1
+    assert sink.cancelled == [()]
+    assert sink.held[0][0] == ()
 
 
 def test_runner_replans_from_observation_after_tracking_error() -> None:
@@ -383,14 +487,17 @@ def test_runner_replans_from_observation_after_tracking_error() -> None:
     assert recovered.status is RunnerStatus.RUNNING
 
 
-def test_runner_surfaces_explicit_invocation_revision() -> None:
-    runner, _, _, _, action = _make_runner()
+def test_runner_revision_waits_for_deadline_and_plans_from_fresh_observation() -> None:
+    runner, clock, provider, sink, action = _make_runner()
+    first = runner.step()
+    assert first.wait_duration == pytest.approx(FIRST_INTERVAL)
+
     revised_pose = torch.eye(4)
     revised_pose[0, 3] = 2.0 * TARGET_POSITION
     revised = ActionInvocation(
         skill_id="timed",
         goal=EndEffectorPoseGoal(revised_pose),
-        binding=ActionBinding(manipulators={"primary": "arm"}),
+        binding=_timed_action_binding(action),
         motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
@@ -400,16 +507,64 @@ def test_runner_surfaces_explicit_invocation_revision() -> None:
         revision=1,
     )
 
-    runner.session.revise_current(revised)
+    runner.revise_current(revised)
+    provider.qpos.fill_(0.4)
+    waiting = runner.step()
+
+    assert waiting.is_waiting is True
+    assert action.plan_count == 1
+    assert sink.send_times == [0.0]
+
+    clock.advance(FIRST_INTERVAL)
     result = runner.step()
 
     assert action.plan_count == 2
+    assert result.command_count == 2
+    assert sink.send_times == pytest.approx([0.0, FIRST_INTERVAL])
     assert result.tick is not None
+    revised_payload = result.tick.command.commands[0].payload
+    assert isinstance(revised_payload, JointPositionPayload)
+    assert torch.allclose(revised_payload.positions, torch.full((1, 2), 0.4))
     assert any(
         event.kind is ExecutionEventKind.INVOCATION_REVISED
         and event.invocation_revision == 1
         for event in result.tick.events
     )
+
+
+def test_runner_revision_rejects_pending_effect_verification() -> None:
+    runner, _, _, _, action = _make_runner(with_effect=True)
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None
+    assert blocked.tick.pending_effect is not None
+    assert runner.effect_verification_pending is True
+
+    revised_pose = torch.eye(4)
+    revised_pose[0, 3] = 2.0 * TARGET_POSITION
+    revised = ActionInvocation(
+        skill_id="timed",
+        goal=EndEffectorPoseGoal(revised_pose),
+        binding=_timed_action_binding(action),
+        motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
+        recovery_policy=RecoveryPolicy(
+            max_replans=2,
+            tracking_error_threshold=0.05,
+            action_timeout=10.0,
+        ),
+        revision=1,
+    )
+
+    with pytest.raises(RuntimeError, match="awaiting verification"):
+        runner.revise_current(revised)
+
+    assert runner.effect_verification_pending is True
+    completed = runner.run_until_blocked(
+        effect_verifier=lambda context, tick: torch.ones(
+            context.batch_size,
+            dtype=torch.bool,
+        )
+    )
+    assert completed.status is RunnerStatus.COMPLETED
 
 
 def test_runner_fails_safely_when_observation_provider_raises() -> None:
@@ -425,6 +580,8 @@ def test_runner_fails_safely_when_observation_provider_raises() -> None:
     ]
     assert len(sink.held) == 1
     assert sink.cancel_count == 1
+    assert sink.cancelled == [()]
+    assert sink.held[0][0] == ()
     assert failed.message is not None and "observation unavailable" in failed.message
 
 

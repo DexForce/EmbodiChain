@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -183,22 +182,26 @@ def main() -> None:
         sim, args, "Inspect the wooden block, then press Enter to plan..."
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
+    move_binding = engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": "arm"}},
+    )
+    press_binding = engine.bind_control_parts(
+        "press",
+        {"primary": {"motion": "arm", "grasp": "hand"}},
     )
     compiled = engine.compile(
         (
             ActionInvocation(
                 "move_end_effector",
                 EndEffectorPoseGoal(move_target),
-                binding,
+                move_binding,
                 MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
             ),
             ActionInvocation(
                 "press",
                 PressGoal(press_target),
-                binding,
+                press_binding,
                 MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,

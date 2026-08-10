@@ -27,9 +27,6 @@ An atomic action owns a
 - a {class}`~embodichain.lab.sim.atomic_actions.SkillEndpointRequirement`
   declares the all-of capabilities and typed semantic commands needed from that
   participant;
-- an optional
-  {class}`~embodichain.lab.sim.atomic_actions.ActionBindingRoute` lowers a
-  generic endpoint into the current atomic-action core; and
 - {class}`~embodichain.lab.sim.atomic_actions.DisjointSlotEndpoints` declares
   endpoint views that must not share physical channels within one participant;
   coupled whole-body views may overlap when the skill does not declare this
@@ -184,7 +181,8 @@ preset = bound.preset(skill_id="pick_up")
 
 {meth}`BoundRobotSkillProfile.resolve` returns a {class}`ResolvedSkillBinding`
 containing the selected logical resources, their adapter-resolved endpoints,
-their combined {class}`ResourceClaim`, and the current-core `ActionBinding`. A
+their combined {class}`ResourceClaim`, and an engine-owned generic
+{class}`~embodichain.lab.sim.atomic_actions.ActionBinding`. A
 semantic compiler uses that binding and the selected preset when constructing
 an invocation; profile resolution does not plan or execute the action itself.
 
@@ -248,13 +246,15 @@ and capability in its own binding contract. Existing built-in actions do not
 consume these example capabilities.
 
 Non-joint controllers add one endpoint declaration type and one adapter. The
-adapter returns {class}`EndpointResolution` with a command-profile key,
-supported binding values, joint IDs when applicable, and adapter-defined claim
+adapter returns {class}`EndpointResolution` with a typed immutable
+{class}`~embodichain.lab.sim.atomic_actions.RuntimeEndpointTarget`, an optional
+command-profile key, joint IDs when applicable, and adapter-defined claim
 tokens. The generic graph, matching, command, default, and conflict code does
-not change. For example, a twist controller can return
-`claim_tokens={"controller:base"}` with no joint IDs. Exclusive endpoints must
-provide joint IDs or claim tokens; a read-only or otherwise shareable virtual
-endpoint must opt into `exclusive=False` explicitly.
+not change. For example, a twist controller can return a target addressed to a
+`base_velocity` transport and `claim_tokens={"controller:base"}` with no joint
+IDs. Exclusive endpoints must provide joint IDs or claim tokens; a read-only or
+otherwise shareable virtual endpoint must opt into `exclusive=False`
+explicitly.
 
 Adapters are registered by exact endpoint type. The built-in
 {class}`ControlPartEndpointAdapter` cannot be overridden; define a distinct
@@ -262,19 +262,25 @@ endpoint subtype and adapter when controller semantics differ. An adapter may
 set `requires_command_profile=True` when a missing generic command-profile ID
 must make profile binding fail immediately.
 
-{class}`ActionBindingRoute` remains a transition into the current core's
-`manipulator` and `end_effector` maps. A new non-core controller therefore also
-needs one reusable atomic skill/runtime integration for its route and command
-transport. Once that shared capability exists, new tasks and robot variants
-reuse it through profile and task configuration rather than task-specific
-motion code.
+A resolved action binding is keyed only by the skill-local
+`(slot_id, endpoint_id)` pair. A reusable non-joint capability supplies a
+matching {class}`~embodichain.lab.sim.atomic_actions.RuntimeCommandPayload`, a
+shared atomic skill that emits
+{class}`~embodichain.lab.sim.atomic_actions.RuntimeCommandFrame` values, and an
+{class}`~embodichain.lab.sim.atomic_actions.EndpointCommandTransport` registered
+with {class}`~embodichain.lab.sim.atomic_actions.EndpointCommandRouter`. The
+core binding, session, runner, and router do not need controller-specific
+changes. Once that shared capability exists, new tasks and robot variants reuse
+it through profile and task configuration rather than task-specific motion
+code.
 
 ```{important}
 `ResourceClaim` combines leaf IDs, concrete joint IDs, and adapter claim tokens.
 It and explicit disjoint constraints detect physical overlap for binding and
 future scheduling work. They do not enable parallel action execution. The
-current action plans and commands still contain full-robot joint positions, and
-the runtime does not merge concurrent command streams.
+runtime does not merge concurrent endpoint-command streams. Joint-backed plans
+may retain a full-robot trajectory for feedback and offline compilation, but
+runtime dispatch is scoped to the endpoints in each command frame.
 ```
 
 See {doc}`index` for the direct atomic-action core and

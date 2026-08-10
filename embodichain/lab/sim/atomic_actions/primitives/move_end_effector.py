@@ -23,12 +23,12 @@ from typing import ClassVar
 
 import torch
 
+from ..bindings import JointPositionTarget
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
     SkillEndpointRequirement,
@@ -73,14 +73,12 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
                     SkillEndpointRequirement(
                         endpoint_id="motion",
                         capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "primary"),
                     ),
                 ),
             ),
         ),
     )
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self,
@@ -95,9 +93,11 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
         goal = self.require_goal(request)
-        manipulator = request.binding.manipulator("primary")
-        control_part = manipulator.name
-        joint_ids = list(manipulator.joint_ids)
+        motion_target = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
         move_xpos = resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
             n_envs=context.batch_size,

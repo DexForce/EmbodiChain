@@ -26,11 +26,12 @@ import torch
 
 from embodichain.utils import configclass
 
-from .execution import JointCommand
+from .bindings import JointPositionTarget, RuntimeEndpointTarget
 from .runner import (
     CommandAcknowledgement,
     CommandAckStatus,
 )
+from .runtime_commands import JointPositionPayload, RuntimeCommandFrame
 from .scene import SceneProvider
 from .state import (
     EntityState,
@@ -262,6 +263,9 @@ class SimulationExecutionAdapter:
         initial_time: Initial elapsed simulation time in seconds.
     """
 
+    transport_id = JointPositionTarget.TRANSPORT_ID
+    payload_type = JointPositionPayload
+
     def __init__(
         self,
         simulation: SimulationManager,
@@ -395,16 +399,15 @@ class SimulationExecutionAdapter:
 
     def send(
         self,
-        command: JointCommand,
+        command: RuntimeCommandFrame,
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Write active targets and observed-position holds as one batch.
+        """Write joint endpoint targets and neutralize inactive rows.
 
         Args:
-            command: Full-robot batched command. Inactive rows already contain
-                observed-position holds and are written with active rows so no
-                environment continues tracking a stale target.
+            command: Joint-position endpoint frame. Inactive rows are replaced
+                with observed positions by this transport.
             timeout: Positive acknowledgement deadline. Simulation writes are
                 synchronous, so this is validated but otherwise unused.
 
@@ -413,16 +416,43 @@ class SimulationExecutionAdapter:
         """
         self._validate_timeout(timeout)
         try:
-            self._validate_command(command)
-            self.robot.set_qpos(
-                command.positions,
-                env_ids=self._robot_env_indices,
-            )
-            if command.velocities is not None:
-                self.robot.set_qvel(
-                    command.velocities,
+            self._validate_command_frame(command)
+            observed_positions = self.robot.get_qpos()
+            for endpoint_command in command.commands:
+                target = endpoint_command.target
+                payload = endpoint_command.payload
+                assert isinstance(target, JointPositionTarget)
+                assert isinstance(payload, JointPositionPayload)
+                joint_ids = list(target.joint_ids)
+                positions = torch.where(
+                    command.active_mask[:, None],
+                    payload.positions,
+                    observed_positions[:, joint_ids],
+                )
+                self.robot.set_qpos(
+                    positions,
+                    joint_ids=joint_ids,
                     env_ids=self._robot_env_indices,
                 )
+                velocities = payload.velocities
+                if velocities is None and not command.active_mask.all().item():
+                    observed_velocities = self._read_optional_tensor("get_qvel")
+                    velocities = (
+                        torch.zeros_like(observed_positions[:, joint_ids])
+                        if observed_velocities is None
+                        else observed_velocities[:, joint_ids]
+                    )
+                if velocities is not None:
+                    velocities = torch.where(
+                        command.active_mask[:, None],
+                        velocities,
+                        torch.zeros_like(velocities),
+                    )
+                    self.robot.set_qvel(
+                        velocities,
+                        joint_ids=joint_ids,
+                        env_ids=self._robot_env_indices,
+                    )
             return CommandAcknowledgement.accepted_ack()
         except Exception as exc:
             return CommandAcknowledgement(
@@ -432,15 +462,16 @@ class SimulationExecutionAdapter:
 
     def hold(
         self,
-        command: JointCommand,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        context: PlanningContext,
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Set every represented environment to an observed-position hold.
+        """Set every represented joint endpoint to an observed-position hold.
 
         Args:
-            command: Full-robot hold positions. ``active_mask`` is intentionally
-                ignored because safety hold applies to every environment row.
+            targets: Joint-position destinations to place in a safe hold.
+            context: Latest observed positions and stable environment IDs.
             timeout: Positive acknowledgement deadline.
 
         Returns:
@@ -448,14 +479,25 @@ class SimulationExecutionAdapter:
         """
         self._validate_timeout(timeout)
         try:
-            self._validate_command(command)
-            self.robot.set_qpos(
-                command.positions,
-                env_ids=self._robot_env_indices,
-            )
-            if command.velocities is not None:
+            self._validate_targets(targets)
+            if not isinstance(context, PlanningContext):
+                raise TypeError("context must be a PlanningContext.")
+            if not torch.equal(context.env_ids, self.env_ids):
+                raise ValueError("Hold context env_ids must match the adapter.")
+            if context.robot.qpos.shape != self.robot.get_qpos().shape:
+                raise ValueError("Hold context qpos shape must match the robot.")
+            for target in targets:
+                assert isinstance(target, JointPositionTarget)
+                joint_ids = list(target.joint_ids)
+                observed_positions = context.robot.qpos[:, joint_ids]
+                self.robot.set_qpos(
+                    observed_positions,
+                    joint_ids=joint_ids,
+                    env_ids=self._robot_env_indices,
+                )
                 self.robot.set_qvel(
-                    command.velocities,
+                    torch.zeros_like(observed_positions),
+                    joint_ids=joint_ids,
                     env_ids=self._robot_env_indices,
                 )
             return CommandAcknowledgement.accepted_ack()
@@ -465,10 +507,16 @@ class SimulationExecutionAdapter:
                 f"{type(exc).__name__}: {exc}",
             )
 
-    def cancel(self, *, timeout: float) -> CommandAcknowledgement:
+    def cancel(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
         """Acknowledge cancellation of synchronous simulation target writes.
 
         Args:
+            targets: Joint-position destinations whose queued work is cancelled.
             timeout: Positive acknowledgement deadline.
 
         Returns:
@@ -476,6 +524,13 @@ class SimulationExecutionAdapter:
             actual safe target.
         """
         self._validate_timeout(timeout)
+        try:
+            self._validate_targets(targets)
+        except Exception as exc:
+            return CommandAcknowledgement(
+                CommandAckStatus.REJECTED,
+                f"{type(exc).__name__}: {exc}",
+            )
         return CommandAcknowledgement.accepted_ack(
             "Simulation commands are synchronous; no queued command remained."
         )
@@ -505,18 +560,43 @@ class SimulationExecutionAdapter:
             return None
         return value if isinstance(value, torch.Tensor) else None
 
-    def _validate_command(self, command: JointCommand) -> None:
-        """Validate command identity and shape against the attached robot."""
-        if not isinstance(command, JointCommand):
-            raise TypeError("command must be a JointCommand.")
-        qpos = self.robot.get_qpos()
-        if command.positions.shape != qpos.shape:
-            raise ValueError(
-                "Command shape must match full robot qpos, "
-                f"got {tuple(command.positions.shape)} and {tuple(qpos.shape)}."
-            )
+    def _validate_command_frame(self, command: RuntimeCommandFrame) -> None:
+        """Validate one joint-position frame against the attached robot."""
+        if not isinstance(command, RuntimeCommandFrame):
+            raise TypeError("command must be a RuntimeCommandFrame.")
         if not torch.equal(command.env_ids, self.env_ids):
             raise ValueError("Command env_ids must match the simulation adapter.")
+        self._validate_targets(command.targets)
+        for endpoint_command in command.commands:
+            if not isinstance(endpoint_command.payload, JointPositionPayload):
+                raise TypeError(
+                    "SimulationExecutionAdapter accepts JointPositionPayload only."
+                )
+
+    def _validate_targets(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+    ) -> None:
+        """Validate joint target ownership and robot dimensions."""
+        if isinstance(targets, (str, bytes)):
+            raise TypeError("targets must be an iterable of runtime targets.")
+        qpos = self.robot.get_qpos()
+        seen_joints: set[int] = set()
+        for target in targets:
+            if not isinstance(target, JointPositionTarget):
+                raise TypeError(
+                    "SimulationExecutionAdapter accepts JointPositionTarget only."
+                )
+            if target.transport_id != self.transport_id:
+                raise ValueError("Target transport does not match this adapter.")
+            if max(target.joint_ids) >= qpos.shape[1]:
+                raise ValueError(
+                    f"Target {target.target_id!r} references a joint outside robot DOF."
+                )
+            overlaps = seen_joints.intersection(target.joint_ids)
+            if overlaps:
+                raise ValueError(f"Joint targets overlap on IDs {sorted(overlaps)}.")
+            seen_joints.update(target.joint_ids)
 
     @staticmethod
     def _validate_timeout(timeout: float) -> None:
