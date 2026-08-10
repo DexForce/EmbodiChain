@@ -28,7 +28,8 @@ live :class:`~embodichain.lab.sim.objects.RigidObject` meshes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -539,7 +540,7 @@ def _mesh_to_obstacle_entry(
 
 
 def generate_curobo_world_yaml(
-    rigid_objects: Sequence[RigidObject],
+    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject],
     output_path: str,
     *,
     representation: str = "cuboid",
@@ -552,7 +553,7 @@ def generate_curobo_world_yaml(
     collision_sphere_buffer: float = 0.0,
     device: str = "cuda:0",
 ) -> str:
-    """Generate a cuRobo V2 scene (world) YAML from a sequence of ``RigidObject``.
+    """Generate a cuRobo V2 scene (world) YAML from live ``RigidObject`` handles.
 
     Each object's mesh (``get_vertices`` / ``get_triangles``) and world pose
     (``get_local_pose``) are converted into cuRobo obstacle entries under a single
@@ -568,7 +569,9 @@ def generate_curobo_world_yaml(
         :meth:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboPlanner.update_dynamic_obstacles`.
 
     Args:
-        rigid_objects: ``RigidObject`` instances to bake into the collision world.
+        rigid_objects: Objects to bake into the collision world. Mapping keys are
+            authoritative obstacle IDs. A sequence derives each name from the
+            object's ``uid`` (or ``obstacle_<index>`` when absent).
         output_path: Destination YAML file path.
         representation: ``"cuboid"`` (default, AABB->OBB, no CUDA), ``"mesh"``
             (exact triangle mesh, no CUDA), or ``"sphere"`` (cuRobo sphere fit,
@@ -594,29 +597,48 @@ def generate_curobo_world_yaml(
 
     import yaml
 
-    rigid_objects = list(rigid_objects)
-    if not rigid_objects:
+    registry_backed = isinstance(rigid_objects, Mapping)
+    if registry_backed:
+        named_rigid_objects = list(rigid_objects.items())
+    else:
+        named_rigid_objects = [
+            (getattr(obj, "uid", None) or f"obstacle_{idx}", obj)
+            for idx, obj in enumerate(rigid_objects)
+        ]
+    if not named_rigid_objects:
         raise ValueError("rigid_objects must contain at least one RigidObject.")
 
     data: dict[str, dict[str, object]] = {}
     used_names: set[str] = set()
-    for idx, obj in enumerate(rigid_objects):
-        name = getattr(obj, "uid", None) or f"obstacle_{idx}"
+    for name, obj in named_rigid_objects:
+        if not isinstance(name, str) or not name or name != name.strip():
+            raise ValueError(
+                "Obstacle IDs must be non-empty strings without outer whitespace."
+            )
         if name in used_names:
             raise ValueError(
-                f"Duplicate obstacle name {name!r}; RigidObject uids must be unique."
+                f"Duplicate obstacle name {name!r}; obstacle IDs must be unique."
             )
         used_names.add(name)
 
         vertices = obj.get_vertices(env_ids=[env_id], scale=True)[0]
         faces = obj.get_triangles(env_ids=[env_id])[0]
-        pose = obj.get_local_pose(to_matrix=False)[env_id]
-
-        if vertices is None or faces is None or vertices.numel() == 0:
+        if (
+            vertices is None
+            or faces is None
+            or vertices.numel() == 0
+            or faces.numel() == 0
+        ):
+            if registry_backed:
+                raise ValueError(
+                    f"Registry-backed obstacle {name!r} has no mesh geometry; "
+                    "the declared collision world cannot omit it."
+                )
             logger.log_warning(
                 f"RigidObject {name!r} has no mesh geometry; skipping collision export."
             )
             continue
+        pose = obj.get_local_pose(to_matrix=False)[env_id]
 
         entries = _mesh_to_obstacle_entry(
             name,

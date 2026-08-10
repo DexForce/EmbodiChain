@@ -27,6 +27,7 @@ from __future__ import annotations
 import importlib
 import logging
 import math
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -229,6 +230,28 @@ def test_curobo_world_cfg_accepts_registered_dynamic_obstacle():
     assert cfg.dynamic_obstacle_names == ["known"]
 
 
+def test_curobo_world_cfg_mapping_uses_registry_id_for_dynamic_obstacle():
+    obstacle = type("NamedObstacle", (), {"uid": "legacy_uid"})()
+
+    cfg = CuroboWorldCfg(
+        rigid_objects={"registry_cube": obstacle},
+        dynamic_obstacle_names=["registry_cube"],
+    )
+
+    assert cfg.dynamic_obstacle_names == ["registry_cube"]
+    assert cfg.rigid_objects["registry_cube"] is obstacle
+
+
+def test_curobo_world_cfg_mapping_does_not_accept_object_uid_as_alias():
+    obstacle = type("NamedObstacle", (), {"uid": "legacy_uid"})()
+
+    with pytest.raises(ValueError, match="not present in rigid_objects"):
+        CuroboWorldCfg(
+            rigid_objects={"registry_cube": obstacle},
+            dynamic_obstacle_names=["legacy_uid"],
+        )
+
+
 def test_curobo_world_cfg_rejects_unregistered_dynamic_obstacle():
     obstacle = type("NamedObstacle", (), {"uid": "known"})()
 
@@ -249,11 +272,53 @@ def test_curobo_world_cfg_rejects_duplicate_dynamic_obstacle_names():
         )
 
 
+def test_curobo_world_cfg_rejects_outer_whitespace_in_obstacle_ids():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(ValueError, match="without outer whitespace"):
+        CuroboWorldCfg(
+            rigid_objects={"registry_cube": obstacle},
+            dynamic_obstacle_names=[" registry_cube"],
+        )
+    with pytest.raises(ValueError, match="without outer whitespace"):
+        CuroboWorldCfg(rigid_objects={" registry_cube": obstacle})
+
+
+def test_curobo_world_cfg_rejects_string_dynamic_obstacle_collection():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(TypeError, match="not a string"):
+        CuroboWorldCfg(
+            rigid_objects={"registry_cube": obstacle},
+            dynamic_obstacle_names="registry_cube",  # type: ignore[arg-type]
+        )
+
+
 def test_curobo_world_cfg_rejects_duplicate_rigid_object_names():
     obstacle_type = type("NamedObstacle", (), {"uid": "duplicate"})
 
     with pytest.raises(ValueError, match="unique obstacle names"):
         CuroboWorldCfg(rigid_objects=[obstacle_type(), obstacle_type()])
+
+
+@pytest.mark.parametrize(
+    ("multi_env", "expected_mode"),
+    [(False, "shared"), (True, "per_env")],
+)
+def test_curobo_planner_exposes_collision_world_contract(multi_env, expected_mode):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(
+            rigid_objects={"registry_cube": object()},
+            dynamic_obstacle_names=["registry_cube"],
+            multi_env=multi_env,
+        ),
+    )
+
+    assert planner.dynamic_collision_entity_ids == ("registry_cube",)
+    assert planner.collision_world_entity_ids == ("registry_cube",)
+    assert planner.collision_world_batch_mode == expected_mode
 
 
 def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
@@ -551,6 +616,88 @@ def test_generate_cuboid_world_yaml_assembles_schema(tmp_path):
     assert data["cuboid"]["demo_block"]["pose"][:3] == pytest.approx([0.45, 0.0, 0.18])
 
 
+def test_generate_world_yaml_uses_mapping_key_instead_of_object_uid(tmp_path):
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+    output_path = tmp_path / "registry_world.yml"
+
+    generate_curobo_world_yaml(
+        {"registry_cube": rigid_object},
+        str(output_path),
+        representation="cuboid",
+    )
+    data = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+
+    assert set(data["cuboid"]) == {"registry_cube"}
+
+
+def test_world_yaml_cache_key_includes_registry_id():
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(rigid_objects={"registry_cube": rigid_object}),
+    )
+    registry_key = planner._world_yaml_cache_key(planner.cfg.world)
+    planner.cfg.world = CuroboWorldCfg(
+        rigid_objects={"renamed_registry_cube": rigid_object}
+    )
+
+    renamed_key = planner._world_yaml_cache_key(planner.cfg.world)
+
+    assert registry_key != renamed_key
+
+
+def test_dynamic_update_uses_registry_id_in_curobo_backend():
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(
+            rigid_objects={"registry_cube": rigid_object},
+            obstacle_representation="cuboid",
+            dynamic_obstacle_names=["registry_cube"],
+        ),
+    )
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Pose=lambda **kwargs: kwargs)
+    updates = []
+    collision_checker = SimpleNamespace(
+        update_obstacle_pose=lambda name, pose, env_idx: updates.append(
+            (name, pose, env_idx)
+        )
+    )
+    backend = SimpleNamespace(
+        batch_size=1,
+        profile=SimpleNamespace(sim_base_to_curobo_base=None),
+        sim_base_to_curobo_base_matrix=None,
+        planner=SimpleNamespace(scene_collision_checker=collision_checker),
+    )
+    identity = torch.eye(4).unsqueeze(0)
+
+    planner.update_dynamic_obstacles(
+        {"registry_cube": identity},
+        backend=backend,
+        sim_base_pose_inv=identity,
+    )
+
+    assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
+
+
 def test_generate_mesh_world_yaml_assembles_schema(tmp_path):
     rigid_object = _FakeRigidObject(
         "demo_block",
@@ -604,6 +751,21 @@ def test_generate_world_yaml_rejects_empty_input(tmp_path):
         generate_curobo_world_yaml([], str(tmp_path / "world.yml"))
 
 
+def test_registry_world_yaml_rejects_empty_geometry_instead_of_skipping(tmp_path):
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        torch.zeros((0, 3), dtype=torch.float32),
+        torch.zeros((0, 3), dtype=torch.int64),
+        _identity_pose(),
+    )
+
+    with pytest.raises(ValueError, match="Registry-backed obstacle.*no mesh"):
+        generate_curobo_world_yaml(
+            {"registry_cube": rigid_object},
+            str(tmp_path / "world.yml"),
+        )
+
+
 def test_generate_world_yaml_rejects_duplicate_names(tmp_path):
     pose = _identity_pose()
     first = _FakeRigidObject(
@@ -622,6 +784,21 @@ def test_generate_world_yaml_rejects_duplicate_names(tmp_path):
     with pytest.raises(ValueError, match="Duplicate"):
         generate_curobo_world_yaml(
             [first, second],
+            str(tmp_path / "world.yml"),
+        )
+
+
+def test_generate_world_yaml_rejects_outer_whitespace_in_mapping_id(tmp_path):
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+
+    with pytest.raises(ValueError, match="without outer whitespace"):
+        generate_curobo_world_yaml(
+            {" registry_cube": rigid_object},
             str(tmp_path / "world.yml"),
         )
 

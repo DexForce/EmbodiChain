@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -423,6 +424,30 @@ class EntityState:
         object.__setattr__(self, "pose", self.pose.clone())
 
 
+class _ImmutableEntityMapping(Mapping[str, EntityState]):
+    """Own entity states and return defensive copies on every public read."""
+
+    __slots__ = ("_states",)
+
+    def __init__(self, states: Mapping[str, EntityState]) -> None:
+        self._states = MappingProxyType(
+            {
+                entity_id: EntityState(state.pose, confidence=state.confidence)
+                for entity_id, state in states.items()
+            }
+        )
+
+    def __getitem__(self, entity_id: str) -> EntityState:
+        state = self._states[entity_id]
+        return EntityState(state.pose, confidence=state.confidence)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._states)
+
+    def __len__(self) -> int:
+        return len(self._states)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class SceneSnapshot:
     """Versioned scene state used to ground dynamic goals and obstacles."""
@@ -487,7 +512,7 @@ class SceneSnapshot:
                 "collision_entity_ids reference missing scene entities: "
                 f"{sorted(missing)}."
             )
-        object.__setattr__(self, "entities", MappingProxyType(normalized))
+        object.__setattr__(self, "entities", _ImmutableEntityMapping(normalized))
         object.__setattr__(self, "collision_entity_ids", collision_entity_ids)
 
     def collision_world_revisions(self, batch_size: int) -> tuple[int, ...]:

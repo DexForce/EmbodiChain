@@ -168,6 +168,72 @@ class MotionGenerator:
         """
         return getattr(self.planner, "supports_collision_world_updates", False) is True
 
+    @property
+    def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
+        """Return canonical dynamic-obstacle IDs declared by the planner."""
+        entity_ids = getattr(self.planner, "dynamic_collision_entity_ids", ())
+        return self._validate_collision_entity_ids(
+            entity_ids,
+            field_name="dynamic_collision_entity_ids",
+        )
+
+    @property
+    def collision_world_entity_ids(self) -> tuple[str, ...]:
+        """Return every canonical entity ID in the planner collision world."""
+        entity_ids = getattr(self.planner, "collision_world_entity_ids", ())
+        return self._validate_collision_entity_ids(
+            entity_ids,
+            field_name="collision_world_entity_ids",
+        )
+
+    @staticmethod
+    def _validate_collision_entity_ids(
+        entity_ids: object,
+        *,
+        field_name: str,
+    ) -> tuple[str, ...]:
+        """Validate one planner-owned canonical collision-ID declaration."""
+        if not isinstance(entity_ids, tuple) or not all(
+            isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()
+            for entity_id in entity_ids
+        ):
+            raise TypeError(
+                f"Planner.{field_name} must be a tuple of "
+                "non-empty strings without outer whitespace."
+            )
+        if len(set(entity_ids)) != len(entity_ids):
+            raise ValueError(f"Planner.{field_name} must contain unique IDs.")
+        return entity_ids
+
+    @staticmethod
+    def _validate_collision_pose_keys(
+        poses: Mapping[object, object],
+        *,
+        field_name: str,
+    ) -> set[str]:
+        """Validate exact canonical IDs on one obstacle-pose mapping."""
+        entity_ids = tuple(poses)
+        if not all(
+            isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()
+            for entity_id in entity_ids
+        ):
+            raise TypeError(
+                f"{field_name} keys must be non-empty strings without outer "
+                "whitespace."
+            )
+        return set(entity_ids)
+
+    @property
+    def collision_world_batch_mode(self) -> Literal["shared", "per_env"] | None:
+        """Return the backend's dynamic collision-world batch-sharing mode."""
+        mode = getattr(self.planner, "collision_world_batch_mode", None)
+        if mode not in (None, "shared", "per_env"):
+            raise ValueError(
+                "Planner.collision_world_batch_mode must be 'shared', 'per_env', "
+                "or None."
+            )
+        return mode
+
     def bind_collision_world(
         self,
         plan_opts: PlanOptions | None,
@@ -192,15 +258,68 @@ class MotionGenerator:
                 "collision-world updates.",
                 ValueError,
             )
+        configured_ids = self.dynamic_collision_entity_ids
+        received_ids = tuple(obstacle_poses)
+        if not all(
+            isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()
+            for entity_id in received_ids
+        ):
+            raise TypeError(
+                "obstacle_poses keys must be non-empty strings without outer "
+                "whitespace."
+            )
+        missing = sorted(set(configured_ids).difference(received_ids))
+        extra = sorted(set(received_ids).difference(configured_ids))
+        if missing or extra:
+            logger.log_error(
+                "Dynamic collision obstacle IDs do not match the planner "
+                f"configuration; missing={missing}, extra={extra}.",
+                ValueError,
+            )
         options = (
             deepcopy(plan_opts)
             if plan_opts is not None
             else self.planner.default_plan_options()
         )
-        return self.planner.with_collision_world(
+        existing_poses = getattr(options, "dynamic_obstacle_poses", None)
+        if existing_poses is not None:
+            if not isinstance(existing_poses, Mapping):
+                raise TypeError(
+                    "plan_opts.dynamic_obstacle_poses must be a mapping or None."
+                )
+            existing_ids = self._validate_collision_pose_keys(
+                existing_poses,
+                field_name="plan_opts.dynamic_obstacle_poses",
+            )
+            existing_extra = sorted(existing_ids.difference(configured_ids))
+            if existing_extra:
+                raise ValueError(
+                    "Caller planning options contain dynamic collision IDs that "
+                    f"are not configured by the planner: {existing_extra}."
+                )
+        bound = self.planner.with_collision_world(
             options,
             obstacle_poses=obstacle_poses,
         )
+        if hasattr(bound, "dynamic_obstacle_poses"):
+            bound_poses = bound.dynamic_obstacle_poses
+            if bound_poses is None:
+                bound_ids: set[str] = set()
+            elif not isinstance(bound_poses, Mapping):
+                raise TypeError("Bound dynamic_obstacle_poses must be a mapping.")
+            else:
+                bound_ids = self._validate_collision_pose_keys(
+                    bound_poses,
+                    field_name="Bound dynamic_obstacle_poses",
+                )
+            bound_missing = sorted(set(configured_ids).difference(bound_ids))
+            bound_extra = sorted(bound_ids.difference(configured_ids))
+            if bound_missing or bound_extra:
+                raise ValueError(
+                    "Bound dynamic collision obstacle IDs do not match the planner "
+                    f"configuration; missing={bound_missing}, extra={bound_extra}."
+                )
+        return bound
 
     def resolve_plan_options(
         self,

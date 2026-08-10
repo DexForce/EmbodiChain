@@ -544,6 +544,54 @@ def test_scene_snapshot_expands_global_collision_world_revision() -> None:
     assert torch.equal(obstacle_poses["obstacle"], pose)
 
 
+def test_scene_snapshot_owns_entity_state_storage() -> None:
+    pose = torch.eye(4)
+    state = EntityState(pose)
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"object": state},
+    )
+
+    pose.fill_(2.0)
+    state.pose.fill_(3.0)
+
+    assert torch.equal(snapshot.entities["object"].pose, torch.eye(4))
+
+
+def test_scene_snapshot_entity_reads_are_defensive() -> None:
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"object": EntityState(torch.eye(4))},
+    )
+
+    first_read = snapshot.entities["object"]
+    first_read.pose.fill_(7.0)
+
+    assert torch.equal(snapshot.entities["object"].pose, torch.eye(4))
+    with pytest.raises(TypeError):
+        snapshot.entities["other"] = EntityState(torch.eye(4))  # type: ignore[index]
+
+
+def test_scene_snapshot_collision_pose_reads_are_defensive() -> None:
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"obstacle": EntityState(torch.eye(4))},
+        collision_entity_ids=("obstacle",),
+    )
+
+    obstacle_poses = snapshot.collision_obstacle_poses(
+        batch_size=1,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    obstacle_poses["obstacle"].fill_(5.0)
+
+    assert torch.equal(snapshot.entities["obstacle"].pose, torch.eye(4))
+
+
 def test_scene_snapshot_rejects_unknown_collision_entity() -> None:
     with pytest.raises(ValueError, match="missing scene entities"):
         SceneSnapshot(
