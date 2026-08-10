@@ -181,7 +181,7 @@ def split_three_segments(
     third_segment_name: str = "third",
 ) -> tuple[int, int, int]:
     """Split a sample budget into motion, hand, and motion segments."""
-    first = int((sample_count - hand_interp_steps) * first_segment_ratio)
+    first = int(round((sample_count - hand_interp_steps) * first_segment_ratio))
     if first < 2:
         raise ValueError(
             f"Not enough waypoints for {first_segment_name} trajectory. "
