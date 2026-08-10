@@ -6,6 +6,7 @@
 :hidden:
 
 builtin_actions
+robot_skill_profiles
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -187,6 +188,14 @@ added.
 
 ### Semantic resource binding
 
+The canonical semantic path uses a
+{doc}`RobotSkillProfile <robot_skill_profiles>` to match skill-local slots and
+endpoint capabilities against a generic robot resource graph. It validates
+participant pairing, typed commands, physical claims, complete defaults, and
+policy presets before lowering the selected endpoints to the current core
+binding. The `ActionBinding` description below is the resulting direct-core
+contract and remains available for advanced manual callers.
+
 A **role** is an action-owned semantic participant slot: it describes the job a
 robot resource performs in that action, not the identity of the resource. Each
 `AtomicAction` declares its required slots through `manipulator_roles` and
@@ -221,11 +230,12 @@ manipulator's IK/TCP frame remains part of the robot and solver configuration.
 The engine validates every name and resolves its full-robot joint indices
 before calling the action planner.
 
-The validation boundary is intentionally narrow: the engine verifies required
-roles, `control_parts` membership, resolvable joint indices, command type, and
-command dimensions. The Agent adapter or application binder remains responsible
-for capability compatibility, such as pairing an arm with the hand mounted on
-it and choosing a semantic command supported by that tool.
+For a manually constructed `ActionBinding`, the validation boundary remains
+intentionally narrow: the engine verifies required roles, `control_parts`
+membership, resolvable joint indices, command type, and command dimensions. A
+bound `RobotSkillProfile` adds capability matching, participant endpoint
+pairing, command requirements, joint-claim checks, and deterministic
+disambiguation before it produces that same core value.
 
 Role names should describe action responsibilities rather than robot-specific
 joint, link, or model names. Single-resource skills use `primary`; handover uses
@@ -242,8 +252,14 @@ manipulator control-part name.
 
 ### Control-part semantic commands
 
-Register embodiment commands once when constructing the engine. The keys are
-concrete names from `robot.control_parts`; the command names remain semantic:
+On the canonical semantic path, declare embodiment commands on the
+{doc}`RobotSkillProfile <robot_skill_profiles>` and pass the profile through the
+engine's `skill_profile` argument. For a direct-core integration, register the
+same command profiles explicitly when constructing the engine. Profile command
+IDs are generic and selected by endpoint adapters; the built-in control-part
+adapter defaults them to concrete `robot.control_parts` names. Direct-core
+engine keys are always concrete control-part names. The command names remain
+semantic:
 
 ```python
 engine = AtomicActionEngine(
@@ -324,10 +340,12 @@ world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
 `RigidObjectSceneProvider` remains an advanced-core path.
 
 Registration means that an implementation is installed, not that every robot
-can execute it. Required roles, control parts, profiles, and task-state
-preconditions are validated while an invocation is resolved and planned. Agent
-adapters must additionally filter the catalog by `agent_visible` and
-embodiment capability instead of exposing every `engine.actions` entry blindly.
+can execute it. `engine.actions` contains direct-core implementations;
+`engine.skills` contains installed, agent-visible implementations with an
+explicit generic binding contract; and `engine.skill_profile.skills` applies
+embodiment capability filtering. Required task-state preconditions remain
+runtime conditions and are validated while an invocation is resolved and
+planned.
 
 Use invocation `skill_options` whenever behavior varies per call. Two variants
 with the same stable skill ID therefore share one built-in implementation:

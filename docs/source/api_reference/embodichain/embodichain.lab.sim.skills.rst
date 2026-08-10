@@ -21,7 +21,83 @@ embodichain.lab.sim.skills
       SceneCollisionRole
       SceneCollisionWorldMode
 
+   .. rubric:: Robot skill profiles
+
+   .. autosummary::
+
+      RobotSkillProfile
+      BoundRobotSkillProfile
+      RobotResource
+      ResourceEndpoint
+      ResourceEndpointAdapter
+      EndpointResolution
+      ControlPartEndpoint
+      ControlPartEndpointAdapter
+      ResourceBinding
+      ResolvedResourceEndpoint
+      ResolvedRobotResource
+      ResolvedSkillBinding
+      ResourceClaim
+      SkillPolicyPreset
+      ProfileValidationError
+      UnsupportedSkillError
+      AmbiguousSkillBindingError
+
 .. currentmodule:: embodichain.lab.sim.skills
+
+Robot resources and profiles
+----------------------------
+
+.. autoclass:: RobotSkillProfile
+   :members:
+
+.. autoclass:: BoundRobotSkillProfile
+   :members:
+
+.. autoclass:: RobotResource
+   :members:
+
+.. autoclass:: ResourceEndpoint
+   :members:
+
+.. autoclass:: ResourceEndpointAdapter
+   :members:
+
+.. autoclass:: EndpointResolution
+   :members:
+
+.. autoclass:: ControlPartEndpoint
+   :members:
+
+.. autoclass:: ControlPartEndpointAdapter
+   :members:
+
+.. autoclass:: ResourceBinding
+   :members:
+
+.. autoclass:: ResolvedResourceEndpoint
+   :members:
+
+.. autoclass:: ResolvedRobotResource
+   :members:
+
+.. autoclass:: ResolvedSkillBinding
+   :members:
+
+.. autoclass:: ResourceClaim
+   :members:
+
+.. autoclass:: SkillPolicyPreset
+   :members:
+
+Profile errors
+--------------
+
+.. autoclass:: ProfileValidationError
+
+.. autoclass:: UnsupportedSkillError
+
+.. autoclass:: AmbiguousSkillBindingError
 
 Registry and provider
 ---------------------

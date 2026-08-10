@@ -30,11 +30,21 @@ from embodichain.utils.math import (
 )
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..control import GRASP_COMMAND
+from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
+from ..requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from ..state import PlanningContext
 from ..trajectory_ops import build_pose_plan_states
 
@@ -86,6 +96,32 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     OptionsType: ClassVar[type] = MoveHeldObjectOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset(
+                            {
+                                CARTESIAN_POSE_CAPABILITY,
+                                FORWARD_KINEMATICS_CAPABILITY,
+                            }
+                        ),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={GRASP_COMMAND: JointPositionCommand},
+                        route=ActionBindingRoute("end_effector", "primary"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+    )
 
     def _plan(
         self,

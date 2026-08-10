@@ -45,6 +45,8 @@ The simulation stack can be read from the bottom up:
     |   `-- time parameterization and sampling utilities
     |-- scene registry
     |   `-- canonical semantic identity, snapshots, and collision integration
+    |-- robot skill profiles
+    |   `-- generic resource graphs, capabilities, commands, and policy presets
     `-- atomic actions
         `-- reusable manipulation primitives built from assets, solvers, and planners
 
@@ -91,6 +93,11 @@ Submodule Relationships
        affordances, hierarchy, and collision roles.
      - Publishes registry-derived snapshots for atomic actions and validates
        dynamic collision-world agreement with planners.
+   * - Robot skill profiles
+     - Describe embodiment resources as a generic graph with explicit
+       endpoints, capabilities, semantic commands, defaults, and presets.
+     - Match skill-local participants to robot resources and lower validated
+       selections to the current atomic-action binding contract.
    * - Atomic actions
      - Package complete manipulation primitives such as move, pick, and place.
      - Compose semantic targets, solvers, planners, and robot control into
@@ -129,6 +136,9 @@ Choosing Where to Start
   time-ordered trajectory.
 - Use :doc:`scene_registry` when semantic calls, snapshots, and planner
   obstacles must share one authoritative entity namespace.
+- Use :doc:`atomic_actions/robot_skill_profiles` when semantic skills should
+  resolve robot resources and policy presets from reusable embodiment
+  configuration.
 - Use :doc:`atomic actions <atomic_actions/index>` when building scripted manipulation from reusable
   motion primitives.
 

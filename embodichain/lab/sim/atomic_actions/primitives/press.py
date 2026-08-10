@@ -24,11 +24,21 @@ from typing import ClassVar
 import torch
 
 from ._helpers import arm_qpos_from_state
-from ..control import GRASP_COMMAND
+from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
+from ..requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointSlotEndpoints,
+    GRASP_CAPABILITY,
+    JOINT_POSITION_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from ..state import PlanningContext
 from ..trajectory_ops import (
     build_joint_plan_states,
@@ -69,6 +79,32 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     OptionsType: ClassVar[type] = PressOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset(
+                            {
+                                CARTESIAN_POSE_CAPABILITY,
+                                JOINT_POSITION_CAPABILITY,
+                            }
+                        ),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={GRASP_COMMAND: JointPositionCommand},
+                        route=ActionBindingRoute("end_effector", "primary"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+    )
 
     def _plan(
         self,
