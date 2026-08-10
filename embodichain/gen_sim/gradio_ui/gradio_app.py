@@ -26,12 +26,22 @@ import signal
 
 from app_config import (
     ASSETS_DIR,
-    GEN_SIM_ROOT,
     DEFAULT_CONCURRENCY_LIMIT,
+    GEN_SIM_ROOT,
 )
-from app_env import EMBODICHAIN_ROOT, SERVER_NAME, SERVER_PORT
+from app_env import (
+    ARTICRAFT_OUTPUT_ROOT,
+    EMBODICHAIN_ROOT,
+    SERVER_NAME,
+    SERVER_PORT,
+    build_gradio_allowed_paths,
+    build_gradio_blocked_paths,
+    get_gradio_auth,
+    validate_gradio_artifact_root,
+)
 from app_processes import force_stop_all_child_processes
 from app_services import build_app
+from embodichain.gen_sim.env import find_gen_sim_env_file
 
 __all__ = ["main"]
 
@@ -59,6 +69,20 @@ def _install_shutdown_handlers() -> None:
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
 
 
+def _allowed_paths() -> list[str]:
+    """Return only static assets and workspace-generated artifact roots."""
+    return build_gradio_allowed_paths(
+        ASSETS_DIR,
+        GEN_SIM_ROOT,
+        validate_gradio_artifact_root(ARTICRAFT_OUTPUT_ROOT),
+    )
+
+
+def _blocked_paths() -> list[str]:
+    """Return source-control and dotenv paths that Gradio must never serve."""
+    return build_gradio_blocked_paths(find_gen_sim_env_file())
+
+
 def main() -> None:
     if not EMBODICHAIN_ROOT.is_dir():
         raise FileNotFoundError(f"EmbodiChain root not found: {EMBODICHAIN_ROOT}")
@@ -69,11 +93,9 @@ def main() -> None:
         app.launch(
             server_name=SERVER_NAME,
             server_port=SERVER_PORT,
-            allowed_paths=[
-                str(EMBODICHAIN_ROOT),
-                str(ASSETS_DIR),
-                str(GEN_SIM_ROOT),
-            ],
+            auth=get_gradio_auth(),
+            allowed_paths=_allowed_paths(),
+            blocked_paths=_blocked_paths(),
         )
     finally:
         _stop_child_processes()

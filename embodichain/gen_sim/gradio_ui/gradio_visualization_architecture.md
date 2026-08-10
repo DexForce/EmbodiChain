@@ -51,15 +51,17 @@ conda run -n embodichain python gradio_app.py
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | EmbodiChain root | 自动从 `embodichain/gen_sim/env.py` 的源码位置推导 | EmbodiChain 根目录；不再从 `.env` 配置。 |
-| `GRADIO_SERVER_NAME` | `0.0.0.0` | Gradio 监听地址。 |
+| `GRADIO_SERVER_NAME` | `127.0.0.1` | Gradio 监听地址；非回环地址必须启用认证。 |
 | `GRADIO_SERVER_PORT` | `7860` | Gradio 监听端口。 |
+| `GRADIO_AUTH_USERNAME` | 空 | 非本机部署的 Gradio 用户名。 |
+| `GRADIO_AUTH_PASSWORD` | 空 | 非本机部署的 Gradio 密码。 |
 | `SCENE_ENGINE_VISER_PORT` | `8080` | 独立 Scene Engine 的 Viser 端口。 |
-| `ARTICRAFT_VISER_PORT` | `8081` | Articraft 关节预览的 Viser 端口。 |
+| `ARTICRAFT_VISER_PORT` | `8081` | Articraft 关节预览的首选 Viser 端口；占用时为会话分配其他可用端口。 |
 | `ARTICRAFT_ROOT` | `<项目>/.articraft` | Articraft checkout。 |
 | `ARTICRAFT_CONDA_ENV` | `articraft` | 运行 Articraft CLI 的 Conda 环境。 |
 | `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft 记录、运行日志和导出 bundle。 |
 
-`app.launch()` 仅开放 EmbodiChain 根目录、`assets/` 和 `.gen_sim/` 给浏览器读取。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`；Scene Engine、DexSim、Viser 和 Articraft 直接继承 `.env` 中的原始配置。这不会改写启动 Gradio 的父进程环境。
+`app.launch()` 仅开放 UI 静态资源、`.gen_sim/` 生成物和配置的 Articraft 输出目录，并显式禁止 `.env`、`.git/` 等敏感路径。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`；Scene Engine、DexSim、Viser 和 Articraft 直接继承 `.env` 中的原始配置。Codex 作为用户指令驱动的子进程，使用独立登录状态和最小化环境，不继承 GenSim 服务凭据。
 
 ## 页面与引擎
 
@@ -100,7 +102,7 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 
 处理函数以 generator 持续返回最近的 stdout；完成时优先预览 `asset_simready.glb`，只有 OBJ 时再转为 GLB。此路径不依赖 DexSim。
 
-`Reset SimReady` 会清空上传、类别、预览、下载项和日志，并按进程组终止正在运行的 SimReady CLI 及其子进程。
+`Reset SimReady` 会清空当前浏览器会话的上传、类别、预览、下载项和日志，并仅按进程组终止该会话正在运行的 SimReady CLI 及其子进程。
 
 ### Articulation：Articraft + Codex
 
@@ -119,9 +121,9 @@ description + optional image
   → exports/<record-id>.zip + Viser articulation preview
 ```
 
-产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 每次成功预览会终止旧的 Articraft 预览进程，再以 `0.0.0.0:<ARTICRAFT_VISER_PORT>` 启动新进程。
+产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 按 Gradio 会话管理预览进程：首先尝试 `ARTICRAFT_VISER_PORT`，若已被占用则分配其他可用端口，不会查找或发送信号给占用端口的外部进程。
 
-`Reset Articulation` 会清空描述、参考图、记录与下载结果，终止当前 Articraft/Codex 命令进程组，并关闭该面板启动的 Viser。
+`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，终止该会话的 Articraft/Codex 命令进程组，并关闭该会话启动的 Viser。
 
 ## 独立 Scene engine 和 Viser
 
@@ -170,7 +172,7 @@ python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent \
 
 ## 共享状态、并发和进度
 
-Scene engine 和 Action engine 共享 `RuntimeState` 与 `runtime_lock`，其中包含运行 token、DexSim/Scene Viser 进程、输入、预览、日志和阶段。运行 token 用于丢弃过期线程的更新。Articraft Viser 使用单独的锁和进程引用；SimReady 使用自己的同步 generator。
+Scene engine 和 Action engine 共享 `RuntimeState` 与 `runtime_lock`，其中包含运行 token、DexSim/Scene Viser 进程、输入、预览、日志和阶段。运行 token 用于丢弃过期线程的更新。SimReady 和 Articraft 使用按 `request.session_hash` 隔离的进程注册表；Reset 和页面卸载只清理所属会话，应用退出时再统一清理全部已注册子进程。
 
 `app.queue(default_concurrency_limit=1)` 将队列中的高成本回调串行化。Action engine 的 `Timer(2.0)` 读取共享状态。Asset/Articraft 面板不写入这一状态，但仍会受 Gradio 队列限制。
 
@@ -212,7 +214,7 @@ embodichain/gen_sim/scene_engine/cli/preview.py
 .env
 ```
 
-Articulation 还需要 Git（首次 clone）、Conda、`ARTICRAFT_CONDA_ENV` 和 Codex CLI。生成请求会交给本机 Codex CLI 执行，因此只应提交可信请求。
+Articulation 还需要 Git（首次 clone）、Conda、`ARTICRAFT_CONDA_ENV` 和已通过独立凭据存储完成登录的 Codex CLI。Codex 子进程不继承 `.env` 中的 API key、token 或密码，输出在返回浏览器前还会按已知敏感环境值脱敏。生成请求会交给本机 Codex CLI 执行，因此默认只在本机可信工作台中使用。
 
 每次修改后至少执行：
 

@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from app_config import COMMANDS, PROCESS_STOP_TIMEOUT_S
@@ -35,20 +36,186 @@ from app_env import (
 )
 
 __all__ = [
+    "SessionProcessRegistry",
+    "build_codex_env",
     "build_pipeline_env",
     "build_run_agent_command",
     "force_stop_all_child_processes",
+    "get_request_session_id",
     "read_process_output",
     "register_managed_process",
     "run_agent_cli_supports_robot_profile",
     "start_pipeline",
     "terminate_process_group",
+    "redact_sensitive_text",
 ]
 
 _RUN_AGENT_SUPPORTS_ROBOT_PROFILE: bool | None = None
 _managed_processes: dict[int, subprocess.Popen[str]] = {}
 _managed_processes_lock = threading.Lock()
 _shutdown_requested = False
+_CODEX_ENV_ALLOWLIST = {
+    "CODEX_HOME",
+    "COLORTERM",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LOGNAME",
+    "PATH",
+    "REQUESTS_CA_BUNDLE",
+    "SHELL",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TEMP",
+    "TERM",
+    "TMP",
+    "TMPDIR",
+    "USER",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+}
+_SENSITIVE_ENV_MARKERS = (
+    "API_KEY",
+    "CREDENTIAL",
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+)
+
+
+def get_request_session_id(request: object) -> str:
+    """Return the stable session identifier supplied by Gradio.
+
+    Args:
+        request: Gradio request object injected into an event callback.
+
+    Returns:
+        The non-empty Gradio session hash.
+
+    Raises:
+        RuntimeError: If the callback was invoked without a session hash.
+    """
+    session_id = getattr(request, "session_hash", None)
+    if not isinstance(session_id, str) or not session_id:
+        raise RuntimeError("This operation requires an active Gradio session.")
+    return session_id
+
+
+class SessionProcessRegistry:
+    """Track one replaceable subprocess for each Gradio session.
+
+    A registry instance belongs to one workflow, such as SimReady or Articraft.
+    Resetting one session can therefore never invalidate or terminate another
+    session's run.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._runs: dict[str, tuple[str, subprocess.Popen[str] | None]] = {}
+
+    def begin(self, session_id: str) -> str:
+        """Start a new logical run for one session.
+
+        Args:
+            session_id: Stable Gradio session identifier.
+
+        Returns:
+            A new ownership token for the run.
+        """
+        token = uuid.uuid4().hex
+        with self._lock:
+            previous = self._runs.get(session_id)
+            self._runs[session_id] = (token, None)
+        if previous is not None and previous[1] is not None:
+            terminate_process_group(previous[1])
+        return token
+
+    def is_active(
+        self,
+        session_id: str,
+        token: str,
+        process: subprocess.Popen[str] | None = None,
+    ) -> bool:
+        """Return whether a run still owns its session slot.
+
+        Args:
+            session_id: Stable Gradio session identifier.
+            token: Token returned by :meth:`begin`.
+            process: Optional process that must also match the registered child.
+
+        Returns:
+            ``True`` when the token and optional process still match.
+        """
+        with self._lock:
+            current = self._runs.get(session_id)
+            return (
+                current is not None
+                and current[0] == token
+                and (process is None or current[1] is process)
+            )
+
+    def attach(
+        self,
+        session_id: str,
+        token: str,
+        process: subprocess.Popen[str],
+    ) -> bool:
+        """Attach a subprocess to an active session run.
+
+        Args:
+            session_id: Stable Gradio session identifier.
+            token: Token returned by :meth:`begin`.
+            process: Managed subprocess started for the run.
+
+        Returns:
+            ``True`` if the token still owns the session slot.
+        """
+        with self._lock:
+            current = self._runs.get(session_id)
+            if current is None or current[0] != token:
+                return False
+            self._runs[session_id] = (token, process)
+            return True
+
+    def finish(
+        self,
+        session_id: str,
+        token: str,
+        process: subprocess.Popen[str],
+    ) -> None:
+        """Clear a finished subprocess while keeping its logical run active.
+
+        Args:
+            session_id: Stable Gradio session identifier.
+            token: Token returned by :meth:`begin`.
+            process: Subprocess that has finished.
+        """
+        with self._lock:
+            current = self._runs.get(session_id)
+            if current == (token, process):
+                self._runs[session_id] = (token, None)
+
+    def reset(self, session_id: str) -> None:
+        """Invalidate and terminate only one session's process.
+
+        Args:
+            session_id: Stable Gradio session identifier.
+        """
+        with self._lock:
+            current = self._runs.pop(session_id, None)
+        if current is not None and current[1] is not None:
+            terminate_process_group(current[1])
+
+    def reset_all(self) -> None:
+        """Invalidate and terminate every process tracked by this registry."""
+        with self._lock:
+            runs = tuple(self._runs.values())
+            self._runs.clear()
+        for _token, process in runs:
+            if process is not None:
+                terminate_process_group(process)
 
 
 def run_agent_cli_supports_robot_profile() -> bool:
@@ -130,6 +297,50 @@ def build_pipeline_env(*, use_simready_llm: bool = False) -> dict[str, str]:
     if use_simready_llm:
         configure_simready_llm_env(env)
     return env
+
+
+def build_codex_env() -> dict[str, str]:
+    """Build a credential-minimized environment for user-directed Codex runs.
+
+    The Codex CLI may still use its own login state through ``CODEX_HOME`` or
+    the normal user configuration directory, but GenSim service credentials
+    and dotenv-specific settings are not inherited by the command sandbox.
+
+    Returns:
+        An allowlisted child-process environment.
+
+    .. attention::
+        Deployments that authenticate Codex exclusively through
+        ``OPENAI_API_KEY`` must use ``codex login`` or another isolated Codex
+        credential store instead. Passing the server key to a user-directed
+        process would recreate the disclosure boundary this function removes.
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key in _CODEX_ENV_ALLOWLIST and value
+    }
+
+
+def redact_sensitive_text(text: str) -> str:
+    """Replace known environment credential values in UI-bound output.
+
+    Args:
+        text: Subprocess output or a final message that may contain credentials.
+
+    Returns:
+        Text with non-trivial sensitive environment values replaced.
+    """
+    redacted = text
+    for key, value in os.environ.items():
+        upper_key = key.upper()
+        if (
+            value
+            and len(value) >= 4
+            and any(marker in upper_key for marker in _SENSITIVE_ENV_MARKERS)
+        ):
+            redacted = redacted.replace(value, "[REDACTED]")
+    return redacted
 
 
 def register_managed_process(
@@ -279,17 +490,28 @@ def read_process_output(
     process: subprocess.Popen[str],
     output_queue: queue.Queue[str],
     log_path: Path | None = None,
+    *,
+    redact_sensitive: bool = False,
 ) -> None:
-    """Forward merged subprocess output to the UI queue and an optional log."""
+    """Forward merged subprocess output to the UI queue and an optional log.
+
+    Args:
+        process: Child process whose merged stdout should be consumed.
+        output_queue: Destination for individual output lines.
+        log_path: Optional file receiving the same output.
+        redact_sensitive: Whether to redact known environment credentials before
+            forwarding or persisting each line.
+    """
     if process.stdout is None:
         return
     log_file = log_path.open("a", encoding="utf-8") if log_path is not None else None
     try:
         for line in process.stdout:
-            output_queue.put(line.rstrip())
+            output_line = redact_sensitive_text(line) if redact_sensitive else line
+            output_queue.put(output_line.rstrip())
             if log_file is not None:
-                log_file.write(line)
-                if not line.endswith("\n"):
+                log_file.write(output_line)
+                if not output_line.endswith("\n"):
                     log_file.write("\n")
                 log_file.flush()
     finally:

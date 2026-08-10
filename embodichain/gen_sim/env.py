@@ -35,12 +35,14 @@ def get_embodichain_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def find_gen_sim_env_file() -> Path:
+def find_gen_sim_env_file() -> Path | None:
     """Return the configured shared ``.env`` file path.
 
     ``EMBODICHAIN_ENV_FILE`` is useful for deployments that keep secrets outside
-    the source tree. Otherwise GenSim uses ``embodichain/gen_sim/.env``. The
-    repository-root ``.env`` remains a backward-compatible fallback.
+    the source tree. Otherwise GenSim uses ``embodichain/gen_sim/.env``.
+
+    Returns:
+        The configured or default dotenv path, or ``None`` when neither exists.
     """
     configured_path = os.environ.get("EMBODICHAIN_ENV_FILE")
     if configured_path:
@@ -48,6 +50,7 @@ def find_gen_sim_env_file() -> Path:
     default_path = Path(__file__).resolve().parent / ".env"
     if default_path.is_file():
         return default_path
+    return None
 
 
 def load_gen_sim_env(env: MutableMapping[str, str] | None = None) -> Path | None:
@@ -67,7 +70,7 @@ def load_gen_sim_env(env: MutableMapping[str, str] | None = None) -> Path | None
     """
     target_env = os.environ if env is None else env
     env_path = find_gen_sim_env_file()
-    if not env_path.is_file():
+    if env_path is None or not env_path.is_file():
         return None
 
     for line_number, raw_line in enumerate(

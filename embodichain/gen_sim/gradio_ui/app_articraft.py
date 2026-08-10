@@ -29,13 +29,13 @@ import queue
 import json
 import shutil
 import html
-import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,16 +48,25 @@ from app_env import (
     ARTICRAFT_REPOSITORY_URL,
     ARTICRAFT_ROOT,
     ARTICRAFT_VISER_PORT,
+    EMBODICHAIN_ROOT,
+    validate_gradio_artifact_root,
 )
 from app_processes import (
+    SessionProcessRegistry,
+    build_codex_env,
+    build_pipeline_env,
+    get_request_session_id,
     read_process_output,
+    redact_sensitive_text,
     register_managed_process,
     start_pipeline,
     terminate_process_group,
 )
+from embodichain.gen_sim.env import find_gen_sim_env_file
 
 __all__ = [
     "build_articraft_panel",
+    "cleanup_articraft_session",
     "configure_articraft_environment",
     "generate_articraft_asset",
     "reset_articraft_asset",
@@ -65,13 +74,10 @@ __all__ = [
 ]
 
 _VISER_START_TIMEOUT_SECONDS = 15.0
-_VISER_STOP_TIMEOUT_SECONDS = 5.0
 _ARTICRAFT_PYTHON_VERSION = "3.12"
 _CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
 _articraft_environment_lock = threading.Lock()
-_articraft_generation_lock = threading.Lock()
-_articraft_generation_process: subprocess.Popen[str] | None = None
-_articraft_generation_token: str | None = None
+_articraft_runs = SessionProcessRegistry()
 _ARTICRAFT_IDLE_PREVIEW = (
     "<div style='padding: 1rem; color: #6b7280;'>"
     "The interactive Viser articulation preview will appear here after generation."
@@ -79,53 +85,8 @@ _ARTICRAFT_IDLE_PREVIEW = (
 )
 
 
-def _begin_articraft_generation() -> str:
-    """Invalidate the previous generation and return a new ownership token."""
-    global _articraft_generation_process, _articraft_generation_token
-    with _articraft_generation_lock:
-        previous_process = _articraft_generation_process
-        _articraft_generation_process = None
-        token = uuid.uuid4().hex
-        _articraft_generation_token = token
-    if previous_process is not None:
-        terminate_process_group(previous_process)
-    return token
-
-
-def _articraft_generation_is_active(
-    token: str, process: subprocess.Popen[str] | None = None
-) -> bool:
-    with _articraft_generation_lock:
-        return _articraft_generation_token == token and (
-            process is None or _articraft_generation_process is process
-        )
-
-
-def _set_articraft_generation_process(
-    token: str, process: subprocess.Popen[str]
-) -> bool:
-    global _articraft_generation_process
-    with _articraft_generation_lock:
-        if _articraft_generation_token != token:
-            return False
-        _articraft_generation_process = process
-        return True
-
-
-def _finish_articraft_generation_process(
-    token: str, process: subprocess.Popen[str]
-) -> None:
-    global _articraft_generation_process
-    with _articraft_generation_lock:
-        if (
-            _articraft_generation_token == token
-            and _articraft_generation_process is process
-        ):
-            _articraft_generation_process = None
-
-
 def _run_articraft_generation_check(
-    command: list[str], *, token: str, timeout: int
+    command: list[str], *, session_id: str, token: str, timeout: int
 ) -> subprocess.CompletedProcess[str] | None:
     """Run one Articraft CLI gate so Reset can stop its whole process group."""
     process = register_managed_process(
@@ -136,10 +97,10 @@ def _run_articraft_generation_check(
             stderr=subprocess.STDOUT,
             text=True,
             start_new_session=True,
-            env=os.environ.copy(),
+            env=build_pipeline_env(),
         )
     )
-    if not _set_articraft_generation_process(token, process):
+    if not _articraft_runs.attach(session_id, token, process):
         terminate_process_group(process)
         return None
     try:
@@ -148,22 +109,27 @@ def _run_articraft_generation_check(
         terminate_process_group(process)
         raise
     finally:
-        _finish_articraft_generation_process(token, process)
-    if not _articraft_generation_is_active(token):
+        _articraft_runs.finish(session_id, token, process)
+    if not _articraft_runs.is_active(session_id, token):
         return None
-    return subprocess.CompletedProcess(command, process.returncode, stdout)
+    return subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        redact_sensitive_text(stdout or ""),
+    )
 
 
-def reset_articraft_asset():
-    """Clear Articraft inputs/results and stop its command and Viser processes."""
-    global _articraft_generation_process, _articraft_generation_token
-    with _articraft_generation_lock:
-        process = _articraft_generation_process
-        _articraft_generation_process = None
-        _articraft_generation_token = None
-    if process is not None:
-        terminate_process_group(process)
-    stop_articraft_viser_preview()
+def reset_articraft_asset(request: gr.Request) -> tuple[Any, ...]:
+    """Clear Articraft state and stop only the requesting session's processes.
+
+    Args:
+        request: Gradio request for the browser session initiating Reset.
+
+    Returns:
+        Reset values for all Articraft panel widgets.
+    """
+    session_id = get_request_session_id(request)
+    cleanup_articraft_session(session_id)
     return (
         "**Environment:** not checked.",
         "",
@@ -174,6 +140,16 @@ def reset_articraft_asset():
         "",
         _ARTICRAFT_IDLE_PREVIEW,
     )
+
+
+def cleanup_articraft_session(session_id: str) -> None:
+    """Stop Articraft generation and preview processes for one session.
+
+    Args:
+        session_id: Stable Gradio session identifier.
+    """
+    _articraft_runs.reset(session_id)
+    stop_articraft_viser_preview(session_id)
 
 
 def _command_path(name: str) -> str | None:
@@ -334,7 +310,10 @@ def _check_requirements() -> tuple[list[str], list[str], str | None]:
     """Return diagnostics and the Codex executable, without creating an asset."""
     errors: list[str] = []
     details: list[str] = []
-    if not (
+    isolation_error = _articraft_isolation_error()
+    if isolation_error:
+        errors.append(isolation_error)
+    elif not (
         ARTICRAFT_ROOT.is_dir()
         and (ARTICRAFT_ROOT / ".git").exists()
         and (ARTICRAFT_ROOT / "pyproject.toml").is_file()
@@ -367,6 +346,8 @@ def _check_requirements() -> tuple[list[str], list[str], str | None]:
 
 def _prepare_articraft_checkout() -> tuple[bool, str]:
     """Clone the configured checkout when absent, without overwriting a directory."""
+    if isolation_error := _articraft_isolation_error():
+        return False, isolation_error
     if ARTICRAFT_ROOT.exists():
         if (ARTICRAFT_ROOT / ".git").exists() and (
             ARTICRAFT_ROOT / "pyproject.toml"
@@ -396,6 +377,27 @@ def _prepare_articraft_checkout() -> tuple[bool, str]:
     if clone.returncode:
         return False, f"Articraft clone failed: {_short_output(clone, limit=3000)}"
     return True, f"Cloned .articraft from {ARTICRAFT_REPOSITORY_URL}"
+
+
+def _articraft_isolation_error() -> str | None:
+    """Return an error when Codex roots could contain deployment secrets."""
+    checkout = ARTICRAFT_ROOT.expanduser().resolve()
+    repository = EMBODICHAIN_ROOT.resolve()
+    if checkout == repository or repository.is_relative_to(checkout):
+        return (
+            "ARTICRAFT_ROOT must be a dedicated nested or external Git checkout, "
+            "not the EmbodiChain repository or one of its parents."
+        )
+    env_path = find_gen_sim_env_file()
+    if env_path is not None and env_path.resolve().is_relative_to(checkout):
+        return "ARTICRAFT_ROOT must not contain the shared GenSim dotenv file."
+    try:
+        output_root = validate_gradio_artifact_root(ARTICRAFT_OUTPUT_ROOT)
+    except ValueError as exc:
+        return str(exc)
+    if env_path is not None and env_path.resolve().is_relative_to(output_root):
+        return "ARTICRAFT_OUTPUT_ROOT must not contain the shared GenSim dotenv file."
+    return None
 
 
 def configure_articraft_environment() -> str:
@@ -484,11 +486,11 @@ def _make_result_bundle(record_id: str) -> tuple[Path, Path]:
     return materialized, archive
 
 
-def _articraft_viser_iframe(record_id: str) -> str:
+def _articraft_viser_iframe(record_id: str, port: int) -> str:
     """Embed the Articulation Viser service through the Gradio page hostname."""
     srcdoc = (
         "<script>window.location.replace(window.top.location.protocol + '//' + "
-        f"window.top.location.hostname + ':{ARTICRAFT_VISER_PORT}');</script>"
+        f"window.top.location.hostname + ':{port}');</script>"
     )
     escaped_record_id = html.escape(record_id)
     return (
@@ -502,34 +504,45 @@ def _articraft_viser_iframe(record_id: str) -> str:
 
 
 class _ArticraftViserPreview:
-    """Own the single Articraft Viser process and its dedicated TCP port."""
+    """Own an isolated Articraft Viser process for each Gradio session."""
 
-    def __init__(self, port: int) -> None:
-        self._port = port
+    def __init__(self, preferred_port: int) -> None:
+        self._preferred_port = preferred_port
         self._lock = threading.Lock()
-        self._process: subprocess.Popen[str] | None = None
+        self._processes: dict[str, tuple[subprocess.Popen[str], int]] = {}
 
-    def start(self, urdf_path: Path, record_id: str) -> str:
-        """Replace the active preview with a verified preview of one URDF."""
+    def start(self, session_id: str, urdf_path: Path, record_id: str) -> str:
+        """Replace one session's preview with a verified preview of one URDF."""
         if not urdf_path.is_file():
             raise FileNotFoundError(f"Compiled URDF is missing: {urdf_path}")
 
         with self._lock:
-            self._stop_managed_process()
-            self._clear_stale_listener()
-            process = start_pipeline(self._command(urdf_path))
-            if not self._wait_until_owned(process):
+            previous = self._processes.pop(session_id, None)
+            if previous is not None:
+                terminate_process_group(previous[0])
+            port = self._select_available_port()
+            process = start_pipeline(self._command(urdf_path, port))
+            if not self._wait_until_owned(process, port):
                 terminate_process_group(process)
                 raise RuntimeError("New Articraft Viser preview did not bind its port.")
-            self._process = process
-        return _articraft_viser_iframe(record_id)
+            self._processes[session_id] = (process, port)
+        return _articraft_viser_iframe(record_id, port)
 
-    def stop(self) -> None:
-        """Stop the preview process, if this panel started one."""
+    def stop(self, session_id: str | None = None) -> None:
+        """Stop one session's preview, or every preview during shutdown."""
         with self._lock:
-            self._stop_managed_process()
+            if session_id is None:
+                processes = tuple(
+                    process for process, _port in self._processes.values()
+                )
+                self._processes.clear()
+            else:
+                current = self._processes.pop(session_id, None)
+                processes = () if current is None else (current[0],)
+        for process in processes:
+            terminate_process_group(process)
 
-    def _command(self, urdf_path: Path) -> list[str]:
+    def _command(self, urdf_path: Path, port: int) -> list[str]:
         return [
             sys.executable,
             str(Path(__file__).with_name("app_media.py")),
@@ -542,133 +555,69 @@ class _ArticraftViserPreview:
             "--viser-host",
             "0.0.0.0",
             "--viser-port",
-            str(self._port),
+            str(port),
         ]
 
-    def _stop_managed_process(self) -> None:
-        if self._process is not None:
-            terminate_process_group(self._process)
-            self._process = None
-
-    def _clear_stale_listener(self) -> None:
-        if self._port_is_available():
-            return
-        listener_pids = self._listener_pids()
-        if listener_pids is None:
-            raise RuntimeError(
-                "Cannot identify the process using the Articraft Viser port."
-            )
-        if not listener_pids:
-            raise RuntimeError(
-                f"Port {self._port} is unavailable without a visible listener."
-            )
-
-        self._signal_listeners(listener_pids, signal.SIGTERM, "stop")
-        if self._wait_for_port_release():
-            return
-
-        remaining_pids = self._listener_pids()
-        if remaining_pids is None:
-            raise RuntimeError(
-                f"Cannot identify the stale Viser service on port {self._port}."
-            )
-        self._signal_listeners(remaining_pids, signal.SIGKILL, "force-stop")
-        if not self._wait_for_port_release():
-            raise RuntimeError(
-                f"The stale Viser service is still listening on port {self._port}."
-            )
-
-    def _signal_listeners(
-        self, listener_pids: set[int], signal_value: int, action: str
-    ) -> None:
-        for pid in listener_pids:
-            try:
-                os.kill(pid, signal_value)
-            except ProcessLookupError:
-                continue
-            except PermissionError as exc:
-                raise RuntimeError(
-                    f"Cannot {action} Viser process {pid} using port {self._port}."
-                ) from exc
-
-    def _wait_for_port_release(self) -> bool:
-        deadline = time.monotonic() + _VISER_STOP_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            if self._port_is_available():
-                return True
-            time.sleep(0.1)
-        return self._port_is_available()
-
-    def _wait_until_owned(self, process: subprocess.Popen[str]) -> bool:
+    def _wait_until_owned(self, process: subprocess.Popen[str], port: int) -> bool:
         deadline = time.monotonic() + _VISER_START_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 return False
             try:
-                with socket.create_connection(("127.0.0.1", self._port), timeout=0.2):
-                    listener_pids = self._listener_pids()
-                    if listener_pids is not None and process.pid in listener_pids:
-                        return True
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    return True
             except OSError:
                 pass
             time.sleep(0.25)
         return False
 
-    def _port_is_available(self) -> bool:
+    def _select_available_port(self) -> int:
+        if self._port_is_available(self._preferred_port):
+            return self._preferred_port
         probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            probe.bind(("0.0.0.0", self._port))
+            probe.bind(("0.0.0.0", 0))
+            return int(probe.getsockname()[1])
+        finally:
+            probe.close()
+
+    @staticmethod
+    def _port_is_available(port: int) -> bool:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("0.0.0.0", port))
         except OSError:
             return False
         finally:
             probe.close()
         return True
 
-    def _listener_pids(self) -> set[int] | None:
-        for command in self._listener_commands():
-            try:
-                result = subprocess.run(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    timeout=5,
-                    check=False,
-                )
-            except OSError:
-                continue
-            if result.returncode in (0, 1):
-                return {int(pid) for pid in result.stdout.split() if pid.isdecimal()}
-        return None
-
-    def _listener_commands(self) -> list[list[str]]:
-        commands: list[list[str]] = []
-        if lsof := _command_path("lsof"):
-            commands.append([lsof, "-nP", f"-iTCP:{self._port}", "-sTCP:LISTEN", "-t"])
-        if fuser := _command_path("fuser"):
-            commands.append([fuser, "-n", "tcp", str(self._port)])
-        return commands
-
 
 _articraft_viser_preview = _ArticraftViserPreview(ARTICRAFT_VISER_PORT)
 
 
-def stop_articraft_viser_preview() -> None:
+def stop_articraft_viser_preview(session_id: str | None = None) -> None:
     """Stop the Viser subprocess currently owned by the Articraft panel.
 
     The preview runs independently from Gradio so it can be embedded through an
     iframe.  Expose its cleanup explicitly so application shutdown can release
     the dedicated port instead of leaving an orphaned Viser server behind.
     """
-    _articraft_viser_preview.stop()
+    _articraft_viser_preview.stop(session_id)
 
 
 atexit.register(stop_articraft_viser_preview)
 
 
-def _start_articraft_viser_preview(materialized: Path, record_id: str) -> str:
+def _start_articraft_viser_preview(
+    session_id: str, materialized: Path, record_id: str
+) -> str:
     """Load the compiled URDF as an articulation and expose it through Viser."""
-    return _articraft_viser_preview.start(materialized / "model.urdf", record_id)
+    return _articraft_viser_preview.start(
+        session_id,
+        materialized / "model.urdf",
+        record_id,
+    )
 
 
 def _external_check_is_unsupported(result: subprocess.CompletedProcess[str]) -> bool:
@@ -760,12 +709,26 @@ The Gradio app packages the compiled URDF and meshes after you finish. In your f
 briefly state the articulation mechanisms and validation result."""
 
 
-def generate_articraft_asset(prompt_value: str, image_value: Any):
-    """Initialize a record, let Codex author it, and expose one result bundle."""
-    token = _begin_articraft_generation()
+def generate_articraft_asset(
+    prompt_value: str,
+    image_value: Any,
+    request: gr.Request,
+) -> Iterator[tuple[Any, ...]]:
+    """Initialize a record, let Codex author it, and expose one result bundle.
+
+    Args:
+        prompt_value: Requested articulated-object description.
+        image_value: Optional Gradio reference-image value.
+        request: Gradio request identifying the owning browser session.
+
+    Yields:
+        Updated artifact, status, log, and Viser preview values for the panel.
+    """
+    session_id = get_request_session_id(request)
+    token = _articraft_runs.begin(session_id)
     prompt = (prompt_value or "").strip()
     if not prompt:
-        if _articraft_generation_is_active(token):
+        if _articraft_runs.is_active(session_id, token):
             yield None, "", "**Input error:** enter a description of the articulated object.", "", ""
         return
 
@@ -774,7 +737,7 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         message = (
             "\n".join(f"- {error}" for error in errors) or "Codex CLI is unavailable."
         )
-        if _articraft_generation_is_active(token):
+        if _articraft_runs.is_active(session_id, token):
             yield None, "", f"**Articulation is not ready.**\n\n{message}", "", ""
         return
 
@@ -798,7 +761,10 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         )
         log_lines.append("$ " + " ".join(init_command[:-1]) + " <prompt>")
         initialized = _run_articraft_generation_check(
-            init_command, token=token, timeout=90
+            init_command,
+            session_id=session_id,
+            token=token,
+            timeout=90,
         )
         if initialized is None:
             return
@@ -810,11 +776,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
             return
         model_path = _active_model_path(record_dir)
     except Exception as exc:
-        if _articraft_generation_is_active(token):
+        if _articraft_runs.is_active(session_id, token):
             yield None, "", f"**Setup failed:** {exc}", "\n".join(log_lines), ""
         return
 
-    if not _articraft_generation_is_active(token):
+    if not _articraft_runs.is_active(session_id, token):
         return
 
     final_message = run_root / "codex_final_message.txt"
@@ -823,6 +789,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         "exec",
         "--sandbox",
         "workspace-write",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "-c",
+        'web_search="disabled"',
         "--color",
         "never",
         "-C",
@@ -858,14 +829,14 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
                 text=True,
                 bufsize=1,
                 start_new_session=True,
-                env=os.environ.copy(),
+                env=build_codex_env(),
             )
         )
-        if not _set_articraft_generation_process(token, process):
+        if not _articraft_runs.attach(session_id, token, process):
             terminate_process_group(process)
             return
     except Exception as exc:
-        if _articraft_generation_is_active(token):
+        if _articraft_runs.is_active(session_id, token):
             yield None, record_dir.as_posix(), f"**Codex could not start:** {exc}", "\n".join(
                 log_lines
             ), ""
@@ -873,11 +844,14 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
 
     output_queue: queue.Queue[str] = queue.Queue()
     reader = threading.Thread(
-        target=read_process_output, args=(process, output_queue), daemon=True
+        target=read_process_output,
+        args=(process, output_queue),
+        kwargs={"redact_sensitive": True},
+        daemon=True,
     )
     reader.start()
     while process.poll() is None:
-        if not _articraft_generation_is_active(token, process):
+        if not _articraft_runs.is_active(session_id, token, process):
             return
         try:
             while True:
@@ -896,15 +870,17 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         except queue.Empty:
             pass
     finally:
-        _finish_articraft_generation_process(token, process)
+        _articraft_runs.finish(session_id, token, process)
 
-    if not _articraft_generation_is_active(token):
+    if not _articraft_runs.is_active(session_id, token):
         return
 
     if final_message.is_file():
         final_text = final_message.read_text(encoding="utf-8", errors="replace").strip()
         if final_text:
-            log_lines.append("\nCodex final response:\n" + final_text)
+            log_lines.append(
+                "\nCodex final response:\n" + redact_sensitive_text(final_text)
+            )
     if process.returncode:
         yield None, record_dir.as_posix(), f"**Codex generation failed** (exit code {process.returncode}).", "\n".join(
             log_lines[-300:]
@@ -930,7 +906,10 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
     )
     try:
         checked = _run_articraft_generation_check(
-            check_command, token=token, timeout=300
+            check_command,
+            session_id=session_id,
+            token=token,
+            timeout=300,
         )
         if checked is None:
             return
@@ -979,7 +958,10 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         )
         try:
             compiled = _run_articraft_generation_check(
-                compile_command, token=token, timeout=300
+                compile_command,
+                session_id=session_id,
+                token=token,
+                timeout=300,
             )
             if compiled is None:
                 return
@@ -1024,7 +1006,10 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
     log_lines.append("$ " + " ".join(finalize_command))
     try:
         finalized = _run_articraft_generation_check(
-            finalize_command, token=token, timeout=300
+            finalize_command,
+            session_id=session_id,
+            token=token,
+            timeout=300,
         )
         if finalized is None:
             return
@@ -1048,7 +1033,7 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
         )
         return
 
-    if not _articraft_generation_is_active(token):
+    if not _articraft_runs.is_active(session_id, token):
         return
     try:
         materialized, archive = _make_result_bundle(record_id)
@@ -1057,7 +1042,11 @@ def generate_articraft_asset(prompt_value: str, image_value: Any):
             f"- Record: `{record_dir}`\n- Compiled output: `{materialized}`\n- Downloadable bundle: `{archive}`"
         )
         try:
-            preview_html = _start_articraft_viser_preview(materialized, record_id)
+            preview_html = _start_articraft_viser_preview(
+                session_id,
+                materialized,
+                record_id,
+            )
             status += "\n- Interactive Viser preview: ready"
         except Exception as exc:
             preview_html = ""

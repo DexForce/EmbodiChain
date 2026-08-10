@@ -24,6 +24,7 @@ import importlib.util
 import io
 import json
 import queue
+import shutil
 import socket
 import subprocess
 import sys
@@ -39,6 +40,7 @@ from PIL import Image, ImageOps
 from app_config import (
     AGENT_CONFIG,
     COMMANDS,
+    GEN_SIM_ROOT,
     GEN_SIM_SCENE_ROOT,
     FAST_GYM_CONFIG,
 )
@@ -635,7 +637,20 @@ def _monitor_simulation(
 
     reader.join(timeout=1.0)
     _append_simulation_logs(token, process, _drain_output_queue(output_queue))
-    display_video = latest_audience_output_video(min_mtime_ns=started_at_ns)
+    source_video = latest_audience_output_video(min_mtime_ns=started_at_ns)
+    display_video: Path | None = None
+    if source_video is not None:
+        destination = GEN_SIM_ROOT / "action_videos" / token / source_video.name
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_video, destination)
+            display_video = destination
+        except OSError as exc:
+            _append_simulation_logs(
+                token,
+                process,
+                [f"Could not copy the simulation preview into the workspace: {exc}"],
+            )
 
     with runtime_lock:
         if runtime.run_token != token or runtime.sim_process is not process:

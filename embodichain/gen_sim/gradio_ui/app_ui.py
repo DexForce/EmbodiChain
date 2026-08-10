@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import gradio as gr
 
-from app_asset_engine import build_asset_engine_panel
+from app_asset_engine import build_asset_engine_panel, cleanup_asset_engine_session
 from app_config import (
     DEBUG_ENGINE_ACTION,
     DEBUG_ENGINE_ASSET,
@@ -261,5 +261,7 @@ def build_app() -> gr.Blocks:
             ],
             queue=False,
         )
+
+        app.unload(cleanup_asset_engine_session)
 
     return app

@@ -26,71 +26,62 @@ from __future__ import annotations
 
 import queue
 import shutil
-import subprocess
 import sys
-import threading
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Iterable
 
 import gradio as gr
 import trimesh
 
-from app_articraft import build_articraft_panel
+from app_articraft import build_articraft_panel, cleanup_articraft_session
 from app_config import GEN_SIM_ASSET_ROOT, SIMREADY_MESH_SUFFIXES
-from app_env import EMBODICHAIN_ROOT
-from app_processes import read_process_output, start_pipeline, terminate_process_group
+from app_processes import (
+    SessionProcessRegistry,
+    get_request_session_id,
+    read_process_output,
+    start_pipeline,
+    terminate_process_group,
+)
 
-_simready_run_lock = threading.Lock()
-_simready_process: subprocess.Popen[str] | None = None
-_simready_run_token: str | None = None
+__all__ = [
+    "build_asset_engine_panel",
+    "cleanup_asset_engine_session",
+    "prepare_asset_input_preview",
+    "reset_simready_asset",
+    "run_simready_asset",
+]
+
+_simready_runs = SessionProcessRegistry()
 _SIMREADY_IDLE_STATUS = "**Status:** waiting for an asset."
 
 
-def _begin_simready_run() -> str:
-    """Invalidate any previous SimReady run and return a new ownership token."""
-    global _simready_process, _simready_run_token
-    with _simready_run_lock:
-        previous_process = _simready_process
-        _simready_process = None
-        token = uuid.uuid4().hex
-        _simready_run_token = token
-    if previous_process is not None:
-        terminate_process_group(previous_process)
-    return token
+def reset_simready_asset(
+    request: gr.Request,
+) -> tuple[None, str, None, None, None, str, str]:
+    """Clear SimReady widgets and stop only the requesting session's run.
 
+    Args:
+        request: Gradio request for the browser session initiating Reset.
 
-def _simready_run_is_active(
-    token: str, process: subprocess.Popen[str] | None = None
-) -> bool:
-    with _simready_run_lock:
-        return _simready_run_token == token and (
-            process is None or _simready_process is process
-        )
-
-
-def _finish_simready_run(
-    token: str, process: subprocess.Popen[str] | None = None
-) -> None:
-    global _simready_process
-    with _simready_run_lock:
-        if _simready_run_token == token and (
-            process is None or _simready_process is process
-        ):
-            _simready_process = None
-
-
-def reset_simready_asset():
-    """Clear SimReady widgets and terminate the process group for its active run."""
-    global _simready_process, _simready_run_token
-    with _simready_run_lock:
-        process = _simready_process
-        _simready_process = None
-        _simready_run_token = None
-    if process is not None:
-        terminate_process_group(process)
+    Returns:
+        Reset values for the SimReady panel widgets.
+    """
+    _simready_runs.reset(get_request_session_id(request))
     return None, "rigid_object", None, None, None, _SIMREADY_IDLE_STATUS, ""
+
+
+def cleanup_asset_engine_session(request: gr.Request) -> None:
+    """Stop Asset-engine subprocesses owned by a disconnected session.
+
+    Args:
+        request: Gradio request for the disconnecting browser session.
+    """
+    session_id = get_request_session_id(request)
+    _simready_runs.reset(session_id)
+    cleanup_articraft_session(session_id)
 
 
 def _as_paths(value: Any) -> list[Path]:
@@ -180,13 +171,26 @@ def _find_simready_output(output_root: Path) -> Path:
     return candidates[0]
 
 
-def run_simready_asset(upload_value: Any, category: str):
-    """Run one upstream SimReady job and stream concise subprocess progress."""
-    global _simready_process
-    token = _begin_simready_run()
+def run_simready_asset(
+    upload_value: Any,
+    category: str,
+    request: gr.Request,
+) -> Iterator[tuple[Any, ...]]:
+    """Run one upstream SimReady job and stream concise subprocess progress.
+
+    Args:
+        upload_value: Gradio upload value containing the asset and sidecars.
+        category: SimReady asset category.
+        request: Gradio request identifying the owning browser session.
+
+    Yields:
+        Updated preview, output, status, and log values for the panel.
+    """
+    session_id = get_request_session_id(request)
+    token = _simready_runs.begin(session_id)
     category = (category or "").strip()
     if not category:
-        if _simready_run_is_active(token):
+        if _simready_runs.is_active(session_id, token):
             yield None, None, None, "**Input error:** enter an asset category.", ""
         return
     try:
@@ -198,7 +202,7 @@ def run_simready_asset(upload_value: Any, category: str):
         source_mesh = _safe_copy_uploads(uploads, input_dir)
         input_preview = _export_preview(source_mesh, run_root / "input_preview.glb")
     except Exception as exc:
-        if _simready_run_is_active(token):
+        if _simready_runs.is_active(session_id, token):
             yield None, None, None, f"**Input error:** {exc}", ""
         return
 
@@ -214,7 +218,7 @@ def run_simready_asset(upload_value: Any, category: str):
         category,
     ]
     log_lines = ["$ " + " ".join(command)]
-    if not _simready_run_is_active(token):
+    if not _simready_runs.is_active(session_id, token):
         return
     yield input_preview.as_posix(), None, None, "**SimReady is running…**", "\n".join(
         log_lines
@@ -223,17 +227,13 @@ def run_simready_asset(upload_value: Any, category: str):
     try:
         process = start_pipeline(command, use_simready_llm=True)
     except Exception as exc:
-        if _simready_run_is_active(token):
+        if _simready_runs.is_active(session_id, token):
             yield input_preview.as_posix(), None, None, f"**Pipeline start failed:** {exc}", "\n".join(
                 log_lines
             )
         return
 
-    with _simready_run_lock:
-        owns_process = _simready_run_token == token
-        if owns_process:
-            _simready_process = process
-    if not owns_process:
+    if not _simready_runs.attach(session_id, token, process):
         terminate_process_group(process)
         return
 
@@ -244,7 +244,7 @@ def run_simready_asset(upload_value: Any, category: str):
         )
         reader.start()
         while process.poll() is None:
-            if not _simready_run_is_active(token, process):
+            if not _simready_runs.is_active(session_id, token, process):
                 return
             try:
                 while True:
@@ -262,7 +262,7 @@ def run_simready_asset(upload_value: Any, category: str):
                 log_lines.append(output_queue.get_nowait())
         except queue.Empty:
             pass
-        if not _simready_run_is_active(token, process):
+        if not _simready_runs.is_active(session_id, token, process):
             return
 
         if process.returncode != 0:
@@ -285,7 +285,7 @@ def run_simready_asset(upload_value: Any, category: str):
                 log_lines[-220:]
             )
     finally:
-        _finish_simready_run(token, process)
+        _simready_runs.finish(session_id, token, process)
 
 
 def build_asset_engine_panel() -> dict[str, Any]:
