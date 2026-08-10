@@ -33,9 +33,9 @@ def _same_physical_object(
     second: ObjectSemantics,
 ) -> bool:
     """Return whether two semantic records identify one physical object."""
-    if first is second:
-        return True
-    return first.entity is not None and first.entity is second.entity
+    from .core import _same_object_identity
+
+    return _same_object_identity(first, second)
 
 
 def _resolve_runtime_device(device: torch.device | str) -> torch.device:
