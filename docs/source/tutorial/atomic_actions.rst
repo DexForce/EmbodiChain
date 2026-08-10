@@ -502,9 +502,7 @@ correlated per-environment verification result:
 
    from embodichain.lab.sim.atomic_actions import EffectVerificationResult
 
-   def verify_effect(context, tick):
-       request = tick.pending_effect
-       assert request is not None
+   def verify_effect(context, request):
        success_mask, failure_mask = verify_grasp_or_release(context, request.env_mask)
        return EffectVerificationResult(
            verification_id=request.verification_id,
@@ -515,7 +513,10 @@ correlated per-environment verification result:
    result = runner.run_until_blocked(effect_verifier=verify_effect)
 
 This prevents a successful trajectory plan from being mistaken for a successful
-physical grasp or release. If verification is asynchronous, omit the callback;
+physical grasp or release. The runner invokes this synchronous callback after a
+fresh due-cycle observation and feeds its result to the session in that same
+cycle. Returning all-false masks keeps the remaining rows unresolved. If
+verification is asynchronous, omit the callback;
 ``run_until_blocked`` returns at the verification boundary and the application
 can later resume from the *current* pending request:
 

@@ -31,6 +31,7 @@ from embodichain.utils import configclass
 
 from .bindings import RuntimeEndpointTarget
 from .execution import (
+    EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionSession,
     ExecutionStatus,
@@ -293,10 +294,10 @@ class RunnerStep:
 
 
 EffectVerifier = Callable[
-    [PlanningContext, ExecutionTick],
-    EffectVerificationResult | None,
+    [PlanningContext, EffectVerificationRequest],
+    EffectVerificationResult,
 ]
-"""Callback that verifies a pending semantic effect for each environment."""
+"""Synchronous verifier called on a fresh due-cycle observation."""
 
 RunnerStepCallback = Callable[[RunnerStep], None]
 """Optional observer called after every blocking runner-loop iteration."""
@@ -464,6 +465,7 @@ class ExecutionRunner:
         self,
         *,
         effect_result: EffectVerificationResult | None = None,
+        effect_verifier: EffectVerifier | None = None,
     ) -> RunnerStep:
         """Perform one due observation/session/controller update without sleeping.
 
@@ -471,11 +473,22 @@ class ExecutionRunner:
             effect_result: Optional correlated effect result. If this call
                 occurs before the next cycle is due, it is not consumed and
                 must be supplied again on a later call.
+            effect_verifier: Optional synchronous verifier for the current
+                pending request. It runs after a fresh due-cycle observation
+                and before the session consumes the result. It is not called
+                after the request deadline. Mutually exclusive with
+                ``effect_result``.
 
         Returns:
             Runner status, optional session tick, controller acknowledgements,
             and time remaining before another update is due.
         """
+        if effect_result is not None and effect_verifier is not None:
+            raise ValueError(
+                "effect_result and effect_verifier are mutually exclusive."
+            )
+        if effect_verifier is not None and not callable(effect_verifier):
+            raise TypeError("effect_verifier must be callable or None.")
         now = self._clock_now()
         if self._status is not RunnerStatus.RUNNING:
             return self._result(timestamp=now)
@@ -498,6 +511,25 @@ class ExecutionRunner:
                 context=self._last_context,
             )
         self._last_context = context
+
+        pending_effect = self._session.pending_effect
+        if (
+            effect_verifier is not None
+            and pending_effect is not None
+            and context.robot.timestamp <= pending_effect.deadline
+        ):
+            try:
+                effect_result = effect_verifier(context, pending_effect)
+                if type(effect_result) is not EffectVerificationResult:
+                    raise TypeError(
+                        "EffectVerifier must return exactly "
+                        "EffectVerificationResult."
+                    )
+            except Exception as exc:
+                return self._fail(
+                    f"Effect verifier failed: {type(exc).__name__}: {exc}",
+                    context=context,
+                )
 
         try:
             if self._pending_revision is not None:
@@ -659,9 +691,10 @@ class ExecutionRunner:
         """Run with clock-driven waiting until terminal or effect verification blocks.
 
         Args:
-            effect_verifier: Optional callback used after an
-                ``effect_verification_required`` event. Without one, the method
-                returns the running step so the caller can verify externally.
+            effect_verifier: Optional synchronous callback used on fresh
+                due-cycle observations while effect verification is pending.
+                Without one, the method returns the running boundary so the
+                caller can verify externally.
             on_step: Optional callback for tracing or tutorial visualization.
             max_steps: Hard bound on loop iterations.
 
@@ -670,7 +703,6 @@ class ExecutionRunner:
         """
         if max_steps <= 0:
             raise ValueError("max_steps must be greater than zero.")
-        effect_result: EffectVerificationResult | None = None
         now = self._clock_now()
         last_result = self._result(
             timestamp=now,
@@ -681,9 +713,7 @@ class ExecutionRunner:
         if self.effect_verification_pending and effect_verifier is None:
             return last_result
         for _ in range(max_steps):
-            result = self.step(effect_result=effect_result)
-            if result.tick is not None:
-                effect_result = None
+            result = self.step(effect_verifier=effect_verifier)
             if on_step is not None:
                 try:
                     on_step(result)
@@ -700,20 +730,8 @@ class ExecutionRunner:
             verification_required = (
                 result.tick is not None and result.tick.pending_effect is not None
             )
-            if verification_required:
-                if effect_verifier is None or result.context is None:
-                    return result
-                try:
-                    effect_result = effect_verifier(result.context, result.tick)
-                except Exception as exc:
-                    return self._fail(
-                        f"Effect verifier failed: {type(exc).__name__}: {exc}",
-                        context=result.context,
-                        tick=result.tick,
-                        dispatches=list(result.dispatches),
-                    )
-                if effect_result is None:
-                    return result
+            if verification_required and effect_verifier is None:
+                return result
             if result.wait_duration > 0.0:
                 try:
                     self._clock.sleep(result.wait_duration)

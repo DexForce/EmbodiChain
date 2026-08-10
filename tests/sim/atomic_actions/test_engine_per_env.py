@@ -1455,6 +1455,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
     assert partial.pending_effect is not None
     assert partial.pending_effect.env_mask.tolist() == [False, True]
     assert partial.pending_effect.verification_id != first_request.verification_id
+    assert partial.pending_effect.attempt_generation == first_request.attempt_generation
     assert partial.pending_effect.requested_at == first_request.requested_at
     assert partial.pending_effect.deadline == first_request.deadline
     assert not any(
@@ -1978,6 +1979,7 @@ def test_effect_retry_invalidates_previous_verification_id() -> None:
     assert first_wait.pending_effect is not None
     old_id = first_wait.pending_effect.verification_id
     old_deadline = first_wait.pending_effect.deadline
+    old_generation = first_wait.pending_effect.attempt_generation
 
     retry = session.tick(_context(0.3, 0.2, 0.2, 0))
     assert retry.command is not None
@@ -1986,6 +1988,7 @@ def test_effect_retry_invalidates_previous_verification_id() -> None:
     second_wait = session.tick(_context(0.5, 0.2, 0.2, 0))
     assert second_wait.pending_effect is not None
     assert second_wait.pending_effect.verification_id != old_id
+    assert second_wait.pending_effect.attempt_generation == old_generation + 1
     assert second_wait.pending_effect.deadline > old_deadline
 
     with pytest.raises(ValueError, match="verification_id"):
@@ -1997,6 +2000,30 @@ def test_effect_retry_invalidates_previous_verification_id() -> None:
                 torch.tensor([False]),
             ),
         )
+
+
+def test_effect_request_generation_advances_after_tracking_replan() -> None:
+    engine, _ = _engine()
+    effect = EffectAction()
+    engine.register(effect)
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id=effect.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+    session.tick(_context(0.0, 0.0, 0.2, 0))
+
+    replanned = session.tick(_context(0.1, 1.0, 0.2, 0))
+    session.tick(_context(0.2, 1.0, 0.2, 0))
+    waiting = session.tick(_context(0.3, 0.2, 0.2, 0))
+
+    assert any(event.kind is ExecutionEventKind.REPLANNED for event in replanned.events)
+    assert waiting.pending_effect is not None
+    assert waiting.pending_effect.attempt_generation == 1
 
 
 def test_failed_effect_plan_retries_without_requesting_effect_verification() -> None:

@@ -444,7 +444,7 @@ an older custom action by renaming its implementation to `_plan()`.
 | `session.revise_current(invocation)` | Manually ticked runtime orchestrator | Replaces the active logical call with a newer same-destination revision and replans from the latest observed context |
 | `runner.revise_current(invocation)` | Runner-driven runtime orchestrator or Action Agent | Snapshots a revision, preserves the current frame deadline, then replans from a fresh due-time observation |
 | `runner.deactivate_rows(mask, reason=...)` | Runner-driven runtime orchestrator | Permanently removes rows and refreshes the runner's cached effect request; prefer it over direct session mutation |
-| `runner.step(effect_result=...)` | Non-blocking controller integration | Observes and routes a `RuntimeCommandFrame` only when it is due |
+| `runner.step(effect_result=..., effect_verifier=...)` | Non-blocking controller integration | Observes only when due; accepts either an asynchronous correlated result or a synchronous verifier, never both |
 | `runner.run_until_blocked(...)` | Simple blocking application or tutorial | Advances the injected clock until terminal or external effect verification is required |
 | `runner.cancel(reason)` | Explicit safe stop | Requests controller cancellation followed by an observed-position hold |
 
