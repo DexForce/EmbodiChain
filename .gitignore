@@ -208,9 +208,9 @@ scripts/benchmark/rl/reports/*
 .worktrees/
 # Local gym project workspace
 /gym_project/
-.debug_engine/
+.gen_sim/
 
 # Local Gradio UI dependencies, generated Articraft records, and bytecode
 /embodichain/gen_sim/gradio_ui/.articraft/
-/embodichain/gen_sim/gradio_ui/.debug_engine/
+/embodichain/gen_sim/gradio_ui/.gen_sim/
 /embodichain/gen_sim/gradio_ui/__pycache__/

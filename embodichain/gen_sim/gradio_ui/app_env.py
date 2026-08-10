@@ -46,7 +46,7 @@ __all__ = [
 load_gen_sim_env()
 
 APP_ROOT = Path(__file__).resolve().parent
-DEBUG_ENGINE_ROOT = APP_ROOT / ".debug_engine"
+GEN_SIM_ROOT = APP_ROOT / ".gen_sim"
 PROXY_ENV_KEYS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -77,7 +77,7 @@ ARTICRAFT_REPOSITORY_URL = _getenv(
 )
 ARTICRAFT_CONDA_ENV = _getenv("ARTICRAFT_CONDA_ENV", "articraft")
 ARTICRAFT_OUTPUT_ROOT = Path(
-    _getenv("ARTICRAFT_OUTPUT_ROOT", str(DEBUG_ENGINE_ROOT / "articraft"))
+    _getenv("ARTICRAFT_OUTPUT_ROOT", str(GEN_SIM_ROOT / "articraft"))
 ).expanduser()
 SCENE_ENGINE_VISER_PORT = int(_getenv("SCENE_ENGINE_VISER_PORT", "8080"))
 ARTICRAFT_VISER_PORT = int(_getenv("ARTICRAFT_VISER_PORT", "8081"))

@@ -23,6 +23,6 @@ while callers move to the focused modules.
 
 from __future__ import annotations
 
-from app_ui import build_demo
+from app_ui import build_app
 
-__all__ = ["build_demo"]
+__all__ = ["build_app"]

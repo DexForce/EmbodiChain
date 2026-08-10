@@ -26,12 +26,12 @@ import signal
 
 from app_config import (
     ASSETS_DIR,
-    DEBUG_ENGINE_ROOT,
+    GEN_SIM_ROOT,
     DEFAULT_CONCURRENCY_LIMIT,
 )
 from app_env import EMBODICHAIN_ROOT, SERVER_NAME, SERVER_PORT
 from app_processes import force_stop_all_child_processes
-from app_services import build_demo
+from app_services import build_app
 
 __all__ = ["main"]
 
@@ -62,17 +62,17 @@ def _install_shutdown_handlers() -> None:
 def main() -> None:
     if not EMBODICHAIN_ROOT.is_dir():
         raise FileNotFoundError(f"EmbodiChain root not found: {EMBODICHAIN_ROOT}")
-    demo = build_demo()
-    demo.queue(default_concurrency_limit=DEFAULT_CONCURRENCY_LIMIT)
+    app = build_app()
+    app.queue(default_concurrency_limit=DEFAULT_CONCURRENCY_LIMIT)
     _install_shutdown_handlers()
     try:
-        demo.launch(
+        app.launch(
             server_name=SERVER_NAME,
             server_port=SERVER_PORT,
             allowed_paths=[
                 str(EMBODICHAIN_ROOT),
                 str(ASSETS_DIR),
-                str(DEBUG_ENGINE_ROOT),
+                str(GEN_SIM_ROOT),
             ],
         )
     finally:

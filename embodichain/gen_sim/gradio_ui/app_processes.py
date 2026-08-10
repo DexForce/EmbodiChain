@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pipeline subprocess execution and progress detection."""
+"""Subprocess execution and lifecycle management for the engine workspace."""
 
 from __future__ import annotations
 
@@ -33,19 +33,16 @@ from app_env import (
     configure_direct_network_env,
     configure_simready_llm_env,
 )
-from app_state import PHASES
 
 __all__ = [
     "build_pipeline_env",
     "build_run_agent_command",
-    "detect_phase_from_files",
     "force_stop_all_child_processes",
     "read_process_output",
     "register_managed_process",
     "run_agent_cli_supports_robot_profile",
     "start_pipeline",
     "terminate_process_group",
-    "update_phase_from_log",
 ]
 
 _RUN_AGENT_SUPPORTS_ROBOT_PROFILE: bool | None = None
@@ -80,14 +77,11 @@ def run_agent_cli_supports_robot_profile() -> bool:
     return _RUN_AGENT_SUPPORTS_ROBOT_PROFILE
 
 
-def build_run_agent_command(
-    paths: ScenePaths, *, parallel_env: bool = False, robot_profile: str | None = None
-) -> list[str]:
+def build_run_agent_command(*, robot_profile: str | None = None) -> list[str]:
+    """Build the Action-engine command for the existing current scene."""
     from app_commands import build_run_agent_command as build_command
 
     return build_command(
-        paths,
-        parallel_env=parallel_env,
         robot_profile=robot_profile,
         supports_robot_profile=run_agent_cli_supports_robot_profile(),
     )
@@ -258,72 +252,6 @@ def terminate_process_group(process: subprocess.Popen[str]) -> None:
             process.kill()
     finally:
         _unregister_managed_process(process)
-
-
-def detect_phase_from_files(current_key: str, paths: ScenePaths) -> str:
-    candidates = [
-        ("scene_intake", paths.prompt_root / "scene_intake" / "result.json"),
-        ("relations", paths.prompt_root / "image_segments" / "result.json"),
-        (
-            "relations",
-            paths.prompt_root / "image_spatial_relations" / "result.json",
-        ),
-        ("gym_export", paths.prompt_root / "gym_export" / "gym_config.json"),
-        ("config", paths.fast_gym_config),
-        ("preview", paths.gradio_scene_glb),
-    ]
-    best_key = current_key
-    best_progress = PHASES.get(best_key, PHASES["idle"]).progress
-
-    if any(paths.prompt_root.glob("unified_scene_gen/**/*.glb")):
-        best_key, best_progress = _choose_later_phase(
-            best_key,
-            best_progress,
-            "asset_generation",
-        )
-    for phase_key, marker in candidates:
-        if marker.exists():
-            best_key, best_progress = _choose_later_phase(
-                best_key,
-                best_progress,
-                phase_key,
-            )
-    return best_key
-
-
-def _choose_later_phase(
-    current_key: str,
-    current_progress: int,
-    candidate_key: str,
-) -> tuple[str, int]:
-    candidate_progress = PHASES[candidate_key].progress
-    if candidate_progress > current_progress:
-        return candidate_key, candidate_progress
-    return current_key, current_progress
-
-
-def update_phase_from_log(line: str, current_key: str) -> str:
-    text = line.lower()
-    mapping = [
-        ("scene_intake", "scene_intake"),
-        ("image_segments", "relations"),
-        ("image_spatial_relations", "relations"),
-        ("unified_scene_gen", "asset_generation"),
-        ("glb", "asset_generation"),
-        ("gym_export", "gym_export"),
-        ("generated gym config", "config"),
-        ("fast_gym_config", "config"),
-    ]
-    best_key = current_key
-    best_progress = PHASES.get(best_key, PHASES["idle"]).progress
-    for needle, phase_key in mapping:
-        if needle in text:
-            best_key, best_progress = _choose_later_phase(
-                best_key,
-                best_progress,
-                phase_key,
-            )
-    return best_key
 
 
 def read_process_output(

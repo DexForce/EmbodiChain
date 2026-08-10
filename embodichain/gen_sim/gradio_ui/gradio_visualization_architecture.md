@@ -1,6 +1,6 @@
 # Gradio 可视化系统架构
 
-本文档以当前代码为准，描述 Gradio Demo、Debug 下的三个引擎，以及它们与 EmbodiChain、SimReady、Articraft 和 DexSim 的边界。`gradio_app.py` 只负责启动；界面、资产工作流、场景工作流和进程管理分散在专用模块中。
+本文档以当前代码为准，描述 Gradio 中的三个引擎，以及它们与 EmbodiChain、SimReady、Articraft 和 DexSim 的边界。`gradio_app.py` 只负责启动；界面、资产工作流、场景工作流和进程管理分散在专用模块中。
 
 ## 架构总览
 
@@ -11,11 +11,11 @@ gradio_app.py
 app_services.py（兼容门面）
     ▼
 app_ui.py ───────────► app_asset_engine.py ───► SimReady CLI
-    │ 布局、模式和事件绑定 │       │
+    │ 布局、引擎选择和事件绑定 │    │
     │                     │       └──────────► app_articraft.py ───► Articraft CLI + Codex CLI
     ▼
 app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
-    │                  └► prompt2scene / action-agent pipeline + DexSim
+    │                  └► action-agent `run_agent` + DexSim
     ├──────────────► app_commands.py   命令构造
     ├──────────────► app_processes.py  子进程、环境、日志和阶段检测
     ├──────────────► app_state.py      共享 RuntimeState、锁和计时
@@ -28,14 +28,14 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
 | 模块 | 职责 |
 | --- | --- |
 | `gradio_app.py` | 唯一启动入口；校验 `EMBODICHAIN_ROOT`，创建 Blocks，设置队列和本地文件访问路径。 |
-| `app_ui.py` | Demo/Debug 布局、引擎面板切换和回调绑定；不实现 pipeline。 |
+| `app_ui.py` | 顶部图标、引擎面板切换和回调绑定；不实现 pipeline。 |
 | `app_asset_engine.py` | SimReady 上传适配、输入/输出 GLB 预览、处理日志，以及 Asset engine 的 Articraft 标签页。 |
 | `app_articraft.py` | Articraft checkout/环境检查、外部记录创建、Codex 生成与校验、URDF bundle 和 Viser 关节预览。 |
-| `app_workflows.py` | Demo 的 prompt2scene/action-agent 工作流、独立 Scene Engine 工作流、GLB 预览、场景提升和 DexSim。 |
-| `app_processes.py` | 子进程环境、进程组终止、stdout 读取、Demo pipeline 阶段检测。 |
+| `app_workflows.py` | Scene Engine 工作流、Action Engine 所需的共享状态、GLB 预览和 DexSim。 |
+| `app_processes.py` | 子进程环境、进程组终止、stdout 读取和 pipeline 阶段检测。 |
 | `app_state.py` | `RuntimeState`、互斥锁、进度阶段、运行 token 和耗时统计。 |
-| `app_commands.py` | prompt2scene、动作配置和 `run_agent` 的参数构造。 |
-| `app_media.py` | 观众视频、LeRobot 数据预览、组合视频和运行日志归档。 |
+| `app_commands.py` | Action engine 的 `run_agent` 参数构造。 |
+| `app_media.py` | DexSim 观众视频发现和 Articraft Viser CLI 适配。 |
 | `app_config.py` | UI 文案、引擎模式、路径推导和 CLI 固定参数。 |
 | `app_env.py` | 从 `.env` 读取 Gradio、Articraft 和 SimReady 的部署值，并保留未配置时的默认值。 |
 | `../.env` | Gradio 与 Scene Engine 共用的路径、端口、LLM 和服务端点配置；不提交凭据。 |
@@ -57,69 +57,22 @@ conda run -n embodichain python gradio_app.py
 | `ARTICRAFT_VISER_PORT` | `8081` | Articraft 关节预览的 Viser 端口。 |
 | `ARTICRAFT_ROOT` | `<项目>/.articraft` | Articraft checkout。 |
 | `ARTICRAFT_CONDA_ENV` | `articraft` | 运行 Articraft CLI 的 Conda 环境。 |
-| `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.debug_engine/articraft` | Articraft 记录、运行日志和导出 bundle。 |
+| `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft 记录、运行日志和导出 bundle。 |
 
-`demo.launch()` 仅开放 EmbodiChain 根目录、`assets/` 和 `.debug_engine/` 给浏览器读取。pipeline 子进程由 `build_pipeline_env()` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*`、关闭 Gradio analytics，并把非空的 SimReady 配置映射为 `OPENAI_*`。这不会改写启动 Gradio 的父进程环境。
+`app.launch()` 仅开放 EmbodiChain 根目录、`assets/` 和 `.gen_sim/` 给浏览器读取。pipeline 子进程由 `build_pipeline_env()` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*`、关闭 Gradio analytics，并把非空的 SimReady 配置映射为 `OPENAI_*`。这不会改写启动 Gradio 的父进程环境。
 
 ## 页面与引擎
 
-顶部的 `Demo` / `Debug` 只切换可见面板，不会启动任务；切换后共享运行状态保留。Debug 有三个按钮：`Asset_engine`、`Scene_engine`、`Action_engine`。它们的实际输入和产物并不完全相同：
+页面顶部保留 DexForce 图标，并直接显示 `Asset_engine`、`Scene_engine`、`Action_engine` 三个入口，不再提供模式切换。它们的实际输入和产物并不完全相同：
 
 | Engine | 输入 | 预览/下载 | 实际产物 | 是否启动 DexSim |
 | --- | --- | --- | --- | --- |
-| Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.debug_engine/assets/runs/<token>/` | 否 |
-| Asset engine / Articulation | 文字、可选参考图 | URDF articulation 的 Viser、zip 下载 | `.debug_engine/articraft/` | 否 |
-| Scene engine | 一张图片 | Scene Engine 的 Viser | `.debug_engine/scenes/<image-sha256-前16位>/` | 否 |
-| Action engine | `current` Gym 场景、任务、机器人 | `current` 的 GLB 和 DexSim 视频 | EmbodiChain `gym_project/current` 与 `outputs/` | 是 |
+| Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
+| Asset engine / Articulation | 文字、可选参考图 | URDF articulation 的 Viser、zip 下载 | `.gen_sim/articraft/` | 否 |
+| Scene engine | 一张图片 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
+| Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
-因此，Debug 的 Scene engine 是独立的图像条件场景生成器；它不会提升、复制或转换输出到 `gym_project/current`。Action engine 只消费 Demo/prompt2scene 工作流已经生成的 `current` Gym 场景。界面中的 “Scene engine” 文案表达的是所需场景类型，并不意味着独立 Scene Engine 输出已自动连到 Action engine。
-
-## Demo：端到端 Gym 场景和 DexSim
-
-Demo 提供 `Auto`、`Interact`、`Parallel Simulation` 三种运行状态，以及图像、任务、场景描述、生成模式、机器人、随机输入、视频和 GLB 预览。它们与顶部的 Demo/Debug 模式无关。
-
-`run_generate()` 是 Demo 的主入口。初始生成会在 staging 场景中运行 prompt2scene/action-agent pipeline，成功后才 promote 为固定的 `current`；随后默认启动 DexSim。编辑和仅改任务复用已有 `current`：
-
-```text
-Initial generation
-  image + task
-  → _gradio_pending_<token>
-  → run_agent_pipeline --skip-run-agent
-  → fast_gym_config / agent_config / GLB previews
-  → promote 到 current
-  → run_agent（DexSim）
-
-Edit current scene
-  current + task + scene description
-  → 编辑 pipeline
-  → current
-  → run_agent（DexSim）
-
-Change task only
-  current + task
-  → generate_action_agent_config
-  → current
-  → run_agent（DexSim）
-```
-
-场景生成期间，工作流会从 `fast_gym_config.json` 构建场景 GLB，并将生成的对象 GLB 合并为对象预览。`launch_simulation=False` 是可用的工作流参数，但当前 Debug Scene panel 不调用这条 Demo 工作流；它调用独立的 `run_scene_engine()`。
-
-正式场景固定在：
-
-```text
-gym_project/current/
-gym_project/current/gym_export/
-gym_project/action_agent_pipeline/images/current.png
-gym_project/action_agent_pipeline/configs/current/
-    fast_gym_config.json
-    agent_config.json
-    gradio_scene/
-        scene_current.glb
-        initial_scene.glb
-        object_preview.glb
-```
-
-初始生成使用 `_gradio_pending_<token>` 路径。提升失败或 pipeline 失败时，已有 `current` 保持不变；成功提升后会重写 staging 中的路径引用。`Reset` 会清理当前场景和 staging 产物；`Stop` 通过进程组终止正在运行的 pipeline 或 DexSim。
+因此，Scene engine 是独立的图像条件场景生成器；它不会提升、复制或转换输出到 `gym_project/current`。Action engine 只消费已有的 `current` Gym 场景。界面中的 “Scene engine” 文案表达的是所需场景类型，并不意味着独立 Scene Engine 输出已自动连到 Action engine。
 
 ## Asset engine
 
@@ -129,7 +82,7 @@ SimReady CLI 接收目录，而 Gradio 接收上传文件。上传文件会复�
 
 ```text
 mesh + sidecar files
-  → .debug_engine/assets/runs/<token>/input/
+  → .gen_sim/assets/runs/<token>/input/
   → trimesh 导出 input_preview.glb
   → SimReady CLI
   → output/**/asset_simready.glb（优先）或 asset_simready.obj
@@ -151,7 +104,7 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 
 ### Articulation：Articraft + Codex
 
-Articulation 标签页根据文本和可选参考图生成一个可下载的 articulated asset。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会 clone `ARTICRAFT_REPOSITORY_URL`；随后检查 Conda、指定的 Articraft 环境和 Codex CLI。该操作会创建 checkout 和 `.debug_engine/articraft/` 中的输出目录，现有的非 Articraft 目录不会被覆盖。
+Articulation 标签页根据文本和可选参考图生成一个可下载的 articulated asset。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会 clone `ARTICRAFT_REPOSITORY_URL`；随后检查 Conda、指定的 Articraft 环境和 Codex CLI。该操作会创建 checkout 和 `.gen_sim/articraft/` 中的输出目录，现有的非 Articraft 目录不会被覆盖。
 
 生成流程：
 
@@ -166,7 +119,7 @@ description + optional image
   → exports/<record-id>.zip + Viser articulation preview
 ```
 
-产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Demo 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 每次成功预览会终止旧的 Articraft 预览进程，再以 `0.0.0.0:<ARTICRAFT_VISER_PORT>` 启动新进程。
+产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 每次成功预览会终止旧的 Articraft 预览进程，再以 `0.0.0.0:<ARTICRAFT_VISER_PORT>` 启动新进程。
 
 `Reset Articulation` 会清空描述、参考图、记录与下载结果，终止当前 Articraft/Codex 命令进程组，并关闭该面板启动的 Viser。
 
@@ -176,7 +129,7 @@ Scene engine 只接收图像。上传图像会先进行 EXIF 归正并转为 RGB
 
 ```text
 image
-  → .debug_engine/scenes/<hash>/input.png
+  → .gen_sim/scenes/<hash>/input.png
   → python -m embodichain scene-engine
        --image <input.png>
        --output_root <hash-dir>
@@ -199,7 +152,9 @@ gym_project/action_agent_pipeline/configs/current/fast_gym_config.json
 gym_project/action_agent_pipeline/configs/current/agent_config.json
 ```
 
-点击 `Load current scene` 只读取共享状态快照。点击 `Run DexSim` 会先检查任务、`current` 的 Gym/action 配置、运行占用和可导入的 `embodichain.gen_sim.action_agent_pipeline.cli.run_agent`，再以当前配置调用 `run_agent`。它不会因为新的任务文本重建动作图；任务改变时应在 Demo 里使用 `Change task only`，或者实现显式的配置再生成步骤。
+进入 Action engine 或点击 `Refresh scenes` 会扫描 `.gen_sim/scenes/`，只列出包含 `scene_export/scene_config.json` 的完整场景。列表不会自动选中场景；用户显式选择后，右侧通过 Viser 展示该场景。当前场景选择只负责可视化，尚未传递给 DexSim 命令。
+
+点击 `Run DexSim` 仍会检查任务、现有 `current` Gym/action 配置、运行占用和可导入的 `embodichain.gen_sim.action_agent_pipeline.cli.run_agent`，再以当前配置调用 `run_agent`。
 
 运行命令的核心参数为：
 
@@ -208,16 +163,16 @@ python -m embodichain.gen_sim.action_agent_pipeline.cli.run_agent \
   --task_name current \
   --gym_config <.../fast_gym_config.json> \
   --agent_config <.../agent_config.json> \
-  --regenerate --renderer fast-rt --num_envs <1|9>
+  --regenerate --renderer fast-rt --num_envs 1
 ```
 
-并行模式额外传入 arena 和数据保存过滤参数。`--robot-profile` 仅在通过 `run_agent --help` 探测到该参数时加入。DexSim 完成后会寻找 audience 视频和 LeRobot 数据集；单环境可组合两种预览视频。
+`--robot-profile` 仅在通过 `run_agent --help` 探测到该参数时加入。DexSim 完成后会寻找本次运行产生的 audience 视频并显示在 Action engine 中。
 
 ## 共享状态、并发和进度
 
-Demo、独立 Scene engine 和 Action engine 共享 `RuntimeState` 与 `runtime_lock`，其中包含运行 token、pipeline/DexSim/Scene Viser 进程、输入、预览、日志、阶段和计时。运行 token 用于丢弃过期线程的更新。Articraft Viser 使用单独的锁和进程引用；SimReady 使用自己的同步 generator。
+Scene engine 和 Action engine 共享 `RuntimeState` 与 `runtime_lock`，其中包含运行 token、DexSim/Scene Viser 进程、输入、预览、日志和阶段。运行 token 用于丢弃过期线程的更新。Articraft Viser 使用单独的锁和进程引用；SimReady 使用自己的同步 generator。
 
-`demo.queue(default_concurrency_limit=1)` 将队列中的高成本回调串行化。Demo 的 `Timer(2.0)` 与 Action engine 的独立 `Timer(2.0)` 都读取同一共享状态。Scene Engine 和 Demo pipeline 因共享 `is_busy` 互斥；Asset/Articraft 面板不写入这一状态，但仍会受 Gradio 队列限制。
+`app.queue(default_concurrency_limit=1)` 将队列中的高成本回调串行化。Action engine 的 `Timer(2.0)` 读取共享状态。Asset/Articraft 面板不写入这一状态，但仍会受 Gradio 队列限制。
 
 共享阶段如下；独立 Scene Engine 将其日志映射到相同的进度条：
 
@@ -243,11 +198,9 @@ export SIMREADY_OPENAI_MODEL='<model>'
 export SIMREADY_OPENAI_BASE_URL='<base-url>'
 ```
 
-Demo/Action 需要 action-agent 模块，特别是：
+Action engine 只需要 action-agent 的运行模块：
 
 ```text
-embodichain.gen_sim.action_agent_pipeline.cli.run_agent_pipeline
-embodichain.gen_sim.action_agent_pipeline.cli.generate_action_agent_config
 embodichain.gen_sim.action_agent_pipeline.cli.run_agent
 ```
 
@@ -272,7 +225,7 @@ python -m py_compile \
 env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
   -u http_proxy -u https_proxy -u all_proxy \
   conda run -n embodichain python -c \
-  "from app_ui import build_demo; assert build_demo() is not None"
+  "from app_ui import build_app; assert build_app() is not None"
 ```
 
 手动检查：
@@ -280,6 +233,4 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 1. SimReady 上传简单网格后能显示输入预览；执行后显示 SimReady 输出或明确错误。
 2. Articulation 环境检查能报告 checkout、Conda 和 Codex 状态；成功生成后有 zip、记录目录和 Viser 或明确的预览错误。
 3. Scene engine 从图像生成 `scene_export/scene_config.json`，并在 `8080` 显示 Viser；它不应改写 `gym_project/current`。
-4. Demo 初始生成成功后才替换 `current`；失败时旧场景仍可用。
-5. Action engine 在没有 `current` Gym/action 配置或缺少 CLI 时给出预检错误；任务更新后通过 Demo 的 `Change task only` 重建配置。
-6. Demo 的 Auto/Interact/Parallel Simulation 行为不因 Debug 面板切换而改变；Reset/Stop 能终止其对应的进程组。
+4. Action engine 在没有 `current` Gym/action 配置或缺少 CLI 时给出预检错误。

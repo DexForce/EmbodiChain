@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Standalone SimReady asset-engine workflow used by Debug mode.
+"""Standalone SimReady asset-engine workflow used by the engine workspace.
 
 The upstream SimReady CLI works on a directory, while Gradio uploads files.
 This adapter creates an isolated directory for every run, keeps material
@@ -38,7 +38,7 @@ import gradio as gr
 import trimesh
 
 from app_articraft import build_articraft_panel
-from app_config import DEBUG_ASSET_ENGINE_ROOT, SIMREADY_MESH_SUFFIXES
+from app_config import GEN_SIM_ASSET_ROOT, SIMREADY_MESH_SUFFIXES
 from app_env import EMBODICHAIN_ROOT
 from app_processes import read_process_output, start_pipeline, terminate_process_group
 
@@ -151,7 +151,7 @@ def prepare_asset_input_preview(upload_value: Any):
     """Validate an upload and return a normalized GLB preview without running SimReady."""
     try:
         source = _mesh_path(_as_paths(upload_value))
-        preview = DEBUG_ASSET_ENGINE_ROOT / "previews" / f"{uuid.uuid4().hex}.glb"
+        preview = GEN_SIM_ASSET_ROOT / "previews" / f"{uuid.uuid4().hex}.glb"
         _export_preview(source, preview)
         return (
             preview.as_posix(),
@@ -192,7 +192,7 @@ def run_simready_asset(upload_value: Any, category: str):
     try:
         uploads = _as_paths(upload_value)
         _mesh_path(uploads)
-        run_root = DEBUG_ASSET_ENGINE_ROOT / "runs" / uuid.uuid4().hex
+        run_root = GEN_SIM_ASSET_ROOT / "runs" / uuid.uuid4().hex
         input_dir = run_root / "input"
         output_root = run_root / "output"
         source_mesh = _safe_copy_uploads(uploads, input_dir)
@@ -289,7 +289,7 @@ def run_simready_asset(upload_value: Any, category: str):
 
 
 def build_asset_engine_panel() -> dict[str, Any]:
-    """Create the Debug Asset-engine panel and return its event endpoints."""
+    """Create the Asset-engine panel and return its event endpoints."""
     with gr.Column(visible=True) as panel:
         gr.Markdown(
             "## Asset engine\nConvert an existing mesh with SimReady, or generate a new articulated asset through Articraft and Codex. DexSim is not started in this engine."
