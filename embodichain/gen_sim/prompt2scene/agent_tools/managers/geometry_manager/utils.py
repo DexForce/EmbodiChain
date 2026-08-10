@@ -33,6 +33,7 @@ __all__ = [
     "_aabb_bottom_to_xy_plane_transform",
     "_aabb_center",
     "_compose_sam3d_multi_object_transform",
+    "_compose_glb_y_up_transform",
     "_copy_scene_with_transform",
     "_estimate_support_normal",
     "_glb_to_sam3d_local_matrix",
@@ -269,6 +270,32 @@ def _compose_sam3d_multi_object_transform(
         linear_row=linear_row,
         translation=translation,
     )
+
+
+def _compose_glb_y_up_transform(
+    *,
+    rotation_quaternion_wxyz: list[float],
+    translation: list[float],
+    scale: list[float],
+) -> np.ndarray:
+    """Compose the transform for SAM3D server output in GLB y-up coordinates.
+
+    The current SAM3D server converts its reconstruction-frame SRT before
+    serializing the response.  The returned GLB and these pose fields are
+    therefore already in the same y-up frame and must not receive the legacy
+    SAM3D-to-GLB basis conversion.
+    """
+    rotation = _quaternion_wxyz_to_matrix(rotation_quaternion_wxyz)
+    scale_matrix = np.diag(_validate_vector(scale, expected_len=3, name="scale"))
+    translation_vector = _validate_vector(
+        translation,
+        expected_len=3,
+        name="translation",
+    )
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, :3] = rotation @ scale_matrix
+    transform[:3, 3] = translation_vector
+    return transform
 
 
 def _row_linear_to_trimesh_matrix(

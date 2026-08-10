@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 import time
 from typing import Any
 
@@ -32,7 +33,6 @@ from embodichain.gen_sim.prompt2scene.agent_tools.clients.config import (
     DEFAULT_CLIENT_CONFIG_PATH,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_client.parser import (
-    parse_geometry_generation_response,
     parse_multi_object_generation_response,
 )
 from embodichain.gen_sim.prompt2scene.agent_tools.clients.geometry_generation_client.schemas import (
@@ -113,16 +113,21 @@ class GeometryGenerationClient(BaseHttpClient):
     ) -> GeometryGenerationServerResponse | GeometryGenerationError:
         """Generate one GLB mesh from an object image and save it locally."""
         _validate_request(request)
-        url = f"{self.base_url}{self.generate_single_object_path}"
         started_perf = time.perf_counter()
         try:
-            response = self.post_with_retries(
-                lambda: _post_geometry_generation_request(self, url, request),
-                max_retries=max_retries,
-                error_cls=GeometryGenerationError,
-                request_label="geometry_generation",
-            )
-            if isinstance(response, GeometryGenerationError):
+            # The current SAM3D server exposes only the multi-object route.
+            # Adapt a single RGBA/RGB image to that route with one mask instead
+            # of calling the server's removed /generate_single_object endpoint.
+            with _single_object_mask(request.image_path) as mask_path:
+                response = self.generate_multiple_objects(
+                    MultiObjectGenerationServerRequest(
+                        image_path=request.image_path,
+                        mask_paths=[mask_path],
+                    ),
+                    output_dir=Path(request.output_path).expanduser().resolve().parent,
+                    max_retries=max_retries,
+                )
+            if isinstance(response, MultiObjectGenerationError):
                 _record_sam3d_generation_timing(
                     operation="single_object",
                     started_perf=started_perf,
@@ -131,8 +136,26 @@ class GeometryGenerationClient(BaseHttpClient):
                     output_path=request.output_path,
                     error=response.error_message,
                 )
-                return response
-            parsed = parse_geometry_generation_response(response, request)
+                return GeometryGenerationError(
+                    error_message=response.error_message,
+                    status_code=response.status_code,
+                    content_type=response.content_type,
+                    headers=response.headers,
+                    raw_response=response.raw_response,
+                )
+            if not response.result.objects:
+                raise RuntimeError("SAM3D returned no object for single-object input")
+            source_path = Path(response.result.objects[0].geometry_path)
+            output_path = Path(request.output_path).expanduser().resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if source_path.resolve() != output_path:
+                output_path.write_bytes(source_path.read_bytes())
+            parsed = GeometryGenerationServerResponse(
+                ok=True,
+                status="ok",
+                result=GeometryGenerationResult(geometry_path=str(output_path)),
+                status_code=200,
+            )
             _record_sam3d_generation_timing(
                 operation="single_object",
                 started_perf=started_perf,
@@ -181,6 +204,7 @@ class GeometryGenerationClient(BaseHttpClient):
                     error=response.error_message,
                 )
                 return response
+            response = _wait_for_multi_object_result(self, response)
             parsed = parse_multi_object_generation_response(
                 response,
                 self.base_url,
@@ -294,11 +318,45 @@ def _validate_multi_object_request(
             )
 
 
+class _SingleObjectMask:
+    """Temporary mask context used to adapt the single-object API."""
+
+    def __init__(self, image_path: str | Path) -> None:
+        self.image_path = Path(image_path).expanduser().resolve()
+        self._tmp: Any = None
+        self.path: Path | None = None
+
+    def __enter__(self) -> Path:
+        from PIL import Image
+
+        with Image.open(self.image_path) as image:
+            if image.mode in {"RGBA", "LA"} or (
+                image.mode == "P" and "transparency" in image.info
+            ):
+                mask = image.convert("RGBA").getchannel("A")
+            else:
+                mask = Image.new("L", image.size, 255)
+            self._tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            self.path = Path(self._tmp.name)
+            mask.save(self._tmp, format="PNG")
+            self._tmp.close()
+        return self.path
+
+    def __exit__(self, *_: object) -> None:
+        if self.path is not None:
+            self.path.unlink(missing_ok=True)
+
+
+def _single_object_mask(image_path: str | Path) -> _SingleObjectMask:
+    return _SingleObjectMask(image_path)
+
+
 def _post_multi_object_generation_request(
     client: GeometryGenerationClient,
     url: str,
     request: MultiObjectGenerationServerRequest,
 ) -> requests.Response:
+    image_file = _open_image_file(request.image_path)
     mask_files = [
         ("masks", (Path(p).name, Path(p).expanduser().resolve().open("rb")))
         for p in request.mask_paths
@@ -312,7 +370,7 @@ def _post_multi_object_generation_request(
                     "image",
                     (
                         Path(request.image_path).name,
-                        _open_image_file(request.image_path),
+                        image_file,
                     ),
                 )
             ]
@@ -320,5 +378,59 @@ def _post_multi_object_generation_request(
             timeout=(10, client.timeout_s),
         )
     finally:
+        image_file.close()
         for _, (_, f) in mask_files:
             f.close()
+
+
+def _wait_for_multi_object_result(
+    client: GeometryGenerationClient,
+    response: requests.Response,
+) -> requests.Response:
+    """Resolve SAM3D's queued response into the completed JSON response."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response
+    if not isinstance(body, dict) or isinstance(body.get("result"), dict):
+        return response
+
+    status_url = body.get("status_url")
+    request_id = body.get("request_id")
+    if not isinstance(status_url, str) or not status_url:
+        raise RuntimeError(
+            "SAM3D returned a non-terminal response without status_url: "
+            f"request_id={request_id!r}"
+        )
+
+    poll_url = _join_url(client.base_url, status_url)
+    deadline = time.monotonic() + client.timeout_s
+    interval = float(client.config.get("task_poll_interval_s", 1.0))
+    while time.monotonic() < deadline:
+        poll_response = client.session.get(
+            poll_url,
+            timeout=(10, min(client.timeout_s, 30)),
+        )
+        poll_response.raise_for_status()
+        poll_body = poll_response.json()
+        if not isinstance(poll_body, dict):
+            raise RuntimeError("SAM3D task response must be a JSON object")
+        status = str(poll_body.get("status", ""))
+        if isinstance(poll_body.get("result"), dict):
+            return poll_response
+        if status in {"failed", "cancelled", "cancelling"}:
+            raise RuntimeError(
+                f"SAM3D task {request_id or '<unknown>'} {status}: "
+                f"{poll_body.get('error', 'unknown error')}"
+            )
+        time.sleep(max(0.05, min(interval, 60.0)))
+
+    raise TimeoutError(f"Timed out waiting for SAM3D task {request_id or '<unknown>'}")
+
+
+def _join_url(base_url: str, path_or_url: str) -> str:
+    if path_or_url.startswith(("http://", "https://")):
+        return path_or_url
+    if path_or_url.startswith("/"):
+        return f"{base_url}{path_or_url}"
+    return f"{base_url}/{path_or_url}"

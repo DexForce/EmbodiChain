@@ -47,8 +47,6 @@ class ImageSegmentationServerRequest:
         """Convert the request to the SAM3 server multipart form fields."""
         return {
             "prompt": self.prompt,
-            "score_threshold": "0.0",
-            "max_instances": "5",
         }
 
 
