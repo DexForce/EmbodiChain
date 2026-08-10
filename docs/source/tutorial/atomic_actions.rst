@@ -328,8 +328,7 @@ before replanning:
 planning must fail unless the live collision world is available, or
 ``DynamicCollisionMode.OFF`` to ignore snapshot collision entities and
 collision-world revisions. These modes do not disable static-world or
-self-collision checks configured by the selected planner. The deprecated
-``collision_check`` boolean maps ``True`` to ``AUTO`` and ``False`` to ``OFF``.
+self-collision checks configured by the selected planner.
 
 Recovery replans reuse one immutable invocation-revision snapshot. If an
 application intentionally changes the goal, options, policy, binding, or a

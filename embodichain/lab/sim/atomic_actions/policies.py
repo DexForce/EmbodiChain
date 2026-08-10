@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -46,7 +45,7 @@ class DynamicCollisionMode(str, Enum):
     """Require live collision entities and a compatible motion planner."""
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class MotionPolicy:
     """Immutable motion-generation policy for one action invocation.
 
@@ -76,49 +75,13 @@ class MotionPolicy:
     acceleration_limit: float | None = None
     """Optional planner acceleration limit."""
 
-    plan_opts: PlanOptions | None = None
-    """Optional typed planner-specific options."""
-
     dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO
     """How this invocation consumes live scene-snapshot collision entities."""
 
-    def __init__(
-        self,
-        planner: str | None = None,
-        motion_source: str = "ik_interp",
-        interpolation: str = "linear",
-        sample_count: int = 50,
-        control_dt: float = 1.0 / 60.0,
-        velocity_limit: float | None = None,
-        acceleration_limit: float | None = None,
-        collision_check: bool | None = None,
-        plan_opts: PlanOptions | None = None,
-        dynamic_collision_mode: DynamicCollisionMode | str = DynamicCollisionMode.AUTO,
-    ) -> None:
-        """Initialize a motion policy, accepting the deprecated boolean alias."""
-        object.__setattr__(self, "planner", planner)
-        object.__setattr__(self, "motion_source", motion_source)
-        object.__setattr__(self, "interpolation", interpolation)
-        object.__setattr__(self, "sample_count", sample_count)
-        object.__setattr__(self, "control_dt", control_dt)
-        object.__setattr__(self, "velocity_limit", velocity_limit)
-        object.__setattr__(self, "acceleration_limit", acceleration_limit)
-        object.__setattr__(self, "plan_opts", plan_opts)
-        object.__setattr__(self, "dynamic_collision_mode", dynamic_collision_mode)
-        self.__post_init__(collision_check)
+    plan_opts: PlanOptions | None = None
+    """Optional typed planner-specific options."""
 
-    @property
-    def collision_check(self) -> bool:
-        """Return the deprecated boolean view of the dynamic-collision mode."""
-        warnings.warn(
-            "MotionPolicy.collision_check is deprecated; use "
-            "dynamic_collision_mode instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.dynamic_collision_mode is not DynamicCollisionMode.OFF
-
-    def __post_init__(self, collision_check: bool | None) -> None:
+    def __post_init__(self) -> None:
         valid_sources = {"ik_interp", "motion_gen"}
         if self.motion_source not in valid_sources:
             raise ValueError(
@@ -151,26 +114,6 @@ class MotionPolicy:
             raise TypeError(
                 "dynamic_collision_mode must be a DynamicCollisionMode or string."
             )
-        if collision_check is not None:
-            if not isinstance(collision_check, bool):
-                raise TypeError("collision_check must be a bool when provided.")
-            warnings.warn(
-                "MotionPolicy.collision_check is deprecated; use "
-                "dynamic_collision_mode instead.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            legacy_mode = (
-                DynamicCollisionMode.AUTO
-                if collision_check
-                else DynamicCollisionMode.OFF
-            )
-            if mode not in (DynamicCollisionMode.AUTO, legacy_mode):
-                raise ValueError(
-                    "collision_check and dynamic_collision_mode specify "
-                    "conflicting dynamic-collision policies."
-                )
-            mode = legacy_mode
         object.__setattr__(self, "dynamic_collision_mode", mode)
         object.__setattr__(self, "plan_opts", deepcopy(self.plan_opts))
 
