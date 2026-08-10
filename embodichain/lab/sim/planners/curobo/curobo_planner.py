@@ -379,7 +379,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
     resamples the returned trajectory to the atomic action's ``sample_interval``
     waypoint count - matching the documented contract of
-    :class:`~embodichain.lab.sim.atomic_actions.primitives.move_end_effector.MoveEndEffectorCfg.sample_interval`
+    :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
     sample density changes (cuRobo's own count is derived from
@@ -640,7 +640,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
 
     Raises:
         ImportError: If cuRobo V2 is not installed, with an actionable message
-            naming NVIDIA's CUDA-matched extras.
+            naming NVIDIA's CUDA-matched source variants.
     """
     _configure_curobo_logging(log_level)
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
@@ -652,10 +652,10 @@ def _require_curobo(log_level: str = "error") -> "Any":
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
-            "From the EmbodiChain repository root, install the CUDA-matched "
-            "extra, e.g. `pip install -e '.[curobo-cu12]'` for CUDA 12.x or "
-            "`pip install -e '.[curobo-cu13]'` for CUDA 13.x "
-            "(also `.[curobo-cu12-torch]` / `.[curobo-cu13-torch]`). "
+            "Install NVIDIA's CUDA-matched source package separately, e.g. "
+            "`pip install 'nvidia-curobo[cu12] @ "
+            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
     return SimpleNamespace(
@@ -838,6 +838,54 @@ class CuroboPlanner(BasePlanner):
         if options.control_part is None:
             options.control_part = control_part
         return options
+
+    def prepare_backend(
+        self,
+        *,
+        control_part: str,
+        batch_size: int,
+        move_type: MoveType = MoveType.EEF_MOVE,
+    ) -> dict[str, object]:
+        """Materialize and warm one lazy cuRobo backend without planning a case.
+
+        This explicit lifecycle hook lets deployment tooling and benchmarks
+        separate one-time robot/world YAML generation, collision-sphere setup,
+        CUDA graph capture, and cuRobo warmup from the first real planning call.
+        Repeated calls for the same backend key reuse the cached backend.
+
+        Args:
+            control_part: Robot control part to prepare.
+            batch_size: Goal batch size used by the future planning calls.
+            move_type: Goal type whose cuRobo buffers and graph are prepared.
+
+        Returns:
+            Metadata describing the resolved backend and actual CUDA graph mode.
+
+        Raises:
+            ValueError: If the batch size or move type is unsupported.
+        """
+        if batch_size < 1:
+            logger.log_error("batch_size must be >= 1.", ValueError)
+        if move_type not in self.supported_move_types:
+            logger.log_error(
+                f"cuRobo cannot prepare unsupported move type {move_type}.",
+                ValueError,
+            )
+        robot_batch_size = int(getattr(self.robot, "num_instances", 1))
+        if batch_size not in (1, robot_batch_size):
+            logger.log_error(
+                f"batch_size={batch_size} must be 1 or robot.num_instances="
+                f"{robot_batch_size}.",
+                ValueError,
+            )
+        backend = self._get_backend(control_part, batch_size, move_type)
+        return {
+            "control_part": backend.control_part,
+            "batch_size": backend.batch_size,
+            "move_type": backend.planning_mode.name,
+            "multi_env": bool(self.cfg.world.multi_env),
+            "use_cuda_graph": backend.use_cuda_graph,
+        }
 
     @validate_plan_options(options_cls=CuroboPlanOptions)
     def plan(

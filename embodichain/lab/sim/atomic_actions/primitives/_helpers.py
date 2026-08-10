@@ -22,7 +22,7 @@ import torch
 
 from embodichain.utils import logger
 
-from ..core import WorldState
+from ..state import PlanningContext
 
 
 def resolve_object_target(
@@ -33,7 +33,7 @@ def resolve_object_target(
     name: str = "object_target_pose",
 ) -> torch.Tensor:
     """Broadcast an object target pose to ``(n_envs, 4, 4)`` or validate it."""
-    target = target.to(device=device, dtype=torch.float32)
+    target = target.to(device=device, dtype=torch.float32).clone()
     if target.shape == (4, 4):
         target = target.unsqueeze(0).repeat(n_envs, 1, 1)
     if target.shape != (n_envs, 4, 4):
@@ -44,9 +44,12 @@ def resolve_object_target(
     return target
 
 
-def arm_qpos_from_state(state: WorldState, arm_joint_ids: list[int]) -> torch.Tensor:
-    """Extract the arm slice of the full-DoF ``last_qpos`` carried in state."""
-    return state.last_qpos[:, arm_joint_ids]
+def arm_qpos_from_state(
+    context: PlanningContext,
+    arm_joint_ids: list[int],
+) -> torch.Tensor:
+    """Extract the arm slice of the measured planning-start joint positions."""
+    return context.robot.qpos[:, arm_joint_ids]
 
 
 __all__ = ["arm_qpos_from_state", "resolve_object_target"]

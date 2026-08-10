@@ -156,7 +156,7 @@ class RigidBodyGroupData:
             # Fetch angular velocity from CPU entities
             self._ang_vel = torch.as_tensor(
                 [
-                    [entity.get_linear_velocity() for entity in instance]
+                    [entity.get_angular_velocity() for entity in instance]
                     for instance in self.entities
                 ],
                 dtype=torch.float32,

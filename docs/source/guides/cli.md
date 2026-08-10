@@ -197,7 +197,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--preview`` | ``False`` | Enter interactive preview mode |
 | ``--filter_visual_rand`` | ``False`` | Filter out visual randomization |
 | ``--filter_dataset_saving`` | ``False`` | Filter out dataset saving |
-| ``--max_episodes`` | *(from config)* | Override the maximum number of rollout episodes |
+| ``--max_episodes`` | *(from config)* | Override the exact number of persisted per-environment episodes; vector batches are trimmed to this count |
 | ``--record_trajectory`` | ``False`` | Record per-object kinematic trajectories during generation (for replay). Episodes auto-save to ``--trajectory_save_dir`` (or ``~/.cache/embodichain_data/trajectories/<run_id>/``) |
 | ``--trajectory_save_dir`` | ``None`` | Directory for auto-saved trajectories (default: ``~/.cache/embodichain_data/trajectories/<run_id>/``) |
 | ``--replay`` | ``False`` | Replay a recorded trajectory (``--replay_trajectory`` required; mutually exclusive with ``--preview``) |
@@ -347,6 +347,41 @@ reported separately as ``window_record_capture`` and
 
 ---
 
+(cli-preview-lerobot-data)=
+## Preview LeRobot Data
+
+Print and validate one recorded LeRobot episode without launching the
+simulator:
+
+```bash
+embodichain preview_lerobot_data \
+    outputs/lerobot/multi_segments \
+    --latest \
+    --episode 0 \
+    --expect-segments 3
+```
+
+The positional path must be an exact dataset root containing
+`meta/info.json`, unless `--latest` is used to select the newest direct child.
+`--expect-segments` is an optional exact-count assertion; it does not select,
+split, or modify segments.
+
+| Argument | Default | Description |
+|---|---|---|
+| ``dataset_root`` | *(required)* | Dataset root, or parent directory with ``--latest`` |
+| ``--episode`` | ``0`` | Episode index to inspect |
+| ``--expect-segments`` | *(unchecked)* | Fail unless the episode has exactly this many segments |
+| ``--latest`` | ``False`` | Select the newest direct child dataset |
+
+The command prints dataset format, robot, FPS, state/action shapes and ranges,
+task text, segment frame ranges, subtask descriptions, and sidecar success. It
+returns status 0 when all checks pass, 1 for a validation mismatch, and 2 when
+the path, episode, or dataset cannot be loaded. For the complete validation
+contract and a comparison with LeRobot's official Rerun visualization, see
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>`.
+
+---
+
 ## Train RL
 
 Launch reinforcement learning training from a JSON or YAML config file.
@@ -419,9 +454,9 @@ Run the packaged benchmark suites through the same CLI:
 # RL train/evaluate/report workflow
 embodichain benchmark rl --tasks push_cube --algorithms ppo
 
-# Kinematic solver and neural planner benchmarks
+# Kinematic solver and motion-generation benchmarks
 embodichain benchmark robotics-kinematic-solver --solvers all
-embodichain benchmark planners-neural-planner --num-waypoints 1 3 5
+embodichain benchmark motion-generation --suite smoke
 
 # Atomic actions, grasp generation, and workspace analysis
 embodichain benchmark atomic-action --smoke

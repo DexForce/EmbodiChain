@@ -39,7 +39,24 @@ Since {class}`~envs.EmbodiedEnvCfg` inherits from {class}`~envs.EnvCfg`, it incl
   The seed for the random number generator. Defaults to ``None``, in which case the seed is not set. The seed is set at the beginning of the environment initialization to ensure deterministic behavior across different runs.
 
 * **sim_steps_per_control** (int): 
-  Number of simulation steps per control (environment) step. This parameter determines the relationship between the simulation timestep and the control timestep. For instance, if the simulation dt is 0.01s and the control dt is 0.1s, then ``sim_steps_per_control`` should be 10. This means that the control action is updated every 10 simulation steps. Defaults to ``4``.
+  Number of physics simulation steps per control (environment) step. This integer decimation determines the actual environment cadence. For instance, if the physics timestep is 0.01 s and ``sim_steps_per_control`` is 10, each environment step represents 0.1 s. Defaults to ``4``.
+
+* **target_control_frequency** (float | None):
+  Optional convenience setting for a desired control frequency. EmbodiChain converts it to an integer ``sim_steps_per_control`` using the configured physics timestep, taking precedence over a directly configured step count. The requested frequency must be exactly representable; otherwise initialization raises an error instead of changing the physics timestep or silently approximating the rate. Defaults to ``None``.
+
+### Environment Timing
+
+The simulation timestep and the environment sampling timestep have different responsibilities:
+
+```text
+physics_dt = sim_cfg.physics_dt
+step_dt = physics_dt * sim_steps_per_control
+control_frequency = 1 / step_dt
+```
+
+Choose ``physics_dt`` according to physics stability and contact accuracy. To change how often a policy, controller, or expert trajectory supplies an action, change the integer ``sim_steps_per_control`` instead. The environment exposes ``physics_dt``, ``step_dt``, ``physics_frequency``, and ``control_frequency`` as derived runtime properties.
+
+If configuration is easier in hertz, set ``target_control_frequency``. For example, a 0.01 s physics timestep can represent 25 Hz exactly with four physics steps per environment step. It cannot represent 30 Hz exactly, so that combination is rejected.
 
 * **ignore_terminations** (bool): 
   Whether to ignore terminations when deciding when to auto reset. Terminations can be caused by the task reaching a success or fail state as defined in a task's evaluation function. If set to ``False``, episodes will stop early when termination conditions are met. If set to ``True``, episodes will only stop due to the timelimit, which is useful for modeling tasks as infinite horizon. Defaults to ``False``.
@@ -195,7 +212,7 @@ class MyDatasetCfg:
         func="LeRobotRecorder",
         params={
             "save_path": "./outputs/datasets/my_task",
-            "robot_meta": {"robot_type": "my_robot", "control_freq": 25},
+            "robot_meta": {"robot_type": "my_robot"},
             "instruction": {"lang": "move the cube to the goal"},
             "use_videos": False,
         },
@@ -229,6 +246,32 @@ This example shows the typical division of responsibilities:
 - ``rewards`` shape RL behavior.
 - ``actions`` define how policy outputs map to robot control commands.
 - ``dataset`` controls structured episode export, independent from debug-video recording.
+
+## Rollout Buffer Modes
+
+{class}`~envs.EmbodiedEnv` always stores rollout data in one rectangular
+``TensorDict``; it does not allocate a Python list or ragged
+tensor per environment. Leaf tensors use a layout such as
+``[num_envs, max_steps, ...]``. The cursor semantics depend on how the buffer is
+used:
+
+- **Expert/demo mode** is used by dataset and scripted-trajectory collection.
+  Every row has its own ``rollout_steps[env_id]`` cursor and every stored frame
+  has a ``valid`` flag. A row that finishes early is frozen while other rows
+  continue, so logical episode lengths can differ even though the underlying
+  tensor remains fixed-size. LeRobot recorders slice each row to its own valid
+  length and do not export padding or a stale tail.
+- **RL mode** is selected for externally supplied buffers containing the RL
+  fields ``obs``, ``action``, ``reward``, ``done``, ``value``, ``terminated``,
+  and ``truncated``. These buffers use a uniform
+  ``[num_envs, rollout_time + 1]`` layout and one shared
+  ``current_rollout_step``. Environments may auto-reset independently, but
+  collection stays on the vector rollout's synchronized time axis; the
+  expert-only per-row cursor and ``valid`` slicing are not applied.
+
+Consequently, references to “different parallel episode lengths” in the
+demonstration and LeRobot documentation describe expert collection, not the RL
+training buffer.
 
 ## Manager Systems
 
@@ -372,7 +415,7 @@ Configure rewards through the {class}`~envs.managers.RewardManager` in your envi
 Inherit from {class}`~envs.EmbodiedEnv` for IL tasks:
 
 ```python
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 
 @register_env("MyILTask-v0")
@@ -380,12 +423,20 @@ class MyILTaskEnv(EmbodiedEnv):
     def __init__(self, cfg: MyTaskEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
-    def create_demo_action_list(self, *args, **kwargs):
-        # Required: Generate scripted demonstrations for data collection
-        pass
+    def create_demo_segments(self, *args, **kwargs):
+        # Plan lazily: each iteration runs after the previous segment finishes.
+        for object_uid in self.object_order:
+            yield DemoSegment(
+                actions=self.plan_pick_and_place(object_uid),
+                name="pick_and_place",
+                target_uid=object_uid,
+                instruction=f"Place {object_uid} in its target bin",
+                # Optional zero-argument, per-env subtask validation.
+                validator=lambda uid=object_uid: self.is_object_placed(uid),
+            )
 
     def is_task_success(self, **kwargs):
-        # Required: Define success criteria for filtering successful episodes
+        # Define final task success for episode classification and filtering.
         # Returns: torch.Tensor of shape (num_envs,) with boolean values
         return success_tensor
 
@@ -395,6 +446,17 @@ class MyILTaskEnv(EmbodiedEnv):
         info["custom_metric"] = ...
         return info
 ```
+
+``create_demo_segments()`` is the preferred expert API. Each
+{class}`~envs.DemoSegment` may carry its own target, language instruction,
+metadata, and validator, and its action iterable may be generated lazily from
+the scene state left by the previous segment. Existing tasks that implement
+``create_demo_action_list()`` remain compatible and are represented as one
+``legacy`` segment.
+
+The common executor checks termination after every action. A task should
+override ``is_task_success()`` with a meaningful per-environment result so
+normal plan exhaustion cannot classify incomplete demonstrations as success.
 
 For a complete example of a modular environment setup, please refer to the {ref}`tutorial_modular_env` tutorial.
 

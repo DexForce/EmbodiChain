@@ -14,13 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Atomic action abstraction layer for embodied AI motion generation.
+"""Typed planning contracts and built-in atomic actions.
 
-This module provides a unified interface for the atomic motion primitives
-(``move_end_effector``, ``move_joints``, ``pick_up``, ``move_held_object``,
-``place``, ``press``, ``coordinated_pickment``, ``coordinated_placement``,
-``hand_over``), with typed targets, a ``WorldState`` threaded across sequenced
-actions, and extensible custom action registration.
+The engine resolves an :class:`ActionInvocation` into a
+:class:`ResolvedActionRequest`, which an action combines with a
+:class:`PlanningContext` through :meth:`AtomicAction.plan`. Planning is
+side-effect free: it returns an :class:`ActionPlan` with timed motion,
+completion criteria, diagnostics, and uncommitted expected task-state effects.
+:class:`AtomicActionEngine` can compile a static sequence. For closed-loop use,
+:class:`ExecutionSession` owns recovery and invocation-revision state while
+:class:`ExecutionRunner` connects it to observations, commands, and time.
 """
 
 from __future__ import annotations
@@ -31,126 +34,199 @@ from .affordance import (
     AssembleAffordance,
     InteractionPoints,
 )
-from .core import (
-    ActionTarget,
-    ActionCfg,
-    ActionResult,
-    AtomicAction,
-    CoordinatedHeldObjectState,
-    HeldObjectState,
-    ObjectSemantics,
-    Target,
-    WorldState,
+from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
+from .control import (
+    ActionControlOverrides,
+    ControlCommand,
+    ControlPartCommandProfile,
+    GRASP_COMMAND,
+    JointPositionCommand,
+    OPEN_COMMAND,
 )
+from .core import AtomicAction, ObjectSemantics, SkillDescriptor
+from .effects import StateDelta
 from .engine import (
     AtomicActionEngine,
+    get_registered_actions,
     register_action,
     unregister_action,
-    get_registered_actions,
 )
-from .targets import ObjectActionTarget
+from .execution import (
+    ExecutionEvent,
+    ExecutionEventKind,
+    ExecutionSession,
+    ExecutionStatus,
+    ExecutionTick,
+    JointCommand,
+)
+from .goals import ActionGoal, ObjectActionGoal, PoseGoalValue, SceneEntityPose
+from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
+from .plans import (
+    ActionPlan,
+    CompiledTrajectory,
+    CompletionCondition,
+    CompletionConditionKind,
+    PhaseSpec,
+    PlannedPhase,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
+from .policies import MotionPolicy, RecoveryPolicy
+from .runtime import ActionPlanningServices
 from .primitives import (
-    AssembleTarget,
-    CoordinatedPickTarget,
+    AssembleGoal,
+    BUILTIN_ACTION_TYPES,
+    CoordinatedPickGoal,
     CoordinatedPickment,
-    CoordinatedPickmentCfg,
-    CoordinatedPickmentTarget,
+    CoordinatedPickmentOptions,
     CoordinatedPlacement,
-    CoordinatedPlacementCfg,
-    CoordinatedPlacementTarget,
-    EndEffectorPoseTarget,
-    GraspTarget,
+    CoordinatedPlacementGoal,
+    CoordinatedPlacementOptions,
+    EndEffectorPoseGoal,
+    GraspGoal,
     HandOver,
-    HandOverCfg,
-    HeldObjectPoseTarget,
-    JointPositionTarget,
+    HandOverOptions,
+    HeldObjectPoseGoal,
+    JointPositionGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
+    MoveEndEffectorOptions,
     MoveHeldObject,
-    MoveHeldObjectCfg,
+    MoveHeldObjectOptions,
     MoveJoints,
-    MoveJointsCfg,
-    NamedJointPositionTarget,
+    MoveJointsOptions,
     PickUp,
-    PickUpCfg,
+    PickUpOptions,
     Place,
-    PlaceCfg,
-    PlaceTarget,
+    PlaceGoal,
+    PlaceOptions,
     Press,
-    PressCfg,
-    PressTarget,
+    PressGoal,
+    PressOptions,
+)
+from .runner import (
+    CommandAcknowledgement,
+    CommandAckStatus,
+    CommandDispatch,
+    CommandOperation,
+    CommandSink,
+    EffectVerifier,
+    ExecutionClock,
+    ExecutionRunner,
+    ExecutionRunnerCfg,
+    MonotonicExecutionClock,
+    ObservationProvider,
+    RunnerStatus,
+    RunnerStep,
+    RunnerStepCallback,
+)
+from .sim_adapter import SceneSnapshotSupplier, SimulationExecutionAdapter
+from .state import (
+    CoordinatedHeldObjectState,
+    EntityState,
+    HeldObjectState,
+    PlanningContext,
+    RobotObservation,
+    SceneSnapshot,
+    TaskState,
 )
 from .trajectory import TrajectoryBuilder
 
-BuiltinTarget = (
-    EndEffectorPoseTarget
-    | JointPositionTarget
-    | NamedJointPositionTarget
-    | GraspTarget
-    | HeldObjectPoseTarget
-    | PlaceTarget
-    | PressTarget
-    | CoordinatedPickTarget
-    | CoordinatedPlacementTarget
-    | AssembleTarget
-)
-"""Union of target types shipped by EmbodiChain.
-
-Use :class:`ActionTarget` rather than this closed union at extension boundaries.
-"""
-
 __all__ = [
-    # Core classes
-    "ActionTarget",
+    "ActionBinding",
+    "ActionControlOverrides",
+    "ActionGoal",
+    "ActionInvocation",
+    "ActionOptions",
+    "ActionPlan",
+    "ActionPlanningServices",
     "Affordance",
     "AntipodalAffordance",
     "AssembleAffordance",
-    "InteractionPoints",
-    "ObjectSemantics",
-    "ObjectActionTarget",
-    "HeldObjectState",
-    "CoordinatedHeldObjectState",
-    "HeldObjectPoseTarget",
-    "JointPositionTarget",
-    "NamedJointPositionTarget",
-    "EndEffectorPoseTarget",
-    "PlaceTarget",
-    "PressTarget",
-    "CoordinatedPickTarget",
-    "CoordinatedPickmentTarget",
-    "CoordinatedPlacementTarget",
-    "AssembleTarget",
-    "GraspTarget",
-    "Target",
-    "BuiltinTarget",
-    "WorldState",
-    "ActionResult",
-    "ActionCfg",
+    "AssembleGoal",
     "AtomicAction",
-    # Action implementations
-    "CoordinatedPickment",
-    "CoordinatedPlacement",
-    "HandOver",
-    "MoveEndEffector",
-    "MoveJoints",
-    "MoveHeldObject",
-    "PickUp",
-    "Place",
-    "Press",
-    "CoordinatedPickmentCfg",
-    "CoordinatedPlacementCfg",
-    "HandOverCfg",
-    "MoveEndEffectorCfg",
-    "MoveJointsCfg",
-    "MoveHeldObjectCfg",
-    "PickUpCfg",
-    "PlaceCfg",
-    "PressCfg",
-    # Engine
     "AtomicActionEngine",
+    "BUILTIN_ACTION_TYPES",
+    "CompiledTrajectory",
+    "CommandAcknowledgement",
+    "CommandAckStatus",
+    "CommandDispatch",
+    "CommandOperation",
+    "CommandSink",
+    "CompletionCondition",
+    "CompletionConditionKind",
+    "ControlCommand",
+    "ControlPartCommandProfile",
+    "CoordinatedHeldObjectState",
+    "CoordinatedPickGoal",
+    "CoordinatedPickment",
+    "CoordinatedPickmentOptions",
+    "CoordinatedPlacement",
+    "CoordinatedPlacementGoal",
+    "CoordinatedPlacementOptions",
+    "EndEffectorPoseGoal",
+    "EntityState",
+    "EffectVerifier",
+    "ExecutionClock",
+    "ExecutionEvent",
+    "ExecutionEventKind",
+    "ExecutionRunner",
+    "ExecutionRunnerCfg",
+    "ExecutionSession",
+    "ExecutionStatus",
+    "ExecutionTick",
+    "GRASP_COMMAND",
+    "GraspGoal",
+    "HandOver",
+    "HandOverOptions",
+    "HeldObjectPoseGoal",
+    "HeldObjectState",
+    "InteractionPoints",
+    "JointPositionGoal",
+    "JointCommand",
+    "JointPositionCommand",
+    "MotionPolicy",
+    "MonotonicExecutionClock",
+    "MoveEndEffector",
+    "MoveEndEffectorOptions",
+    "MoveHeldObject",
+    "MoveHeldObjectOptions",
+    "MoveJoints",
+    "MoveJointsOptions",
+    "ObjectActionGoal",
+    "ObjectSemantics",
+    "OPEN_COMMAND",
+    "ObservationProvider",
+    "PhaseSpec",
+    "PickUp",
+    "PickUpOptions",
+    "Place",
+    "PlaceGoal",
+    "PlaceOptions",
+    "PlannedPhase",
+    "PlannerDiagnostics",
+    "PlanningContext",
+    "PoseGoalValue",
+    "Press",
+    "PressGoal",
+    "PressOptions",
+    "RecoveryPolicy",
+    "ResolvedActionRequest",
+    "ResolvedActionBinding",
+    "ResolvedControlPart",
+    "RobotObservation",
+    "RunnerStatus",
+    "RunnerStep",
+    "RunnerStepCallback",
+    "SceneSnapshot",
+    "SceneSnapshotSupplier",
+    "SceneEntityPose",
+    "SkillDescriptor",
+    "StateDelta",
+    "SimulationExecutionAdapter",
+    "TaskState",
+    "TimedTrajectory",
+    "TrajectoryBuilder",
+    "get_registered_actions",
     "register_action",
     "unregister_action",
-    "get_registered_actions",
-    # Trajectory helpers
-    "TrajectoryBuilder",
 ]

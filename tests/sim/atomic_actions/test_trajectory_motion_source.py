@@ -23,8 +23,9 @@ import pytest
 from unittest.mock import Mock, patch
 
 from embodichain.lab.sim.atomic_actions.trajectory import TrajectoryBuilder
+from embodichain.lab.sim.planners import PlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
-from embodichain.lab.sim.atomic_actions.core import ActionCfg
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
 
 
 def _mock_mg(num_envs=2, arm_dof=6, planner_type="toppra"):
@@ -74,6 +75,31 @@ def _pose_targets_for_two_envs():
 
 
 class TestPlanArmTrajMotionGen:
+    def test_shared_action_cfg_forwards_copied_plan_options(self):
+        mg = _mock_mg(num_envs=2, arm_dof=6)
+        mg.generate.return_value = PlanResult(
+            success=torch.ones(2, dtype=torch.bool),
+            positions=torch.zeros(2, 6, 6),
+        )
+        builder = TrajectoryBuilder(mg)
+        cfg = MotionPolicy(
+            motion_source="motion_gen",
+            plan_opts=PlanOptions(),
+        )
+
+        builder.plan_arm_traj(
+            _pose_targets_for_two_envs(),
+            torch.zeros(2, 6),
+            6,
+            control_part="arm",
+            arm_dof=6,
+            cfg=cfg,
+        )
+
+        forwarded = mg.generate.call_args.kwargs["options"].plan_opts
+        assert type(forwarded) is PlanOptions
+        assert forwarded is not cfg.plan_opts
+
     def test_motion_gen_path_delegates_to_generate(self):
         mg = _mock_mg(num_envs=3, arm_dof=6)
         from embodichain.lab.sim.planners.utils import PlanResult
@@ -83,7 +109,7 @@ class TestPlanArmTrajMotionGen:
             positions=torch.zeros(3, 12, 6),
         )
         builder = TrajectoryBuilder(mg)
-        cfg = ActionCfg(motion_source="motion_gen", control_part="arm")
+        cfg = MotionPolicy(motion_source="motion_gen")
         start_qpos = torch.zeros(3, 6)
         # per-env list[list[PlanState]] with single-env PlanStates (action contract)
         target_states_list = [
@@ -113,7 +139,7 @@ class TestPlanArmTrajMotionGen:
     def test_ik_interp_path_unchanged(self):
         mg = _mock_mg(num_envs=2, arm_dof=6)
         builder = TrajectoryBuilder(mg)
-        cfg = ActionCfg(motion_source="ik_interp", control_part="arm")
+        cfg = MotionPolicy(motion_source="ik_interp")
         start_qpos = torch.zeros(2, 6)
         target_states_list = [
             [PlanState(xpos=torch.eye(4), move_type=MoveType.EEF_MOVE)]
@@ -135,6 +161,30 @@ class TestPlanArmTrajMotionGen:
         assert traj.shape[0] == 2
         interpolate.assert_called_once()
 
+    def test_ik_interp_normalizes_integer_success_mask(self):
+        mg = _mock_mg(num_envs=2, arm_dof=6)
+        mg.robot.compute_ik = Mock(
+            return_value=(
+                torch.tensor([1, 0], dtype=torch.int64),
+                torch.ones(2, 6),
+            )
+        )
+        builder = TrajectoryBuilder(mg)
+        start_qpos = torch.zeros(2, 6)
+
+        success, trajectory = builder.plan_arm_traj(
+            _pose_targets_for_two_envs(),
+            start_qpos,
+            10,
+            control_part="arm",
+            arm_dof=6,
+            cfg=MotionPolicy(motion_source="ik_interp"),
+        )
+
+        assert success.dtype == torch.bool
+        assert success.tolist() == [True, False]
+        assert torch.allclose(trajectory[1], torch.zeros_like(trajectory[1]))
+
 
 class TestCuroboBuilderDispatch:
     def test_curobo_builder_preserves_cartesian_targets_and_samples(self):
@@ -146,9 +196,8 @@ class TestCuroboBuilderDispatch:
             n_waypoints=20,
             control_part="arm",
             arm_dof=6,
-            cfg=ActionCfg(
+            cfg=MotionPolicy(
                 motion_source="motion_gen",
-                control_part="arm",
             ),
         )
         assert success.tolist() == [True, True]
@@ -165,7 +214,7 @@ class TestCuroboBuilderDispatch:
 
     def test_invalid_motion_source_raises(self):
         with pytest.raises(ValueError, match="motion_source"):
-            ActionCfg(motion_source="bogus")
+            MotionPolicy(motion_source="bogus")
 
     def test_nan_positions_rejected(self):
         positions = torch.zeros(2, 5, 6)
@@ -179,9 +228,8 @@ class TestCuroboBuilderDispatch:
                 n_waypoints=10,
                 control_part="arm",
                 arm_dof=6,
-                cfg=ActionCfg(
+                cfg=MotionPolicy(
                     motion_source="motion_gen",
-                    control_part="arm",
                 ),
             )
 
@@ -198,9 +246,8 @@ class TestCuroboBuilderDispatch:
                 n_waypoints=10,
                 control_part="arm",
                 arm_dof=6,
-                cfg=ActionCfg(
+                cfg=MotionPolicy(
                     motion_source="motion_gen",
-                    control_part="arm",
                 ),
             )
 
@@ -220,9 +267,8 @@ class TestCuroboBuilderDispatch:
             n_waypoints=10,
             control_part="arm",
             arm_dof=6,
-            cfg=ActionCfg(
+            cfg=MotionPolicy(
                 motion_source="motion_gen",
-                control_part="arm",
             ),
         )
         assert success.tolist() == [True, False]
@@ -243,9 +289,8 @@ class TestCuroboBuilderDispatch:
             n_waypoints=10,
             control_part="arm",
             arm_dof=6,
-            cfg=ActionCfg(
+            cfg=MotionPolicy(
                 motion_source="motion_gen",
-                control_part="arm",
             ),
         )
 
@@ -262,7 +307,7 @@ class TestJointMotionCapabilities:
             positions=torch.zeros(2, 8, 6),
         )
         builder = TrajectoryBuilder(mg)
-        cfg = ActionCfg(motion_source="motion_gen", control_part="arm")
+        cfg = MotionPolicy(motion_source="motion_gen")
 
         success, trajectory = builder.plan_joint_motion(
             torch.zeros(2, 6),
@@ -283,7 +328,7 @@ class TestJointMotionCapabilities:
         builder = TrajectoryBuilder(mg)
         start = torch.zeros(2, 6)
         target = torch.ones(2, 6)
-        cfg = ActionCfg(motion_source="motion_gen", control_part="arm")
+        cfg = MotionPolicy(motion_source="motion_gen")
 
         with patch(
             "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",

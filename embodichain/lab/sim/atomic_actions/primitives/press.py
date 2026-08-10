@@ -24,93 +24,102 @@ from typing import ClassVar
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanState
-from embodichain.utils import configclass, logger
+from embodichain.utils import logger
 
 from ._helpers import arm_qpos_from_state
-from ..core import (
-    ActionTarget,
-    ActionCfg,
-    ActionResult,
-    AtomicAction,
-    WorldState,
-    _validate_pose_tensor,
-)
-from ..trajectory import TrajectoryBuilder
+from ..control import GRASP_COMMAND
+from ..core import AtomicAction
+from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
+from ..invocation import ActionOptions, ResolvedActionRequest
+from ..plans import ActionPlan
+from ..state import PlanningContext
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class PressTarget(ActionTarget):
+class PressGoal:
     """Single end-effector contact pose used by :class:`Press`."""
 
-    xpos: torch.Tensor
+    goal_kind: ClassVar[str] = "press_pose"
+
+    xpos: PoseGoalValue
     """Contact pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
 
     def __post_init__(self) -> None:
-        _validate_pose_tensor(self.xpos, "xpos", allow_waypoints=False)
+        validate_pose_goal(self.xpos, "xpos", allow_waypoints=False)
 
 
-@configclass
-class PressCfg(ActionCfg):
-    name: str = "press"
-    """Name of the action, used for identification and logging."""
-
-    sample_interval: int = 80
-    """Number of waypoints for the full trajectory (hand close + down + back)."""
+@dataclass(frozen=True, slots=True, eq=False)
+class PressOptions(ActionOptions):
+    """Per-invocation press behavior."""
 
     hand_interp_steps: int = 5
     """Number of waypoints for closing the gripper before pressing."""
 
-    hand_control_part: str = "hand"
-    """Name of the robot part that controls the hand joints."""
-
-    hand_close_qpos: torch.Tensor | None = None
-    """Joint positions for the closed hand state, shape ``[hand_dof,]``."""
+    def __post_init__(self) -> None:
+        if self.hand_interp_steps < 1:
+            raise ValueError("hand_interp_steps must be at least 1.")
 
 
-class Press(AtomicAction[PressTarget]):
+class Press(AtomicAction[PressGoal, PressOptions]):
     """Close the gripper, press down to a target pose, then return."""
 
-    TargetType: ClassVar[type] = PressTarget
+    skill_id: ClassVar[str] = "press"
+    GoalType: ClassVar[type] = PressGoal
+    OptionsType: ClassVar[type] = PressOptions
+    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
     def __init__(
         self,
-        motion_generator,
-        cfg: PressCfg | None = None,
+        default_options: PressOptions | None = None,
     ) -> None:
-        super().__init__(motion_generator, cfg or PressCfg())
-        self.builder = TrajectoryBuilder(motion_generator)
+        super().__init__(default_options)
+
+    def _on_bind(self) -> None:
+        """Resolve engine-wide resources from the owning engine."""
         self.n_envs = self.robot.get_qpos().shape[0]
-        self.arm_joint_ids = self.robot.get_joint_ids(name=self.cfg.control_part)
-        self.hand_joint_ids = self.robot.get_joint_ids(name=self.cfg.hand_control_part)
-        self.arm_dof = len(self.arm_joint_ids)
-        self.hand_dof = len(self.hand_joint_ids)
         self.robot_dof = self.robot.dof
 
-        if self.cfg.hand_close_qpos is None:
-            logger.log_error(
-                "hand_close_qpos must be specified in PressCfg", ValueError
-            )
-        self.hand_close_qpos = self.builder.expand_hand_qpos(
-            self.cfg.hand_close_qpos,
+    def plan(
+        self,
+        request: ResolvedActionRequest[PressGoal, PressOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Plan a close, press, and retract sequence."""
+        target = self.require_goal(request)
+        options = request.skill_options
+        binding = request.binding
+        manipulator = binding.manipulator()
+        end_effector = binding.end_effector()
+        control_part = manipulator.name
+        arm_joint_ids = list(manipulator.joint_ids)
+        hand_joint_ids = list(end_effector.joint_ids)
+        hand_close_qpos = end_effector.joint_positions(
+            GRASP_COMMAND,
             n_envs=self.n_envs,
-            hand_dof=self.hand_dof,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
         )
-
-    def execute(self, target: PressTarget, state: WorldState) -> ActionResult:
-        press_xpos = self.builder.resolve_pose_target(target.xpos, n_envs=self.n_envs)
+        state = context
+        press_xpos = self.builder.resolve_pose_target(
+            resolve_pose_goal(target.xpos, context, name="xpos"),
+            n_envs=self.n_envs,
+        )
         start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, self.arm_joint_ids),
+            arm_qpos_from_state(state, arm_joint_ids),
             n_envs=self.n_envs,
-            arm_dof=self.arm_dof,
-            control_part=self.cfg.control_part,
+            arm_dof=manipulator.dof,
+            control_part=control_part,
         )
-        start_hand_qpos = state.last_qpos[:, self.hand_joint_ids]
+        start_hand_qpos = state.last_qpos[:, hand_joint_ids]
 
-        n_close, n_down, n_back = self._compute_phase_waypoints()
+        n_close, n_down, n_back = self._compute_phase_waypoints(
+            request.motion_policy.sample_count, options
+        )
 
         hand_close_path = self.builder.interpolate_hand_qpos(
             start_hand_qpos,
-            self.hand_close_qpos,
+            hand_close_qpos,
             n_waypoints=n_close,
         )
 
@@ -122,9 +131,9 @@ class Press(AtomicAction[PressTarget]):
             target_states_list,
             start_arm_qpos,
             n_down,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
+            control_part=control_part,
+            arm_dof=manipulator.dof,
+            cfg=request.motion_policy,
         )
 
         press_arm_qpos = down_arm[:, -1, :]
@@ -132,9 +141,9 @@ class Press(AtomicAction[PressTarget]):
             press_arm_qpos,
             start_arm_qpos,
             n_back,
-            control_part=self.cfg.control_part,
-            arm_dof=self.arm_dof,
-            cfg=self.cfg,
+            control_part=control_part,
+            arm_dof=manipulator.dof,
+            cfg=request.motion_policy,
         )
         success = down_success & back_success
 
@@ -148,53 +157,41 @@ class Press(AtomicAction[PressTarget]):
             device=self.device,
         )
         full[:, :, :] = state.last_qpos.unsqueeze(1)
-        full[:, :n_close, self.arm_joint_ids] = start_arm_qpos.unsqueeze(1)
-        full[:, :n_close, self.hand_joint_ids] = hand_close_path
-        full[:, n_close : n_close + n_down_actual, self.arm_joint_ids] = down_arm
-        full[:, n_close : n_close + n_down_actual, self.hand_joint_ids] = (
-            self.hand_close_qpos.unsqueeze(1)
+        full[:, :n_close, arm_joint_ids] = start_arm_qpos.unsqueeze(1)
+        full[:, :n_close, hand_joint_ids] = hand_close_path
+        full[:, n_close : n_close + n_down_actual, arm_joint_ids] = down_arm
+        full[:, n_close : n_close + n_down_actual, hand_joint_ids] = (
+            hand_close_qpos.unsqueeze(1)
         )
-        full[:, n_close + n_down_actual :, self.arm_joint_ids] = back_arm
-        full[:, n_close + n_down_actual :, self.hand_joint_ids] = (
-            self.hand_close_qpos.unsqueeze(1)
+        full[:, n_close + n_down_actual :, arm_joint_ids] = back_arm
+        full[:, n_close + n_down_actual :, hand_joint_ids] = hand_close_qpos.unsqueeze(
+            1
         )
 
-        return ActionResult(
+        return self.build_plan(
+            request,
+            context,
             success=success,
             trajectory=full,
-            next_state=state.with_updates(
-                last_qpos=full[:, -1, :].clone(),
-            ),
+            phase_name="press",
         )
 
-    def _compute_phase_waypoints(self) -> tuple[int, int, int]:
-        n_close = self.cfg.hand_interp_steps
-        if n_close < 1:
-            logger.log_error(
-                "hand_interp_steps must be at least 1 for PressCfg.", ValueError
-            )
+    def _compute_phase_waypoints(
+        self, sample_count: int, options: PressOptions
+    ) -> tuple[int, int, int]:
+        """Split the invocation sample budget across press phases."""
+        n_close = options.hand_interp_steps
 
-        motion_waypoints = self.cfg.sample_interval - n_close
+        motion_waypoints = sample_count - n_close
         n_down = motion_waypoints // 2
         n_back = motion_waypoints - n_down
         if n_down < 2 or n_back < 2:
             logger.log_error(
                 "Not enough waypoints for press trajectory. Increase "
-                "sample_interval or decrease hand_interp_steps.",
+                "MotionPolicy.sample_count or decrease hand_interp_steps.",
                 ValueError,
             )
         return n_close, n_down, n_back
 
-    def _fail(self, state: WorldState) -> ActionResult:
-        return ActionResult(
-            success=torch.zeros(self.n_envs, dtype=torch.bool, device=self.device),
-            trajectory=torch.empty(
-                (self.n_envs, 0, self.robot_dof),
-                dtype=torch.float32,
-                device=self.device,
-            ),
-            next_state=state,
-        )
 
-
-__all__ = ["Press", "PressCfg", "PressTarget"]
+__all__ = ["Press", "PressGoal", "PressOptions"]

@@ -12,27 +12,28 @@ cuRobo, and constructing this planner requires a CUDA-capable NVIDIA GPU.
 
 ## Install cuRobo V2
 
-EmbodiChain exposes cuRobo V2 as CUDA-matched optional dependencies. From the
-EmbodiChain repository root, select exactly one extra:
+cuRobo V2 is installed separately from EmbodiChain because public package
+indexes do not accept Git dependencies in published package metadata. Select
+exactly one CUDA-matched source requirement:
 
 ~~~bash
 # Recommended for the normal EmbodiChain environment, where PyTorch is present.
-uv pip install ".[curobo-cu12]"  # CUDA 12.x
-uv pip install ".[curobo-cu13]"  # CUDA 13.x
+uv pip install "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+uv pip install "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 # For a fresh environment that also needs PyTorch.
-uv pip install ".[curobo-cu12-torch]"  # CUDA 12.x
-uv pip install ".[curobo-cu13-torch]"  # CUDA 13.x
+uv pip install "nvidia-curobo[cu12-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
+uv pip install "nvidia-curobo[cu13-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 python -c "import curobo; print(curobo.__version__)"
 pytest --pyargs curobo.tests
 ~~~
 
-The extras follow [NVIDIA's official cuRobo installation
+These commands follow [NVIDIA's official cuRobo installation
 guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
 and pin the source dependency to the cuRobo V2 `v0.8.0` release. Use a Python
 3.10--3.13 environment on Linux with a supported NVIDIA GPU and driver. The
-non-`torch` extras are preferred for EmbodiChain because the simulation
+non-`torch` variants are preferred for EmbodiChain because the simulation
 environment normally already provides PyTorch; the `-torch` variants delegate
 the PyTorch version requirement to cuRobo. Keep cuRobo in the same Python
 environment that runs the simulator.
@@ -235,9 +236,9 @@ Panda) so planning stays fast; raise it for tighter collision coverage.
 MotionGenerator passes start_qpos and control_part to the cuRobo backend. For
 Cartesian goals, leave EmbodiChain pre-interpolation disabled: cuRobo must
 receive the original pose. By default the returned collision-checked samples are
-arc-length resampled to the action's `sample_interval` waypoint count (so
-`MoveEndEffectorCfg.sample_interval` controls the trajectory length, as for the
-other planners); set `CuroboPlannerCfg.preserve_plan_samples=True` to keep
+arc-length resampled to the invocation's `MotionPolicy.sample_count` waypoint
+count (so the same runtime policy controls trajectory length across planners);
+set `CuroboPlannerCfg.preserve_plan_samples=True` to keep
 cuRobo's own samples (whose count is derived from `interpolation_dt` and the
 trajectory duration).
 

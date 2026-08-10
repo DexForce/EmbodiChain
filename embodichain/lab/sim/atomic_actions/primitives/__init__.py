@@ -18,66 +18,73 @@
 
 from __future__ import annotations
 
+from ..core import AtomicAction
 from .coordinated_pickment import (
-    CoordinatedPickTarget,
+    CoordinatedPickGoal,
     CoordinatedPickment,
-    CoordinatedPickmentCfg,
-    CoordinatedPickmentTarget,
+    CoordinatedPickmentOptions,
 )
 from .coordinated_placement import (
     CoordinatedPlacement,
-    CoordinatedPlacementCfg,
-    CoordinatedPlacementTarget,
+    CoordinatedPlacementGoal,
+    CoordinatedPlacementOptions,
 )
-from .hand_over import HandOver, HandOverCfg
+from .hand_over import HandOver, HandOverOptions
 from .move_end_effector import (
-    EndEffectorPoseTarget,
+    EndEffectorPoseGoal,
     MoveEndEffector,
-    MoveEndEffectorCfg,
+    MoveEndEffectorOptions,
 )
 from .move_held_object import (
-    HeldObjectPoseTarget,
+    HeldObjectPoseGoal,
     MoveHeldObject,
-    MoveHeldObjectCfg,
+    MoveHeldObjectOptions,
 )
-from .move_joints import (
-    JointPositionTarget,
+from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
+from .pick_up import GraspGoal, PickUp, PickUpOptions
+from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
+from .press import Press, PressGoal, PressOptions
+
+BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
+    MoveEndEffector,
     MoveJoints,
-    MoveJointsCfg,
-    NamedJointPositionTarget,
+    PickUp,
+    MoveHeldObject,
+    Place,
+    Press,
+    CoordinatedPickment,
+    CoordinatedPlacement,
+    HandOver,
 )
-from .pick_up import GraspTarget, PickUp, PickUpCfg
-from .place import AssembleTarget, Place, PlaceCfg, PlaceTarget
-from .press import Press, PressCfg, PressTarget
+"""Built-in action implementations instantiated once per action engine."""
 
 __all__ = [
-    "AssembleTarget",
-    "CoordinatedPickTarget",
+    "AssembleGoal",
+    "BUILTIN_ACTION_TYPES",
+    "CoordinatedPickGoal",
     "CoordinatedPickment",
-    "CoordinatedPickmentCfg",
-    "CoordinatedPickmentTarget",
+    "CoordinatedPickmentOptions",
     "CoordinatedPlacement",
-    "CoordinatedPlacementCfg",
-    "CoordinatedPlacementTarget",
-    "EndEffectorPoseTarget",
-    "GraspTarget",
+    "CoordinatedPlacementGoal",
+    "CoordinatedPlacementOptions",
+    "EndEffectorPoseGoal",
+    "GraspGoal",
     "HandOver",
-    "HandOverCfg",
-    "HeldObjectPoseTarget",
-    "JointPositionTarget",
+    "HandOverOptions",
+    "HeldObjectPoseGoal",
+    "JointPositionGoal",
     "MoveEndEffector",
-    "MoveEndEffectorCfg",
+    "MoveEndEffectorOptions",
     "MoveHeldObject",
-    "MoveHeldObjectCfg",
+    "MoveHeldObjectOptions",
     "MoveJoints",
-    "MoveJointsCfg",
-    "NamedJointPositionTarget",
+    "MoveJointsOptions",
     "PickUp",
-    "PickUpCfg",
+    "PickUpOptions",
     "Place",
-    "PlaceCfg",
-    "PlaceTarget",
+    "PlaceGoal",
+    "PlaceOptions",
     "Press",
-    "PressCfg",
-    "PressTarget",
+    "PressGoal",
+    "PressOptions",
 ]

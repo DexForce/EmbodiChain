@@ -17,6 +17,11 @@
 
 from __future__ import annotations
 
+import json
+import threading
+import warnings
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -26,6 +31,9 @@ from unittest.mock import MagicMock, Mock, patch
 
 # Skip all tests if LeRobot is not available
 try:
+    import pandas as pd
+
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from embodichain.lab.gym.envs.managers.datasets import (
         LeRobotRecorder,
         LEROBOT_AVAILABLE,
@@ -36,6 +44,7 @@ try:
     LEROBOT_AVAILABLE = True
 except ImportError:
     LEROBOT_AVAILABLE = False
+    LeRobotDataset = None
     LeRobotRecorder = None
     LeRobotKey = None
 
@@ -89,10 +98,15 @@ class MockEnvForDataset:
     """Mock environment for dataset functor tests."""
 
     def __init__(
-        self, num_envs: int = 4, num_joints: int = 6, has_sensors: bool = True
+        self,
+        num_envs: int = 4,
+        num_joints: int = 6,
+        has_sensors: bool = True,
+        step_dt: float = 1.0 / 30.0,
     ):
         self.num_envs = num_envs
         self.device = torch.device("cpu")
+        self.step_dt = step_dt
         self.active_joint_ids = list(range(num_joints))
 
         self.robot = MockRobot(num_joints)
@@ -175,7 +189,7 @@ class TestLeRobotRecorderInitialization:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -185,7 +199,43 @@ class TestLeRobotRecorderInitialization:
         recorder = LeRobotRecorder(cfg, env)
 
         assert recorder.lerobot_data_root == "/tmp/test_dataset"
-        assert recorder.use_videos == False
+        assert recorder.use_videos is False
+        assert recorder.dataset_fps == 30
+        assert mock_lerobot_dataset.create.call_args.kwargs["fps"] == 30
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_non_integer_environment_frequency_is_rejected(self, mock_lerobot_dataset):
+        """LeRobot recording rejects cadence that its integer FPS cannot encode."""
+        env = MockEnvForDataset(step_dt=0.03)
+        cfg = MockFunctorCfg(params={"save_path": "/tmp/test_dataset"})
+
+        with pytest.raises(ValueError, match="requires an integer dataset FPS"):
+            LeRobotRecorder(cfg, env)
+
+        mock_lerobot_dataset.create.assert_not_called()
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_episode_duration_uses_environment_step_dt(self, mock_lerobot_dataset):
+        """Episode duration follows actual environment steps, not dataset metadata."""
+        env = MockEnvForDataset(has_sensors=False, step_dt=0.04)
+
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 3}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+
+        cfg = MockFunctorCfg(params={"save_path": "/tmp/test_dataset"})
+        recorder = LeRobotRecorder(cfg, env)
+        recorder._convert_frame_to_lerobot = Mock(return_value={"task": "test"})
+
+        saved = recorder._save_single_episode(
+            env_id=0,
+            obs_list=[object(), object(), object()],
+            action_list=[object(), object(), object()],
+        )
+
+        assert saved is True
+        assert recorder.total_time == pytest.approx(0.12)
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_initialization_with_videos(self, mock_lerobot_dataset):
@@ -200,7 +250,7 @@ class TestLeRobotRecorderInitialization:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": True,
@@ -209,7 +259,39 @@ class TestLeRobotRecorderInitialization:
 
         recorder = LeRobotRecorder(cfg, env)
 
-        assert recorder.use_videos == True
+        assert recorder.use_videos is True
+
+    @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
+    def test_finalize_is_idempotent_and_does_not_commit_live_rollout(
+        self, mock_lerobot_dataset, tmp_path
+    ):
+        """Closing finalizes storage but never turns a partial rollout into an episode."""
+        env = MockEnvForDataset(num_envs=2)
+        env.current_rollout_step = 3
+        mock_dataset_instance = Mock()
+        mock_dataset_instance.image_writer = None
+        mock_dataset_instance.meta = Mock()
+        mock_dataset_instance.meta.info = {"fps": 30}
+        mock_lerobot_dataset.create.return_value = mock_dataset_instance
+        cfg = MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "instruction": {"lang": "test task"},
+                "extra": {"task_description": "test"},
+            }
+        )
+        recorder = LeRobotRecorder(cfg, env)
+        recorder._save_episodes = Mock()
+
+        first_path = recorder.finalize()
+        second_path = recorder.close()
+
+        assert first_path == second_path == recorder.dataset_path
+        recorder._save_episodes.assert_not_called()
+        mock_dataset_instance.finalize.assert_called_once_with()
+        with pytest.raises(RuntimeError, match="already finalized"):
+            recorder(env, torch.tensor([0]))
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -229,7 +311,7 @@ class TestLeRobotRecorderFeatures:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -247,6 +329,16 @@ class TestLeRobotRecorderFeatures:
         # Check shapes
         assert features[LeRobotKey.OBS_STATE.value]["shape"] == (6,)
         assert features[LeRobotKey.ACTION.value]["shape"] == (6,)
+        assert features["subtask_index"] == {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": None,
+        }
+        assert features["annotation.segment_id"] == {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": ["segment_id"],
+        }
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_build_features_with_sensor(self, mock_lerobot_dataset):
@@ -261,7 +353,7 @@ class TestLeRobotRecorderFeatures:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -310,7 +402,7 @@ class TestLeRobotRecorderFeatures:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -373,7 +465,7 @@ class TestLeRobotRecorderFeatures:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -422,7 +514,7 @@ class TestLeRobotRecorderFeatures:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -477,7 +569,7 @@ class TestLeRobotRecorderFeatures:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -539,7 +631,7 @@ class TestLeRobotRecorderDepthSidecar:
         cfg = MockFunctorCfg(
             params={
                 "save_path": str(tmp_path),
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -620,7 +712,7 @@ class TestLeRobotRecorderFrameConversion:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -645,12 +737,29 @@ class TestLeRobotRecorderFrameConversion:
         # Create mock action
         action = torch.zeros(6)
 
-        frame = recorder._convert_frame_to_lerobot(obs, action, "test_task")
+        frame = recorder._convert_frame_to_lerobot(
+            obs,
+            action,
+            "test_task",
+            annotations={
+                "episode_step": 4,
+                "segment_id": 2,
+                "segment_step": 1,
+                "segment_start": False,
+                "segment_end": True,
+                "terminated": False,
+                "truncated": False,
+            },
+            subtask_index=3,
+        )
 
         assert "task" in frame
         assert frame["task"] == "test_task"
+        assert frame["subtask_index"].tolist() == [3]
         assert LeRobotKey.OBS_STATE.value in frame
         assert LeRobotKey.ACTION.value in frame
+        assert frame["annotation.segment_id"].tolist() == [2]
+        assert frame["annotation.segment_end"].tolist() == [1]
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_convert_frame_with_depth_and_mask(self, mock_lerobot_dataset):
@@ -671,7 +780,7 @@ class TestLeRobotRecorderFrameConversion:
         cfg = MockFunctorCfg(
             params={
                 "save_path": "/tmp/test_dataset",
-                "robot_meta": {"robot_type": "test_robot", "control_freq": 30},
+                "robot_meta": {"robot_type": "test_robot"},
                 "instruction": {"lang": "test task"},
                 "extra": {"task_description": "test"},
                 "use_videos": False,
@@ -718,6 +827,179 @@ class TestLeRobotRecorderFrameConversion:
         assert torch.equal(frame["observation.mask.camera"], mask)
         assert frame["observation.depth.camera"].dtype == torch.float32
         assert frame["observation.mask.camera"].dtype == torch.int32
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_episode_metadata_sidecar_appends_json_lines(tmp_path) -> None:
+    """The EmbodiChain sidecar is valid append-only JSONL."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder.dataset_full_path = tmp_path
+    recorder._metadata_lock = threading.Lock()
+
+    recorder._write_episode_metadata(
+        {"episode_index": 1, "segments": [{"name": "pick"}]}
+    )
+    recorder._write_episode_metadata(
+        {"episode_index": 2, "segments": [{"name": "place"}]}
+    )
+
+    metadata_path = tmp_path / "meta" / "embodichain_episodes.jsonl"
+    records = [json.loads(line) for line in metadata_path.read_text().splitlines()]
+    assert [record["episode_index"] for record in records] == [1, 2]
+    assert [record["segments"][0]["name"] for record in records] == ["pick", "place"]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_subtask_registry_writes_stable_deduplicated_indices(tmp_path) -> None:
+    """Repeated descriptions retain one stable row in subtasks.parquet."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder.dataset_full_path = tmp_path
+    recorder.dataset = MagicMock()
+    recorder._metadata_lock = threading.Lock()
+    recorder._subtask_to_index = {}
+
+    first_indices = recorder._register_subtasks(
+        ["pick cube", "place cube", "pick cube"]
+    )
+    second_indices = recorder._register_subtasks([" place cube ", "release cube"])
+
+    assert first_indices == {"pick cube": 0, "place cube": 1}
+    assert second_indices == {"place cube": 1, "release cube": 2}
+
+    subtasks = pd.read_parquet(tmp_path / "meta" / "subtasks.parquet")
+    assert subtasks.index.tolist() == ["pick cube", "place cube", "release cube"]
+    assert subtasks["subtask_index"].tolist() == [0, 1, 2]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
+    """LeRobot 0.4.4 reloads one overall task and per-frame subtasks."""
+    env = MockEnvForDataset(num_joints=2, has_sensors=False)
+    cfg = MockFunctorCfg(
+        params={
+            "save_path": str(tmp_path),
+            "robot_meta": {"robot_type": "test_robot", "control_freq": 10},
+            "instruction": {"lang": "Move the cube between two targets."},
+            "extra": {"task_description": "multisegment_round_trip"},
+            "use_videos": False,
+        }
+    )
+    recorder = LeRobotRecorder(cfg, env)
+    obs_list = [
+        TensorDict(
+            {
+                "robot": {
+                    "qpos": torch.full((2,), frame_index, dtype=torch.float32),
+                    "qvel": torch.zeros(2),
+                    "qf": torch.zeros(2),
+                }
+            },
+            batch_size=[],
+        )
+        for frame_index in range(4)
+    ]
+    action_list = [torch.zeros(2) for _ in obs_list]
+    annotations = {
+        "segment_id": torch.tensor([0, 0, 1, 1]),
+        "segment_step": torch.tensor([0, 1, 0, 1]),
+        "segment_start": torch.tensor([1, 0, 1, 0]),
+        "segment_end": torch.tensor([0, 1, 0, 1]),
+    }
+    episode_metadata = {
+        "segments": [
+            {
+                "segment_id": 0,
+                "start_step": 0,
+                "end_step": 2,
+                "instruction": "Pick up the cube.",
+            },
+            {
+                "segment_id": 1,
+                "start_step": 2,
+                "end_step": 4,
+                "instruction": "Place the cube at the next target.",
+            },
+        ]
+    }
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error",
+            message=("Conversion of an array with ndim > 0 to a scalar is deprecated"),
+            category=DeprecationWarning,
+        )
+        assert recorder._save_single_episode(
+            0,
+            obs_list,
+            action_list,
+            annotations=annotations,
+            episode_metadata=episode_metadata,
+        )
+    recorder.finalize()
+
+    loaded = LeRobotDataset(
+        repo_id=recorder.dataset_full_path.name,
+        root=recorder.dataset_full_path,
+    )
+    samples = [loaded[index] for index in range(len(obs_list))]
+
+    assert {sample["task"] for sample in samples} == {
+        "Move the cube between two targets."
+    }
+    assert [sample["subtask"] for sample in samples] == [
+        "Pick up the cube.",
+        "Pick up the cube.",
+        "Place the cube at the next target.",
+        "Place the cube at the next target.",
+    ]
+    assert [sample["subtask_index"].item() for sample in samples] == [0, 0, 1, 1]
+    assert [sample["annotation.segment_id"].item() for sample in samples] == [
+        0,
+        0,
+        1,
+        1,
+    ]
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_post_commit_metadata_failure_does_not_reuse_episode_index() -> None:
+    """A sidecar failure after LeRobot commit advances the global index first."""
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = MockEnvForDataset(has_sensors=False)
+    recorder.instruction = None
+    recorder.extra = {}
+    recorder.total_time = 0.0
+    recorder.curr_episode = 0
+    recorder.dataset_full_path = Path("/tmp/test_dataset")
+    recorder.dataset = MagicMock()
+    recorder.dataset.meta.info = {"fps": 30}
+    recorder._depth_manager = None
+    recorder._register_subtasks = MagicMock(return_value={"unknown_task": 0})
+    recorder._convert_frame_to_lerobot = MagicMock(return_value={})
+    recorder._write_episode_metadata = MagicMock(side_effect=OSError("disk full"))
+
+    with pytest.raises(OSError, match="disk full"):
+        recorder._save_single_episode(0, [object()], [object()])
+
+    recorder.dataset.save_episode.assert_called_once_with()
+    assert recorder.curr_episode == 1
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_save_episodes_skips_empty_rollout() -> None:
+    """An initial reset with no recorded frames is not a failed commit."""
+    env = Mock()
+    env.rollout_steps = torch.zeros(1, dtype=torch.long)
+    env.rollout_buffer = MagicMock()
+
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = env
+    recorder._save_single_episode = Mock()
+
+    recorder._save_episodes(torch.tensor([0]))
+
+    recorder._save_single_episode.assert_not_called()
+    env.rollout_buffer.__getitem__.assert_not_called()
 
 
 class TestDatasetFunctorCfg:
