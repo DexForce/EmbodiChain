@@ -440,9 +440,11 @@ an older custom action by renaming its implementation to `_plan()`.
 | `AtomicAction.plan(request, context)` | `AtomicActionEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
 | `AtomicAction._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedActionRequest` and returns an `ActionPlan` |
 | `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
+| `engine.start(invocations, context, eligible_mask=...)` | Runtime orchestrator | Starts a session whose owned row cohort can only shrink across action barriers and recovery |
 | `session.revise_current(invocation)` | Manually ticked runtime orchestrator | Replaces the active logical call with a newer same-destination revision and replans from the latest observed context |
 | `runner.revise_current(invocation)` | Runner-driven runtime orchestrator or Action Agent | Snapshots a revision, preserves the current frame deadline, then replans from a fresh due-time observation |
-| `runner.step(effect_success=...)` | Non-blocking controller integration | Observes and routes a `RuntimeCommandFrame` only when it is due |
+| `runner.deactivate_rows(mask, reason=...)` | Runner-driven runtime orchestrator | Permanently removes rows and refreshes the runner's cached effect request; prefer it over direct session mutation |
+| `runner.step(effect_result=...)` | Non-blocking controller integration | Observes and routes a `RuntimeCommandFrame` only when it is due |
 | `runner.run_until_blocked(...)` | Simple blocking application or tutorial | Advances the injected clock until terminal or external effect verification is required |
 | `runner.cancel(reason)` | Explicit safe stop | Requests controller cancellation followed by an observed-position hold |
 
@@ -623,6 +625,16 @@ unknown or incompatible transport cannot cause partial dispatch. Cancellation,
 observation/session exceptions, and negative acknowledgements enter a
 best-effort cancel-then-hold path for every armed runtime target.
 
+Pass an owned `eligible_mask` to `engine.start()` when only a subset of rows may
+enter the invocation sequence. This cohort is sticky: eligibility can only
+shrink across action barriers and replans. Later failures outside the atomic
+runtime should call `runner.deactivate_rows(mask, reason=...)`; the operation is
+idempotent, the next command neutralizes changed rows, and removing the final
+eligible row fails and terminates the session. When effect verification is
+pending, deactivation narrows the request and assigns a new
+`verification_id`. Do not mutate `session` directly while its runner owns
+scheduling, because the runner must refresh its cached effect boundary.
+
 The engine authorizes every emitted command against the immutable target and
 physical claims in the resolved binding. A command cannot address an unbound
 destination, substitute target metadata, or overlap another endpoint's joints
@@ -786,20 +798,39 @@ Consumers query per-environment active and exclusive-hold masks from that one
 map. A single-arm transport, release, or handover row fails safely while a
 second manipulator still holds the same semantic object or live entity.
 
-At the terminal waypoint, an `ExecutionSession` requests an external
-per-environment verification mask before committing a non-empty effect:
+At the terminal waypoint, an `ExecutionSession` requests an external,
+correlated per-environment result before committing a non-empty effect:
 
 ```python
+from embodichain.lab.sim.atomic_actions import EffectVerificationResult
+
 tick = session.tick(latest_context)
 if tick.pending_effect is not None:
-    effect_success = verify_grasp_or_release()
-    tick = session.tick(latest_context, effect_success=effect_success)
+    request = tick.pending_effect
+    success_mask, failure_mask = verify_grasp_or_release(request.env_mask)
+    effect_result = EffectVerificationResult(
+        verification_id=request.verification_id,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+    )
+    tick = session.tick(latest_context, effect_result=effect_result)
 ```
 
 This prevents a collision-free or well-tracked command plan from being
 misreported as a successful grasp, release, or handover. The typed
 `EffectVerificationRequest` persists on subsequent ticks while waiting;
-`EFFECT_VERIFICATION_REQUIRED` remains a one-time observability event.
+`EFFECT_VERIFICATION_REQUIRED` remains a one-time observability event. Success
+and failure masks are disjoint subsets of the request mask; omitted request rows
+remain unresolved. Request IDs change after mask shrinkage or whole-action
+retry, so a delayed result cannot commit a newer attempt.
+
+`request.deadline` is expressed in the robot-observation timestamp domain.
+`RecoveryPolicy.action_timeout` covers both trajectory execution and the
+terminal effect wait; a retry invalidates the old request ID. With
+`ExecutionRunner.step()`, a call made before the next due cycle does not consume
+its `effect_result`: schedule another call using `wait_duration`, re-read the
+current request, and submit a result for that current ID. Partial resolution and
+row deactivation can also replace the request before the delayed result arrives.
 
 ## Action Agent integration
 

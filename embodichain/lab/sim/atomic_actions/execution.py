@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -60,13 +61,18 @@ class ExecutionEventKind(str, Enum):
     TRACKING_ERROR = "tracking_error"
     DYNAMIC_GOAL_CHANGED = "dynamic_goal_changed"
     COLLISION_WORLD_CHANGED = "collision_world_changed"
+    ACTION_PLANNING_FAILED = "action_planning_failed"
     ACTION_TIMEOUT = "action_timeout"
     TRAJECTORY_COMPLETED = "trajectory_completed"
     EFFECT_VERIFICATION_REQUIRED = "effect_verification_required"
+    EFFECT_VERIFICATION_FAILED = "effect_verification_failed"
+    EFFECT_VERIFICATION_TIMEOUT = "effect_verification_timeout"
     ACTION_RETRY = "action_retry"
     ACTION_COMPLETED = "action_completed"
     RECOVERY_EXHAUSTED = "recovery_exhausted"
+    ROWS_DEACTIVATED = "rows_deactivated"
     SESSION_COMPLETED = "session_completed"
+    SESSION_FAILED = "session_failed"
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -89,6 +95,8 @@ class ExecutionEvent:
             raise ValueError("invocation_index must be non-negative.")
         if self.invocation_revision < 0:
             raise ValueError("invocation_revision must be non-negative.")
+        if not isinstance(self.env_mask, torch.Tensor):
+            raise TypeError("env_mask must be a torch.Tensor.")
         if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
             raise ValueError("ExecutionEvent.env_mask must be a 1D bool tensor.")
         object.__setattr__(self, "env_mask", self.env_mask.clone())
@@ -96,17 +104,27 @@ class ExecutionEvent:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class EffectVerificationRequest:
-    """Typed boundary describing a semantic effect awaiting verification."""
+    """Typed boundary describing a semantic effect awaiting verification.
 
+    ``requested_at`` and ``deadline`` use the same timestamp domain as
+    :class:`RobotObservation`. Request-mask shrinkage retains both values;
+    only a whole-action retry starts a new attempt deadline.
+    """
+
+    verification_id: int
     skill_id: str
     invocation_id: str | None
     invocation_revision: int
     invocation_index: int
     terminal_segment: str | None
+    requested_at: float
+    deadline: float
     env_mask: torch.Tensor
     expected_effects: StateDelta
 
     def __post_init__(self) -> None:
+        if type(self.verification_id) is not int or self.verification_id < 0:
+            raise ValueError("verification_id must be a non-negative integer.")
         if not isinstance(self.skill_id, str) or not self.skill_id:
             raise ValueError("skill_id must be a non-empty string.")
         if self.invocation_id is not None and (
@@ -121,13 +139,71 @@ class EffectVerificationRequest:
             not isinstance(self.terminal_segment, str) or not self.terminal_segment
         ):
             raise ValueError("terminal_segment must be a non-empty string or None.")
+        if not math.isfinite(self.requested_at) or self.requested_at < 0.0:
+            raise ValueError("requested_at must be finite and non-negative.")
+        if not math.isfinite(self.deadline) or self.deadline < self.requested_at:
+            raise ValueError(
+                "deadline must be finite and no earlier than requested_at."
+            )
+        if not isinstance(self.env_mask, torch.Tensor):
+            raise TypeError("env_mask must be a torch.Tensor.")
         if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
             raise ValueError("env_mask must be a 1D bool tensor.")
+        if not self.env_mask.any():
+            raise ValueError("env_mask must contain at least one requested row.")
         if not isinstance(self.expected_effects, StateDelta):
             raise TypeError("expected_effects must be a StateDelta.")
         if self.expected_effects.is_empty:
             raise ValueError("Effect verification requires a non-empty StateDelta.")
         object.__setattr__(self, "env_mask", self.env_mask.clone())
+        object.__setattr__(self, "expected_effects", self.expected_effects.snapshot())
+
+    def snapshot(self) -> EffectVerificationRequest:
+        """Return a request snapshot with an independently owned row mask."""
+        return EffectVerificationRequest(
+            verification_id=self.verification_id,
+            skill_id=self.skill_id,
+            invocation_id=self.invocation_id,
+            invocation_revision=self.invocation_revision,
+            invocation_index=self.invocation_index,
+            terminal_segment=self.terminal_segment,
+            requested_at=self.requested_at,
+            deadline=self.deadline,
+            env_mask=self.env_mask,
+            expected_effects=self.expected_effects,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class EffectVerificationResult:
+    """Correlated per-environment update for one effect boundary.
+
+    Rows absent from both masks remain unresolved. This lets one shared batch
+    barrier commit verified rows while other rows continue observing the same
+    physical effect.
+    """
+
+    verification_id: int
+    success_mask: torch.Tensor
+    failure_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if type(self.verification_id) is not int or self.verification_id < 0:
+            raise ValueError("verification_id must be a non-negative integer.")
+        for name in ("success_mask", "failure_mask"):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        if self.success_mask.shape != self.failure_mask.shape:
+            raise ValueError("success_mask and failure_mask must have equal shapes.")
+        if self.success_mask.device != self.failure_mask.device:
+            raise ValueError("success_mask and failure_mask must use the same device.")
+        if (self.success_mask & self.failure_mask).any():
+            raise ValueError("success_mask and failure_mask must not overlap.")
+        object.__setattr__(self, "success_mask", self.success_mask.clone())
+        object.__setattr__(self, "failure_mask", self.failure_mask.clone())
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -162,6 +238,16 @@ class ExecutionTick:
             raise TypeError("hold_targets must contain RuntimeEndpointTarget values.")
         if self.command is not None and self.hold_targets:
             raise ValueError("A tick cannot send commands and request a hold together.")
+        if self.pending_effect is not None:
+            if not isinstance(self.pending_effect, EffectVerificationRequest):
+                raise TypeError(
+                    "pending_effect must be an EffectVerificationRequest or None."
+                )
+            object.__setattr__(
+                self,
+                "pending_effect",
+                self.pending_effect.snapshot(),
+            )
         hold_targets: list[RuntimeEndpointTarget] = []
         for target in self.hold_targets:
             snapshot = target.snapshot()
@@ -182,11 +268,14 @@ class ExecutionSession:
     The session never steps a simulator itself. Each :meth:`tick` consumes the
     latest observation and scene snapshot and emits at most one synchronized
     endpoint-command frame. Expected symbolic effects are committed only after the caller
-    supplies ``effect_success`` for a non-empty :class:`StateDelta`.
+    supplies a correlated :class:`EffectVerificationResult` for a non-empty
+    :class:`StateDelta`.
 
     Environment eligibility and recovery budgets are tracked per row. The
     waypoint cursor is batch-synchronized: a recoverable row replans the active
     cohort from the latest observation and restarts the action trajectory.
+    Calls that mutate the session must be serialized by its owner; the session
+    does not provide thread synchronization.
     """
 
     def __init__(
@@ -231,12 +320,23 @@ class ExecutionSession:
         )
         self._replans = torch.zeros_like(self._action_retries)
         self._pending_effect: EffectVerificationRequest | None = None
+        self._effect_failures = torch.zeros_like(self._eligible)
+        self._effect_requested_at: float | None = None
+        self._next_effect_verification_id = 0
         self._status = (
             ExecutionStatus.RUNNING if self._eligible.any() else ExecutionStatus.FAILED
         )
         self._queued_events: list[ExecutionEvent] = []
         if self._status is ExecutionStatus.RUNNING:
             self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
+        else:
+            self._queued_events.append(
+                self._event(
+                    ExecutionEventKind.SESSION_FAILED,
+                    self._eligible,
+                    "No environment was initially eligible for execution.",
+                )
+            )
 
     @property
     def status(self) -> ExecutionStatus:
@@ -262,6 +362,68 @@ class ExecutionSession:
     def effect_verification_pending(self) -> bool:
         """Whether the current physical effect still requires verification."""
         return self._pending_effect is not None
+
+    @property
+    def pending_effect(self) -> EffectVerificationRequest | None:
+        """Owned snapshot of the current effect boundary, when present."""
+        return None if self._pending_effect is None else self._pending_effect.snapshot()
+
+    def deactivate_rows(
+        self,
+        env_mask: torch.Tensor,
+        *,
+        reason: str,
+    ) -> torch.Tensor:
+        """Permanently remove selected rows from this invocation sequence.
+
+        Deactivation is sticky across action barriers and recovery replans.
+        The next emitted command frame marks those rows inactive so the command
+        sink can apply target-specific safe hold behavior.
+
+        Args:
+            env_mask: Rows requested for deactivation.
+            reason: Human-readable event message.
+
+        Returns:
+            Owned mask of rows that changed from eligible to inactive.
+
+        Raises:
+            RuntimeError: If the session is already terminal.
+            ValueError: If ``reason`` is empty or the mask shape is invalid.
+        """
+        if self._status is not ExecutionStatus.RUNNING:
+            raise RuntimeError("Only a running execution session can deactivate rows.")
+        if type(reason) is not str or not reason:
+            raise ValueError("reason must be a non-empty string.")
+        requested = self._normalize_mask(env_mask, "env_mask")
+        changed = requested & self._eligible
+        if not changed.any():
+            return changed
+        self._eligible &= ~changed
+        self._pending &= ~changed
+        self._effect_failures &= ~changed
+        self._last_command_mask &= ~changed
+        self._queued_events.append(
+            self._event(ExecutionEventKind.ROWS_DEACTIVATED, changed, reason)
+        )
+        if self._pending_effect is not None:
+            assert self._plan is not None
+            previous_effect = self._pending_effect
+            remaining_effect = (
+                previous_effect.env_mask & self._pending & self._plan.plan_success
+            )
+            if torch.equal(remaining_effect, previous_effect.env_mask):
+                self._pending_effect = previous_effect
+            elif remaining_effect.any():
+                self._pending_effect = self._effect_verification_request(
+                    remaining_effect
+                )
+            else:
+                self._pending_effect = None
+        terminal_event = self._update_terminal_status()
+        if terminal_event is not None:
+            self._queued_events.append(terminal_event)
+        return changed.clone()
 
     def revise_current(
         self,
@@ -311,10 +473,10 @@ class ExecutionSession:
             raise TypeError("invocation must be an ActionInvocation.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
-        if self._pending_effect is not None:
+        if self._pending_effect is not None or self._effect_failures.any():
             raise RuntimeError(
-                "Cannot revise while a physical effect is awaiting verification; "
-                "verify it or cancel and start a new invocation."
+                "Cannot revise while physical-effect resolution is pending; "
+                "resolve it or cancel and start a new invocation."
             )
         self._validate_revision_identity(
             skill_id=invocation.skill_id,
@@ -333,10 +495,10 @@ class ExecutionSession:
             raise TypeError("replacement must be a ResolvedActionRequest.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
-        if self._pending_effect is not None:
+        if self._pending_effect is not None or self._effect_failures.any():
             raise RuntimeError(
-                "Cannot revise while a physical effect is awaiting verification; "
-                "verify it or cancel and start a new invocation."
+                "Cannot revise while physical-effect resolution is pending; "
+                "resolve it or cancel and start a new invocation."
             )
         self._validate_revision_identity(
             skill_id=replacement.skill_id,
@@ -417,32 +579,41 @@ class ExecutionSession:
         self,
         context: PlanningContext,
         *,
-        effect_success: torch.Tensor | None = None,
+        effect_result: EffectVerificationResult | None = None,
     ) -> ExecutionTick:
         """Advance execution by one observation/command cycle.
 
         Args:
             context: Latest measured robot and versioned scene state. Its task
                 state is replaced by the session's verified task state.
-            effect_success: Optional per-environment semantic-effect verification
-                for an action waiting at its terminal waypoint.
+            effect_result: Optional correlated semantic-effect result for an
+                action waiting at its terminal waypoint.
 
         Returns:
             Status, optional command, events, and current verified task state.
         """
         self._context = self._validated_context(context)
         events = self._drain_events()
+        if effect_result is not None:
+            if type(effect_result) is not EffectVerificationResult:
+                raise TypeError(
+                    "effect_result must be exactly EffectVerificationResult or None."
+                )
+            if self._pending_effect is None:
+                raise ValueError("No semantic effect is awaiting verification.")
+            if effect_result.verification_id != self._pending_effect.verification_id:
+                raise ValueError(
+                    "effect_result verification_id does not match the pending "
+                    "effect boundary."
+                )
         if self._status is not ExecutionStatus.RUNNING:
             return self._tick_result(command=None, events=events)
 
         assert self._plan is not None
-        if self._pending_effect is not None:
-            execution_mask = (
-                self._pending_effect.env_mask & self._pending & self._plan.plan_success
-            )
+        if not self._pending.any():
             command, hold_targets, completion_events = self._finish_action(
-                execution_mask,
-                effect_success,
+                self._pending,
+                None,
             )
             events.extend(completion_events)
             return self._tick_result(
@@ -450,6 +621,104 @@ class ExecutionSession:
                 hold_targets=hold_targets,
                 events=events,
             )
+
+        if self._pending_effect is not None:
+            execution_mask = (
+                self._pending_effect.env_mask & self._pending & self._plan.plan_success
+            )
+            if self._action_timed_out(self._plan, execution_mask):
+                timed_out = execution_mask.clone()
+                known_failures = self._effect_failures.clone()
+                planning_failed = self._pending & ~self._plan.plan_success
+                retry_mask = timed_out | known_failures | planning_failed
+                self._pending_effect = None
+                self._effect_failures.zero_()
+                if known_failures.any():
+                    events.append(
+                        self._event(
+                            ExecutionEventKind.EFFECT_VERIFICATION_FAILED,
+                            known_failures,
+                            "Expected semantic effects were not observed.",
+                        )
+                    )
+                if planning_failed.any():
+                    events.append(
+                        self._event(
+                            ExecutionEventKind.ACTION_PLANNING_FAILED,
+                            planning_failed,
+                            "Planning failed for pending environments.",
+                        )
+                    )
+                events.extend(
+                    self._attempt_action_retry(
+                        retry_mask,
+                        ExecutionEventKind.EFFECT_VERIFICATION_TIMEOUT,
+                        "Effect verification exceeded the action attempt timeout.",
+                        reason_mask=timed_out,
+                    )
+                )
+                if self._status is not ExecutionStatus.RUNNING:
+                    return self._tick_result(command=None, events=events)
+                if not self._pending.any():
+                    command, hold_targets, completion_events = self._finish_action(
+                        self._pending,
+                        None,
+                    )
+                    events.extend(completion_events)
+                    return self._tick_result(
+                        command=command,
+                        hold_targets=hold_targets,
+                        events=events,
+                    )
+                assert self._plan is not None
+                effect_result = None
+            else:
+                command, hold_targets, completion_events = self._finish_action(
+                    execution_mask,
+                    effect_result,
+                )
+                events.extend(completion_events)
+                return self._tick_result(
+                    command=command,
+                    hold_targets=hold_targets,
+                    events=events,
+                )
+
+        if self._effect_failures.any():
+            failed_effect = self._effect_failures.clone()
+            planning_failed = self._pending & ~self._plan.plan_success
+            retry_mask = failed_effect | planning_failed
+            self._effect_failures.zero_()
+            if planning_failed.any():
+                events.append(
+                    self._event(
+                        ExecutionEventKind.ACTION_PLANNING_FAILED,
+                        planning_failed,
+                        "Planning failed for pending environments.",
+                    )
+                )
+            events.extend(
+                self._attempt_action_retry(
+                    retry_mask,
+                    ExecutionEventKind.EFFECT_VERIFICATION_FAILED,
+                    "Expected semantic effects were not observed.",
+                    reason_mask=failed_effect,
+                )
+            )
+            if self._status is not ExecutionStatus.RUNNING:
+                return self._tick_result(command=None, events=events)
+            if not self._pending.any():
+                command, hold_targets, completion_events = self._finish_action(
+                    self._pending,
+                    None,
+                )
+                events.extend(completion_events)
+                return self._tick_result(
+                    command=command,
+                    hold_targets=hold_targets,
+                    events=events,
+                )
+            assert self._plan is not None
 
         plan = self._plan
         execution_mask = self._pending & plan.plan_success
@@ -468,6 +737,17 @@ class ExecutionSession:
             assert self._plan is not None
             plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
+        if not self._pending.any():
+            command, hold_targets, completion_events = self._finish_action(
+                self._pending,
+                None,
+            )
+            events.extend(completion_events)
+            return self._tick_result(
+                command=command,
+                hold_targets=hold_targets,
+                events=events,
+            )
 
         commands = plan.commands
         if self._waypoint_index < commands.frame_count:
@@ -492,6 +772,17 @@ class ExecutionSession:
             assert self._plan is not None
             plan = self._plan
             execution_mask = self._pending & self._plan.plan_success
+            if not self._pending.any():
+                command, hold_targets, completion_events = self._finish_action(
+                    self._pending,
+                    None,
+                )
+                events.extend(completion_events)
+                return self._tick_result(
+                    command=command,
+                    hold_targets=hold_targets,
+                    events=events,
+                )
             if plan.commands.frame_count > 0:
                 command = self._command_at(plan, 0, execution_mask)
                 self._waypoint_index = 1
@@ -505,7 +796,7 @@ class ExecutionSession:
             )
             command, hold_targets, completion_events = self._finish_action(
                 execution_mask,
-                effect_success,
+                effect_result,
             )
             events.extend(completion_events)
             return self._tick_result(
@@ -524,7 +815,7 @@ class ExecutionSession:
 
         command, hold_targets, completion_events = self._finish_action(
             execution_mask,
-            effect_success,
+            effect_result,
         )
         events.extend(completion_events)
         return self._tick_result(
@@ -607,6 +898,8 @@ class ExecutionSession:
         self._last_joint_ids = ()
         self._last_command_mask.zero_()
         self._pending_effect = None
+        self._effect_failures.zero_()
+        self._effect_requested_at = None
         planned_mask = self._pending & plan.plan_success
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
@@ -682,10 +975,7 @@ class ExecutionSession:
         events: list[ExecutionEvent] = []
         if not execution_mask.any():
             return events
-        if (
-            self._context.robot.timestamp - self._action_started_at
-            > plan.recovery_policy.action_timeout
-        ):
+        if self._action_timed_out(plan, execution_mask):
             return self._attempt_action_retry(
                 execution_mask,
                 ExecutionEventKind.ACTION_TIMEOUT,
@@ -731,6 +1021,18 @@ class ExecutionSession:
             )
         return events
 
+    def _action_timed_out(
+        self,
+        plan: ActionPlan,
+        execution_mask: torch.Tensor,
+    ) -> bool:
+        """Return whether an active action attempt exceeded its deadline."""
+        return bool(
+            execution_mask.any()
+            and self._context.robot.timestamp - self._action_started_at
+            > plan.recovery_policy.action_timeout
+        )
+
     def _attempt_replan(
         self,
         trigger_mask: torch.Tensor,
@@ -761,7 +1063,9 @@ class ExecutionSession:
             self._replans[allowed] += 1
             self._plan_current(self._context, ExecutionEventKind.REPLANNED)
             events.extend(self._drain_events())
-        self._update_terminal_status()
+        terminal_event = self._update_terminal_status()
+        if terminal_event is not None:
+            events.append(terminal_event)
         return events
 
     def _attempt_action_retry(
@@ -769,11 +1073,16 @@ class ExecutionSession:
         trigger_mask: torch.Tensor,
         reason: ExecutionEventKind,
         message: str,
+        *,
+        reason_mask: torch.Tensor | None = None,
     ) -> list[ExecutionEvent]:
         """Retry the current action or permanently fail exhausted rows."""
         assert self._plan is not None
         policy = self._plan.recovery_policy
-        events = [self._event(reason, trigger_mask, message)]
+        cause_mask = trigger_mask if reason_mask is None else reason_mask
+        events = [self._event(reason, cause_mask, message)]
+        self._pending_effect = None
+        self._effect_failures &= ~trigger_mask
         allowed = trigger_mask & (self._action_retries < policy.max_action_retries)
         exhausted = trigger_mask & ~allowed
         if exhausted.any():
@@ -798,13 +1107,15 @@ class ExecutionSession:
             )
             self._plan_current(self._context, ExecutionEventKind.REPLANNED)
             events.extend(self._drain_events())
-        self._update_terminal_status()
+        terminal_event = self._update_terminal_status()
+        if terminal_event is not None:
+            events.append(terminal_event)
         return events
 
     def _finish_action(
         self,
         execution_mask: torch.Tensor,
-        effect_success: torch.Tensor | None,
+        effect_result: EffectVerificationResult | None,
     ) -> tuple[
         RuntimeCommandFrame | None,
         tuple[RuntimeEndpointTarget, ...],
@@ -820,22 +1131,39 @@ class ExecutionSession:
         )
         orphaned_targets = bool(active_targets) and not plan_targets
         events: list[ExecutionEvent] = []
+        if not self._pending.any():
+            hold_targets, barrier_events = self._advance_action_barrier(
+                active_targets,
+                orphaned_targets=orphaned_targets,
+            )
+            return None, hold_targets, barrier_events
+
         planning_failed = self._pending & ~self._plan.plan_success
         if not execution_mask.any() and planning_failed.any():
             events.extend(
                 self._attempt_action_retry(
                     planning_failed,
-                    ExecutionEventKind.ACTION_RETRY,
+                    ExecutionEventKind.ACTION_PLANNING_FAILED,
                     "Planning failed for every pending environment.",
                 )
             )
             if self._status is not ExecutionStatus.RUNNING:
                 return None, active_targets, events
+            if not self._pending.any():
+                hold_targets, barrier_events = self._advance_action_barrier(
+                    active_targets,
+                    orphaned_targets=orphaned_targets,
+                )
+                events.extend(barrier_events)
+                return None, hold_targets, events
             return None, active_targets, events
 
+        failed_effect = torch.zeros_like(execution_mask)
+        unresolved = torch.zeros_like(execution_mask)
+        made_progress = False
         if self._plan.expected_effects.is_empty:
             verified = execution_mask
-        elif effect_success is None:
+        elif effect_result is None:
             if self._pending_effect is None:
                 self._pending_effect = self._effect_verification_request(execution_mask)
                 events.append(
@@ -847,9 +1175,27 @@ class ExecutionSession:
                 )
             return None, active_targets, events
         else:
-            verified_input = self._normalize_mask(effect_success, "effect_success")
-            verified = execution_mask & verified_input
-            self._pending_effect = None
+            success_input = self._normalize_mask(
+                effect_result.success_mask,
+                "effect_result.success_mask",
+            )
+            failure_input = self._normalize_mask(
+                effect_result.failure_mask,
+                "effect_result.failure_mask",
+            )
+            reported = success_input | failure_input
+            if (reported & ~execution_mask).any():
+                raise ValueError(
+                    "Effect verification masks must be subsets of the pending "
+                    "effect request env_mask."
+                )
+            verified = execution_mask & success_input
+            failed_effect = execution_mask & failure_input
+            unresolved = execution_mask & ~reported
+            made_progress = bool(reported.any().item())
+            self._effect_failures |= failed_effect
+            if not unresolved.any():
+                self._pending_effect = None
 
         if verified.any():
             self._task_state = self._plan.expected_effects.apply(
@@ -863,22 +1209,67 @@ class ExecutionSession:
                 control_dt=self._context.control_dt,
             )
             self._pending &= ~verified
-        failed_effect = execution_mask & ~verified
-        retry_mask = failed_effect | planning_failed
+        if unresolved.any():
+            if made_progress:
+                self._pending_effect = self._effect_verification_request(unresolved)
+            return None, active_targets, events
+        retry_mask = self._effect_failures | planning_failed
         if retry_mask.any():
+            effect_failure_mask = self._effect_failures.clone()
+            self._effect_failures.zero_()
+            reason = (
+                ExecutionEventKind.EFFECT_VERIFICATION_FAILED
+                if effect_failure_mask.any()
+                else ExecutionEventKind.ACTION_PLANNING_FAILED
+            )
+            reason_mask = (
+                effect_failure_mask if effect_failure_mask.any() else retry_mask
+            )
+            if effect_failure_mask.any() and planning_failed.any():
+                events.append(
+                    self._event(
+                        ExecutionEventKind.ACTION_PLANNING_FAILED,
+                        planning_failed,
+                        "Planning failed for pending environments.",
+                    )
+                )
             events.extend(
                 self._attempt_action_retry(
                     retry_mask,
-                    ExecutionEventKind.ACTION_RETRY,
+                    reason,
                     "Planning or expected-effect verification failed.",
+                    reason_mask=reason_mask,
                 )
             )
             if self._status is not ExecutionStatus.RUNNING:
                 return None, active_targets, events
-            return None, active_targets, events
+            if self._pending.any():
+                return None, active_targets, events
 
         if self._pending.any():
             return None, active_targets, events
+        hold_targets, barrier_events = self._advance_action_barrier(
+            active_targets,
+            orphaned_targets=orphaned_targets,
+        )
+        events.extend(barrier_events)
+        return None, hold_targets, events
+
+    def _advance_action_barrier(
+        self,
+        active_targets: tuple[RuntimeEndpointTarget, ...],
+        *,
+        orphaned_targets: bool,
+    ) -> tuple[tuple[RuntimeEndpointTarget, ...], list[ExecutionEvent]]:
+        """Complete an empty action cohort and install the next invocation."""
+        if self._status is not ExecutionStatus.RUNNING or self._plan is None:
+            raise RuntimeError("Only a running planned action can cross its barrier.")
+        if self._pending.any():
+            raise RuntimeError("The action barrier cannot advance with pending rows.")
+        self._pending_effect = None
+        self._effect_failures.zero_()
+        self._effect_requested_at = None
+        events: list[ExecutionEvent] = []
         events.append(
             self._event(
                 ExecutionEventKind.ACTION_COMPLETED,
@@ -893,22 +1284,28 @@ class ExecutionSession:
                 if self._eligible.any()
                 else ExecutionStatus.FAILED
             )
+            terminal_kind = (
+                ExecutionEventKind.SESSION_COMPLETED
+                if self._status is ExecutionStatus.COMPLETED
+                else ExecutionEventKind.SESSION_FAILED
+            )
             events.append(
                 self._event(
-                    ExecutionEventKind.SESSION_COMPLETED,
+                    terminal_kind,
                     self._eligible,
                     "Invocation sequence completed.",
                 )
             )
-            return None, (active_targets if orphaned_targets else ()), events
+            return (active_targets if orphaned_targets else ()), events
 
         self._pending = self._eligible.clone()
         self._pending_effect = None
+        self._effect_failures.zero_()
         self._action_retries.zero_()
         self._replans.zero_()
         self._plan_current(self._context, ExecutionEventKind.ACTION_PLANNED)
         events.extend(self._drain_events())
-        return None, active_targets, events
+        return active_targets, events
 
     def _command_at(
         self,
@@ -1071,13 +1468,22 @@ class ExecutionSession:
         """Describe the current action's pending semantic-effect boundary."""
         assert self._plan is not None
         request = self._requests[self._invocation_index]
+        verification_id = self._next_effect_verification_id
+        self._next_effect_verification_id += 1
+        if self._effect_requested_at is None:
+            self._effect_requested_at = self._context.robot.timestamp
         return EffectVerificationRequest(
+            verification_id=verification_id,
             skill_id=request.skill_id,
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
             invocation_index=self._invocation_index,
             terminal_segment=(
                 self._plan.segments[-1].name if self._plan.segments else None
+            ),
+            requested_at=self._effect_requested_at,
+            deadline=(
+                self._action_started_at + self._plan.recovery_policy.action_timeout
             ),
             env_mask=env_mask,
             expected_effects=self._plan.expected_effects,
@@ -1122,10 +1528,19 @@ class ExecutionSession:
         self._queued_events = []
         return events
 
-    def _update_terminal_status(self) -> None:
-        """Mark the session failed when no environment can continue."""
-        if not self._eligible.any():
+    def _update_terminal_status(self) -> ExecutionEvent | None:
+        """Mark and report failure when no environment can continue."""
+        if not self._eligible.any() and self._status is ExecutionStatus.RUNNING:
             self._status = ExecutionStatus.FAILED
+            self._pending_effect = None
+            self._effect_failures.zero_()
+            self._effect_requested_at = None
+            return self._event(
+                ExecutionEventKind.SESSION_FAILED,
+                self._eligible,
+                "No environment remains eligible for execution.",
+            )
+        return None
 
     def _tick_result(
         self,
@@ -1148,6 +1563,7 @@ class ExecutionSession:
 
 __all__ = [
     "EffectVerificationRequest",
+    "EffectVerificationResult",
     "ExecutionEvent",
     "ExecutionEventKind",
     "ExecutionSession",

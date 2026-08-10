@@ -604,9 +604,8 @@ class AtomicActionEngine:
             invocations: Grounded action requests in execution order.
             context: Initial measured state and scene snapshot. The engine
                 captures one when omitted.
-            eligible_mask: Optional per-environment cohort allowed to execute.
-                Ineligible rows remain excluded for the whole session. All rows
-                are eligible when omitted.
+            eligible_mask: Optional rows allowed to enter this session. Inactive
+                rows remain inactive across every invocation in the sequence.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
