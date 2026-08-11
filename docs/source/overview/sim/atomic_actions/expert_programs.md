@@ -176,6 +176,16 @@ requires the profile-selected `HandOverPoseProvider`. A direct `Place(at=...)`
 does not require a relation grounder. Missing, ambiguous, or stale providers
 fail during provider-aware program preflight, before the first physical action.
 
+The standard simulation registration supplies the common relation path without
+task-owned grounder code. Declare `SupportSurfaceAffordanceBinding` or
+`ContainerAffordanceBinding` in `SimulationSceneBinding`; its
+`object_target_pose` is the desired object pose relative to the explicitly named
+object, articulation, or link parent. Mark one capability-scoped target per
+parent as `is_default=True` when calls should reference only that parent. The
+registration installs the matching exact grounder automatically and resolves
+the target from a fresh scene snapshot. It never infers a placement frame from
+an entity name, mesh, or bounding box.
+
 The same preflight rejects a reachable `safe` preset for a dynamic scene before
 the first observation when the active motion generator cannot provide the
 required dynamic collision world.
@@ -229,6 +239,16 @@ Version 2 also uses strict symbolic key-level conflict detection at the barrier:
 two branches may not commit the same task-state key, even when their physical
 changes occurred in disjoint environment rows.
 
+Joint-position integrations using the active cuRobo planner can declare
+`CuroboParallelSafetyValidatorFactory(validation_control_part="dual_arm")`.
+The selected aggregate control part must contain every joint commanded by any
+lane. Before dispatch, the validator combines the exact merged target with the
+current measured joint state, interpolates the segment under `max_joint_step`,
+and asks cuRobo to check every supplied sample against joint bounds,
+self-collision, and the registry-backed static/dynamic world. It fails closed
+when a joint is uncovered or the configured sample cap would under-sample the
+segment. This gate does not replan or replace the trajectory.
+
 ## Python semantic calls
 
 Standalone applications can use the same compiler and runtime through
@@ -242,8 +262,9 @@ result = skills.run(Pick(object=cube), Place(object=cube, on=tray))
 ```
 
 In this example, `runtime_provider` owns the typed relation grounder for the
-tray's placement affordance. Applications without such a provider can use a
-direct `SemanticPose` through `Place(at=...)`.
+tray's placement affordance. A standard simulation registration obtains it from
+the support/container binding above. Applications without such a provider can
+use a direct `SemanticPose` through `Place(at=...)`.
 
 `from_env` requires an explicit `SkillRuntimeProvider`; it never scans arbitrary
 environment attributes. Gym demonstration environments intentionally use the
@@ -261,18 +282,20 @@ robot resource and endpoint declarations, see {doc}`robot_skill_profiles`.
 | --- | --- | --- |
 | `Pick` | Compiler, runtime, effect verification | Antipodal grasp binding plus motion/grasp resources |
 | `Place(at=...)` | Object-centric lowering with verified held state | Direct semantic pose target |
-| `Place(on=...)` / `Place(inside=...)` | Exact typed relation dispatch | Integration must install the matching `RelationTargetGrounder` |
+| `Place(on=...)` / `Place(inside=...)` | Exact typed relation dispatch | Support/container bindings install standard target-frame grounders; custom payloads install an exact `RelationTargetGrounder` |
 | `HandOver` | Coordinated call, state flow, and effect contract | Embodiment must install its named `HandOverPoseProvider` and evidence sources |
 | `OperateArticulation` | Named/absolute/displacement target and joint effect | Link, joint, operation-affordance, and interaction endpoint bindings |
 | Registered calls | Typed call catalog and explicit lowerer | Physical extensions must add an explicit effect contract |
 | Mobile/whole-body extensions | Generic resources, claims, endpoint targets, command frames, and routing | Requires a reusable semantic skill/lowerer plus matching adapter, payload, transport, and effect integration; no curated navigation or whole-body skill is installed today |
-| Parallel blocks | Shared-clock coordinator and strict barrier merge | Requires an authoritative `ParallelCommandSafetyValidator`; none is inferred by default |
+| Parallel blocks | Shared-clock coordinator and strict barrier merge | Joint-position/cuRobo tasks may declare the aggregate collision validator; other transports require an authoritative validator |
 
 The table separates implemented reusable contracts from embodiment-specific
 providers. It is not a claim that every row has completed task-level physical
 simulation acceptance.
 
 The Open Drawer vertical slice has completed its supported-simulation physical
-run and reached the configured drawer joint target. Repeated cube pick/place has
-completed one physical Pick/Place/settle/validator cycle; its full three-cycle
-run remains in threshold calibration.
+run and reached the configured drawer joint target. Repeated cube pick/place
+completes three independently observed physical Pick/Place/settle/validator
+cycles. Its physical-fault gate opens the commanded gripper during Place,
+observes held-object loss, performs a real re-acquisition Pick, retries Place,
+and completes without simulator-side repair.

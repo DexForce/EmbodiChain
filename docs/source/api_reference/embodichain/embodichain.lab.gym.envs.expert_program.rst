@@ -16,6 +16,8 @@ embodichain.lab.gym.envs.expert_program
       ExpertProgramEnvironmentMixin
       ExpertProgramEnvironmentAdapter
       SimulationSceneBinding
+      SupportSurfaceAffordanceBinding
+      ContainerAffordanceBinding
       SimulationResourceEndpointBinding
       SimulationRobotResourceBinding
       RobotResourceBinding
@@ -25,6 +27,7 @@ embodichain.lab.gym.envs.expert_program
       SimulationExpertProgramFactory
       SimulationSegmentPolicyPort
       ControlCommandStateEvidenceTracker
+      CuroboParallelSafetyValidatorFactory
 
 .. currentmodule:: embodichain.lab.gym.envs.expert_program
 
@@ -80,6 +83,12 @@ Simulation integration
 .. autoclass:: SimulationSceneBinding
    :members:
 
+.. autoclass:: SupportSurfaceAffordanceBinding
+   :members:
+
+.. autoclass:: ContainerAffordanceBinding
+   :members:
+
 .. autoclass:: SimulationResourceEndpointBinding
 
 .. autoclass:: SimulationRobotResourceBinding
@@ -103,4 +112,7 @@ Simulation integration
    :members:
 
 .. autoclass:: ControlCommandStateEvidenceTracker
+   :members:
+
+.. autoclass:: CuroboParallelSafetyValidatorFactory
    :members:

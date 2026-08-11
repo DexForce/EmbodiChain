@@ -150,14 +150,14 @@ _FRAMEWORK_CAPABILITIES = (
     (
         "HandOver",
         "framework-tested",
-        "integration-required",
-        "No landed task integration is claimed by this report.",
+        "per-embodiment integration",
+        "Coordinated effects and bounded recovery are covered.",
     ),
     (
         "Place relation (on/inside)",
         "framework-tested",
-        "integration-required",
-        "Embodiment frames and relation validators must be supplied.",
+        "per-scene integration",
+        "Standard support/container target-frame bindings install exact grounders.",
     ),
     (
         "Registered call",
@@ -169,7 +169,7 @@ _FRAMEWORK_CAPABILITIES = (
         "V2 parallel",
         "framework-tested",
         "integration-required",
-        "Fail-closed by default; production use requires an authoritative validator.",
+        "Joint/cuRobo validation is available; physical parallel acceptance remains.",
     ),
 )
 
@@ -182,7 +182,7 @@ _LANDED_INTEGRATIONS = (
         "attach/release",
         "V1 sequential",
         "checked in",
-        "pending: one cycle passed; full three-cycle gate remains",
+        "fixed-seed three-cycle and physical-loss recovery slow gates",
     ),
     (
         "CobotMagic",
@@ -192,6 +192,15 @@ _LANDED_INTEGRATIONS = (
         "V1 sequential",
         "checked in",
         "fixed-seed supported-simulation slow gate; not release-required",
+    ),
+    (
+        "Dual UR5 + PGI",
+        "HandOver",
+        "Pick + HandOver",
+        "attach/transfer",
+        "V1 sequential",
+        "checked in",
+        "three consecutive supported-simulation contact-dynamics runs",
     ),
 )
 
@@ -329,7 +338,7 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             "## Checked-in Integration Matrix",
             "",
             (
-                "Only the two checked-in vertical slices below are classified as "
+                "Only the checked-in vertical slices below are classified as "
                 "integration/production code. Physical acceptance is tracked "
                 "separately."
             ),
@@ -354,13 +363,13 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
         [
             "",
             (
-                "HandOver, Place relations (`on`/`inside`), Registered calls, and V2 "
-                "parallel are framework-tested but integration-required. They are "
-                "intentionally not listed as checked-in integrations."
+                "Place-relation bindings are reusable scene integration rather than "
+                "a task vertical slice. Registered calls and V2 parallel remain "
+                "integration-required; physical parallel acceptance is still open."
             ),
             "",
             (
-                "Both checked-in environment classes have zero task-local motion or "
+                "The checked-in environment classes have zero task-local motion or "
                 "demo-generation overrides; "
                 "`test_task_classes_do_not_override_motion_or_demo_generation` "
                 "keeps that structural metric at zero."
@@ -422,10 +431,10 @@ def render_report(metrics: Sequence[TaskSizeMetric]) -> str:
             ),
             "",
             (
-                "No success-rate result or release gate is checked in yet. Open "
-                "Drawer has a single real-simulation smoke pass, while repeated Cube "
-                "still needs the tracking-threshold decision and three-cycle physical "
-                "acceptance before a fixed-seed rate is meaningful."
+                "No multi-seed success-rate or release gate is checked in yet. Open "
+                "Drawer has a real-simulation smoke pass; repeated Cube has a "
+                "fixed-seed three-cycle pass plus physical-loss/re-acquisition gate; "
+                "and HandOver has three consecutive contact-dynamics runs."
             ),
             "",
             "## Drift Check",

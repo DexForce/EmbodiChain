@@ -4,9 +4,11 @@
   branches. A real CUDA/cuRobo dynamic-obstacle recovery gate is landed and
   runs conditionally when cuRobo is installed, CUDA is available, and GPU/slow
   tests are explicitly enabled. Open Drawer has completed its
-  supported-simulation physical run; repeated cube pick/place has completed one
-  Pick/Place/settle/validator cycle, while the full three-cycle run remains in
-  threshold calibration. Dual-UR5/PGI HandOver has completed three consecutive
+  supported-simulation physical run; repeated cube pick/place now completes all
+  three independently observed Pick/Place/settle/validator cycles. A physical
+  gripper-command fault gate also proves held-object loss, symbolic invalidation,
+  real re-acquisition, and retry without simulator-side repair. Dual-UR5/PGI
+  HandOver has completed three consecutive
   supported-simulation Pick/transfer/settle/validator runs using contact
   dynamics only. Named trajectory-segment effect gates now block Pick lift,
   Place retract, and HandOver source release until fresh physical evidence
@@ -1232,9 +1234,11 @@ it only when GPU and slow tests are explicitly selected.
 
 Implementation status: the semantic facade, provider-free linking, canonical
 compiler, bounded program preflight, and cross-segment sequential look-ahead are
-implemented. Relation placement remains an exact typed integration capability;
-a reusable production support-surface/container affordance and grounder are
-follow-up work rather than inferred behavior.
+implemented. Relation placement remains an exact typed integration capability.
+Production support-surface and container bindings now declare a desired object
+target frame relative to an object, articulation, or link parent; registration
+installs their exact versioned grounders automatically. No geometric target is
+guessed from a name, mesh, or bounding box.
 
 Deliverables:
 
@@ -1260,16 +1264,19 @@ effects, row-local composite hysteresis kernel, canonical `SkillRuntime`, and
 production simulation evidence ports are wired end to end. Segment-scoped
 held-object guard requests, live evidence collection, row-local symbolic
 invalidation, bounded Pick retry, and typed external-recovery hand-off are also
-implemented. Physical simulation acceptance is partial: Open Drawer and one
-cube Pick/Place/settle/validator cycle have completed. The embodiment-owned
+implemented. Physical simulation acceptance covers Open Drawer and all three
+cube Pick/Place/settle/validator cycles. The embodiment-owned
 dual-UR5/PGI HandOver slice now completes Pick, transfer, terminal
 physical-effect verification, settling, and target validation through real
 contact dynamics. Per-expectation terminal outcomes, core-owned failure
 invalidation, row-local retry/recovery decisions, fail-closed deadline
 reconciliation, and blocking named-segment effect gates are implemented.
 Workflow-level re-acquisition is implemented through the preset-owned bounded
-policy and canonical runtime. Real-simulation fault-injection coverage and the
-full repeated-cube run remain validation work.
+policy and canonical runtime. A supported-simulation fault gate now replaces a
+bounded window of outgoing gripper commands with a real open command during
+Place, observes pose-relation contradiction and symbolic invalidation, performs
+a real Pick, retries Place, and completes the remaining program. The wrapper
+never writes object pose, velocity, attachment, constraint, or task state.
 
 Deliverables:
 
@@ -1314,9 +1321,9 @@ strict decoder/loader, lazy compiler, environment/CLI integration, shared
 simulation factory, and three-segment cube program are implemented. The task
 combines declarative program configuration with typed scene/profile integration
 declarations and installs the shared adapter without overriding task motion
-generation. A supported-simulation run has completed the first physical
-Pick/Place/settle/validator cycle; completing all three cycles remains an
-acceptance item while thresholds are calibrated.
+generation. The UR5 embodiment preset uses 100 motion samples while retaining
+the 0.08-rad tracking gate and bounded replanning. A supported-simulation run
+now completes all three physical Pick/Place/settle/validator cycles.
 
 Deliverables:
 
@@ -1361,13 +1368,16 @@ trajectories in task code.
 
 ### Phase 7: parallel execution and PourWater
 
-Implementation status: the schema/runtime contracts and fail-closed safety
-boundary are implemented. Schema
+Implementation status: the schema/runtime contracts, fail-closed safety
+boundary, and production simulation validator are implemented. Schema
 version 2 provides explicit parallel branches and barriers; static resource
 conflict analysis, shared-clock lane coordination, deterministic hold padding,
 transport/safety validation, row-local failure and cancellation, timeouts, and
-deterministic state merge are covered by tests. A production simulation safety
-validator and parallel physical integration remain pending. The PourWater task
+deterministic state merge are covered by tests. The cuRobo validator assembles
+the exact aggregate joint segment, densifies it under a configured maximum joint
+step, and checks every sample against joint bounds, self collision, and the
+registry-backed live world without replanning or replacing the command. A
+parallel physical integration remains pending. The PourWater task
 migration is outside the current scope because it would require modifying
 Action Bank code.
 
@@ -1516,22 +1526,22 @@ The design is complete when all of the following hold:
 - [x] Automatic grasping tracks target revisions and receives downstream object
       goals without caller duplication.
 - [x] `Place` is object-centric and consumes verified held-object state.
-- [ ] Built-in grasp, release, handover, and supported articulation effect
-      monitors work in simulation. The dual-UR5/PGI HandOver vertical slice is
-      physically validated; remaining skill/embodiment coverage keeps this
-      aggregate item open.
-- [ ] Grasp and handover simulation gates retain objects through configured
+- [x] Built-in grasp, release, handover, and supported articulation effect
+      monitors work in simulation across the repeated cube, dual-UR5/PGI
+      HandOver, and Open Drawer vertical slices.
+- [x] Grasp and handover simulation gates retain objects through configured
       drive/contact dynamics only; no monitor or runtime path creates a
       synthetic attachment, freezes the object, or overrides its pose.
-- [ ] Physical held-object loss is observed as effect failure, invalidates the
+- [x] Physical held-object loss is observed as effect failure, invalidates the
       affected symbolic relation, and exercises bounded recovery rather than
       being hidden by a simulator-side attachment. The segment-aware observation,
       row-local core-owned invalidation, per-expectation terminal
       reconciliation, fail-closed deadline handling, bounded Pick/retained-Place
       retry, typed recovery boundary, and blocking acquisition/release gates are
       implemented. Preset-owned per-row workflow re-acquisition now performs
-      real `Pick` and semantic-call retries; real-simulation fault injection
-      remains open.
+      real `Pick` and semantic-call retries. The supported-simulation gate opens
+      the real gripper during Place, observes the loss, re-acquires the fallen
+      cube, and completes the retried call.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break
@@ -1543,7 +1553,7 @@ The design is complete when all of the following hold:
       through `env.step()`.
 - [x] No program post-policy, effect, or tracing integration depends on
       hard-coded waypoint indices.
-- [ ] Repeated cube pick/place completes at least three lazy, independently
+- [x] Repeated cube pick/place completes at least three lazy, independently
       observed program/demo segments with settle/effect/validation metadata.
 - [x] Version 1 uses one shared program/call barrier while per-environment task
       state, effects, recovery, eligibility, success, and failure remain
