@@ -60,6 +60,9 @@ PLACE_ON_AFFORDANCE_CAPABILITY = "affordance.place.on"
 PLACE_IN_AFFORDANCE_CAPABILITY = "affordance.place.in"
 """Capability for an affordance that defines an ``inside`` placement relation."""
 
+PLACEMENT_TARGET_AFFORDANCE_REVISION = "1"
+"""Schema revision for built-in support/container object-target frames."""
+
 SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID = "builtin.scene_articulation"
 """Stable route for explicitly injected articulation-joint observations."""
 
@@ -90,6 +93,58 @@ class UnsupportedSceneAffordanceError(ValueError):
 
 class AmbiguousSceneAffordanceError(ValueError):
     """Raised when compatible affordances lack one explicitly scoped default."""
+
+
+@dataclass
+class SupportSurfaceAffordance(Affordance):
+    """Typed target frame for placing an object's origin on a support surface.
+
+    The registered affordance pose is the desired object pose, expressed
+    relative to its parent scene entity. The optional confidence threshold is
+    enforced whenever that late-bound target pose is resolved.
+
+    Args:
+        minimum_confidence: Minimum confidence accepted while resolving the
+            late-bound target pose.
+    """
+
+    minimum_confidence: float = 0.0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.minimum_confidence, bool) or not isinstance(
+            self.minimum_confidence,
+            (int, float),
+        ):
+            raise TypeError("minimum_confidence must be a number.")
+        self.minimum_confidence = float(self.minimum_confidence)
+        if not 0.0 <= self.minimum_confidence <= 1.0:
+            raise ValueError("minimum_confidence must be in [0, 1].")
+
+
+@dataclass
+class ContainerAffordance(Affordance):
+    """Typed target frame for placing an object's origin inside a container.
+
+    The registered affordance pose is the desired object pose, expressed
+    relative to its parent scene entity. The optional confidence threshold is
+    enforced whenever that late-bound target pose is resolved.
+
+    Args:
+        minimum_confidence: Minimum confidence accepted while resolving the
+            late-bound target pose.
+    """
+
+    minimum_confidence: float = 0.0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.minimum_confidence, bool) or not isinstance(
+            self.minimum_confidence,
+            (int, float),
+        ):
+            raise TypeError("minimum_confidence must be a number.")
+        self.minimum_confidence = float(self.minimum_confidence)
+        if not 0.0 <= self.minimum_confidence <= 1.0:
+            raise ValueError("minimum_confidence must be in [0, 1].")
 
 
 def _validate_identifier(value: str, name: str) -> None:
@@ -2106,7 +2161,9 @@ __all__ = [
     "ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY",
     "ArticulationJointEvidenceAddress",
     "AmbiguousSceneAffordanceError",
+    "ContainerAffordance",
     "GRASP_AFFORDANCE_CAPABILITY",
+    "PLACEMENT_TARGET_AFFORDANCE_REVISION",
     "PLACE_IN_AFFORDANCE_CAPABILITY",
     "PLACE_ON_AFFORDANCE_CAPABILITY",
     "RegistrySceneProvider",
@@ -2126,5 +2183,6 @@ __all__ = [
     "SceneLinkRef",
     "SceneObjectRef",
     "SceneRegistry",
+    "SupportSurfaceAffordance",
     "UnsupportedSceneAffordanceError",
 ]

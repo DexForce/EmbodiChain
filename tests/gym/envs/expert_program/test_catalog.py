@@ -31,12 +31,15 @@ from embodichain.lab.gym.envs.expert_program import (
     IntegrationFingerprintMismatch,
     SimulationArticulationLinkBinding,
     SimulationExpertProgramRegistration,
+    SimulationRigidObjectBinding,
     SimulationSceneBinding,
+    SupportSurfaceAffordanceBinding,
     decode_expert_program,
 )
 from embodichain.lab.gym.utils.registration import EnvSpec
 from embodichain.lab.sim.atomic_actions import Affordance, PlanningContext
 from embodichain.lab.sim.skills import (
+    PLACEMENT_TARGET_AFFORDANCE_REVISION,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     BoundSemanticCall,
     ControlPartEndpoint,
@@ -47,6 +50,7 @@ from embodichain.lab.sim.skills import (
     RelationTargetGrounder,
     SemanticCallCatalog,
     SceneAffordanceRef,
+    SceneDynamics,
     SceneEntityManifest,
     SceneManifest,
     SceneObjectRef,
@@ -54,6 +58,8 @@ from embodichain.lab.sim.skills import (
     RegisteredSemanticCall,
     SemanticCallDescriptor,
     SkillPolicyPreset,
+    SupportSurfaceAffordance,
+    SupportSurfaceRelationTargetGrounder,
     WorkflowRecoveryPolicy,
     builtin_semantic_call_catalog,
 )
@@ -739,6 +745,58 @@ def test_catalog_accepts_linked_place_relation_with_exact_grounder_key() -> None
     )
 
     compiled = catalog.preflight(program)
+
+    assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "place"
+
+
+def test_standard_support_binding_installs_grounder_without_task_code() -> None:
+    """A task relation declaration supplies its production grounder implicitly."""
+    base = create_cube_scene_binding(grasp_samples=32)
+    scene = replace(
+        base,
+        registry_id="relation_scene",
+        rigid_objects=(
+            *base.rigid_objects,
+            SimulationRigidObjectBinding(
+                entity_id="support",
+                simulation_uid="support",
+                dynamics=SceneDynamics.STATIC,
+                semantic_type="support_surface",
+            ),
+        ),
+        support_surfaces=(
+            SupportSurfaceAffordanceBinding(
+                entity_id="support_top",
+                parent_id="support",
+                native_name="top_object_target",
+                is_default=True,
+            ),
+        ),
+    )
+    registration = SimulationExpertProgramRegistration(
+        scene_binding=scene,
+        robot_profile_binding=create_cube_robot_profile_binding(),
+    )
+
+    assert len(registration.relation_grounders) == 1
+    assert type(registration.relation_grounders[0]) is (
+        SupportSurfaceRelationTargetGrounder
+    )
+    assert registration.catalog.relation_grounder_keys == frozenset(
+        {
+            (
+                PLACE_ON_AFFORDANCE_CAPABILITY,
+                SupportSurfaceAffordance,
+                PLACEMENT_TARGET_AFFORDANCE_REVISION,
+            )
+        }
+    )
+
+    program = decode_expert_program(
+        _place_relation_payload(),
+        validation_context=registration.catalog,
+    )
+    compiled = registration.catalog.preflight(program)
 
     assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "place"
 
