@@ -43,11 +43,26 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
     INVERSE_KINEMATICS_CAPABILITY,
     SkillBindingContract,
     SkillResourceSlot,
 )
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
+from .effects import (
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
+    CONTACT_EFFECT_CHANNEL,
+    CONSTRAINT_EFFECT_CHANNEL,
+    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+    FORCE_EFFECT_CHANNEL,
+    JOINT_STATE_EFFECT_CHANNEL,
+    POSE_RELATION_EFFECT_CHANNEL,
+    ControlPartEvidenceAddress,
+    EffectEvidenceSourceRef,
+    EffectMonitorRef,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
@@ -123,6 +138,39 @@ def _snapshot_endpoint_commands(
     return MappingProxyType(snapshots)
 
 
+def _snapshot_effect_sources(
+    values: Mapping[str, EffectEvidenceSourceRef],
+    *,
+    field_name: str,
+) -> Mapping[str, EffectEvidenceSourceRef]:
+    """Validate, own, and freeze endpoint observation sources by channel."""
+    if not isinstance(values, Mapping):
+        raise TypeError(f"{field_name} must be a mapping.")
+    snapshots: dict[str, EffectEvidenceSourceRef] = {}
+    for channel, source in values.items():
+        _validate_identifier(channel, field_name=f"{field_name} channel names")
+        if not isinstance(source, EffectEvidenceSourceRef):
+            raise TypeError(
+                f"{field_name} values must be EffectEvidenceSourceRef instances."
+            )
+        snapshot = source.snapshot()
+        if snapshot is source:
+            raise TypeError(
+                f"{field_name}[{channel!r}].snapshot() must return an independent "
+                "source reference."
+            )
+        if (
+            isinstance(snapshot.address, ControlPartEvidenceAddress)
+            and snapshot.address.channel != channel
+        ):
+            raise ValueError(
+                f"{field_name}[{channel!r}] disagrees with its control-part "
+                f"address channel {snapshot.address.channel!r}."
+            )
+        snapshots[channel] = snapshot
+    return MappingProxyType(snapshots)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResourceEndpoint(ABC):
     """Extensible execution endpoint in a robot resource graph.
@@ -188,6 +236,12 @@ class EndpointResolution:
     runtime_target: RuntimeEndpointTarget
     """Typed immutable destination consumed by an endpoint command transport."""
 
+    task_state_key: str | None = None
+    """Optional symbolic state key; profile binding defaults to its resource ID."""
+
+    effect_sources: Mapping[str, EffectEvidenceSourceRef] = field(default_factory=dict)
+    """Provider-routed raw observation sources keyed by open channel ID."""
+
     command_profile_key: str | None = None
     """Profile key that owns semantic commands for this endpoint, when any."""
 
@@ -226,6 +280,19 @@ class EndpointResolution:
             field_name="RuntimeEndpointTarget.target_id",
         )
         object.__setattr__(self, "runtime_target", target)
+        if self.task_state_key is not None:
+            _validate_identifier(
+                self.task_state_key,
+                field_name="EndpointResolution.task_state_key",
+            )
+        object.__setattr__(
+            self,
+            "effect_sources",
+            _snapshot_effect_sources(
+                self.effect_sources,
+                field_name="EndpointResolution.effect_sources",
+            ),
+        )
         if self.command_profile_key is not None:
             _validate_identifier(
                 self.command_profile_key,
@@ -356,6 +423,18 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
                     f"Control part {endpoint.control_part!r} declares solver-backed "
                     f"capabilities {sorted(declared)}, but has no configured solver."
                 )
+        effect_channels = {
+            POSE_RELATION_EFFECT_CHANNEL,
+            JOINT_STATE_EFFECT_CHANNEL,
+        }
+        if GRASP_CAPABILITY in endpoint.capabilities:
+            effect_channels.update(
+                {
+                    CONTACT_EFFECT_CHANNEL,
+                    CONSTRAINT_EFFECT_CHANNEL,
+                    FORCE_EFFECT_CHANNEL,
+                }
+            )
         return EndpointResolution(
             runtime_target=JointPositionTarget(
                 control_part=endpoint.control_part,
@@ -367,6 +446,14 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
                 else endpoint.command_profile
             ),
             requires_command_profile=endpoint.command_profile is not None,
+            effect_sources={
+                channel: EffectEvidenceSourceRef(
+                    CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                    CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+                    ControlPartEvidenceAddress(endpoint.control_part, channel),
+                )
+                for channel in sorted(effect_channels)
+            },
             claim_tokens=frozenset({f"robot.control_part:{endpoint.control_part}"}),
             joint_ids=joint_ids,
         )
@@ -379,6 +466,8 @@ class ResolvedResourceEndpoint:
     endpoint: ResourceEndpoint
     adapter_id: str
     runtime_target: RuntimeEndpointTarget
+    task_state_key: str | None = None
+    effect_sources: Mapping[str, EffectEvidenceSourceRef] = field(default_factory=dict)
     command_profile_key: str | None = None
     requires_command_profile: bool = False
     commands: Mapping[str, ControlCommand] = field(default_factory=dict)
@@ -405,6 +494,8 @@ class ResolvedResourceEndpoint:
         )
         resolution = EndpointResolution(
             runtime_target=self.runtime_target,
+            task_state_key=self.task_state_key,
+            effect_sources=self.effect_sources,
             command_profile_key=self.command_profile_key,
             requires_command_profile=self.requires_command_profile,
             claim_tokens=self.claim_tokens,
@@ -412,6 +503,13 @@ class ResolvedResourceEndpoint:
             exclusive=self.exclusive,
         )
         object.__setattr__(self, "runtime_target", resolution.runtime_target)
+        resolved_state_key = (
+            resolution.runtime_target.target_id
+            if resolution.task_state_key is None
+            else resolution.task_state_key
+        )
+        object.__setattr__(self, "task_state_key", resolved_state_key)
+        object.__setattr__(self, "effect_sources", resolution.effect_sources)
         object.__setattr__(
             self,
             "command_profile_key",
@@ -548,13 +646,14 @@ class ResourceBinding:
 
 @dataclass(frozen=True, slots=True, init=False)
 class SkillPolicyPreset:
-    """Versioned planning, recovery, and runner policy bundle."""
+    """Versioned planning, recovery, runner, and effect-monitor bundle."""
 
     preset_id: str
     schema_version: int
     _motion_policy: MotionPolicy
     _recovery_policy: RecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
+    _effect_monitors: Mapping[str, EffectMonitorRef]
 
     def __init__(
         self,
@@ -563,6 +662,7 @@ class SkillPolicyPreset:
         motion_policy: MotionPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
+        effect_monitors: Mapping[str, EffectMonitorRef] | None = None,
     ) -> None:
         """Own one policy bundle without exposing mutable nested configuration."""
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
@@ -584,11 +684,45 @@ class SkillPolicyPreset:
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
         if not isinstance(selected_runner, ExecutionRunnerCfg):
             raise TypeError("runner_cfg must be an ExecutionRunnerCfg.")
+        selected_effect_monitors = (
+            {
+                semantic_id: EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID,
+                    COMPOSITE_EFFECT_MONITOR_REVISION,
+                )
+                for semantic_id in (
+                    "pick",
+                    "place",
+                    "hand_over",
+                    "operate_articulation",
+                )
+            }
+            if effect_monitors is None
+            else effect_monitors
+        )
+        if not isinstance(selected_effect_monitors, Mapping):
+            raise TypeError("effect_monitors must be a mapping or None.")
+        normalized_effect_monitors: dict[str, EffectMonitorRef] = {}
+        for semantic_id, monitor_ref in selected_effect_monitors.items():
+            _validate_identifier(
+                semantic_id,
+                field_name="SkillPolicyPreset effect semantic IDs",
+            )
+            if not isinstance(monitor_ref, EffectMonitorRef):
+                raise TypeError(
+                    "effect_monitors values must be EffectMonitorRef instances."
+                )
+            normalized_effect_monitors[semantic_id] = monitor_ref.snapshot()
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
         object.__setattr__(self, "_runner_cfg", deepcopy(selected_runner))
+        object.__setattr__(
+            self,
+            "_effect_monitors",
+            MappingProxyType(normalized_effect_monitors),
+        )
 
     @property
     def motion_policy(self) -> MotionPolicy:
@@ -605,6 +739,16 @@ class SkillPolicyPreset:
         """Return an independently owned runner configuration."""
         return deepcopy(self._runner_cfg)
 
+    @property
+    def effect_monitors(self) -> Mapping[str, EffectMonitorRef]:
+        """Return effect-monitor selections keyed by exact semantic call ID."""
+        return MappingProxyType(
+            {
+                semantic_id: monitor_ref.snapshot()
+                for semantic_id, monitor_ref in self._effect_monitors.items()
+            }
+        )
+
     def snapshot(self) -> SkillPolicyPreset:
         """Return an independently owned preset value."""
         return SkillPolicyPreset(
@@ -613,6 +757,7 @@ class SkillPolicyPreset:
             motion_policy=self.motion_policy,
             recovery_policy=self.recovery_policy,
             runner_cfg=self.runner_cfg,
+            effect_monitors=self.effect_monitors,
         )
 
 
@@ -1454,6 +1599,12 @@ class BoundRobotSkillProfile:
                     endpoint=endpoint,
                     adapter_id=adapter.adapter_id,
                     runtime_target=resolution.runtime_target,
+                    task_state_key=(
+                        resource_id
+                        if resolution.task_state_key is None
+                        else resolution.task_state_key
+                    ),
+                    effect_sources=resolution.effect_sources,
                     command_profile_key=resolution.command_profile_key,
                     requires_command_profile=resolution.requires_command_profile,
                     commands=(
@@ -1853,6 +2004,7 @@ class BoundRobotSkillProfile:
                         resource_id=resource.resource_id,
                         adapter_id=endpoint.adapter_id,
                         target=endpoint.runtime_target,
+                        task_state_key=endpoint.task_state_key,
                         capabilities=endpoint.capabilities,
                         commands=endpoint.commands,
                         claim_tokens=endpoint.claim_tokens,

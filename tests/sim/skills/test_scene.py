@@ -27,6 +27,7 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
     EntityState,
+    ObservedArticulationJointState,
     SceneSnapshot,
 )
 from embodichain.lab.sim.skills import (
@@ -89,6 +90,24 @@ class _MutableStateProvider:
         return EntityState(self.pose)
 
 
+class _MutableJointProvider:
+    """Expose one mutable canonical articulation joint observation."""
+
+    def __init__(self, position: torch.Tensor) -> None:
+        self.position = position
+        self.calls = 0
+
+    def observe_joints(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> dict[str, ObservedArticulationJointState]:
+        del timestamp, env_ids
+        self.calls += 1
+        return {"slide": ObservedArticulationJointState(self.position)}
+
+
 class _MotionGenerator:
     """Minimal dynamic-collision integration surface."""
 
@@ -127,12 +146,26 @@ class _ExternalSceneProvider:
 class _SimulationEntity:
     """Simulation entity pose source used by the opt-in adapter tests."""
 
-    def __init__(self, pose: torch.Tensor) -> None:
+    def __init__(
+        self,
+        pose: torch.Tensor,
+        *,
+        qpos: torch.Tensor | None = None,
+        joint_names: tuple[str, ...] = (),
+    ) -> None:
         self.pose = pose
+        self.qpos = qpos
+        self.joint_names = joint_names
 
     def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
         assert to_matrix is True
         return self.pose
+
+    def get_qpos(self, *, target: bool) -> torch.Tensor:
+        assert target is False
+        if self.qpos is None:
+            raise RuntimeError("This simulation fixture has no articulation qpos.")
+        return self.qpos
 
 
 class _Simulation:
@@ -144,7 +177,11 @@ class _Simulation:
             "ignored": _SimulationEntity(torch.eye(4) * 2.0),
         }
         self.articulations = {
-            "sim_drawer": _SimulationEntity(torch.eye(4)),
+            "sim_drawer": _SimulationEntity(
+                torch.eye(4),
+                qpos=torch.tensor([[0.25]]),
+                joint_names=("slide",),
+            ),
         }
 
     def get_rigid_object(self, uid: str) -> _SimulationEntity | None:
@@ -218,6 +255,47 @@ def test_registration_rejects_string_as_alias_collection() -> None:
 def test_root_registration_requires_explicit_state_provider() -> None:
     with pytest.raises(ValueError, match="state_provider"):
         SceneEntityRegistration(ref=SceneObjectRef("cube"))
+
+
+def test_joint_state_provider_is_owned_by_articulation_registration() -> None:
+    joint_provider = _MutableJointProvider(torch.tensor([[0.1], [0.2]]))
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=SceneArticulationRef("drawer"),
+                state_provider=_StateProvider(),
+                joint_state_provider=joint_provider,
+            ),
+        )
+    )
+    provider = registry.make_scene_provider()
+    env_ids = torch.tensor([0, 1], dtype=torch.long)
+
+    first = provider.snapshot(timestamp=0.0, env_ids=env_ids)
+    returned = first.articulation_joints[("drawer", "slide")]
+    returned.position.zero_()
+    assert torch.equal(
+        first.articulation_joints[("drawer", "slide")].position,
+        torch.tensor([[0.1], [0.2]]),
+    )
+
+    joint_provider.position[:, 0] = torch.tensor([0.3, 0.4])
+    second = provider.snapshot(timestamp=1.0, env_ids=env_ids)
+    assert second.version == first.version + 1
+    assert torch.equal(
+        second.articulation_joints[("drawer", "slide")].position,
+        torch.tensor([[0.3], [0.4]]),
+    )
+    assert joint_provider.calls == 2
+
+
+def test_joint_state_provider_rejects_non_articulation_registration() -> None:
+    with pytest.raises(ValueError, match="SceneArticulationRef"):
+        SceneEntityRegistration(
+            ref=SceneObjectRef("cube"),
+            state_provider=_StateProvider(),
+            joint_state_provider=_MutableJointProvider(torch.tensor([0.0])),
+        )
 
 
 def test_link_registration_requires_parent_and_native_name() -> None:
@@ -1023,6 +1101,35 @@ def test_from_simulation_is_explicit_and_uses_uid_only_as_alias() -> None:
     assert registry.collision_geometry_by_id() == {}
     assert set(snapshot.entities) == {"cube"}
     assert "ignored" not in snapshot.entities
+
+
+def test_from_simulation_does_not_register_canonical_uid_as_alias() -> None:
+    simulation = _Simulation()
+    simulation.rigid_objects["cube"] = simulation.rigid_objects["sim_cube"]
+
+    registry = SceneRegistry.from_simulation(
+        simulation,  # type: ignore[arg-type]
+        rigid_objects={"cube": "cube"},
+    )
+
+    assert registry.resolve("cube") == SceneObjectRef("cube")
+    assert registry.aliases == {}
+
+
+def test_from_simulation_publishes_named_articulation_qpos() -> None:
+    registry = SceneRegistry.from_simulation(
+        _Simulation(),  # type: ignore[arg-type]
+        articulations={"drawer": "sim_drawer"},
+    )
+
+    snapshot = registry.make_scene_provider().snapshot(
+        timestamp=0.0,
+        env_ids=torch.tensor([0], dtype=torch.long),
+    )
+
+    state = snapshot.articulation_joints[("drawer", "slide")]
+    assert torch.equal(state.position, torch.tensor([[0.25]]))
+    assert state.valid_mask is not None and state.valid_mask.tolist() == [True]
 
 
 def test_from_simulation_derives_live_geometry_only_for_explicit_collision_role() -> (

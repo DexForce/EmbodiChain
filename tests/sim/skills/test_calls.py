@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import json
 import math
 
 import pytest
@@ -111,6 +112,25 @@ def test_semantic_pose_converts_to_homogeneous_matrix() -> None:
         ]
     )
     torch.testing.assert_close(pose.to_matrix(), expected, atol=1.0e-6, rtol=1.0e-6)
+
+
+def test_semantic_call_metadata_is_deterministic_and_json_safe() -> None:
+    call = Place(
+        object=SceneObjectRef("cube"),
+        at=SemanticPose((1.0, 2.0, 3.0), (1.0, 0.0, 0.0, 0.0)),
+        resources={"primary": "left_arm"},
+    )
+
+    metadata = call.to_metadata()
+
+    json.dumps(metadata, allow_nan=False, sort_keys=True)
+    assert metadata["semantic_id"] == "place"
+    assert metadata["resources"] == {"primary": "left_arm"}
+    assert metadata["arguments"]["object"] == {
+        "entity_type": "SceneObjectRef",
+        "entity_id": "cube",
+    }
+    assert metadata["arguments"]["at"]["position"] == [1.0, 2.0, 3.0]
 
 
 @pytest.mark.parametrize(

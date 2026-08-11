@@ -43,6 +43,38 @@ embodichain.lab.sim.skills
       UnsupportedSkillError
       AmbiguousSkillBindingError
 
+   .. rubric:: Semantic calls and runtime
+
+   .. autosummary::
+
+      SemanticCallSpec
+      SemanticPose
+      Pick
+      Place
+      HandOver
+      OperateArticulation
+      RegisteredSemanticCall
+      SemanticCallCatalog
+      SemanticSkillCompiler
+      AtomicSkills
+      SkillRuntime
+      SkillResult
+      SkillCallTrace
+      SkillPlanAttemptTrace
+      SkillEffectTrace
+
+   .. rubric:: Effects, evidence, and parallel execution
+
+   .. autosummary::
+
+      SemanticEffectSpec
+      EffectMonitorRef
+      EffectMonitor
+      EffectEvidenceCollector
+      ParallelSkillRuntime
+      ParallelSkillResult
+      ParallelCommandSafetyValidator
+
 .. currentmodule:: embodichain.lab.sim.skills
 
 Robot resources and profiles
@@ -98,6 +130,78 @@ Profile errors
 .. autoclass:: UnsupportedSkillError
 
 .. autoclass:: AmbiguousSkillBindingError
+
+Semantic calls and runtime
+--------------------------
+
+.. autoclass:: SemanticCallSpec
+   :members:
+
+.. autoclass:: SemanticPose
+   :members:
+
+.. autoclass:: Pick
+   :members:
+
+.. autoclass:: Place
+   :members:
+
+.. autoclass:: HandOver
+   :members:
+
+.. autoclass:: OperateArticulation
+   :members:
+
+.. autoclass:: RegisteredSemanticCall
+   :members:
+
+.. autoclass:: SemanticCallCatalog
+   :members:
+
+.. autoclass:: SemanticSkillCompiler
+   :members:
+
+.. autoclass:: AtomicSkills
+   :members:
+
+.. autoclass:: SkillRuntime
+   :members:
+
+.. autoclass:: SkillResult
+   :members:
+
+.. autoclass:: SkillCallTrace
+   :members:
+
+.. autoclass:: SkillPlanAttemptTrace
+   :members:
+
+.. autoclass:: SkillEffectTrace
+   :members:
+
+Effects, evidence, and parallel execution
+-----------------------------------------
+
+.. autoclass:: SemanticEffectSpec
+   :members:
+
+.. autoclass:: EffectMonitorRef
+   :members:
+
+.. autoclass:: EffectMonitor
+   :members:
+
+.. autoclass:: EffectEvidenceCollector
+   :members:
+
+.. autoclass:: ParallelSkillRuntime
+   :members:
+
+.. autoclass:: ParallelSkillResult
+   :members:
+
+.. autoclass:: ParallelCommandSafetyValidator
+   :members:
 
 Registry and provider
 ---------------------

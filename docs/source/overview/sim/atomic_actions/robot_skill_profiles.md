@@ -157,6 +157,55 @@ One-dimensional joint-position commands are broadcast across environments.
 Their last dimension must equal the resolved endpoint's degree of freedom. Use
 invocation-level command overrides for object- or environment-specific values.
 
+## Safe preset and dynamic collision worlds
+
+When the authoritative scene registry declares dynamic collision entities and
+`safe` is reachable through the integration-wide, per-skill, or
+profile-default preset selection, semantic integration validates that path
+conservatively during binding. The `safe` preset must use `motion_gen`, and the
+active motion generator must explicitly support dynamic collision worlds;
+otherwise binding fails before provider observation, planning, or command
+emission.
+
+A linked call receives an effective immutable preset snapshot with
+`DynamicCollisionMode.REQUIRED`; the source profile preset is not mutated.
+Other presets, and scenes without dynamic collision entities, retain their
+configured collision mode.
+
+## Select semantic effect monitors with the preset
+
+A {class}`SkillPolicyPreset` owns one coherent runtime choice: planning and
+recovery policy, runner cadence, and the exact semantic-effect monitors used to
+confirm physical postconditions. `effect_monitors` maps a semantic call ID to a
+versioned {class}`EffectMonitorRef`. Its parameters are bounded declarative
+values; executable objects, tensors, cyclic containers, and non-finite numbers
+are rejected.
+
+When `effect_monitors` is omitted, the preset selects the built-in
+pose-relation hysteresis monitor for `pick`, `place`, and `hand_over`. Passing an
+explicit empty mapping disables that default; static analysis then reports
+`missing_effect_monitor` if a curated effectful call selects that preset. A
+manifest also rejects monitor entries whose semantic ID is absent from its call
+catalog, and the compiler requires the exact monitor ID/revision and validates
+its parameters before grounding.
+
+The semantic compiler creates a fresh monitor for every grounded call. Pick
+expects one attached destination relation, place one detached source relation,
+and handover both source-detached and destination-attached relations in the
+same observation. The monitor compares fresh backend evidence with owned
+object-to-endpoint baselines; it never treats the planned `StateDelta` or
+current `TaskState` as proof that the physical effect occurred. Invalid or
+missing per-environment evidence remains unresolved. Consecutive-sample state
+survives request-mask shrinkage within one attempt and resets when recovery
+installs a new attempt.
+
+```{note}
+The monitor contract is backend-neutral. Simulation, hardware perception, or
+controller feedback supplies typed pose-relation evidence. The semantic
+runtime adapter that connects that evidence to `ExecutionRunner` is separate
+from the profile and monitor configuration.
+```
+
 ## Bind, discover, and resolve
 
 Pass the profile to

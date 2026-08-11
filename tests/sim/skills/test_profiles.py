@@ -57,9 +57,19 @@ from embodichain.lab.sim.atomic_actions.bindings import (
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.skills import (
     AmbiguousSkillBindingError,
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
+    CONSTRAINT_EFFECT_CHANNEL,
+    CONTACT_EFFECT_CHANNEL,
     ControlPartEndpoint,
     ControlPartEndpointAdapter,
+    ControlPartEvidenceAddress,
+    EffectEvidenceSourceRef,
+    EffectMonitorRef,
     EndpointResolution,
+    FORCE_EFFECT_CHANNEL,
+    JOINT_STATE_EFFECT_CHANNEL,
+    POSE_RELATION_EFFECT_CHANNEL,
     ProfileValidationError,
     ResourceBinding,
     ResourceEndpoint,
@@ -475,6 +485,32 @@ def test_endpoint_resolution_owns_runtime_target_snapshot() -> None:
     assert resolution.runtime_target is not target
     assert type(resolution.runtime_target) is _MutableRuntimeTarget
     assert resolution.runtime_target.aliases == ["base"]
+
+
+def test_endpoint_resolution_owns_and_freezes_effect_sources() -> None:
+    source = EffectEvidenceSourceRef(
+        "test.provider",
+        "1",
+        ControlPartEvidenceAddress("left_arm", POSE_RELATION_EFFECT_CHANNEL),
+    )
+    sources = {POSE_RELATION_EFFECT_CHANNEL: source}
+
+    resolution = EndpointResolution(
+        runtime_target=_BaseVelocityTarget("base_controller"),
+        task_state_key="mobile_actor",
+        effect_sources=sources,
+        exclusive=False,
+    )
+    sources.clear()
+
+    assert resolution.task_state_key == "mobile_actor"
+    assert tuple(resolution.effect_sources) == (POSE_RELATION_EFFECT_CHANNEL,)
+    assert resolution.effect_sources[POSE_RELATION_EFFECT_CHANNEL] is not source
+    assert resolution.effect_sources[POSE_RELATION_EFFECT_CHANNEL].address == (
+        ControlPartEvidenceAddress("left_arm", POSE_RELATION_EFFECT_CHANNEL)
+    )
+    with pytest.raises(TypeError):
+        resolution.effect_sources["new"] = source  # type: ignore[index]
 
 
 @pytest.mark.parametrize("returns_self", [False, True])
@@ -1112,6 +1148,28 @@ def test_unique_capability_binding_lowers_to_exact_action_binding() -> None:
     )
     assert motion.require_target(JointPositionTarget).control_part == "left_arm"
     assert grasp.require_target(JointPositionTarget).control_part == "left_hand"
+    assert motion.task_state_key == "left_actor"
+    assert grasp.task_state_key == "left_actor"
+    resource = resolved.resources["primary"]
+    motion_sources = resource.endpoints["motion"].effect_sources
+    grasp_sources = resource.endpoints["grasp"].effect_sources
+    assert set(motion_sources) == {
+        POSE_RELATION_EFFECT_CHANNEL,
+        JOINT_STATE_EFFECT_CHANNEL,
+    }
+    assert set(grasp_sources) == {
+        POSE_RELATION_EFFECT_CHANNEL,
+        JOINT_STATE_EFFECT_CHANNEL,
+        CONTACT_EFFECT_CHANNEL,
+        CONSTRAINT_EFFECT_CHANNEL,
+        FORCE_EFFECT_CHANNEL,
+    }
+    assert motion_sources[POSE_RELATION_EFFECT_CHANNEL].address == (
+        ControlPartEvidenceAddress("left_arm", POSE_RELATION_EFFECT_CHANNEL)
+    )
+    assert grasp_sources[CONSTRAINT_EFFECT_CHANNEL].address == (
+        ControlPartEvidenceAddress("left_hand", CONSTRAINT_EFFECT_CHANNEL)
+    )
     assert resolved.claim.leaf_resource_ids == frozenset({"left_arm", "left_hand"})
     assert resolved.claim.joint_ids == (0, 1, 2)
 
@@ -1344,6 +1402,59 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     )
     with pytest.raises(ProfileValidationError, match="requires planner"):
         incompatible.bind(_engine(control_profiles=_command_profiles()))
+
+
+def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:
+    preset = SkillPolicyPreset("safe")
+
+    assert set(preset.effect_monitors) == {
+        "pick",
+        "place",
+        "hand_over",
+        "operate_articulation",
+    }
+    for monitor_ref in preset.effect_monitors.values():
+        assert monitor_ref.monitor_id == COMPOSITE_EFFECT_MONITOR_ID
+        assert monitor_ref.revision == COMPOSITE_EFFECT_MONITOR_REVISION
+        assert dict(monitor_ref.params) == {}
+
+
+def test_policy_preset_distinguishes_explicit_empty_effect_monitor_mapping() -> None:
+    preset = SkillPolicyPreset("unmonitored", effect_monitors={})
+
+    assert dict(preset.effect_monitors) == {}
+    assert dict(preset.snapshot().effect_monitors) == {}
+
+
+def test_policy_preset_owns_and_snapshots_effect_monitor_refs() -> None:
+    source_params = {
+        "consecutive_samples": 3,
+        "metadata": ["strict", {"source": "profile"}],
+    }
+    source_ref = EffectMonitorRef("test.monitor", "2", source_params)
+    source_mapping = {"pick": source_ref}
+    preset = SkillPolicyPreset("custom", effect_monitors=source_mapping)
+
+    source_params["consecutive_samples"] = 99
+    source_params["metadata"][1]["source"] = "mutated"  # type: ignore[index]
+    source_mapping["pick"] = EffectMonitorRef("replacement", "1")
+    first = preset.effect_monitors
+    snapshot = preset.snapshot()
+    second = snapshot.effect_monitors
+
+    assert first["pick"] is not source_ref
+    assert first["pick"].monitor_id == "test.monitor"
+    assert first["pick"].params["consecutive_samples"] == 3
+    assert first["pick"].params["metadata"] == (
+        "strict",
+        {"source": "profile"},
+    )
+    assert second["pick"] is not first["pick"]
+    assert second["pick"].params == first["pick"].params
+    with pytest.raises(TypeError):
+        first["place"] = source_ref  # type: ignore[index]
+    with pytest.raises(TypeError):
+        first["pick"].params["consecutive_samples"] = 4  # type: ignore[index]
 
 
 def test_profile_owns_named_grounding_provider_selections() -> None:
