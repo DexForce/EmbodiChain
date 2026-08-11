@@ -21,8 +21,14 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
    .. autosummary::
 
       demo
+      expert_program
       managers
       wrapper
+
+.. toctree::
+   :hidden:
+
+   embodichain.lab.gym.envs.expert_program
 
 .. currentmodule:: embodichain.lab.gym.envs
 
@@ -58,6 +64,9 @@ and the common executor records per-environment lengths, terminal status, and
 segment spans.
 
 .. autoclass:: DemoSegment
+    :members:
+
+.. autoclass:: ProcessedEnvAction
     :members:
 
 .. autoclass:: DemoSegmentResult

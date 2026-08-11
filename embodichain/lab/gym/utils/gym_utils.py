@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import numpy as np
 import torch
 import dexsim
@@ -393,13 +394,22 @@ def cat_tensor_with_ids(
     return out
 
 
-def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg":
+def config_to_cfg(
+    config: dict,
+    manager_modules: list | None = None,
+    *,
+    source_path: str | os.PathLike[str] | None = None,
+) -> "EmbodiedEnvCfg":
     """Parser configuration file into cfgs for env initialization.
 
     Args:
         config (dict): The configuration dictionary containing robot, sensor, light, background, and interactive objects.
         manager_modules (list): List of module paths for dataset, event, observation, and reward managers.
             If not provided, uses default module paths.
+        source_path: Optional path of the Gym configuration source file. A
+            relative top-level ``expert_program_path`` is resolved from this
+            file's directory. Without it, relative paths use the current
+            working directory.
 
     Returns:
         EmbodiedEnvCfg: A configuration object for initializing the environment.
@@ -445,6 +455,30 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
     for key in required_keys:
         if key not in config:
             log_error(f"Missing required config key: {key}")
+
+    if "expert_program_path" in config:
+        expert_program_path = config["expert_program_path"]
+        if type(expert_program_path) is not str:
+            raise TypeError("expert_program_path must be an exact string.")
+        if (
+            not expert_program_path
+            or expert_program_path != expert_program_path.strip()
+        ):
+            raise ValueError(
+                "expert_program_path must be a non-empty string without outer "
+                "whitespace."
+            )
+        from embodichain.lab.gym.envs.expert_program.loader import (
+            load_expert_program,
+        )
+
+        expert_program_base_dir = (
+            None if source_path is None else Path(source_path).expanduser().parent
+        )
+        env_cfg.expert_program = load_expert_program(
+            expert_program_path,
+            base_dir=expert_program_base_dir,
+        )
 
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
@@ -1021,16 +1055,20 @@ def build_env_cfg_from_args(
         tuple[EmbodiedEnvCfg, dict, dict]: A tuple containing the environment configuration object,
             the merged gym configuration dictionary, and the action configuration dictionary.
     """
+    from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.envs import EmbodiedEnvCfg
 
-    gym_config = load_config(args.gym_config)
+    gym_config_source_path = resolve_config_path(args.gym_config)
+    gym_config = load_config(gym_config_source_path)
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
     cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config, manager_modules=get_manager_modules()
+        gym_config,
+        manager_modules=get_manager_modules(),
+        source_path=gym_config_source_path,
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
