@@ -26,12 +26,12 @@ from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
 
-from embodichain.gen_sim.scene_engine.pipeline.scene_understanding import (
+from embodichain.gen_sim.scene_engine.pipeline.generation.scene_understanding import (
     understand_scene,
 )
 from embodichain.utils.logger import log_info
 
-from embodichain.gen_sim.scene_engine.pipeline.scene_generation import (
+from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation import (
     generate_scene_and_refine,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import SceneExporter

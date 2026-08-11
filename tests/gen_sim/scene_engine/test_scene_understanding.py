@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.pipeline import scene_understanding
+from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understanding
 
 
 def _response(*, asset_name: str = "cup") -> str:

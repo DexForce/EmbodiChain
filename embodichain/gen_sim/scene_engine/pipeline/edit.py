@@ -1,0 +1,89 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
+    OpenAICompatibleVLM,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+    SceneExportImporter,
+)
+from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding import (
+    understand_scene_edit,
+)
+from embodichain.utils.logger import log_info
+
+
+def edit_scene(
+    *,
+    output_root: str | Path,
+    edit_prompt: str,
+) -> None:
+    """Apply one text edit instruction to an existing Scene Engine output."""
+
+    # Initialize the VLM client that will interpret the edit instruction.
+    vlm_client = OpenAICompatibleVLM.from_dotenv()
+    scene_importer = SceneExportImporter(output_root=output_root)
+    # Validate scene_export, write scene.json, and return Scene; failures raise before editing.
+    scene = scene_importer.import_scene()
+
+    # 1. Edit Understanding
+    log_info("Starting Edit Understanding")
+    edit_plan = understand_scene_edit(
+        scene=scene,
+        edit_prompt=edit_prompt,
+        output_root=output_root,  # Has already been resolved.
+        vlm_client=vlm_client,
+    )
+    log_info("Completed Edit Understanding")
+
+    # 2. Scene Graph Update(or Initialization)
+    log_info("Starting Scene Graph Update")
+    # updated_scene_graph = update_scene_graph(
+    #     scene=scene,
+    #     edit_plan=edit_plan,
+    #     output_root=output_root,
+    # )
+    log_info("Completed Scene Graph Update")
+
+    # 3. Prepare Objects.
+    log_info("Preparing Objects if necessary")
+    # scene = prepare_objects(
+    #     scene=scene,
+    #     output_root=output_root,
+    # )
+    log_info("Completed Preparing Objects")
+
+    # 4. Layout Editing
+    log_info("Starting Layout Editing")
+    # scene = edit_layout(
+    #     scene=scene,
+    #     edit_plan=edit_plan,
+    #     scene_graph=updated_scene_graph,
+    #     output_root=output_root,
+    # )
+    log_info("Completed Layout Editing")
+
+    # 5. Scene Export
+    # Re export the scene to the same output format,
+    # and delete some temporary files or folders.
+    log_info("Starting Scene Export")
+    log_info("Completed Scene Export")
+
+    raise NotImplementedError("Scene editing is not implemented yet.")
