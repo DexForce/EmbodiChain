@@ -155,6 +155,7 @@ from .simulation_environment import (
     SimulationPlanningObservationProvider,
     create_simulation_expert_program_adapter,
 )
+from .simulation_handover import ConfiguredHandOverPoseProvider
 from .simulation_policies import (
     SimulationSegmentPolicyPort,
     default_simulation_settle_presets,
@@ -186,6 +187,7 @@ __all__ = [
     "ControlPartCommandPreset",
     "ControlPartEndpointBinding",
     "ControlPartResourceBinding",
+    "ConfiguredHandOverPoseProvider",
     "CyclicPoseTargetCfg",
     "DeclarativeCfgValue",
     "DemoBridgeError",

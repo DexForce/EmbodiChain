@@ -57,6 +57,7 @@ from embodichain.lab.sim.atomic_actions import (
     RuntimeCommandFrame,
     RuntimeEndpointTarget,
     RunnerStatus,
+    RunnerStep,
     SceneSnapshot,
     SkillBindingContract,
     SkillEndpointRequirement,
@@ -339,6 +340,8 @@ def _make_runner(
     max_action_retries: int = 2,
     action_timeout: float = 10.0,
     tracking_runtime: TrackingRuntime | None = None,
+    hold_on_completion: bool = True,
+    hold_during_effect_verification: bool = True,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -385,7 +388,11 @@ def _make_runner(
         provider,
         sink,
         clock=clock,
-        cfg=ExecutionRunnerCfg(minimum_cycle_time=MINIMUM_CYCLE_TIME),
+        cfg=ExecutionRunnerCfg(
+            minimum_cycle_time=MINIMUM_CYCLE_TIME,
+            hold_on_completion=hold_on_completion,
+            hold_during_effect_verification=hold_during_effect_verification,
+        ),
     )
     return runner, clock, provider, sink, action
 
@@ -398,6 +405,26 @@ def _successful_effect_result(
     return EffectVerificationResult(
         verification_id=request.verification_id,
         success_mask=torch.ones(
+            context.batch_size,
+            dtype=torch.bool,
+            device=context.robot.qpos.device,
+        ),
+        failure_mask=torch.zeros(
+            context.batch_size,
+            dtype=torch.bool,
+            device=context.robot.qpos.device,
+        ),
+    )
+
+
+def _unresolved_effect_result(
+    context: PlanningContext,
+    request: EffectVerificationRequest,
+) -> EffectVerificationResult:
+    """Keep every row pending at the current effect boundary."""
+    return EffectVerificationResult(
+        verification_id=request.verification_id,
+        success_mask=torch.zeros(
             context.batch_size,
             dtype=torch.bool,
             device=context.robot.qpos.device,
@@ -857,6 +884,62 @@ def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None
     assert completed.tick.task_state.get_held_object("arm") is not None
 
 
+def test_runner_holds_while_effect_verification_is_pending_by_default() -> None:
+    runner, _, _, sink, _ = _make_runner(with_effect=True)
+
+    blocked = runner.run_until_blocked()
+
+    assert blocked.status is RunnerStatus.RUNNING
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    assert [item.operation for item in blocked.dispatches] == [CommandOperation.HOLD]
+    assert len(sink.held) == 1
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
+
+
+def test_runner_skips_all_effect_pending_holds_when_disabled() -> None:
+    runner, clock, _, sink, _ = _make_runner(
+        with_effect=True,
+        hold_on_completion=False,
+        hold_during_effect_verification=False,
+    )
+
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    assert blocked.dispatches == ()
+
+    polls: list[RunnerStep] = []
+    for _ in range(2):
+        clock.advance(MINIMUM_CYCLE_TIME)
+        polls.append(runner.step(effect_verifier=_unresolved_effect_result))
+
+    assert all(step.status is RunnerStatus.RUNNING for step in polls)
+    assert all(
+        step.tick is not None and step.tick.pending_effect is not None for step in polls
+    )
+    assert all(step.dispatches == () for step in polls)
+    assert sink.held == []
+
+
+def test_effect_success_adds_no_hold_when_pending_and_completion_holds_are_disabled() -> (
+    None
+):
+    runner, clock, _, sink, _ = _make_runner(
+        with_effect=True,
+        hold_on_completion=False,
+        hold_during_effect_verification=False,
+    )
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    clock.advance(MINIMUM_CYCLE_TIME)
+
+    completed = runner.step(effect_verifier=_successful_effect_result)
+
+    assert completed.status is RunnerStatus.COMPLETED
+    assert completed.tick is not None and completed.tick.pending_effect is None
+    assert completed.dispatches == ()
+    assert sink.held == []
+
+
 def test_resumed_effect_verifier_uses_a_fresh_observation() -> None:
     runner, clock, _, _, _ = _make_runner(with_effect=True)
     blocked = runner.run_until_blocked()
@@ -1123,6 +1206,34 @@ def test_runner_effect_timeout_exhaustion_cancels_and_holds() -> None:
         CommandOperation.HOLD,
     ]
     assert sink.cancel_count == 1
+
+
+def test_effect_timeout_still_cancels_and_holds_when_pending_holds_are_disabled() -> (
+    None
+):
+    runner, clock, _, sink, _ = _make_runner(
+        with_effect=True,
+        max_action_retries=0,
+        action_timeout=2.0,
+        hold_on_completion=False,
+        hold_during_effect_verification=False,
+    )
+    blocked = runner.run_until_blocked()
+    assert blocked.tick is not None and blocked.tick.pending_effect is not None
+    assert sink.held == []
+    request = blocked.tick.pending_effect
+    clock.advance(request.deadline - clock.now() + MINIMUM_CYCLE_TIME)
+
+    failed = runner.step()
+
+    assert failed.status is RunnerStatus.FAILED
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert len(sink.held) == 1
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
 
 
 def test_runner_deactivation_refreshes_cached_effect_request() -> None:

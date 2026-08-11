@@ -236,6 +236,15 @@ class ExecutionRunnerCfg:
     hold_on_completion: bool = True
     """Whether to issue a final hold after the session completes."""
 
+    hold_during_effect_verification: bool = True
+    """Whether to hold observed state while terminal effects are pending.
+
+    Disable this only for persistent transports whose last accepted command
+    remains active without refresh, such as a position-controlled gripper that
+    must retain contact preload. Failure and cancellation still perform the
+    normal cancel-then-observed-hold safe stop.
+    """
+
     def __post_init__(self) -> None:
         for name in ("command_timeout", "safe_stop_timeout"):
             value = getattr(self, name)
@@ -245,6 +254,8 @@ class ExecutionRunnerCfg:
             raise ValueError("minimum_cycle_time must be finite and non-negative.")
         if not isinstance(self.hold_on_completion, bool):
             raise TypeError("hold_on_completion must be a bool.")
+        if not isinstance(self.hold_during_effect_verification, bool):
+            raise TypeError("hold_during_effect_verification must be a bool.")
 
 
 class RunnerStatus(str, Enum):
@@ -581,7 +592,9 @@ class ExecutionRunner:
                 self._command_count += 1
             interval = self._command_interval(tick.command)
             self._next_step_at = self._clock_now() + interval
-        elif tick.hold_targets:
+        elif tick.hold_targets and (
+            tick.pending_effect is None or self.cfg.hold_during_effect_verification
+        ):
             self._remember_targets(tick.hold_targets)
             hold_dispatch = self._dispatch(
                 CommandOperation.HOLD,
@@ -605,6 +618,7 @@ class ExecutionRunner:
                 )
             self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
         elif tick.pending_effect is not None:
+            self._remember_targets(tick.hold_targets)
             self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
         else:
             self._next_step_at = self._clock_now()

@@ -1269,6 +1269,33 @@ class ExpertProgramIntegrationCatalog:
                     )
 
 
+def _profile_with_step_dt(
+    profile: RobotSkillProfile,
+    *,
+    step_dt: float,
+) -> RobotSkillProfile:
+    """Return the registration profile aligned to one Gym runtime cadence."""
+    return replace(
+        profile,
+        presets={
+            preset_id: SkillPolicyPreset(
+                preset_id=preset.preset_id,
+                schema_version=preset.schema_version,
+                motion_policy=replace(preset.motion_policy, control_dt=step_dt),
+                tracking_policy=preset.tracking_policy,
+                recovery_policy=preset.recovery_policy,
+                runner_cfg=replace(
+                    preset.runner_cfg,
+                    minimum_cycle_time=step_dt,
+                ),
+                effect_monitors=preset.effect_monitors,
+                action_option_templates=preset.action_option_templates,
+            )
+            for preset_id, preset in profile.presets.items()
+        },
+    )
+
+
 def _registration_payload(
     *,
     scene_binding: SimulationSceneBinding,
@@ -1629,9 +1656,10 @@ class SimulationExpertProgramRegistration:
         self.assert_unchanged()
         if type(profile) is not RobotSkillProfile:
             raise TypeError("profile must be exactly RobotSkillProfile.")
-        if not isinstance(step_dt, (int, float)) or isinstance(step_dt, bool):
-            raise TypeError("step_dt must be a real number.")
-        expected = self.catalog.robot_profile
+        expected = _profile_with_step_dt(
+            self.catalog.robot_profile,
+            step_dt=step_dt,
+        )
         if _canonical_json(profile) != _canonical_json(expected):
             raise IntegrationFingerprintMismatch(
                 "Live robot skill profile differs from the registered declaration."
