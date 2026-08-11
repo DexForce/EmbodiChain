@@ -46,6 +46,7 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
     SimulationExecutionAdapter,
     SkillDescriptor,
 )
+from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
 from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator  # noqa: E402
@@ -185,9 +186,12 @@ def _profile() -> RobotSkillProfile:
                     sample_count=SAMPLE_COUNT,
                     control_dt=COMMAND_CYCLE_TIME,
                 ),
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=0.1,
+                    terminal_max_abs_error=0.1,
+                ),
                 recovery_policy=RecoveryPolicy(
                     max_replans=2,
-                    tracking_error_threshold=0.1,
                     action_timeout=30.0,
                 ),
                 runner_cfg=ExecutionRunnerCfg(minimum_cycle_time=COMMAND_CYCLE_TIME),

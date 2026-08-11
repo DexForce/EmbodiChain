@@ -38,6 +38,14 @@ from embodichain.lab.sim.atomic_actions.control import (
 )
 from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_actions.tracking import (
+    JOINT_POSITION_CHANNEL,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
+    TrackingFeedbackSourceRef,
+    TrackingPolicy,
+    TrackingProjectorRef,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     DisjointResourceSlots,
@@ -171,6 +179,37 @@ def _snapshot_effect_sources(
     return MappingProxyType(snapshots)
 
 
+def _snapshot_tracking_channels(
+    values: Mapping[str, EndpointTrackingChannelBinding],
+    *,
+    field_name: str,
+) -> Mapping[str, EndpointTrackingChannelBinding]:
+    """Validate, own, and freeze endpoint tracking bindings by channel."""
+    if not isinstance(values, Mapping):
+        raise TypeError(f"{field_name} must be a mapping.")
+    snapshots: dict[str, EndpointTrackingChannelBinding] = {}
+    for channel_id, binding in values.items():
+        _validate_identifier(channel_id, field_name=f"{field_name} channel IDs")
+        if not isinstance(binding, EndpointTrackingChannelBinding):
+            raise TypeError(
+                f"{field_name} values must be EndpointTrackingChannelBinding "
+                "instances."
+            )
+        if binding.channel_id != channel_id:
+            raise ValueError(
+                f"{field_name}[{channel_id!r}] disagrees with binding channel "
+                f"{binding.channel_id!r}."
+            )
+        snapshot = binding.snapshot()
+        if snapshot is binding:
+            raise TypeError(
+                f"{field_name}[{channel_id!r}].snapshot() must return an "
+                "independent channel binding."
+            )
+        snapshots[channel_id] = snapshot
+    return MappingProxyType(snapshots)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResourceEndpoint(ABC):
     """Extensible execution endpoint in a robot resource graph.
@@ -242,6 +281,11 @@ class EndpointResolution:
     effect_sources: Mapping[str, EffectEvidenceSourceRef] = field(default_factory=dict)
     """Provider-routed raw observation sources keyed by open channel ID."""
 
+    tracking_channels: Mapping[str, EndpointTrackingChannelBinding] = field(
+        default_factory=dict
+    )
+    """Typed feedback source and desired-state projector by channel ID."""
+
     command_profile_key: str | None = None
     """Profile key that owns semantic commands for this endpoint, when any."""
 
@@ -291,6 +335,14 @@ class EndpointResolution:
             _snapshot_effect_sources(
                 self.effect_sources,
                 field_name="EndpointResolution.effect_sources",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "tracking_channels",
+            _snapshot_tracking_channels(
+                self.tracking_channels,
+                field_name="EndpointResolution.tracking_channels",
             ),
         )
         if self.command_profile_key is not None:
@@ -435,11 +487,24 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
                     FORCE_EFFECT_CHANNEL,
                 }
             )
-        return EndpointResolution(
-            runtime_target=JointPositionTarget(
-                control_part=endpoint.control_part,
-                joint_ids=joint_ids,
+        runtime_target = JointPositionTarget(
+            control_part=endpoint.control_part,
+            joint_ids=joint_ids,
+        )
+        tracking_channel = EndpointTrackingChannelBinding(
+            JOINT_POSITION_CHANNEL,
+            TrackingFeedbackSourceRef(
+                "planning_context.robot",
+                "1",
+                EndpointTrackingFeedbackAddress(
+                    runtime_target,
+                    JOINT_POSITION_CHANNEL,
+                ),
             ),
+            TrackingProjectorRef("joint_position_payload", "1"),
+        )
+        return EndpointResolution(
+            runtime_target=runtime_target,
             command_profile_key=(
                 endpoint.control_part
                 if endpoint.command_profile is None
@@ -454,6 +519,7 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
                 )
                 for channel in sorted(effect_channels)
             },
+            tracking_channels={JOINT_POSITION_CHANNEL: tracking_channel},
             claim_tokens=frozenset({f"robot.control_part:{endpoint.control_part}"}),
             joint_ids=joint_ids,
         )
@@ -468,6 +534,9 @@ class ResolvedResourceEndpoint:
     runtime_target: RuntimeEndpointTarget
     task_state_key: str | None = None
     effect_sources: Mapping[str, EffectEvidenceSourceRef] = field(default_factory=dict)
+    tracking_channels: Mapping[str, EndpointTrackingChannelBinding] = field(
+        default_factory=dict
+    )
     command_profile_key: str | None = None
     requires_command_profile: bool = False
     commands: Mapping[str, ControlCommand] = field(default_factory=dict)
@@ -496,6 +565,7 @@ class ResolvedResourceEndpoint:
             runtime_target=self.runtime_target,
             task_state_key=self.task_state_key,
             effect_sources=self.effect_sources,
+            tracking_channels=self.tracking_channels,
             command_profile_key=self.command_profile_key,
             requires_command_profile=self.requires_command_profile,
             claim_tokens=self.claim_tokens,
@@ -510,6 +580,7 @@ class ResolvedResourceEndpoint:
         )
         object.__setattr__(self, "task_state_key", resolved_state_key)
         object.__setattr__(self, "effect_sources", resolution.effect_sources)
+        object.__setattr__(self, "tracking_channels", resolution.tracking_channels)
         object.__setattr__(
             self,
             "command_profile_key",
@@ -646,11 +717,12 @@ class ResourceBinding:
 
 @dataclass(frozen=True, slots=True, init=False)
 class SkillPolicyPreset:
-    """Versioned planning, recovery, runner, and effect-monitor bundle."""
+    """Versioned planning, tracking, recovery, runner, and monitor bundle."""
 
     preset_id: str
     schema_version: int
     _motion_policy: MotionPolicy
+    _tracking_policy: TrackingPolicy
     _recovery_policy: RecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
     _effect_monitors: Mapping[str, EffectMonitorRef]
@@ -660,6 +732,7 @@ class SkillPolicyPreset:
         preset_id: str,
         schema_version: int = 1,
         motion_policy: MotionPolicy | None = None,
+        tracking_policy: TrackingPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         effect_monitors: Mapping[str, EffectMonitorRef] | None = None,
@@ -674,12 +747,19 @@ class SkillPolicyPreset:
                 f"{schema_version}; supported versions are [1]."
             )
         selected_motion = MotionPolicy() if motion_policy is None else motion_policy
+        selected_tracking = (
+            TrackingPolicy.joint_position()
+            if tracking_policy is None
+            else tracking_policy
+        )
         selected_recovery = (
             RecoveryPolicy() if recovery_policy is None else recovery_policy
         )
         selected_runner = ExecutionRunnerCfg() if runner_cfg is None else runner_cfg
         if not isinstance(selected_motion, MotionPolicy):
             raise TypeError("motion_policy must be a MotionPolicy.")
+        if not isinstance(selected_tracking, TrackingPolicy):
+            raise TypeError("tracking_policy must be a TrackingPolicy.")
         if not isinstance(selected_recovery, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
         if not isinstance(selected_runner, ExecutionRunnerCfg):
@@ -716,6 +796,7 @@ class SkillPolicyPreset:
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "_motion_policy", deepcopy(selected_motion))
+        object.__setattr__(self, "_tracking_policy", deepcopy(selected_tracking))
         object.__setattr__(self, "_recovery_policy", deepcopy(selected_recovery))
         object.__setattr__(self, "_runner_cfg", deepcopy(selected_runner))
         object.__setattr__(
@@ -733,6 +814,11 @@ class SkillPolicyPreset:
     def recovery_policy(self) -> RecoveryPolicy:
         """Return an independently owned recovery policy."""
         return deepcopy(self._recovery_policy)
+
+    @property
+    def tracking_policy(self) -> TrackingPolicy:
+        """Return independently owned endpoint-tracking settings."""
+        return deepcopy(self._tracking_policy)
 
     @property
     def runner_cfg(self) -> ExecutionRunnerCfg:
@@ -755,6 +841,7 @@ class SkillPolicyPreset:
             preset_id=self.preset_id,
             schema_version=self.schema_version,
             motion_policy=self.motion_policy,
+            tracking_policy=self.tracking_policy,
             recovery_policy=self.recovery_policy,
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
@@ -1605,6 +1692,7 @@ class BoundRobotSkillProfile:
                         else resolution.task_state_key
                     ),
                     effect_sources=resolution.effect_sources,
+                    tracking_channels=resolution.tracking_channels,
                     command_profile_key=resolution.command_profile_key,
                     requires_command_profile=resolution.requires_command_profile,
                     commands=(
@@ -2005,6 +2093,7 @@ class BoundRobotSkillProfile:
                         adapter_id=endpoint.adapter_id,
                         target=endpoint.runtime_target,
                         task_state_key=endpoint.task_state_key,
+                        tracking_channels=endpoint.tracking_channels,
                         capabilities=endpoint.capabilities,
                         commands=endpoint.commands,
                         claim_tokens=endpoint.claim_tokens,

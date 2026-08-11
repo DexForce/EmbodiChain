@@ -55,6 +55,12 @@ from embodichain.lab.sim.atomic_actions.bindings import (
     RuntimeEndpointTarget,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.tracking import (
+    JOINT_POSITION_CHANNEL,
+    EndpointTrackingFeedbackAddress,
+    JointPositionTrackingMetric,
+    TrackingPolicy,
+)
 from embodichain.lab.sim.skills import (
     AmbiguousSkillBindingError,
     COMPOSITE_EFFECT_MONITOR_ID,
@@ -1150,6 +1156,19 @@ def test_unique_capability_binding_lowers_to_exact_action_binding() -> None:
     assert grasp.require_target(JointPositionTarget).control_part == "left_hand"
     assert motion.task_state_key == "left_actor"
     assert grasp.task_state_key == "left_actor"
+    motion_tracking = motion.tracking_channel(JOINT_POSITION_CHANNEL)
+    assert motion_tracking.source.provider_id == "planning_context.robot"
+    assert motion_tracking.source.revision == "1"
+    assert motion_tracking.projector.projector_id == "joint_position_payload"
+    assert motion_tracking.projector.revision == "1"
+    assert isinstance(
+        motion_tracking.source.address,
+        EndpointTrackingFeedbackAddress,
+    )
+    assert (
+        motion_tracking.source.address.target.address_fingerprint
+        == motion.target.address_fingerprint
+    )
     resource = resolved.resources["primary"]
     motion_sources = resource.endpoints["motion"].effect_sources
     grasp_sources = resource.endpoints["grasp"].effect_sources
@@ -1362,6 +1381,10 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     preset = SkillPolicyPreset(
         "safe",
         motion_policy=MotionPolicy(planner="stub_planner", sample_count=80),
+        tracking_policy=TrackingPolicy.joint_position(
+            in_flight_max_abs_error=0.125,
+            terminal_max_abs_error=0.125,
+        ),
     )
     profile = RobotSkillProfile(
         "presets",
@@ -1379,6 +1402,11 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     assert first is not second
     assert first.schema_version == 1
     assert first.motion_policy.sample_count == 80
+    assert first.tracking_policy is not second.tracking_policy
+    first_tracking = first.tracking_policy.in_flight
+    assert first_tracking is not None
+    assert isinstance(first_tracking.metrics[0], JointPositionTrackingMetric)
+    assert first_tracking.metrics[0].tolerance == 0.125
     mutable_runner = first.runner_cfg
     mutable_runner.command_timeout = 99.0
     assert bound.preset().runner_cfg.command_timeout == 1.0

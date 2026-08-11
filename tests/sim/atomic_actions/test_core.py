@@ -36,10 +36,11 @@ from embodichain.lab.sim.atomic_actions import (
     DynamicCollisionMode,
     EndpointBinding,
     EndpointCommand,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
     EndEffectorPoseGoal,
     EntityState,
     EffectVerificationRequirement,
-    ExecutionFeedbackMode,
     HeldObjectState,
     JointPositionPayload,
     JointPositionTarget,
@@ -58,7 +59,15 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TimedTerminalAcceptance,
+    TimedTrackingSequence,
     TimedTrajectory,
+    TrackingFeedbackSourceRef,
+    TrackingFrame,
+    TrackingPolicy,
+    TrackingProjectorRef,
+    TrackingSetpoint,
+    JointPositionTrackingState,
 )
 from embodichain.lab.sim.atomic_actions.goals import (
     _resolve_object_pose,
@@ -196,7 +205,8 @@ def _action_plan(
     *,
     plan_success: torch.Tensor | None = None,
     joint_trajectory: TimedTrajectory | None = None,
-    feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
+    tracking_policy: TrackingPolicy | None = None,
+    tracking: TimedTrackingSequence | None = None,
     expected_effects: StateDelta | None = None,
     effect_verification: EffectVerificationRequirement | None = None,
     diagnostics: PlannerDiagnostics | None = None,
@@ -214,12 +224,15 @@ def _action_plan(
         plan_success=plan_success,
         commands=commands,
         recovery_policy=RecoveryPolicy(),
+        tracking_policy=(
+            TrackingPolicy.timed() if tracking_policy is None else tracking_policy
+        ),
         planned_scene_version=0,
         planned_collision_world_revision=(0,) * commands.batch_size,
         diagnostics=(
             PlannerDiagnostics(backend="test") if diagnostics is None else diagnostics
         ),
-        feedback_mode=feedback_mode,
+        tracking=tracking,
         joint_trajectory=joint_trajectory,
         scene_dependencies=scene_dependencies,
         scene_dependency_monitor_until=(
@@ -230,6 +243,41 @@ def _action_plan(
         expected_effects=StateDelta() if expected_effects is None else expected_effects,
         effect_verification=effect_verification,
     )
+
+
+def _joint_tracking_sequence(
+    commands: TimedCommandSequence,
+) -> TimedTrackingSequence:
+    frames: list[TrackingFrame] = []
+    for command_frame in commands.frames:
+        setpoints: list[TrackingSetpoint] = []
+        for command in command_frame.commands:
+            assert isinstance(command.target, JointPositionTarget)
+            assert isinstance(command.payload, JointPositionPayload)
+            channel = EndpointTrackingChannelBinding(
+                channel_id="joint.position",
+                source=TrackingFeedbackSourceRef(
+                    provider_id="planning_context.robot",
+                    revision="1",
+                    address=EndpointTrackingFeedbackAddress(
+                        target=command.target,
+                        channel_id="joint.position",
+                    ),
+                ),
+                projector=TrackingProjectorRef(
+                    projector_id="joint_position_payload",
+                    revision="1",
+                ),
+            )
+            setpoints.append(
+                TrackingSetpoint(
+                    endpoint_key=("primary", "motion"),
+                    binding=channel,
+                    desired=JointPositionTrackingState(command.payload.positions),
+                )
+            )
+        frames.append(TrackingFrame(tuple(setpoints)))
+    return TimedTrackingSequence(commands.env_ids, tuple(frames))
 
 
 @pytest.mark.parametrize("kind", ("", " physical", "physical ", 1, True))
@@ -353,6 +401,7 @@ class _RawCommandAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
                 frame_count=1,
             ),
             recovery_policy=RecoveryPolicy(),
+            tracking_policy=TrackingPolicy.timed(),
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(0,) * context.batch_size,
             diagnostics=PlannerDiagnostics(backend="test"),
@@ -756,6 +805,7 @@ def test_build_plan_uses_action_scene_dependency_hook() -> None:
         goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
         binding=ActionBinding(owner_id=engine.binding_owner_id),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -807,6 +857,7 @@ def test_build_command_plan_rejects_unbound_runtime_destination() -> None:
         goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
         binding=ActionBinding(owner_id=engine.binding_owner_id),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -835,6 +886,7 @@ def test_public_plan_authorizes_raw_action_plan_destinations() -> None:
         goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
         binding=ActionBinding(owner_id=engine.binding_owner_id),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -861,6 +913,7 @@ def test_command_target_authorization_rejects_altered_joint_claims() -> None:
             ),
         ),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -901,6 +954,7 @@ def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
         goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
         binding=ActionBinding(owner_id="test-engine", endpoints=endpoints),
         motion_policy=MotionPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
         recovery_policy=RecoveryPolicy(),
         skill_options=ActionOptions(),
     )
@@ -945,7 +999,6 @@ def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
         commands,
         plan_success=plan_success,
         joint_trajectory=trajectory,
-        feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
     )
     payload = commands.frames[0].commands[0].payload
     assert isinstance(payload, JointPositionPayload)
@@ -1061,7 +1114,8 @@ def test_action_plan_allows_timed_commands_without_joint_trajectory() -> None:
 
     assert plan.commands.frame_count == 1
     assert plan.joint_trajectory is None
-    assert plan.feedback_mode is ExecutionFeedbackMode.TIMED
+    assert isinstance(plan.tracking_policy.terminal, TimedTerminalAcceptance)
+    assert plan.tracking is None
 
 
 def test_action_plan_rejects_command_device_mismatch() -> None:
@@ -1103,7 +1157,6 @@ def test_action_plan_validates_joint_trajectory_against_commands(
         _action_plan(
             commands,
             joint_trajectory=trajectory,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
         )
 
 
@@ -1122,7 +1175,54 @@ def test_joint_position_plan_rejects_empty_commands_for_successful_rows() -> Non
             commands,
             plan_success=torch.tensor([True]),
             joint_trajectory=trajectory,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+            tracking_policy=TrackingPolicy.joint_position(),
+            tracking=_joint_tracking_sequence(commands),
+        )
+
+
+@pytest.mark.parametrize("changed_route", ["source", "projector"])
+def test_tracking_plan_rejects_route_changes_between_frames(
+    changed_route: str,
+) -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=2,
+    )
+    tracking = _joint_tracking_sequence(commands)
+    first_frame, second_frame = tracking.frames
+    original = second_frame.setpoints[0]
+    source = original.binding.source
+    projector = original.binding.projector
+    if changed_route == "source":
+        source = TrackingFeedbackSourceRef(
+            provider_id=source.provider_id,
+            revision="alternate",
+            address=source.address,
+        )
+    else:
+        projector = TrackingProjectorRef(
+            projector_id=projector.projector_id,
+            revision="alternate",
+        )
+    changed = TrackingSetpoint(
+        endpoint_key=original.endpoint_key,
+        binding=EndpointTrackingChannelBinding(
+            channel_id=original.binding.channel_id,
+            source=source,
+            projector=projector,
+        ),
+        desired=original.desired,
+    )
+    changed_tracking = TimedTrackingSequence(
+        commands.env_ids,
+        (first_frame, TrackingFrame((changed,))),
+    )
+
+    with pytest.raises(ValueError, match="source fingerprint and projector route"):
+        _action_plan(
+            commands,
+            tracking_policy=TrackingPolicy.joint_position(),
+            tracking=changed_tracking,
         )
 
 
@@ -1140,19 +1240,14 @@ def test_joint_position_plan_allows_empty_commands_when_all_rows_fail() -> None:
         commands,
         plan_success=torch.tensor([False]),
         joint_trajectory=trajectory,
-        feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        tracking_policy=TrackingPolicy.joint_position(),
+        tracking=_joint_tracking_sequence(commands),
     )
 
     assert plan.commands.frame_count == 0
 
 
-@pytest.mark.parametrize(
-    "feedback_mode",
-    [ExecutionFeedbackMode.TIMED, ExecutionFeedbackMode.JOINT_POSITION],
-)
-def test_action_plan_requires_stable_destination_set(
-    feedback_mode: ExecutionFeedbackMode,
-) -> None:
+def test_action_plan_requires_stable_destination_set() -> None:
     env_ids = torch.tensor([4], dtype=torch.long)
     commands = _command_sequence(
         env_ids=env_ids,
@@ -1162,22 +1257,8 @@ def test_action_plan_requires_stable_destination_set(
             JointPositionTarget("other_arm", (0, 1)),
         ),
     )
-    trajectory = (
-        TimedTrajectory.from_positions(
-            torch.tensor([[[1.0, 1.0], [2.0, 2.0]]]),
-            env_ids=env_ids,
-            control_dt=0.1,
-        )
-        if feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
-        else None
-    )
-
     with pytest.raises(ValueError, match="same destination set"):
-        _action_plan(
-            commands,
-            joint_trajectory=trajectory,
-            feedback_mode=feedback_mode,
-        )
+        _action_plan(commands)
 
 
 def test_action_plan_requires_stable_exact_target_type() -> None:
@@ -1208,87 +1289,6 @@ def test_action_plan_requires_stable_target_address_fingerprint() -> None:
 
     with pytest.raises(ValueError, match="target address fingerprint"):
         _action_plan(commands)
-
-
-def test_joint_position_plan_rejects_joint_ids_outside_trajectory() -> None:
-    env_ids = torch.tensor([4], dtype=torch.long)
-    commands = _command_sequence(
-        env_ids=env_ids,
-        frame_count=1,
-        targets=(JointPositionTarget("arm", (0, 2)),),
-    )
-    trajectory = TimedTrajectory.from_positions(
-        torch.ones(1, 1, 2),
-        env_ids=env_ids,
-        control_dt=0.1,
-    )
-
-    with pytest.raises(ValueError, match="outside joint_trajectory robot_dof"):
-        _action_plan(
-            commands,
-            joint_trajectory=trajectory,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
-        )
-
-
-def test_joint_position_plan_rejects_payload_position_mismatch() -> None:
-    env_ids = torch.tensor([4], dtype=torch.long)
-    commands = _command_sequence(env_ids=env_ids, frame_count=1)
-    trajectory = TimedTrajectory.from_positions(
-        torch.zeros(1, 1, 2),
-        env_ids=env_ids,
-        control_dt=0.1,
-    )
-
-    with pytest.raises(ValueError, match="positions.*exactly match"):
-        _action_plan(
-            commands,
-            joint_trajectory=trajectory,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
-        )
-
-
-def test_joint_position_plan_rejects_payload_velocity_presence_mismatch() -> None:
-    env_ids = torch.tensor([4], dtype=torch.long)
-    commands = _command_sequence(
-        env_ids=env_ids,
-        frame_count=1,
-        velocities=(torch.zeros(1, 2),),
-    )
-    trajectory = TimedTrajectory.from_positions(
-        torch.ones(1, 1, 2),
-        env_ids=env_ids,
-        control_dt=0.1,
-    )
-
-    with pytest.raises(ValueError, match="same presence"):
-        _action_plan(
-            commands,
-            joint_trajectory=trajectory,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
-        )
-
-
-def test_joint_position_plan_rejects_payload_velocity_value_mismatch() -> None:
-    env_ids = torch.tensor([4], dtype=torch.long)
-    commands = _command_sequence(
-        env_ids=env_ids,
-        frame_count=1,
-        velocities=(torch.zeros(1, 2),),
-    )
-    trajectory = TimedTrajectory.from_positions(
-        torch.ones(1, 1, 2),
-        velocities=torch.ones(1, 1, 2),
-        env_ids=env_ids,
-        control_dt=0.1,
-    )
-
-    with pytest.raises(ValueError, match="velocities.*exactly match"):
-        _action_plan(
-            commands,
-            joint_trajectory=trajectory,
-            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
-        )
 
 
 def test_scene_snapshot_expands_global_collision_world_revision() -> None:

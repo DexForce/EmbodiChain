@@ -39,6 +39,8 @@ from embodichain.lab.sim.atomic_actions import (
     EffectVerificationRequirement,
     EffectVerificationRequest,
     EndpointBinding,
+    EndpointTrackingChannelBinding,
+    EndpointTrackingFeedbackAddress,
     JointPositionTarget,
     MotionPolicy,
     PlanningContext,
@@ -50,7 +52,10 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedCommandSequence,
+    TrackingFeedbackSourceRef,
+    TrackingProjectorRef,
 )
+from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
 from embodichain.lab.sim.skills.calls import RegisteredSemanticCall
 from embodichain.lab.sim.skills.compiler import SemanticSkillCompiler
 from embodichain.lab.sim.skills.effects import (
@@ -345,6 +350,7 @@ class _Compiler(SemanticSkillCompiler):
                 velocity_limit=0.4,
                 acceleration_limit=0.8,
             ),
+            tracking_policy=TrackingPolicy.timed(),
             recovery_policy=RecoveryPolicy(
                 max_replans=0,
                 max_action_retries=0,
@@ -627,9 +633,16 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert resolved["motion_policy"]["strategy"] == "ik_interp"
     assert resolved["motion_policy"]["planner"] == "runtime_test"
     assert resolved["motion_policy"]["sample_count"] == 7
+    assert resolved["tracking_policy"] == {
+        "in_flight": None,
+        "terminal": {"mode": "timed", "settle_duration": 0.0},
+    }
     assert resolved["recovery_policy"]["max_replans"] == 0
     assert resolved["endpoints"] == []
     assert attempt["resolved_core_policy"] == resolved
+    assert attempt["tracking_policy"] == resolved["tracking_policy"]
+    assert attempt["tracking_contract"] is None
+    assert "feedback_mode" not in attempt
     assert result.calls[0].resolved_core_policy.preset_id == "runtime_test_preset"
     effect = call["effects"][0]
     assert effect["effect_spec"]["semantic_id"] == "test.metadata"
@@ -670,16 +683,34 @@ def test_plan_attempt_trace_rejects_monitor_cutoff_for_non_dependency() -> None:
 
 
 def test_endpoint_binding_trace_records_only_stable_binding_choices() -> None:
+    target = JointPositionTarget("left_arm_control", (3, 1))
     binding = EndpointBinding(
         slot_id="primary",
         endpoint_id="motion",
         resource_id="left_arm",
         adapter_id="control_part",
-        target=JointPositionTarget("left_arm_control", (3, 1)),
+        target=target,
         task_state_key="left_arm_state",
         capabilities=frozenset({"cartesian_pose", "joint_position"}),
         claim_tokens=frozenset({"arm_workspace", "left_side"}),
         joint_ids=(3, 1),
+        tracking_channels={
+            "joint.position": EndpointTrackingChannelBinding(
+                channel_id="joint.position",
+                source=TrackingFeedbackSourceRef(
+                    provider_id="planning_context.robot",
+                    revision="1",
+                    address=EndpointTrackingFeedbackAddress(
+                        target=target,
+                        channel_id="joint.position",
+                    ),
+                ),
+                projector=TrackingProjectorRef(
+                    projector_id="joint_position_payload",
+                    revision="1",
+                ),
+            )
+        },
     )
 
     trace = SkillEndpointBindingTrace.from_binding(binding)
@@ -694,6 +725,32 @@ def test_endpoint_binding_trace_records_only_stable_binding_choices() -> None:
     assert metadata["claim_tokens"] == ["arm_workspace", "left_side"]
     assert metadata["joint_ids"] == [3, 1]
     assert "target" not in metadata
+    tracking = metadata["tracking_channels"][0]
+    target_fingerprint = [
+        {
+            "__type__": (
+                "embodichain.lab.sim.atomic_actions.bindings." "JointPositionTarget"
+            )
+        },
+        "robot.joint_position",
+        "left_arm_control",
+        [3, 1],
+    ]
+    address_fingerprint = [target_fingerprint, "joint.position"]
+    assert tracking["feedback_source"]["address_fingerprint"] == address_fingerprint
+    assert tracking["route_fingerprint"] == [
+        "joint.position",
+        ["planning_context.robot", "1", address_fingerprint],
+        "joint_position_payload",
+        "1",
+    ]
+    tracking["feedback_source"]["address_fingerprint"][0][1] = "mutated"
+    assert (
+        trace.to_metadata()["tracking_channels"][0]["feedback_source"][
+            "address_fingerprint"
+        ][0][1]
+        == "robot.joint_position"
+    )
 
 
 def test_preparation_failure_keeps_resolved_policy_without_plan_attempt(

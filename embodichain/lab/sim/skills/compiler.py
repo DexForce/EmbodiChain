@@ -1083,6 +1083,7 @@ class SemanticSkillCompiler:
             goal=lowering.goal,
             binding=bound.binding.action_binding,
             motion_policy=bound.preset.motion_policy,
+            tracking_policy=bound.preset.tracking_policy,
             recovery_policy=bound.preset.recovery_policy,
             skill_options=lowering.skill_options,
             control_overrides=lowering.control_overrides,

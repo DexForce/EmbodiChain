@@ -511,6 +511,38 @@ class RobotObservation:
                 raise ValueError("RobotObservation.qeffort must match qpos shape.")
             if self.qeffort.device != self.qpos.device:
                 raise ValueError("RobotObservation.qeffort must share the qpos device.")
+        if self.root_pose is not None:
+            if not isinstance(self.root_pose, torch.Tensor):
+                raise TypeError("RobotObservation.root_pose must be a tensor or None.")
+            if self.root_pose.shape != (self.qpos.shape[0], 4, 4):
+                raise ValueError(
+                    "RobotObservation.root_pose must have shape "
+                    f"({self.qpos.shape[0]}, 4, 4)."
+                )
+            if not self.root_pose.is_floating_point():
+                raise TypeError("RobotObservation.root_pose must be floating point.")
+            if self.root_pose.device != self.qpos.device:
+                raise ValueError(
+                    "RobotObservation.root_pose must share the qpos device."
+                )
+            if not torch.isfinite(self.root_pose).all():
+                raise ValueError("RobotObservation.root_pose must be finite.")
+        if self.root_twist is not None:
+            if not isinstance(self.root_twist, torch.Tensor):
+                raise TypeError("RobotObservation.root_twist must be a tensor or None.")
+            if self.root_twist.shape != (self.qpos.shape[0], 6):
+                raise ValueError(
+                    "RobotObservation.root_twist must have shape "
+                    f"({self.qpos.shape[0]}, 6)."
+                )
+            if not self.root_twist.is_floating_point():
+                raise TypeError("RobotObservation.root_twist must be floating point.")
+            if self.root_twist.device != self.qpos.device:
+                raise ValueError(
+                    "RobotObservation.root_twist must share the qpos device."
+                )
+            if not torch.isfinite(self.root_twist).all():
+                raise ValueError("RobotObservation.root_twist must be finite.")
         object.__setattr__(self, "qpos", self.qpos.clone())
         object.__setattr__(self, "qvel", self.qvel.clone())
         if self.qeffort is not None:

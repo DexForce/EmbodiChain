@@ -45,9 +45,11 @@ from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
     JOINT_POSITION_CAPABILITY,
     JointPositionPayload,
+    JointPositionTrackingMetric,
     JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
+    PlanningContextTrackingFeedbackProvider,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
@@ -62,6 +64,14 @@ from embodichain.lab.sim.atomic_actions import (
     StateDelta,
     TaskState,
     TimedTrajectory,
+    TrackingEvaluation,
+    TrackingEvaluatorRegistry,
+    TrackingFeedbackBatch,
+    TrackingFeedbackProviderRegistry,
+    TrackingFeedbackSourceRef,
+    TrackingMetricCfg,
+    TrackingRuntime,
+    TrackingState,
 )
 
 BATCH_SIZE = 1
@@ -185,6 +195,66 @@ class FakeCommandSink:
         return CommandAcknowledgement.accepted_ack()
 
 
+class RaisingFeedbackProvider:
+    """Built-in-source replacement that simulates a provider failure."""
+
+    provider_id = "planning_context.robot"
+    revision = "1"
+
+    def observe(
+        self,
+        source: TrackingFeedbackSourceRef,
+        context: PlanningContext,
+    ) -> TrackingFeedbackBatch:
+        """Raise instead of returning required feedback."""
+        del source, context
+        raise RuntimeError("provider unavailable")
+
+
+class RaisingJointTrackingEvaluator:
+    """Joint evaluator replacement that simulates an evaluation failure."""
+
+    metric_id = JointPositionTrackingMetric.metric_id
+    revision = JointPositionTrackingMetric.revision
+    metric_type = JointPositionTrackingMetric
+
+    def evaluate(
+        self,
+        desired: TrackingState,
+        observed: TrackingState,
+        valid_mask: torch.Tensor,
+        metric: TrackingMetricCfg,
+    ) -> TrackingEvaluation:
+        """Raise instead of evaluating required feedback."""
+        del desired, observed, valid_mask, metric
+        raise RuntimeError("evaluator unavailable")
+
+
+class MaskedFeedbackProvider(PlanningContextTrackingFeedbackProvider):
+    """Context provider exposing a deterministic per-row validity mask."""
+
+    def __init__(self, valid_mask: tuple[bool, ...]) -> None:
+        self.valid_mask = valid_mask
+
+    def observe(
+        self,
+        source: TrackingFeedbackSourceRef,
+        context: PlanningContext,
+    ) -> TrackingFeedbackBatch:
+        """Return built-in feedback with selected rows marked invalid."""
+        feedback = super().observe(source, context)
+        return TrackingFeedbackBatch(
+            source=feedback.source,
+            state=feedback.state,
+            valid_mask=torch.tensor(
+                self.valid_mask,
+                dtype=torch.bool,
+                device=feedback.state.device,
+            ),
+            timestamp=feedback.timestamp,
+        )
+
+
 class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
     """Test action with explicit non-uniform command intervals."""
 
@@ -269,6 +339,7 @@ def _make_runner(
     control_joint_ids: tuple[int, ...] | None = None,
     max_action_retries: int = 2,
     action_timeout: float = 10.0,
+    tracking_runtime: TrackingRuntime | None = None,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -292,7 +363,7 @@ def _make_runner(
     generator.device = torch.device("cpu")
     generator.planner.cfg.planner_type = "stub"
     action = TimedAction(with_effect=with_effect)
-    engine = AtomicActionEngine(generator)
+    engine = AtomicActionEngine(generator, tracking_runtime=tracking_runtime)
     engine.register(action)
     initial_task = TaskState.empty(batch_size, "cpu")
     initial_context = provider.observe(initial_task)
@@ -306,7 +377,6 @@ def _make_runner(
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             max_action_retries=max_action_retries,
-            tracking_error_threshold=0.05,
             action_timeout=action_timeout,
         ),
     )
@@ -356,7 +426,7 @@ def test_joint_feedback_ignores_motion_outside_bound_endpoint() -> None:
     assert action.plan_count == 1
     assert len(sink.sent) == 3
     assert not any(
-        event.kind is ExecutionEventKind.TRACKING_ERROR
+        event.kind is ExecutionEventKind.TRACKING_DIVERGED
         for step in (second, completed)
         if step.tick is not None
         for event in step.tick.events
@@ -507,9 +577,129 @@ def test_runner_replans_from_observation_after_tracking_error() -> None:
     assert action.plan_count == 2
     assert recovered.tick is not None
     event_kinds = {event.kind for event in recovered.tick.events}
-    assert ExecutionEventKind.TRACKING_ERROR in event_kinds
+    assert ExecutionEventKind.TRACKING_DIVERGED in event_kinds
     assert ExecutionEventKind.REPLANNED in event_kinds
     assert recovered.status is RunnerStatus.RUNNING
+
+
+@pytest.mark.parametrize("failure_kind", ["provider", "evaluator"])
+def test_runner_fails_closed_when_required_tracking_runtime_raises(
+    failure_kind: str,
+) -> None:
+    builtins = TrackingRuntime.with_builtins()
+    if failure_kind == "provider":
+        tracking_runtime = TrackingRuntime(
+            TrackingFeedbackProviderRegistry((RaisingFeedbackProvider(),)),
+            builtins.projectors,
+            builtins.evaluators,
+        )
+    else:
+        tracking_runtime = TrackingRuntime(
+            builtins.providers,
+            builtins.projectors,
+            TrackingEvaluatorRegistry((RaisingJointTrackingEvaluator(),)),
+        )
+    runner, clock, _, sink, action = _make_runner(tracking_runtime=tracking_runtime)
+
+    runner.step()
+    clock.advance(FIRST_INTERVAL)
+    failed = runner.step()
+
+    assert failed.status is RunnerStatus.FAILED
+    assert failed.tick is not None
+    event_kinds = {event.kind for event in failed.tick.events}
+    assert ExecutionEventKind.TRACKING_FEEDBACK_FAILED in event_kinds
+    assert ExecutionEventKind.REPLANNED not in event_kinds
+    assert action.plan_count == 1
+    assert sink.cancel_count == 1
+
+
+def test_runner_deactivates_only_rows_with_invalid_required_feedback() -> None:
+    builtins = TrackingRuntime.with_builtins()
+    tracking_runtime = TrackingRuntime(
+        TrackingFeedbackProviderRegistry((MaskedFeedbackProvider((True, False)),)),
+        builtins.projectors,
+        builtins.evaluators,
+    )
+    runner, clock, _, _, _ = _make_runner(
+        batch_size=2,
+        tracking_runtime=tracking_runtime,
+    )
+
+    runner.step()
+    clock.advance(2.0 * FIRST_INTERVAL)
+    partial = runner.step()
+
+    assert partial.status is RunnerStatus.RUNNING
+    assert partial.tick is not None
+    assert partial.tick.command is not None
+    assert partial.tick.command.active_mask.tolist() == [True, False]
+    feedback_failure = next(
+        event
+        for event in partial.tick.events
+        if event.kind is ExecutionEventKind.TRACKING_FEEDBACK_FAILED
+    )
+    assert feedback_failure.env_mask.tolist() == [False, True]
+
+
+def test_runner_maintains_final_target_while_terminal_acceptance_is_pending() -> None:
+    runner, clock, _, sink, action = _make_runner()
+    sink.follow_commands.extend([True, True, False])
+
+    runner.step()
+    clock.advance(FIRST_INTERVAL)
+    runner.step()
+    clock.advance(SECOND_INTERVAL)
+    runner.step()
+    final_command = sink.sent[-1]
+
+    clock.advance(SECOND_INTERVAL)
+    settling = runner.step()
+
+    assert action.plan_count == 1
+    assert settling.status is RunnerStatus.RUNNING
+    assert settling.tick is not None
+    assert settling.tick.command is not None
+    assert len(sink.sent) == 4
+    assert sink.sent[-1] is settling.tick.command
+    assert torch.equal(sink.sent[-1].active_mask, final_command.active_mask)
+    final_payload = final_command.commands[0].payload
+    settling_payload = sink.sent[-1].commands[0].payload
+    assert isinstance(final_payload, JointPositionPayload)
+    assert isinstance(settling_payload, JointPositionPayload)
+    assert torch.equal(settling_payload.positions, final_payload.positions)
+    event_kinds = {event.kind for event in settling.tick.events}
+    assert ExecutionEventKind.TERMINAL_ACCEPTANCE_PENDING in event_kinds
+    assert ExecutionEventKind.REPLANNED not in event_kinds
+
+
+def test_terminal_settle_reemits_final_target_only_for_pending_rows() -> None:
+    runner, clock, provider, sink, action = _make_runner(batch_size=2)
+
+    runner.step()
+    clock.advance(2.0 * FIRST_INTERVAL)
+    runner.step()
+    clock.advance(2.0 * SECOND_INTERVAL)
+    runner.step()
+    provider.qpos[1].zero_()
+
+    clock.advance(2.0 * SECOND_INTERVAL)
+    settling = runner.step()
+
+    assert action.plan_count == 1
+    assert settling.status is RunnerStatus.RUNNING
+    assert settling.tick is not None
+    assert settling.tick.command is not None
+    assert settling.tick.command.active_mask.tolist() == [False, True]
+    pending = next(
+        event
+        for event in settling.tick.events
+        if event.kind is ExecutionEventKind.TERMINAL_ACCEPTANCE_PENDING
+    )
+    assert pending.env_mask.tolist() == [False, True]
+    assert not any(
+        event.kind is ExecutionEventKind.REPLANNED for event in settling.tick.events
+    )
 
 
 def test_runner_revision_waits_for_deadline_and_plans_from_fresh_observation() -> None:
@@ -526,7 +716,6 @@ def test_runner_revision_waits_for_deadline_and_plans_from_fresh_observation() -
         motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
-            tracking_error_threshold=0.05,
             action_timeout=10.0,
         ),
         revision=1,
@@ -573,7 +762,6 @@ def test_runner_revision_rejects_pending_effect_verification() -> None:
         motion_policy=MotionPolicy(sample_count=3, control_dt=FIRST_INTERVAL),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
-            tracking_error_threshold=0.05,
             action_timeout=10.0,
         ),
         revision=1,
