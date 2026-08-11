@@ -125,6 +125,9 @@ embodichain.lab.sim.skills
       FORCE_EFFECT_CHANNEL
       GRASP_AFFORDANCE_CAPABILITY
       GroundedSemanticCall
+      GroundedHeldObjectGuard
+      GroundedPhaseEffectGate
+      HeldObjectGuardBaseline
       HandOverPoseProvider
       HandOverPoseTargets
       HeldObjectRelation
@@ -185,6 +188,10 @@ embodichain.lab.sim.skills
       SemanticWorkflow
       SkillEndpointBindingTrace
       SkillEndpointTrackingChannelTrace
+      SkillWorkflowRecoveryRole
+      SkillWorkflowRecoveryTrace
+      WorkflowRecoveryPolicy
+      EffectExpectationDecision
       SkillFailure
       SkillRuntimeProvider
       SkillScene

@@ -61,6 +61,7 @@ from embodichain.lab.sim.skills.profiles import (
     RobotResource,
     RobotSkillProfile,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
 )
 from embodichain.lab.sim.skills.scene import (
     AmbiguousSceneAffordanceError,
@@ -95,7 +96,7 @@ def _action_option_templates() -> dict[str, object]:
 
 
 def _preset(preset_id: str, **kwargs: object) -> SkillPolicyPreset:
-    """Build one complete schema-v2 test preset."""
+    """Build one complete schema-v3 test preset."""
     kwargs.setdefault("action_option_templates", _action_option_templates())
     return SkillPolicyPreset(preset_id, **kwargs)
 
@@ -725,6 +726,9 @@ def test_safe_preset_requires_dynamic_collision_for_dynamic_scene(
                 strategy="motion_gen",
                 dynamic_collision_mode=source_mode,
             ),
+            workflow_recovery_policy=WorkflowRecoveryPolicy(
+                max_recovery_attempts=2,
+            ),
         ),
     )
     engine = _engine_for_integration(
@@ -744,6 +748,7 @@ def test_safe_preset_requires_dynamic_collision_for_dynamic_scene(
         integration.robot_profile.presets["safe"].motion_policy.dynamic_collision_mode
         is source_mode
     )
+    assert bound.preset.workflow_recovery_policy.max_recovery_attempts == 2
     assert provider.calls == 0
 
 

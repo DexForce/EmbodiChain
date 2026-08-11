@@ -1274,22 +1274,24 @@ def _profile_with_step_dt(
     *,
     step_dt: float,
 ) -> RobotSkillProfile:
-    """Return the registration profile aligned to one Gym runtime cadence."""
+    """Return the registration profile with runner cadence aligned to Gym."""
     return replace(
         profile,
         presets={
             preset_id: SkillPolicyPreset(
                 preset_id=preset.preset_id,
                 schema_version=preset.schema_version,
-                motion_policy=replace(preset.motion_policy, control_dt=step_dt),
+                motion_policy=preset.motion_policy,
                 tracking_policy=preset.tracking_policy,
                 recovery_policy=preset.recovery_policy,
+                workflow_recovery_policy=preset.workflow_recovery_policy,
                 runner_cfg=replace(
                     preset.runner_cfg,
                     minimum_cycle_time=step_dt,
                 ),
                 effect_monitors=preset.effect_monitors,
                 action_option_templates=preset.action_option_templates,
+                required_planner=preset.required_planner,
             )
             for preset_id, preset in profile.presets.items()
         },

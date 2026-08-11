@@ -55,6 +55,7 @@ from embodichain.lab.sim.skills import (
     RegisteredSemanticCall,
     SemanticCallDescriptor,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.atomic_actions.tracking import (
@@ -791,28 +792,24 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
     assert len(left.fingerprint) == 64
 
 
-def test_planner_projection_is_json_safe_deterministic_and_owned() -> None:
-    """Planner discovery is one catalog-derived view with the exact digest."""
-    left = _registration()
-    right = _registration()
-
-    projection = left.catalog.planner_projection()
-    encoded = json.dumps(projection, allow_nan=False, sort_keys=True)
-
-    assert projection == right.catalog.planner_projection()
-    assert projection["schema_version"] == (
-        "semantic_integration_planner_projection/v1"
+def test_fingerprint_covers_workflow_recovery_policy() -> None:
+    """A recovery budget is immutable registration-owned runtime behavior."""
+    base = create_cube_robot_profile_binding().presets[0]
+    changed = SkillPolicyPreset(
+        base.preset_id,
+        schema_version=base.schema_version,
+        action_option_templates=base.action_option_templates,
+        motion_policy=base.motion_policy,
+        tracking_policy=base.tracking_policy,
+        recovery_policy=base.recovery_policy,
+        workflow_recovery_policy=WorkflowRecoveryPolicy(
+            max_recovery_attempts=1,
+        ),
+        runner_cfg=base.runner_cfg,
+        effect_monitors=base.effect_monitors,
     )
-    assert projection["integration_fingerprint"] == left.fingerprint
-    assert {call["call_id"] for call in projection["semantic_calls"]} >= {
-        "pick",
-        "place",
-    }
-    assert "ActionInvocation" not in encoded
-    assert "qpos" not in encoded
 
-    projection["scene"]["entities"].clear()
-    assert left.catalog.planner_projection()["scene"]["entities"]
+    assert _registration().fingerprint != _registration_with_preset(changed).fingerprint
 
 
 def test_fingerprint_is_independent_of_catalog_and_provider_insertion_order() -> None:

@@ -25,6 +25,7 @@ embodichain.lab.gym.envs.expert_program
       SimulationExpertProgramFactory
       SimulationSegmentPolicyPort
       ControlCommandStateEvidenceTracker
+      ConfiguredHandOverPoseProvider
       AcceptedRuntimeCommandObserver
       AcceptedRuntimeCommandObserverFactory
       AntipodalGraspAffordanceBinding

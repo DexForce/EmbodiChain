@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 import math
 from typing import Any, Protocol, TYPE_CHECKING
 
@@ -718,11 +719,9 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         translation_threshold: Material scene translation threshold.
         rotation_threshold: Material scene rotation threshold.
 
-    Every profile policy is rebuilt with ``control_dt == step_dt`` and
-    ``minimum_cycle_time == step_dt``.  The Gym cadence is authoritative because
-    commands and fresh feedback cannot be produced between environment steps;
-    silently retaining a preset's unrelated fallback cadence would make runtime
-    timing unrepresentable at the bridge.
+    Every runner policy is rebuilt with ``minimum_cycle_time == step_dt``. The
+    Gym cadence is also carried by each ``PlanningContext``; motion policy stays
+    provider-free and does not own environment timing.
     """
 
     def __init__(
@@ -873,39 +872,37 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
         return registry
 
     def create_robot_skill_profile(self) -> RobotSkillProfile:
-        """Build a profile whose motion and runner policies use Gym cadence."""
+        """Build a profile whose runner policy uses Gym cadence."""
         profile = self._robot_profile_binding.build(self._robot)
         aligned_presets = {
             preset_id: SkillPolicyPreset(
                 preset_id=preset.preset_id,
                 schema_version=preset.schema_version,
-                motion_policy=replace(
-                    preset.motion_policy,
-                    control_dt=self._step_dt,
-                ),
+                motion_policy=preset.motion_policy,
                 tracking_policy=preset.tracking_policy,
                 recovery_policy=preset.recovery_policy,
+                workflow_recovery_policy=preset.workflow_recovery_policy,
                 runner_cfg=replace(
                     preset.runner_cfg,
                     minimum_cycle_time=self._step_dt,
                 ),
                 effect_monitors=preset.effect_monitors,
                 action_option_templates=preset.action_option_templates,
+                required_planner=preset.required_planner,
             )
             for preset_id, preset in profile.presets.items()
         }
         aligned = replace(profile, presets=aligned_presets)
         if any(
-            preset.motion_policy.control_dt != self._step_dt
-            or preset.runner_cfg.minimum_cycle_time != self._step_dt
+            preset.runner_cfg.minimum_cycle_time != self._step_dt
             for preset in aligned.presets.values()
         ):
-            raise AssertionError("Profile runtime policies were not cadence-aligned.")
+            raise AssertionError("Profile runner policies were not cadence-aligned.")
         self._registration.validate_robot_profile(
-            profile,
+            aligned,
             step_dt=self._step_dt,
         )
-        return profile
+        return aligned
 
     def create_atomic_action_engine(
         self,

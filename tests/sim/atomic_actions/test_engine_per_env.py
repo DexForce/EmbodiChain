@@ -174,7 +174,11 @@ class PhaseGateAction(DynamicAction):
             request,
             context,
             success=True,
-            trajectory=torch.stack([context.robot.qpos, midpoint, target], dim=1),
+            trajectory=TimedTrajectory.from_uniform_step(
+                torch.stack([context.robot.qpos, midpoint, target], dim=1),
+                env_ids=context.env_ids,
+                step_dt=0.1,
+            ),
             segment_lengths={"prepare": 2, "commit": 1},
         )
 

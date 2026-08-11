@@ -171,6 +171,7 @@ from .profiles import (
     RobotSkillProfile,
     SkillPolicyPreset,
     UnsupportedSkillError,
+    WorkflowRecoveryPolicy,
 )
 from .scene import (
     ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
@@ -213,6 +214,8 @@ from .runtime import (
     SkillRuntimeProvider,
     SkillScene,
     SkillStatus,
+    SkillWorkflowRecoveryRole,
+    SkillWorkflowRecoveryTrace,
     task_state_to_metadata,
 )
 
@@ -385,8 +388,11 @@ __all__ = [
     "SkillRuntimeProvider",
     "SkillScene",
     "SkillStatus",
+    "SkillWorkflowRecoveryRole",
+    "SkillWorkflowRecoveryTrace",
     "task_state_to_metadata",
     "UnsupportedSkillError",
+    "WorkflowRecoveryPolicy",
     "UnsupportedSceneAffordanceError",
     "build_effect_evidence_queries",
     "align_parallel_commands",

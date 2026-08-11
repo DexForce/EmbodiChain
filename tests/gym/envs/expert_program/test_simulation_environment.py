@@ -118,6 +118,7 @@ from embodichain.lab.sim.skills import (
     SemanticPose,
     SemanticRelationTarget,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
 )
 from embodichain.lab.sim.skills.effects import (
     CONSTRAINT_EFFECT_CHANNEL,
@@ -715,8 +716,8 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
             quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
         )
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(pose=pose),
-            final=SemanticObjectTarget(pose=pose),
+            middle=SemanticObjectTarget(pose),
+            final=SemanticObjectTarget(pose),
         )
 
 
@@ -1120,7 +1121,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
-                motion_policy=MotionPolicy(control_dt=_UNALIGNED_PROFILE_DT),
+                motion_policy=MotionPolicy(sample_count=17),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.037,
                     terminal_max_abs_error=0.019,
@@ -1894,10 +1895,24 @@ def _assert_invocation_equivalent(
     )
 
 
-def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
-    """Cadence lowering preserves source declarations and unrelated policy."""
+def test_simulation_factory_aligns_runner_policy_to_gym_step() -> None:
+    """Runner cadence lowering preserves source declarations and policy."""
     binding = _profile_binding()
-    source_preset = binding.presets[0]
+    base_preset = binding.presets[0]
+    source_preset = SkillPolicyPreset(
+        base_preset.preset_id,
+        schema_version=base_preset.schema_version,
+        action_option_templates=base_preset.action_option_templates,
+        motion_policy=base_preset.motion_policy,
+        tracking_policy=base_preset.tracking_policy,
+        recovery_policy=base_preset.recovery_policy,
+        workflow_recovery_policy=WorkflowRecoveryPolicy(
+            max_recovery_attempts=2,
+        ),
+        runner_cfg=base_preset.runner_cfg,
+        effect_monitors=base_preset.effect_monitors,
+    )
+    binding = replace(binding, presets=(source_preset,))
     source_runner_cfg = source_preset.runner_cfg
     factory, _ = _factory(binding)
 
@@ -1905,7 +1920,7 @@ def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
 
     aligned_preset = profile.presets["safe"]
     aligned_runner_cfg = aligned_preset.runner_cfg
-    assert aligned_preset.motion_policy.control_dt == pytest.approx(_STEP_DT)
+    assert aligned_preset.motion_policy.sample_count == 17
     assert aligned_runner_cfg.minimum_cycle_time == pytest.approx(_STEP_DT)
     assert aligned_runner_cfg.command_timeout == source_runner_cfg.command_timeout
     assert aligned_runner_cfg.safe_stop_timeout == source_runner_cfg.safe_stop_timeout
@@ -1918,9 +1933,8 @@ def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
         in_flight_max_abs_error=0.037,
         terminal_max_abs_error=0.019,
     )
-    assert binding.presets[0].motion_policy.control_dt == pytest.approx(
-        _UNALIGNED_PROFILE_DT
-    )
+    assert aligned_preset.workflow_recovery_policy.max_recovery_attempts == 2
+    assert binding.presets[0].motion_policy.sample_count == 17
     assert binding.presets[0].runner_cfg.minimum_cycle_time == pytest.approx(
         _UNALIGNED_PROFILE_DT
     )
