@@ -6,8 +6,10 @@
   tests are explicitly enabled. Open Drawer has completed its
   supported-simulation physical run; repeated cube pick/place has completed one
   Pick/Place/settle/validator cycle, while the full three-cycle run remains in
-  threshold calibration.
-- Baseline: `main@bcccb787e8f9165e9c8acf6f39f165ba6ac752a4`
+  threshold calibration. Dual-UR5/PGI HandOver has completed three consecutive
+  supported-simulation Pick/transfer/settle/validator runs using contact
+  dynamics only.
+- Baseline: `main@bcccb787dcafdafd7b944ba210e5e85f9cd1d0cb`
 - Last updated: 2026-08-11
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
@@ -585,6 +587,50 @@ Simulation integrations should provide standard monitors for grasp, release,
 handover, and articulation-joint progress. Hardware can implement the same
 contract with perception, force, or controller feedback. Custom monitors stay
 an advanced extension point.
+
+Grasp and handover must remain real dynamics outcomes. A simulation effect
+monitor is observational: it must not create a fixed joint, managed attachment,
+kinematic parent, frozen body, or pose override to make a held-object relation
+persist. Grasp retention comes from embodiment-owned drive settings, collision
+geometry, material/contact parameters, solver settings, and the commands sent
+through the normal controller path. An accepted semantic ``grasp`` command is
+controller intent, not physical proof.
+
+``HeldObjectState`` records a relation only after live physical evidence has
+passed the selected monitor. The target contract must treat contradictory
+evidence, including object-to-endpoint slip, as a real effect failure, invalidate
+the affected row's assumed relation, and enter bounded recovery instead of
+repairing the scene. Terminal effect failure already enters bounded recovery;
+phase-aware detection and failure-outcome state invalidation are not yet
+implemented. For handover, success transfers the verified relation from source
+to destination while the destination remains physically closed. Releasing the
+destination is a separate ``Place`` or ``Release`` semantic call.
+
+The first pure-dynamics rollout uses the staged **B** continuation policy. The
+standard simulation factory lowers both trajectory ``control_dt`` and runner
+``minimum_cycle_time`` to the authoritative Gym step. A persistent
+joint-position task may disable observed-position holds during terminal effect
+verification and on successful completion; bridge wait steps then replay the
+last accepted environment action, and a following ``wait_stable`` policy keeps
+eligible rows on their live drive targets. Cancellation and failure retain the
+normal cancel-then-observed-position safe stop. This split preserves physical
+gripper preload without converting a success continuation into a universal
+safe-state policy.
+
+The validated dual-UR5/PGI slice drives only each PGI master joint (the mimic
+child drive is disabled), uses a ``0.011`` close target with
+``stiffness=2000``, ``damping=50``, and ``max_effort=140``, models the can at
+``0.33 kg``, and executes a 200-sample motion policy. These values are task and
+embodiment calibration, not effect-monitor success shortcuts: the normal
+``0.05 rad`` tracking gate, bounded replanning, physical effect evidence, and
+settling thresholds remain enabled.
+
+This B stage is not the final continuation abstraction for mobile-base or
+whole-body transports. Such endpoints need a typed, transport-owned
+continuation command that can preserve the last successful setpoint per
+endpoint; they must not inherit a joint-qpos-specific latch. The phase-aware
+in-flight held-object guard and failure-state reconciliation described below
+also remain follow-up work.
 
 ## 8. Expert Program configuration
 
@@ -1167,8 +1213,10 @@ profile-owned monitor selection, grounded Pick/Place/HandOver/articulation
 effects, row-local composite hysteresis kernel, canonical `SkillRuntime`, and
 production simulation evidence ports are wired end to end. Physical simulation
 acceptance is partial: Open Drawer and one cube Pick/Place/settle/validator
-cycle have completed, while the full repeated-cube run and embodiment-owned
-HandOver pose integration remain validation work.
+cycle have completed. The embodiment-owned dual-UR5/PGI HandOver slice now
+completes Pick, transfer, terminal physical-effect verification, settling, and
+target validation through real contact dynamics; the full repeated-cube run
+remains validation work.
 
 Deliverables:
 
@@ -1416,7 +1464,15 @@ The design is complete when all of the following hold:
       goals without caller duplication.
 - [x] `Place` is object-centric and consumes verified held-object state.
 - [ ] Built-in grasp, release, handover, and supported articulation effect
-      monitors work in simulation.
+      monitors work in simulation. The dual-UR5/PGI HandOver vertical slice is
+      physically validated; remaining skill/embodiment coverage keeps this
+      aggregate item open.
+- [ ] Grasp and handover simulation gates retain objects through configured
+      drive/contact dynamics only; no monitor or runtime path creates a
+      synthetic attachment, freezes the object, or overrides its pose.
+- [ ] Physical held-object loss is observed as effect failure, invalidates the
+      affected symbolic relation, and exercises bounded recovery rather than
+      being hidden by a simulator-side attachment.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break

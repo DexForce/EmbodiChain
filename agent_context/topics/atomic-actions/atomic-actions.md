@@ -472,6 +472,13 @@ command-only `RuntimeEndpointTarget`. This keeps motion, mobile, whole-body,
 articulation, and custom controller transports extensible without treating a
 control part as symbolic state identity.
 
+`HeldObjectState` is verified symbolic knowledge only. Neither it nor the
+standard effect runtime creates simulator joints, managed attachments,
+kinematic parents, frozen bodies, or pose overrides. Physical grasp retention
+therefore depends on the configured controller, collision geometry, materials,
+contact solver, and rigid-body parameters. A command-state evidence value is
+only accepted controller intent and never physical contact proof by itself.
+
 Providers emit raw `PoseRelationEvidenceBatch`, `BinaryEffectEvidenceBatch`,
 `ScalarEffectEvidenceBatch`, or `JointStateEvidenceBatch` values with stable
 environment IDs, per-row validity/acquisition diagnostics, timestamps, and
@@ -490,6 +497,17 @@ timeout/recovery remains authoritative.
 Cause events (`ACTION_PLANNING_FAILED`, `EFFECT_VERIFICATION_FAILED`, and
 `EFFECT_VERIFICATION_TIMEOUT`) are distinct from the `ACTION_RETRY` recovery
 event. `SESSION_COMPLETED` and `SESSION_FAILED` are distinct terminal events.
+
+Effect verification is currently a terminal action boundary. There is no
+in-flight physical-invariant monitor for the held-object relation during Pick
+lift or HandOver transfer/release/delivery. A slip can therefore be detected at
+the terminal monitor but cannot interrupt the trajectory at the frame where it
+occurs. On a failed HandOver, the success-only `StateDelta` is not committed,
+but an already verified source-held relation also is not reconciled from
+failure evidence; blindly retrying after both grippers lost the object can use
+stale symbolic state. Pure-dynamics recovery needs a typed, phase-aware
+in-flight guard plus failure-outcome reconciliation rather than a simulator-side
+attachment.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
 its owned goal snapshot. Mutable goal values are copied, while simulator-backed
@@ -693,7 +711,13 @@ profile catalog rather than duplicate robot data across tasks.
 The Open Drawer vertical slice has completed its supported-simulation physical
 run and reached the configured drawer joint target. Repeated cube pick/place has
 completed one physical Pick/Place/settle/validator cycle; the full three-cycle
-run remains in threshold calibration.
+run remains in threshold calibration. The dual-UR5/PGI HandOver slice has
+completed three consecutive supported-simulation Pick/transfer/settle/validator
+runs using contact dynamics only. Its calibrated profile drives only the PGI
+master joints, keeps mimic-child drives disabled, uses a 0.011 close target with
+stiffness 2000, damping 50, and maximum effort 140, models the can at 0.33 kg,
+and uses 200 motion samples. The default 0.05-rad tracking gate and bounded
+replanning remain active.
 
 When no explicit contact or constraint callback is installed, simulation grasp
 and release evidence combines the live object-to-endpoint pose relation with
@@ -707,9 +731,28 @@ contact by itself.
 
 `DynamicSettleMonitor` is shared by reset events and the Expert Program
 `wait_stable` post-policy. It owns threshold, cadence, consecutive-check,
-settled, and timeout state but never steps simulation. The demo policy yields
-full-qpos holds through the normal environment step path. Segment validators
-remain a separate dataset/task boundary.
+settled, and timeout state but never steps simulation. Eligible rows reuse live
+target qpos so a contact-blocked position gripper retains closure preload;
+initially inactive rows use fresh measured-qpos holds. Early-settled eligible
+rows keep their targets until the active cohort terminates. Every action still
+passes through the normal environment-step path, and segment validators remain
+a separate dataset/task boundary.
+
+The standard simulation factory lowers both `MotionPolicy.control_dt` and
+`ExecutionRunnerCfg.minimum_cycle_time` to the authoritative Gym `step_dt`.
+When `hold_during_effect_verification=False`, runner polling emits no
+observed-position HOLD; the bridge advances physics by replaying the last
+accepted environment action. HandOver also sets `hold_on_completion=False`, so
+its subsequent `wait_stable` policy continues the existing targets rather than
+neutralizing the gripper at its contact-displaced qpos. Cancellation and
+failure still perform cancel followed by an observed-position safe hold.
+
+This staged B behavior solves the validated joint-position HandOver path but is
+not a generic continuation contract for mobile-base or whole-body transports.
+Those endpoints need a typed transport-owned continuation command rather than a
+joint-qpos latch. `wait_stable` also runs only after terminal effect verification
+and symbolic-state commit, so its timeout is a post-policy failure and does not
+trigger atomic-action recovery.
 
 Runtime and demo results expose deterministic JSON-safe metadata. Call traces
 include invocation identity, masks, command counts, execution/recovery events,

@@ -148,6 +148,7 @@ from embodichain.lab.sim.skills.scene import SceneObjectRef
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
 _STEP_DT = 0.04
+_UNALIGNED_PROFILE_DT = 0.01
 _TRACKER_ENV_IDS = torch.tensor((7, 3, 11), dtype=torch.long)
 _HAND_OPEN_POSITION = 0.0
 _HAND_GRASP_POSITION = 0.8
@@ -1007,8 +1008,9 @@ class _MobileRobot:
     def __init__(self) -> None:
         self.qpos = torch.zeros(_BATCH_SIZE, _ROBOT_DOF)
 
-    def get_qpos(self) -> torch.Tensor:
+    def get_qpos(self, *, target: bool = False) -> torch.Tensor:
         """Return the full controller hold state."""
+        del target
         return self.qpos
 
     def get_qvel(self) -> torch.Tensor:
@@ -1117,7 +1119,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
                     "pick": PickUpOptions(),
                     "place": PlaceOptions(),
                 },
-                motion_policy=MotionPolicy(control_dt=0.01),
+                motion_policy=MotionPolicy(control_dt=_UNALIGNED_PROFILE_DT),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.037,
                     terminal_max_abs_error=0.019,
@@ -1125,7 +1127,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
                 runner_cfg=ExecutionRunnerCfg(
                     command_timeout=0.37,
                     safe_stop_timeout=0.61,
-                    minimum_cycle_time=0.04,
+                    minimum_cycle_time=_UNALIGNED_PROFILE_DT,
                     hold_on_completion=False,
                 ),
             ),
@@ -1274,17 +1276,22 @@ def _motion_generator(robot: _Robot) -> MotionGenerator:
     return generator
 
 
-def _factory() -> tuple[SimulationExpertProgramFactory, _Robot]:
+def _factory(
+    robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
+) -> tuple[SimulationExpertProgramFactory, _Robot]:
     """Create one production factory around CPU-only test doubles."""
     robot = _Robot()
     simulation = _Simulation(robot)
+    selected_profile_binding = (
+        _profile_binding() if robot_profile_binding is None else robot_profile_binding
+    )
     return (
         SimulationExpertProgramFactory(
             simulation,  # type: ignore[arg-type]
             robot,  # type: ignore[arg-type]
             SimulationExpertProgramRegistration(
                 scene_binding=SimulationSceneBinding(registry_id="scene"),
-                robot_profile_binding=_profile_binding(),
+                robot_profile_binding=selected_profile_binding,
             ),
             step_dt=_STEP_DT,
             motion_generator_factory=lambda: _motion_generator(robot),
@@ -1865,16 +1872,35 @@ def _assert_invocation_equivalent(
     )
 
 
-def test_simulation_factory_aligns_every_motion_policy_to_gym_step() -> None:
-    """Cadence alignment preserves the exact registered tracking contract."""
-    factory, _ = _factory()
+def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
+    """Cadence lowering preserves source declarations and unrelated policy."""
+    binding = _profile_binding()
+    source_preset = binding.presets[0]
+    source_runner_cfg = source_preset.runner_cfg
+    factory, _ = _factory(binding)
 
     profile = factory.create_robot_skill_profile()
 
-    assert profile.presets["safe"].motion_policy.control_dt == pytest.approx(_STEP_DT)
-    assert profile.presets["safe"].tracking_policy == TrackingPolicy.joint_position(
+    aligned_preset = profile.presets["safe"]
+    aligned_runner_cfg = aligned_preset.runner_cfg
+    assert aligned_preset.motion_policy.control_dt == pytest.approx(_STEP_DT)
+    assert aligned_runner_cfg.minimum_cycle_time == pytest.approx(_STEP_DT)
+    assert aligned_runner_cfg.command_timeout == source_runner_cfg.command_timeout
+    assert aligned_runner_cfg.safe_stop_timeout == source_runner_cfg.safe_stop_timeout
+    assert aligned_runner_cfg.hold_on_completion is source_runner_cfg.hold_on_completion
+    assert (
+        aligned_runner_cfg.hold_during_effect_verification
+        is source_runner_cfg.hold_during_effect_verification
+    )
+    assert aligned_preset.tracking_policy == TrackingPolicy.joint_position(
         in_flight_max_abs_error=0.037,
         terminal_max_abs_error=0.019,
+    )
+    assert binding.presets[0].motion_policy.control_dt == pytest.approx(
+        _UNALIGNED_PROFILE_DT
+    )
+    assert binding.presets[0].runner_cfg.minimum_cycle_time == pytest.approx(
+        _UNALIGNED_PROFILE_DT
     )
 
 
