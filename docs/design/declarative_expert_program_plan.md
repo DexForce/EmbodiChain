@@ -8,7 +8,9 @@
   Pick/Place/settle/validator cycle, while the full three-cycle run remains in
   threshold calibration. Dual-UR5/PGI HandOver has completed three consecutive
   supported-simulation Pick/transfer/settle/validator runs using contact
-  dynamics only.
+  dynamics only. Named trajectory-segment effect gates now block Pick lift,
+  Place retract, and HandOver source release until fresh physical evidence
+  confirms the required acquisition or release.
 - Baseline: `main@bcccb787dcafdafd7b944ba210e5e85f9cd1d0cb`
 - Last updated: 2026-08-11
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
@@ -597,8 +599,9 @@ controller intent, not physical proof.
 passed the selected monitor. The target contract must treat contradictory
 evidence, including object-to-endpoint slip, as a real effect failure, invalidate
 the affected row's assumed relation, and enter bounded recovery instead of
-repairing the scene. The runtime now exposes the active named motion phase,
-observes phase-scoped held-object invariants from fresh physical evidence, and
+repairing the scene. The runtime now exposes the active named trajectory
+segment, observes segment-scoped held-object invariants from fresh physical
+evidence, and
 applies removal-only ``StateDelta`` reconciliation to failed rows before any
 retry or recovery hand-off. The monitor publishes one current-observation
 outcome per physical expectation, including the stronger proof that every
@@ -612,10 +615,23 @@ external recovery, but the core owns the removal-only invalidation delta and
 applies it before either path. Evidence that remains unresolved at the action
 deadline is reconciled fail-closed: any active verified state covered by the
 pending effect is removed before external recovery. Workflow-level
-re-acquisition and blocking acquisition gates remain open; neither may repair
-the scene implicitly. For handover, success transfers the verified relation
-from source to destination while the destination remains physically closed.
-Releasing the destination is a separate ``Place`` or ``Release`` semantic call.
+re-acquisition remains open and may not repair the scene implicitly.
+
+Blocking physical-effect gates are enforced at named trajectory-segment
+entries. ``Pick`` requires destination attachment before ``lift``; ``Place``
+requires source detachment before ``retract``; and ``HandOver`` requires
+destination attachment before the source ``release`` segment. While a gate is
+unresolved, the session does not advance its waypoint cursor and replays the
+preceding command for the complete synchronized active cohort, so gripper
+preload or open intent remains active under real dynamics. Gate success only
+unlocks motion and never commits ``TaskState``; terminal effect verification
+remains authoritative. Contradiction uses the enclosing action's bounded retry
+policy, stale request IDs are rejected, and the action deadline covers gate
+polling. Every gate owns a fresh monitor instance independent from the terminal
+monitor and in-flight loss guard. For handover, terminal success transfers the
+verified relation from source to destination while the destination remains
+physically closed. Releasing the destination is a separate ``Place`` or
+``Release`` semantic call.
 
 The first pure-dynamics rollout uses the staged **B** continuation policy. The
 standard simulation factory lowers both trajectory ``control_dt`` and runner
@@ -1230,7 +1246,7 @@ The backend-neutral typed state expectations, evidence addresses and sources,
 pose/binary/scalar/joint evidence clauses, versioned monitor registry,
 profile-owned monitor selection, grounded Pick/Place/HandOver/articulation
 effects, row-local composite hysteresis kernel, canonical `SkillRuntime`, and
-production simulation evidence ports are wired end to end. Phase-scoped
+production simulation evidence ports are wired end to end. Segment-scoped
 held-object guard requests, live evidence collection, row-local symbolic
 invalidation, bounded Pick retry, and typed external-recovery hand-off are also
 implemented. Physical simulation acceptance is partial: Open Drawer and one
@@ -1238,10 +1254,10 @@ cube Pick/Place/settle/validator cycle have completed. The embodiment-owned
 dual-UR5/PGI HandOver slice now completes Pick, transfer, terminal
 physical-effect verification, settling, and target validation through real
 contact dynamics. Per-expectation terminal outcomes, core-owned failure
-invalidation, row-local retry/recovery decisions, and fail-closed deadline
-reconciliation are implemented. Blocking acquisition gates, workflow-level
-re-acquisition, fault-injection coverage, and the full repeated-cube run remain
-validation or design work.
+invalidation, row-local retry/recovery decisions, fail-closed deadline
+reconciliation, and blocking named-segment effect gates are implemented.
+Workflow-level re-acquisition, fault-injection coverage, and the full
+repeated-cube run remain validation or design work.
 
 Deliverables:
 
@@ -1497,12 +1513,12 @@ The design is complete when all of the following hold:
       synthetic attachment, freezes the object, or overrides its pose.
 - [ ] Physical held-object loss is observed as effect failure, invalidates the
       affected symbolic relation, and exercises bounded recovery rather than
-      being hidden by a simulator-side attachment. The phase-aware observation,
+      being hidden by a simulator-side attachment. The segment-aware observation,
       row-local core-owned invalidation, per-expectation terminal
       reconciliation, fail-closed deadline handling, bounded Pick/retained-Place
-      retry, and typed recovery boundary are implemented; blocking acquisition,
-      workflow-level re-acquisition, and real-simulation fault injection remain
-      open.
+      retry, typed recovery boundary, and blocking acquisition/release gates are
+      implemented; workflow-level re-acquisition and real-simulation fault
+      injection remain open.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break

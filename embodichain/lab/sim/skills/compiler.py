@@ -43,6 +43,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     OperateArticulationGoal,
     OperateArticulationOptions,
+    PhaseEffectGateRequirement,
     PlanningContext,
     PoseGoalValue,
     SceneArticulationOperationGeometry,
@@ -513,6 +514,55 @@ class GroundedHeldObjectGuard:
         return expectation.task_state_key
 
 
+@dataclass(frozen=True, slots=True)
+class GroundedPhaseEffectGate:
+    """One independently monitored physical-effect segment-entry gate.
+
+    Args:
+        gate_id: Invocation-local stable gate identity.
+        segment_name: Named trajectory segment blocked by the gate.
+        effect_spec: Single-expectation physical observation contract.
+        effect_monitor: Fresh monitor instance owned only by this gate.
+        retry_action: Whether contradiction may retry the enclosing action.
+    """
+
+    gate_id: str
+    segment_name: str
+    effect_spec: SemanticEffectSpec
+    effect_monitor: EffectMonitor = field(repr=False, compare=False)
+    retry_action: bool = True
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.gate_id, field_name="gate_id")
+        _validate_identifier(self.segment_name, field_name="segment_name")
+        if not isinstance(self.effect_spec, SemanticEffectSpec):
+            raise TypeError("effect_spec must be a SemanticEffectSpec.")
+        physical_ids = {clause.expectation_id for clause in self.effect_spec.clauses}
+        if (
+            len(self.effect_spec.state_expectations) != 1
+            or len(physical_ids) != 1
+            or next(iter(physical_ids))
+            != self.effect_spec.state_expectations[0].expectation_id
+        ):
+            raise ValueError(
+                "A phase-effect gate must own exactly one physically observed "
+                "state expectation."
+            )
+        if not isinstance(self.effect_monitor, EffectMonitor):
+            raise TypeError("effect_monitor must be an EffectMonitor.")
+        if type(self.retry_action) is not bool:
+            raise TypeError("retry_action must be a bool.")
+        object.__setattr__(self, "effect_spec", self.effect_spec.snapshot())
+
+    @property
+    def requirement(self) -> PhaseEffectGateRequirement:
+        """Return the core-owned blocking requirement for this monitor."""
+        return PhaseEffectGateRequirement(
+            gate_id=self.gate_id,
+            segment_name=self.segment_name,
+        )
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class GroundedSemanticCall:
     """Call lowered from the latest observed context."""
@@ -522,6 +572,7 @@ class GroundedSemanticCall:
     effect_spec: SemanticEffectSpec | None
     effect_monitor: EffectMonitor | None = field(repr=False, compare=False)
     effect_guards: tuple[GroundedHeldObjectGuard, ...]
+    effect_gates: tuple[GroundedPhaseEffectGate, ...]
     _eligible_mask: torch.Tensor = field(repr=False, compare=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -541,6 +592,7 @@ class GroundedSemanticCall:
         effect_spec: SemanticEffectSpec | None,
         effect_monitor: EffectMonitor | None,
         effect_guards: tuple[GroundedHeldObjectGuard, ...],
+        effect_gates: tuple[GroundedPhaseEffectGate, ...],
         eligible_mask: torch.Tensor,
     ) -> GroundedSemanticCall:
         """Create one compiler-owned grounded result."""
@@ -550,6 +602,7 @@ class GroundedSemanticCall:
         object.__setattr__(instance, "effect_spec", effect_spec)
         object.__setattr__(instance, "effect_monitor", effect_monitor)
         object.__setattr__(instance, "effect_guards", tuple(effect_guards))
+        object.__setattr__(instance, "effect_gates", tuple(effect_gates))
         object.__setattr__(instance, "_eligible_mask", eligible_mask.clone())
         instance.__post_init__()
         return instance
@@ -586,6 +639,28 @@ class GroundedSemanticCall:
         if guards and self.effect_spec is None:
             raise ValueError("Held-object guards require a terminal effect spec.")
         object.__setattr__(self, "effect_guards", guards)
+        gates = tuple(self.effect_gates)
+        if not all(type(value) is GroundedPhaseEffectGate for value in gates):
+            raise TypeError(
+                "effect_gates must contain exact GroundedPhaseEffectGate values."
+            )
+        gate_ids = [value.gate_id for value in gates]
+        gate_segments = [value.segment_name for value in gates]
+        if len(set(gate_ids)) != len(gate_ids):
+            raise ValueError("Grounded phase-effect gate IDs must be unique.")
+        if len(set(gate_segments)) != len(gate_segments):
+            raise ValueError(
+                "At most one grounded phase-effect gate may block each segment."
+            )
+        if tuple(value.requirement for value in gates) != (
+            self.invocation.phase_effect_gates
+        ):
+            raise ValueError(
+                "Grounded phase-effect gates must match invocation requirements."
+            )
+        if gates and self.effect_spec is None:
+            raise ValueError("Phase-effect gates require a terminal effect spec.")
+        object.__setattr__(self, "effect_gates", gates)
         if not isinstance(self._eligible_mask, torch.Tensor):
             raise TypeError("eligible_mask must be a torch.Tensor.")
         if self._eligible_mask.dtype != torch.bool or self._eligible_mask.dim() != 1:
@@ -1195,12 +1270,23 @@ class SemanticSkillCompiler:
             context,
             path=(*path, call_index, "effect_guards"),
         )
+        effect_gates = self._ground_phase_effect_gates(
+            analyzed,
+            effect_spec,
+            path=(*path, call_index, "effect_gates"),
+        )
+        if effect_gates:
+            invocation = replace(
+                invocation,
+                phase_effect_gates=tuple(value.requirement for value in effect_gates),
+            )
         return GroundedSemanticCall._create(
             analyzed=analyzed,
             invocation=invocation,
             effect_spec=effect_spec,
             effect_monitor=effect_monitor,
             effect_guards=effect_guards,
+            effect_gates=effect_gates,
             eligible_mask=eligible,
         )
 
@@ -1817,6 +1903,90 @@ class SemanticSkillCompiler:
             env_ids=context.env_ids,
             state_expectations=tuple(state_expectations),
             clauses=tuple(clauses),
+        )
+
+    def _ground_phase_effect_gates(
+        self,
+        analyzed: AnalyzedSemanticCall,
+        effect_spec: SemanticEffectSpec | None,
+        *,
+        path: tuple[PathPart, ...],
+    ) -> tuple[GroundedPhaseEffectGate, ...]:
+        """Create blocking acquisition/release gates for built-in semantics."""
+        monitor_ref = analyzed.effect_monitor_ref
+        if effect_spec is None or monitor_ref is None:
+            return ()
+        call = analyzed.call
+        if type(call) is Pick:
+            definitions = (("destination_acquired", "lift", "destination"),)
+        elif type(call) is Place:
+            definitions = (("source_released", "retract", "source"),)
+        elif type(call) is HandOver:
+            definitions = (("destination_acquired", "release", "destination"),)
+        else:
+            return ()
+
+        gates: list[GroundedPhaseEffectGate] = []
+        for gate_id, segment_name, expectation_id in definitions:
+            gate_spec = self._single_held_expectation_effect_spec(
+                effect_spec,
+                expectation_id=expectation_id,
+            )
+            try:
+                monitor = self._effect_monitor_registry.create(
+                    gate_spec,
+                    monitor_ref,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise _diagnostic(
+                    "effect_gate_monitor_creation_failed",
+                    (*path, gate_id),
+                    f"Could not create phase-effect gate monitor: {exc}",
+                ) from exc
+            gates.append(
+                GroundedPhaseEffectGate(
+                    gate_id=gate_id,
+                    segment_name=segment_name,
+                    effect_spec=gate_spec,
+                    effect_monitor=monitor,
+                    retry_action=True,
+                )
+            )
+        return tuple(gates)
+
+    @staticmethod
+    def _single_held_expectation_effect_spec(
+        terminal_spec: SemanticEffectSpec,
+        *,
+        expectation_id: str,
+    ) -> SemanticEffectSpec:
+        """Project one terminal held relation into an independent gate spec."""
+        expectation = terminal_spec.state_expectation(expectation_id)
+        if type(expectation) is not HeldObjectStateExpectation:
+            raise TypeError("Phase-effect gates require held-object expectations.")
+        clauses = tuple(
+            clause
+            for clause in terminal_spec.clauses
+            if clause.expectation_id == expectation_id
+        )
+        if not clauses:
+            raise ValueError(
+                f"Held-object expectation {expectation_id!r} has no physical clauses."
+            )
+        effect_kind = (
+            SemanticEffectKind.ATTACH
+            if expectation.relation is HeldObjectRelation.ATTACHED
+            else SemanticEffectKind.RELEASE
+        )
+        return SemanticEffectSpec(
+            semantic_id=terminal_spec.semantic_id,
+            effect_kind=effect_kind,
+            skill_id=terminal_spec.skill_id,
+            invocation_id=terminal_spec.invocation_id,
+            invocation_revision=terminal_spec.invocation_revision,
+            env_ids=terminal_spec.env_ids,
+            state_expectations=(expectation,),
+            clauses=clauses,
         )
 
     def _ground_held_object_guards(
@@ -2445,6 +2615,7 @@ class SemanticSkillCompiler:
 __all__ = [
     "AnalyzedSemanticCall",
     "GroundedHeldObjectGuard",
+    "GroundedPhaseEffectGate",
     "GroundedSemanticCall",
     "HandOverPoseProvider",
     "HandOverPoseTargets",

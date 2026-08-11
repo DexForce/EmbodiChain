@@ -59,6 +59,9 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     PlannerDiagnostics,
     PlanningContext,
+    PhaseEffectGateRequest,
+    PhaseEffectGateRequirement,
+    PhaseEffectGateResult,
     RecoveryPolicy,
     ResolvedActionRequest,
     RobotObservation,
@@ -147,6 +150,32 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
             context,
             success=True,
             trajectory=trajectory,
+        )
+
+
+class PhaseGateAction(DynamicAction):
+    """Three-frame action with one gate before its terminal segment."""
+
+    skill_id: ClassVar[str] = "phase_gate"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        self.plan_count += 1
+        self.requests.append(request)
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        midpoint = torch.lerp(context.robot.qpos, target, 0.5)
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=torch.stack([context.robot.qpos, midpoint, target], dim=1),
+            segment_lengths={"prepare": 2, "commit": 1},
         )
 
 
@@ -595,6 +624,26 @@ def _held_object_loss_result(
     )
 
 
+def _phase_gate_result(
+    request: PhaseEffectGateRequest,
+    *,
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    retry_mask: torch.Tensor | None = None,
+) -> PhaseEffectGateResult:
+    """Build one result exactly correlated with a pending segment-entry gate."""
+    return PhaseEffectGateResult(
+        verification_id=request.verification_id,
+        gate_id=request.gate_id,
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        retry_mask=(failure_mask.clone() if retry_mask is None else retry_mask),
+    )
+
+
 def _multi_dependency_context(
     timestamp: float,
     *,
@@ -720,6 +769,29 @@ def _destination_invocation(
     )
 
 
+def _phase_gate_invocation(
+    engine: AtomicActionEngine,
+    *,
+    segment_name: str = "commit",
+    max_action_retries: int = 2,
+) -> ActionInvocation[EndEffectorPoseGoal]:
+    """Build a test invocation whose core owns one named segment gate."""
+    base = _invocation(
+        engine,
+        skill_id=PhaseGateAction.skill_id,
+        max_action_retries=max_action_retries,
+    )
+    return replace(
+        base,
+        phase_effect_gates=(
+            PhaseEffectGateRequirement(
+                gate_id="physical_ready",
+                segment_name=segment_name,
+            ),
+        ),
+    )
+
+
 def _effect_session(
     *,
     batch_size: int = 1,
@@ -784,6 +856,174 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert torch.all(_joint_positions(second.command) == 0.2)
     assert final.status is ExecutionStatus.COMPLETED
     assert final.eligible_mask.tolist() == [True]
+
+
+@pytest.mark.parametrize(
+    ("segment_name", "message"),
+    (("missing", "missing segment"), ("prepare", "first trajectory segment")),
+)
+def test_phase_effect_gate_requires_a_noninitial_named_segment(
+    segment_name: str,
+    message: str,
+) -> None:
+    engine, _ = _engine()
+    engine.register(PhaseGateAction())
+
+    with pytest.raises(ValueError, match=message):
+        engine.start(
+            (_phase_gate_invocation(engine, segment_name=segment_name),),
+            _context(0.0, 0.0, 0.2, 0),
+        )
+
+
+def test_unresolved_phase_effect_gate_replays_preceding_command_for_full_cohort() -> (
+    None
+):
+    engine, _ = _engine(batch_size=2)
+    action = PhaseGateAction()
+    engine.register(action)
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    session = engine.start((_phase_gate_invocation(engine),), initial)
+
+    first = session.tick(initial)
+    boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+    assert request.gate_id == "physical_ready"
+    assert request.segment_name == "commit"
+    assert request.next_waypoint_index == 2
+    assert request.env_mask.tolist() == [True, True]
+    assert torch.allclose(_joint_positions(first.command), torch.zeros(2, 2))
+    predecessor = _joint_positions(boundary.command)
+    assert torch.allclose(predecessor, torch.tensor([[0.1, 0.1], [0.2, 0.2]]))
+
+    unresolved = session.tick(
+        _context(0.2, (0.1, 0.2), (0.2, 0.4), 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([True, False]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert unresolved.status is ExecutionStatus.RUNNING
+    assert unresolved.pending_phase_effect_gate is not None
+    assert unresolved.pending_phase_effect_gate.verification_id == (
+        request.verification_id + 1
+    )
+    assert unresolved.pending_phase_effect_gate.next_waypoint_index == 2
+    assert torch.equal(_joint_positions(unresolved.command), predecessor)
+    assert unresolved.command is not None
+    assert unresolved.command.active_mask.tolist() == [True, True]
+    assert unresolved.task_state.held_objects == {}
+    kinds = [event.kind for event in (*boundary.events, *unresolved.events)]
+    assert kinds.count(ExecutionEventKind.PHASE_EFFECT_GATE_REQUIRED) == 1
+    assert ExecutionEventKind.PHASE_EFFECT_GATE_SATISFIED not in kinds
+    assert action.plan_count == 1
+
+
+def test_phase_effect_gate_success_unlocks_segment_without_committing_task_state() -> (
+    None
+):
+    engine, _ = _engine(batch_size=2)
+    engine.register(PhaseGateAction())
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    session = engine.start((_phase_gate_invocation(engine),), initial)
+    session.tick(initial)
+    boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+
+    released = session.tick(
+        _context(0.2, (0.1, 0.2), (0.2, 0.4), 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([True, True]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert released.pending_phase_effect_gate is None
+    assert torch.allclose(
+        _joint_positions(released.command),
+        torch.tensor([[0.2, 0.2], [0.4, 0.4]]),
+    )
+    assert released.task_state.held_objects == {}
+    satisfied = next(
+        event
+        for event in released.events
+        if event.kind is ExecutionEventKind.PHASE_EFFECT_GATE_SATISFIED
+    )
+    assert satisfied.env_mask.tolist() == [True, True]
+
+
+def test_phase_effect_gate_contradiction_retries_action_without_state_mutation() -> (
+    None
+):
+    engine, _ = _engine(batch_size=2)
+    action = PhaseGateAction()
+    engine.register(action)
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    session = engine.start(
+        (_phase_gate_invocation(engine, max_action_retries=1),),
+        initial,
+    )
+    session.tick(initial)
+    boundary = session.tick(_context(0.1, (0.0, 0.0), (0.2, 0.4), 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+
+    retried = session.tick(
+        _context(0.2, (0.1, 0.2), (0.2, 0.4), 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([False, True]),
+            failure_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([True, False]),
+        ),
+    )
+
+    assert retried.status is ExecutionStatus.RUNNING
+    assert retried.pending_phase_effect_gate is None
+    assert retried.command is not None
+    assert retried.command.active_mask.tolist() == [True, True]
+    assert action.plan_count == 2
+    assert session.plan_attempts[-1].attempt_generation == 1
+    assert session.plan_attempts[-1].action_retry_counts == (1, 0)
+    assert retried.task_state.held_objects == {}
+    kinds = [event.kind for event in retried.events]
+    assert ExecutionEventKind.PHASE_EFFECT_GATE_FAILED in kinds
+    assert ExecutionEventKind.ACTION_RETRY in kinds
+
+
+def test_stale_phase_effect_gate_result_is_rejected_after_unresolved_poll() -> None:
+    engine, _ = _engine()
+    engine.register(PhaseGateAction())
+    initial = _context(0.0, 0.0, 0.2, 0)
+    session = engine.start((_phase_gate_invocation(engine),), initial)
+    session.tick(initial)
+    boundary = session.tick(_context(0.1, 0.0, 0.2, 0))
+    request = boundary.pending_phase_effect_gate
+    assert request is not None
+    unresolved = session.tick(
+        _context(0.2, 0.1, 0.2, 0),
+        phase_effect_gate_result=_phase_gate_result(
+            request,
+            success_mask=torch.tensor([False]),
+            failure_mask=torch.tensor([False]),
+        ),
+    )
+    assert unresolved.pending_phase_effect_gate is not None
+
+    with pytest.raises(ValueError, match="verification_id"):
+        session.tick(
+            _context(0.3, 0.1, 0.2, 0),
+            phase_effect_gate_result=_phase_gate_result(
+                request,
+                success_mask=torch.tensor([True]),
+                failure_mask=torch.tensor([False]),
+            ),
+        )
 
 
 def test_held_object_loss_retries_only_failed_row_with_reconciled_state() -> None:

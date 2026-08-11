@@ -866,8 +866,8 @@ and resets the history. Evidence exactly at the deadline is valid, while a due
 observation after the deadline is handled by session timeout without invoking
 the verifier.
 
-The curated semantic runtime also installs phase-scoped, negative
-held-object guards for named trajectory segments. Before a due command is
+The curated semantic runtime also installs segment-scoped, negative held-object
+guards for named trajectory segments. Before a due command is
 dispatched, `ExecutionRunner` passes a fresh observation and the current
 `HeldObjectGuardRequest` to its synchronous guard verifier. Each request has a
 single-use verification ID, the active waypoint/segment identity, and the
@@ -878,10 +878,27 @@ before retrying or emitting `RECOVERY_REQUIRED`.
 Unavailable or unresolved evidence does not count as a physical contradiction,
 and the guard verifier is not invoked after the authoritative action deadline.
 
-The current guard is observational and negative; a blocking positive
-acquisition gate, outcome-aware terminal reconciliation, and workflow-level
-re-acquisition remain separate policies. Neither the monitor nor runtime
+The curated `Pick`, `Place`, and `HandOver` paths additionally install blocking
+positive-effect gates at named trajectory-segment entries. Pick must verify the
+destination attachment before `lift`, Place must verify source detachment before
+`retract`, and HandOver must verify the destination attachment before source
+`release`. The compiler creates a monitor instance for each gate independently
+from both the terminal monitor and negative held-object guard.
+
+`ExecutionSession` exposes a correlated `PhaseEffectGateRequest` at the segment
+boundary. While its result remains unresolved, the waypoint cursor does not
+advance and the preceding command is replayed for the complete synchronized
+active cohort. This preserves gripper preload or open intent instead of
+replacing it with an observed-position hold. A successful
+`PhaseEffectGateResult` only unlocks the segment; it does not commit
+`TaskState`. Contradiction uses the enclosing action's bounded retry policy,
+request IDs are single-use, and the action deadline covers all polling. Calling
+`run_until_blocked()` without a gate verifier returns this boundary for an
+external verifier.
+
+The guards and gates are observational. Neither a monitor nor the runtime
 creates a simulator attachment, freezes an object, or overrides its pose.
+Workflow-level re-acquisition remains a separate recovery policy.
 
 ## Action Agent integration
 

@@ -47,6 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
+    PhaseEffectGateRequest,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
@@ -63,6 +64,7 @@ from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
 from embodichain.lab.sim.skills.calls import HandOver, Place, RegisteredSemanticCall
 from embodichain.lab.sim.skills.compiler import (
     GroundedHeldObjectGuard,
+    GroundedPhaseEffectGate,
     HeldObjectGuardBaseline,
     SemanticSkillCompiler,
 )
@@ -795,6 +797,120 @@ def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation()
     assert trace.boundary_kind == "in_flight_guard"
     assert trace.guard_id == "source_attached"
     assert trace.segment_name == "carry"
+    assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
+
+
+def test_phase_effect_gate_uses_independent_monitor_and_records_boundary_trace() -> (
+    None
+):
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="object",
+        entity_id="cube",
+    )
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="destination",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="arm",
+        task_state_key="arm",
+    )
+    spec = SemanticEffectSpec(
+        semantic_id="pick",
+        effect_kind=SemanticEffectKind.ATTACH,
+        skill_id="pick_up",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
+        state_expectations=(expectation,),
+        clauses=(
+            BinaryEffectClause(
+                clause_id="destination.constraint",
+                expectation_id="destination",
+                source=EffectEvidenceSourceRef(
+                    "test.provider",
+                    "1",
+                    ControlPartEvidenceAddress("hand", "constraint"),
+                ),
+                evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                expected=True,
+            ),
+        ),
+    )
+    terminal_monitor = _DecisionMonitor(
+        spec,
+        EffectMonitorDecision(_mask(True, True), _mask(False, False)),
+    )
+    gate_monitor = _DecisionMonitor(
+        spec,
+        EffectMonitorDecision(_mask(False, True), _mask(True, False)),
+    )
+    gate = GroundedPhaseEffectGate(
+        gate_id="destination_acquired",
+        segment_name="lift",
+        effect_spec=spec,
+        effect_monitor=gate_monitor,
+        retry_action=True,
+    )
+    system.runtime._grounded = SimpleNamespace(
+        analyzed=SimpleNamespace(effect_monitor_ref=None),
+        effect_monitor=terminal_monitor,
+        effect_gates=(gate,),
+    )
+    system.runtime._runner = SimpleNamespace(
+        session=SimpleNamespace(
+            active_plan=SimpleNamespace(
+                expected_effects=StateDelta(held_object_updates={"arm": held})
+            )
+        )
+    )
+    system.runtime._current_call_index = 0
+    context = system.observation.observe(TaskState.empty(BATCH_SIZE, "cpu"))
+    request = PhaseEffectGateRequest(
+        verification_id=7,
+        gate_id="destination_acquired",
+        skill_id="pick_up",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        invocation_index=0,
+        attempt_generation=3,
+        next_waypoint_index=4,
+        segment_name="lift",
+        requested_at=0.0,
+        deadline=10.0,
+        env_mask=_mask(True, True),
+    )
+
+    result = system.runtime._phase_effect_gate_verifier(context, request)
+
+    assert result.verification_id == 7
+    assert result.gate_id == "destination_acquired"
+    assert result.attempt_generation == 3
+    assert result.next_waypoint_index == 4
+    assert torch.equal(result.success_mask, _mask(False, True))
+    assert torch.equal(result.failure_mask, _mask(True, False))
+    assert torch.equal(result.retry_mask, _mask(True, False))
+    assert terminal_monitor.calls == 0
+    assert gate_monitor.calls == 1
+    assert gate_monitor.requests[0].terminal_segment == "lift"
+    candidate = gate_monitor.requests[0].expected_effects.held_object_updates["arm"]
+    assert isinstance(candidate, HeldObjectState)
+    assert candidate.semantics.entity_id == "cube"
+    trace = system.runtime._effect_traces[0]
+    assert trace.boundary_kind == "phase_effect_gate"
+    assert trace.guard_id is None
+    assert trace.gate_id == "destination_acquired"
+    assert trace.segment_name == "lift"
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
 
 
