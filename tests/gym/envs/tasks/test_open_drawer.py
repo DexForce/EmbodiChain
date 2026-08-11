@@ -162,7 +162,8 @@ def test_task_config_compiles_through_real_simulation_factory(
         uid = "CobotMagic"
 
         @staticmethod
-        def get_qpos() -> torch.Tensor:
+        def get_qpos(*, target: bool = False) -> torch.Tensor:
+            del target
             return torch.zeros((1, 16), dtype=torch.float32)
 
     class FakeDrawer:
