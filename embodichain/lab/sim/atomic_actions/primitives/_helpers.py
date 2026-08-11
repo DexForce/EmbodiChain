@@ -22,7 +22,39 @@ import torch
 
 from embodichain.utils import logger
 
+from ..bindings import EndpointBinding
 from ..state import PlanningContext
+
+
+def require_shared_task_state_key(
+    motion: EndpointBinding,
+    grasp: EndpointBinding,
+    *,
+    participant: str,
+) -> str:
+    """Return the stable task-state key shared by one participant's endpoints.
+
+    Args:
+        motion: Participant endpoint used for motion control.
+        grasp: Participant endpoint used for grasp control.
+        participant: Human-readable participant name used in validation errors.
+
+    Returns:
+        Stable logical key used to address held-object task state.
+
+    Raises:
+        ValueError: If the participant endpoints use different task-state keys.
+    """
+    motion_key = motion.task_state_key
+    grasp_key = grasp.task_state_key
+    if motion_key != grasp_key:
+        raise ValueError(
+            f"{participant} motion and grasp endpoints must share one "
+            f"task_state_key, but got {motion_key!r} and {grasp_key!r}."
+        )
+    if not isinstance(motion_key, str) or not motion_key:
+        raise ValueError(f"{participant} task_state_key must be a non-empty string.")
+    return motion_key
 
 
 def resolve_object_target(
@@ -52,4 +84,8 @@ def arm_qpos_from_state(
     return context.robot.qpos[:, arm_joint_ids]
 
 
-__all__ = ["arm_qpos_from_state", "resolve_object_target"]
+__all__ = [
+    "arm_qpos_from_state",
+    "require_shared_task_state_key",
+    "resolve_object_target",
+]

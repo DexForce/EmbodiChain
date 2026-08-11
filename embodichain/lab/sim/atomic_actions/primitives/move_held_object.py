@@ -30,7 +30,11 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
-from ._helpers import arm_qpos_from_state, resolve_object_target
+from ._helpers import (
+    arm_qpos_from_state,
+    require_shared_task_state_key,
+    resolve_object_target,
+)
 from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
@@ -146,6 +150,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         grasp = binding.endpoint("primary", "grasp")
         motion_target = motion.require_target(JointPositionTarget)
         grasp_target = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="MoveHeldObject primary participant",
+        )
         control_part = motion_target.control_part
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
@@ -156,11 +165,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
-        held_object = state.get_held_object(control_part)
+        held_object = state.get_held_object(task_state_key)
         if held_object is None:
             logger.log_error(
-                "MoveHeldObject requires an object held by control part "
-                f"{control_part!r} - run PickUp first.",
+                "MoveHeldObject requires an object held by task-state resource "
+                f"{task_state_key!r} - run PickUp first.",
                 ValueError,
             )
         object_target_pose = resolve_object_target(

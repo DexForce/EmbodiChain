@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
+import math
 from typing import ClassVar
 from unittest.mock import Mock
 
@@ -43,6 +44,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
+    EffectVerificationRequirement,
     EffectVerificationResult,
     GraspGoal,
     HeldObjectState,
@@ -50,6 +52,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
+    PlannerDiagnostics,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
@@ -138,6 +141,31 @@ class EffectAction(DynamicAction):
         )
 
 
+class VerificationOnlyAction(DynamicAction):
+    """Dynamic action requiring a physical check without symbolic effects."""
+
+    skill_id: ClassVar[str] = "verification_only"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        goal = self.require_goal(request)
+        pose = resolve_pose_goal(goal.xpos, context, name="xpos")
+        target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=torch.stack([context.robot.qpos, target], dim=1),
+            effect_verification=EffectVerificationRequirement(
+                kind="physical.test_completion"
+            ),
+        )
+
+
 class FailedEffectAction(EffectAction):
     """Effect-declaring action whose planner fails for every environment."""
 
@@ -151,6 +179,65 @@ class FailedEffectAction(EffectAction):
     ) -> ActionPlan:
         plan = super()._plan(request, context)
         return replace(plan, plan_success=torch.zeros_like(plan.plan_success))
+
+
+class DiagnosticAction(DynamicAction):
+    """Dynamic action exposing its installed plan for snapshot isolation tests."""
+
+    skill_id: ClassVar[str] = "diagnostic"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.metadata = {"solver": {"iterations": [3, 5]}}
+        self.returned_plans: list[ActionPlan] = []
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        plan = super()._plan(request, context)
+        plan = replace(
+            plan,
+            diagnostics=PlannerDiagnostics(
+                backend="diagnostic",
+                metadata=self.metadata,
+            ),
+        )
+        self.returned_plans.append(plan)
+        return plan
+
+
+class WindowedDependencyAction(DynamicAction):
+    """Stop monitoring a goal pose once its first command was issued."""
+
+    skill_id: ClassVar[str] = "windowed_dependency"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        plan = super()._plan(request, context)
+        return replace(
+            plan,
+            scene_dependency_monitor_until={"target": 1},
+        )
+
+
+class MultiDependencyAction(DynamicAction):
+    """Track the goal plus one auxiliary scene dependency."""
+
+    skill_id: ClassVar[str] = "multi_dependency"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+    ) -> tuple[str, ...]:
+        return tuple(sorted((*super()._scene_dependencies(request), "obstacle")))
 
 
 class MixedEffectAction(EffectAction):
@@ -378,6 +465,41 @@ def _context(
     )
 
 
+def _multi_dependency_context(
+    timestamp: float,
+    *,
+    target_x: float,
+    obstacle_x: float | None,
+    version: int,
+    target_yaw: float = 0.0,
+) -> PlanningContext:
+    """Build one-row context with an optional auxiliary dependency."""
+    context = _context(timestamp, 0.0, target_x, version)
+    entities = dict(context.scene.entities)
+    target_pose = entities["target"].pose
+    cosine = math.cos(target_yaw)
+    sine = math.sin(target_yaw)
+    target_pose[:, 0, 0] = cosine
+    target_pose[:, 0, 1] = -sine
+    target_pose[:, 1, 0] = sine
+    target_pose[:, 1, 1] = cosine
+    entities["target"] = EntityState(target_pose)
+    if obstacle_x is not None:
+        obstacle_pose = torch.eye(4).unsqueeze(0)
+        obstacle_pose[:, 0, 3] = obstacle_x
+        entities["obstacle"] = EntityState(obstacle_pose)
+    return PlanningContext(
+        robot=context.robot,
+        task=context.task,
+        scene=SceneSnapshot(
+            timestamp=timestamp,
+            version=version,
+            entities=entities,
+        ),
+        env_ids=context.env_ids,
+    )
+
+
 def _collision_context(
     timestamp: float,
     qpos: torch.Tensor,
@@ -460,6 +582,7 @@ def _destination_invocation(
                     "second": "arm_b",
                 }
             },
+            task_state_keys={"primary": "destination_resource"},
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
@@ -476,7 +599,7 @@ def _effect_session(
     max_action_retries: int = 2,
     action_timeout: float = 30.0,
     eligible_mask: torch.Tensor | None = None,
-    action: EffectAction | None = None,
+    action: DynamicAction | None = None,
 ) -> tuple[ExecutionSession, ExecutionTick]:
     """Advance a test effect action to its verification boundary."""
     engine, _ = _engine(batch_size=batch_size)
@@ -530,6 +653,109 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert torch.all(_joint_positions(second.command) == 0.2)
     assert final.status is ExecutionStatus.COMPLETED
     assert final.eligible_mask.tolist() == [True]
+
+
+def test_all_rows_planning_failure_skips_inactive_command_frames() -> None:
+    engine, _ = _engine()
+    action = FailedEffectAction()
+    engine.register(action)
+    base = _invocation(engine, max_action_retries=0)
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    failed = session.tick(_context(0.0, 0.0, 0.2, 0))
+
+    assert failed.command is None
+    assert failed.status is ExecutionStatus.FAILED
+    assert failed.eligible_mask.tolist() == [False]
+    assert any(
+        event.kind is ExecutionEventKind.ACTION_PLANNING_FAILED
+        for event in failed.events
+    )
+
+
+def test_plan_attempt_records_snapshot_nested_metadata_at_installation() -> None:
+    engine, _ = _engine()
+    action = DiagnosticAction()
+    engine.register(action)
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    action.metadata["solver"]["iterations"][0] = 99
+    action.returned_plans[0].diagnostics.metadata["solver"]["iterations"][1] = 77
+    first_read = session.plan_attempts[0]
+    first_read.plan.diagnostics.metadata["solver"]["iterations"][0] = 42
+    second_read = session.plan_attempts[0]
+
+    assert second_read.plan.diagnostics.metadata["solver"]["iterations"] == [3, 5]
+
+
+def test_scene_dependency_window_ignores_expected_self_motion() -> None:
+    engine, _ = _engine()
+    action = WindowedDependencyAction()
+    engine.register(action)
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    first = session.tick(_context(0.0, 0.0, 0.2, 0))
+    moved = session.tick(_context(0.1, 0.0, 0.8, 1))
+
+    assert first.command is not None
+    assert moved.command is not None
+    assert action.plan_count == 1
+    assert not any(
+        event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED for event in moved.events
+    )
+
+
+def test_scene_dependency_window_reports_motion_before_cutoff() -> None:
+    engine, _ = _engine()
+    action = WindowedDependencyAction()
+    engine.register(action)
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
+
+    moved = session.tick(_context(0.1, 0.0, 0.8, 1))
+
+    changed = next(
+        event
+        for event in moved.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
+    assert changed.message == (
+        "Scene dependency invalidated the active plan at waypoint_index=0: "
+        "entity_id='target', monitor_cutoff=1, max_translation=0.600000, "
+        "translation_threshold=0.020000, max_rotation=0.000000, "
+        "rotation_threshold=0.087266."
+    )
+    assert action.plan_count == 2
 
 
 def test_initial_eligibility_is_sticky_across_invocation_barriers() -> None:
@@ -706,11 +932,102 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     tick = session.tick(_context(0.1, 0.0, 0.3, 1))
 
     kinds = {event.kind for event in tick.events}
+    changed = next(
+        event
+        for event in tick.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
     assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED in kinds
     assert ExecutionEventKind.REPLANNED in kinds
+    assert changed.message == (
+        "Scene dependency invalidated the active plan at waypoint_index=1: "
+        "entity_id='target', monitor_cutoff=none, max_translation=0.200000, "
+        "translation_threshold=0.020000, max_rotation=0.000000, "
+        "rotation_threshold=0.087266."
+    )
     assert action.plan_count == 2
     assert action.requests[0] is action.requests[1]
     assert tick.command is not None
+
+
+def test_scene_motion_diagnostic_orders_multiple_changed_entities() -> None:
+    engine, _ = _engine()
+    action = MultiDependencyAction()
+    engine.register(action)
+    initial = _multi_dependency_context(
+        0.0,
+        target_x=0.1,
+        obstacle_x=0.4,
+        version=0,
+    )
+    session = engine.start(
+        (_invocation(engine, skill_id=action.skill_id),),
+        initial,
+    )
+    session.tick(initial)
+
+    tick = session.tick(
+        _multi_dependency_context(
+            0.1,
+            target_x=0.4,
+            obstacle_x=0.8,
+            version=1,
+            target_yaw=0.2,
+        )
+    )
+
+    changed = next(
+        event
+        for event in tick.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
+    assert changed.message == (
+        "Scene dependency invalidated the active plan at waypoint_index=1: "
+        "entity_id='obstacle', monitor_cutoff=none, max_translation=0.400000, "
+        "translation_threshold=0.020000, max_rotation=0.000000, "
+        "rotation_threshold=0.087266 | "
+        "entity_id='target', monitor_cutoff=none, max_translation=0.300000, "
+        "translation_threshold=0.020000, max_rotation=0.200000, "
+        "rotation_threshold=0.087266."
+    )
+
+
+def test_scene_motion_diagnostic_identifies_missing_entity() -> None:
+    engine, _ = _engine()
+    action = MultiDependencyAction()
+    engine.register(action)
+    initial = _multi_dependency_context(
+        0.0,
+        target_x=0.1,
+        obstacle_x=0.4,
+        version=0,
+    )
+    session = engine.start(
+        (_invocation(engine, skill_id=action.skill_id),),
+        initial,
+    )
+    session.tick(initial)
+
+    tick = session.tick(
+        _multi_dependency_context(
+            0.1,
+            target_x=0.1,
+            obstacle_x=None,
+            version=1,
+        )
+    )
+
+    changed = next(
+        event
+        for event in tick.events
+        if event.kind is ExecutionEventKind.DYNAMIC_GOAL_CHANGED
+    )
+    assert changed.message == (
+        "Scene dependency invalidated the active plan at waypoint_index=1: "
+        "entity_id='obstacle', monitor_cutoff=none, missing=current_scene, "
+        "max_translation=unavailable, translation_threshold=0.020000, "
+        "max_rotation=unavailable, rotation_threshold=0.087266."
+    )
 
 
 def test_recovery_replan_rejects_runtime_destination_change() -> None:
@@ -794,6 +1111,18 @@ def test_collision_world_change_replans_with_latest_obstacle_pose() -> None:
     latest_obstacles = generator.bind_collision_world.call_args.kwargs["obstacle_poses"]
     assert latest_obstacles["obstacle"][0, 0, 3] == pytest.approx(0.6)
     assert tick.command is not None
+    attempts = session.plan_attempts
+    assert [attempt.attempt_generation for attempt in attempts] == [0, 1]
+    assert [attempt.event_kind for attempt in attempts] == [
+        ExecutionEventKind.ACTION_PLANNED,
+        ExecutionEventKind.REPLANNED,
+    ]
+    assert [attempt.plan.planned_scene_version for attempt in attempts] == [0, 1]
+    assert [attempt.plan.planned_collision_world_revision for attempt in attempts] == [
+        (0,),
+        (1,),
+    ]
+    assert [attempt.replan_counts for attempt in attempts] == [(0,), (1,)]
 
 
 def test_collision_world_exhaustion_only_disables_changed_environment() -> None:
@@ -1107,10 +1436,15 @@ def test_session_revision_replans_from_latest_context() -> None:
     session.revise_current(revised)
     first = session.tick(_context(0.0, 0.0, 0.1, 0))
     second = session.tick(_context(0.1, 0.0, 0.1, 0))
+    attempts = session.plan_attempts
 
     assert action.plan_count == 2
     assert action.requests[0] is not action.requests[1]
     assert [request.revision for request in action.requests] == [0, 1]
+    assert [attempt.request.revision for attempt in attempts] == [0, 1]
+    assert attempts[0].request is not attempts[1].request
+    assert attempts[1].request.motion_policy == revised.motion_policy
+    assert attempts[1].request.recovery_policy == revised.recovery_policy
     assert any(
         event.kind is ExecutionEventKind.INVOCATION_REVISED
         and event.invocation_revision == 1
@@ -1296,6 +1630,159 @@ def test_session_rejects_regressing_collision_world_revision() -> None:
 
     with pytest.raises(ValueError, match="Collision-world revisions"):
         session.tick(regressed)
+
+
+def test_explicit_verification_with_empty_delta_preserves_task_state() -> None:
+    session, waiting = _effect_session(action=VerificationOnlyAction())
+    request = waiting.pending_effect
+    assert request is not None
+    assert request.expected_effects.is_empty
+    assert request.effect_verification is not None
+    assert request.effect_verification.kind == "physical.test_completion"
+    initial_task_state = waiting.task_state
+
+    preserved = session.pending_effect
+    assert preserved is not None
+    assert preserved.effect_verification is not None
+    assert preserved.effect_verification is not request.effect_verification
+    with pytest.raises(ValueError, match="explicit physical-effect requirement"):
+        replace(request, effect_verification=None)
+
+    completed = session.tick(
+        _context(0.21, 0.2, 0.2, 0),
+        effect_result=EffectVerificationResult(
+            request.verification_id,
+            success_mask=torch.tensor([True]),
+            failure_mask=torch.tensor([False]),
+        ),
+    )
+
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.pending_effect is None
+    assert completed.task_state is initial_task_state
+    assert not completed.task_state.held_objects
+
+
+def test_explicit_verification_keeps_partial_and_retry_row_lifecycle() -> None:
+    session, waiting = _effect_session(
+        batch_size=2,
+        max_action_retries=1,
+        action=VerificationOnlyAction(),
+    )
+    first_request = waiting.pending_effect
+    assert first_request is not None
+    initial_task_state = waiting.task_state
+
+    retry = session.tick(
+        _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
+        effect_result=EffectVerificationResult(
+            first_request.verification_id,
+            success_mask=torch.tensor([True, False]),
+            failure_mask=torch.tensor([False, True]),
+        ),
+    )
+
+    assert retry.pending_effect is None
+    assert retry.task_state is initial_task_state
+    assert any(
+        event.kind is ExecutionEventKind.ACTION_RETRY
+        and event.env_mask.tolist() == [False, True]
+        for event in retry.events
+    )
+
+    first_command = session.tick(_context(0.22, (0.2, 0.2), (0.2, 0.2), 0))
+    second_command = session.tick(_context(0.23, (0.2, 0.2), (0.2, 0.2), 0))
+    second_wait = session.tick(_context(0.24, (0.2, 0.2), (0.2, 0.2), 0))
+    assert first_command.command is not None
+    assert first_command.command.active_mask.tolist() == [False, True]
+    assert second_command.command is not None
+    assert second_command.command.active_mask.tolist() == [False, True]
+    second_request = second_wait.pending_effect
+    assert second_request is not None
+    assert second_request.env_mask.tolist() == [False, True]
+    assert second_request.verification_id != first_request.verification_id
+    assert second_request.deadline > first_request.deadline
+
+    completed = session.tick(
+        _context(0.25, (0.2, 0.2), (0.2, 0.2), 0),
+        effect_result=EffectVerificationResult(
+            second_request.verification_id,
+            success_mask=torch.tensor([False, True]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.eligible_mask.tolist() == [True, True]
+    assert completed.task_state is initial_task_state
+
+
+def test_explicit_verification_partial_success_shrinks_request_without_state_delta() -> (
+    None
+):
+    session, waiting = _effect_session(
+        batch_size=2,
+        action=VerificationOnlyAction(),
+    )
+    first_request = waiting.pending_effect
+    assert first_request is not None
+    initial_task_state = waiting.task_state
+
+    partial = session.tick(
+        _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
+        effect_result=EffectVerificationResult(
+            first_request.verification_id,
+            success_mask=torch.tensor([True, False]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    second_request = partial.pending_effect
+    assert second_request is not None
+    assert second_request.env_mask.tolist() == [False, True]
+    assert second_request.verification_id != first_request.verification_id
+    assert second_request.requested_at == first_request.requested_at
+    assert second_request.deadline == first_request.deadline
+    assert second_request.effect_verification is not None
+    assert second_request.effect_verification.kind == "physical.test_completion"
+    assert partial.task_state is initial_task_state
+
+    completed = session.tick(
+        _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
+        effect_result=EffectVerificationResult(
+            second_request.verification_id,
+            success_mask=torch.tensor([False, True]),
+            failure_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert completed.status is ExecutionStatus.COMPLETED
+    assert completed.task_state is initial_task_state
+
+
+def test_explicit_verification_empty_delta_obeys_action_timeout() -> None:
+    session, waiting = _effect_session(
+        max_action_retries=0,
+        action_timeout=0.25,
+        action=VerificationOnlyAction(),
+    )
+    request = waiting.pending_effect
+    assert request is not None
+    initial_task_state = waiting.task_state
+
+    timed_out = session.tick(_context(0.3, 0.2, 0.2, 0))
+
+    assert timed_out.status is ExecutionStatus.FAILED
+    assert timed_out.pending_effect is None
+    assert timed_out.task_state is initial_task_state
+    assert any(
+        event.kind is ExecutionEventKind.EFFECT_VERIFICATION_TIMEOUT
+        for event in timed_out.events
+    )
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED
+        for event in timed_out.events
+    )
 
 
 def test_nonempty_effect_is_committed_only_after_external_verification() -> None:
@@ -1989,12 +2476,10 @@ def test_failed_effect_plan_retries_without_requesting_effect_verification() -> 
         recovery_policy=base.recovery_policy,
     )
     session = engine.start((invocation,), _context(0.0, 0.0, 0.2, 0))
-    session.tick(_context(0.0, 0.0, 0.2, 0))
-    session.tick(_context(0.1, 0.0, 0.2, 0))
-
-    failed = session.tick(_context(0.2, 0.0, 0.2, 0))
+    failed = session.tick(_context(0.0, 0.0, 0.2, 0))
 
     assert failed.status is ExecutionStatus.FAILED
+    assert failed.command is None
     assert failed.pending_effect is None
     assert not any(
         event.kind is ExecutionEventKind.EFFECT_VERIFICATION_REQUIRED

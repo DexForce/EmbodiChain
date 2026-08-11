@@ -25,7 +25,6 @@ import torch
 
 from embodichain.utils import logger
 
-from ._helpers import resolve_object_target
 from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction
@@ -49,6 +48,7 @@ from ..trajectory_ops import (
     interpolate_hand_qpos,
     translate_pose_world,
 )
+from ._helpers import require_shared_task_state_key, resolve_object_target
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -122,6 +122,8 @@ class CoordinatedPlacementOptions(ActionOptions):
 class _CoordinatedPlacementResources:
     """Invocation-bound control parts and compatible hand commands."""
 
+    placing_task_state_key: str
+    support_task_state_key: str
     placing_arm: JointPositionTarget
     support_arm: JointPositionTarget
     placing_hand: JointPositionTarget
@@ -205,6 +207,21 @@ class CoordinatedPlacement(
         support_arm = support_motion.require_target(JointPositionTarget)
         placing_hand = placing_grasp.require_target(JointPositionTarget)
         support_hand = support_grasp.require_target(JointPositionTarget)
+        placing_task_state_key = require_shared_task_state_key(
+            placing_motion,
+            placing_grasp,
+            participant="CoordinatedPlacement placing participant",
+        )
+        support_task_state_key = require_shared_task_state_key(
+            support_motion,
+            support_grasp,
+            participant="CoordinatedPlacement support participant",
+        )
+        if placing_task_state_key == support_task_state_key:
+            raise ValueError(
+                "CoordinatedPlacement placing and support participants must "
+                "use different task_state_key values."
+            )
         if placing_arm.control_part == support_arm.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
@@ -216,6 +233,8 @@ class CoordinatedPlacement(
                 "different end-effector control parts."
             )
         return _CoordinatedPlacementResources(
+            placing_task_state_key=placing_task_state_key,
+            support_task_state_key=support_task_state_key,
             placing_arm=placing_arm,
             support_arm=support_arm,
             placing_hand=placing_hand,
@@ -404,14 +423,14 @@ class CoordinatedPlacement(
             ],
             dim=1,
         )
-        involved_control_parts = {
-            resources.placing_arm.control_part,
-            resources.support_arm.control_part,
+        involved_task_state_keys = {
+            resources.placing_task_state_key,
+            resources.support_task_state_key,
         }
         coordinated_removals = {
             key: None
             for key in state.coordinated_held_objects
-            if not involved_control_parts.isdisjoint(key)
+            if not involved_task_state_keys.isdisjoint(key)
         }
         return self.build_plan(
             request,
@@ -420,10 +439,10 @@ class CoordinatedPlacement(
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.placing_arm.control_part: (
+                    resources.placing_task_state_key: (
                         None if release else placing_held_object
                     ),
-                    resources.support_arm.control_part: support_held_object,
+                    resources.support_task_state_key: support_held_object,
                 },
                 coordinated_held_object_updates=coordinated_removals,
             ),
@@ -507,20 +526,20 @@ class CoordinatedPlacement(
         HeldObjectState,
         HeldObjectState,
     ]:
-        placing_control_part = resources.placing_arm.control_part
-        support_control_part = resources.support_arm.control_part
-        placing_held_object = state.get_held_object(placing_control_part)
+        placing_task_state_key = resources.placing_task_state_key
+        support_task_state_key = resources.support_task_state_key
+        placing_held_object = state.get_held_object(placing_task_state_key)
         if placing_held_object is None:
             logger.log_error(
-                "CoordinatedPlacement requires an object held by placing control "
-                f"part {placing_control_part!r}.",
+                "CoordinatedPlacement requires an object held by placing "
+                f"task-state resource {placing_task_state_key!r}.",
                 ValueError,
             )
-        support_held_object = state.get_held_object(support_control_part)
+        support_held_object = state.get_held_object(support_task_state_key)
         if support_held_object is None:
             logger.log_error(
-                "CoordinatedPlacement requires an object held by support control "
-                f"part {support_control_part!r}.",
+                "CoordinatedPlacement requires an object held by support "
+                f"task-state resource {support_task_state_key!r}.",
                 ValueError,
             )
         placing_height_offset = (

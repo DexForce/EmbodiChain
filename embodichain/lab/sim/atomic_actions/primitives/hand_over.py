@@ -55,6 +55,7 @@ from ..trajectory_ops import (
     interpolate_hand_qpos,
     translate_pose_world,
 )
+from ._helpers import require_shared_task_state_key
 from .pick_up import GraspGoal
 
 
@@ -140,6 +141,8 @@ class HandOverOptions(ActionOptions):
 class _HandOverResources:
     """Invocation-bound control parts and compatible hand commands."""
 
+    transfer_task_state_key: str
+    receive_task_state_key: str
     transfer_arm: JointPositionTarget
     receive_arm: JointPositionTarget
     transfer_hand: JointPositionTarget
@@ -250,6 +253,21 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         receive_arm = receive_motion.require_target(JointPositionTarget)
         transfer_hand = transfer_grasp.require_target(JointPositionTarget)
         receive_hand = receive_grasp.require_target(JointPositionTarget)
+        transfer_task_state_key = require_shared_task_state_key(
+            transfer_motion,
+            transfer_grasp,
+            participant="HandOver source participant",
+        )
+        receive_task_state_key = require_shared_task_state_key(
+            receive_motion,
+            receive_grasp,
+            participant="HandOver destination participant",
+        )
+        if transfer_task_state_key == receive_task_state_key:
+            raise ValueError(
+                "HandOver source and destination must use different "
+                "task_state_key values."
+            )
         if transfer_arm.control_part == receive_arm.control_part:
             raise ValueError(
                 "HandOver source and destination must use different manipulator "
@@ -261,6 +279,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 "control parts."
             )
         return _HandOverResources(
+            transfer_task_state_key=transfer_task_state_key,
+            receive_task_state_key=receive_task_state_key,
             transfer_arm=transfer_arm,
             receive_arm=receive_arm,
             transfer_hand=transfer_hand,
@@ -316,7 +336,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         semantics = target.semantics
         transfer_object_to_eef = self._resolve_transfer_object_to_eef(
             state,
-            resources.transfer_arm.control_part,
+            resources.transfer_task_state_key,
             semantics,
         )
         transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
@@ -600,8 +620,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.transfer_arm.control_part: None,
-                    resources.receive_arm.control_part: held_object,
+                    resources.transfer_task_state_key: None,
+                    resources.receive_task_state_key: held_object,
                 }
             ),
             segment_lengths=segment_lengths,
@@ -634,20 +654,20 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     def _resolve_transfer_object_to_eef(
         self,
         state: PlanningContext,
-        transfer_control_part: str,
+        transfer_task_state_key: str,
         target_semantics: ObjectSemantics,
     ) -> torch.Tensor:
-        held = state.get_held_object(transfer_control_part)
+        held = state.get_held_object(transfer_task_state_key)
         if held is None:
             logger.log_error(
-                "HandOver requires an object held by transfer control part "
-                f"{transfer_control_part!r} (run PickUp first).",
+                "HandOver requires an object held by source task-state resource "
+                f"{transfer_task_state_key!r} (run PickUp first).",
                 ValueError,
             )
         if not _same_object_identity(target_semantics, held.semantics):
             raise ValueError(
                 "HandOver target semantics must identify the object held by "
-                f"transfer control part {transfer_control_part!r}."
+                f"source task-state resource {transfer_task_state_key!r}."
             )
         return self._resolve_matrix(held.object_to_eef, "held_object.object_to_eef")
 

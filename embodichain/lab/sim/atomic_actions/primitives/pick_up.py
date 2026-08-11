@@ -32,7 +32,7 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
-from ._helpers import arm_qpos_from_state
+from ._helpers import arm_qpos_from_state, require_shared_task_state_key
 from ..affordance import AntipodalAffordance
 from ..bindings import JointPositionTarget
 from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
@@ -352,6 +352,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         grasp = binding.endpoint("primary", "grasp")
         manipulator = motion.require_target(JointPositionTarget)
         end_effector = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="PickUp primary participant",
+        )
         hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
             n_envs=context.batch_size,
@@ -441,7 +446,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
         coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if control_part in key
+            key: None for key in state.coordinated_held_objects if task_state_key in key
         }
         return self.build_plan(
             request,
@@ -449,10 +454,15 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             success=success_mask,
             trajectory=full,
             expected_effects=StateDelta(
-                held_object_updates={control_part: held},
+                held_object_updates={task_state_key: held},
                 coordinated_held_object_updates=coordinated_updates,
             ),
             segment_lengths=segment_lengths,
+            scene_dependency_monitor_until=(
+                {}
+                if sem.entity_id is None
+                else {sem.entity_id: segment_lengths["approach"]}
+            ),
         )
 
     def _resolve_grasp_pose(
