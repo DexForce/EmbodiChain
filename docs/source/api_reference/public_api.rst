@@ -280,6 +280,7 @@ embodichain.lab.gym.envs.expert_program.simulation
    ArticulationOperationAffordanceBinding
    ArticulationOperationTargetBinding
    ControlPartCommandPreset
+   ContainerAffordanceBinding
    ControlPartEndpointBinding
    ControlPartResourceBinding
    RobotResourceBinding
@@ -290,6 +291,7 @@ embodichain.lab.gym.envs.expert_program.simulation
    SimulationRobotResourceBinding
    SimulationRobotSkillProfileBinding
    SimulationSceneBinding
+   SupportSurfaceAffordanceBinding
 
 embodichain.lab.gym.envs.expert_program.simulation_environment
 ----------------------------------------------------------------
@@ -1270,6 +1272,7 @@ embodichain.lab.sim.skills.compiler
    GroundedSemanticCall
    GroundedHeldObjectGuard
    GroundedPhaseEffectGate
+   ContainerRelationTargetGrounder
    HandOverPoseProvider
    HandOverPoseTargets
    HeldObjectGuardBaseline
@@ -1282,6 +1285,7 @@ embodichain.lab.sim.skills.compiler
    SemanticObjectTarget
    SemanticRelationTarget
    SemanticSkillCompiler
+   SupportSurfaceRelationTargetGrounder
    SemanticWorkflow
 
 embodichain.lab.sim.skills.effects
@@ -1310,6 +1314,7 @@ embodichain.lab.sim.skills.effects
    EffectEvidenceAddress
    EffectEvidenceBatch
    EffectEvidenceSourceRef
+   EffectExpectationDecision
    EffectExpectationDecision
    EffectMonitor
    EffectMonitorDecision
@@ -1476,6 +1481,7 @@ embodichain.lab.sim.skills.scene
 
    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
    ArticulationJointEvidenceAddress
+   ContainerAffordance
    SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID
    SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION
    SceneArticulationJointStateProvider
@@ -1497,6 +1503,8 @@ embodichain.lab.sim.skills.scene
    GRASP_AFFORDANCE_CAPABILITY
    PLACE_IN_AFFORDANCE_CAPABILITY
    PLACE_ON_AFFORDANCE_CAPABILITY
+   PLACEMENT_TARGET_AFFORDANCE_REVISION
+   SupportSurfaceAffordance
    UnsupportedSceneAffordanceError
 
 embodichain.lab.sim.solvers.neural_ik_solver

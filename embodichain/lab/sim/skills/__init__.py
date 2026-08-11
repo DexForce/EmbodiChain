@@ -34,6 +34,7 @@ from .calls import (
 )
 from .compiler import (
     AnalyzedSemanticCall,
+    ContainerRelationTargetGrounder,
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
     GroundedSemanticCall,
@@ -49,6 +50,7 @@ from .compiler import (
     SemanticRelationTarget,
     SemanticSkillCompiler,
     SemanticWorkflow,
+    SupportSurfaceRelationTargetGrounder,
 )
 from .effects import (
     ArticulationJointStateExpectation,
@@ -175,6 +177,8 @@ from .profiles import (
 )
 from .scene import (
     ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
+    ContainerAffordance,
+    PLACEMENT_TARGET_AFFORDANCE_REVISION,
     SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID,
     SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION,
     AmbiguousSceneAffordanceError,
@@ -197,6 +201,7 @@ from .scene import (
     SceneLinkRef,
     SceneObjectRef,
     SceneRegistry,
+    SupportSurfaceAffordance,
     UnsupportedSceneAffordanceError,
 )
 from .runtime import (
@@ -242,6 +247,8 @@ __all__ = [
     "ControlPartEvidenceAddress",
     "ControlPartRobotEvidenceSource",
     "ControlPartSimulationEvidenceProvider",
+    "ContainerAffordance",
+    "ContainerRelationTargetGrounder",
     "CoordinatedHeldObjectCleanupExpectation",
     "COMPOSITE_EFFECT_MONITOR_ID",
     "COMPOSITE_EFFECT_MONITOR_REVISION",
@@ -293,6 +300,7 @@ __all__ = [
     "POSE_RELATION_EFFECT_CHANNEL",
     "PLACE_IN_AFFORDANCE_CAPABILITY",
     "PLACE_ON_AFFORDANCE_CAPABILITY",
+    "PLACEMENT_TARGET_AFFORDANCE_REVISION",
     "PathPart",
     "OperateArticulation",
     "ParallelBarrierUpdate",
@@ -367,6 +375,8 @@ __all__ = [
     "SemanticEffectSpec",
     "SymbolicStateDomain",
     "SymbolicStateKey",
+    "SupportSurfaceAffordance",
+    "SupportSurfaceRelationTargetGrounder",
     "SemanticHandOverTarget",
     "SemanticIntegrationManifest",
     "SemanticLowering",

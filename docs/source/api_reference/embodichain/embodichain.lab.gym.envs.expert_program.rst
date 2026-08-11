@@ -47,6 +47,7 @@ embodichain.lab.gym.envs.expert_program
       ConfigPath
       ConfigPathPart
       ControlPartCommandPreset
+      ContainerAffordanceBinding
       CyclicPoseTargetCfg
       DeclarativeCfgValue
       DemoBridgeError
@@ -104,6 +105,7 @@ embodichain.lab.gym.envs.expert_program
       SimulationExpertProgramEnvironment
       SimulationPlanningObservationProvider
       SimulationRigidObjectBinding
+      SupportSurfaceAffordanceBinding
       SkillRuntimeAssemblyPort
       TargetCfg
       TargetRefCfg

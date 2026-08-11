@@ -102,6 +102,8 @@ embodichain.lab.sim.skills
       CompositeEffectMonitor
       CompositeEffectMonitorCfg
       CompositeEffectMonitorFactory
+      ContainerAffordance
+      ContainerRelationTargetGrounder
       ControlPartEvidenceAddress
       ControlPartRobotEvidenceSource
       ControlPartSimulationEvidenceProvider
@@ -140,6 +142,7 @@ embodichain.lab.sim.skills
       LinkedSemanticCall
       PLACE_IN_AFFORDANCE_CAPABILITY
       PLACE_ON_AFFORDANCE_CAPABILITY
+      PLACEMENT_TARGET_AFFORDANCE_REVISION
       POSE_RELATION_EFFECT_CHANNEL
       ParallelBarrierUpdate
       ParallelBranchPlan
@@ -175,6 +178,8 @@ embodichain.lab.sim.skills
       SceneEntityManifest
       SceneEntityMetadata
       SceneManifest
+      SupportSurfaceAffordance
+      SupportSurfaceRelationTargetGrounder
       SemanticCallDescriptor
       SemanticDiagnostic
       SemanticEffectDependency
