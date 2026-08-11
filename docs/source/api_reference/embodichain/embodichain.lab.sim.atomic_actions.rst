@@ -3,257 +3,232 @@ embodichain.lab.sim.atomic_actions
 
 .. automodule:: embodichain.lab.sim.atomic_actions
 
-   .. rubric:: Classes
+   .. rubric:: Planning contracts
 
    .. autosummary::
 
-      Affordance
-      AntipodalAffordance
-      InteractionPoints
-      ObjectSemantics
-      ActionTarget
-      ObjectActionTarget
-      EndEffectorPoseTarget
-      PlaceTarget
-      PressTarget
-      JointPositionTarget
-      NamedJointPositionTarget
-      GraspTarget
-      HeldObjectPoseTarget
-      CoordinatedPickTarget
-      CoordinatedPickmentTarget
-      CoordinatedPlacementTarget
-      Target
-      BuiltinTarget
-      HeldObjectState
-      CoordinatedHeldObjectState
-      WorldState
-      ActionResult
-      ActionCfg
+      ActionGoal
+      ActionBinding
+      ResolvedActionBinding
+      ResolvedControlPart
+      ControlCommand
+      JointPositionCommand
+      ControlPartCommandProfile
+      ActionControlOverrides
+      ActionInvocation
+      ResolvedActionRequest
+      ActionOptions
+      MotionPolicy
+      RecoveryPolicy
+      RobotObservation
+      TaskState
+      SceneSnapshot
+      SceneEntityPose
+      PlanningContext
+      StateDelta
+      TimedTrajectory
+      TrajectorySegment
+      PlannerDiagnostics
+      ActionPlan
+      CompiledTrajectory
+
+   .. rubric:: Execution contracts
+
+   .. autosummary::
+
       AtomicAction
-      TrajectoryBuilder
-      MoveEndEffectorCfg
-      MoveEndEffector
-      MoveJointsCfg
-      MoveJoints
-      PickUpCfg
-      PickUp
-      MoveHeldObjectCfg
-      MoveHeldObject
-      PlaceCfg
-      Place
-      PressCfg
-      Press
-      CoordinatedPickmentCfg
-      CoordinatedPickment
-      CoordinatedPlacementCfg
-      CoordinatedPlacement
       AtomicActionEngine
+      ExecutionSession
+      ExecutionRunner
+      ExecutionRunnerCfg
+      RunnerStep
+      RunnerStatus
+      ObservationProvider
+      CommandSink
+      CommandAcknowledgement
+      CommandAckStatus
+      CommandDispatch
+      CommandOperation
+      ExecutionClock
+      SimulationExecutionAdapter
+      ExecutionTick
+      EffectVerificationRequest
+      JointCommand
+      ExecutionEvent
+      ExecutionEventKind
+      ExecutionStatus
+
+   .. rubric:: Built-in goals and actions
+
+   .. autosummary::
+
+      EndEffectorPoseGoal
+      JointPositionGoal
+      GraspGoal
+      HeldObjectPoseGoal
+      PlaceGoal
+      AssembleGoal
+      PressGoal
+      CoordinatedPickGoal
+      CoordinatedPlacementGoal
+      MoveEndEffector
+      MoveJoints
+      PickUp
+      MoveHeldObject
+      Place
+      Press
+      CoordinatedPickment
+      CoordinatedPlacement
+      HandOver
 
 .. toctree::
    :maxdepth: 1
    :hidden:
 
-   embodichain.lab.sim.atomic_actions.targets
    embodichain.lab.sim.atomic_actions.primitives
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 
-Layout
-------
-
-The public API is exported from ``embodichain.lab.sim.atomic_actions``. Built-in
-primitive implementations live under
-``embodichain.lab.sim.atomic_actions.primitives`` and
-shared target contracts live in
-``embodichain.lab.sim.atomic_actions.targets``.
-``embodichain.lab.sim.atomic_actions.actions`` remains a compatibility re-export
-for existing imports.
-
-Core
-----
-
-.. autoclass:: Affordance
-    :members:
-    :show-inheritance:
-
-.. autoclass:: AntipodalAffordance
-    :members:
-    :show-inheritance:
-
-.. autoclass:: InteractionPoints
-    :members:
-    :show-inheritance:
-
-.. autoclass:: ObjectSemantics
-    :members:
-    :show-inheritance:
-
-.. autoclass:: ActionTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: ObjectActionTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: EndEffectorPoseTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: PlaceTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: PressTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: JointPositionTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: NamedJointPositionTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: GraspTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: HeldObjectPoseTarget
-    :members:
-    :show-inheritance:
-
-.. autoclass:: CoordinatedPickTarget
-    :members:
-    :show-inheritance:
-
-.. autodata:: CoordinatedPickmentTarget
-
-.. autoclass:: CoordinatedPlacementTarget
-    :members:
-    :show-inheritance:
-
-.. autodata:: Target
-
-.. autodata:: BuiltinTarget
-
-.. autoclass:: HeldObjectState
-    :members:
-    :show-inheritance:
-
-.. autoclass:: CoordinatedHeldObjectState
-    :members:
-    :show-inheritance:
-
-.. autoclass:: WorldState
-    :members:
-    :show-inheritance:
-
-.. autoclass:: ActionResult
-    :members:
-    :show-inheritance:
-
-.. autoclass:: ActionCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-
-.. autoclass:: AtomicAction
-    :members:
-    :show-inheritance:
-
-Trajectory helpers
+Planning and state
 ------------------
 
-.. autoclass:: TrajectoryBuilder
-    :members:
-    :show-inheritance:
+.. autoclass:: ActionBinding
+   :members:
 
-Actions
--------
+.. autoclass:: ResolvedActionBinding
+   :members:
 
-.. autoclass:: MoveEndEffectorCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ResolvedControlPart
+   :members:
 
-.. autoclass:: MoveEndEffector
-    :members:
-    :show-inheritance:
+.. autoclass:: ControlCommand
+   :members:
 
-.. autoclass:: MoveJointsCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: JointPositionCommand
+   :members:
 
-.. autoclass:: MoveJoints
-    :members:
-    :show-inheritance:
+.. autoclass:: ControlPartCommandProfile
+   :members:
 
-.. autoclass:: PickUpCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ActionControlOverrides
+   :members:
 
-.. autoclass:: PickUp
-    :members:
-    :show-inheritance:
+.. autoclass:: ActionInvocation
+   :members:
 
-.. autoclass:: MoveHeldObjectCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: ResolvedActionRequest
+   :members:
 
-.. autoclass:: MoveHeldObject
-    :members:
-    :show-inheritance:
+.. autoclass:: ActionOptions
+   :members:
 
-.. autoclass:: PlaceCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: MotionPolicy
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
 
-.. autoclass:: Place
-    :members:
-    :show-inheritance:
+.. autoclass:: RecoveryPolicy
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
 
-.. autoclass:: PressCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: PlanningContext
+   :members:
 
-.. autoclass:: Press
-    :members:
-    :show-inheritance:
+.. autoclass:: RobotObservation
+   :members:
 
-.. autoclass:: CoordinatedPickmentCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: TaskState
+   :members:
 
-.. autoclass:: CoordinatedPickment
-    :members:
-    :show-inheritance:
+.. autoclass:: SceneSnapshot
+   :members:
 
-.. autoclass:: CoordinatedPlacementCfg
-    :members:
-    :exclude-members: __init__, copy, replace, to_dict
-    :show-inheritance:
+.. autoclass:: SceneEntityPose
+   :members:
 
-.. autoclass:: CoordinatedPlacement
-    :members:
-    :show-inheritance:
+.. autoclass:: StateDelta
+   :members:
 
-Engine & Registry
------------------
+.. autoclass:: TimedTrajectory
+   :members:
+
+.. autoclass:: ActionPlan
+   :members:
+
+Engine and execution
+--------------------
+
+.. autoclass:: AtomicAction
+   :members:
 
 .. autoclass:: AtomicActionEngine
-    :members:
-    :show-inheritance:
+   :members:
 
-.. autofunction:: register_action
+.. autoclass:: ExecutionSession
+   :members:
 
-.. autofunction:: unregister_action
+.. autoclass:: ExecutionRunner
+   :members:
 
-.. autofunction:: get_registered_actions
+.. autoclass:: ExecutionRunnerCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
+
+.. autoclass:: ObservationProvider
+   :members:
+
+.. autoclass:: CommandSink
+   :members:
+
+.. autoclass:: ExecutionClock
+   :members:
+
+.. autoclass:: MonotonicExecutionClock
+   :members:
+
+.. autoclass:: SimulationExecutionAdapter
+   :members:
+
+.. autoclass:: CommandAcknowledgement
+   :members:
+
+.. autoclass:: CommandAckStatus
+   :members:
+
+.. autoclass:: CommandDispatch
+   :members:
+
+.. autoclass:: CommandOperation
+   :members:
+
+.. autoclass:: RunnerStep
+   :members:
+
+.. autoclass:: RunnerStatus
+   :members:
+
+.. autoclass:: ExecutionTick
+   :members:
+
+.. autoclass:: JointCommand
+   :members:
+
+.. autoclass:: ExecutionEvent
+   :members:
+
+.. autoclass:: ExecutionEventKind
+   :members:
+
+.. autoclass:: ExecutionStatus
+   :members:
+
+Semantic objects and helpers
+----------------------------
+
+.. autoclass:: ObjectSemantics
+   :members:
+
+.. autoclass:: HeldObjectState
+   :members:
+
+.. autoclass:: CoordinatedHeldObjectState
+   :members:

@@ -14,12 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import torch
-import numpy as np
+from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import MISSING
+from typing import Literal
+
 import matplotlib.pyplot as plt
-from typing import Dict, List, Tuple, Union, Any
+import numpy as np
+import torch
 
 from embodichain.lab.sim.planners import (
     BasePlannerCfg,
@@ -27,16 +31,25 @@ from embodichain.lab.sim.planners import (
     BasePlanner,
     ToppraPlanner,
     ToppraPlannerCfg,
+    ToppraPlanOptions,
     NeuralPlanner,
     NeuralPlannerCfg,
-    NeuralPlanOptions,
     CuroboPlanner,
     CuroboPlannerCfg,
-    CuroboPlanOptions,
 )
-from embodichain.lab.sim.utility.action_utils import interpolate_with_nums
+from embodichain.lab.sim.utility.action_utils import (
+    interpolate_with_distance,
+    interpolate_with_nums,
+    resample_with_distance,
+)
 from embodichain.utils import logger, configclass
-from .utils import MovePart, MoveType, PlanState, PlanResult
+from .utils import (
+    MoveType,
+    PlanResult,
+    PlanState,
+    TrajectorySampleMethod,
+    normalize_success_mask,
+)
 from .utils import (
     calculate_point_allocations,
     interpolate_xpos,
@@ -59,6 +72,18 @@ class MotionGenCfg:
 
 @configclass
 class MotionGenOptions:
+
+    strategy: Literal["motion_gen", "ik_interp"] = "motion_gen"
+    """Motion strategy: backend planning or deterministic IK interpolation."""
+
+    sample_count: int | None = None
+    """Requested output sample count; ``None`` preserves backend defaults."""
+
+    velocity_limit: float | None = None
+    """Optional scalar joint velocity limit used by compatible backends."""
+
+    acceleration_limit: float | None = None
+    """Optional scalar joint acceleration limit used by compatible backends."""
 
     start_qpos: torch.Tensor | None = None
     """Optional starting joint configuration for the trajectory, shape (B, DOF). If provided, the planner will ensure that the trajectory starts from this configuration. If not provided, the planner will use the current joint configuration of the robot as the starting point."""
@@ -94,6 +119,21 @@ class MotionGenOptions:
     interpolate_angle_step: float = np.pi / 90
     """Angular step size for interpolation in joint space (radians). Only used if is_linear is False."""
 
+    def __post_init__(self) -> None:
+        """Validate backend-neutral motion generation options."""
+        valid_strategies = {"motion_gen", "ik_interp"}
+        if self.strategy not in valid_strategies:
+            raise ValueError(
+                f"strategy must be one of {sorted(valid_strategies)}, "
+                f"got {self.strategy!r}."
+            )
+        if self.sample_count is not None and self.sample_count < 2:
+            raise ValueError("sample_count must be at least 2 when set.")
+        if self.velocity_limit is not None and self.velocity_limit <= 0.0:
+            raise ValueError("velocity_limit must be greater than zero when set.")
+        if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
+            raise ValueError("acceleration_limit must be greater than zero when set.")
+
 
 class MotionGenerator:
     r"""Unified motion generator for robot trajectory planning.
@@ -118,6 +158,89 @@ class MotionGenerator:
 
         self.robot = self.planner.robot
         self.device = self.robot.device
+
+    @property
+    def supports_dynamic_collision_world(self) -> bool:
+        """Whether the planner accepts per-plan dynamic obstacle poses.
+
+        Returns:
+            ``True`` when the selected planner supports collision-world updates.
+        """
+        return getattr(self.planner, "supports_collision_world_updates", False) is True
+
+    def bind_collision_world(
+        self,
+        plan_opts: PlanOptions | None,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> PlanOptions:
+        """Bind live obstacle poses to owned planner options.
+
+        Args:
+            plan_opts: Optional reusable caller-owned planner options.
+            obstacle_poses: Batched world poses keyed by stable obstacle ID.
+
+        Returns:
+            Backend-specific options bound to the supplied collision world.
+
+        Raises:
+            ValueError: If the selected planner cannot consume dynamic obstacles.
+        """
+        if not self.supports_dynamic_collision_world:
+            logger.log_error(
+                f"{type(self.planner).__name__} does not support dynamic "
+                "collision-world updates.",
+                ValueError,
+            )
+        options = (
+            deepcopy(plan_opts)
+            if plan_opts is not None
+            else self.planner.default_plan_options()
+        )
+        return self.planner.with_collision_world(
+            options,
+            obstacle_poses=obstacle_poses,
+        )
+
+    def resolve_plan_options(
+        self,
+        plan_opts: PlanOptions | None,
+        *,
+        sample_count: int | None,
+        velocity_limit: float | None = None,
+        acceleration_limit: float | None = None,
+    ) -> PlanOptions:
+        """Resolve owned backend options from backend-neutral motion limits.
+
+        Args:
+            plan_opts: Optional caller-owned backend-specific options.
+            sample_count: Requested output sample count, or ``None`` to use the
+                backend default.
+            velocity_limit: Optional scalar joint velocity limit.
+            acceleration_limit: Optional scalar joint acceleration limit.
+
+        Returns:
+            An independently owned options object for the configured backend.
+
+        Raises:
+            ValueError: If a supplied ``sample_count`` is smaller than two.
+        """
+        if sample_count is not None and sample_count < 2:
+            raise ValueError("sample_count must be at least 2.")
+        if plan_opts is not None:
+            return deepcopy(plan_opts)
+        if sample_count is not None and self.planner.cfg.planner_type == "toppra":
+            return ToppraPlanOptions(
+                sample_method=TrajectorySampleMethod.QUANTITY,
+                sample_interval=sample_count,
+                constraints={
+                    "velocity": 0.2 if velocity_limit is None else velocity_limit,
+                    "acceleration": (
+                        0.5 if acceleration_limit is None else acceleration_limit
+                    ),
+                },
+            )
+        return self.planner.default_plan_options()
 
     @classmethod
     def register_planner_type(cls, name: str, planner_class, planner_cfg_class) -> None:
@@ -149,22 +272,58 @@ class MotionGenerator:
 
     def generate(
         self,
-        target_states: List[PlanState],
-        options: MotionGenOptions = MotionGenOptions(),
+        target_states: list[PlanState],
+        options: MotionGenOptions | None = None,
     ) -> PlanResult:
-        r"""Generate motion with given options.
+        r"""Generate one normalized, environment-batched motion plan.
 
-        This method generates a smooth trajectory using the selected planner that satisfies
-        constraints and perform pre-interpolation if specified in the options.
+        ``options.strategy`` selects either the configured planner backend
+        (``"motion_gen"``) or deterministic waypoint IK followed by joint-space
+        interpolation (``"ik_interp"``). Joint targets fall back to interpolation
+        when the configured backend cannot consume :class:`MoveType.JOINT_MOVE`.
 
         Args:
-            target_states: List[PlanState].
-            options: MotionGenOptions.
+            target_states: Batched planner waypoints.
+            options: Motion-generation strategy and runtime options.
 
         Returns:
-            PlanResult containing the planned trajectory details.
+            Normalized result with a per-environment success mask and joint
+            positions. Failed rows hold ``start_qpos`` when it is supplied.
+
+        Raises:
+            ValueError: If targets or options violate the motion contract.
         """
+        if not target_states:
+            raise ValueError("target_states must contain at least one waypoint.")
+        options = MotionGenOptions() if options is None else deepcopy(options)
+        if options.strategy not in {"motion_gen", "ik_interp"}:
+            raise ValueError(
+                "strategy must be 'motion_gen' or 'ik_interp', "
+                f"got {options.strategy!r}."
+            )
+
         move_types = {state.move_type for state in target_states}
+        if len(move_types) != 1:
+            names = sorted(move_type.name for move_type in move_types)
+            raise ValueError(f"All target states must share move_type; got {names}.")
+        move_type = target_states[0].move_type
+        use_interpolation = options.strategy == "ik_interp" or (
+            move_type is MoveType.JOINT_MOVE
+            and not self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        )
+        if use_interpolation:
+            raw_result = self._generate_ik_interpolation(target_states, options)
+        else:
+            raw_result = self._generate_with_planner(target_states, options)
+        return self._normalize_plan_result(raw_result, target_states, options)
+
+    def _generate_with_planner(
+        self,
+        target_states: list[PlanState],
+        options: MotionGenOptions,
+    ) -> PlanResult:
+        """Dispatch batched targets through the configured planner backend."""
+        move_type = target_states[0].move_type
         should_preinterpolate = (
             options.is_interpolate
             and not self.planner.supports_move_type(MoveType.EEF_MOVE)
@@ -172,25 +331,16 @@ class MotionGenerator:
         )
 
         if should_preinterpolate:
-            move_type = target_states[0].move_type
             if move_type == MoveType.EEF_MOVE:
-                for s in target_states:
-                    if s.move_type != move_type:
-                        logger.log_error(
-                            f"All states must share move_type; got {s.move_type}",
-                            ValueError,
-                        )
+                if any(state.xpos is None for state in target_states):
+                    raise ValueError("EEF_MOVE target states require xpos tensors.")
                 xpos_list = torch.stack([s.xpos for s in target_states]).transpose(
                     0, 1
                 )  # (B, N, 4, 4)
                 qpos_list = None
             elif move_type == MoveType.JOINT_MOVE:
-                for s in target_states:
-                    if s.move_type != move_type:
-                        logger.log_error(
-                            f"All states must share move_type; got {s.move_type}",
-                            ValueError,
-                        )
+                if any(state.qpos is None for state in target_states):
+                    raise ValueError("JOINT_MOVE target states require qpos tensors.")
                 qpos_list = torch.stack([s.qpos for s in target_states]).transpose(
                     0, 1
                 )  # (B, N, DOF)
@@ -214,19 +364,12 @@ class MotionGenerator:
                         start_xpos = start_xpos.unsqueeze(1)
                     xpos_list = torch.cat([start_xpos, xpos_list], dim=1)
 
-            qpos_interpolated, xpos_interpolated = self.interpolate_trajectory(
+            qpos_interpolated, _ = self.interpolate_trajectory(
                 control_part=options.control_part,
                 xpos_list=xpos_list,
                 qpos_list=qpos_list,
                 options=options,
             )
-            if not options.plan_opts:
-                return PlanResult(
-                    success=True,
-                    positions=qpos_interpolated,
-                    xpos_list=xpos_interpolated,
-                )
-
             target_plan_states = [
                 PlanState(move_type=MoveType.JOINT_MOVE, qpos=qpos_interpolated[:, j])
                 for j in range(qpos_interpolated.shape[1])
@@ -234,11 +377,9 @@ class MotionGenerator:
         else:
             target_plan_states = target_states
 
-        unsupported_move_types = {
-            move_type
-            for move_type in move_types
-            if not self.planner.supports_move_type(move_type)
-        }
+        unsupported_move_types = (
+            set() if self.planner.supports_move_type(move_type) else {move_type}
+        )
         if not should_preinterpolate and unsupported_move_types:
             unsupported_names = sorted(
                 move_type.name for move_type in unsupported_move_types
@@ -252,17 +393,273 @@ class MotionGenerator:
                 ValueError,
             )
 
-        if options.plan_opts is None:
-            options.plan_opts = self.planner.default_plan_options()
-        options.plan_opts = self.planner.with_motion_context(
+        plan_opts = self.resolve_plan_options(
             options.plan_opts,
+            sample_count=options.sample_count,
+            velocity_limit=options.velocity_limit,
+            acceleration_limit=options.acceleration_limit,
+        )
+        plan_opts = self.planner.with_motion_context(
+            plan_opts,
             start_qpos=options.start_qpos,
             control_part=options.control_part,
         )
-
         return self.planner.plan(
-            target_states=target_plan_states, options=options.plan_opts
+            target_states=target_plan_states,
+            options=plan_opts,
         )
+
+    def _generate_ik_interpolation(
+        self,
+        target_states: list[PlanState],
+        options: MotionGenOptions,
+    ) -> PlanResult:
+        """Generate deterministic joint interpolation from batched targets."""
+        if options.start_qpos is None:
+            raise ValueError("IK interpolation requires start_qpos.")
+        if options.sample_count is None:
+            raise ValueError("IK interpolation requires sample_count.")
+        start_qpos = options.start_qpos
+        if start_qpos.dim() == 1:
+            start_qpos = start_qpos.unsqueeze(0)
+        device = self._runtime_device()
+        start_qpos = start_qpos.to(device)
+        batch_size, controlled_dof = start_qpos.shape
+        move_type = target_states[0].move_type
+
+        if move_type is MoveType.JOINT_MOVE:
+            qpos_targets: list[torch.Tensor] = []
+            for state in target_states:
+                if state.qpos is None:
+                    raise ValueError("JOINT_MOVE target states require qpos tensors.")
+                qpos = state.qpos
+                if qpos.dim() == 1:
+                    qpos = qpos.unsqueeze(0)
+                expected_shape = (batch_size, controlled_dof)
+                if qpos.shape != expected_shape:
+                    raise ValueError(
+                        "JOINT_MOVE target qpos must have shape "
+                        f"{expected_shape}, got {tuple(qpos.shape)}."
+                    )
+                qpos_targets.append(qpos.to(device=device, dtype=start_qpos.dtype))
+            keyframes = torch.cat(
+                [start_qpos.unsqueeze(1), torch.stack(qpos_targets, dim=1)],
+                dim=1,
+            )
+            positions = interpolate_with_distance(
+                trajectory=keyframes,
+                interp_num=options.sample_count,
+                device=device,
+            )
+            return PlanResult(
+                success=torch.ones(batch_size, dtype=torch.bool, device=device),
+                positions=positions,
+            )
+
+        if move_type is not MoveType.EEF_MOVE:
+            raise ValueError(
+                "strategy='ik_interp' supports only EEF_MOVE and JOINT_MOVE, "
+                f"got {move_type.name}."
+            )
+        if options.control_part is None:
+            raise ValueError("EEF_MOVE IK interpolation requires control_part.")
+
+        success = torch.ones(batch_size, dtype=torch.bool, device=device)
+        qpos_seed = start_qpos
+        solved_waypoints: list[torch.Tensor] = []
+        for index, state in enumerate(target_states):
+            if state.xpos is None:
+                raise ValueError("EEF_MOVE target states require xpos tensors.")
+            pose = state.xpos
+            if pose.dim() == 2:
+                pose = pose.unsqueeze(0)
+            expected_shape = (batch_size, 4, 4)
+            if pose.shape != expected_shape:
+                raise ValueError(
+                    f"EEF_MOVE target xpos must have shape {expected_shape}, "
+                    f"got {tuple(pose.shape)}."
+                )
+            step_success, qpos = self.robot.compute_ik(
+                pose=pose.to(device),
+                name=options.control_part,
+                joint_seed=qpos_seed,
+            )
+            step_success = normalize_success_mask(
+                step_success,
+                n_envs=batch_size,
+                device=device,
+                name=f"IK success for target state {index}",
+            )
+            qpos = torch.as_tensor(
+                qpos,
+                dtype=start_qpos.dtype,
+                device=device,
+            )
+            if qpos.shape != (batch_size, controlled_dof):
+                raise ValueError(
+                    "IK qpos must have shape "
+                    f"({batch_size}, {controlled_dof}), got {tuple(qpos.shape)}."
+                )
+            if not step_success.all():
+                logger.log_warning(
+                    f"Failed to compute IK for target state {index} in some "
+                    "environments."
+                )
+            qpos = torch.where(step_success[:, None], qpos, qpos_seed)
+            success &= step_success
+            solved_waypoints.append(qpos)
+            qpos_seed = qpos
+
+        keyframes = torch.cat(
+            [start_qpos.unsqueeze(1), torch.stack(solved_waypoints, dim=1)],
+            dim=1,
+        )
+        positions = interpolate_with_distance(
+            trajectory=keyframes,
+            interp_num=options.sample_count,
+            device=device,
+        )
+        held = start_qpos.unsqueeze(1).expand_as(positions)
+        positions = torch.where(success[:, None, None], positions, held)
+        return PlanResult(success=success, positions=positions)
+
+    def _normalize_plan_result(
+        self,
+        result: PlanResult,
+        target_states: list[PlanState],
+        options: MotionGenOptions,
+    ) -> PlanResult:
+        """Enforce the public :class:`PlanResult` contract."""
+        device = self._runtime_device()
+        start_qpos = options.start_qpos
+        if start_qpos is not None:
+            if start_qpos.dim() == 1:
+                start_qpos = start_qpos.unsqueeze(0)
+            start_qpos = start_qpos.to(device)
+            batch_size = start_qpos.shape[0]
+            controlled_dof: int | None = start_qpos.shape[1]
+        else:
+            sample = target_states[0]
+            if sample.qpos is not None:
+                batch_size = 1 if sample.qpos.dim() == 1 else sample.qpos.shape[0]
+            elif sample.xpos is not None:
+                batch_size = 1 if sample.xpos.dim() == 2 else sample.xpos.shape[0]
+            else:
+                raise ValueError("The first target state has no qpos or xpos tensor.")
+            controlled_dof = None
+
+        success = normalize_success_mask(
+            result.success,
+            n_envs=batch_size,
+            device=device,
+            name="MotionGenerator PlanResult.success",
+        )
+        positions = result.positions
+        if positions is None or positions.dim() != 3:
+            raise ValueError(
+                "MotionGenerator must return positions with shape (B, N, DOF)."
+            )
+        if positions.shape[0] != batch_size:
+            raise ValueError(
+                "MotionGenerator result batch size does not match its targets: "
+                f"{positions.shape[0]} != {batch_size}."
+            )
+        if controlled_dof is not None and positions.shape[2] != controlled_dof:
+            raise ValueError(
+                "MotionGenerator result DoF does not match start_qpos: "
+                f"{positions.shape[2]} != {controlled_dof}."
+            )
+        if positions.device != device:
+            raise ValueError(
+                "MotionGenerator returned positions on "
+                f"{positions.device}, expected {device}."
+            )
+        if not torch.isfinite(positions).all():
+            raise ValueError("MotionGenerator returned non-finite positions.")
+
+        resampled = False
+        preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
+        if (
+            options.sample_count is not None
+            and not preserve_samples
+            and positions.shape[1] != options.sample_count
+        ):
+            positions = resample_with_distance(
+                trajectory=positions,
+                interp_num=options.sample_count,
+                device=device,
+            )
+            resampled = True
+
+        def normalize_derivative(
+            value: torch.Tensor | None,
+            name: str,
+        ) -> torch.Tensor | None:
+            if value is None or resampled:
+                return None
+            if value.shape != positions.shape:
+                raise ValueError(
+                    f"MotionGenerator {name} must match positions shape, "
+                    f"got {tuple(value.shape)} and {tuple(positions.shape)}."
+                )
+            if value.device != device or not torch.isfinite(value).all():
+                raise ValueError(
+                    f"MotionGenerator returned invalid or wrong-device {name}."
+                )
+            return value
+
+        velocities = normalize_derivative(result.velocities, "velocities")
+        accelerations = normalize_derivative(result.accelerations, "accelerations")
+        dt = None if resampled else result.dt
+        if dt is not None:
+            if not isinstance(dt, torch.Tensor):
+                raise TypeError("MotionGenerator dt must be a torch.Tensor.")
+            if dt.shape != positions.shape[:2]:
+                raise ValueError(
+                    "MotionGenerator dt must match positions batch and sample "
+                    f"dimensions, got {tuple(dt.shape)} and "
+                    f"{tuple(positions.shape[:2])}."
+                )
+            if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
+                raise ValueError("MotionGenerator returned invalid time deltas.")
+            duration: float | torch.Tensor = dt.sum(dim=1)
+        else:
+            duration = result.duration
+
+        if start_qpos is not None and not success.all():
+            held = (
+                start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
+            )
+            positions = torch.where(success[:, None, None], positions, held)
+            if velocities is not None:
+                velocities = torch.where(
+                    success[:, None, None],
+                    velocities,
+                    torch.zeros_like(velocities),
+                )
+            if accelerations is not None:
+                accelerations = torch.where(
+                    success[:, None, None],
+                    accelerations,
+                    torch.zeros_like(accelerations),
+                )
+
+        return PlanResult(
+            success=success,
+            xpos_list=None if resampled else result.xpos_list,
+            positions=positions,
+            velocities=velocities,
+            accelerations=accelerations,
+            dt=dt,
+            duration=duration,
+        )
+
+    def _runtime_device(self) -> torch.device:
+        """Return the concrete device used by the generator."""
+        device = torch.device(self.device)
+        if device.type == "cuda" and device.index is None:
+            return torch.device(f"cuda:{torch.cuda.current_device()}")
+        return device
 
     def estimate_trajectory_sample_count(
         self,
@@ -496,7 +893,7 @@ class MotionGenerator:
         control_part: str | None = None,
         xpos_list: torch.Tensor | None = None,
         qpos_list: torch.Tensor | None = None,
-        options: MotionGenOptions = MotionGenOptions(),
+        options: MotionGenOptions | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         r"""Interpolate trajectory based on provided waypoints.
 
@@ -521,6 +918,7 @@ class MotionGenerator:
                 - feasible_pose_targets: Corresponding end-effector poses, shape
                   ``(B, M, 4, 4)``, or ``None`` if not applicable.
         """
+        options = MotionGenOptions() if options is None else options
 
         # Normalize single-env inputs to batched form.
         if qpos_list is not None and qpos_list.dim() == 2:

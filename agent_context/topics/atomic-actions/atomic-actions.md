@@ -1,180 +1,304 @@
-# Atomic Actions
+# Atomic actions
 
-## Entry Points
+## Current contract
 
-| What | Path |
-|---|---|
-| Base classes, configs, runtime state | `embodichain/lab/sim/atomic_actions/core.py` |
-| Shared target contracts | `embodichain/lab/sim/atomic_actions/targets.py` |
-| Engine and global registry | `embodichain/lab/sim/atomic_actions/engine.py` |
-| Trajectory helpers | `embodichain/lab/sim/atomic_actions/trajectory.py` |
-| Built-in primitives and their targets | `embodichain/lab/sim/atomic_actions/primitives/` |
-| Legacy re-export facade | `embodichain/lab/sim/atomic_actions/actions.py` |
-| Public API | `embodichain/lab/sim/atomic_actions/__init__.py` |
-
-## Overview
-
-Atomic actions are env-batched motion primitives chained by `AtomicActionEngine`. Each action receives a typed target and a `WorldState`, plans a full-DoF trajectory for all environments, and returns an `ActionResult`. The engine threads `WorldState` from one action to the next and concatenates trajectories along the time axis.
-
-```
-AtomicActionEngine
-  ├─ AtomicAction(s)        ← one primitive per class, e.g. MoveEndEffector, PickUp
-  │      │
-  │      └── TrajectoryBuilder  ← IK/interpolation and MotionGenerator dispatch
-  │
-  └── WorldState            ← last_qpos + per-control-part held-object maps
-```
-
-All tensor shapes carry a leading batch dim `B = n_envs`.
-
-## Core Types
-
-### Typed Targets
-
-Frozen, identity-equality dataclasses accepted by actions via their `TargetType`
-class variable. Built-in and third-party targets inherit the open `ActionTarget`
-marker; `BuiltinTarget` is only the closed union of targets shipped by EmbodiChain.
-Each action-exclusive target is defined beside its owning action and config in
-`primitives/<action>.py`. The package root re-exports all targets, so callers
-should import them from `embodichain.lab.sim.atomic_actions`. A genuinely shared
-target belongs in a neutral target module, not in one primitive that another
-primitive must import.
-
-`ObjectActionTarget(semantics)` is the neutral shared base for actions operating
-on a semantic object. It intentionally does not define a generic pose field:
-object poses, single-arm grasp poses, and dual-arm grasp pairs are distinct
-contracts.
-
-| Target | Holds | Used by |
-|---|---|---|
-| `EndEffectorPoseTarget(xpos)` | `(4,4)`, `(B,4,4)` or `(B,n_waypoint,4,4)` EEF pose | `MoveEndEffector` |
-| `PlaceTarget(xpos, tcp_symmetry)` | Release EEF pose plus optional TCP z-roll symmetry | `Place` |
-| `PressTarget(xpos)` | One `(4,4)` or `(B,4,4)` contact pose | `Press` |
-| `JointPositionTarget(qpos)` | `(dof,)`, `(B,dof)` or `(B,n_waypoint,dof)` joint positions | `MoveJoints` |
-| `NamedJointPositionTarget(name)` | Name resolved from `MoveJointsCfg.named_joint_positions` | `MoveJoints` |
-| `ObjectActionTarget(semantics)` | Shared semantic-object contract; no generic pose | Base of object-centric targets |
-| `GraspTarget(semantics)` | Object semantics plus optional single-arm `grasp_xpos` | `PickUp` |
-| `HeldObjectPoseTarget(pose)` | `(4,4)` or `(B,4,4)` target pose for the held object | `MoveHeldObject` |
-| `CoordinatedPickTarget(semantics, ...)` | Shared object + target object pose + left/right object-to-EEF transforms | `CoordinatedPickment` |
-| `CoordinatedPlacementTarget(...)` | Placing/support target poses and per-call offsets | `CoordinatedPlacement` |
-
-`CoordinatedPickmentTarget` remains an alias of `CoordinatedPickTarget`.
-
-### WorldState
-
-Threaded between actions:
-- `last_qpos: torch.Tensor` — shape `(B, robot.dof)`, robot joint positions at the start of the next action.
-- `held_objects: dict[str, HeldObjectState]` — independently held objects keyed by arm/control part.
-- `coordinated_held_objects: dict[tuple[str, str], CoordinatedHeldObjectState]` — jointly held objects keyed by an ordered control-part pair.
-
-`HeldObjectState` stores the object's semantics plus the object-to-EEF transform and grasp pose (both `(B, 4, 4)`).
-Use `get_held_object(control_part)`, `get_coordinated_held_object(first, second)`,
-and `with_updates(...)`; `with_updates` copies both maps so successor actions do
-not alias their containers.
-
-### ActionResult
-
-Every `execute()` returns:
-- `success: bool | torch.Tensor` — per-env boolean tensor of shape `(B,)` for batched actions.
-- `trajectory: torch.Tensor` — full-robot trajectory `(B, n_waypoints, robot.dof)`.
-- `next_state: WorldState` — state to feed into the next action.
-
-Helpers:
-- `ActionResult.success_all` — `True` only when every env succeeded.
-- `bool(action_result)` — deprecated; delegates to `success_all` and emits a `DeprecationWarning`.
-
-## Action Configuration
-
-`ActionCfg` (base for all action configs):
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `name` | `str` | `"default"` | Engine registration key |
-| `control_part` | `str` | `"arm"` | Robot control part to move |
-| `interpolation_type` | `str` | `"linear"` | Interpolation flavor |
-| `velocity_limit` | `float \| None` | `None` | Used on the `motion_gen` path |
-| `acceleration_limit` | `float \| None` | `None` | Used on the `motion_gen` path |
-| `motion_source` | `str` | `"ik_interp"` | `"ik_interp"` (batched IK + interpolation) or `"motion_gen"` (batched `MotionGenerator`) |
-
-The base config is flat: every action cfg extends `ActionCfg` directly, even if it also carries hand open/close fields (see `PickUpCfg` / `PlaceCfg`).
-The engine's `MotionGenerator` owns exactly one planner, so action configs do not
-declare a planner type. On the `motion_gen` path, `TrajectoryBuilder` derives
-planner-specific options from that owned planner.
-
-## TrajectoryBuilder
-
-Stateless helper owned by each action. Key methods:
-
-| Method | Purpose |
-|---|---|
-| `resolve_pose_target(target, n_envs)` | Broadcast EEF target to `(B,4,4)` or `(B,n,4,4)` |
-| `resolve_joint_target(target, n_envs, joint_dof, control_part)` | Broadcast joint target to `(B,dof)` or `(B,n,dof)` |
-| `resolve_start_qpos(start_qpos, n_envs, arm_dof, control_part)` | Broadcast start qpos to `(B, arm_dof)` |
-| `plan_arm_traj(target_states_list, start_qpos, n_waypoints, control_part, arm_dof, cfg=None)` | Returns `(success:(B,), trajectory:(B,n_waypoints,arm_dof))`. Selects `ik_interp` or `motion_gen` from `cfg.motion_source`. |
-| `plan_joint_traj(start_qpos, target_qpos, n_waypoints)` | Joint-space interpolation; always succeeds. |
-| `split_three_phase(...)` | Split sample interval into motion / hand-interp / motion phases. |
-| `interpolate_hand_qpos(...)` | Interpolate gripper qpos between two states. |
-
-`plan_arm_traj` input contract for actions: `target_states_list` is `list[list[PlanState]]` where the outer list is per-env and the inner list is per-waypoint. The builder internally converts to a batched `list[PlanState]` (each carrying `(B, ...)` tensors) when dispatching to `MotionGenerator`.
-
-## AtomicActionEngine
+Atomic actions are side-effect-free, environment-batched planners:
 
 ```python
-engine = AtomicActionEngine(motion_generator)
-engine.register(MoveEndEffector(motion_generator, cfg=MoveEndEffectorCfg()))
-success, traj, final_state = engine.run(steps=[("move_end_effector", target)])
+plan = engine.plan(invocation: ActionInvocation, context: PlanningContext)
 ```
 
-`run(steps, state=None) -> (success, full_traj, final_state)`:
-- `success` is a `(B,)` bool tensor indicating which environments completed every step.
-- Failed environments hold their last successful joint position in both `full_traj` and `final_state.last_qpos` for the remainder of the sequence.
-- If all envs fail, the loop stops early.
-- `state` defaults to `WorldState(last_qpos=robot.get_qpos().clone())`.
+There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
+`AtomicActionEngine.run()` compatibility surface.
 
-## Built-in Primitives
+`ActionInvocation` separates:
 
-| Action | Target | Notes |
+- an action-owned typed goal (`goal_kind` is its stable discriminator);
+- `ActionBinding`, which maps semantic roles to names from the engine robot's
+  `control_parts` mapping;
+- reusable `MotionPolicy` planner/timing choices;
+- bounded `RecoveryPolicy` thresholds and retry budgets;
+- optional typed `skill_options` and role-scoped `control_overrides` for one
+  invocation revision.
+
+`PlanningContext` separates measured `RobotObservation`, verified symbolic
+`TaskState`, versioned `SceneSnapshot`, and environment IDs. An `ActionPlan`
+contains per-environment planning success, one full-robot `TimedTrajectory`,
+action-level recovery and scene-invalidation metadata, planner diagnostics,
+named `TrajectorySegment` ranges, and an uncommitted `StateDelta`. Segments are
+inspection/tracing metadata inside one trajectory; they are not independently
+replannable execution boundaries.
+
+`AtomicAction.build_plan()` normalizes the success mask and freezes unsuccessful
+trajectory rows at the context's observed qpos; skill implementations should
+return row-local success instead of duplicating failure-row masking.
+Use `plan.segment(name)` for action-local half-open ranges and
+`compiled.segment(action_index, name)` for concatenated coordinates; do not
+recompute private sample splits in callers.
+
+Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
+instance, which contains its robot, one `MotionGenerator`/planner backend, and
+control-part command profiles. `MotionGenerator.generate()` is the only
+stateful motion-planning entry point. `MotionPolicy.to_motion_gen_options()`
+passes the invocation's `strategy` directly into `MotionGenOptions`; it is either
+`"motion_gen"` or `"ik_interp"`. Target shaping, world-frame pose translation,
+hand/joint interpolation used by composite actions, and full-robot trajectory
+embedding are pure functions in `trajectory_ops.py`. Actions retain only an
+owned copy of typed default options and borrow engine services. Engine
+construction creates and binds a fresh instance of every type in
+`BUILTIN_ACTION_TYPES`; use `load_builtins=False` only for isolated tests or a
+fully custom action set. A bound action cannot be reused by another engine.
+
+## Engine entry points
+
+Choose the public engine entry point by lifecycle, not by skill type:
+
+| Entry point | Use | Result and state behavior |
 |---|---|---|
-| `MoveEndEffector` | `EndEffectorPoseTarget` | EEF pose move |
-| `MoveJoints` | `JointPositionTarget` / `NamedJointPositionTarget` | Joint-space interpolation |
-| `PickUp` | `GraspTarget` | Approach → close gripper → lift; populates `held_objects[cfg.control_part]` |
-| `MoveHeldObject` | `HeldObjectPoseTarget` | Moves the object at `held_objects[cfg.control_part]` |
-| `Place` | `PlaceTarget` | Lower → open gripper → retract; clears its control-part entry |
-| `Press` | `PressTarget` | Close gripper → press down → return |
-| `CoordinatedPickment` | `CoordinatedPickTarget` | Replaces the two individual entries with one coordinated held state |
-| `CoordinatedPlacement` | `CoordinatedPlacementTarget` | Reads both individual held states from `WorldState` |
+| `engine.plan(invocation, context)` | Inspect or plan one registered action | Returns one `ActionPlan`; does not project a context for another action |
+| `engine.compile(invocations, context)` | Plan an ordered sequence against a fixed scene | Returns a concatenated `CompiledTrajectory`; propagates hypothetical qpos and expected effects through `projected_context` |
+| `engine.start(invocations, context)` | Execute incrementally from observations | Returns an `ExecutionSession`; `tick(latest_context)` emits commands and performs bounded recovery |
 
-## Implementing a New Action
+None steps simulation directly. `compile()` never observes physical execution;
+split compilation at observation boundaries when later goals depend on measured
+results. Use `start()` when observation, effect verification, and replanning
+must remain active during execution.
 
-1. Create a flat `@configclass` extending `ActionCfg` with a unique `name`.
-2. Define an action-exclusive `@dataclass(frozen=True, slots=True, eq=False)`
-   target beside the action. Reuse or promote a target to a neutral module only
-   when the contract is genuinely shared. Inherit `ObjectActionTarget` when
-   multiple object-centric actions share only `semantics`; keep pose roles in
-   the concrete target.
-3. Subclass `AtomicAction[YourTarget]` directly (do not inherit from another action). Set `TargetType` for runtime checking and compose a `TrajectoryBuilder`.
-4. Implement `execute(self, target, state: WorldState) -> ActionResult`:
-   - Resolve batched targets and start qpos via `self.builder`.
-   - Call `self.builder.plan_arm_traj(..., cfg=self.cfg)` if using arm motion.
-   - Return per-env `success` (a `(B,)` tensor if any env can fail, or `torch.ones(...)` for always-succeeding paths).
-   - Embed the arm trajectory into full-DoF shape `(B, n_wp, robot.dof)`.
-   - Advance `last_qpos` with `state.with_updates(...)` and preserve/update the held-object maps.
-5. Register an instance with the engine or globally via `register_action(name, ActionClass)`.
-6. Export from `primitives/__init__.py` and `atomic_actions/__init__.py`.
+`AtomicAction.plan(request, context)` is the framework-owned template method
+called by the engine, not a fourth application entry point. It binds collision
+entities from the current scene into a copied motion policy before delegating
+to the skill-specific `_plan()` hook. New actions implement `_plan()` and must
+not override `plan()`. `engine.plan_action(...)` is only an extension/testing
+escape hatch for an unregistered instance.
 
-## Common Failure Modes
+## Static compilation
 
-- **Forgetting `cfg=self.cfg` in `plan_arm_traj`** — without it, `motion_source` defaults to `"ik_interp"` and per-action planning options are ignored.
-- **Treating `success` as scalar** — `ActionResult.success` is `(B,)` for all built-ins; use `success_all` or `success.all()` for a single bool.
-- **Using `bool(action_result)` in new code** — still works but emits a `DeprecationWarning`; prefer `.success_all`.
-- **Returning arm-only trajectory** — actions must embed into `(B, n_wp, robot.dof)` before returning.
-- **Putting runtime held state into a target** — desired state belongs in the
-  target; objects already held by a control part belong in `WorldState`.
-- **Using a target dataclass with default Tensor equality** — use `eq=False`;
-  generated dataclass equality is invalid for multi-element tensors.
-- **Importing a target from a sibling primitive** — give the action its own
-  contract or promote the shared contract to a neutral module.
-- **Putting a generic `xpos` on a shared object target** — use explicit names
-  such as `object_target_pose`, `grasp_xpos`, or left/right grasp transforms;
-  their frames and cardinalities are not interchangeable.
-- **`motion_source="motion_gen"` without a MotionGenerator** — the engine passes its own `motion_generator` to each action's `TrajectoryBuilder`; if it is `None`, the action raises `ValueError` at execute time.
+Built-ins are already registered by their class-level stable `skill_id`; call:
+
+```python
+compiled = engine.compile(invocations, context=None)
+```
+
+Compilation does not step simulation. It concatenates timed trajectories and
+applies successful expected effects only to `compiled.projected_context`, so a
+following action can be checked against hypothetical state. Failed rows hold
+their last successful qpos.
+
+Use invocation `skill_options` for multiple variants with the same stable
+`skill_id`; do not create per-variant built-in instances.
+
+## Dynamic execution and recovery
+
+`SceneEntityPose(entity_id, relative_pose)` is resolved from the latest scene
+snapshot every time the action plans. Its entity ID is recorded in
+`ActionPlan.scene_dependencies`.
+
+```python
+session = engine.start(invocations, initial_context)
+runner = ExecutionRunner(
+    session,
+    observation_provider,
+    command_sink,
+    clock=execution_clock,
+)
+result = runner.step(effect_success=None)
+```
+
+`ExecutionSession` owns deterministic planning progress and recovery state. It
+emits at most one `JointCommand` per tick. The command's per-environment
+`hold_duration` schedules the next feedback cycle from `TimedTrajectory.dt`:
+command `i` carries the arrival interval `dt[:, i + 1]` leading to the next
+waypoint. The final command reuses its own interval as a settling window. The
+session monitors:
+
+- joint tracking error against the previous command;
+- translation/rotation drift of referenced scene entities;
+- per-environment collision-world revision changes for collision-sensitive
+  actions;
+- action-attempt timeout;
+- planner and semantic-effect failure.
+
+It replans from the latest observation within per-environment budgets. The
+budgets and eligibility masks are row-local, while the action waypoint cursor
+is batch-synchronized: one allowed replan regenerates the active cohort and
+restarts its action trajectory without charging unaffected rows. Unknown
+or exhausted failures are reported as structured `ExecutionEvent` objects. A
+non-empty `StateDelta` is not committed until the caller supplies an external
+`effect_success` mask. While verification is outstanding,
+`ExecutionTick.pending_effect` retains a typed `EffectVerificationRequest` on
+every tick; `EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
+
+Recovery replans reuse the current immutable `ResolvedActionRequest`, including
+its owned goal snapshot. Mutable goal values are copied, while simulator-backed
+`BatchEntity` handles retain their runtime identity. To change a goal, option,
+policy, binding, or control command during execution, submit a strictly newer
+revision explicitly:
+
+```python
+session.revise_current(revised_invocation)
+```
+
+The replacement must keep the active `skill_id` and `invocation_id`. The
+session resolves a new snapshot, resets that revision's recovery budgets, and
+replans from the latest context.
+
+`ExecutionRunner` owns the controller-facing lifecycle around a session:
+
+- `ObservationProvider.observe(task_state)` supplies a fresh, monotonically
+  timestamped `PlanningContext` when a feedback cycle is due;
+- `CommandSink.send/hold/cancel` returns a `CommandAcknowledgement` with
+  `accepted`, `rejected`, or `timed_out` status;
+- `ExecutionClock` supplies monotonic time and backend waiting;
+- non-blocking `step()` dispatches only when the current command's
+  `hold_duration` has elapsed;
+- `run_until_blocked()` is a convenience loop that waits through the clock and
+  stops at a terminal state or an unhandled effect-verification boundary; the
+  runner remembers that boundary so a later verifier call can resume it;
+- cancellation, observation/session exceptions, and negative acknowledgements
+  enter a best-effort cancel-then-hold path.
+
+`TimedTrajectory.dt[:, i]` is the interval leading to sample `i`.
+`ExecutionSession` dispatches sample zero immediately, then maps each following
+arrival interval to the preceding command's `JointCommand.hold_duration`. The
+final sample uses its own interval again as a settling window before terminal
+validation. Batched execution currently advances at a synchronized barrier
+using the longest active row interval.
+
+`SimulationExecutionAdapter` implements observation, command, and clock ports
+for a `SimulationManager`/`Robot` pair. Its `sleep()` advances an integral
+number of physics steps, so simulation execution does not depend on wall time.
+Stable context IDs are correlation identifiers; the adapter maps command rows
+to simulation robot indices rather than using those IDs as array indices.
+Real-device adapters should implement the same protocols and enforce the passed
+acknowledgement timeout in their transport/controller layer.
+
+`SceneProvider.snapshot(timestamp=..., env_ids=...)` is the scene-observation
+boundary used by execution adapters. `SceneSnapshot.collision_entity_ids`
+identifies obstacle poses consumed by a planner, while
+`collision_world_revision` is either global or per environment. A newer
+revision invalidates only affected batch rows. `RigidObjectSceneProvider`
+tracks live simulation objects, filters sub-threshold pose noise, advances the
+general scene version, and maintains per-environment collision revisions.
+Thresholds are measured from the last materially published pose per entity and
+environment, so repeated sub-threshold motion eventually becomes observable.
+For lightweight sources that do not need environment correlation IDs,
+`SimulationExecutionAdapter` also accepts a mutually exclusive
+`SceneSnapshotSupplier(timestamp)` callback.
+
+The public `AtomicAction.plan()` copies `MotionPolicy` and binds collision entity
+poses through `MotionGenerator.bind_collision_world()`. The motion generator
+owns option copying and the backend capability boundary, then forwards the
+update through `BasePlanner.with_collision_world()`. Backends opt in via
+`supports_collision_world_updates`; cuRobo implements this bridge using
+`CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore consumes the
+same scene snapshot that triggered invalidation without adding obstacle
+parameters to each skill. Add/remove/geometry mutations are not yet supported
+by this pose-update path; providers should revision only pose-updatable
+registered obstacles.
+
+Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
+`tracking_error_recovery.py`, `moving_target_recovery.py`, and
+`dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
+structured invalidation/replan events, and requires terminal completion.
+
+The latest validated session context is retained for safe hold if the first
+live observation fails. Environment IDs must remain stable and ordered for the
+entire session; robot and scene timestamps and scene versions must be monotonic.
+Collision-world revisions must also remain monotonic per environment.
+
+## Parameter ownership
+
+Goal dataclasses carry only semantic task intent. They do not carry robot part
+names, planner configuration, retry policy, or runtime state.
+
+`MotionPolicy` owns planner selection, motion strategy, sample count, fallback
+control period, limits, dynamic-collision mode, and typed planner options.
+`DynamicCollisionMode.AUTO` consumes a live collision world when available,
+`OFF` ignores snapshot collision entities and their revisions, and `REQUIRED`
+fails unless the motion strategy, scene, and planner support that path. These
+modes do not toggle backend-configured static-world or self-collision checks.
+`RecoveryPolicy` owns tracking/dynamic-goal thresholds, timeouts, and budgets.
+Each built-in has a frozen `*Options` value for invocation-varying segment counts,
+offsets, and grasp selection behavior. An action constructor may accept
+`default_options`; an invocation's `skill_options` replaces them for that call.
+There is no `ActionCfg` or built-in `*Cfg` layer.
+
+`engine.register(action)` is reserved for custom skill implementations. A
+built-in can be replaced only with explicit `replace=True`. Registration means
+an implementation is installed; it does not prove that the current embodiment
+has compatible control parts, profiles, bindings, or task state. Capability
+adapters must filter registered descriptors before exposing skills to an Agent.
+The module-level `register_action()` API is a process-wide extension-type
+discovery catalog only; it neither binds actions nor changes an engine's
+default built-in set.
+
+`ExecutionRunnerCfg` is intentionally separate from action options. It
+configures controller acknowledgement deadlines, scheduler cadence, and final
+safe-hold behavior for one runner instance; it does not change skill planning
+semantics and does not belong in `ActionInvocation` or an invocation revision.
+
+Every `ActionBinding` value is a `RobotCfg.control_parts` key. It is not a link,
+TCP-frame, joint, or scene-object name. Planning services validate those names
+and resolve immutable `ResolvedControlPart` values containing full-robot joint
+indices. Built-ins use the binding as the only source for participating arm and
+hand names; attachment state and `StateDelta` keys use the bound manipulator.
+
+Embodiment-specific joint commands do not belong to Action options. Register
+them once by actual control-part name:
+
+```python
+engine = AtomicActionEngine(
+    motion_generator,
+    control_profiles={
+        "left_hand": ControlPartCommandProfile.joint_positions(
+            open=left_open_qpos,
+            grasp=left_grasp_qpos,
+        ),
+        "left_arm": ControlPartCommandProfile.joint_positions(ready=ready_qpos),
+    },
+)
+```
+
+Actions request semantic commands (`open`, `grasp`, or a named joint target)
+from the `ResolvedControlPart`. `ActionControlOverrides` may replace commands
+by semantic binding role for one invocation revision. Joint limits constrain
+commands but do not define semantic open/grasp states; a robot integration or
+tutorial may derive a simple profile from limits explicitly.
+
+## Built-ins
+
+| Skill ID | Goal type | Roles |
+|---|---|---|
+| `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` |
+| `move_joints` | `JointPositionGoal` (`target` is explicit qpos or a profile command name) | manipulator `primary` |
+| `pick_up` | `GraspGoal` | manipulator/end effector `primary` |
+| `move_held_object` | `HeldObjectPoseGoal` | manipulator/end effector `primary` |
+| `place` | `PlaceGoal`, `AssembleGoal` | manipulator/end effector `primary` |
+| `press` | `PressGoal` | manipulator/end effector `primary` |
+| `coordinated_pickment` | `CoordinatedPickGoal` | `left`, `right` |
+| `coordinated_placement` | `CoordinatedPlacementGoal` | `placing`, `support` |
+| `hand_over` | `GraspGoal` | `source`, `destination` |
+
+`GraspGoal.grasp_xpos` accepts an explicit pose tensor, a late-bound
+`SceneEntityPose`, or `None` for affordance sampling. A `SceneEntityPose`
+registers the referenced entity as a recovery dependency, allowing an executing
+`PickUp` to replan when the grasp target moves.
+
+## Extension rules
+
+1. Define a frozen action-owned goal dataclass with `goal_kind`.
+2. Define a frozen `ActionOptions` subclass only when runtime behavior exists.
+3. Declare `skill_id`, `GoalType`, `OptionsType`, and required semantic roles.
+4. Implement `_plan()`; do not override the framework-owned `plan()` method.
+5. Validate with `require_goal(request)` and consume only the resolved binding.
+6. Plan from `context.robot.qpos`; never read an implicit live start state.
+7. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
+   Build batched `list[PlanState]`, translate the policy with
+   `request.motion_policy.to_motion_gen_options()`, and call
+   `self.motion_generator.generate()`. Import pure operations directly from
+   `trajectory_ops.py`.
+8. Declare symbolic changes with `StateDelta`; do not mutate context or commit
+   physical effects during planning.
+9. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
+   atomic action. Put execution-loop I/O behind the runner protocols rather than
+   calling a simulator or device from `plan()` or `ExecutionSession`.

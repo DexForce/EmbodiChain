@@ -20,6 +20,7 @@ through :func:`~embodichain.lab.gym.utils.registration.make`.
 
    .. autosummary::
 
+      demo
       managers
       wrapper
 
@@ -47,6 +48,27 @@ Environment Classes
 .. autoclass:: EmbodiedEnvCfg
     :members:
     :exclude-members: __init__, class_type
+
+Demonstration Episodes
+----------------------
+
+The segment-aware demonstration API represents a complete task as one episode
+containing one or more semantic subtasks. Segment action iterables may be lazy,
+and the common executor records per-environment lengths, terminal status, and
+segment spans.
+
+.. autoclass:: DemoSegment
+    :members:
+
+.. autoclass:: DemoSegmentResult
+    :members:
+
+.. autoclass:: DemoEpisodeResult
+    :members:
+
+.. autofunction:: execute_demo_episode
+
+.. autofunction:: resolve_demo_segments
 
 Wrappers
 --------

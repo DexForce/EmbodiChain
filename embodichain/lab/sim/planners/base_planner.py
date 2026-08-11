@@ -20,6 +20,7 @@ import torch
 
 import functools
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import MISSING
 
 from embodichain.utils import logger
@@ -168,11 +169,14 @@ class BasePlanner(ABC):
     preserve_plan_samples: bool = False
     """Whether callers must retain this planner's returned sample points exactly.
 
-    When ``True``, ``TrajectoryBuilder`` returns the planner's trajectory
+    When ``True``, :class:`MotionGenerator` returns the planner's trajectory
     without resampling, preserving collision-checked samples. When ``False``
-    (the default), the builder may normalize the trajectory to a requested
+    (the default), the generator may normalize the trajectory to a requested
     waypoint count.
     """
+
+    supports_collision_world_updates: bool = False
+    """Whether per-plan dynamic obstacle poses can update the collision world."""
 
     def supports_move_type(self, move_type: MoveType) -> bool:
         """Return whether the planner accepts a movement target type directly.
@@ -233,6 +237,26 @@ class BasePlanner(ABC):
 
         Returns:
             The (possibly mutated) planning options carrying the context.
+        """
+        return options
+
+    def with_collision_world(
+        self,
+        options: PlanOptions,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> PlanOptions:
+        """Attach dynamic obstacle poses to backend planning options.
+
+        The base planner does not consume a collision world. Backends declaring
+        :attr:`supports_collision_world_updates` override this method.
+
+        Args:
+            options: Backend-specific options to enrich.
+            obstacle_poses: Batched world poses keyed by stable obstacle ID.
+
+        Returns:
+            Planning options unchanged for a backend without world updates.
         """
         return options
 
