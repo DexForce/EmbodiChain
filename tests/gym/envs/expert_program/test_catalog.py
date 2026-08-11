@@ -18,7 +18,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
+import json
+from threading import Event, Lock
 from typing import ClassVar
 
 import pytest
@@ -37,6 +40,7 @@ from embodichain.lab.sim.atomic_actions import Affordance, PlanningContext
 from embodichain.lab.sim.skills import (
     PLACE_ON_AFFORDANCE_CAPABILITY,
     BoundSemanticCall,
+    ControlPartEndpoint,
     HandOver,
     HandOverPoseProvider,
     HandOverPoseTargets,
@@ -48,7 +52,20 @@ from embodichain.lab.sim.skills import (
     SceneManifest,
     SceneObjectRef,
     SemanticRelationTarget,
+    RegisteredSemanticCall,
+    SemanticCallDescriptor,
+    SkillPolicyPreset,
     builtin_semantic_call_catalog,
+)
+from embodichain.lab.sim.atomic_actions.tracking import (
+    InFlightTrackingPolicy,
+    TimedTerminalAcceptance,
+    TrackingMetricCfg,
+    TrackingPolicy,
+)
+from embodichain.lab.sim.skills.effects import EffectMonitorRef
+from embodichain.lab.sim.skills.parallel_runtime import (
+    ParallelCommandSafetyValidator,
 )
 from embodichain_tasks.multi_segments.cube_pick_place import (
     CUBE_ROBOT_PROFILE_ID,
@@ -140,6 +157,14 @@ class _StatefulCatalogRelationGrounder(_CatalogRelationGrounder):
         self.height = 0.5
 
 
+@dataclass(frozen=True, slots=True)
+class _NestedMutableCatalogRelationGrounder(_CatalogRelationGrounder):
+    """Invalid frozen provider retaining one mutable nested configuration."""
+
+    capability: ClassVar[str] = "test.catalog_relation.mutable_nested"
+    offsets: list[float]
+
+
 class _PrivateSlotHandOverPoseProvider(HandOverPoseProvider):
     """Invalid provider whose state is hidden behind a mangled slot name."""
 
@@ -191,6 +216,95 @@ class _OpaqueHandOverPoseProvider(HandOverPoseProvider):
         """Remain unreachable because fingerprinting rejects this provider."""
         del call, context, bound
         raise AssertionError("Opaque providers must never reach runtime.")
+
+
+class _AcceptParallelSafety:
+    """Stateless safety sentinel returned by the registration-owned factory."""
+
+    def validate(self, *, branch_frames: object, merged_frame: object) -> None:
+        """Accept the provider-free test command without observing simulation."""
+        del branch_frames, merged_frame
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogParallelSafetyFactory:
+    """Frozen declaration covering the built-in transport exactly."""
+
+    validator_id: ClassVar[str] = "test.catalog_parallel_safety"
+    revision: ClassVar[str] = "1"
+    supported_transport_ids: ClassVar[frozenset[str]] = frozenset(
+        {"robot.joint_position"}
+    )
+    margin: float = 0.02
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+    ) -> ParallelCommandSafetyValidator:
+        """Return one independent protocol-compatible safety gate."""
+        del simulation, robot
+        return _AcceptParallelSafety()
+
+
+class _SerializedParallelSafetyFactory:
+    """Instrument concurrent create calls without carrying instance state."""
+
+    validator_id: ClassVar[str] = "test.serialized_parallel_safety"
+    revision: ClassVar[str] = "1"
+    supported_transport_ids: ClassVar[frozenset[str]] = frozenset(
+        {"robot.joint_position"}
+    )
+    _state_lock: ClassVar[Lock] = Lock()
+    _first_entered: ClassVar[Event] = Event()
+    _second_entered: ClassVar[Event] = Event()
+    _release_first: ClassVar[Event] = Event()
+    _calls: ClassVar[int] = 0
+    _active: ClassVar[int] = 0
+    _max_active: ClassVar[int] = 0
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset class-owned concurrency instrumentation for one test."""
+        cls._first_entered = Event()
+        cls._second_entered = Event()
+        cls._release_first = Event()
+        cls._calls = 0
+        cls._active = 0
+        cls._max_active = 0
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+    ) -> ParallelCommandSafetyValidator:
+        """Block the first call so a second call can attempt registration entry."""
+        del simulation, robot
+        with self._state_lock:
+            call_index = self._calls
+            type(self)._calls += 1
+            type(self)._active += 1
+            type(self)._max_active = max(self._max_active, self._active)
+        if call_index == 0:
+            self._first_entered.set()
+            if not self._release_first.wait(timeout=2.0):
+                raise TimeoutError("Timed out waiting to release first safety create.")
+        else:
+            self._second_entered.set()
+        with self._state_lock:
+            type(self)._active -= 1
+        return _AcceptParallelSafety()
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogCustomTrackingMetric(TrackingMetricCfg):
+    """Metric with no built-in exact evaluator registration."""
+
+    metric_id: ClassVar[str] = "test.catalog_metric"
+    revision: ClassVar[str] = "1"
+    channel_id: ClassVar[str] = "joint.position"
 
 
 def _program_payload(
@@ -299,6 +413,9 @@ def _place_relation_catalog(
         relation_grounder_keys=grounder_keys,
         articulation_operation_targets={},
         settle_preset_ids=base.settle_preset_ids,
+        endpoint_adapter_declarations=base.endpoint_adapter_declarations,
+        runtime_transport_declarations=base.runtime_transport_declarations,
+        parallel_safety_declaration=base.parallel_safety_declaration,
         fingerprint="0" * 64,
         _required_skills={},
     )
@@ -326,6 +443,50 @@ def _place_relation_payload() -> dict[str, object]:
     }
 
 
+def _parallel_pick_payload() -> dict[str, object]:
+    """Return one schema-v2 parallel program rooted at an exact config path."""
+    return {
+        "schema_version": 2,
+        "program_id": "catalog_parallel_pick",
+        "integration": {
+            "robot_profile": CUBE_ROBOT_PROFILE_ID,
+            "scene_registry": CUBE_SCENE_REGISTRY_ID,
+            "runtime_preset": "safe",
+        },
+        "targets": {},
+        "program": {
+            "kind": "parallel",
+            "branches": [
+                {
+                    "kind": "invoke",
+                    "call": {"kind": "pick", "object": "cube"},
+                },
+                {
+                    "kind": "invoke",
+                    "call": {"kind": "pick", "object": "cube"},
+                },
+            ],
+            "barrier": {
+                "kind": "barrier",
+                "name": "catalog_join",
+                "timeout_steps": 40,
+                "failure_policy": "fail_fast",
+            },
+        },
+    }
+
+
+def _registration_with_preset(
+    preset: SkillPolicyPreset,
+) -> SimulationExpertProgramRegistration:
+    """Replace the Cube task's sole preset for registration validation tests."""
+    binding = create_cube_robot_profile_binding()
+    return SimulationExpertProgramRegistration(
+        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        robot_profile_binding=replace(binding, presets=(preset,)),
+    )
+
+
 def test_catalog_decodes_compiles_and_links_without_simulation() -> None:
     """All external references are linked before a simulation is available."""
     registration = _registration()
@@ -337,6 +498,172 @@ def test_catalog_decodes_compiles_and_links_without_simulation() -> None:
     compiled = registration.catalog.preflight(program)
 
     assert tuple(compiled.iter_segments())[0].calls[0].call.semantic_id == "pick"
+
+
+def test_catalog_declares_builtin_endpoint_and_ordered_transport_contracts() -> None:
+    """The standard provider-free catalog contains its exact built-in wiring."""
+    catalog = _registration().catalog
+
+    adapter = catalog.endpoint_adapter_declarations[ControlPartEndpoint]
+
+    assert adapter.adapter_id == "control_part"
+    assert adapter.runtime_transport_ids == frozenset({"robot.joint_position"})
+    assert tuple(
+        value.transport_id for value in catalog.runtime_transport_declarations
+    ) == ("robot.joint_position",)
+
+
+def test_parallel_preflight_requires_registered_safety_factory_at_exact_path() -> None:
+    """Parallel programs cannot defer physical-safety wiring to live startup."""
+    registration = _registration()
+    program = decode_expert_program(
+        _parallel_pick_payload(),
+        validation_context=registration.catalog,
+    )
+
+    with pytest.raises(ExpertProgramValidationError) as error:
+        registration.catalog.preflight(program)
+
+    assert error.value.code == "parallel_safety_factory_not_registered"
+    assert error.value.path == ("program",)
+
+
+def test_parallel_preflight_accepts_exact_registration_owned_safety_factory() -> None:
+    """A factory declaration covers preflight and creates a fresh live gate."""
+    registration = SimulationExpertProgramRegistration(
+        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        parallel_safety_factory=_CatalogParallelSafetyFactory(),
+    )
+    program = decode_expert_program(
+        _parallel_pick_payload(),
+        validation_context=registration.catalog,
+    )
+
+    compiled = registration.catalog.preflight(program)
+    validator = registration.create_parallel_safety_validator(
+        simulation=object(),
+        robot=object(),
+    )
+
+    assert tuple(compiled.iter_segments())[0].parallel_block is not None
+    assert isinstance(validator, ParallelCommandSafetyValidator)
+
+
+def test_parallel_safety_factory_must_return_a_validator() -> None:
+    """A malformed registration-owned factory fails before runtime dispatch."""
+
+    class InvalidParallelSafetyFactory:
+        validator_id: ClassVar[str] = "test.invalid_parallel_safety"
+        revision: ClassVar[str] = "1"
+        supported_transport_ids: ClassVar[frozenset[str]] = frozenset(
+            {"robot.joint_position"}
+        )
+
+        def create(self, *, simulation: object, robot: object) -> object:
+            del simulation, robot
+            return object()
+
+    registration = SimulationExpertProgramRegistration(
+        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        parallel_safety_factory=InvalidParallelSafetyFactory(),
+    )
+
+    with pytest.raises(TypeError, match="must return a ParallelCommandSafetyValidator"):
+        registration.create_parallel_safety_validator(
+            simulation=object(),
+            robot=object(),
+        )
+
+
+def test_parallel_safety_creation_and_history_are_one_registration_lock_scope() -> None:
+    """Concurrent assemblies cannot enter one registration factory together."""
+    factory_type = _SerializedParallelSafetyFactory
+    factory_type.reset()
+    registration = SimulationExpertProgramRegistration(
+        scene_binding=create_cube_scene_binding(grasp_samples=32),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        parallel_safety_factory=factory_type(),
+    )
+
+    def create_validator() -> ParallelCommandSafetyValidator | None:
+        return registration.create_parallel_safety_validator(
+            simulation=object(),
+            robot=object(),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(create_validator)
+        assert factory_type._first_entered.wait(timeout=1.0)
+        second = executor.submit(create_validator)
+        assert not factory_type._second_entered.wait(timeout=0.05)
+        factory_type._release_first.set()
+        assert isinstance(first.result(timeout=1.0), ParallelCommandSafetyValidator)
+        assert isinstance(second.result(timeout=1.0), ParallelCommandSafetyValidator)
+
+    assert factory_type._calls == 2
+    assert factory_type._max_active == 1
+
+
+def test_standard_registration_rejects_registered_semantic_descriptors() -> None:
+    """Executable lowerer extensions are outside the standard factory contract."""
+    catalog = builtin_semantic_call_catalog()
+    target = catalog.descriptors["pick"].target_descriptor
+    assert target is not None and target.binding_contract is not None
+    custom = SemanticCallDescriptor(
+        call_id="test.catalog_call",
+        spec_type=RegisteredSemanticCall,
+        target_descriptor=target,
+    )
+
+    with pytest.raises(ValueError, match="Registered semantic call"):
+        SimulationExpertProgramRegistration(
+            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            robot_profile_binding=create_cube_robot_profile_binding(),
+            call_catalog=catalog.with_descriptor(custom),
+        )
+
+
+def test_standard_registration_rejects_nonbuiltin_effect_monitor() -> None:
+    """Custom effect-monitor factories cannot be injected after registration."""
+    base = create_cube_robot_profile_binding().presets[0]
+    preset = SkillPolicyPreset(
+        "safe",
+        action_option_templates=base.action_option_templates,
+        motion_policy=base.motion_policy,
+        tracking_policy=base.tracking_policy,
+        recovery_policy=base.recovery_policy,
+        runner_cfg=base.runner_cfg,
+        effect_monitors={"pick": EffectMonitorRef("test.monitor", "1")},
+    )
+
+    with pytest.raises(ValueError, match="non-built-in effect monitor"):
+        _registration_with_preset(preset)
+
+
+def test_standard_registration_rejects_tracking_metric_without_builtin_evaluator() -> (
+    None
+):
+    """Metric evaluator availability is proven before simulation startup."""
+    base = create_cube_robot_profile_binding().presets[0]
+    preset = SkillPolicyPreset(
+        "safe",
+        action_option_templates=base.action_option_templates,
+        motion_policy=base.motion_policy,
+        tracking_policy=TrackingPolicy(
+            in_flight=InFlightTrackingPolicy(
+                metrics=(_CatalogCustomTrackingMetric(),),
+            ),
+            terminal=TimedTerminalAcceptance(),
+        ),
+        recovery_policy=base.recovery_policy,
+        runner_cfg=base.runner_cfg,
+        effect_monitors=base.effect_monitors,
+    )
+
+    with pytest.raises(ValueError, match="no exact built-in evaluator"):
+        _registration_with_preset(preset)
 
 
 @pytest.mark.parametrize("validation_stage", ("decode", "preflight"))
@@ -462,6 +789,30 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
 
     assert left.fingerprint == right.fingerprint
     assert len(left.fingerprint) == 64
+
+
+def test_planner_projection_is_json_safe_deterministic_and_owned() -> None:
+    """Planner discovery is one catalog-derived view with the exact digest."""
+    left = _registration()
+    right = _registration()
+
+    projection = left.catalog.planner_projection()
+    encoded = json.dumps(projection, allow_nan=False, sort_keys=True)
+
+    assert projection == right.catalog.planner_projection()
+    assert projection["schema_version"] == (
+        "semantic_integration_planner_projection/v1"
+    )
+    assert projection["integration_fingerprint"] == left.fingerprint
+    assert {call["call_id"] for call in projection["semantic_calls"]} >= {
+        "pick",
+        "place",
+    }
+    assert "ActionInvocation" not in encoded
+    assert "qpos" not in encoded
+
+    projection["scene"]["entities"].clear()
+    assert left.catalog.planner_projection()["scene"]["entities"]
 
 
 def test_fingerprint_is_independent_of_catalog_and_provider_insertion_order() -> None:
@@ -593,6 +944,16 @@ def test_registration_rejects_stateful_non_dataclass_providers(
             scene_binding=create_cube_scene_binding(grasp_samples=32),
             robot_profile_binding=create_cube_robot_profile_binding(),
             **kwargs,
+        )
+
+
+def test_registration_rejects_nested_mutable_relation_grounder_state() -> None:
+    """Catalog providers reuse the standard recursive immutability boundary."""
+    with pytest.raises(TypeError, match="deeply immutable"):
+        SimulationExpertProgramRegistration(
+            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            robot_profile_binding=create_cube_robot_profile_binding(),
+            relation_grounders=(_NestedMutableCatalogRelationGrounder(offsets=[0.1]),),
         )
 
 

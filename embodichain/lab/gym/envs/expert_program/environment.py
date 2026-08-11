@@ -26,6 +26,7 @@ shared semantic compiler, runtime, and Gym bridge.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 import math
 from typing import Protocol, runtime_checkable
@@ -61,6 +62,7 @@ from embodichain.lab.sim.skills.parallel_runtime import (
     analyze_parallel_branches,
 )
 from embodichain.lab.sim.skills.profiles import (
+    BoundRobotSkillProfile,
     ResourceEndpoint,
     ResourceEndpointAdapter,
     RobotSkillProfile,
@@ -75,12 +77,17 @@ from .bridge import (
     CurrentQposProvider,
     DemoBridgeError,
     EnvironmentStepClock,
+    JointPositionGymTransportEncoder,
     RuntimeCommandFrameEncoder,
     RuntimeTransportActionEncoder,
     SegmentPostPolicyPort,
     SegmentValidatorPort,
 )
-from .catalog import ExpertProgramIntegrationCatalog
+from .catalog import (
+    ExpertProgramIntegrationCatalog,
+    IntegrationFingerprintMismatch,
+    SimulationExpertProgramRegistration,
+)
 from .cfg import ExpertProgramCfg, ExpertProgramIntegrationCfg
 from .compiler import (
     CompiledProgram,
@@ -216,6 +223,34 @@ class AcceptedRuntimeCommandObserverFactory(Protocol):
         """Return the observer shared by the command sink and evidence ports."""
 
 
+@runtime_checkable
+class ParallelCommandSafetyValidatorProvider(Protocol):
+    """Runtime-factory capability for a fresh registration-owned safety gate."""
+
+    def create_parallel_command_safety_validator(
+        self,
+        *,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+        observation_provider: PlanningObservationPort,
+    ) -> ParallelCommandSafetyValidator:
+        """Create the live gate for the exact assembled runtime components."""
+
+
+@runtime_checkable
+class _RegistrationOwningExpertProgramFactory(Protocol):
+    """Internal capability exposing one exact standard registration owner."""
+
+    @property
+    def expert_program_registration(self) -> SimulationExpertProgramRegistration:
+        """Return the exact registration owned by this live factory."""
+
+    def registration_owned_segment_policy_ports(
+        self,
+    ) -> tuple[SegmentPostPolicyPort | None, SegmentValidatorPort | None]:
+        """Return factory-owned post-policy and validator ports."""
+
+
 @dataclass(frozen=True, slots=True)
 class ExpertProgramRuntimeAssembly:
     """Auditable result of one fresh environment runtime assembly.
@@ -233,6 +268,8 @@ class ExpertProgramRuntimeAssembly:
         command_encoder: Runtime-frame to Gym-action encoder.
         command_sink: Buffered Gym command sink.
         accepted_command_observer: Optional transactional command-state owner.
+        runner_cfg: Runner policy selected by the integration runtime preset.
+        parallel_safety_validator: Optional fresh registration-owned safety gate.
         runtime: Nonblocking semantic skill runtime.
     """
 
@@ -248,6 +285,8 @@ class ExpertProgramRuntimeAssembly:
     command_encoder: RuntimeCommandFrameEncoder
     command_sink: BufferedGymCommandSink
     accepted_command_observer: AcceptedRuntimeCommandObserver | None
+    runner_cfg: ExecutionRunnerCfg
+    parallel_safety_validator: ParallelCommandSafetyValidator | None
     runtime: SkillRuntime
 
 
@@ -282,6 +321,8 @@ class ExpertProgramEnvironmentAdapter:
         step_dt: Authoritative Gym control cadence in seconds.
         integration_catalog: Optional immutable task-registration catalog used
             for provider-free compilation.
+        registration: Optional exact standard task registration. When present,
+            every compiler/runtime extension comes exclusively from it.
         call_catalog: Optional immutable semantic call catalog.  The built-in
             catalog is used when omitted.
         endpoint_adapters: Optional custom robot endpoint adapters.
@@ -306,6 +347,7 @@ class ExpertProgramEnvironmentAdapter:
         *,
         step_dt: float,
         integration_catalog: ExpertProgramIntegrationCatalog | None = None,
+        registration: SimulationExpertProgramRegistration | None = None,
         call_catalog: SemanticCallCatalog | None = None,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
@@ -342,6 +384,86 @@ class ExpertProgramEnvironmentAdapter:
                 "integration_catalog must be exactly "
                 "ExpertProgramIntegrationCatalog or None."
             )
+        if (
+            registration is not None
+            and type(registration) is not SimulationExpertProgramRegistration
+        ):
+            raise TypeError(
+                "registration must be exactly "
+                "SimulationExpertProgramRegistration or None."
+            )
+        registration_owner = (
+            factory
+            if isinstance(factory, _RegistrationOwningExpertProgramFactory)
+            else None
+        )
+        if registration_owner is not None:
+            owned_registration = registration_owner.expert_program_registration
+            if type(owned_registration) is not SimulationExpertProgramRegistration:
+                raise TypeError(
+                    "A registration-owning factory must expose exactly "
+                    "SimulationExpertProgramRegistration."
+                )
+            if registration is None:
+                raise ValueError(
+                    "A registration-owning factory requires its exact registration; "
+                    "catalog-only or unregistered adapter construction is forbidden."
+                )
+            if registration is not owned_registration:
+                raise ValueError(
+                    "registration must be the exact object owned by the factory."
+                )
+        elif registration is not None:
+            raise TypeError(
+                "registration requires a factory that exposes exact registration "
+                "ownership and factory-owned segment policy ports."
+            )
+        registered_lowerer_values = tuple(registered_lowerers)
+        relation_grounder_values = tuple(relation_grounders)
+        handover_pose_provider_values = tuple(handover_pose_providers)
+        runtime_transport_values = tuple(runtime_transports)
+        if registration is not None:
+            if integration_catalog is not None:
+                raise ValueError(
+                    "integration_catalog cannot override an exact task registration."
+                )
+            forbidden = {
+                "call_catalog": call_catalog is not None,
+                "endpoint_adapters": endpoint_adapters is not None,
+                "registered_lowerers": bool(registered_lowerer_values),
+                "relation_grounders": bool(relation_grounder_values),
+                "handover_pose_providers": bool(handover_pose_provider_values),
+                "effect_monitor_registry": effect_monitor_registry is not None,
+                "runtime_transports": bool(runtime_transport_values),
+                "runner_cfg": runner_cfg is not None,
+                "post_policy_port": post_policy_port is not None,
+                "validator_port": validator_port is not None,
+                "parallel_safety_validator": parallel_safety_validator is not None,
+            }
+            supplied = tuple(name for name, present in forbidden.items() if present)
+            if supplied:
+                raise ValueError(
+                    "Standard task registration owns all semantic and runtime "
+                    f"extensions; external overrides are forbidden: {supplied}."
+                )
+            registration.assert_unchanged()
+            integration_catalog = registration.catalog
+            endpoint_adapters = dict(registration.endpoint_adapter_map)
+            registered_lowerer_values = ()
+            relation_grounder_values = registration.relation_grounders
+            handover_pose_provider_values = registration.handover_pose_providers
+            effect_monitor_registry = None
+            runtime_transport_values = registration.runtime_transports
+            runner_cfg = None
+            parallel_safety_validator = None
+            assert registration_owner is not None
+            owned_ports = registration_owner.registration_owned_segment_policy_ports()
+            if type(owned_ports) is not tuple or len(owned_ports) != 2:
+                raise TypeError(
+                    "registration_owned_segment_policy_ports() must return an "
+                    "exact 2-tuple."
+                )
+            post_policy_port, validator_port = owned_ports
         if integration_catalog is not None:
             if integration_catalog.scene_registry_id != scene_registry_id:
                 raise ValueError(
@@ -393,16 +515,17 @@ class ExpertProgramEnvironmentAdapter:
         self._scene_registry_id = scene_registry_id
         self._robot_profile_id = robot_profile_id
         self._step_dt = float(step_dt)
+        self._registration = registration
         self._integration_catalog = integration_catalog
         self._call_catalog = selected_catalog
         self._endpoint_adapters = (
             None if endpoint_adapters is None else dict(endpoint_adapters)
         )
-        self._registered_lowerers = tuple(registered_lowerers)
-        self._relation_grounders = tuple(relation_grounders)
-        self._handover_pose_providers = tuple(handover_pose_providers)
+        self._registered_lowerers = registered_lowerer_values
+        self._relation_grounders = relation_grounder_values
+        self._handover_pose_providers = handover_pose_provider_values
         self._effect_monitor_registry = effect_monitor_registry
-        self._runtime_transports = tuple(runtime_transports)
+        self._runtime_transports = runtime_transport_values
         self._runner_cfg = runner_cfg
         self._post_policy_port = post_policy_port
         self._validator_port = validator_port
@@ -484,6 +607,7 @@ class ExpertProgramEnvironmentAdapter:
                 f"{self._robot_profile_id!r}, got {current_profile_id!r}."
             )
         profile = self._factory.create_robot_skill_profile()
+        self._validate_registration_ownership()
         if type(profile) is not RobotSkillProfile:
             raise TypeError(
                 "create_robot_skill_profile() must return exactly RobotSkillProfile."
@@ -493,12 +617,31 @@ class ExpertProgramEnvironmentAdapter:
                 "Factory robot profile declaration drifted: expected "
                 f"{self._robot_profile_id!r}, got {profile.profile_id!r}."
             )
+        if self._registration is not None:
+            self._registration.validate_robot_profile(
+                profile,
+                step_dt=self._step_dt,
+            )
 
         engine = self._factory.create_atomic_action_engine(profile)
+        self._validate_registration_ownership()
         if not isinstance(engine, AtomicActionEngine):
             raise TypeError(
                 "create_atomic_action_engine() must return an AtomicActionEngine."
             )
+        if self._registration is not None:
+            bound_profile = engine.skill_profile
+            if type(bound_profile) is not BoundRobotSkillProfile:
+                raise IntegrationFingerprintMismatch(
+                    "The standard factory engine must own one exact bound robot "
+                    "profile."
+                )
+            if bound_profile.source_profile is not profile:
+                raise IntegrationFingerprintMismatch(
+                    "The standard factory engine is bound to a different robot "
+                    "profile object than the adapter validated."
+                )
+            self._registration.validate_engine(engine)
 
         manifest = self._create_manifest(
             registry,
@@ -510,6 +653,12 @@ class ExpertProgramEnvironmentAdapter:
             engine,
             endpoint_adapters=self._endpoint_adapters,
         )
+        if self._registration is not None:
+            self._validate_registration_ownership()
+            # ``manifest.bind`` resolves endpoints again and replaces the
+            # engine-owned bound profile. Revalidate that second live result so a
+            # provider cannot pass factory construction and drift before compile.
+            self._registration.validate_engine(engine)
         compiler = SemanticSkillCompiler(
             bound,
             registered_lowerers=self._registered_lowerers,
@@ -539,6 +688,7 @@ class ExpertProgramEnvironmentAdapter:
         """Attach live observation, evidence, command, and runtime boundaries."""
         if type(semantic) is not _ExpertProgramSemanticAssembly:
             raise TypeError("semantic must be exactly _ExpertProgramSemanticAssembly.")
+        self._validate_registration_ownership()
 
         clock = EnvironmentStepClock(self._step_dt)
         observation_provider = self._factory.create_planning_observation_provider(
@@ -546,6 +696,7 @@ class ExpertProgramEnvironmentAdapter:
             engine=semantic.engine,
             clock=clock,
         )
+        self._validate_registration_ownership()
         if not isinstance(observation_provider, PlanningObservationPort):
             raise TypeError(
                 "create_planning_observation_provider() must return a port "
@@ -556,6 +707,7 @@ class ExpertProgramEnvironmentAdapter:
             engine=semantic.engine,
             observation_provider=observation_provider,
         )
+        self._validate_registration_ownership()
         if isinstance(providers, (str, bytes)):
             raise TypeError(
                 "create_effect_evidence_providers() must return an iterable of "
@@ -571,10 +723,30 @@ class ExpertProgramEnvironmentAdapter:
         evidence_collector = EffectEvidenceCollector(
             EffectEvidenceProviderRegistry(provider_values)
         )
+        expected_transport_ids: tuple[str, ...] | None = None
+        include_joint_position = True
+        if self._registration is not None:
+            expected_transport_ids = tuple(
+                declaration.transport_id
+                for declaration in (
+                    self._registration.catalog.runtime_transport_declarations
+                )
+            )
+            include_joint_position = (
+                JointPositionGymTransportEncoder.transport_id in expected_transport_ids
+            )
         command_encoder = RuntimeCommandFrameEncoder(
             observation_provider,
             transports=self._runtime_transports,
+            include_joint_position=include_joint_position,
         )
+        if expected_transport_ids is not None:
+            if command_encoder.transport_ids != expected_transport_ids:
+                raise IntegrationFingerprintMismatch(
+                    "Live command encoder transport order differs from the exact "
+                    "registration catalog."
+                )
+            command_encoder.freeze()
         accepted_command_observer: AcceptedRuntimeCommandObserver | None = None
         if isinstance(self._factory, AcceptedRuntimeCommandObserverFactory):
             accepted_command_observer = (
@@ -584,6 +756,7 @@ class ExpertProgramEnvironmentAdapter:
                     observation_provider=observation_provider,
                 )
             )
+            self._validate_registration_ownership()
             if not isinstance(
                 accepted_command_observer,
                 AcceptedRuntimeCommandObserver,
@@ -597,14 +770,56 @@ class ExpertProgramEnvironmentAdapter:
             clock,
             accepted_command_observer=accepted_command_observer,
         )
+        try:
+            selected_preset = semantic.robot_profile.presets[
+                semantic.integration.runtime_preset
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                "The selected runtime preset is absent from the assembled robot "
+                "profile."
+            ) from exc
+        selected_runner_cfg = selected_preset.runner_cfg
+        if self._registration is None and self._runner_cfg is not None:
+            selected_runner_cfg = deepcopy(self._runner_cfg)
         runtime = SkillRuntime.from_components(
             semantic.compiler,
             observation_provider,
             command_sink,
             evidence_collector,
             clock=clock,
-            runner_cfg=self._runner_cfg,
+            runner_cfg=deepcopy(selected_runner_cfg),
         )
+        parallel_safety_validator = self._parallel_safety_validator
+        if (
+            self._registration is not None
+            and self._registration.parallel_safety_factory is not None
+        ):
+            if not isinstance(
+                self._factory,
+                ParallelCommandSafetyValidatorProvider,
+            ):
+                raise TypeError(
+                    "A registration-owned parallel_safety_factory requires the "
+                    "environment factory to implement "
+                    "ParallelCommandSafetyValidatorProvider."
+                )
+            parallel_safety_validator = (
+                self._factory.create_parallel_command_safety_validator(
+                    scene_registry=semantic.scene_registry,
+                    engine=semantic.engine,
+                    observation_provider=observation_provider,
+                )
+            )
+            self._validate_registration_ownership()
+            if not isinstance(
+                parallel_safety_validator,
+                ParallelCommandSafetyValidator,
+            ):
+                raise TypeError(
+                    "create_parallel_command_safety_validator() must return a "
+                    "ParallelCommandSafetyValidator."
+                )
         return ExpertProgramRuntimeAssembly(
             integration=semantic.integration,
             scene_registry=semantic.scene_registry,
@@ -618,6 +833,8 @@ class ExpertProgramEnvironmentAdapter:
             command_encoder=command_encoder,
             command_sink=command_sink,
             accepted_command_observer=accepted_command_observer,
+            runner_cfg=selected_runner_cfg,
+            parallel_safety_validator=parallel_safety_validator,
             runtime=runtime,
         )
 
@@ -645,7 +862,8 @@ class ExpertProgramEnvironmentAdapter:
             assembly.clock,
             post_policy_port=self._post_policy_port,
             validator_port=self._validator_port,
-            parallel_safety_validator=self._parallel_safety_validator,
+            runner_cfg=assembly.runner_cfg,
+            parallel_safety_validator=assembly.parallel_safety_validator,
         )
 
     def _preflight_program_surfaces(
@@ -695,12 +913,13 @@ class ExpertProgramEnvironmentAdapter:
             raise TypeError("compiler must be a SemanticSkillCompiler.")
         analyses = program.preflight_analyses()
         if any(analysis.kind == "parallel_branch" for analysis in analyses) and (
-            self._parallel_safety_validator is None
+            not self._parallel_safety_is_registered
         ):
             raise ValueError(
                 "Expert Programs containing parallel blocks require an explicit "
                 "ParallelCommandSafetyValidator before bridge creation."
             )
+
         index = 0
         while index < len(analyses):
             analysis = analyses[index]
@@ -734,6 +953,13 @@ class ExpertProgramEnvironmentAdapter:
                 branch_paths=branch_paths,
             )
 
+    @property
+    def _parallel_safety_is_registered(self) -> bool:
+        """Whether static assembly owns an authoritative parallel safety gate."""
+        if self._registration is not None:
+            return self._registration.parallel_safety_factory is not None
+        return self._parallel_safety_validator is not None
+
     def _validate_selection(
         self,
         integration: ExpertProgramIntegrationCfg,
@@ -741,6 +967,7 @@ class ExpertProgramEnvironmentAdapter:
         """Reject an integration selection owned by another adapter."""
         if type(integration) is not ExpertProgramIntegrationCfg:
             raise TypeError("integration must be exactly ExpertProgramIntegrationCfg.")
+        self._validate_registration_ownership()
         current_scene_id = _validate_identifier(
             self._factory.scene_registry_id,
             field_name="factory.scene_registry_id",
@@ -772,6 +999,28 @@ class ExpertProgramEnvironmentAdapter:
                 f"only {self._robot_profile_id!r}."
             )
 
+    def _validate_registration_ownership(self) -> None:
+        """Reject a standard factory whose exact registration owner drifted."""
+        registration = self._registration
+        if registration is None:
+            return
+        if not isinstance(self._factory, _RegistrationOwningExpertProgramFactory):
+            raise IntegrationFingerprintMismatch(
+                "The standard environment factory no longer exposes registration "
+                "ownership."
+            )
+        current = self._factory.expert_program_registration
+        if type(current) is not SimulationExpertProgramRegistration:
+            raise IntegrationFingerprintMismatch(
+                "The standard environment factory no longer exposes an exact "
+                "SimulationExpertProgramRegistration."
+            )
+        if current is not registration:
+            raise IntegrationFingerprintMismatch(
+                "The standard environment factory registration ownership changed "
+                "after adapter construction."
+            )
+
     def _create_scene_registry(self) -> SceneRegistry:
         """Create and validate one exact live scene registry."""
         current_id = _validate_identifier(
@@ -784,10 +1033,13 @@ class ExpertProgramEnvironmentAdapter:
                 f"{self._scene_registry_id!r}, got {current_id!r}."
             )
         registry = self._factory.create_scene_registry()
+        self._validate_registration_ownership()
         if type(registry) is not SceneRegistry:
             raise TypeError(
                 "create_scene_registry() must return exactly SceneRegistry."
             )
+        if self._registration is not None:
+            self._registration.validate_scene_registry(registry)
         return registry
 
     def _create_manifest(

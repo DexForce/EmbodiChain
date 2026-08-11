@@ -1409,7 +1409,8 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         action_option_templates={
             "pick": PickUpOptions(pre_grasp_distance=0.08),
         },
-        motion_policy=MotionPolicy(planner="stub_planner", sample_count=80),
+        motion_policy=MotionPolicy(sample_count=80),
+        required_planner="stub_planner",
         tracking_policy=TrackingPolicy.joint_position(
             in_flight_max_abs_error=0.125,
             terminal_max_abs_error=0.125,
@@ -1461,7 +1462,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
             "other": SkillPolicyPreset(
                 "other",
                 action_option_templates={},
-                motion_policy=MotionPolicy(planner="other_planner"),
+                required_planner="other_planner",
             )
         },
     )

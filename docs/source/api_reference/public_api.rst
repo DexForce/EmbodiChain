@@ -127,6 +127,17 @@ embodichain.lab.gym.envs.expert_program.bridge
    SequentialSkillRuntimePort
    UnsupportedRuntimeTransportError
 
+embodichain.lab.gym.envs.expert_program.catalog
+-------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.catalog
+
+.. autosummary::
+
+   ExpertProgramIntegrationCatalog
+   IntegrationFingerprintMismatch
+   SimulationExpertProgramRegistration
+
 embodichain.lab.gym.envs.expert_program.cfg
 ---------------------------------------------
 
@@ -227,6 +238,25 @@ embodichain.lab.gym.envs.expert_program.environment
    PlanningObservationPort
    SkillRuntimeAssemblyPort
 
+embodichain.lab.gym.envs.expert_program.extensions
+----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.extensions
+
+.. autosummary::
+
+   EndpointAdapterDeclaration
+   ParallelCommandSafetyValidatorFactory
+   ParallelSafetyDeclaration
+   RuntimeTransportDeclaration
+   StandardExtensionDeclarations
+   VersionedKey
+   build_standard_extension_declarations
+   declare_endpoint_adapter
+   declare_parallel_safety_factory
+   declare_runtime_transport
+   validate_immutable_extension_declaration
+
 embodichain.lab.gym.envs.expert_program.loader
 ------------------------------------------------
 
@@ -284,6 +314,7 @@ embodichain.lab.gym.envs.expert_program.simulation_policies
 .. autosummary::
 
    SimulationSegmentPolicyPort
+   default_simulation_settle_presets
 
 embodichain.lab.gym.envs.settling
 ---------------------------------
@@ -2108,6 +2139,7 @@ embodichain_tasks.multi_segments.cube_pick_place
 .. autosummary::
 
    MultiSegmentsCubePickPlaceEnv
+   CUBE_EXPERT_PROGRAM_REGISTRATION
    create_cube_robot_profile_binding
    create_cube_scene_binding
 
@@ -2201,6 +2233,7 @@ embodichain_tasks.tableware.open_drawer
 .. autosummary::
 
    OpenDrawerEnv
+   OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
    create_open_drawer_robot_profile_binding
    create_open_drawer_scene_binding
 

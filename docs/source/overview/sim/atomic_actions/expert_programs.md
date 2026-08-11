@@ -127,13 +127,18 @@ task then delegates runtime assembly to the shared factory; it does not
 construct approach, grasp, pull, or placement trajectories:
 
 ```python
+MY_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
+    scene_binding=create_my_scene_binding(),
+    robot_profile_binding=create_my_robot_profile_binding(),
+)
+
+
 class MyTaskEnv(ExpertProgramEnvironmentMixin, EmbodiedEnv):
     def __init__(self, cfg, **kwargs):
         super().__init__(cfg, **kwargs)
         self._expert_program_adapter = create_simulation_expert_program_adapter(
             self,
-            scene_binding=create_my_scene_binding(),
-            robot_profile_binding=create_my_robot_profile_binding(),
+            registration=MY_EXPERT_PROGRAM_REGISTRATION,
         )
 
     @property
@@ -149,8 +154,20 @@ monitor selection. `SimulationRobotSkillProfileBinding` accepts generic
 `ResourceEndpoint` values; `ControlPartResourceBinding` is its stricter
 joint-backed convenience. Endpoint adapters and runtime transports are the
 extension boundary for mobile-base, whole-body, or non-joint controllers and
-are accepted by the standard simulation helper. Task programs keep the same
-semantic calls and do not gain controller-shaped fields.
+are owned by `SimulationExpertProgramRegistration`, not passed as live helper
+overrides. Their exact static target, payload, route, and transport declarations
+enter the catalog fingerprint, while transport tuple order defines deterministic
+Gym-action composition order. Task programs keep the same semantic calls and do
+not gain controller-shaped fields.
+
+The current standard registration installs built-in joint tracking and effect
+evidence providers only for `ControlPartEndpoint`. Every custom endpoint adapter
+must declare empty tracking/evidence route sets and therefore uses
+timed/open-loop completion. A non-joint closed-loop projector, feedback source,
+or effect-evidence backend still requires the planned registration-owned
+provider-factory extension; it must not be injected from a task after preflight.
+Whole-body controllers expressed through existing joint control parts continue
+to use the built-in joint route.
 
 Relation and rendezvous semantics are also explicit integration capabilities.
 `Place(on=...)` and `Place(inside=...)` require an exact typed/versioned
@@ -185,9 +202,12 @@ of evidence:
 - the live object-to-endpoint pose relation from the shared scene snapshot.
 
 The command-state update is transactional: encoder, buffer, cancellation, or
-safe-stop failures invalidate it. An integration with contact, constraint,
-force, or wrench sensing can install typed evidence callbacks without changing
-the semantic call or program.
+safe-stop failures invalidate it. The current C1 standard path does not accept
+task-side evidence callbacks: custom endpoint adapters must expose empty
+tracking and effect-evidence route sets. Contact, constraint, force, wrench, or
+other custom closed-loop sensing requires a future registration-owned provider
+factory whose declaration enters the integration fingerprint; this will not
+change the semantic call or program.
 
 Program/demo-segment metadata records runtime call results, named trajectory
 segments, effect decisions, recovery events, scene and collision revisions,
@@ -199,7 +219,10 @@ Schema-version-2 parallel blocks additionally require an authoritative
 `ParallelCommandSafetyValidator`. Resource-claim disjointness is necessary but
 is not treated as proof of physical safety. If no validator is installed, the
 parallel block refuses to start; the standard simulation adapter intentionally
-does not invent one from resource names. Every parallel frame must occupy
+does not invent one from resource names. Its task registration must instead
+declare a safety factory covering the exact registered transport set; each
+runtime assembly receives a fresh validator instance from that factory. Every
+parallel frame must occupy
 exactly one `BaseEnv.step_dt`; shorter lanes repeat their last safe target as
 hold padding, while fractional frames are rejected rather than resampled.
 Version 2 also uses strict symbolic key-level conflict detection at the barrier:

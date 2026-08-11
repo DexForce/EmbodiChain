@@ -1103,6 +1103,7 @@ class SkillPolicyPreset:
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
             action_option_templates=self.action_option_templates,
+            required_planner=self.required_planner,
         )
 
 
