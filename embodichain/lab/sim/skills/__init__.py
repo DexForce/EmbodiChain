@@ -35,6 +35,7 @@ from .calls import (
 from .compiler import (
     AnalyzedSemanticCall,
     GroundedHeldObjectGuard,
+    GroundedPhaseEffectGate,
     GroundedSemanticCall,
     HandOverPoseProvider,
     HandOverPoseTargets,
@@ -272,6 +273,7 @@ __all__ = [
     "FORCE_EFFECT_CHANNEL",
     "GRASP_AFFORDANCE_CAPABILITY",
     "GroundedHeldObjectGuard",
+    "GroundedPhaseEffectGate",
     "GroundedSemanticCall",
     "HeldObjectRelation",
     "HeldObjectStateExpectation",

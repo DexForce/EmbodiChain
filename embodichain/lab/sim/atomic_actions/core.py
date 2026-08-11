@@ -377,6 +377,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             motion_policy=invocation.motion_policy,
             tracking_policy=invocation.tracking_policy,
             recovery_policy=invocation.recovery_policy,
+            phase_effect_gates=invocation.phase_effect_gates,
             skill_options=options,
             invocation_id=invocation.invocation_id,
             revision=invocation.revision,

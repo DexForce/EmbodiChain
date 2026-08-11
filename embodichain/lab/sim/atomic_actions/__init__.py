@@ -70,6 +70,8 @@ from .execution import (
     ExecutionTick,
     HeldObjectGuardRequest,
     HeldObjectGuardResult,
+    PhaseEffectGateRequest,
+    PhaseEffectGateResult,
 )
 from .goals import (
     ActionGoal,
@@ -78,7 +80,12 @@ from .goals import (
     SceneArticulationOperationGeometry,
     SceneEntityPose,
 )
-from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
+from .invocation import (
+    ActionInvocation,
+    ActionOptions,
+    PhaseEffectGateRequirement,
+    ResolvedActionRequest,
+)
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
@@ -196,6 +203,7 @@ from .runner import (
     HeldObjectGuardVerifier,
     MonotonicExecutionClock,
     ObservationProvider,
+    PhaseEffectGateVerifier,
     RunnerStatus,
     RunnerStep,
     RunnerStepCallback,
@@ -279,6 +287,10 @@ __all__ = [
     "ExecutionTick",
     "HeldObjectGuardRequest",
     "HeldObjectGuardResult",
+    "PhaseEffectGateRequest",
+    "PhaseEffectGateRequirement",
+    "PhaseEffectGateResult",
+    "PhaseEffectGateVerifier",
     "HeldObjectGuardVerifier",
     "EndpointTrackingChannelBinding",
     "EndpointTrackingFeedbackAddress",

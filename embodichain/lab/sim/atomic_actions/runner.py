@@ -38,6 +38,8 @@ from .execution import (
     ExecutionTick,
     HeldObjectGuardRequest,
     HeldObjectGuardResult,
+    PhaseEffectGateRequest,
+    PhaseEffectGateResult,
 )
 from .invocation import ActionInvocation, ResolvedActionRequest
 from .runtime_commands import RuntimeCommandFrame
@@ -318,6 +320,12 @@ HeldObjectGuardVerifier = Callable[
 ]
 """Synchronous phase-aware held-object verifier for one due command cycle."""
 
+PhaseEffectGateVerifier = Callable[
+    [PlanningContext, PhaseEffectGateRequest],
+    PhaseEffectGateResult,
+]
+"""Synchronous verifier for one blocking trajectory-segment entry gate."""
+
 RunnerStepCallback = Callable[[RunnerStep], None]
 """Optional observer called after every blocking runner-loop iteration."""
 
@@ -485,6 +493,8 @@ class ExecutionRunner:
         *,
         effect_result: EffectVerificationResult | None = None,
         effect_verifier: EffectVerifier | None = None,
+        phase_effect_gate_result: PhaseEffectGateResult | None = None,
+        phase_effect_gate_verifier: PhaseEffectGateVerifier | None = None,
         held_object_guard_verifier: HeldObjectGuardVerifier | None = None,
     ) -> RunnerStep:
         """Perform one due observation/session/controller update without sleeping.
@@ -498,6 +508,11 @@ class ExecutionRunner:
                 and before the session consumes the result. It is not called
                 after the request deadline. Mutually exclusive with
                 ``effect_result``.
+            phase_effect_gate_result: Optional externally produced result for
+                the current blocking trajectory-segment entry gate.
+            phase_effect_gate_verifier: Optional synchronous verifier for the
+                current gate. It runs on a fresh due-cycle observation and is
+                mutually exclusive with ``phase_effect_gate_result``.
             held_object_guard_verifier: Optional synchronous phase-aware
                 verifier. It receives a fresh observation and the current
                 command-phase request before :meth:`ExecutionSession.tick` and
@@ -512,12 +527,24 @@ class ExecutionRunner:
             raise ValueError(
                 "effect_result and effect_verifier are mutually exclusive."
             )
+        if (
+            phase_effect_gate_result is not None
+            and phase_effect_gate_verifier is not None
+        ):
+            raise ValueError(
+                "phase_effect_gate_result and phase_effect_gate_verifier are "
+                "mutually exclusive."
+            )
         if effect_verifier is not None and not callable(effect_verifier):
             raise TypeError("effect_verifier must be callable or None.")
         if held_object_guard_verifier is not None and not callable(
             held_object_guard_verifier
         ):
             raise TypeError("held_object_guard_verifier must be callable or None.")
+        if phase_effect_gate_verifier is not None and not callable(
+            phase_effect_gate_verifier
+        ):
+            raise TypeError("phase_effect_gate_verifier must be callable or None.")
         now = self._clock_now()
         if self._status is not RunnerStatus.RUNNING:
             return self._result(timestamp=now)
@@ -573,6 +600,29 @@ class ExecutionRunner:
                     context=context,
                 )
 
+        phase_effect_gate_request = self._session.phase_effect_gate_request
+        if (
+            phase_effect_gate_verifier is not None
+            and phase_effect_gate_request is not None
+            and context.robot.timestamp <= phase_effect_gate_request.deadline
+        ):
+            try:
+                phase_effect_gate_result = phase_effect_gate_verifier(
+                    context,
+                    phase_effect_gate_request,
+                )
+                if type(phase_effect_gate_result) is not PhaseEffectGateResult:
+                    raise TypeError(
+                        "PhaseEffectGateVerifier must return exactly "
+                        "PhaseEffectGateResult."
+                    )
+            except Exception as exc:
+                return self._fail(
+                    "Phase-effect gate verifier failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    context=context,
+                )
+
         held_object_guard_result: HeldObjectGuardResult | None = None
         held_object_guard_request = self._session.held_object_guard_request
         if (
@@ -604,6 +654,7 @@ class ExecutionRunner:
             tick = self._session.tick(
                 context,
                 effect_result=effect_result,
+                phase_effect_gate_result=phase_effect_gate_result,
                 held_object_guard_result=held_object_guard_result,
             )
             context = self._session.latest_context
@@ -755,6 +806,7 @@ class ExecutionRunner:
         self,
         *,
         effect_verifier: EffectVerifier | None = None,
+        phase_effect_gate_verifier: PhaseEffectGateVerifier | None = None,
         held_object_guard_verifier: HeldObjectGuardVerifier | None = None,
         on_step: RunnerStepCallback | None = None,
         max_steps: int = 100_000,
@@ -766,6 +818,8 @@ class ExecutionRunner:
                 due-cycle observations while effect verification is pending.
                 Without one, the method returns the running boundary so the
                 caller can verify externally.
+            phase_effect_gate_verifier: Optional synchronous callback used on
+                fresh observations while a trajectory-segment entry is gated.
             held_object_guard_verifier: Optional synchronous phase-aware
                 held-object verifier used before every due command cycle.
             on_step: Optional callback for tracing or tutorial visualization.
@@ -788,6 +842,7 @@ class ExecutionRunner:
         for _ in range(max_steps):
             result = self.step(
                 effect_verifier=effect_verifier,
+                phase_effect_gate_verifier=phase_effect_gate_verifier,
                 held_object_guard_verifier=held_object_guard_verifier,
             )
             if on_step is not None:
@@ -807,6 +862,12 @@ class ExecutionRunner:
                 result.tick is not None and result.tick.pending_effect is not None
             )
             if verification_required and effect_verifier is None:
+                return result
+            gate_required = (
+                result.tick is not None
+                and result.tick.pending_phase_effect_gate is not None
+            )
+            if gate_required and phase_effect_gate_verifier is None:
                 return result
             if result.wait_duration > 0.0:
                 try:
@@ -1004,6 +1065,7 @@ __all__ = [
     "HeldObjectGuardVerifier",
     "MonotonicExecutionClock",
     "ObservationProvider",
+    "PhaseEffectGateVerifier",
     "RunnerStatus",
     "RunnerStep",
     "RunnerStepCallback",

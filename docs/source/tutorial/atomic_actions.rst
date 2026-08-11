@@ -550,6 +550,34 @@ same invocation remains physically valid. Other failed rows enter external
 recovery after selected invalidation. Unresolved evidence at the action
 deadline is reconciled fail-closed when covered verified state is still active.
 
+Trajectory-segment effect gates
+-------------------------------
+
+An invocation may declare a
+:class:`~embodichain.lab.sim.atomic_actions.PhaseEffectGateRequirement` for a
+named, non-initial trajectory segment. The execution session then exposes a
+:class:`~embodichain.lab.sim.atomic_actions.PhaseEffectGateRequest` immediately
+before the first frame of that segment. Curated semantic calls install these
+automatically: Pick gates ``lift`` on destination attachment, Place gates
+``retract`` on source detachment, and HandOver gates source ``release`` on
+destination attachment.
+
+Supply ``phase_effect_gate_verifier(context, request)`` to ``runner.step()`` or
+``runner.run_until_blocked()``. It runs on a fresh due-cycle observation and
+returns a correlated
+:class:`~embodichain.lab.sim.atomic_actions.PhaseEffectGateResult`. If neither
+the success nor failure mask selects every remaining active row, the session
+keeps the whole cohort at the boundary and resends the command immediately
+before the gated segment. This preserves a close/open command and its physical
+preload; it is not an observed-position hold.
+
+Gate success only permits the next command and does not update ``TaskState``.
+The terminal effect verifier still owns the semantic commit. A contradictory
+row may consume the enclosing action's retry budget; a row outside the result's
+``retry_mask`` requires external recovery. The gate shares the action timeout,
+and each consumed observation replaces its request ID. Without a gate verifier,
+``run_until_blocked()`` returns the pending boundary for asynchronous handling.
+
 Adding an action
 ----------------
 

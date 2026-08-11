@@ -38,6 +38,8 @@ from ..atomic_actions.execution import (
     ExecutionPlanAttempt,
     HeldObjectGuardRequest,
     HeldObjectGuardResult,
+    PhaseEffectGateRequest,
+    PhaseEffectGateResult,
 )
 from ..atomic_actions.plans import TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
@@ -61,6 +63,7 @@ from ..atomic_actions.tracking import (
 from .calls import HandOver, Pick, Place, SemanticCallSpec
 from .compiler import (
     GroundedHeldObjectGuard,
+    GroundedPhaseEffectGate,
     HeldObjectGuardBaseline,
     SemanticSkillCompiler,
 )
@@ -71,6 +74,8 @@ from .effects import (
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorRef,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
     JointStateEvidenceBatch,
     PoseRelationEvidenceBatch,
     ScalarEffectEvidenceBatch,
@@ -966,6 +971,7 @@ class SkillEffectTrace:
     evidence: Mapping[str, EffectEvidenceBatch]
     boundary_kind: str = "terminal"
     guard_id: str | None = None
+    gate_id: str | None = None
     segment_name: str | None = None
 
     def __post_init__(self) -> None:
@@ -975,20 +981,43 @@ class SkillEffectTrace:
             raise ValueError("verification_id must be a non-negative integer.")
         if type(self.observation_revision) is not int or self.observation_revision < 0:
             raise ValueError("observation_revision must be non-negative.")
-        if self.boundary_kind not in {"terminal", "in_flight_guard"}:
-            raise ValueError("boundary_kind must be 'terminal' or 'in_flight_guard'.")
-        for name in ("guard_id", "segment_name"):
+        if self.boundary_kind not in {
+            "terminal",
+            "in_flight_guard",
+            "phase_effect_gate",
+        }:
+            raise ValueError(
+                "boundary_kind must be 'terminal', 'in_flight_guard', or "
+                "'phase_effect_gate'."
+            )
+        for name in ("guard_id", "gate_id", "segment_name"):
             value = getattr(self, name)
             if value is not None and (type(value) is not str or not value):
                 raise ValueError(f"{name} must be a non-empty string or None.")
         if self.boundary_kind == "terminal":
-            if self.guard_id is not None or self.segment_name is not None:
+            if (
+                self.guard_id is not None
+                or self.gate_id is not None
+                or self.segment_name is not None
+            ):
                 raise ValueError(
-                    "Terminal effect traces cannot declare guard phase metadata."
+                    "Terminal effect traces cannot declare segment-boundary metadata."
                 )
-        elif self.guard_id is None or self.segment_name is None:
+        elif self.boundary_kind == "in_flight_guard" and (
+            self.guard_id is None
+            or self.gate_id is not None
+            or self.segment_name is None
+        ):
             raise ValueError(
-                "In-flight guard traces require guard_id and segment_name."
+                "In-flight guard traces require only guard_id and segment_name."
+            )
+        elif self.boundary_kind == "phase_effect_gate" and (
+            self.gate_id is None
+            or self.guard_id is not None
+            or self.segment_name is None
+        ):
+            raise ValueError(
+                "Phase-effect gate traces require only gate_id and segment_name."
             )
         if not math.isfinite(self.timestamp) or self.timestamp < 0.0:
             raise ValueError("timestamp must be finite and non-negative.")
@@ -1113,6 +1142,7 @@ class SkillEffectTrace:
             evidence=self.evidence,
             boundary_kind=self.boundary_kind,
             guard_id=self.guard_id,
+            gate_id=self.gate_id,
             segment_name=self.segment_name,
         )
 
@@ -1155,6 +1185,13 @@ class SkillEffectTrace:
             metadata["boundary"].update(
                 {
                     "guard_id": self.guard_id,
+                    "segment_name": self.segment_name,
+                }
+            )
+        elif self.boundary_kind == "phase_effect_gate":
+            metadata["boundary"].update(
+                {
+                    "gate_id": self.gate_id,
                     "segment_name": self.segment_name,
                 }
             )
@@ -1646,6 +1683,7 @@ class SkillRuntime:
         self._call_effect_offset = 0
         self._observation_revision = 0
         self._next_guard_verification_id = 0
+        self._next_gate_verification_id = 0
         self._wait_duration = 0.0
         self._message: str | None = None
 
@@ -1813,8 +1851,11 @@ class SkillRuntime:
         verifier = self._effect_verifier if monitor is not None else None
         guards = tuple(getattr(grounded, "effect_guards", ()))
         guard_verifier = self._held_object_guard_verifier if guards else None
+        gates = tuple(getattr(grounded, "effect_gates", ()))
+        gate_verifier = self._phase_effect_gate_verifier if gates else None
         runner_step = runner.step(
             effect_verifier=verifier,
+            phase_effect_gate_verifier=gate_verifier,
             held_object_guard_verifier=guard_verifier,
         )
         self._consume_runner_step(runner_step)
@@ -1827,6 +1868,17 @@ class SkillRuntime:
             self._abort(
                 "The atomic plan requested effect verification, but the grounded "
                 "semantic call did not install an effect monitor."
+            )
+            return self.result
+        if (
+            runner_step.status is RunnerStatus.RUNNING
+            and runner_step.tick is not None
+            and runner_step.tick.pending_phase_effect_gate is not None
+            and not gates
+        ):
+            self._abort(
+                "The atomic invocation requested a phase-effect gate, but the "
+                "grounded semantic call did not install its monitor."
             )
             return self.result
         if runner_step.status is RunnerStatus.RUNNING:
@@ -2083,6 +2135,7 @@ class SkillRuntime:
         self._call_effect_offset = 0
         self._observation_revision = 0
         self._next_guard_verification_id = 0
+        self._next_gate_verification_id = 0
         self._wait_duration = 0.0
         self._message = None
         self._status = SkillStatus.RUNNING
@@ -2134,6 +2187,7 @@ class SkillRuntime:
         effect_spec = getattr(grounded, "effect_spec", None)
         effect_monitor = getattr(grounded, "effect_monitor", None)
         effect_guards = tuple(getattr(grounded, "effect_guards", ()))
+        effect_gates = tuple(getattr(grounded, "effect_gates", ()))
         if invocation is None:
             raise TypeError("Semantic compiler ground() must return an invocation.")
         if not isinstance(grounded_eligible, torch.Tensor) or not torch.equal(
@@ -2162,6 +2216,13 @@ class SkillRuntime:
             )
         if effect_guards and effect_spec is None:
             raise ValueError("Grounded held-object guards require an effect spec.")
+        if not all(type(value) is GroundedPhaseEffectGate for value in effect_gates):
+            raise TypeError(
+                "Grounded effect_gates must contain exact "
+                "GroundedPhaseEffectGate values."
+            )
+        if effect_gates and effect_spec is None:
+            raise ValueError("Grounded phase-effect gates require an effect spec.")
 
         self._grounded = grounded
         session = self._engine.start(
@@ -2302,6 +2363,99 @@ class SkillRuntime:
             retained = failure_mask & source.inverse_satisfied_mask
             return failure_mask & ~retained, torch.zeros_like(failure_mask)
         return invalidation, retry
+
+    def _phase_effect_gate_verifier(
+        self,
+        context: PlanningContext,
+        request: PhaseEffectGateRequest,
+    ) -> PhaseEffectGateResult:
+        """Observe one blocking segment-entry effect on a fresh due cycle."""
+        grounded = self._require_grounded()
+        gates = tuple(getattr(grounded, "effect_gates", ()))
+        matches = tuple(value for value in gates if value.gate_id == request.gate_id)
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Grounded call must own exactly one phase-effect gate "
+                f"{request.gate_id!r}."
+            )
+        gate = matches[0]
+        if gate.segment_name != request.segment_name:
+            raise ValueError(
+                "Phase-effect gate request segment does not match its grounded "
+                "monitor."
+            )
+        session = self._require_runner().session
+        monitor_request = EffectVerificationRequest(
+            verification_id=self._next_gate_verification_id,
+            skill_id=request.skill_id,
+            invocation_id=request.invocation_id,
+            invocation_revision=request.invocation_revision,
+            invocation_index=request.invocation_index,
+            attempt_generation=request.attempt_generation,
+            terminal_segment=request.segment_name,
+            requested_at=request.requested_at,
+            deadline=request.deadline,
+            env_mask=request.env_mask,
+            expected_effects=self._phase_effect_gate_expected_effects(
+                gate,
+                session.active_plan.expected_effects,
+            ),
+        )
+        self._next_gate_verification_id += 1
+        decision = self._observe_effect_monitor(
+            context,
+            monitor_request,
+            spec=gate.effect_spec,
+            monitor=gate.effect_monitor,
+            boundary_kind="phase_effect_gate",
+            gate_id=gate.gate_id,
+            segment_name=gate.segment_name,
+        )
+        return PhaseEffectGateResult(
+            verification_id=request.verification_id,
+            gate_id=request.gate_id,
+            attempt_generation=request.attempt_generation,
+            invocation_index=request.invocation_index,
+            next_waypoint_index=request.next_waypoint_index,
+            success_mask=decision.success_mask,
+            failure_mask=decision.failure_mask,
+            retry_mask=(
+                decision.failure_mask
+                if gate.retry_action
+                else torch.zeros_like(decision.failure_mask)
+            ),
+            message=(
+                f"Physical evidence contradicted gate {gate.gate_id!r} before "
+                f"segment {gate.segment_name!r}."
+                if decision.failure_mask.any()
+                else ""
+            ),
+        )
+
+    @staticmethod
+    def _phase_effect_gate_expected_effects(
+        gate: GroundedPhaseEffectGate,
+        action_effects: StateDelta,
+    ) -> StateDelta:
+        """Project the action-owned held relation required by one gate."""
+        expectation = gate.effect_spec.state_expectations[0]
+        if type(expectation) is not HeldObjectStateExpectation:
+            raise TypeError("Built-in phase-effect gates require held-object state.")
+        key = expectation.task_state_key
+        if key not in action_effects.held_object_updates:
+            raise ValueError(f"Active action does not declare gate state key {key!r}.")
+        candidate = action_effects.held_object_updates[key]
+        if expectation.relation is HeldObjectRelation.ATTACHED:
+            if not isinstance(candidate, HeldObjectState):
+                raise ValueError(
+                    f"Attached gate {gate.gate_id!r} requires an action-owned "
+                    "HeldObjectState candidate."
+                )
+        elif candidate is not None:
+            raise ValueError(
+                f"Detached gate {gate.gate_id!r} requires an action-owned removal."
+            )
+        return StateDelta(held_object_updates={key: candidate})
 
     def _held_object_guard_verifier(
         self,
@@ -2447,6 +2601,7 @@ class SkillRuntime:
         monitor: EffectMonitor,
         boundary_kind: str = "terminal",
         guard_id: str | None = None,
+        gate_id: str | None = None,
         segment_name: str | None = None,
     ) -> EffectMonitorDecision:
         """Collect evidence, run one monitor, and append an auditable trace."""
@@ -2501,6 +2656,7 @@ class SkillRuntime:
             evidence=evidence,
             boundary_kind=boundary_kind,
             guard_id=guard_id,
+            gate_id=gate_id,
             segment_name=segment_name,
         )
         self._effect_traces.append(trace)
