@@ -174,6 +174,25 @@ class _InheritedCachedHandOverPoseProvider(_CatalogHandOverPoseProvider):
         object.__setattr__(self, "cache", {})
 
 
+@dataclass(frozen=True, slots=True)
+class _OpaqueHandOverPoseProvider(HandOverPoseProvider):
+    """Provider declaration containing an unsupported opaque nested value."""
+
+    provider_id: ClassVar[str] = "test.catalog_handover.opaque"
+    opaque: object
+
+    def resolve(
+        self,
+        call: HandOver,
+        *,
+        context: PlanningContext,
+        bound: BoundSemanticCall,
+    ) -> HandOverPoseTargets:
+        """Remain unreachable because fingerprinting rejects this provider."""
+        del call, context, bound
+        raise AssertionError("Opaque providers must never reach runtime.")
+
+
 def _program_payload(
     *,
     scene_registry: str = CUBE_SCENE_REGISTRY_ID,
@@ -493,6 +512,16 @@ def test_fingerprint_owns_provider_ids_and_declarative_fields() -> None:
     object.__setattr__(provider, "transfer_height", 0.8)
     with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
         registration.assert_unchanged()
+
+
+def test_fingerprint_rejects_opaque_nested_declaration_values() -> None:
+    """Unknown nested values cannot silently collapse to their Python type."""
+    with pytest.raises(TypeError, match="unsupported value type"):
+        SimulationExpertProgramRegistration(
+            scene_binding=create_cube_scene_binding(grasp_samples=32),
+            robot_profile_binding=create_cube_robot_profile_binding(),
+            handover_pose_providers=(_OpaqueHandOverPoseProvider(opaque=object()),),
+        )
 
 
 def test_registration_rejects_duplicate_provider_keys_and_ids() -> None:
