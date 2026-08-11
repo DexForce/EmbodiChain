@@ -854,6 +854,23 @@ and resets the history. Evidence exactly at the deadline is valid, while a due
 observation after the deadline is handled by session timeout without invoking
 the verifier.
 
+The curated semantic runtime also installs phase-scoped, negative
+held-object guards for named trajectory segments. Before a due command is
+dispatched, `ExecutionRunner` passes a fresh observation and the current
+`HeldObjectGuardRequest` to its synchronous guard verifier. Each request has a
+single-use verification ID, the active waypoint/segment identity, and the
+action-owned symbolic key/object identities that may be invalidated. A
+contradictory result must name that canonical object and carry a removal-only
+`StateDelta`; `ExecutionSession` applies that delta to only the failed rows
+before retrying or emitting `RECOVERY_REQUIRED`.
+Unavailable or unresolved evidence does not count as a physical contradiction,
+and the guard verifier is not invoked after the authoritative action deadline.
+
+The current guard is observational and negative; a blocking positive
+acquisition gate, outcome-aware terminal reconciliation, and workflow-level
+re-acquisition remain separate policies. Neither the monitor nor runtime
+creates a simulator attachment, freezes an object, or overrides its pose.
+
 ## Action Agent integration
 
 An MLLM should not construct `ActionInvocation` by copying arbitrary JSON into

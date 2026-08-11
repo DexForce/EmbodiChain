@@ -69,6 +69,7 @@ from embodichain.lab.sim.skills.calls import (
 from embodichain.lab.sim.skills.compiler import (
     HandOverPoseProvider,
     HandOverPoseTargets,
+    HeldObjectGuardBaseline,
     RegisteredSemanticLowerer,
     RelationTargetGrounder,
     SemanticLowering,
@@ -771,6 +772,17 @@ def test_pick_effect_spec_binds_destination_and_fresh_monitor_per_grounding() ->
     assert revised.effect_spec is not None
     assert revised.effect_spec.invocation_revision == 1
     assert revised.effect_monitor.spec.invocation_revision == 1
+    assert len(first.effect_guards) == 1
+    guard = first.effect_guards[0]
+    assert guard.guard_id == "destination_attached"
+    assert guard.active_segments == ("lift",)
+    assert guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert guard.task_state_key == "manipulator"
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action is True
+    assert guard.effect_monitor is not first.effect_monitor
+    assert guard.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+    assert repeated.effect_guards[0].effect_monitor is not guard.effect_monitor
 
 
 def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
@@ -822,6 +834,20 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
     )
     assert isinstance(constraint, BinaryEffectClause)
     assert constraint.expected is False
+    assert len(grounded.effect_guards) == 1
+    guard = grounded.effect_guards[0]
+    assert guard.guard_id == "source_attached"
+    assert guard.active_segments == ("approach",)
+    assert guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+    assert guard.task_state_key == "manipulator"
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action is False
+    guard_pose, guard_constraint = guard.effect_spec.clauses
+    assert isinstance(guard_pose, PoseRelationClause)
+    assert guard_pose.expectation is PoseRelationExpectation.MATCHED
+    assert guard_pose.baseline_object_to_endpoint is None
+    assert isinstance(guard_constraint, BinaryEffectClause)
+    assert guard_constraint.expected is True
 
 
 def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
@@ -896,6 +922,26 @@ def test_handover_effect_spec_binds_source_and_destination_relations() -> None:
     assert destination_pose.baseline_object_to_endpoint is None
     assert isinstance(destination_constraint, BinaryEffectClause)
     assert destination_constraint.expected is True
+    assert tuple(guard.guard_id for guard in grounded.effect_guards) == (
+        "source_attached",
+        "destination_attached",
+    )
+    source_guard, destination_guard = grounded.effect_guards
+    assert source_guard.active_segments == (
+        "transfer",
+        "approach",
+        "close",
+        "hold",
+    )
+    assert source_guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE
+    assert source_guard.task_state_key == "left"
+    assert source_guard.invalidation_task_state_keys == ("left",)
+    assert source_guard.retry_action is False
+    assert destination_guard.active_segments == ("release", "deliver")
+    assert destination_guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert destination_guard.task_state_key == "right"
+    assert destination_guard.invalidation_task_state_keys == ("left", "right")
+    assert destination_guard.retry_action is False
 
 
 def test_registered_call_without_monitor_has_no_effect_contract() -> None:

@@ -32,6 +32,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     ActionOptions,
     ActionPlan,
+    Affordance,
     ArticulationJointState,
     AtomicAction,
     AtomicActionEngine,
@@ -41,8 +42,11 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointBinding,
     EndpointTrackingChannelBinding,
     EndpointTrackingFeedbackAddress,
+    HeldObjectGuardRequest,
+    HeldObjectState,
     JointPositionTarget,
     MotionPolicy,
+    ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
     ResolvedActionRequest,
@@ -57,14 +61,22 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
 from embodichain.lab.sim.skills.calls import RegisteredSemanticCall
-from embodichain.lab.sim.skills.compiler import SemanticSkillCompiler
+from embodichain.lab.sim.skills.compiler import (
+    GroundedHeldObjectGuard,
+    HeldObjectGuardBaseline,
+    SemanticSkillCompiler,
+)
 from embodichain.lab.sim.skills.effects import (
     ArticulationJointStateExpectation,
+    BinaryEffectClause,
+    BinaryEvidenceKind,
     ControlPartEvidenceAddress,
     EffectEvidenceBatch,
     EffectEvidenceSourceRef,
     EffectMonitor,
     EffectMonitorDecision,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
     JOINT_STATE_EFFECT_CHANNEL,
     JointStateEffectClause,
     SemanticEffectKind,
@@ -599,6 +611,109 @@ def test_nonblocking_step_routes_effect_feedback_through_collector() -> None:
     assert system.compiler.monitors[0].requests[0].verification_id == 0
 
 
+def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation() -> (
+    None
+):
+    system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="object",
+        entity_id="cube",
+    )
+    poses = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=poses,
+        grasp_xpos=poses,
+        env_mask=_mask(True, True),
+    )
+    task_state = TaskState(
+        batch_size=BATCH_SIZE,
+        device="cpu",
+        held_objects={"arm": held},
+    )
+    expectation = HeldObjectStateExpectation(
+        expectation_id="source",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        resource_id="arm",
+        task_state_key="arm",
+    )
+    spec = SemanticEffectSpec(
+        semantic_id="carry",
+        effect_kind=SemanticEffectKind.ATTACH,
+        skill_id="carry",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
+        state_expectations=(expectation,),
+        clauses=(
+            BinaryEffectClause(
+                clause_id="source.constraint",
+                expectation_id="source",
+                source=EffectEvidenceSourceRef(
+                    "test.provider",
+                    "1",
+                    ControlPartEvidenceAddress("hand", "constraint"),
+                ),
+                evidence_kind=BinaryEvidenceKind.CONSTRAINT,
+                expected=True,
+            ),
+        ),
+    )
+    monitor = _DecisionMonitor(
+        spec,
+        EffectMonitorDecision(_mask(False, True), _mask(True, False)),
+    )
+    guard = GroundedHeldObjectGuard(
+        guard_id="source_attached",
+        active_segments=("carry",),
+        baseline=HeldObjectGuardBaseline.VERIFIED_TASK_STATE,
+        effect_spec=spec,
+        effect_monitor=monitor,
+        invalidation_task_state_keys=("arm",),
+        retry_action=False,
+    )
+    system.runtime._grounded = SimpleNamespace(
+        analyzed=SimpleNamespace(effect_monitor_ref=None),
+        effect_guards=(guard,),
+    )
+    system.runtime._runner = SimpleNamespace(
+        session=SimpleNamespace(task_state=task_state)
+    )
+    system.runtime._current_call_index = 0
+    context = system.observation.observe(task_state)
+    request = HeldObjectGuardRequest(
+        verification_id=0,
+        skill_id="carry",
+        invocation_id="workflow:0",
+        invocation_revision=0,
+        invocation_index=0,
+        attempt_generation=0,
+        next_waypoint_index=1,
+        segment_name="carry",
+        env_mask=_mask(True, True),
+        allowed_held_object_relations=(("arm", "cube"),),
+        allowed_coordinated_held_object_relations=(),
+        deadline=10.0,
+    )
+
+    result = system.runtime._held_object_guard_verifier(context, request)
+
+    assert result is not None
+    assert torch.equal(result.failure_mask, _mask(True, False))
+    assert torch.equal(result.retry_mask, _mask(False, False))
+    assert result.state_invalidation.held_object_updates == {"arm": None}
+    assert len(system.runtime._effect_traces) == 1
+    trace = system.runtime._effect_traces[0]
+    assert trace.boundary_kind == "in_flight_guard"
+    assert trace.guard_id == "source_attached"
+    assert trace.segment_name == "carry"
+    assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
+
+
 def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None:
     system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
 
@@ -641,6 +756,7 @@ def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None
     assert "feedback_mode" not in attempt
     assert result.calls[0].resolved_core_policy.preset_id == "runtime_test_preset"
     effect = call["effects"][0]
+    assert effect["boundary"] == {"kind": "terminal"}
     assert effect["effect_spec"]["semantic_id"] == "test.metadata"
     assert effect["monitor"]["monitor_id"].endswith("._DecisionMonitor")
     assert effect["evidence"] == {}

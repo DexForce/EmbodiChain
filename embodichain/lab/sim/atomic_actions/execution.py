@@ -74,8 +74,10 @@ class ExecutionEventKind(str, Enum):
     EFFECT_VERIFICATION_REQUIRED = "effect_verification_required"
     EFFECT_VERIFICATION_FAILED = "effect_verification_failed"
     EFFECT_VERIFICATION_TIMEOUT = "effect_verification_timeout"
+    HELD_OBJECT_LOST = "held_object_lost"
     ACTION_RETRY = "action_retry"
     ACTION_COMPLETED = "action_completed"
+    RECOVERY_REQUIRED = "recovery_required"
     RECOVERY_EXHAUSTED = "recovery_exhausted"
     ROWS_DEACTIVATED = "rows_deactivated"
     SESSION_COMPLETED = "session_completed"
@@ -351,6 +353,191 @@ class EffectVerificationResult:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectGuardRequest:
+    """Describe the next in-flight command boundary for held-object checks.
+
+    A request is correlated to one installed action-plan attempt and one next
+    waypoint. The named segment lets an external verifier select phase-aware
+    physical evidence without teaching the execution core skill-specific
+    phases. ``deadline`` uses the observation timestamp domain.
+    """
+
+    verification_id: int
+    skill_id: str
+    invocation_id: str | None
+    invocation_revision: int
+    invocation_index: int
+    attempt_generation: int
+    next_waypoint_index: int
+    segment_name: str
+    env_mask: torch.Tensor
+    allowed_held_object_relations: tuple[tuple[str, str], ...]
+    allowed_coordinated_held_object_relations: tuple[tuple[str, str, str], ...]
+    deadline: float
+
+    def __post_init__(self) -> None:
+        if type(self.verification_id) is not int or self.verification_id < 0:
+            raise ValueError("verification_id must be a non-negative integer.")
+        if type(self.skill_id) is not str or not self.skill_id:
+            raise ValueError("skill_id must be a non-empty string.")
+        if self.invocation_id is not None and (
+            type(self.invocation_id) is not str or not self.invocation_id
+        ):
+            raise ValueError("invocation_id must be a non-empty string or None.")
+        for name in (
+            "invocation_revision",
+            "invocation_index",
+            "attempt_generation",
+            "next_waypoint_index",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+        if type(self.segment_name) is not str or not self.segment_name:
+            raise ValueError("segment_name must be a non-empty string.")
+        if not isinstance(self.env_mask, torch.Tensor):
+            raise TypeError("env_mask must be a torch.Tensor.")
+        if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
+            raise ValueError("env_mask must be a one-dimensional bool tensor.")
+        if not self.env_mask.any():
+            raise ValueError("env_mask must contain at least one guarded row.")
+        held_relations = tuple(self.allowed_held_object_relations)
+        if len(set(held_relations)) != len(held_relations) or not all(
+            type(value) is tuple
+            and len(value) == 2
+            and all(type(item) is str and item for item in value)
+            for value in held_relations
+        ):
+            raise ValueError(
+                "allowed_held_object_relations must contain unique "
+                "(task_state_key, object_id) pairs."
+            )
+        coordinated_relations = tuple(self.allowed_coordinated_held_object_relations)
+        if len(set(coordinated_relations)) != len(coordinated_relations) or not all(
+            type(value) is tuple
+            and len(value) == 3
+            and all(type(item) is str and item for item in value)
+            for value in coordinated_relations
+        ):
+            raise ValueError(
+                "allowed_coordinated_held_object_relations must contain unique "
+                "(first_key, second_key, object_id) triples."
+            )
+        if not math.isfinite(self.deadline) or self.deadline < 0.0:
+            raise ValueError("deadline must be finite and non-negative.")
+        object.__setattr__(self, "env_mask", self.env_mask.clone())
+        object.__setattr__(self, "allowed_held_object_relations", held_relations)
+        object.__setattr__(
+            self,
+            "allowed_coordinated_held_object_relations",
+            coordinated_relations,
+        )
+
+    def snapshot(self) -> HeldObjectGuardRequest:
+        """Return an independently owned guard request.
+
+        Returns:
+            Request with an independently owned environment mask.
+        """
+        return HeldObjectGuardRequest(
+            verification_id=self.verification_id,
+            skill_id=self.skill_id,
+            invocation_id=self.invocation_id,
+            invocation_revision=self.invocation_revision,
+            invocation_index=self.invocation_index,
+            attempt_generation=self.attempt_generation,
+            next_waypoint_index=self.next_waypoint_index,
+            segment_name=self.segment_name,
+            env_mask=self.env_mask,
+            allowed_held_object_relations=self.allowed_held_object_relations,
+            allowed_coordinated_held_object_relations=(
+                self.allowed_coordinated_held_object_relations
+            ),
+            deadline=self.deadline,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectGuardResult:
+    """Correlated in-flight held-object loss and recovery decision.
+
+    ``state_invalidation`` may only remove single-resource or coordinated
+    held-object relations. It is applied to ``failure_mask`` before recovery
+    planning, so a retry always observes reconciled symbolic state.
+    """
+
+    verification_id: int
+    object_id: str
+    attempt_generation: int
+    invocation_index: int
+    next_waypoint_index: int
+    failure_mask: torch.Tensor
+    state_invalidation: StateDelta
+    retry_mask: torch.Tensor
+    message: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.verification_id) is not int or self.verification_id < 0:
+            raise ValueError("verification_id must be a non-negative integer.")
+        if type(self.object_id) is not str or not self.object_id:
+            raise ValueError("object_id must be a non-empty string.")
+        for name in (
+            "attempt_generation",
+            "invocation_index",
+            "next_waypoint_index",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+        for name in ("failure_mask", "retry_mask"):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        if self.failure_mask.shape != self.retry_mask.shape:
+            raise ValueError("failure_mask and retry_mask must have equal shapes.")
+        if self.failure_mask.device != self.retry_mask.device:
+            raise ValueError("failure_mask and retry_mask must use the same device.")
+        if (self.retry_mask & ~self.failure_mask).any():
+            raise ValueError("retry_mask must be a subset of failure_mask.")
+        if not isinstance(self.state_invalidation, StateDelta):
+            raise TypeError("state_invalidation must be a StateDelta.")
+        if any(
+            value is not None
+            for value in self.state_invalidation.held_object_updates.values()
+        ) or any(
+            value is not None
+            for value in self.state_invalidation.coordinated_held_object_updates.values()
+        ):
+            raise ValueError(
+                "state_invalidation may only remove held-object relations."
+            )
+        if self.state_invalidation.articulation_joint_updates:
+            raise ValueError(
+                "state_invalidation cannot update articulation-joint state."
+            )
+        has_invalidation = bool(
+            self.state_invalidation.held_object_updates
+            or self.state_invalidation.coordinated_held_object_updates
+        )
+        if bool(self.failure_mask.any().item()) != has_invalidation:
+            raise ValueError(
+                "state_invalidation must contain relation removals exactly when "
+                "failure_mask contains failed rows."
+            )
+        if type(self.message) is not str:
+            raise TypeError("message must be a string.")
+        object.__setattr__(self, "failure_mask", self.failure_mask.clone())
+        object.__setattr__(self, "retry_mask", self.retry_mask.clone())
+        object.__setattr__(
+            self,
+            "state_invalidation",
+            self.state_invalidation.snapshot(),
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class ExecutionTick:
     """Result returned after one closed-loop execution update."""
 
@@ -481,6 +668,7 @@ class ExecutionSession:
         self._effect_failures = torch.zeros_like(self._eligible)
         self._effect_requested_at: float | None = None
         self._next_effect_verification_id = 0
+        self._next_held_object_guard_verification_id = 0
         self._plan_attempt_records: list[_ExecutionPlanAttemptRecord] = []
         self._status = (
             ExecutionStatus.RUNNING if self._eligible.any() else ExecutionStatus.FAILED
@@ -526,6 +714,22 @@ class ExecutionSession:
     def pending_effect(self) -> EffectVerificationRequest | None:
         """Owned snapshot of the current effect boundary, when present."""
         return None if self._pending_effect is None else self._pending_effect.snapshot()
+
+    @property
+    def held_object_guard_request(self) -> HeldObjectGuardRequest | None:
+        """Describe the phase that must be checked before the next command.
+
+        The request remains available while terminal acceptance is settling,
+        using the final waypoint and segment identity. Once terminal physical
+        effect verification begins, that verifier owns the boundary and this
+        property returns ``None``.
+
+        Returns:
+            Owned phase-aware guard request, or ``None`` when no command-phase
+            guard is active.
+        """
+        request = self._held_object_guard_request()
+        return None if request is None else request.snapshot()
 
     def deactivate_rows(
         self,
@@ -765,6 +969,7 @@ class ExecutionSession:
         context: PlanningContext,
         *,
         effect_result: EffectVerificationResult | None = None,
+        held_object_guard_result: HeldObjectGuardResult | None = None,
     ) -> ExecutionTick:
         """Advance execution by one observation/command cycle.
 
@@ -773,6 +978,10 @@ class ExecutionSession:
                 state is replaced by the session's verified task state.
             effect_result: Optional correlated semantic-effect result for an
                 action waiting at its terminal waypoint.
+            held_object_guard_result: Optional correlated in-flight held-object
+                loss result for the current waypoint phase. ``None`` means the
+                verifier found no applicable guard for this phase or no result
+                was supplied.
 
         Returns:
             Status, optional command, events, and current verified task state.
@@ -791,10 +1000,52 @@ class ExecutionSession:
                     "effect_result verification_id does not match the pending "
                     "effect boundary."
                 )
+        guard_request = self._held_object_guard_request()
+        if held_object_guard_result is not None:
+            if type(held_object_guard_result) is not HeldObjectGuardResult:
+                raise TypeError(
+                    "held_object_guard_result must be exactly "
+                    "HeldObjectGuardResult or None."
+                )
+            if guard_request is None:
+                raise ValueError("No held-object guard is active for this phase.")
+            if held_object_guard_result.verification_id != (
+                guard_request.verification_id
+            ):
+                raise ValueError(
+                    "held_object_guard_result verification_id does not match the "
+                    "active guard request."
+                )
+            for name in (
+                "attempt_generation",
+                "invocation_index",
+                "next_waypoint_index",
+            ):
+                if getattr(held_object_guard_result, name) != getattr(
+                    guard_request,
+                    name,
+                ):
+                    raise ValueError(
+                        f"held_object_guard_result {name} does not match the "
+                        "active guard request."
+                    )
+        if guard_request is not None:
+            self._next_held_object_guard_verification_id += 1
         if self._status is not ExecutionStatus.RUNNING:
             return self._tick_result(command=None, events=events)
 
         assert self._plan is not None
+        if held_object_guard_result is not None:
+            assert guard_request is not None
+            events.extend(
+                self._apply_held_object_guard_result(
+                    held_object_guard_result,
+                    guard_request,
+                )
+            )
+            if self._status is not ExecutionStatus.RUNNING:
+                return self._tick_result(command=None, events=events)
+            assert self._plan is not None
         if not self._pending.any():
             command, hold_targets, completion_events = self._finish_action(
                 self._pending,
@@ -1849,6 +2100,200 @@ class ExecutionSession:
             raise ValueError("Scene entity pose batch does not match the session.")
         return pose
 
+    def _held_object_guard_request(self) -> HeldObjectGuardRequest | None:
+        """Build the current command-phase held-object guard request."""
+        if (
+            self._status is not ExecutionStatus.RUNNING
+            or self._plan is None
+            or self._pending_effect is not None
+            or self._effect_failures.any()
+            or self._plan.commands.frame_count == 0
+        ):
+            return None
+        env_mask = self._pending & self._plan.plan_success
+        if not env_mask.any():
+            return None
+        next_waypoint_index = min(
+            self._waypoint_index,
+            self._plan.commands.frame_count - 1,
+        )
+        segment = self._plan.segment_at(next_waypoint_index)
+        invocation = self._requests[self._invocation_index]
+        (
+            allowed_held_object_relations,
+            allowed_coordinated_held_object_relations,
+        ) = self._authorized_held_object_invalidation_relations(
+            invocation=invocation,
+        )
+        return HeldObjectGuardRequest(
+            verification_id=self._next_held_object_guard_verification_id,
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            invocation_revision=invocation.revision,
+            invocation_index=self._invocation_index,
+            attempt_generation=self._attempt_generation,
+            next_waypoint_index=next_waypoint_index,
+            segment_name=segment.name,
+            env_mask=env_mask,
+            allowed_held_object_relations=allowed_held_object_relations,
+            allowed_coordinated_held_object_relations=(
+                allowed_coordinated_held_object_relations
+            ),
+            deadline=(
+                self._action_started_at + self._plan.recovery_policy.action_timeout
+            ),
+        )
+
+    def _apply_held_object_guard_result(
+        self,
+        result: HeldObjectGuardResult,
+        request: HeldObjectGuardRequest,
+    ) -> list[ExecutionEvent]:
+        """Reconcile lost relations and enter row-local bounded recovery."""
+        failure_mask = self._normalize_mask(
+            result.failure_mask,
+            "held_object_guard_result.failure_mask",
+        )
+        retry_mask = self._normalize_mask(
+            result.retry_mask,
+            "held_object_guard_result.retry_mask",
+        )
+        request_mask = request.env_mask.to(self._eligible.device)
+        if (failure_mask & ~request_mask).any():
+            raise ValueError(
+                "Held-object guard failure_mask must be a subset of the active "
+                "request env_mask."
+            )
+        if (retry_mask & ~request_mask).any():
+            raise ValueError(
+                "Held-object guard retry_mask must be a subset of the active "
+                "request env_mask."
+            )
+        self._validate_held_object_invalidation_authorization(
+            result.state_invalidation,
+            object_id=result.object_id,
+            allowed_held_object_relations=request.allowed_held_object_relations,
+            allowed_coordinated_held_object_relations=(
+                request.allowed_coordinated_held_object_relations
+            ),
+        )
+        if not failure_mask.any():
+            return []
+
+        self._task_state = result.state_invalidation.apply(
+            self._task_state,
+            failure_mask,
+        )
+        self._context = PlanningContext(
+            robot=self._context.robot,
+            task=self._task_state,
+            scene=self._context.scene,
+            env_ids=self._context.env_ids,
+        )
+        message = result.message or (
+            "Physical evidence contradicted the verified held-object relation."
+        )
+        non_retry_mask = failure_mask & ~retry_mask
+        events: list[ExecutionEvent] = []
+        if non_retry_mask.any():
+            self._eligible &= ~non_retry_mask
+            self._pending &= ~non_retry_mask
+            self._effect_failures &= ~non_retry_mask
+            self._last_command_mask &= ~non_retry_mask
+            events.extend(
+                (
+                    self._event(
+                        ExecutionEventKind.HELD_OBJECT_LOST,
+                        non_retry_mask,
+                        message,
+                    ),
+                    self._event(
+                        ExecutionEventKind.RECOVERY_REQUIRED,
+                        non_retry_mask,
+                        "Held-object loss requires recovery outside the current "
+                        "action retry policy.",
+                    ),
+                )
+            )
+        if retry_mask.any():
+            events.extend(
+                self._attempt_action_retry(
+                    retry_mask,
+                    ExecutionEventKind.HELD_OBJECT_LOST,
+                    message,
+                )
+            )
+        else:
+            terminal_event = self._update_terminal_status()
+            if terminal_event is not None:
+                events.append(terminal_event)
+        return events
+
+    def _authorized_held_object_invalidation_relations(
+        self,
+        *,
+        invocation: ResolvedActionRequest | None = None,
+    ) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str, str], ...]]:
+        """Return action-owned key/object identities eligible for removal."""
+        assert self._plan is not None
+        active_invocation = (
+            self._requests[self._invocation_index] if invocation is None else invocation
+        )
+        binding_task_state_keys = {
+            endpoint.task_state_key for endpoint in active_invocation.binding.endpoints
+        }
+        held_relations: set[tuple[str, str]] = set()
+        for key, candidate in self._task_state.held_objects.items():
+            object_id = candidate.semantics.entity_id
+            if key in binding_task_state_keys and object_id is not None:
+                held_relations.add((key, object_id))
+        for key, candidate in self._plan.expected_effects.held_object_updates.items():
+            if candidate is not None and candidate.semantics.entity_id is not None:
+                held_relations.add((key, candidate.semantics.entity_id))
+
+        related_keys = {key for key, _ in held_relations}
+        coordinated_relations: set[tuple[str, str, str]] = set()
+        for resources, candidate in self._task_state.coordinated_held_objects.items():
+            object_id = candidate.semantics.entity_id
+            if not set(resources).isdisjoint(related_keys) and object_id is not None:
+                coordinated_relations.add((*resources, object_id))
+        for (
+            resources,
+            candidate,
+        ) in self._plan.expected_effects.coordinated_held_object_updates.items():
+            if candidate is not None and candidate.semantics.entity_id is not None:
+                coordinated_relations.add((*resources, candidate.semantics.entity_id))
+        return tuple(sorted(held_relations)), tuple(sorted(coordinated_relations))
+
+    def _validate_held_object_invalidation_authorization(
+        self,
+        state_invalidation: StateDelta,
+        *,
+        object_id: str,
+        allowed_held_object_relations: tuple[tuple[str, str], ...],
+        allowed_coordinated_held_object_relations: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        """Reject removals outside the action-owned key/object identity set."""
+        invalidated_held_relations = {
+            (key, object_id) for key in state_invalidation.held_object_updates
+        }
+        if not invalidated_held_relations.issubset(allowed_held_object_relations):
+            raise ValueError(
+                "Held-object state invalidation contains a key/object identity "
+                "outside the active action's authorized relation set."
+            )
+        invalidated_coordinated_relations = {
+            (*resources, object_id)
+            for resources in state_invalidation.coordinated_held_object_updates
+        }
+        if not invalidated_coordinated_relations.issubset(
+            allowed_coordinated_held_object_relations
+        ):
+            raise ValueError(
+                "Held-object state invalidation contains a coordinated key/object "
+                "identity outside the active action's authorized relation set."
+            )
+
     def _normalize_mask(self, value: torch.Tensor, name: str) -> torch.Tensor:
         """Validate and copy a per-environment boolean mask."""
         if not isinstance(value, torch.Tensor):
@@ -1970,4 +2415,6 @@ __all__ = [
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
+    "HeldObjectGuardRequest",
+    "HeldObjectGuardResult",
 ]

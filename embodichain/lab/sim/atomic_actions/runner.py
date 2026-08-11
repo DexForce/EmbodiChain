@@ -36,6 +36,8 @@ from .execution import (
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
 )
 from .invocation import ActionInvocation, ResolvedActionRequest
 from .runtime_commands import RuntimeCommandFrame
@@ -310,6 +312,12 @@ EffectVerifier = Callable[
 ]
 """Synchronous verifier called on a fresh due-cycle observation."""
 
+HeldObjectGuardVerifier = Callable[
+    [PlanningContext, HeldObjectGuardRequest],
+    HeldObjectGuardResult | None,
+]
+"""Synchronous phase-aware held-object verifier for one due command cycle."""
+
 RunnerStepCallback = Callable[[RunnerStep], None]
 """Optional observer called after every blocking runner-loop iteration."""
 
@@ -477,6 +485,7 @@ class ExecutionRunner:
         *,
         effect_result: EffectVerificationResult | None = None,
         effect_verifier: EffectVerifier | None = None,
+        held_object_guard_verifier: HeldObjectGuardVerifier | None = None,
     ) -> RunnerStep:
         """Perform one due observation/session/controller update without sleeping.
 
@@ -489,6 +498,11 @@ class ExecutionRunner:
                 and before the session consumes the result. It is not called
                 after the request deadline. Mutually exclusive with
                 ``effect_result``.
+            held_object_guard_verifier: Optional synchronous phase-aware
+                verifier. It receives a fresh observation and the current
+                command-phase request before :meth:`ExecutionSession.tick` and
+                command dispatch. Returning ``None`` means the current phase
+                has no applicable held-object guard.
 
         Returns:
             Runner status, optional session tick, controller acknowledgements,
@@ -500,6 +514,10 @@ class ExecutionRunner:
             )
         if effect_verifier is not None and not callable(effect_verifier):
             raise TypeError("effect_verifier must be callable or None.")
+        if held_object_guard_verifier is not None and not callable(
+            held_object_guard_verifier
+        ):
+            raise TypeError("held_object_guard_verifier must be callable or None.")
         now = self._clock_now()
         if self._status is not RunnerStatus.RUNNING:
             return self._result(timestamp=now)
@@ -523,6 +541,19 @@ class ExecutionRunner:
             )
         self._last_context = context
 
+        try:
+            if self._pending_revision is not None:
+                self._session._install_prepared_revision(
+                    self._pending_revision,
+                    context,
+                )
+                self._pending_revision = None
+        except Exception as exc:
+            return self._fail(
+                f"Execution session failed: {type(exc).__name__}: {exc}",
+                context=context,
+            )
+
         pending_effect = self._session.pending_effect
         if (
             effect_verifier is not None
@@ -542,14 +573,39 @@ class ExecutionRunner:
                     context=context,
                 )
 
-        try:
-            if self._pending_revision is not None:
-                self._session._install_prepared_revision(
-                    self._pending_revision,
+        held_object_guard_result: HeldObjectGuardResult | None = None
+        held_object_guard_request = self._session.held_object_guard_request
+        if (
+            held_object_guard_verifier is not None
+            and held_object_guard_request is not None
+            and context.robot.timestamp <= held_object_guard_request.deadline
+        ):
+            try:
+                held_object_guard_result = held_object_guard_verifier(
                     context,
+                    held_object_guard_request,
                 )
-                self._pending_revision = None
-            tick = self._session.tick(context, effect_result=effect_result)
+                if (
+                    held_object_guard_result is not None
+                    and type(held_object_guard_result) is not HeldObjectGuardResult
+                ):
+                    raise TypeError(
+                        "HeldObjectGuardVerifier must return exactly "
+                        "HeldObjectGuardResult or None."
+                    )
+            except Exception as exc:
+                return self._fail(
+                    "Held-object guard verifier failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    context=context,
+                )
+
+        try:
+            tick = self._session.tick(
+                context,
+                effect_result=effect_result,
+                held_object_guard_result=held_object_guard_result,
+            )
             context = self._session.latest_context
             self._last_context = context
         except Exception as exc:
@@ -699,6 +755,7 @@ class ExecutionRunner:
         self,
         *,
         effect_verifier: EffectVerifier | None = None,
+        held_object_guard_verifier: HeldObjectGuardVerifier | None = None,
         on_step: RunnerStepCallback | None = None,
         max_steps: int = 100_000,
     ) -> RunnerStep:
@@ -709,6 +766,8 @@ class ExecutionRunner:
                 due-cycle observations while effect verification is pending.
                 Without one, the method returns the running boundary so the
                 caller can verify externally.
+            held_object_guard_verifier: Optional synchronous phase-aware
+                held-object verifier used before every due command cycle.
             on_step: Optional callback for tracing or tutorial visualization.
             max_steps: Hard bound on loop iterations.
 
@@ -727,7 +786,10 @@ class ExecutionRunner:
         if self.effect_verification_pending and effect_verifier is None:
             return last_result
         for _ in range(max_steps):
-            result = self.step(effect_verifier=effect_verifier)
+            result = self.step(
+                effect_verifier=effect_verifier,
+                held_object_guard_verifier=held_object_guard_verifier,
+            )
             if on_step is not None:
                 try:
                     on_step(result)
@@ -939,6 +1001,7 @@ __all__ = [
     "ExecutionClock",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
+    "HeldObjectGuardVerifier",
     "MonotonicExecutionClock",
     "ObservationProvider",
     "RunnerStatus",

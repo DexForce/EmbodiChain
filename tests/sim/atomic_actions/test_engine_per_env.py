@@ -49,6 +49,8 @@ from embodichain.lab.sim.atomic_actions import (
     EffectVerificationRequirement,
     EffectVerificationResult,
     GraspGoal,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
     HeldObjectState,
     JointPositionPayload,
     JointPositionTarget,
@@ -520,6 +522,54 @@ def _context(
     )
 
 
+def _with_held_object(
+    context: PlanningContext,
+    *,
+    env_mask: torch.Tensor | None = None,
+) -> PlanningContext:
+    """Attach one verified test object to the logical arm resource."""
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="object",
+        entity_id="object",
+    )
+    held = HeldObjectState(
+        semantics=semantics,
+        object_to_eef=torch.eye(4),
+        grasp_xpos=torch.eye(4),
+        env_mask=env_mask,
+    )
+    return replace(
+        context,
+        task=TaskState(
+            batch_size=context.batch_size,
+            device=context.robot.qpos.device,
+            held_objects={"arm": held},
+        ),
+    )
+
+
+def _held_object_loss_result(
+    request: HeldObjectGuardRequest,
+    *,
+    failure_mask: torch.Tensor,
+    retry_mask: torch.Tensor,
+) -> HeldObjectGuardResult:
+    """Build a loss result exactly correlated with one guard request."""
+    return HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=failure_mask,
+        state_invalidation=StateDelta(held_object_updates={"arm": None}),
+        retry_mask=retry_mask,
+        message="Observed object-to-endpoint slip.",
+    )
+
+
 def _multi_dependency_context(
     timestamp: float,
     *,
@@ -705,6 +755,203 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert torch.all(_joint_positions(second.command) == 0.2)
     assert final.status is ExecutionStatus.COMPLETED
     assert final.eligible_mask.tolist() == [True]
+
+
+def test_held_object_loss_retries_only_failed_row_with_reconciled_state() -> None:
+    engine, _ = _engine(batch_size=2)
+    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session = engine.start(
+        (_invocation(engine, max_action_retries=1),),
+        initial,
+    )
+    request = session.held_object_guard_request
+    assert request is not None
+    assert request.attempt_generation == 0
+    assert request.invocation_index == 0
+    assert request.next_waypoint_index == 0
+    assert request.segment_name == "dynamic"
+    assert request.env_mask.tolist() == [True, True]
+    assert request.allowed_held_object_relations == (("arm", "object"),)
+    assert request.allowed_coordinated_held_object_relations == ()
+
+    retried = session.tick(
+        initial,
+        held_object_guard_result=_held_object_loss_result(
+            request,
+            failure_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([True, False]),
+        ),
+    )
+
+    assert retried.status is ExecutionStatus.RUNNING
+    assert retried.command is not None
+    assert retried.command.active_mask.tolist() == [True, True]
+    held = retried.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [False, True]
+    lost = next(
+        event
+        for event in retried.events
+        if event.kind is ExecutionEventKind.HELD_OBJECT_LOST
+    )
+    retry = next(
+        event
+        for event in retried.events
+        if event.kind is ExecutionEventKind.ACTION_RETRY
+    )
+    assert lost.env_mask.tolist() == [True, False]
+    assert retry.env_mask.tolist() == [True, False]
+    assert session.plan_attempts[-1].action_retry_counts == (1, 0)
+
+
+def test_held_object_loss_result_requires_state_invalidation() -> None:
+    with pytest.raises(ValueError, match="must contain relation removals"):
+        HeldObjectGuardResult(
+            verification_id=0,
+            object_id="object",
+            attempt_generation=0,
+            invocation_index=0,
+            next_waypoint_index=0,
+            failure_mask=torch.tensor([True]),
+            state_invalidation=StateDelta(),
+            retry_mask=torch.tensor([False]),
+        )
+
+
+def test_held_object_guard_rejects_unauthorized_state_invalidation() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+
+    result = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([True]),
+        state_invalidation=StateDelta(held_object_updates={"unrelated_resource": None}),
+        retry_mask=torch.tensor([False]),
+    )
+    with pytest.raises(ValueError, match="authorized relation set"):
+        session.tick(initial, held_object_guard_result=result)
+
+
+def test_held_object_guard_rejects_wrong_object_identity_on_authorized_key() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+
+    result = HeldObjectGuardResult(
+        verification_id=request.verification_id,
+        object_id="another_object",
+        attempt_generation=request.attempt_generation,
+        invocation_index=request.invocation_index,
+        next_waypoint_index=request.next_waypoint_index,
+        failure_mask=torch.tensor([True]),
+        state_invalidation=StateDelta(held_object_updates={"arm": None}),
+        retry_mask=torch.tensor([False]),
+    )
+    with pytest.raises(ValueError, match="key/object identity"):
+        session.tick(initial, held_object_guard_result=result)
+
+
+def test_stale_held_object_guard_result_is_rejected_within_same_attempt() -> None:
+    engine, _ = _engine()
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    session = engine.start((_invocation(engine),), initial)
+    first_request = session.held_object_guard_request
+    assert first_request is not None
+
+    session.tick(initial)
+    current_request = session.held_object_guard_request
+    assert current_request is not None
+    assert current_request.verification_id == first_request.verification_id + 1
+
+    stale = HeldObjectGuardResult(
+        verification_id=first_request.verification_id,
+        object_id="object",
+        attempt_generation=current_request.attempt_generation,
+        invocation_index=current_request.invocation_index,
+        next_waypoint_index=current_request.next_waypoint_index,
+        failure_mask=torch.tensor([False]),
+        state_invalidation=StateDelta(),
+        retry_mask=torch.tensor([False]),
+    )
+    with pytest.raises(ValueError, match="verification_id"):
+        session.tick(initial, held_object_guard_result=stale)
+
+
+def test_nonretry_held_object_loss_fails_row_while_peer_continues() -> None:
+    engine, _ = _engine(batch_size=2)
+    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0))
+    session = engine.start((_invocation(engine),), initial)
+    request = session.held_object_guard_request
+    assert request is not None
+
+    partial = session.tick(
+        initial,
+        held_object_guard_result=_held_object_loss_result(
+            request,
+            failure_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    assert partial.status is ExecutionStatus.RUNNING
+    assert partial.eligible_mask.tolist() == [False, True]
+    assert partial.command is not None
+    assert partial.command.active_mask.tolist() == [False, True]
+    held = partial.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [False, True]
+    event_masks = {
+        event.kind: event.env_mask.tolist()
+        for event in partial.events
+        if event.kind
+        in {
+            ExecutionEventKind.HELD_OBJECT_LOST,
+            ExecutionEventKind.RECOVERY_REQUIRED,
+        }
+    }
+    assert event_masks == {
+        ExecutionEventKind.HELD_OBJECT_LOST: [True, False],
+        ExecutionEventKind.RECOVERY_REQUIRED: [True, False],
+    }
+    assert len(session.plan_attempts) == 1
+    assert session.plan_attempts[0].action_retry_counts == (0, 0)
+
+
+def test_missing_or_out_of_phase_held_object_guard_result_preserves_state() -> None:
+    engine, _ = _engine()
+    action = EffectAction()
+    engine.register(action)
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0))
+    base = _invocation(engine)
+    invocation = ActionInvocation(
+        skill_id=action.skill_id,
+        goal=base.goal,
+        binding=base.binding,
+        motion_policy=base.motion_policy,
+        recovery_policy=base.recovery_policy,
+    )
+    session = engine.start((invocation,), initial)
+
+    first = session.tick(initial)
+    assert first.task_state.get_held_object("arm") is not None
+    session.tick(_with_held_object(_context(0.1, 0.0, 0.2, 0)))
+    pending = session.tick(_with_held_object(_context(0.2, 0.2, 0.2, 0)))
+
+    assert pending.pending_effect is not None
+    assert session.held_object_guard_request is None
+    preserved = session.tick(_with_held_object(_context(0.21, 0.2, 0.2, 0)))
+    held = preserved.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [True]
 
 
 def test_all_rows_planning_failure_skips_inactive_command_frames() -> None:

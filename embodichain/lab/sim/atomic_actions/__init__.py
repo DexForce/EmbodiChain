@@ -65,6 +65,8 @@ from .execution import (
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
 )
 from .goals import (
     ActionGoal,
@@ -194,6 +196,7 @@ from .runner import (
     ExecutionClock,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    HeldObjectGuardVerifier,
     MonotonicExecutionClock,
     ObservationProvider,
     RunnerStatus,
@@ -274,6 +277,9 @@ __all__ = [
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
+    "HeldObjectGuardRequest",
+    "HeldObjectGuardResult",
+    "HeldObjectGuardVerifier",
     "EndpointTrackingChannelBinding",
     "EndpointTrackingFeedbackAddress",
     "FeedbackTerminalAcceptance",

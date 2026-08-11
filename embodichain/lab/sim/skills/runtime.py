@@ -29,11 +29,14 @@ import torch
 
 from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.engine import AtomicActionEngine
+from ..atomic_actions.effects import StateDelta
 from ..atomic_actions.execution import (
     EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEvent,
     ExecutionPlanAttempt,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
 )
 from ..atomic_actions.plans import TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
@@ -47,7 +50,7 @@ from ..atomic_actions.runner import (
     RunnerStatus,
     RunnerStep,
 )
-from ..atomic_actions.state import PlanningContext, TaskState
+from ..atomic_actions.state import HeldObjectState, PlanningContext, TaskState
 from ..atomic_actions.tracking import (
     FeedbackTerminalAcceptance,
     TimedTrackingSequence,
@@ -55,11 +58,16 @@ from ..atomic_actions.tracking import (
     TrackingPolicy,
 )
 from .calls import SemanticCallSpec
-from .compiler import SemanticSkillCompiler
+from .compiler import (
+    GroundedHeldObjectGuard,
+    HeldObjectGuardBaseline,
+    SemanticSkillCompiler,
+)
 from .effects import (
     BinaryEffectEvidenceBatch,
     EffectEvidenceBatch,
     EffectMonitor,
+    EffectMonitorDecision,
     EffectMonitorRef,
     JointStateEvidenceBatch,
     PoseRelationEvidenceBatch,
@@ -949,6 +957,9 @@ class SkillEffectTrace:
     configured_monitor_params: Mapping[str, object]
     resolved_monitor_params: Mapping[str, object]
     evidence: Mapping[str, EffectEvidenceBatch]
+    boundary_kind: str = "terminal"
+    guard_id: str | None = None
+    segment_name: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.call_index) is not int or self.call_index < 0:
@@ -957,6 +968,21 @@ class SkillEffectTrace:
             raise ValueError("verification_id must be a non-negative integer.")
         if type(self.observation_revision) is not int or self.observation_revision < 0:
             raise ValueError("observation_revision must be non-negative.")
+        if self.boundary_kind not in {"terminal", "in_flight_guard"}:
+            raise ValueError("boundary_kind must be 'terminal' or 'in_flight_guard'.")
+        for name in ("guard_id", "segment_name"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not str or not value):
+                raise ValueError(f"{name} must be a non-empty string or None.")
+        if self.boundary_kind == "terminal":
+            if self.guard_id is not None or self.segment_name is not None:
+                raise ValueError(
+                    "Terminal effect traces cannot declare guard phase metadata."
+                )
+        elif self.guard_id is None or self.segment_name is None:
+            raise ValueError(
+                "In-flight guard traces require guard_id and segment_name."
+            )
         if not math.isfinite(self.timestamp) or self.timestamp < 0.0:
             raise ValueError("timestamp must be finite and non-negative.")
         for name in ("success_mask", "failure_mask"):
@@ -1024,11 +1050,14 @@ class SkillEffectTrace:
             configured_monitor_params=self.configured_monitor_params,
             resolved_monitor_params=self.resolved_monitor_params,
             evidence=self.evidence,
+            boundary_kind=self.boundary_kind,
+            guard_id=self.guard_id,
+            segment_name=self.segment_name,
         )
 
     def to_metadata(self) -> dict[str, object]:
         """Return monitor contract, evidence, thresholds, and decision metadata."""
-        return {
+        metadata = {
             "call_index": self.call_index,
             "verification_id": self.verification_id,
             "observation_revision": self.observation_revision,
@@ -1049,6 +1078,15 @@ class SkillEffectTrace:
                 "failure_mask": _metadata_value(self.failure_mask),
             },
         }
+        metadata["boundary"] = {"kind": self.boundary_kind}
+        if self.boundary_kind == "in_flight_guard":
+            metadata["boundary"].update(
+                {
+                    "guard_id": self.guard_id,
+                    "segment_name": self.segment_name,
+                }
+            )
+        return metadata
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -1536,6 +1574,7 @@ class SkillRuntime:
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
+        self._next_guard_verification_id = 0
         self._wait_duration = 0.0
         self._message: str | None = None
 
@@ -1701,7 +1740,12 @@ class SkillRuntime:
         grounded = self._require_grounded()
         monitor = getattr(grounded, "effect_monitor", None)
         verifier = self._effect_verifier if monitor is not None else None
-        runner_step = runner.step(effect_verifier=verifier)
+        guards = tuple(getattr(grounded, "effect_guards", ()))
+        guard_verifier = self._held_object_guard_verifier if guards else None
+        runner_step = runner.step(
+            effect_verifier=verifier,
+            held_object_guard_verifier=guard_verifier,
+        )
         self._consume_runner_step(runner_step)
         if (
             runner_step.status is RunnerStatus.RUNNING
@@ -1967,6 +2011,7 @@ class SkillRuntime:
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
+        self._next_guard_verification_id = 0
         self._wait_duration = 0.0
         self._message = None
         self._status = SkillStatus.RUNNING
@@ -2018,6 +2063,7 @@ class SkillRuntime:
         grounded_eligible = getattr(grounded, "eligible_mask", None)
         effect_spec = getattr(grounded, "effect_spec", None)
         effect_monitor = getattr(grounded, "effect_monitor", None)
+        effect_guards = tuple(getattr(grounded, "effect_guards", ()))
         if invocation is None:
             raise TypeError("Semantic compiler ground() must return an invocation.")
         if not isinstance(grounded_eligible, torch.Tensor) or not torch.equal(
@@ -2039,6 +2085,13 @@ class SkillRuntime:
                 context.env_ids,
             ):
                 raise ValueError("Grounded effect env_ids must match the call context.")
+        if not all(type(value) is GroundedHeldObjectGuard for value in effect_guards):
+            raise TypeError(
+                "Grounded effect_guards must contain exact "
+                "GroundedHeldObjectGuard values."
+            )
+        if effect_guards and effect_spec is None:
+            raise ValueError("Grounded held-object guards require an effect spec.")
 
         self._grounded = grounded
         session = self._engine.start(
@@ -2086,6 +2139,166 @@ class SkillRuntime:
             )
         if request.invocation_revision != spec.invocation_revision:
             raise ValueError("Effect request revision does not match the effect spec.")
+        decision = self._observe_effect_monitor(
+            context,
+            request,
+            spec=spec,
+            monitor=monitor,
+        )
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=decision.success_mask,
+            failure_mask=decision.failure_mask,
+        )
+
+    def _held_object_guard_verifier(
+        self,
+        context: PlanningContext,
+        request: HeldObjectGuardRequest,
+    ) -> HeldObjectGuardResult | None:
+        """Observe a phase-scoped held-object invariant before dispatch.
+
+        Args:
+            context: Fresh due-cycle physical observation.
+            request: Core-owned phase and correlation identity.
+
+        Returns:
+            Correlated row-local loss decision, or ``None`` when this named
+            action segment has no held-object invariant.
+        """
+        if context.robot.timestamp > request.deadline:
+            return None
+        grounded = self._require_grounded()
+        guards = tuple(getattr(grounded, "effect_guards", ()))
+        active = tuple(
+            guard for guard in guards if request.segment_name in guard.active_segments
+        )
+        if not active:
+            return None
+        if len(active) != 1:
+            raise RuntimeError(
+                "At most one held-object guard may own an action segment; "
+                f"segment={request.segment_name!r}, guards="
+                f"{[guard.guard_id for guard in active]}."
+            )
+        guard = active[0]
+        session = self._require_runner().session
+        if guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
+            candidate = session.task_state.get_held_object(guard.task_state_key)
+        else:
+            candidate = session.active_plan.expected_effects.held_object_updates.get(
+                guard.task_state_key
+            )
+        covered = torch.zeros_like(request.env_mask)
+        if isinstance(candidate, HeldObjectState):
+            covered = (
+                torch.ones_like(request.env_mask)
+                if candidate.env_mask is None
+                else candidate.env_mask.to(request.env_mask.device)
+            )
+            if candidate.semantics.entity_id != self._guard_object_id(
+                guard.effect_spec
+            ):
+                covered.zero_()
+        observed_mask = request.env_mask & covered
+        failure_mask = request.env_mask & ~covered
+        if observed_mask.any():
+            assert isinstance(candidate, HeldObjectState)
+            verification_id = self._next_guard_verification_id
+            self._next_guard_verification_id += 1
+            monitor_request = EffectVerificationRequest(
+                verification_id=verification_id,
+                skill_id=request.skill_id,
+                invocation_id=request.invocation_id,
+                invocation_revision=request.invocation_revision,
+                invocation_index=request.invocation_index,
+                attempt_generation=request.attempt_generation,
+                terminal_segment=request.segment_name,
+                requested_at=context.robot.timestamp,
+                deadline=request.deadline,
+                env_mask=observed_mask,
+                expected_effects=StateDelta(
+                    held_object_updates={guard.task_state_key: candidate}
+                ),
+            )
+            decision = self._observe_effect_monitor(
+                context,
+                monitor_request,
+                spec=guard.effect_spec,
+                monitor=guard.effect_monitor,
+                boundary_kind="in_flight_guard",
+                guard_id=guard.guard_id,
+                segment_name=request.segment_name,
+            )
+            failure_mask |= decision.failure_mask
+        invalidation = self._held_object_invalidation(
+            guard.invalidation_task_state_keys,
+            failure_mask,
+            session.task_state,
+        )
+        retry_mask = (
+            failure_mask.clone()
+            if guard.retry_action
+            else torch.zeros_like(failure_mask)
+        )
+        return HeldObjectGuardResult(
+            verification_id=request.verification_id,
+            object_id=self._guard_object_id(guard.effect_spec),
+            attempt_generation=request.attempt_generation,
+            invocation_index=request.invocation_index,
+            next_waypoint_index=request.next_waypoint_index,
+            failure_mask=failure_mask,
+            state_invalidation=invalidation,
+            retry_mask=retry_mask,
+            message=(
+                f"Held-object invariant {guard.guard_id!r} failed during "
+                f"segment {request.segment_name!r}."
+                if failure_mask.any()
+                else ""
+            ),
+        )
+
+    @staticmethod
+    def _guard_object_id(spec: SemanticEffectSpec) -> str:
+        """Return the canonical object ID from a single guard expectation."""
+        expectation = spec.state_expectations[0]
+        object_id = getattr(expectation, "object_id", None)
+        if type(object_id) is not str or not object_id:
+            raise TypeError("Held-object guard expectation must own an object_id.")
+        return object_id
+
+    @staticmethod
+    def _held_object_invalidation(
+        task_state_keys: tuple[str, ...],
+        failure_mask: torch.Tensor,
+        task_state: TaskState,
+    ) -> StateDelta:
+        """Build conservative removal-only reconciliation for failed rows."""
+        if not failure_mask.any():
+            return StateDelta()
+        related = set(task_state_keys)
+        return StateDelta(
+            held_object_updates={key: None for key in task_state_keys},
+            coordinated_held_object_updates={
+                resources: None
+                for resources in task_state.coordinated_held_objects
+                if not set(resources).isdisjoint(related)
+            },
+        )
+
+    def _observe_effect_monitor(
+        self,
+        context: PlanningContext,
+        request: EffectVerificationRequest,
+        *,
+        spec: SemanticEffectSpec,
+        monitor: EffectMonitor,
+        boundary_kind: str = "terminal",
+        guard_id: str | None = None,
+        segment_name: str | None = None,
+    ) -> EffectMonitorDecision:
+        """Collect evidence, run one monitor, and append an auditable trace."""
+        grounded = self._require_grounded()
         observation_revision = self._observation_revision
         self._observation_revision += 1
         selected_env_ids = spec.env_ids[request.env_mask.to(spec.env_ids.device)]
@@ -2124,13 +2337,12 @@ class SkillRuntime:
             configured_monitor_params=configured_monitor_params,
             resolved_monitor_params=resolved_monitor_params,
             evidence=evidence,
+            boundary_kind=boundary_kind,
+            guard_id=guard_id,
+            segment_name=segment_name,
         )
         self._effect_traces.append(trace)
-        return EffectVerificationResult(
-            verification_id=request.verification_id,
-            success_mask=decision.success_mask,
-            failure_mask=decision.failure_mask,
-        )
+        return decision
 
     def _consume_runner_step(self, runner_step: RunnerStep) -> None:
         """Merge one runner update into workflow-level traces."""
