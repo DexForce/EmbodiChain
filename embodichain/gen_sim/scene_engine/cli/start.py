@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from embodichain.gen_sim.scene_engine.pipeline.generate import generate_scene_from_image
+from embodichain.gen_sim.scene_engine.pipeline.edit import edit_scene
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
@@ -28,6 +29,8 @@ _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 def cli_scene_engine(
     image: str | Path,
     output_root: str | Path,
+    *,
+    edit_prompt: str | None = None,
 ) -> None:
     """Generate one scene using the required ``gen_sim/.env`` settings."""
     resolved_image_path = Path(image).expanduser().resolve()
@@ -41,12 +44,27 @@ def cli_scene_engine(
         )
 
     resolved_output_root = Path(output_root).expanduser().resolve()
+    # If this scene needs editing.
+    if edit_prompt is not None:
+        edit_prompt = edit_prompt.strip()
+        if not edit_prompt:
+            raise ValueError("Edit prompt must not be empty.")
+        if not resolved_output_root.is_dir() or not any(resolved_output_root.iterdir()):
+            raise ValueError(
+                "Output root must exist and contain files when edit_prompt is provided."
+            )
+
     resolved_output_root.mkdir(parents=True, exist_ok=True)
 
     generate_scene_from_image(
         image_path=resolved_image_path,
         output_root=resolved_output_root,
     )
+    if edit_prompt is not None:
+        edit_scene(
+            output_root=resolved_output_root,
+            edit_prompt=edit_prompt,
+        )
     print("Successfully completed!")
 
 
@@ -68,9 +86,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         required=True,
         help="Path to the output directory",
     )
+    parser.add_argument(
+        "--edit_prompt",
+        type=str,
+        default=None,
+        help="Optional text instruction for editing an existing output root",
+    )
     args = parser.parse_args(argv)
 
-    cli_scene_engine(args.image, args.output_root)
+    cli_scene_engine(args.image, args.output_root, edit_prompt=args.edit_prompt)
 
 
 if __name__ == "__main__":
