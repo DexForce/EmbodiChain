@@ -130,6 +130,11 @@ from .simulation import (
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
 )
+from .catalog import (
+    ExpertProgramIntegrationCatalog,
+    IntegrationFingerprintMismatch,
+    SimulationExpertProgramRegistration,
+)
 from .simulation_environment import (
     ControlCommandStateEvidenceTracker,
     MotionGeneratorFactory,
@@ -139,7 +144,10 @@ from .simulation_environment import (
     SimulationPlanningObservationProvider,
     create_simulation_expert_program_adapter,
 )
-from .simulation_policies import SimulationSegmentPolicyPort
+from .simulation_policies import (
+    SimulationSegmentPolicyPort,
+    default_simulation_settle_presets,
+)
 
 __all__ = [
     "AcceptedRuntimeCommandObserver",
@@ -183,6 +191,7 @@ __all__ = [
     "ExpertProgramEnvironmentFactory",
     "ExpertProgramEnvironmentMixin",
     "ExpertProgramIntegrationCfg",
+    "ExpertProgramIntegrationCatalog",
     "ExpertProgramRuntimeAssembly",
     "ExpertProgramSceneResolver",
     "ExpertProgramValidationContext",
@@ -190,6 +199,7 @@ __all__ = [
     "HandOverCfg",
     "GymPlanningObservationProvider",
     "InvokeCfg",
+    "IntegrationFingerprintMismatch",
     "MAX_DECLARATIVE_DEPTH",
     "MAX_DECLARATIVE_NODES",
     "MAX_EXPANDED_CALLS",
@@ -228,6 +238,7 @@ __all__ = [
     "SimulationArticulationLinkBinding",
     "SimulationExpertProgramEnvironment",
     "SimulationExpertProgramFactory",
+    "SimulationExpertProgramRegistration",
     "SimulationPlanningObservationProvider",
     "SimulationRigidObjectBinding",
     "SimulationResourceEndpointBinding",
@@ -242,6 +253,7 @@ __all__ = [
     "ValidatorCfg",
     "WaitStablePostCfg",
     "create_simulation_expert_program_adapter",
+    "default_simulation_settle_presets",
     "decode_expert_program",
     "load_expert_program",
     "loads_expert_program_json",

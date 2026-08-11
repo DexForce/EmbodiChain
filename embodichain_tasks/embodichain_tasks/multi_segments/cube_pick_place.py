@@ -41,6 +41,7 @@ from embodichain.lab.gym.envs.expert_program import (
     ExpertProgramEnvironmentAdapter,
     ExpertProgramEnvironmentMixin,
     SimulationRigidObjectBinding,
+    SimulationExpertProgramRegistration,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
     create_simulation_expert_program_adapter,
@@ -53,6 +54,7 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     RecoveryPolicy,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.cfg import (
     LightCfg,
@@ -72,6 +74,7 @@ from embodichain_tasks.configs import get_config_path
 
 __all__ = [
     "MultiSegmentsCubePickPlaceEnv",
+    "CUBE_EXPERT_PROGRAM_REGISTRATION",
     "create_cube_robot_profile_binding",
     "create_cube_scene_binding",
 ]
@@ -133,7 +136,12 @@ def _create_default_robot_cfg() -> URRobotCfg:
 
 def _load_default_expert_program() -> ExpertProgramCfg:
     """Decode the packaged semantic program for direct instantiation."""
-    return load_expert_program(get_config_path(CUBE_EXPERT_PROGRAM_PATH))
+    program = load_expert_program(
+        get_config_path(CUBE_EXPERT_PROGRAM_PATH),
+        validation_context=CUBE_EXPERT_PROGRAM_REGISTRATION.catalog,
+    )
+    CUBE_EXPERT_PROGRAM_REGISTRATION.catalog.preflight(program)
+    return program
 
 
 def _create_default_env_cfg() -> EmbodiedEnvCfg:
@@ -167,10 +175,7 @@ def _create_default_env_cfg() -> EmbodiedEnvCfg:
             init_pos=(-0.42, -0.08, 0.5 * CUBE_SIZE),
         )
     ]
-    cfg.extensions = {
-        "grasp_samples": 10000,
-        "force_reannotate": False,
-    }
+    cfg.extensions = {}
     cfg.events = {
         "settle_cube_on_reset": EventCfg(
             func=wait_for_dynamic_objects_to_settle,
@@ -289,14 +294,28 @@ def create_cube_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                recovery_policy=RecoveryPolicy(tracking_error_threshold=0.08),
+                recovery_policy=RecoveryPolicy(),
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=0.08,
+                    terminal_max_abs_error=0.08,
+                ),
             ),
         ),
         default_preset="safe",
     )
 
 
-@register_env("MultiSegmentsCubePickPlace-v1", max_episode_steps=1200)
+CUBE_EXPERT_PROGRAM_REGISTRATION = SimulationExpertProgramRegistration(
+    scene_binding=create_cube_scene_binding(),
+    robot_profile_binding=create_cube_robot_profile_binding(),
+)
+
+
+@register_env(
+    "MultiSegmentsCubePickPlace-v1",
+    max_episode_steps=1200,
+    expert_program_registration=CUBE_EXPERT_PROGRAM_REGISTRATION,
+)
 class MultiSegmentsCubePickPlaceEnv(ExpertProgramEnvironmentMixin, EmbodiedEnv):
     """Repeatedly pick and place a cube from a semantic config program."""
 
@@ -307,11 +326,7 @@ class MultiSegmentsCubePickPlaceEnv(ExpertProgramEnvironmentMixin, EmbodiedEnv):
         super().__init__(cfg, **kwargs)
         self._expert_program_adapter = create_simulation_expert_program_adapter(
             self,
-            scene_binding=create_cube_scene_binding(
-                grasp_samples=getattr(self, "grasp_samples", 10000),
-                force_reannotate=getattr(self, "force_reannotate", False),
-            ),
-            robot_profile_binding=create_cube_robot_profile_binding(),
+            registration=CUBE_EXPERT_PROGRAM_REGISTRATION,
         )
 
     @property
