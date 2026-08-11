@@ -449,6 +449,10 @@ topics:
       - resource graph
       - resource DAG
       - semantic skill catalog
+      - semantic skill runtime
+      - expert program
+      - declarative expert program
+      - atomic demo bridge
       - capability binding
       - AtomicAction
       - ActionInvocation
@@ -468,6 +472,26 @@ topics:
       - ExecutionSession
       - EffectVerificationRequest
       - EffectVerificationResult
+      - attempt_generation
+      - SemanticEffectSpec
+      - EffectMonitorRef
+      - EffectMonitorRegistry
+      - EffectMonitorDecision
+      - PoseRelationEvidenceBatch
+      - relation hysteresis
+      - SkillRuntime
+      - SkillResult
+      - AtomicSkills
+      - SemanticCallSpec
+      - SemanticSkillCompiler
+      - ExpertProgramCfg
+      - ExpertProgramCompiler
+      - AtomicDemoBridge
+      - BufferedGymCommandSink
+      - ControlCommandStateEvidenceTracker
+      - DynamicSettleMonitor
+      - ParallelSkillRuntime
+      - program segment metadata
       - eligible_mask
       - deactivate_rows
       - effect verification deadline
@@ -537,6 +561,8 @@ topics:
       - ResolvedRobotResource
       - ResolvedSkillBinding
       - SkillPolicyPreset
+      - effect_monitors
+      - semantic effect monitor
       - binding_contract
       - engine.skills
       - skill_profile
@@ -613,8 +639,18 @@ topics:
       - embodichain/lab/sim/atomic_actions/primitives/
       - embodichain/lab/sim/atomic_actions/__init__.py
       - embodichain/lab/sim/skills/scene.py
+      - embodichain/lab/sim/skills/calls.py
+      - embodichain/lab/sim/skills/compiler.py
+      - embodichain/lab/sim/skills/effects.py
+      - embodichain/lab/sim/skills/evidence.py
+      - embodichain/lab/sim/skills/integration.py
+      - embodichain/lab/sim/skills/runtime.py
+      - embodichain/lab/sim/skills/parallel.py
+      - embodichain/lab/sim/skills/parallel_runtime.py
       - embodichain/lab/sim/skills/profiles.py
       - embodichain/lab/sim/skills/__init__.py
+      - embodichain/lab/gym/envs/expert_program/
+      - embodichain/lab/gym/envs/settling.py
     related_topics:
       - motion-planning
       - robot-system

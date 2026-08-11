@@ -470,6 +470,15 @@ scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
 legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
 create a scene dependency.
 
+An action may give selected dependencies an exclusive waypoint cutoff through
+``ActionPlan.scene_dependency_monitor_until``. A dependency is monitored while
+the current waypoint index is smaller than its cutoff; ``0`` disables monitoring
+from the start, and an omitted dependency remains monitored for the whole
+action. Reaching the cutoff ignores every later pose change, not only motion
+caused by the skill. Built-in ``PickUp`` uses ``close.start`` for the grasped
+object, and ``OperateArticulation`` uses ``operate.start`` for the handle; their
+physical effect monitors are authoritative after those boundaries.
+
 Task-state effects
 ------------------
 

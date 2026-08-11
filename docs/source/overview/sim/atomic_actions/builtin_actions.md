@@ -147,6 +147,7 @@ The animations below are the focused simulator demos under
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left.motion`, `left.grasp`, `right.motion`, `right.grasp` | both grasp endpoints: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing.motion`, `placing.grasp`, `support.motion`, `support.grasp` | `placing.grasp`: `open`, `grasp`; `support.grasp`: `grasp` | one individually held object per motion target | optionally detach placing object; preserve support attachment |
 | `hand_over` | `GraspGoal` | `source.motion`, `source.grasp`, `destination.motion`, `destination.grasp` | both grasp endpoints: `open`, `grasp` | object held by the source motion target | transfer attachment to the destination motion target |
+| `operate_articulation` | `OperateArticulationGoal` | `primary.motion`, `primary.interaction` | `primary.interaction`: `open`, `grasp` | registered articulation and handle operation affordance | update and physically verify the target articulation joint position |
 
 ### Participant slot meanings
 
@@ -361,6 +362,13 @@ snapshot. `PickUp` resolves that object pose once per planning attempt, uses the
 same tensor for grasp sampling, upright adjustment, and `object_to_eef`, and
 automatically records the ID as a scene dependency. An explicit ID never falls
 back to a live simulation entity when the snapshot entry is missing.
+
+The object dependency is monitored only while the `approach` segment is active.
+Its exclusive cutoff is `close.start`: object motion observed before that frame
+invalidates the plan, while motion from gripper closure and lift does not. After
+the cutoff, every object-pose change is ignored by scene recovery, including an
+external disturbance, so the accepted `grasp` command and live
+object-to-endpoint effect evidence become the authoritative completion check.
 
 `PickUp` requires typed `open` and `grasp` commands on `primary.grasp`.
 Important `PickUpOptions` fields:
@@ -614,6 +622,47 @@ As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.
 
 **Example:** `scripts/tutorials/atomic_action/hand_over.py`
+
+(builtin-operate-articulation)=
+
+## `OperateArticulation`
+
+Runs one reusable **approach -> engage -> operate -> release -> retract**
+interaction for a drawer, slider, or another handle-driven articulation.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `operate_articulation` |
+| Goal | `OperateArticulationGoal(articulation_id, joint_id, geometry, source_position, target_position, target_displacement)` |
+| Binding contract | disjoint `primary.motion` and `primary.interaction` endpoints |
+| Required commands | `primary.interaction`: `open`, `grasp` |
+| Effect | `ArticulationJointState[(articulation_id, joint_id)] = target_position` |
+| Verification | explicit joint-state evidence is required before committing the effect |
+
+The first-class semantic call takes an articulation reference, an optional
+handle affordance reference, and either a named target or an explicit
+`target_position` plus `target_displacement` pair. The pair is intentionally
+not inferred from simulator state: the core scene snapshot contains entity
+poses, not articulation qpos.
+
+`ArticulationOperationAffordance` owns the joint ID, approach/contact/
+operation/retract offsets, operation axis, position scale, and optional named
+position/displacement pairs. At every JIT grounding boundary the compiler
+reads the latest registered handle pose and derives all four end-effector
+poses. The displacement is measured from that observed handle pose. A named
+target also supplies both its absolute joint postcondition and its explicit
+handle-relative displacement.
+
+The grounded semantic effect uses an `ArticulationJointStateExpectation` and a
+`JointStateEffectClause` addressed by canonical articulation and joint IDs.
+Planning success alone never commits the symbolic joint state.
+
+The handle scene dependency has an exclusive cutoff at `operate.start`. Motion
+before engagement can still invalidate and replan the trajectory; motion after
+that boundary is expected to be caused by the operation and is not classified
+as target drift. The joint-state effect monitor remains authoritative for
+completion, and the cutoff also ignores unrelated external handle motion after
+the operation starts.
 
 ## Running the demos
 
