@@ -158,6 +158,10 @@ from .simulation_environment import (
     create_simulation_expert_program_adapter,
 )
 from .simulation_handover import ConfiguredHandOverPoseProvider
+from .simulation_parallel_safety import (
+    CuroboParallelCommandSafetyValidator,
+    CuroboParallelSafetyValidatorFactory,
+)
 from .simulation_policies import (
     SimulationSegmentPolicyPort,
     default_simulation_settle_presets,
@@ -192,6 +196,8 @@ __all__ = [
     "ControlPartResourceBinding",
     "ConfiguredHandOverPoseProvider",
     "CyclicPoseTargetCfg",
+    "CuroboParallelCommandSafetyValidator",
+    "CuroboParallelSafetyValidatorFactory",
     "DeclarativeCfgValue",
     "DemoBridgeError",
     "EXPERT_PROGRAM_SCHEMA_VERSION",

@@ -318,6 +318,16 @@ embodichain.lab.gym.envs.expert_program.simulation_policies
    SimulationSegmentPolicyPort
    default_simulation_settle_presets
 
+embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
+------------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_parallel_safety
+
+.. autosummary::
+
+   CuroboParallelCommandSafetyValidator
+   CuroboParallelSafetyValidatorFactory
+
 embodichain.lab.gym.envs.expert_program.simulation_handover
 ------------------------------------------------------------
 

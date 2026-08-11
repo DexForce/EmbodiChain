@@ -49,6 +49,8 @@ embodichain.lab.gym.envs.expert_program
       ControlPartCommandPreset
       ContainerAffordanceBinding
       CyclicPoseTargetCfg
+      CuroboParallelCommandSafetyValidator
+      CuroboParallelSafetyValidatorFactory
       DeclarativeCfgValue
       DemoBridgeError
       EXPERT_PROGRAM_SCHEMA_VERSION
