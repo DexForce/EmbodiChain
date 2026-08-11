@@ -143,9 +143,18 @@ def _canonical_value(value: object) -> object:
             for data_field in fields(value)
         }
         return {"type": _qualified_name(value), "fields": metadata}
-    # Provider objects are not executable catalog data. Their declared type is
-    # still part of the integration surface, while live identity is excluded.
-    return {"provider_type": _qualified_name(value)}
+    raise TypeError(
+        "Registration fingerprint metadata contains unsupported value type "
+        f"{_qualified_name(value)!r}. Values must be complete declarative data; "
+        "live or opaque objects cannot be fingerprinted by type alone."
+    )
+
+
+def _provider_fingerprint_declaration(provider: object) -> object:
+    """Return the complete canonical declaration for one validated provider."""
+    if is_dataclass(provider):
+        return provider
+    return {"provider_type": _qualified_name(provider)}
 
 
 def _canonical_json(value: object) -> str:
@@ -838,7 +847,7 @@ def _registration_payload(
         "relation_grounders": tuple(
             {
                 "key": _relation_grounder_key(grounder),
-                "provider": grounder,
+                "provider": _provider_fingerprint_declaration(grounder),
             }
             for grounder in sorted(
                 relation_grounders,
@@ -848,7 +857,7 @@ def _registration_payload(
         "handover_pose_providers": tuple(
             {
                 "provider_id": _handover_pose_provider_id(provider),
-                "provider": provider,
+                "provider": _provider_fingerprint_declaration(provider),
             }
             for provider in sorted(
                 handover_pose_providers,
