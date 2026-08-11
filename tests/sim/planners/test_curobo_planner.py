@@ -17,7 +17,7 @@
 """Unit and smoke tests for the optional cuRobo planner.
 
 Most tests are dependency-free and cover planner configuration, conversion,
-validation, generated robot YAML, and voxel-world data. The GPU-marked smoke tests
+validation, generated robot YAML, and mixed collision-world data. The GPU-marked smoke tests
 exercise cached in-process planning and CPU-physics interoperability. Full
 collision-planning coverage remains in ``test_curobo_integration.py``.
 """
@@ -33,7 +33,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 import yaml
+from dexsim.types import RigidBodyShape
 
+from embodichain.lab.sim.objects import CollisionShapeDesc
 from embodichain.lab.sim.planners import CuroboPlannerCfg
 from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlanOptions,
@@ -51,6 +53,7 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
 from embodichain.lab.sim.planners.curobo.curobo_yaml import (
     _convex_hulls_to_voxel_entry,
     _parse_mimic_joint_names,
+    _world_collision_sphere_data,
     generate_curobo_robot_yaml,
     generate_curobo_world_scene,
     visualize_curobo_collision_models,
@@ -219,11 +222,13 @@ def test_configure_curobo_logging_rejects_unknown_level():
         _configure_curobo_logging("silent")
 
 
-def test_curobo_world_cfg_has_single_voxel_collision_path():
+def test_curobo_world_cfg_defaults_to_auto_collision_policy():
     cfg = CuroboWorldCfg()
 
+    assert cfg.representation == "auto"
+    assert cfg.overrides == {}
     assert cfg.voxel_size == pytest.approx(0.01)
-    assert cfg.voxel_padding == pytest.approx(0.1)
+    assert cfg.voxel_padding == pytest.approx(0.005)
 
 
 def test_auto_gen_defaults_keep_sphere_count_low_and_fit_type_fixed():
@@ -604,7 +609,7 @@ def _identity_pose(
 
 
 class _FakeRigidObject:
-    """Expose the mesh and pose API required by the world generator."""
+    """Expose the physical-shape and pose API required by the world generator."""
 
     def __init__(
         self,
@@ -612,11 +617,21 @@ class _FakeRigidObject:
         vertices: torch.Tensor,
         faces: torch.Tensor,
         pose: torch.Tensor,
+        collision_shapes: list[CollisionShapeDesc] | None = None,
     ) -> None:
         self.uid = uid
         self._vertices = vertices
         self._faces = faces
         self._pose = pose
+        self._collision_shapes = collision_shapes or [
+            CollisionShapeDesc(
+                name="shape_0",
+                shape_type=RigidBodyShape.MESH,
+                local_pose=torch.eye(4),
+                vertices=vertices,
+                triangles=faces,
+            )
+        ]
 
     def get_vertices(self, env_ids=None, scale=False):  # noqa: ARG002
         return self._vertices.unsqueeze(0)
@@ -624,8 +639,15 @@ class _FakeRigidObject:
     def get_triangles(self, env_ids=None):  # noqa: ARG002
         return self._faces.unsqueeze(0)
 
-    def get_local_pose(self, to_matrix=False):  # noqa: ARG002
+    def get_local_pose(self, to_matrix=False):
+        if to_matrix:
+            pose = torch.eye(4, dtype=torch.float32)
+            pose[:3, 3] = self._pose[:3]
+            return pose.unsqueeze(0)
         return self._pose.unsqueeze(0)
+
+    def get_collision_shapes(self, env_id=0):  # noqa: ARG002
+        return self._collision_shapes
 
 
 def _mock_visacd_as_identity(monkeypatch, calls=None):
@@ -844,6 +866,146 @@ def test_combined_collision_visualization_colors_and_cleans_two_actors(
     assert "Showing 2 cuRobo collision spheres" in prompts[0]
 
 
+def test_auto_world_scene_preserves_physical_box_as_cuboid():
+    box = CollisionShapeDesc(
+        name="physics_box",
+        shape_type=RigidBodyShape.BOX,
+        local_pose=torch.eye(4),
+        half_extents=torch.tensor([0.1, 0.2, 0.3]),
+    )
+    rigid_object = _FakeRigidObject(
+        "fixture",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose((1.0, 2.0, 3.0)),
+        [box],
+    )
+
+    scene_data = generate_curobo_world_scene([rigid_object])
+
+    assert list(scene_data) == ["cuboid"]
+    assert scene_data["cuboid"]["fixture"]["dims"] == pytest.approx([0.2, 0.4, 0.6])
+    assert scene_data["cuboid"]["fixture"]["pose"][:3] == pytest.approx([1.0, 2.0, 3.0])
+
+
+def test_mixed_collision_visualization_supports_cuboid():
+    centers, radii = _world_collision_sphere_data(
+        {
+            "cuboid": {
+                "fixture": {
+                    "pose": [1.0, 2.0, 3.0, 1.0, 0.0, 0.0, 0.0],
+                    "dims": [0.2, 0.4, 0.6],
+                }
+            }
+        }
+    )
+
+    assert centers.shape == (8, 3)
+    assert radii.shape == (8,)
+
+
+def test_world_scene_object_override_can_force_voxel(monkeypatch):
+    _mock_visacd_as_identity(monkeypatch)
+    box = CollisionShapeDesc(
+        name="physics_box",
+        shape_type=RigidBodyShape.BOX,
+        local_pose=torch.eye(4),
+        half_extents=torch.tensor([0.5, 0.5, 0.5]),
+    )
+    rigid_object = _FakeRigidObject(
+        "room_scan",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+        [box],
+    )
+
+    scene_data = generate_curobo_world_scene(
+        [rigid_object],
+        overrides={"room_scan": "voxel"},
+        voxel_size=0.5,
+        voxel_padding=0.0,
+    )
+
+    assert list(scene_data) == ["voxel"]
+    assert set(scene_data["voxel"]) == {"room_scan"}
+
+
+def test_auto_world_scene_preserves_compound_shape_names_and_local_poses():
+    box_pose = torch.eye(4)
+    box_pose[0, 3] = 0.25
+    shapes = [
+        CollisionShapeDesc(
+            name="box",
+            shape_type=RigidBodyShape.BOX,
+            local_pose=box_pose,
+            half_extents=torch.tensor([0.1, 0.1, 0.1]),
+        ),
+        CollisionShapeDesc(
+            name="sphere",
+            shape_type=RigidBodyShape.SPHERE,
+            local_pose=torch.eye(4),
+            radius=0.15,
+        ),
+    ]
+    rigid_object = _FakeRigidObject(
+        "compound",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose((1.0, 0.0, 0.0)),
+        shapes,
+    )
+
+    scene_data = generate_curobo_world_scene([rigid_object])
+
+    assert set(scene_data) == {"cuboid", "sphere"}
+    assert set(scene_data["cuboid"]) == {"compound__shape_0"}
+    assert set(scene_data["sphere"]) == {"compound__shape_1"}
+    assert scene_data["cuboid"]["compound__shape_0"]["pose"][:3] == pytest.approx(
+        [1.25, 0.0, 0.0]
+    )
+
+
+def test_dynamic_compound_object_fans_out_to_shape_local_poses():
+    first_pose = torch.eye(4)
+    first_pose[0, 3] = 0.25
+    shapes = [
+        CollisionShapeDesc(
+            name="first",
+            shape_type=RigidBodyShape.BOX,
+            local_pose=first_pose,
+            half_extents=torch.ones(3),
+        ),
+        CollisionShapeDesc(
+            name="second",
+            shape_type=RigidBodyShape.SPHERE,
+            local_pose=torch.eye(4),
+            radius=0.1,
+        ),
+    ]
+    rigid_object = _FakeRigidObject(
+        "compound",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+        shapes,
+    )
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner.cfg = SimpleNamespace(
+        world=CuroboWorldCfg(
+            rigid_objects=[rigid_object], dynamic_obstacle_names=["compound"]
+        )
+    )
+
+    obstacle_shapes = planner._dynamic_obstacle_shapes("compound")
+
+    assert [name for name, _ in obstacle_shapes] == [
+        "compound__shape_0",
+        "compound__shape_1",
+    ]
+    assert obstacle_shapes[0][1][:3, 3].tolist() == pytest.approx([0.25, 0.0, 0.0])
+
+
 def test_generate_world_scene_supports_multiple_objects(monkeypatch):
     _mock_visacd_as_identity(monkeypatch)
     rigid_objects = [
@@ -861,7 +1023,10 @@ def test_generate_world_scene_supports_multiple_objects(monkeypatch):
         ),
     ]
     scene_data = generate_curobo_world_scene(
-        rigid_objects, voxel_size=0.5, voxel_padding=0.0
+        rigid_objects,
+        representation="voxel",
+        voxel_size=0.5,
+        voxel_padding=0.0,
     )
 
     assert list(scene_data) == ["voxel"]
@@ -907,7 +1072,10 @@ def test_generated_voxel_data_loads_in_curobo_scene_cfg(monkeypatch):
         _identity_pose(),
     )
     scene_data = generate_curobo_world_scene(
-        [rigid_object], voxel_size=0.5, voxel_padding=0.0
+        [rigid_object],
+        representation="voxel",
+        voxel_size=0.5,
+        voxel_padding=0.0,
     )
 
     scene = SceneCfg.create(scene_data)
@@ -916,6 +1084,24 @@ def test_generated_voxel_data_loads_in_curobo_scene_cfg(monkeypatch):
     assert scene.voxel[0].name == "demo_block"
     assert scene.voxel[0].voxel_size == pytest.approx(0.5)
     assert tuple(scene.voxel[0].feature_tensor.shape) == (2, 2, 2)
+
+
+def test_generated_physical_mesh_loads_in_curobo_scene_cfg():
+    pytest.importorskip("curobo")
+    from curobo._src.geom.types import SceneCfg
+
+    rigid_object = _FakeRigidObject(
+        "collision_mesh",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+
+    scene = SceneCfg.create(generate_curobo_world_scene([rigid_object]))
+
+    assert len(scene.mesh) == 1
+    assert scene.mesh[0].name == "collision_mesh"
+    assert len(scene.mesh[0].vertices) == _unit_cube_vertices().shape[0]
 
 
 # Simulator smoke coverage

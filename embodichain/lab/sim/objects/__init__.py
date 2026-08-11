@@ -20,7 +20,7 @@ Covers lights, rigid bodies (and groups), articulations, robots, deformables (so
 """
 
 from ..common import BatchEntity
-from .rigid_object import RigidObject, RigidBodyData, RigidObjectCfg
+from .rigid_object import CollisionShapeDesc, RigidObject, RigidBodyData, RigidObjectCfg
 from .rigid_object_group import (
     RigidObjectGroup,
     RigidBodyGroupData,

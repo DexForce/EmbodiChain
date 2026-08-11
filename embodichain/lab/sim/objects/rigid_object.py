@@ -25,7 +25,20 @@ from typing import List, Sequence, Union
 from functools import cached_property
 
 from dexsim.models import MeshObject
-from dexsim.types import RigidBodyGPUAPIReadType, RigidBodyGPUAPIWriteType
+from dexsim.types import (
+    RigidBodyGPUAPIReadType,
+    RigidBodyGPUAPIWriteType,
+    RigidBodyShape,
+)
+from dexsim.engine import (
+    BoxGeometry,
+    CapsuleGeometry,
+    ConvexMeshGeometry,
+    PlaneGeometry,
+    SDFGeometry,
+    SphereGeometry,
+    TriangleMeshGeometry,
+)
 from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
 from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg
 from embodichain.lab.sim.shapes import MeshCfg
@@ -49,7 +62,36 @@ from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
 
-__all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
+__all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg"]
+
+
+@dataclass
+class CollisionShapeDesc:
+    """Planner-independent snapshot of one DexSim physical collision shape.
+
+    Geometry values are copied from DexSim's runtime collision descriptor and
+    therefore already include its geometry scale. Consumers must not apply
+    :attr:`RigidObjectCfg.body_scale` again.
+
+    Attributes:
+        name: Stable shape name within the owning rigid object.
+        shape_type: DexSim collision-shape type.
+        local_pose: Shape pose relative to the rigid object's frame, as ``(4, 4)``.
+        half_extents: Box half-extents, when applicable.
+        radius: Sphere or capsule radius, when applicable.
+        half_height: Capsule cylinder half-height, when applicable.
+        vertices: Scaled collision-mesh vertices, when applicable.
+        triangles: Collision-mesh triangle indices, when applicable.
+    """
+
+    name: str
+    shape_type: RigidBodyShape
+    local_pose: torch.Tensor
+    half_extents: torch.Tensor | None = None
+    radius: float | None = None
+    half_height: float | None = None
+    vertices: torch.Tensor | None = None
+    triangles: torch.Tensor | None = None
 
 
 @dataclass
@@ -1202,6 +1244,154 @@ class RigidObject(BatchEntity):
             ),
             dtype=torch.int32,
             device=self.device,
+        )
+
+    def get_collision_shapes(self, env_id: int = 0) -> list[CollisionShapeDesc]:
+        """Snapshot the physical collision shapes used by DexSim.
+
+        Unlike :meth:`get_vertices` and :meth:`get_triangles`, this method reads
+        the physics body's collision descriptors rather than render meshes. For
+        batched objects, every row is checked for identical shape topology before
+        the requested row is returned.
+
+        .. attention::
+            The installed DexSim binding must populate ``ShapeGeometry.local_pose``
+            and dispatch SDF geometry through ``get_shape_geometry``. This method
+            preserves the values returned by DexSim and raises an actionable error
+            when a descriptor cannot be retrieved.
+
+        Args:
+            env_id: Environment row whose collision geometry is returned.
+
+        Returns:
+            Physical collision-shape descriptors in stable shape-index order.
+
+        Raises:
+            IndexError: If ``env_id`` is outside the object batch.
+            RuntimeError: If DexSim cannot expose a collision descriptor.
+            ValueError: If collision topology differs between environment rows.
+        """
+        if env_id < 0 or env_id >= self.num_instances:
+            raise IndexError(
+                f"env_id must be in [0, {self.num_instances}), got {env_id}."
+            )
+
+        requested = self._get_collision_shapes_for_entity(env_id)
+        requested_topology = self._collision_shape_topology(requested)
+        for other_env_id in range(self.num_instances):
+            if other_env_id == env_id:
+                continue
+            other = self._get_collision_shapes_for_entity(other_env_id)
+            if self._collision_shape_topology(other) != requested_topology:
+                raise ValueError(
+                    f"RigidObject {self.uid!r} has different collision-shape "
+                    f"topology in environment rows {env_id} and {other_env_id}."
+                )
+        return requested
+
+    def _get_collision_shapes_for_entity(self, env_id: int) -> list[CollisionShapeDesc]:
+        """Return physical collision descriptors for one simulator entity."""
+        physical_body = self._entities[env_id].get_physical_body()
+        if physical_body is None:
+            raise RuntimeError(f"RigidObject {self.uid!r} has no DexSim physical body.")
+
+        shape_count = int(physical_body.get_shape_count())
+        shapes: list[CollisionShapeDesc] = []
+        for shape_idx in range(shape_count):
+            try:
+                geometry = physical_body.get_shape_geometry(shape_idx)
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"DexSim could not expose collision shape {shape_idx} for "
+                    f"RigidObject {self.uid!r}. SDF/custom shapes require a "
+                    "geometry descriptor or canonical collision mesh."
+                ) from exc
+            if geometry is None:
+                raise RuntimeError(
+                    f"DexSim returned no geometry for collision shape {shape_idx} "
+                    f"of RigidObject {self.uid!r}."
+                )
+
+            shape_name = physical_body.get_shape_name(shape_idx) or f"shape_{shape_idx}"
+            local_pose = torch.tensor(geometry.local_pose, dtype=torch.float32)
+            if local_pose.shape != (4, 4):
+                raise RuntimeError(
+                    f"DexSim collision shape {shape_idx} of {self.uid!r} returned "
+                    f"local_pose shape {tuple(local_pose.shape)}, expected (4, 4)."
+                )
+            desc = CollisionShapeDesc(
+                name=str(shape_name),
+                shape_type=self._collision_shape_type(geometry),
+                local_pose=local_pose.clone(),
+            )
+            if isinstance(geometry, BoxGeometry):
+                desc.half_extents = torch.tensor(
+                    geometry.half_extents, dtype=torch.float32
+                )
+            elif isinstance(geometry, SphereGeometry):
+                desc.radius = float(geometry.radius)
+            elif isinstance(geometry, CapsuleGeometry):
+                desc.radius = float(geometry.radius)
+                desc.half_height = float(geometry.half_height)
+            elif isinstance(
+                geometry, (ConvexMeshGeometry, TriangleMeshGeometry, SDFGeometry)
+            ):
+                vertices = torch.tensor(geometry.vertices, dtype=torch.float32).reshape(
+                    -1, 3
+                )
+                triangles = torch.tensor(geometry.triangles, dtype=torch.int32).reshape(
+                    -1, 3
+                )
+                scale = getattr(geometry, "scale", None)
+                if scale is not None:
+                    vertices = vertices * torch.tensor(
+                        scale, dtype=torch.float32
+                    ).reshape(1, 3)
+                desc.vertices = vertices
+                desc.triangles = triangles
+            shapes.append(desc)
+        return shapes
+
+    @staticmethod
+    def _collision_shape_type(geometry: object) -> RigidBodyShape:
+        """Map a concrete DexSim geometry descriptor to its shape enum."""
+        if isinstance(geometry, BoxGeometry):
+            return RigidBodyShape.BOX
+        if isinstance(geometry, PlaneGeometry):
+            return RigidBodyShape.PLANE
+        if isinstance(geometry, SphereGeometry):
+            return RigidBodyShape.SPHERE
+        if isinstance(geometry, CapsuleGeometry):
+            return RigidBodyShape.CAPSULE
+        if isinstance(geometry, ConvexMeshGeometry):
+            return RigidBodyShape.CONVEX
+        if isinstance(geometry, TriangleMeshGeometry):
+            return RigidBodyShape.MESH
+        if isinstance(geometry, SDFGeometry):
+            return RigidBodyShape.SDF
+        raise RuntimeError(
+            f"Unsupported DexSim collision geometry descriptor "
+            f"{type(geometry).__name__}."
+        )
+
+    @staticmethod
+    def _collision_shape_topology(
+        shapes: list[CollisionShapeDesc],
+    ) -> tuple[tuple[object, ...], ...]:
+        """Return the topology-only signature used for batched validation."""
+        return tuple(
+            (
+                shape.name,
+                shape.shape_type.value,
+                None if shape.vertices is None else tuple(shape.vertices.shape),
+                None if shape.triangles is None else tuple(shape.triangles.shape),
+                (
+                    None
+                    if shape.triangles is None
+                    else shape.triangles.contiguous().numpy().tobytes()
+                ),
+            )
+            for shape in shapes
         )
 
     def get_user_ids(self, env_ids: Sequence[int] | None = None) -> torch.Tensor:

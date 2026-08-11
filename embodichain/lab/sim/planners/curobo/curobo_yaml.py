@@ -22,8 +22,8 @@ complete cuRobo V2 robot configuration YAML. The cuRobo planner adapter calls
 this automatically (with on-disk caching) on the first plan; see
 :class:`~embodichain.lab.sim.planners.curobo.curobo_planner.CuroboAutoGenCfg`.
 
-:func:`generate_curobo_world_scene` builds cuRobo voxel collision data from live
-:class:`~embodichain.lab.sim.objects.RigidObject` meshes.
+:func:`generate_curobo_world_scene` builds mixed cuRobo collision data from live
+:class:`~embodichain.lab.sim.objects.RigidObject` physical shapes.
 """
 
 from __future__ import annotations
@@ -31,7 +31,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Sequence
 
 import torch
+from dexsim.types import RigidBodyShape
 
+from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix
 
@@ -324,7 +326,7 @@ def generate_curobo_robot_yaml(
 
 
 # =============================================================================
-# World voxel generation from RigidObject meshes
+# World collision generation from RigidObject physical shapes
 # =============================================================================
 
 
@@ -417,76 +419,280 @@ def _convex_hulls_to_voxel_entry(
     }
 
 
+def _pose_matrix_to_list(pose: torch.Tensor) -> list[float]:
+    """Convert a homogeneous pose matrix to cuRobo ``xyz+wxyz`` format."""
+    pose = torch.as_tensor(pose, dtype=torch.float32).detach().cpu()
+    return torch.cat([pose[:3, 3], quat_from_matrix(pose[:3, :3])]).tolist()
+
+
+def _collision_shape_mesh(
+    shape: CollisionShapeDesc,
+    plane_dims: tuple[float, float, float],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convert a physical collision descriptor to a local triangle mesh."""
+    if shape.vertices is not None and shape.triangles is not None:
+        if shape.vertices.numel() and shape.triangles.numel():
+            return shape.vertices, shape.triangles
+
+    import trimesh
+
+    if shape.shape_type == RigidBodyShape.BOX:
+        assert shape.half_extents is not None
+        mesh = trimesh.creation.box(extents=(2.0 * shape.half_extents).numpy())
+    elif shape.shape_type == RigidBodyShape.PLANE:
+        mesh = trimesh.creation.box(extents=plane_dims)
+    elif shape.shape_type == RigidBodyShape.SPHERE:
+        assert shape.radius is not None
+        mesh = trimesh.creation.icosphere(subdivisions=2, radius=shape.radius)
+    elif shape.shape_type == RigidBodyShape.CAPSULE:
+        assert shape.radius is not None and shape.half_height is not None
+        mesh = trimesh.creation.capsule(
+            radius=shape.radius, height=2.0 * shape.half_height
+        )
+    else:
+        raise ValueError(
+            f"Collision shape {shape.name!r} ({shape.shape_type.name}) does not "
+            "expose a mesh usable by cuRobo."
+        )
+    return (
+        torch.as_tensor(mesh.vertices, dtype=torch.float32),
+        torch.as_tensor(mesh.faces, dtype=torch.int32),
+    )
+
+
+def _estimated_voxel_count(
+    vertices: torch.Tensor,
+    voxel_size: float,
+    voxel_padding: float,
+) -> int:
+    """Estimate the dense ESDF allocation for a local collision mesh."""
+    extents = vertices.amax(dim=0) - vertices.amin(dim=0) + 2.0 * voxel_padding
+    shape = torch.clamp(torch.ceil(extents / voxel_size), min=2).to(torch.int64)
+    return int(torch.prod(shape).item())
+
+
+def _auto_collision_representation(
+    shape: CollisionShapeDesc,
+    *,
+    is_dynamic: bool,
+    voxel_size: float,
+    voxel_padding: float,
+    mesh_triangle_threshold: int,
+    max_voxel_count: int,
+    plane_dims: tuple[float, float, float],
+) -> str:
+    """Select a cuRobo representation from one physical shape descriptor."""
+    native = {
+        RigidBodyShape.BOX: "cuboid",
+        RigidBodyShape.PLANE: "cuboid",
+        RigidBodyShape.SPHERE: "sphere",
+        RigidBodyShape.CAPSULE: "capsule",
+        RigidBodyShape.CONVEX: "mesh",
+        RigidBodyShape.SDF: "mesh",
+    }
+    if shape.shape_type in native:
+        return native[shape.shape_type]
+    if shape.shape_type != RigidBodyShape.MESH:
+        raise ValueError(
+            f"No automatic cuRobo representation for DexSim shape "
+            f"{shape.shape_type.name}."
+        )
+
+    vertices, triangles = _collision_shape_mesh(shape, plane_dims)
+    effective_triangle_threshold = mesh_triangle_threshold * (2 if is_dynamic else 1)
+    if triangles.shape[0] <= effective_triangle_threshold:
+        return "mesh"
+    voxel_count = _estimated_voxel_count(vertices, voxel_size, voxel_padding)
+    if voxel_count <= max_voxel_count:
+        return "voxel"
+    logger.log_warning(
+        f"Keeping collision mesh {shape.name!r}: its estimated ESDF allocation "
+        f"({voxel_count} voxels) exceeds max_voxel_count={max_voxel_count}."
+    )
+    return "mesh"
+
+
+def _validate_forced_representation(
+    representation: str,
+    shape: CollisionShapeDesc,
+) -> None:
+    """Reject analytic overrides that do not match the physics shape."""
+    required_type = {
+        "cuboid": {RigidBodyShape.BOX, RigidBodyShape.PLANE},
+        "sphere": {RigidBodyShape.SPHERE},
+        "capsule": {RigidBodyShape.CAPSULE},
+    }
+    if (
+        representation in required_type
+        and shape.shape_type not in required_type[representation]
+    ):
+        raise ValueError(
+            f"Cannot represent DexSim {shape.shape_type.name} shape "
+            f"{shape.name!r} as {representation!r}."
+        )
+
+
 def generate_curobo_world_scene(
     rigid_objects: Sequence[RigidObject],
     *,
     env_id: int = 0,
+    representation: str = "auto",
+    overrides: dict[str, str] | None = None,
+    dynamic_obstacle_names: Sequence[str] = (),
     voxel_size: float = 0.01,
     voxel_padding: float = 0.005,
+    mesh_triangle_threshold: int = 5_000,
+    max_voxel_count: int = 2_000_000,
+    plane_dims: tuple[float, float, float] = (10.0, 10.0, 0.01),
 ) -> dict[str, dict[str, dict[str, object]]]:
-    """Build a VisACD-decomposed ESDF voxel scene for cuRobo.
+    """Build a mixed cuRobo scene from DexSim physical collision shapes.
 
-    Every source object produces one same-named voxel layer. The SDF is the
-    union of at most 16 convex hulls returned by DexSim's
-    :func:`convex_decomposition_visacd`.
+    ``auto`` preserves primitives, exports collision meshes directly, and uses
+    ESDF for triangle meshes whose complexity exceeds ``mesh_triangle_threshold``
+    when the estimated dense grid fits ``max_voxel_count``. Forced ``voxel``
+    remains available globally or per object.
 
     Args:
-        rigid_objects: Live obstacles whose meshes define the collision world.
-        env_id: Environment row used for geometry and initial object poses.
+        rigid_objects: Live obstacles whose physical shapes define the world.
+        env_id: Environment row used for geometry and initial poses.
+        representation: Global ``auto`` or forced representation policy.
+        overrides: Per-object policies keyed by rigid-object UID.
+        dynamic_obstacle_names: Object UIDs whose poses change between plans.
         voxel_size: ESDF voxel edge length in meters.
-        voxel_padding: Free-space padding around each object-local mesh.
+        voxel_padding: Free-space padding around object-local voxel grids.
+        mesh_triangle_threshold: Auto-policy triangle threshold.
+        max_voxel_count: Auto-policy upper bound for a dense ESDF grid.
+        plane_dims: Workspace-bounded cuboid dimensions used for planes.
 
     Returns:
-        A tensor-backed ``{"voxel": ...}`` mapping accepted by cuRobo
-        :meth:`Scene.create`.
+        A mixed tensor-backed scene mapping accepted by cuRobo ``Scene.create``.
 
     Raises:
-        ValueError: If no usable uniquely named objects are provided.
+        ValueError: If configuration or collision geometry is unsupported.
         RuntimeError: If DexSim VisACD decomposition fails.
     """
     rigid_objects = list(rigid_objects)
     if not rigid_objects:
         raise ValueError("rigid_objects must contain at least one RigidObject.")
+    overrides = overrides or {}
+    supported = {"auto", "voxel", "mesh", "cuboid", "sphere", "capsule"}
+    if representation not in supported or any(
+        value not in supported for value in overrides.values()
+    ):
+        raise ValueError(f"representation policies must be one of {sorted(supported)}.")
+    if voxel_size <= 0.0:
+        raise ValueError(f"voxel_size must be positive, got {voxel_size}.")
+    if voxel_padding < 0.0:
+        raise ValueError(f"voxel_padding must be non-negative, got {voxel_padding}.")
+    if mesh_triangle_threshold < 0:
+        raise ValueError("mesh_triangle_threshold must be non-negative.")
+    if max_voxel_count <= 0:
+        raise ValueError("max_voxel_count must be positive.")
+    if len(plane_dims) != 3 or any(value <= 0.0 for value in plane_dims):
+        raise ValueError("plane_dims must contain three positive dimensions.")
 
-    voxels: dict[str, dict[str, object]] = {}
-    for idx, obj in enumerate(rigid_objects):
-        name = getattr(obj, "uid", None) or f"obstacle_{idx}"
-        if name in voxels:
+    scene: dict[str, dict[str, dict[str, object]]] = {}
+    object_names: set[str] = set()
+    for object_idx, obj in enumerate(rigid_objects):
+        object_name = getattr(obj, "uid", None) or f"obstacle_{object_idx}"
+        if object_name in object_names:
             raise ValueError(
-                f"Duplicate obstacle name {name!r}; RigidObject uids must be unique."
+                f"Duplicate obstacle name {object_name!r}; RigidObject uids must be unique."
             )
-        vertices = obj.get_vertices(env_ids=[env_id], scale=True)[0]
-        faces = obj.get_triangles(env_ids=[env_id])[0]
-        pose = obj.get_local_pose(to_matrix=False)[env_id]
-        if vertices is None or faces is None or vertices.numel() == 0:
-            logger.log_warning(
-                f"RigidObject {name!r} has no mesh geometry; skipping collision export."
+        object_names.add(object_name)
+        shapes = obj.get_collision_shapes(env_id=env_id)
+        object_pose = (
+            torch.as_tensor(
+                obj.get_local_pose(to_matrix=True)[env_id], dtype=torch.float32
             )
-            continue
-        obstacle_name, fields = _convex_hulls_to_voxel_entry(
-            name,
-            vertices,
-            faces,
-            pose,
-            voxel_size=voxel_size,
-            voxel_padding=voxel_padding,
+            .detach()
+            .cpu()
         )
-        voxels[obstacle_name] = fields
+        for shape_idx, shape in enumerate(shapes):
+            obstacle_name = (
+                object_name if len(shapes) == 1 else f"{object_name}__shape_{shape_idx}"
+            )
+            shape_pose = object_pose @ shape.local_pose
+            policy = overrides.get(object_name, representation)
+            if policy == "auto":
+                policy = _auto_collision_representation(
+                    shape,
+                    is_dynamic=object_name in dynamic_obstacle_names,
+                    voxel_size=voxel_size,
+                    voxel_padding=voxel_padding,
+                    mesh_triangle_threshold=mesh_triangle_threshold,
+                    max_voxel_count=max_voxel_count,
+                    plane_dims=plane_dims,
+                )
+            _validate_forced_representation(policy, shape)
+            if shape.shape_type == RigidBodyShape.PLANE:
+                offset = torch.eye(4, dtype=torch.float32)
+                offset[2, 3] = -0.5 * plane_dims[2]
+                shape_pose = shape_pose @ offset
 
-    if not voxels:
+            fields: dict[str, object]
+            if policy == "cuboid":
+                if shape.shape_type == RigidBodyShape.PLANE:
+                    dims = list(plane_dims)
+                else:
+                    assert shape.half_extents is not None
+                    dims = (2.0 * shape.half_extents).tolist()
+                fields = {"pose": _pose_matrix_to_list(shape_pose), "dims": dims}
+            elif policy == "sphere":
+                assert shape.radius is not None
+                fields = {
+                    "pose": _pose_matrix_to_list(shape_pose),
+                    "radius": shape.radius,
+                }
+            elif policy == "capsule":
+                assert shape.radius is not None and shape.half_height is not None
+                fields = {
+                    "pose": _pose_matrix_to_list(shape_pose),
+                    "radius": shape.radius,
+                    "base": [0.0, 0.0, -shape.half_height],
+                    "tip": [0.0, 0.0, shape.half_height],
+                }
+            elif policy == "mesh":
+                vertices, triangles = _collision_shape_mesh(shape, plane_dims)
+                fields = {
+                    "pose": _pose_matrix_to_list(shape_pose),
+                    "vertices": vertices.tolist(),
+                    "faces": triangles.reshape(-1).tolist(),
+                }
+            elif policy == "voxel":
+                vertices, triangles = _collision_shape_mesh(shape, plane_dims)
+                _, fields = _convex_hulls_to_voxel_entry(
+                    obstacle_name,
+                    vertices,
+                    triangles,
+                    shape_pose,
+                    voxel_size=voxel_size,
+                    voxel_padding=voxel_padding,
+                )
+            else:  # pragma: no cover - policy is validated above
+                raise AssertionError(f"Unhandled collision policy {policy!r}.")
+            scene.setdefault(policy, {})[obstacle_name] = fields
+
+    unknown_overrides = sorted(set(overrides) - object_names)
+    if unknown_overrides:
+        raise ValueError(
+            f"representation overrides reference unknown RigidObject UIDs: "
+            f"{unknown_overrides}."
+        )
+
+    if not scene:
         raise ValueError(
             "No collision obstacles could be generated from the given RigidObjects."
         )
-    # VoxelData allocates each layer with the first layer's capacity. Keep the
-    # largest layer first so differently-sized object grids all fit the cache.
-    voxels = dict(
-        sorted(
-            voxels.items(),
-            key=lambda item: int(item[1]["feature_tensor"].numel()),
-            reverse=True,
+    if "voxel" in scene:
+        scene["voxel"] = dict(
+            sorted(
+                scene["voxel"].items(),
+                key=lambda item: int(item[1]["feature_tensor"].numel()),
+                reverse=True,
+            )
         )
-    )
-    return {"voxel": voxels}
+    return scene
 
 
 # =============================================================================
@@ -733,16 +939,13 @@ def _remove_dexsim_visualization_actors(env: Any, actors: Sequence[Any]) -> None
 
 
 def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return world-space centers and radii for the ESDF surface overlay."""
+    """Return world-space samples and radii for the collision-world overlay."""
     if isinstance(world_scene, dict):
         voxel_entries = list(world_scene.get("voxel", {}).items())
     else:
         voxel_entries = [
             (voxel.name, voxel) for voxel in (getattr(world_scene, "voxel", None) or [])
         ]
-    if not voxel_entries:
-        raise ValueError("The cuRobo world scene contains no voxel collision data.")
-
     centers: list[torch.Tensor] = []
     radii: list[torch.Tensor] = []
     for name, entry in voxel_entries:
@@ -764,6 +967,61 @@ def _world_collision_sphere_data(world_scene: Any) -> tuple[torch.Tensor, torch.
         centers.append(world_points)
         radii.append(torch.full((world_points.shape[0],), 0.5 * voxel_size))
 
+    representation_names = ("cuboid", "sphere", "capsule", "mesh")
+    for representation in representation_names:
+        if isinstance(world_scene, dict):
+            entries = list(world_scene.get(representation, {}).items())
+        else:
+            entries = [
+                (entry.name, entry)
+                for entry in (getattr(world_scene, representation, None) or [])
+            ]
+        for _, entry in entries:
+            get_value = (
+                entry.get
+                if isinstance(entry, dict)
+                else lambda key: getattr(entry, key)
+            )
+            pose = torch.as_tensor(get_value("pose"), dtype=torch.float32)
+            rotation = matrix_from_quat(pose[3:7])
+            if representation == "sphere":
+                local_points = torch.zeros((1, 3), dtype=torch.float32)
+                sample_radii = torch.tensor([float(get_value("radius"))])
+            elif representation == "capsule":
+                base = torch.as_tensor(get_value("base"), dtype=torch.float32)
+                tip = torch.as_tensor(get_value("tip"), dtype=torch.float32)
+                steps = torch.linspace(0.0, 1.0, 9).unsqueeze(-1)
+                local_points = base + steps * (tip - base)
+                sample_radii = torch.full(
+                    (local_points.shape[0],), float(get_value("radius"))
+                )
+            elif representation == "cuboid":
+                dims = torch.as_tensor(get_value("dims"), dtype=torch.float32)
+                signs = torch.tensor(
+                    [
+                        [x, y, z]
+                        for x in (-0.5, 0.5)
+                        for y in (-0.5, 0.5)
+                        for z in (-0.5, 0.5)
+                    ],
+                    dtype=torch.float32,
+                )
+                local_points = signs * dims
+                sample_radii = torch.full(
+                    (local_points.shape[0],), max(0.005, float(dims.amin()) * 0.1)
+                )
+            else:
+                local_points = torch.as_tensor(
+                    get_value("vertices"), dtype=torch.float32
+                ).reshape(-1, 3)
+                if local_points.shape[0] > 10_000:
+                    stride = (local_points.shape[0] + 9_999) // 10_000
+                    local_points = local_points[::stride]
+                sample_radii = torch.full((local_points.shape[0],), 0.005)
+            world_points = local_points @ rotation.T + pose[:3]
+            centers.append(world_points)
+            radii.append(sample_radii)
+
     if not centers:
         raise ValueError(
             "The cuRobo world scene contains no visible collision surface."
@@ -779,13 +1037,13 @@ def visualize_curobo_world_collision_model(
     env: Any | None = None,
     material: Any | None = None,
 ) -> list[Any]:
-    """Add the cuRobo ESDF collision surface to the DexSim scene.
+    """Add a sampled cuRobo collision-world overlay to the DexSim scene.
 
     The rigid objects are already present in the live DexSim scene, so this
-    function only adds an overlay for the voxel collision data consumed by
-    cuRobo. Voxels within half a voxel of the zero level set are rendered as
-    half-voxel-radius spheres. All spheres are merged into one Open3D mesh,
-    written temporarily under ``/tmp``, and imported as one DexSim actor.
+    function only adds an overlay for the collision data consumed by cuRobo.
+    Voxel zero-level samples, analytic primitives, and mesh vertices are rendered
+    as spheres. All samples are merged into one Open3D mesh, written temporarily
+    under ``/tmp``, and imported as one DexSim actor.
 
     Args:
         rigid_objects: Live simulator obstacles represented by the cache.
@@ -830,11 +1088,11 @@ def visualize_curobo_collision_models(
     """Show robot and world collision models in DexSim until Enter is pressed.
 
     Robot spheres are loaded from the generated cuRobo YAML and transformed by
-    the current simulator link poses. Obstacle spheres show the zero level set
-    of the ESDF voxel data passed to cuRobo. Robot and obstacle spheres are each
-    merged into one temporary DexSim actor so they can use blue and red
-    materials respectively. Both actors are removed before the function returns,
-    including when ``input`` is interrupted.
+    the current simulator link poses. Obstacle samples show the mixed scene data
+    passed to cuRobo. Robot and obstacle samples are each merged into one
+    temporary DexSim actor so they can use blue and red materials respectively.
+    Both actors are removed before the function returns, including when ``input``
+    is interrupted.
     """
     import dexsim
     import yaml

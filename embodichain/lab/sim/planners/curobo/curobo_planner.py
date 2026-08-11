@@ -133,21 +133,40 @@ class _RigidObjectRefList(list):
 class CuroboWorldCfg:
     """Static collision-world configuration for the cuRobo backend.
 
-    The collision world is always auto-generated from live :class:`RigidObject`
-    meshes (see :attr:`rigid_objects`); there is no external scene-YAML path.
+    The collision world is generated from live :class:`RigidObject` physical
+    collision shapes (see :attr:`rigid_objects`); there is no external
+    scene-YAML path.
     """
 
     rigid_objects: list[RigidObject] | None = None
-    """Live objects to bake into the auto-generated voxel collision scene.
+    """Live objects to export into the auto-generated collision scene.
 
-    The adapter reads each object's mesh (``get_vertices`` / ``get_triangles``),
-    decomposes it with DexSim VisACD, and builds a cuRobo ESDF voxel layer cached
-    on disk by content hash. Poses are expressed in the cuRobo world/base frame,
-    so this is exact when the robot base sits at the simulator world origin. For
-    obstacles that move or live in an offset base frame, also list their names in
-    :attr:`dynamic_obstacle_names` to update poses at plan time. ``None`` yields an
-    initially empty collision world.
+    The adapter reads :meth:`RigidObject.get_collision_shapes`, so planning uses
+    the physical geometry seen by DexSim rather than combined visual meshes.
+    Poses are expressed in the cuRobo world/base frame. For obstacles that move
+    or live in an offset base frame, also list their names in
+    :attr:`dynamic_obstacle_names`. ``None`` yields an empty collision world.
     """
+
+    representation: str = "auto"
+    """Collision representation policy: ``"auto"`` or forced ``"voxel"``."""
+
+    overrides: dict[str, str] = {}
+    """Per-object representation overrides keyed by :class:`RigidObject` UID.
+
+    Supported values are ``"auto"``, ``"voxel"``, ``"mesh"``, ``"cuboid"``,
+    ``"sphere"``, and ``"capsule"``. A forced analytic representation must
+    match the source physical shape.
+    """
+
+    mesh_triangle_threshold: int = 5_000
+    """Triangle count above which ``auto`` prefers voxel ESDF for mesh shapes."""
+
+    max_voxel_count: int = 2_000_000
+    """Maximum estimated voxel count allowed when ``auto`` selects ESDF."""
+
+    plane_dims: tuple[float, float, float] = (10.0, 10.0, 0.01)
+    """Workspace-bounded dimensions used to represent an infinite plane."""
 
     voxel_size: float = 0.01
     """ESDF voxel edge length in meters for every world collision object."""
@@ -466,6 +485,38 @@ def _validate_dynamic_obstacles(
             )
 
 
+_WORLD_REPRESENTATIONS = frozenset(
+    {"auto", "voxel", "mesh", "cuboid", "sphere", "capsule"}
+)
+
+
+def _validate_world_cfg(cfg: CuroboWorldCfg) -> None:
+    """Validate collision-world representation policy settings."""
+    if cfg.representation not in _WORLD_REPRESENTATIONS:
+        raise ValueError(
+            f"CuroboWorldCfg.representation must be one of "
+            f"{sorted(_WORLD_REPRESENTATIONS)}, got {cfg.representation!r}."
+        )
+    invalid_overrides = {
+        name: value
+        for name, value in cfg.overrides.items()
+        if value not in _WORLD_REPRESENTATIONS
+    }
+    if invalid_overrides:
+        raise ValueError(
+            f"CuroboWorldCfg.overrides contains unsupported representations: "
+            f"{invalid_overrides}."
+        )
+    if cfg.mesh_triangle_threshold < 0:
+        raise ValueError("CuroboWorldCfg.mesh_triangle_threshold must be non-negative.")
+    if cfg.max_voxel_count <= 0:
+        raise ValueError("CuroboWorldCfg.max_voxel_count must be positive.")
+    if len(cfg.plane_dims) != 3 or any(value <= 0.0 for value in cfg.plane_dims):
+        raise ValueError(
+            "CuroboWorldCfg.plane_dims must contain three positive dimensions."
+        )
+
+
 # =============================================================================
 # Lazy cuRobo V2 binding acquisition
 # =============================================================================
@@ -756,7 +807,9 @@ class CuroboPlanner(BasePlanner):
         self._backend_cache: dict[tuple[str, int, bool, MoveType], "_CuroboBackend"] = (
             {}
         )
+        self._dynamic_shape_cache: dict[str, list[tuple[str, torch.Tensor]]] = {}
         world_cfg = cfg.world
+        _validate_world_cfg(world_cfg)
         if world_cfg.voxel_size <= 0.0:
             logger.log_error(
                 f"CuroboWorldCfg.voxel_size must be positive, got "
@@ -1527,7 +1580,7 @@ class CuroboPlanner(BasePlanner):
         return hasher.hexdigest()
 
     def _auto_generate_world_scene(self, world_cfg: CuroboWorldCfg) -> "Any":
-        """Load or generate a tensor-backed cuRobo voxel scene."""
+        """Load or generate a tensor-backed mixed cuRobo collision scene."""
         from .curobo_yaml import generate_curobo_world_scene
 
         rigid_objects = world_cfg.rigid_objects
@@ -1545,17 +1598,23 @@ class CuroboPlanner(BasePlanner):
         cache_key = self._world_scene_cache_key(world_cfg)
         cache_path = os.path.join(cache_dir, f"world_{cache_key}.pt")
         if not auto.force and os.path.exists(cache_path):
-            logger.log_info(f"cuRobo voxel world cache hit: {cache_path}")
+            logger.log_info(f"cuRobo collision world cache hit: {cache_path}")
             scene_data = torch.load(cache_path, map_location="cpu", weights_only=True)
         else:
             logger.log_info(
-                f"Generating VisACD voxel collision data from "
+                f"Generating physical-shape collision data from "
                 f"{len(rigid_objects)} RigidObject(s) -> {cache_path}"
             )
             scene_data = generate_curobo_world_scene(
                 rigid_objects,
+                representation=world_cfg.representation,
+                overrides=world_cfg.overrides,
+                dynamic_obstacle_names=world_cfg.dynamic_obstacle_names,
                 voxel_size=world_cfg.voxel_size,
                 voxel_padding=world_cfg.voxel_padding,
+                mesh_triangle_threshold=world_cfg.mesh_triangle_threshold,
+                max_voxel_count=world_cfg.max_voxel_count,
+                plane_dims=world_cfg.plane_dims,
             )
             os.makedirs(cache_dir, exist_ok=True)
             torch.save(scene_data, cache_path)
@@ -1568,20 +1627,34 @@ class CuroboPlanner(BasePlanner):
         return self._bindings.Scene.create(runtime_data)
 
     def _world_scene_cache_key(self, world_cfg: CuroboWorldCfg) -> str:
-        """Hash object geometry, initial poses, and voxel settings."""
+        """Hash physical collision geometry, initial poses, and policy settings."""
         hasher = hashlib.md5()
+        hasher.update(b"physical-shapes-v1")
+        hasher.update(world_cfg.representation.encode("utf-8"))
+        hasher.update(repr(sorted(world_cfg.overrides.items())).encode("utf-8"))
+        hasher.update(repr(sorted(world_cfg.dynamic_obstacle_names)).encode("utf-8"))
         hasher.update(str(world_cfg.voxel_size).encode("utf-8"))
         hasher.update(str(world_cfg.voxel_padding).encode("utf-8"))
+        hasher.update(str(world_cfg.mesh_triangle_threshold).encode("utf-8"))
+        hasher.update(str(world_cfg.max_voxel_count).encode("utf-8"))
+        hasher.update(repr(world_cfg.plane_dims).encode("utf-8"))
         for idx, obj in enumerate(world_cfg.rigid_objects or []):
             name = getattr(obj, "uid", None) or f"obstacle_{idx}"
             hasher.update(name.encode("utf-8"))
-            vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
-            faces = obj.get_triangles(env_ids=[0])[0]
-            pose = obj.get_local_pose(to_matrix=False)[0]
-            hasher.update(
-                vertices.detach().to("cpu").to(torch.float32).numpy().tobytes()
-            )
-            hasher.update(faces.detach().to("cpu").numpy().tobytes())
+            for shape in obj.get_collision_shapes(env_id=0):
+                hasher.update(shape.name.encode("utf-8"))
+                hasher.update(str(shape.shape_type.value).encode("utf-8"))
+                for value in (
+                    shape.local_pose,
+                    shape.half_extents,
+                    shape.vertices,
+                    shape.triangles,
+                ):
+                    if value is not None:
+                        hasher.update(value.detach().cpu().numpy().tobytes())
+                hasher.update(repr(shape.radius).encode("utf-8"))
+                hasher.update(repr(shape.half_height).encode("utf-8"))
+            pose = obj.get_local_pose(to_matrix=True)[0]
             hasher.update(pose.detach().to("cpu").to(torch.float32).numpy().tobytes())
         return hasher.hexdigest()
 
@@ -1590,12 +1663,12 @@ class CuroboPlanner(BasePlanner):
         control_part: str,
         env_id: int = 0,
     ) -> None:
-        """Visualize cached robot spheres and world collision voxels.
+        """Visualize cached robot spheres and world collision models.
 
         This materializes the same content-addressed caches used by the planner. The
         robot spheres are transformed by each link's live
         :meth:`~embodichain.lab.sim.objects.Articulation.get_link_pose`; obstacle
-        voxels retain the poses and ESDF values consumed by cuRobo.
+        samples retain the mixed physical-shape scene consumed by cuRobo.
 
         Args:
             control_part: Robot control part whose cuRobo profile/cache is used.
@@ -2215,23 +2288,69 @@ class CuroboPlanner(BasePlanner):
                 pose_tensor, device=self._curobo_device, dtype=torch.float32
             )
             b = pose_tensor.shape[0]
-            for cached_backend in backends:
-                key = id(cached_backend)
-                inv = inv_cache.get(key)
-                if inv is None or inv.shape[0] != b:
-                    if (
-                        backend is not None
-                        and sim_base_pose_inv is not None
-                        and sim_base_pose_inv.shape[0] == b
-                    ):
-                        inv = sim_base_pose_inv
-                    else:
-                        inv = pose_inv(self._get_sim_base_pose(cached_backend, b))
-                    inv_cache[key] = inv
-                curobo_pose = self._sim_world_to_curobo_base_pose(
-                    pose_tensor, cached_backend, inv
-                )
-                self._update_backend_obstacle(name, curobo_pose, cached_backend)
+            for obstacle_name, shape_local_pose in self._dynamic_obstacle_shapes(name):
+                local_pose = shape_local_pose.to(
+                    device=self._curobo_device, dtype=torch.float32
+                ).expand(b, -1, -1)
+                shape_pose_tensor = pose_tensor @ local_pose
+                for cached_backend in backends:
+                    key = id(cached_backend)
+                    inv = inv_cache.get(key)
+                    if inv is None or inv.shape[0] != b:
+                        if (
+                            backend is not None
+                            and sim_base_pose_inv is not None
+                            and sim_base_pose_inv.shape[0] == b
+                        ):
+                            inv = sim_base_pose_inv
+                        else:
+                            inv = pose_inv(self._get_sim_base_pose(cached_backend, b))
+                        inv_cache[key] = inv
+                    curobo_pose = self._sim_world_to_curobo_base_pose(
+                        shape_pose_tensor, cached_backend, inv
+                    )
+                    self._update_backend_obstacle(
+                        obstacle_name, curobo_pose, cached_backend
+                    )
+
+    def _dynamic_obstacle_shapes(
+        self, object_name: str
+    ) -> list[tuple[str, torch.Tensor]]:
+        """Resolve one object UID to stable cuRobo shape names and local poses."""
+        shape_cache = getattr(self, "_dynamic_shape_cache", None)
+        if shape_cache is None:
+            shape_cache = {}
+            self._dynamic_shape_cache = shape_cache
+        if object_name in shape_cache:
+            return shape_cache[object_name]
+        rigid_object = next(
+            (
+                obj
+                for obj in self.cfg.world.rigid_objects or []
+                if getattr(obj, "uid", None) == object_name
+            ),
+            None,
+        )
+        if rigid_object is None:
+            logger.log_error(
+                f"Dynamic obstacle {object_name!r} has no matching RigidObject in "
+                "CuroboWorldCfg.rigid_objects.",
+                ValueError,
+            )
+        shapes = rigid_object.get_collision_shapes(env_id=0)
+        results: list[tuple[str, torch.Tensor]] = []
+        for shape_idx, shape in enumerate(shapes):
+            obstacle_name = (
+                object_name if len(shapes) == 1 else f"{object_name}__shape_{shape_idx}"
+            )
+            local_pose = shape.local_pose.clone()
+            if shape.shape_type.name == "PLANE":
+                local_offset = torch.eye(4, dtype=torch.float32)
+                local_offset[2, 3] = -0.5 * self.cfg.world.plane_dims[2]
+                local_pose = local_pose @ local_offset
+            results.append((obstacle_name, local_pose))
+        shape_cache[object_name] = results
+        return results
 
     def _update_backend_obstacle(
         self, name: str, pose_tensor: torch.Tensor, backend: "_CuroboBackend"
