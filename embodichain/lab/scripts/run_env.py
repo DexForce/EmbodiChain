@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import select
 import sys
@@ -31,6 +32,9 @@ import torch
 import tqdm
 
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
+from embodichain.lab.gym.envs.expert_program.loader import (
+    load_expert_program as _load_expert_program,
+)
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
@@ -289,6 +293,16 @@ def generate_function(
             f"Episode {time_id} attempt {attempt}/{max_attempts} failed: "
             f"{result.terminal_reason}. Discarding {result.length} frames."
         )
+        if debug_mode:
+            log_warning(
+                "Failed demo trace: "
+                + json.dumps(
+                    result.to_metadata(),
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
 
     return False
 
@@ -742,6 +756,18 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.set_defaults(viser_image_fps=None)
 
     parser.add_argument(
+        "--expert-program",
+        type=str,
+        default=None,
+        help="Path to a declarative Expert Program (.json, .yaml, or .yml).",
+    )
+    parser.add_argument(
+        "--debug-mode",
+        action="store_true",
+        help="Log the structured trace for each failed demo attempt.",
+    )
+
+    parser.add_argument(
         "--replay",
         action="store_true",
         help="Replay a recorded trajectory (--replay_trajectory required).",
@@ -832,6 +858,9 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+    expert_program_path = getattr(args, "expert_program", None)
+    if expert_program_path is not None:
+        env_cfg.expert_program = _load_expert_program(expert_program_path)
 
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")

@@ -20,9 +20,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+import math
+from types import MappingProxyType
+from typing import Any, Literal
 
 import torch
+from tensordict import TensorDict
+
+from embodichain.lab.sim.types import EnvAction
 
 __all__ = [
     "DEMO_ANNOTATION_KEYS",
@@ -30,6 +35,7 @@ __all__ = [
     "DemoEpisodeResult",
     "DemoSegment",
     "DemoSegmentResult",
+    "ProcessedEnvAction",
     "execute_demo_episode",
     "resolve_demo_segments",
 ]
@@ -48,6 +54,69 @@ DEMO_ANNOTATION_KEYS = (
     "truncated",
 )
 """Per-frame annotation keys stored in expert rollout buffers."""
+
+
+def _json_safe_copy(value: Any, *, field_name: str) -> Any:
+    """Return an owned JSON value without implicit type coercion."""
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{field_name} contains a non-finite float.")
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if type(key) is not str or not key or key != key.strip():
+                raise ValueError(
+                    f"{field_name} mapping keys must be non-empty strings "
+                    "without outer whitespace."
+                )
+            result[key] = _json_safe_copy(
+                item,
+                field_name=f"{field_name}.{key}",
+            )
+        return result
+    if isinstance(value, (list, tuple)):
+        return [
+            _json_safe_copy(item, field_name=f"{field_name}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    raise TypeError(f"{field_name} contains non-JSON value {type(value).__name__}.")
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ProcessedEnvAction:
+    """Owned controller-ready action that must still pass through ``env.step``.
+
+    Semantic runtimes and demonstration bridges may already have produced the
+    action-manager output (for example, a full joint-position command assembled
+    from typed runtime endpoints). Wrapping it prevents the environment from
+    applying the pre-action transform a second time while retaining the normal
+    simulation, manager, recorder, reward, and dataset step lifecycle.
+
+    Args:
+        value: Controller-ready tensor or ``TensorDict``.
+        metadata: JSON-compatible provenance attached by the producer. The
+            environment does not interpret this mapping.
+    """
+
+    value: EnvAction
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, (torch.Tensor, TensorDict)):
+            raise TypeError("value must be a torch.Tensor or TensorDict.")
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("metadata must be a mapping.")
+        owned_value = self.value.clone()
+        owned_metadata = _json_safe_copy(self.metadata, field_name="metadata")
+        object.__setattr__(self, "value", owned_value)
+        object.__setattr__(self, "metadata", MappingProxyType(owned_metadata))
+
+    def snapshot(self) -> ProcessedEnvAction:
+        """Return an independently owned processed-action envelope."""
+        return ProcessedEnvAction(value=self.value, metadata=self.metadata)
 
 
 @dataclass(frozen=True)
@@ -69,6 +138,16 @@ class DemoSegment:
             parallel environment (or one scalar broadcast to every environment).
             Gym ``terminated`` and ``truncated`` remain episode-level signals;
             use this callback for subtask-level validation.
+        abort_actions: Optional callback invoked when the executor stops after
+            retrieving an action but before exhausting the iterable. It receives
+            a reason and ``last_action_consumed`` flag, and must return any
+            emergency controller actions that still need ordinary ``env.step``
+            consumption. This is the explicit cancellation handshake for lazy
+            runtimes whose command acknowledgements only mean locally buffered.
+        failure_policy: ``"batch_abort"`` preserves legacy batch-atomic
+            behavior. ``"row_independent"`` permanently freezes only failed
+            environment rows while peers continue through the shared segment
+            and later lazy segments.
     """
 
     actions: Iterable[Any]
@@ -77,6 +156,20 @@ class DemoSegment:
     instruction: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     validator: Callable[[], Any] | None = field(default=None, repr=False, compare=False)
+    abort_actions: Callable[..., Iterable[Any]] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    failure_policy: Literal["batch_abort", "row_independent"] = "batch_abort"
+
+    def __post_init__(self) -> None:
+        if self.abort_actions is not None and not callable(self.abort_actions):
+            raise TypeError("abort_actions must be callable or None.")
+        if self.failure_policy not in {"batch_abort", "row_independent"}:
+            raise ValueError(
+                "failure_policy must be 'batch_abort' or 'row_independent'."
+            )
 
 
 @dataclass(frozen=True)
@@ -118,6 +211,15 @@ class DemoSegmentResult:
     successes: tuple[bool, ...] = ()
     failure_reasons: tuple[str | None, ...] = ()
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("metadata must be a mapping.")
+        owned_metadata = _json_safe_copy(
+            self.metadata,
+            field_name="segment result metadata",
+        )
+        object.__setattr__(self, "metadata", MappingProxyType(owned_metadata))
+
     def to_metadata(self, env_id: int | None = None) -> dict[str, Any]:
         """Return a JSON-compatible aggregate or per-environment representation.
 
@@ -133,7 +235,10 @@ class DemoSegmentResult:
             "name": self.name,
             "target_uid": self.target_uid,
             "instruction": self.instruction,
-            "metadata": dict(self.metadata),
+            "metadata": _json_safe_copy(
+                self.metadata,
+                field_name="segment result metadata",
+            ),
         }
         if env_id is not None and self.start_steps:
             metadata.update(
@@ -267,6 +372,28 @@ def _as_bool_tuple(value: Any, num_envs: int) -> tuple[bool, ...]:
             f"Expected {num_envs} environment flags, got {tensor.numel()}."
         )
     return tuple(bool(item) for item in tensor.tolist())
+
+
+def _has_terminal_runtime_failure_trace(segment: DemoSegment) -> bool:
+    """Return whether a lazy segment recorded a canonical failed runtime.
+
+    Expert-program action iterables may terminate before yielding a controller
+    command when planning fails.  Their bridge finalizes the runtime trace while
+    exhausting the iterable and exposes a validator that commits row-local
+    failure.  This marker distinguishes that outcome from an ordinary empty
+    ``DemoSegment``, whose existing ``empty_segment`` guard remains unchanged.
+    """
+    runtime = segment.metadata.get("runtime")
+    if not isinstance(runtime, Mapping):
+        return False
+    return (
+        runtime.get("kind")
+        in {
+            "skill_result",
+            "parallel_skill_result",
+        }
+        and runtime.get("status") == "failed"
+    )
 
 
 def _dataset_instruction(env: Any) -> str:
@@ -448,7 +575,20 @@ def execute_demo_episode(
                     f"{segment.name}",
                 )
 
-            for action in actions:
+            action_iterator = iter(actions)
+            last_action_consumed: bool | None = None
+            action_error: Exception | None = None
+            while True:
+                try:
+                    action = next(action_iterator)
+                except StopIteration:
+                    break
+                except Exception as exc:
+                    action_error = exc
+                    actions_exhausted = False
+                    segment_reason = "action_generation_failed"
+                    break
+                last_action_consumed = False
                 if should_stop is not None and should_stop():
                     actions_exhausted = False
                     fatal_reason = "interrupted"
@@ -461,18 +601,32 @@ def execute_demo_episode(
                     publish_active_mask()
                     break
 
-                if normalize_action is not None:
-                    action = normalize_action(action)
-                if not all(active):
-                    if mask_action is None:
-                        raise RuntimeError(
-                            "A vector demo environment completed asynchronously but "
-                            "does not implement _mask_demo_action(action, active_mask)."
-                        )
-                    action = mask_action(action, tuple(active))
+                try:
+                    if normalize_action is not None:
+                        action = normalize_action(action)
+                    if not all(active):
+                        if mask_action is None:
+                            raise RuntimeError(
+                                "A vector demo environment completed asynchronously "
+                                "but does not implement "
+                                "_mask_demo_action(action, active_mask)."
+                            )
+                        action = mask_action(action, tuple(active))
+                except Exception as exc:
+                    action_error = exc
+                    actions_exhausted = False
+                    segment_reason = "action_processing_failed"
+                    break
 
                 active_before_step = tuple(active)
-                _, _, terminated_value, truncated_value, info = env.step(action)
+                try:
+                    _, _, terminated_value, truncated_value, info = env.step(action)
+                except Exception as exc:
+                    action_error = exc
+                    actions_exhausted = False
+                    segment_reason = "action_execution_failed"
+                    break
+                last_action_consumed = True
                 action_count += 1
                 last_info = info
                 for env_id, was_active in enumerate(active_before_step):
@@ -529,16 +683,21 @@ def execute_demo_episode(
                             step_failed = True
 
                 if step_failed:
-                    actions_exhausted = False
-                    fatal_reason = "truncated" if active_step_truncated else "failure"
-                    segment_reason = fatal_reason
-                    for env_id, is_active in enumerate(active):
-                        if is_active:
-                            terminal_reasons[env_id] = "batch_aborted"
-                            segment_failure_reasons[env_id] = "batch_aborted"
-                            active[env_id] = False
+                    if segment.failure_policy == "batch_abort":
+                        actions_exhausted = False
+                        fatal_reason = (
+                            "truncated" if active_step_truncated else "failure"
+                        )
+                        segment_reason = fatal_reason
+                        for env_id, is_active in enumerate(active):
+                            if is_active:
+                                terminal_reasons[env_id] = "batch_aborted"
+                                segment_failure_reasons[env_id] = "batch_aborted"
+                                active[env_id] = False
                     publish_active_mask()
-                    break
+                    if segment.failure_policy == "batch_abort" or not any(active):
+                        actions_exhausted = False
+                        break
 
                 publish_active_mask()
                 if not any(active):
@@ -558,7 +717,78 @@ def execute_demo_episode(
                     publish_active_mask()
                     break
 
-            if action_count == 0 and segment_reason is None:
+            if not actions_exhausted:
+                if segment.abort_actions is not None:
+                    reason = (
+                        segment_reason
+                        or fatal_reason
+                        or "demo segment execution stopped before exhaustion"
+                    )
+                    try:
+                        emergency_actions = segment.abort_actions(
+                            reason,
+                            last_action_consumed=bool(last_action_consumed),
+                        )
+                        if isinstance(emergency_actions, (str, bytes)):
+                            raise TypeError(
+                                "abort_actions must return an iterable of actions."
+                            )
+                        emergency_iterator = iter(emergency_actions)
+                        try:
+                            for emergency_action in emergency_iterator:
+                                if normalize_action is not None:
+                                    emergency_action = normalize_action(
+                                        emergency_action
+                                    )
+                                try:
+                                    _, _, _, _, emergency_info = env.step(
+                                        emergency_action
+                                    )
+                                except Exception as exc:
+                                    raise RuntimeError(
+                                        "Emergency demo safe-stop action failed "
+                                        "during env.step()."
+                                    ) from exc
+                                action_count += 1
+                                last_info = emergency_info
+                                for env_id, is_participant in enumerate(participants):
+                                    if is_participant:
+                                        lengths[env_id] += 1
+                        finally:
+                            close_emergency = getattr(
+                                emergency_iterator,
+                                "close",
+                                None,
+                            )
+                            if callable(close_emergency):
+                                close_emergency()
+                    finally:
+                        close_actions = getattr(action_iterator, "close", None)
+                        if callable(close_actions):
+                            close_actions()
+                else:
+                    close_actions = getattr(action_iterator, "close", None)
+                    if callable(close_actions):
+                        close_actions()
+
+            if action_error is not None:
+                raise RuntimeError(
+                    "Demo action generation, processing, or execution failed "
+                    "after an emergency safe-stop attempt."
+                ) from action_error
+
+            traced_terminal_runtime_failure = (
+                action_count == 0
+                and actions_exhausted
+                and segment_reason is None
+                and segment.validator is not None
+                and _has_terminal_runtime_failure_trace(segment)
+            )
+            if (
+                action_count == 0
+                and segment_reason is None
+                and not traced_terminal_runtime_failure
+            ):
                 fatal_reason = "empty_segment"
                 segment_reason = fatal_reason
                 for env_id, is_participant in enumerate(participants):
@@ -588,15 +818,25 @@ def execute_demo_episode(
                         terminal_reasons[env_id] = "segment_validation_failed"
 
                 if validation_failed:
-                    fatal_reason = "segment_validation_failed"
-                    segment_reason = fatal_reason
-                    for env_id, is_active in enumerate(active):
-                        if is_active:
-                            if segment_failure_reasons[env_id] is None:
-                                segment_failure_reasons[env_id] = "batch_aborted"
-                                terminal_reasons[env_id] = "batch_aborted"
-                            segment_successes[env_id] = False
-                            active[env_id] = False
+                    if segment.failure_policy == "batch_abort":
+                        fatal_reason = "segment_validation_failed"
+                        segment_reason = fatal_reason
+                        for env_id, is_active in enumerate(active):
+                            if is_active:
+                                if segment_failure_reasons[env_id] is None:
+                                    segment_failure_reasons[env_id] = "batch_aborted"
+                                    terminal_reasons[env_id] = "batch_aborted"
+                                segment_successes[env_id] = False
+                                active[env_id] = False
+                    else:
+                        for env_id, is_active in enumerate(active):
+                            if (
+                                is_active
+                                and segment_failure_reasons[env_id]
+                                == "segment_validation_failed"
+                            ):
+                                segment_successes[env_id] = False
+                                active[env_id] = False
                     publish_active_mask()
 
             participant_ids = [
