@@ -31,6 +31,7 @@ from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
+from .tracking import TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -58,6 +59,7 @@ class AtomicActionEngine:
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
         ) = None,
+        tracking_runtime: TrackingRuntime | None = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -72,6 +74,9 @@ class AtomicActionEngine:
                 ``skill_profile`` are mutually exclusive.
             endpoint_adapters: Optional exact-type endpoint adapters used when
                 binding ``skill_profile``. Invalid without a profile.
+            tracking_runtime: Optional exact-version feedback, projector, and
+                metric registries. Built-in joint tracking is installed when
+                omitted.
         """
         if endpoint_adapters is not None and skill_profile is None:
             raise ValueError("endpoint_adapters requires skill_profile.")
@@ -89,6 +94,7 @@ class AtomicActionEngine:
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
+            tracking_runtime=tracking_runtime,
         )
         self._actions: dict[str, AtomicAction] = {}
         self._skill_catalog_revision = 0
@@ -120,6 +126,11 @@ class AtomicActionEngine:
     def planning_services(self) -> ActionPlanningServices:
         """Engine-owned resources shared by every bound atomic action."""
         return self._planning_services
+
+    @property
+    def tracking_runtime(self) -> TrackingRuntime:
+        """Typed endpoint-feedback runtime used by plans and sessions."""
+        return self._planning_services.tracking_runtime
 
     @property
     def binding_owner_id(self) -> str:
@@ -665,6 +676,11 @@ class AtomicActionEngine:
         if plan.invocation_revision != request.revision:
             raise ValueError(
                 "ActionPlan.invocation_revision must preserve the request revision."
+            )
+        if plan.tracking_policy != request.tracking_policy:
+            raise ValueError(
+                "ActionPlan.tracking_policy must preserve the resolved request "
+                "tracking policy."
             )
         commands = plan.commands
         if commands.batch_size != context.batch_size:

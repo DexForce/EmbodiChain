@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from enum import Enum
 import math
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -29,11 +28,15 @@ import torch
 
 from embodichain.lab.sim.planners.utils import normalize_success_mask
 
-from .bindings import JointPositionTarget
 from .effects import StateDelta
 from .policies import RecoveryPolicy
-from .runtime_commands import JointPositionPayload, TimedCommandSequence
+from .runtime_commands import TimedCommandSequence
 from .state import PlanningContext
+from .tracking import (
+    FeedbackTerminalAcceptance,
+    TimedTrackingSequence,
+    TrackingPolicy,
+)
 
 
 def _validate_optional_trajectory_field(
@@ -378,13 +381,6 @@ class PlannerDiagnostics:
         )
 
 
-class ExecutionFeedbackMode(str, Enum):
-    """Feedback contract used to decide whether an action reached its target."""
-
-    JOINT_POSITION = "joint_position"
-    TIMED = "timed"
-
-
 @dataclass(frozen=True, slots=True)
 class EffectVerificationRequirement:
     """Explicit physical-effect verification independent of symbolic state.
@@ -472,10 +468,11 @@ class ActionPlan:
     plan_success: torch.Tensor
     commands: TimedCommandSequence
     recovery_policy: RecoveryPolicy
+    tracking_policy: TrackingPolicy
     planned_scene_version: int
     planned_collision_world_revision: tuple[int, ...]
     diagnostics: PlannerDiagnostics
-    feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED
+    tracking: TimedTrackingSequence | None = None
     joint_trajectory: TimedTrajectory | None = None
     segments: tuple[TrajectorySegment, ...] = ()
     scene_dependencies: tuple[str, ...] = ()
@@ -505,8 +502,8 @@ class ActionPlan:
             raise ValueError("plan_success batch must match the command sequence.")
         if self.commands.device != self.plan_success.device:
             raise ValueError("plan_success and commands must share a device.")
-        if not isinstance(self.feedback_mode, ExecutionFeedbackMode):
-            raise TypeError("feedback_mode must be an ExecutionFeedbackMode.")
+        if not isinstance(self.tracking_policy, TrackingPolicy):
+            raise TypeError("tracking_policy must be a TrackingPolicy.")
         expected_target_types: dict[tuple[str, str], type[object]] | None = None
         expected_target_fingerprints: dict[tuple[str, str], object] | None = None
         for frame_index, frame in enumerate(self.commands.frames):
@@ -567,101 +564,88 @@ class ActionPlan:
                 )
             if self.joint_trajectory.positions.device != self.commands.device:
                 raise ValueError("joint_trajectory and commands must share a device.")
-        if (
-            self.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
-            and self.joint_trajectory is None
-        ):
-            raise ValueError(
-                "joint_position feedback requires an owned joint_trajectory."
+        required_channels = {
+            metric.channel_id
+            for metric in (
+                ()
+                if self.tracking_policy.in_flight is None
+                else self.tracking_policy.in_flight.metrics
             )
-        if self.feedback_mode is ExecutionFeedbackMode.JOINT_POSITION:
-            if bool(self.plan_success.any().item()) and self.commands.frame_count == 0:
+        }
+        if isinstance(
+            self.tracking_policy.terminal,
+            FeedbackTerminalAcceptance,
+        ):
+            required_channels.update(
+                metric.channel_id for metric in self.tracking_policy.terminal.metrics
+            )
+        if self.tracking is None:
+            if required_channels:
                 raise ValueError(
-                    "joint_position feedback requires command frames when any "
+                    "Feedback tracking policies require an owned tracking sequence."
+                )
+        else:
+            if not isinstance(self.tracking, TimedTrackingSequence):
+                raise TypeError("tracking must be a TimedTrackingSequence or None.")
+            if self.tracking.batch_size != self.commands.batch_size:
+                raise ValueError("tracking batch must match the command sequence.")
+            if self.tracking.frame_count != self.commands.frame_count:
+                raise ValueError("tracking frames must match command sequence frames.")
+            if not torch.equal(self.tracking.env_ids, self.commands.env_ids):
+                raise ValueError("tracking env_ids must match the command sequence.")
+            if self.tracking.device != self.commands.device:
+                raise ValueError("tracking and commands must share a device.")
+            if not required_channels:
+                raise ValueError(
+                    "A tracking sequence requires an in-flight or terminal "
+                    "feedback metric."
+                )
+            if bool(self.plan_success.any().item()) and not self.tracking.frames:
+                raise ValueError(
+                    "Feedback tracking requires command frames when any "
                     "environment planned successfully."
                 )
-            assert self.joint_trajectory is not None
-            expected_destinations: dict[tuple[str, str], tuple[int, ...]] | None = None
-            for frame_index, frame in enumerate(self.commands.frames):
-                if not frame.commands:
-                    raise ValueError(
-                        "joint_position feedback requires at least one endpoint "
-                        f"command in frame {frame_index}."
+            expected_setpoint_keys: set[tuple[str, str, str]] | None = None
+            expected_setpoint_routes: (
+                dict[
+                    tuple[str, str, str],
+                    tuple[object, str, str],
+                ]
+                | None
+            ) = None
+            for frame_index, frame in enumerate(self.tracking.frames):
+                frame_keys = {setpoint.key for setpoint in frame.setpoints}
+                frame_routes = {
+                    setpoint.key: (
+                        setpoint.binding.source.source_fingerprint,
+                        setpoint.binding.projector.projector_id,
+                        setpoint.binding.projector.revision,
                     )
-                if any(
-                    not isinstance(command.target, JointPositionTarget)
-                    or not isinstance(command.payload, JointPositionPayload)
-                    for command in frame.commands
-                ):
-                    raise ValueError(
-                        "joint_position feedback accepts only JointPositionTarget "
-                        "and JointPositionPayload commands."
-                    )
-                for command in frame.commands:
-                    target = command.target
-                    payload = command.payload
-                    assert isinstance(target, JointPositionTarget)
-                    assert isinstance(payload, JointPositionPayload)
-                    if any(
-                        joint_id >= self.joint_trajectory.robot_dof
-                        for joint_id in target.joint_ids
-                    ):
-                        raise ValueError(
-                            f"Joint target {command.destination_key} contains joint "
-                            "IDs outside joint_trajectory robot_dof "
-                            f"{self.joint_trajectory.robot_dof}."
-                        )
-                    joint_ids = list(target.joint_ids)
-                    expected_positions = self.joint_trajectory.positions[
-                        :, frame_index, joint_ids
-                    ]
-                    if (
-                        payload.positions.dtype != expected_positions.dtype
-                        or not torch.equal(payload.positions, expected_positions)
-                    ):
-                        raise ValueError(
-                            f"Joint payload positions for {command.destination_key} "
-                            "must exactly match the corresponding joint_trajectory "
-                            f"slice at frame {frame_index}."
-                        )
-                    trajectory_velocities = self.joint_trajectory.velocities
-                    if (payload.velocities is None) != (trajectory_velocities is None):
-                        raise ValueError(
-                            f"Joint payload velocities for {command.destination_key} "
-                            "must have the same presence as joint_trajectory "
-                            "velocities."
-                        )
-                    if (
-                        payload.velocities is not None
-                        and trajectory_velocities is not None
-                    ):
-                        expected_velocities = trajectory_velocities[
-                            :, frame_index, joint_ids
-                        ]
-                        if (
-                            payload.velocities.dtype != expected_velocities.dtype
-                            or not torch.equal(
-                                payload.velocities,
-                                expected_velocities,
-                            )
-                        ):
-                            raise ValueError(
-                                "Joint payload velocities for "
-                                f"{command.destination_key} must exactly match the "
-                                "corresponding joint_trajectory slice at frame "
-                                f"{frame_index}."
-                            )
-                destinations = {
-                    command.destination_key: command.target.joint_ids
-                    for command in frame.commands
-                    if isinstance(command.target, JointPositionTarget)
+                    for setpoint in frame.setpoints
                 }
-                if expected_destinations is None:
-                    expected_destinations = destinations
-                elif destinations != expected_destinations:
+                frame_channels = {
+                    setpoint.binding.channel_id for setpoint in frame.setpoints
+                }
+                if frame_channels != required_channels:
                     raise ValueError(
-                        "joint_position feedback requires a stable joint endpoint "
-                        "set across every command frame."
+                        "Every tracking frame must cover exactly the configured "
+                        f"feedback channels; frame {frame_index} has "
+                        f"{sorted(frame_channels)}, expected "
+                        f"{sorted(required_channels)}."
+                    )
+                if expected_setpoint_keys is None:
+                    expected_setpoint_keys = frame_keys
+                    expected_setpoint_routes = frame_routes
+                elif frame_keys != expected_setpoint_keys:
+                    raise ValueError(
+                        "Tracking frames must preserve the same endpoint/channel "
+                        f"set; frame {frame_index} differs from frame 0."
+                    )
+                elif frame_routes != expected_setpoint_routes:
+                    raise ValueError(
+                        "Tracking frames must preserve each endpoint/channel "
+                        "source fingerprint and projector route; "
+                        f"frame {frame_index} differs from frame 0."
                     )
         if not isinstance(self.recovery_policy, RecoveryPolicy):
             raise TypeError("recovery_policy must be a RecoveryPolicy.")
@@ -749,6 +733,16 @@ class ActionPlan:
         object.__setattr__(self, "commands", self.commands.snapshot())
         object.__setattr__(
             self,
+            "tracking_policy",
+            self.tracking_policy.snapshot(),
+        )
+        object.__setattr__(
+            self,
+            "tracking",
+            None if self.tracking is None else self.tracking.snapshot(),
+        )
+        object.__setattr__(
+            self,
             "joint_trajectory",
             (
                 None
@@ -805,10 +799,11 @@ class ActionPlan:
             plan_success=self.plan_success,
             commands=self.commands,
             recovery_policy=self.recovery_policy,
+            tracking_policy=self.tracking_policy,
             planned_scene_version=self.planned_scene_version,
             planned_collision_world_revision=self.planned_collision_world_revision,
             diagnostics=self.diagnostics,
-            feedback_mode=self.feedback_mode,
+            tracking=self.tracking,
             joint_trajectory=self.joint_trajectory,
             segments=self.segments,
             scene_dependencies=self.scene_dependencies,
@@ -909,7 +904,6 @@ __all__ = [
     "ActionPlan",
     "CompiledTrajectory",
     "EffectVerificationRequirement",
-    "ExecutionFeedbackMode",
     "PlannerDiagnostics",
     "TimedTrajectory",
     "TrajectorySegment",

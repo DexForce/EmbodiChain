@@ -50,6 +50,10 @@ from embodichain.lab.sim.atomic_actions import (
     SceneEntityPose,
     TaskState,
 )
+from embodichain.lab.sim.atomic_actions.tracking import (
+    JointPositionTrackingMetric,
+    TrackingPolicy,
+)
 from embodichain.lab.sim.skills.calls import (
     HandOver,
     Pick,
@@ -953,6 +957,10 @@ def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> Non
         preset=SkillPolicyPreset(
             "safe",
             motion_policy=MotionPolicy(strategy="motion_gen"),
+            tracking_policy=TrackingPolicy.joint_position(
+                in_flight_max_abs_error=0.125,
+                terminal_max_abs_error=0.125,
+            ),
         )
     )
     compiler, engine = _compiler(
@@ -972,6 +980,14 @@ def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> Non
         engine.resolve(grounded.invocation).motion_policy.dynamic_collision_mode
         is DynamicCollisionMode.REQUIRED
     )
+    invocation_tracking = grounded.invocation.tracking_policy.in_flight
+    resolved_tracking = engine.resolve(grounded.invocation).tracking_policy.in_flight
+    assert invocation_tracking is not None
+    assert resolved_tracking is not None
+    assert isinstance(invocation_tracking.metrics[0], JointPositionTrackingMetric)
+    assert isinstance(resolved_tracking.metrics[0], JointPositionTrackingMetric)
+    assert invocation_tracking.metrics[0].tolerance == 0.125
+    assert resolved_tracking.metrics[0].tolerance == 0.125
 
 
 def test_place_inherits_known_pick_resource_when_primary_is_omitted() -> None:

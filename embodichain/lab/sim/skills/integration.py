@@ -1216,6 +1216,7 @@ class BoundSemanticIntegration:
                     preset.motion_policy,
                     dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
                 ),
+                tracking_policy=preset.tracking_policy,
                 recovery_policy=preset.recovery_policy,
                 runner_cfg=preset.runner_cfg,
                 effect_monitors=preset.effect_monitors,
