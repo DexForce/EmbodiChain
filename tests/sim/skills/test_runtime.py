@@ -99,9 +99,8 @@ class _InstantPick(AtomicAction):
 
     def _plan(self, request, context):
         goal = self.require_goal(request)
-        target = request.binding.endpoint("primary", "motion").require_target(
-            JointPositionTarget
-        )
+        endpoint = request.binding.endpoint("primary", "motion")
+        endpoint.require_target(JointPositionTarget)
         held = HeldObjectState(
             semantics=goal.semantics,
             object_to_eef=torch.eye(4).repeat(context.batch_size, 1, 1),
@@ -113,7 +112,7 @@ class _InstantPick(AtomicAction):
             success=True,
             commands=TimedCommandSequence((), context.env_ids),
             expected_effects=StateDelta(
-                held_object_updates={target.control_part: held}
+                held_object_updates={endpoint.task_state_key: held}
             ),
         )
 
@@ -126,16 +125,15 @@ class _InstantPlace(AtomicAction):
 
     def _plan(self, request, context):
         self.require_goal(request)
-        target = request.binding.endpoint("primary", "motion").require_target(
-            JointPositionTarget
-        )
+        endpoint = request.binding.endpoint("primary", "motion")
+        endpoint.require_target(JointPositionTarget)
         return self.build_command_plan(
             request,
             context,
             success=True,
             commands=TimedCommandSequence((), context.env_ids),
             expected_effects=StateDelta(
-                held_object_updates={target.control_part: None}
+                held_object_updates={endpoint.task_state_key: None}
             ),
         )
 
@@ -358,7 +356,7 @@ def test_task_preserves_verified_state_across_dynamic_segments() -> None:
 
     pick_result = task.run_segment((Pick(object=cube),), segment_id="acquire")
     assert pick_result.status is SemanticExecutionStatus.COMPLETED
-    assert task.task_state.held_object_mask("arm").tolist() == [True, True]
+    assert task.task_state.held_object_mask("manipulator").tolist() == [True, True]
 
     place_result = task.run_segment(
         (
@@ -392,7 +390,19 @@ def test_manual_execution_blocks_until_effect_mask_is_submitted() -> None:
     assert blocked.pending_effect is not None
     assert execution.task_result is None
 
-    completed = execution.step(effect_success=torch.tensor([True, True]))
+    completed = blocked
+    for _ in range(10):
+        if completed.status is SemanticExecutionStatus.COMPLETED:
+            break
+        effect_success = (
+            torch.tensor([True, True]) if execution.pending_effect is not None else None
+        )
+        completed = execution.step(effect_success=effect_success)
+        if (
+            completed.runner_step is not None
+            and completed.runner_step.wait_duration > 0
+        ):
+            runtime.clock.sleep(completed.runner_step.wait_duration)
     assert completed.status is SemanticExecutionStatus.COMPLETED
     assert execution.task_result is not None
     assert execution.task_result.status is SemanticTaskStatus.SUCCEEDED
@@ -440,7 +450,7 @@ def test_effect_failures_produce_partial_task_success_after_bounded_retries() ->
 
     assert result.status is SemanticTaskStatus.PARTIAL_SUCCESS
     assert result.eligible_mask.tolist() == [True, False]
-    assert result.task_state.held_object_mask("arm").tolist() == [True, False]
+    assert result.task_state.held_object_mask("manipulator").tolist() == [True, False]
 
 
 def test_runtime_rejects_concurrent_tasks() -> None:

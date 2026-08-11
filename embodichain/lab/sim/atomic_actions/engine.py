@@ -206,6 +206,8 @@ class AtomicActionEngine:
         self,
         skill: str | AtomicAction,
         endpoints: Mapping[str, Mapping[str, str]],
+        *,
+        task_state_keys: Mapping[str, str] | None = None,
     ) -> ActionBinding:
         """Build an advanced direct-core binding from control-part names.
 
@@ -213,6 +215,10 @@ class AtomicActionEngine:
             skill: Installed skill ID or an explicit action passed later to
                 :meth:`plan_action`.
             endpoints: Nested ``slot_id -> endpoint_id -> control_part`` mapping.
+            task_state_keys: Optional explicit stable task-state key for each
+                resource slot. See
+                :meth:`ActionPlanningServices.bind_control_parts` for inference
+                rules when omitted.
 
         Returns:
             Engine-owned generic endpoint binding.
@@ -237,7 +243,11 @@ class AtomicActionEngine:
             raise ValueError(
                 f"Skill {action.skill_id!r} has no explicit SkillBindingContract."
             )
-        return self._planning_services.bind_control_parts(contract, endpoints)
+        return self._planning_services.bind_control_parts(
+            contract,
+            endpoints,
+            task_state_keys=task_state_keys,
+        )
 
     def make_invocation(
         self,

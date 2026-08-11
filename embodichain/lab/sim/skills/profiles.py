@@ -1841,6 +1841,7 @@ class BoundRobotSkillProfile:
                         resource_id=resource.resource_id,
                         adapter_id=endpoint.adapter_id,
                         target=endpoint.runtime_target,
+                        task_state_key=resource.resource_id,
                         capabilities=endpoint.capabilities,
                         commands=endpoint.commands,
                         claim_tokens=endpoint.claim_tokens,

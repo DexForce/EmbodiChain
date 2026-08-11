@@ -193,6 +193,19 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
         object.__setattr__(self, "recovery_policy", deepcopy(self.recovery_policy))
         object.__setattr__(self, "skill_options", deepcopy(self.skill_options))
 
+    def snapshot(self) -> ResolvedActionRequest[GoalT, OptionsT]:
+        """Return an independently owned resolved-request snapshot."""
+        return ResolvedActionRequest(
+            skill_id=self.skill_id,
+            goal=self.goal,
+            binding=self.binding,
+            motion_policy=self.motion_policy,
+            recovery_policy=self.recovery_policy,
+            skill_options=self.skill_options,
+            invocation_id=self.invocation_id,
+            revision=self.revision,
+        )
+
 
 __all__ = [
     "ActionInvocation",

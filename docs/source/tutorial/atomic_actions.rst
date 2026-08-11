@@ -486,9 +486,10 @@ dependencies. Object-centric skills may additionally declare an explicit
 ``ObjectSemantics.entity_id`` when they ground an object pose from the same
 scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
 legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
-create a scene dependency. An ``ActionPlan`` may bound dependency monitoring
-with ``scene_dependency_end_segment``. ``PickUp`` uses ``approach`` as that
-boundary; joint tracking and collision-world revision checks are unaffected.
+create a scene dependency. An ``ActionPlan`` may bound each dependency with
+``scene_dependency_monitor_until``. ``PickUp`` uses the exclusive end of
+``approach`` as that boundary; joint tracking and collision-world revision
+checks are unaffected.
 
 Task-state effects
 ------------------

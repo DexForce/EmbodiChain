@@ -37,6 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointCommand,
     EndEffectorPoseGoal,
     EntityState,
+    EffectVerificationRequirement,
     ExecutionFeedbackMode,
     HeldObjectState,
     JointPositionPayload,
@@ -191,6 +192,11 @@ def _action_plan(
     plan_success: torch.Tensor | None = None,
     joint_trajectory: TimedTrajectory | None = None,
     feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
+    expected_effects: StateDelta | None = None,
+    effect_verification: EffectVerificationRequirement | None = None,
+    diagnostics: PlannerDiagnostics | None = None,
+    scene_dependencies: tuple[str, ...] = (),
+    scene_dependency_monitor_until: dict[str, int] | None = None,
 ) -> ActionPlan:
     if plan_success is None:
         plan_success = torch.ones(
@@ -205,10 +211,71 @@ def _action_plan(
         recovery_policy=RecoveryPolicy(),
         planned_scene_version=0,
         planned_collision_world_revision=(0,) * commands.batch_size,
-        diagnostics=PlannerDiagnostics(backend="test"),
+        diagnostics=(
+            PlannerDiagnostics(backend="test") if diagnostics is None else diagnostics
+        ),
         feedback_mode=feedback_mode,
         joint_trajectory=joint_trajectory,
+        scene_dependencies=scene_dependencies,
+        scene_dependency_monitor_until=(
+            {}
+            if scene_dependency_monitor_until is None
+            else scene_dependency_monitor_until
+        ),
+        expected_effects=StateDelta() if expected_effects is None else expected_effects,
+        effect_verification=effect_verification,
     )
+
+
+@pytest.mark.parametrize("kind", ("", " physical", "physical ", 1, True))
+def test_effect_verification_requirement_rejects_invalid_kind(kind: object) -> None:
+    with pytest.raises(ValueError, match="kind"):
+        EffectVerificationRequirement(kind=kind)  # type: ignore[arg-type]
+
+
+def test_action_plan_owns_explicit_effect_verification_requirement() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+    requirement = EffectVerificationRequirement(kind="articulation.joint_progress")
+
+    plan = _action_plan(commands, effect_verification=requirement)
+    requirement_snapshot = plan.effect_verification
+
+    assert plan.requires_effect_verification is True
+    assert requirement_snapshot is not None
+    assert requirement_snapshot is not requirement
+    assert requirement_snapshot.kind == requirement.kind
+    assert requirement_snapshot.snapshot() is not requirement_snapshot
+
+
+def test_action_plan_implicitly_verifies_nonempty_state_delta() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+    effects = StateDelta(held_object_updates={"arm": _held(batch_size=1)})
+
+    implicit = _action_plan(commands, expected_effects=effects)
+    no_effect = _action_plan(commands)
+
+    assert implicit.effect_verification is None
+    assert implicit.requires_effect_verification is True
+    assert no_effect.requires_effect_verification is False
+
+
+def test_action_plan_rejects_untyped_effect_verification_requirement() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+
+    with pytest.raises(TypeError, match="EffectVerificationRequirement"):
+        _action_plan(
+            commands,
+            effect_verification=object(),  # type: ignore[arg-type]
+        )
 
 
 class _DependencyAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
@@ -734,6 +801,28 @@ def test_build_plan_uses_action_scene_dependency_hook() -> None:
     assert plan.scene_dependencies == ("extra", "tracked")
 
 
+def test_build_segments_omits_zero_length_entry_and_preserves_offsets() -> None:
+    approach_length = 2
+    release_length = 3
+    segment_lengths = {
+        "approach": approach_length,
+        "hold": 0,
+        "release": release_length,
+    }
+
+    segments = AtomicAction._build_segments(
+        segment_lengths,
+        frame_count=sum(segment_lengths.values()),
+    )
+
+    assert tuple(
+        (segment.name, segment.start, segment.stop) for segment in segments
+    ) == (
+        ("approach", 0, approach_length),
+        ("release", approach_length, approach_length + release_length),
+    )
+
+
 def test_build_command_plan_rejects_unbound_runtime_destination() -> None:
     context = _context()
     generator = Mock()
@@ -865,25 +954,6 @@ def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
         )
 
 
-def test_action_plan_rejects_unknown_scene_dependency_end_segment() -> None:
-    plan = _action_plan(
-        _command_sequence(
-            env_ids=torch.tensor([0, 1], dtype=torch.long),
-            frame_count=2,
-        )
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="scene_dependency_end_segment must name an ActionPlan segment",
-    ):
-        replace(
-            plan,
-            scene_dependencies=("target",),
-            scene_dependency_end_segment="approach",
-        )
-
-
 def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
     env_ids = torch.tensor([4, 7], dtype=torch.long)
     commands = _command_sequence(env_ids=env_ids, frame_count=2)
@@ -925,6 +995,90 @@ def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
     assert plan.commands.env_ids.tolist() == [4, 7]
     assert plan.joint_trajectory is not None
     assert torch.equal(plan.joint_trajectory.positions, trajectory_positions)
+
+
+def test_planner_diagnostics_and_plan_snapshots_own_nested_metadata() -> None:
+    nested = {"solver": {"iterations": [3, 5]}}
+    diagnostics = PlannerDiagnostics(backend="test", metadata=nested)
+    plan = _action_plan(
+        _command_sequence(
+            env_ids=torch.tensor([4], dtype=torch.long),
+            frame_count=1,
+        ),
+        diagnostics=diagnostics,
+    )
+
+    nested["solver"]["iterations"][0] = 99
+    diagnostics.metadata["solver"]["iterations"][1] = 77
+    snapshot = plan.snapshot()
+    plan.diagnostics.metadata["solver"]["iterations"][0] = 42
+
+    assert snapshot.diagnostics.metadata["solver"]["iterations"] == [3, 5]
+
+
+def test_planner_diagnostics_rejects_non_string_messages() -> None:
+    with pytest.raises(TypeError, match="messages must contain strings"):
+        PlannerDiagnostics(
+            backend="test",
+            messages=("valid", 1),  # type: ignore[arg-type]
+        )
+
+
+def test_action_plan_owns_scene_dependency_monitor_cutoffs() -> None:
+    source = {"disabled": 0, "full_sequence": 2}
+    plan = _action_plan(
+        _command_sequence(
+            env_ids=torch.tensor([4], dtype=torch.long),
+            frame_count=2,
+        ),
+        scene_dependencies=("disabled", "full_sequence"),
+        scene_dependency_monitor_until=source,
+    )
+
+    source["disabled"] = 1
+    source["full_sequence"] = 1
+    snapshot = plan.snapshot()
+
+    assert plan.scene_dependency_monitor_until == {
+        "disabled": 0,
+        "full_sequence": 2,
+    }
+    assert snapshot.scene_dependency_monitor_until == {
+        "disabled": 0,
+        "full_sequence": 2,
+    }
+    assert snapshot.scene_dependency_monitor_until is not (
+        plan.scene_dependency_monitor_until
+    )
+
+
+@pytest.mark.parametrize("waypoint_index", (-1, 3, True, 1.5))
+def test_action_plan_rejects_invalid_scene_dependency_monitor_cutoff(
+    waypoint_index: object,
+) -> None:
+    with pytest.raises(ValueError, match="waypoint indices"):
+        _action_plan(
+            _command_sequence(
+                env_ids=torch.tensor([4], dtype=torch.long),
+                frame_count=2,
+            ),
+            scene_dependencies=("tracked",),
+            scene_dependency_monitor_until={
+                "tracked": waypoint_index  # type: ignore[dict-item]
+            },
+        )
+
+
+def test_action_plan_rejects_monitor_cutoff_for_non_dependency() -> None:
+    with pytest.raises(ValueError, match="keys must be scene dependencies"):
+        _action_plan(
+            _command_sequence(
+                env_ids=torch.tensor([4], dtype=torch.long),
+                frame_count=2,
+            ),
+            scene_dependencies=("tracked",),
+            scene_dependency_monitor_until={"other": 1},
+        )
 
 
 def test_action_plan_allows_timed_commands_without_joint_trajectory() -> None:

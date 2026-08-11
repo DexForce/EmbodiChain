@@ -32,17 +32,13 @@ from embodichain.utils.math import (
     quat_from_matrix,
 )
 
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
-from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
-from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
-from embodichain.lab.sim.atomic_actions.control import (
-    GRASP_COMMAND,
-    OPEN_COMMAND,
-    JointPositionCommand,
-)
-from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
-from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.goals import (
+from ._helpers import arm_qpos_from_state, require_shared_task_state_key
+from ..affordance import AntipodalAffordance
+from ..bindings import JointPositionTarget
+from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
+from ..core import AtomicAction, ObjectSemantics
+from ..effects import StateDelta
+from ..goals import (
     ObjectActionGoal,
     PoseGoalValue,
     _resolve_object_pose,
@@ -346,6 +342,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         grasp = binding.endpoint("primary", "grasp")
         manipulator = motion.require_target(JointPositionTarget)
         end_effector = grasp.require_target(JointPositionTarget)
+        task_state_key = require_shared_task_state_key(
+            motion,
+            grasp,
+            participant="PickUp primary participant",
+        )
         hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
             num_envs=context.batch_size,
@@ -434,6 +435,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         held = HeldObjectState(
             semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
         )
+        coordinated_updates = {
+            key: None
+            for key in state.task.coordinated_held_objects
+            if task_state_key in key
+        }
         return self.build_plan(
             request,
             context,
@@ -443,16 +449,15 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 env_ids=context.env_ids,
                 step_dt=context.require_control_dt(),
             ),
-            expected_effects=StateDelta(held_object_updates={control_part: held}),
+            expected_effects=StateDelta(
+                held_object_updates={task_state_key: held},
+                coordinated_held_object_updates=coordinated_updates,
+            ),
             segment_lengths=segment_lengths,
-            # Once the approach is dispatched the object can move because of
-            # contact or grasping. That self-induced motion must not look like
-            # an external dynamic-goal update.
-            scene_dependency_end_segment=(
-                "approach"
-                if segment_lengths.get("approach", 0) > 0
-                and self._scene_dependencies(request)
-                else None
+            scene_dependency_monitor_until=(
+                {}
+                if sem.entity_id is None
+                else {sem.entity_id: segment_lengths["approach"]}
             ),
         )
 

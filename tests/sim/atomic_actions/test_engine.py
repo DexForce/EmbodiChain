@@ -350,11 +350,14 @@ def test_engine_resolves_action_binding_from_robot_control_parts() -> None:
     resolved = engine.bind_control_parts(
         "stub",
         {"primary": {"motion": "all"}},
+        task_state_keys={"primary": "logical_robot"},
     )
-    target = resolved.endpoint("primary", "motion").require_target(JointPositionTarget)
+    endpoint = resolved.endpoint("primary", "motion")
+    target = endpoint.require_target(JointPositionTarget)
 
     assert target.control_part == "all"
     assert target.joint_ids == (0, 1, 2)
+    assert endpoint.task_state_key == "logical_robot"
 
 
 def test_engine_make_invocation_binds_direct_control_parts() -> None:
