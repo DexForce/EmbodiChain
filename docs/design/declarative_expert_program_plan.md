@@ -600,11 +600,19 @@ controller intent, not physical proof.
 passed the selected monitor. The target contract must treat contradictory
 evidence, including object-to-endpoint slip, as a real effect failure, invalidate
 the affected row's assumed relation, and enter bounded recovery instead of
-repairing the scene. Terminal effect failure already enters bounded recovery;
-phase-aware detection and failure-outcome state invalidation are not yet
-implemented. For handover, success transfers the verified relation from source
-to destination while the destination remains physically closed. Releasing the
-destination is a separate ``Place`` or ``Release`` semantic call.
+repairing the scene. The runtime now exposes the active named motion phase,
+observes phase-scoped held-object invariants from fresh physical evidence, and
+applies removal-only ``StateDelta`` reconciliation to failed rows before any
+retry or recovery hand-off. ``Pick`` can use the existing bounded action retry;
+``Place`` and ``HandOver`` currently emit a typed ``RECOVERY_REQUIRED`` boundary
+because replaying the same invocation after its required relation was removed
+would be invalid. A workflow-level re-acquisition policy, blocking acquisition
+gates, per-expectation terminal failure reconciliation, and fail-closed
+reconciliation for evidence that remains unresolved at the action deadline
+remain explicit design decisions rather than implicit scene repair. For
+handover, success transfers the verified relation from source to destination
+while the destination remains physically closed. Releasing the destination is
+a separate ``Place`` or ``Release`` semantic call.
 
 The first pure-dynamics rollout uses the staged **B** continuation policy. The
 standard simulation factory lowers both trajectory ``control_dt`` and runner
@@ -625,12 +633,12 @@ embodiment calibration, not effect-monitor success shortcuts: the normal
 ``0.05 rad`` tracking gate, bounded replanning, physical effect evidence, and
 settling thresholds remain enabled.
 
-This B stage is not the final continuation abstraction for mobile-base or
-whole-body transports. Such endpoints need a typed, transport-owned
-continuation command that can preserve the last successful setpoint per
-endpoint; they must not inherit a joint-qpos-specific latch. The phase-aware
-in-flight held-object guard and failure-state reconciliation described below
-also remain follow-up work.
+The B policy is the complete continuation scope of this refactor. A generic
+mobile-base or whole-body continuation abstraction is deliberately excluded
+from the implementation plan and acceptance checklist. If a later transport
+requires persistence beyond its normal command contract, it should be proposed
+and validated independently instead of becoming a blocker for the declarative
+expert-program rollout.
 
 ## 8. Expert Program configuration
 
@@ -1211,12 +1219,16 @@ The backend-neutral typed state expectations, evidence addresses and sources,
 pose/binary/scalar/joint evidence clauses, versioned monitor registry,
 profile-owned monitor selection, grounded Pick/Place/HandOver/articulation
 effects, row-local composite hysteresis kernel, canonical `SkillRuntime`, and
-production simulation evidence ports are wired end to end. Physical simulation
-acceptance is partial: Open Drawer and one cube Pick/Place/settle/validator
-cycle have completed. The embodiment-owned dual-UR5/PGI HandOver slice now
-completes Pick, transfer, terminal physical-effect verification, settling, and
-target validation through real contact dynamics; the full repeated-cube run
-remains validation work.
+production simulation evidence ports are wired end to end. Phase-scoped
+held-object guard requests, live evidence collection, row-local symbolic
+invalidation, bounded Pick retry, and typed external-recovery hand-off are also
+implemented. Physical simulation acceptance is partial: Open Drawer and one
+cube Pick/Place/settle/validator cycle have completed. The embodiment-owned
+dual-UR5/PGI HandOver slice now completes Pick, transfer, terminal
+physical-effect verification, settling, and target validation through real
+contact dynamics; blocking acquisition gates, workflow-level re-acquisition,
+per-expectation terminal reconciliation, fault-injection coverage, and the full
+repeated-cube run remain validation or design work.
 
 Deliverables:
 
@@ -1472,7 +1484,11 @@ The design is complete when all of the following hold:
       synthetic attachment, freezes the object, or overrides its pose.
 - [ ] Physical held-object loss is observed as effect failure, invalidates the
       affected symbolic relation, and exercises bounded recovery rather than
-      being hidden by a simulator-side attachment.
+      being hidden by a simulator-side attachment. The phase-aware observation,
+      row-local invalidation, bounded Pick retry, and typed recovery boundary
+      are implemented; blocking acquisition, per-expectation terminal
+      reconciliation, workflow-level re-acquisition, and real-simulation fault
+      injection remain open.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break

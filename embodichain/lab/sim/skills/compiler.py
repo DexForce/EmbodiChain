@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from enum import Enum
 from types import MappingProxyType
 from typing import ClassVar, TypeVar
 from uuid import uuid4
@@ -77,6 +78,8 @@ from .effects import (
     JointStateEffectClause,
     PoseRelationClause,
     PoseRelationExpectation,
+    ScalarEffectClause,
+    ScalarExpectation,
     SemanticEffectKind,
     SemanticEffectSpec,
     SymbolicStateKey,
@@ -475,6 +478,85 @@ class HandOverPoseProvider(ABC):
         """
 
 
+class HeldObjectGuardBaseline(str, Enum):
+    """Source of the verified pose baseline used by an in-flight guard."""
+
+    VERIFIED_TASK_STATE = "verified_task_state"
+    PLANNED_EFFECT = "planned_effect"
+
+
+@dataclass(frozen=True, slots=True)
+class GroundedHeldObjectGuard:
+    """One grounded, phase-scoped physical invariant for a held object.
+
+    Named trajectory segments only activate observation of the invariant; they
+    do not create an independent planning, timeout, or recovery boundary.  The
+    enclosing atomic action continues to own the recovery budget.
+    """
+
+    guard_id: str
+    active_segments: tuple[str, ...]
+    baseline: HeldObjectGuardBaseline
+    effect_spec: SemanticEffectSpec
+    effect_monitor: EffectMonitor = field(repr=False, compare=False)
+    invalidation_task_state_keys: tuple[str, ...]
+    retry_action: bool
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.guard_id, field_name="guard_id")
+        segments = tuple(self.active_segments)
+        if not segments or len(set(segments)) != len(segments):
+            raise ValueError(
+                "active_segments must contain unique non-empty segment names."
+            )
+        for segment in segments:
+            _validate_identifier(segment, field_name="active segment")
+        if not isinstance(self.baseline, HeldObjectGuardBaseline):
+            raise TypeError("baseline must be a HeldObjectGuardBaseline.")
+        if not isinstance(self.effect_spec, SemanticEffectSpec):
+            raise TypeError("effect_spec must be a SemanticEffectSpec.")
+        if self.effect_spec.effect_kind is not SemanticEffectKind.ATTACH:
+            raise ValueError("A held-object guard must observe an attach effect.")
+        expectations = tuple(
+            value
+            for value in self.effect_spec.state_expectations
+            if type(value) is HeldObjectStateExpectation
+        )
+        if len(expectations) != 1 or expectations[0].relation is not (
+            HeldObjectRelation.ATTACHED
+        ):
+            raise ValueError(
+                "A held-object guard must contain one attached expectation."
+            )
+        if not isinstance(self.effect_monitor, EffectMonitor):
+            raise TypeError("effect_monitor must be an EffectMonitor.")
+        invalidation_keys = tuple(self.invalidation_task_state_keys)
+        if not invalidation_keys or len(set(invalidation_keys)) != len(
+            invalidation_keys
+        ):
+            raise ValueError(
+                "invalidation_task_state_keys must contain unique non-empty keys."
+            )
+        for key in invalidation_keys:
+            _validate_identifier(key, field_name="invalidation task-state key")
+        if type(self.retry_action) is not bool:
+            raise TypeError("retry_action must be a bool.")
+        object.__setattr__(self, "active_segments", segments)
+        object.__setattr__(self, "effect_spec", self.effect_spec.snapshot())
+        object.__setattr__(
+            self,
+            "invalidation_task_state_keys",
+            invalidation_keys,
+        )
+
+    @property
+    def task_state_key(self) -> str:
+        """Return the single held-object relation observed by this guard."""
+        expectation = self.effect_spec.state_expectations[0]
+        assert type(expectation) is HeldObjectStateExpectation
+        return expectation.task_state_key
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class GroundedSemanticCall:
     """Factory-owned call lowered from the latest observed context."""
@@ -483,6 +565,7 @@ class GroundedSemanticCall:
     invocation: ActionInvocation
     effect_spec: SemanticEffectSpec | None
     effect_monitor: EffectMonitor | None = field(repr=False, compare=False)
+    effect_guards: tuple[GroundedHeldObjectGuard, ...]
     _eligible_mask: torch.Tensor = field(repr=False, compare=False)
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -501,6 +584,7 @@ class GroundedSemanticCall:
         invocation: ActionInvocation,
         effect_spec: SemanticEffectSpec | None,
         effect_monitor: EffectMonitor | None,
+        effect_guards: tuple[GroundedHeldObjectGuard, ...],
         eligible_mask: torch.Tensor,
     ) -> GroundedSemanticCall:
         """Create one compiler-owned grounded result."""
@@ -509,6 +593,7 @@ class GroundedSemanticCall:
         object.__setattr__(instance, "invocation", invocation)
         object.__setattr__(instance, "effect_spec", effect_spec)
         object.__setattr__(instance, "effect_monitor", effect_monitor)
+        object.__setattr__(instance, "effect_guards", tuple(effect_guards))
         object.__setattr__(instance, "_eligible_mask", eligible_mask.clone())
         instance.__post_init__()
         return instance
@@ -534,6 +619,17 @@ class GroundedSemanticCall:
                     "effect_spec semantic_id must match the analyzed call."
                 )
             object.__setattr__(self, "effect_spec", self.effect_spec.snapshot())
+        guards = tuple(self.effect_guards)
+        if not all(type(value) is GroundedHeldObjectGuard for value in guards):
+            raise TypeError(
+                "effect_guards must contain exact GroundedHeldObjectGuard values."
+            )
+        guard_ids = [value.guard_id for value in guards]
+        if len(set(guard_ids)) != len(guard_ids):
+            raise ValueError("Grounded held-object guard IDs must be unique.")
+        if guards and self.effect_spec is None:
+            raise ValueError("Held-object guards require a terminal effect spec.")
+        object.__setattr__(self, "effect_guards", guards)
         if not isinstance(self._eligible_mask, torch.Tensor):
             raise TypeError("eligible_mask must be a torch.Tensor.")
         if self._eligible_mask.dtype != torch.bool or self._eligible_mask.dim() != 1:
@@ -1124,11 +1220,18 @@ class SemanticSkillCompiler:
                     (*path, call_index, "effect_monitor"),
                     f"Could not create the grounded effect monitor: {exc}",
                 ) from exc
+        effect_guards = self._ground_held_object_guards(
+            analyzed,
+            effect_spec,
+            context,
+            path=(*path, call_index, "effect_guards"),
+        )
         return GroundedSemanticCall._create(
             analyzed=analyzed,
             invocation=invocation,
             effect_spec=effect_spec,
             effect_monitor=effect_monitor,
+            effect_guards=effect_guards,
             eligible_mask=eligible,
         )
 
@@ -1761,6 +1864,209 @@ class SemanticSkillCompiler:
             clauses=tuple(clauses),
         )
 
+    def _ground_held_object_guards(
+        self,
+        analyzed: AnalyzedSemanticCall,
+        effect_spec: SemanticEffectSpec | None,
+        context: PlanningContext,
+        *,
+        path: tuple[PathPart, ...],
+    ) -> tuple[GroundedHeldObjectGuard, ...]:
+        """Create phase-scoped held-object invariants for built-in semantics.
+
+        The guard observes only named action segments whose commanded motion
+        assumes that a particular endpoint still holds the object.  It never
+        creates or repairs a physical relation.
+
+        Args:
+            analyzed: Statically linked semantic call.
+            effect_spec: Grounded terminal effect contract for the call.
+            context: Latest planning context used to validate verified baselines.
+            path: Diagnostic path for monitor-construction failures.
+
+        Returns:
+            Independent guard monitors in deterministic phase order.
+        """
+        monitor_ref = analyzed.effect_monitor_ref
+        if effect_spec is None or monitor_ref is None:
+            return ()
+
+        call = analyzed.call
+        definitions: tuple[
+            tuple[
+                str,
+                str,
+                tuple[str, ...],
+                HeldObjectGuardBaseline,
+                tuple[str, ...],
+                bool,
+            ],
+            ...,
+        ]
+        if type(call) is Pick:
+            destination = self._held_expectation(effect_spec, "destination")
+            definitions = (
+                (
+                    "destination_attached",
+                    destination.expectation_id,
+                    ("lift",),
+                    HeldObjectGuardBaseline.PLANNED_EFFECT,
+                    (destination.task_state_key,),
+                    True,
+                ),
+            )
+        elif type(call) is Place:
+            source = self._held_expectation(effect_spec, "source")
+            self._validate_guard_verified_baseline(source, context)
+            definitions = (
+                (
+                    "source_attached",
+                    source.expectation_id,
+                    ("approach",),
+                    HeldObjectGuardBaseline.VERIFIED_TASK_STATE,
+                    (source.task_state_key,),
+                    False,
+                ),
+            )
+        elif type(call) is HandOver:
+            source = self._held_expectation(effect_spec, "source")
+            destination = self._held_expectation(effect_spec, "destination")
+            self._validate_guard_verified_baseline(source, context)
+            definitions = (
+                (
+                    "source_attached",
+                    source.expectation_id,
+                    ("transfer", "approach", "close", "hold"),
+                    HeldObjectGuardBaseline.VERIFIED_TASK_STATE,
+                    (source.task_state_key,),
+                    False,
+                ),
+                (
+                    "destination_attached",
+                    destination.expectation_id,
+                    ("release", "deliver"),
+                    HeldObjectGuardBaseline.PLANNED_EFFECT,
+                    (source.task_state_key, destination.task_state_key),
+                    False,
+                ),
+            )
+        else:
+            return ()
+
+        guards: list[GroundedHeldObjectGuard] = []
+        for (
+            guard_id,
+            expectation_id,
+            active_segments,
+            baseline,
+            invalidation_keys,
+            retry_action,
+        ) in definitions:
+            guard_spec = self._attached_guard_effect_spec(
+                effect_spec,
+                expectation_id=expectation_id,
+            )
+            try:
+                monitor = self._effect_monitor_registry.create(
+                    guard_spec,
+                    monitor_ref,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise _diagnostic(
+                    "effect_guard_monitor_creation_failed",
+                    (*path, guard_id),
+                    f"Could not create held-object guard monitor: {exc}",
+                ) from exc
+            guards.append(
+                GroundedHeldObjectGuard(
+                    guard_id=guard_id,
+                    active_segments=active_segments,
+                    baseline=baseline,
+                    effect_spec=guard_spec,
+                    effect_monitor=monitor,
+                    invalidation_task_state_keys=invalidation_keys,
+                    retry_action=retry_action,
+                )
+            )
+        return tuple(guards)
+
+    @staticmethod
+    def _held_expectation(
+        spec: SemanticEffectSpec,
+        expectation_id: str,
+    ) -> HeldObjectStateExpectation:
+        """Resolve one exact held-object expectation from an effect spec."""
+        expectation = spec.state_expectation(expectation_id)
+        if type(expectation) is not HeldObjectStateExpectation:
+            raise ValueError(
+                f"Effect expectation {expectation_id!r} is not held-object state."
+            )
+        return expectation
+
+    @staticmethod
+    def _validate_guard_verified_baseline(
+        expectation: HeldObjectStateExpectation,
+        context: PlanningContext,
+    ) -> None:
+        """Require the task state to own the guard's verified relation."""
+        held = context.task.get_held_object(expectation.task_state_key)
+        if held is None or held.semantics.entity_id != expectation.object_id:
+            raise ValueError(
+                f"Held-object guard {expectation.expectation_id!r} requires "
+                f"verified object {expectation.object_id!r} under task-state key "
+                f"{expectation.task_state_key!r}."
+            )
+
+    @staticmethod
+    def _attached_guard_effect_spec(
+        terminal_spec: SemanticEffectSpec,
+        *,
+        expectation_id: str,
+    ) -> SemanticEffectSpec:
+        """Project one terminal expectation into an attached invariant."""
+        terminal_expectation = terminal_spec.state_expectation(expectation_id)
+        if type(terminal_expectation) is not HeldObjectStateExpectation:
+            raise TypeError("Held-object guards require held-object expectations.")
+        attached = replace(
+            terminal_expectation,
+            relation=HeldObjectRelation.ATTACHED,
+        )
+        clauses: list[EffectClause] = []
+        for clause in terminal_spec.clauses:
+            if clause.expectation_id != expectation_id:
+                continue
+            if type(clause) is PoseRelationClause:
+                clauses.append(
+                    PoseRelationClause(
+                        clause_id=clause.clause_id,
+                        expectation_id=clause.expectation_id,
+                        source=clause.source,
+                        expectation=PoseRelationExpectation.MATCHED,
+                    )
+                )
+            elif type(clause) is BinaryEffectClause:
+                clauses.append(replace(clause, expected=True))
+            elif type(clause) is ScalarEffectClause:
+                clauses.append(replace(clause, expectation=ScalarExpectation.PRESENT))
+            else:
+                raise TypeError(
+                    "Held-object guards support pose, binary, and scalar clauses."
+                )
+        if not clauses:
+            raise ValueError(
+                f"Held-object expectation {expectation_id!r} has no physical clauses."
+            )
+        return SemanticEffectSpec(
+            semantic_id=terminal_spec.semantic_id,
+            effect_kind=SemanticEffectKind.ATTACH,
+            skill_id=terminal_spec.skill_id,
+            invocation_id=terminal_spec.invocation_id,
+            invocation_revision=terminal_spec.invocation_revision,
+            env_ids=terminal_spec.env_ids,
+            state_expectations=(attached,),
+            clauses=tuple(clauses),
+        )
+
     @staticmethod
     def _coordinated_cleanup_expectations(
         context: PlanningContext,
@@ -2180,9 +2486,11 @@ class SemanticSkillCompiler:
 
 __all__ = [
     "AnalyzedSemanticCall",
+    "GroundedHeldObjectGuard",
     "GroundedSemanticCall",
     "HandOverPoseProvider",
     "HandOverPoseTargets",
+    "HeldObjectGuardBaseline",
     "RelationTargetGrounder",
     "RegisteredSemanticLowerer",
     "SemanticEffectDependency",

@@ -42,6 +42,7 @@ from embodichain.lab.sim.atomic_actions import (
     ExecutionEventKind,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    HeldObjectGuardRequest,
     HeldObjectState,
     JOINT_POSITION_CAPABILITY,
     JointPositionPayload,
@@ -483,6 +484,56 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
     assert second.wait_duration == pytest.approx(SECOND_INTERVAL)
     assert third.command_count == 3
     assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
+
+
+def test_runner_calls_held_object_guard_with_fresh_command_phase() -> None:
+    runner, _, _, sink, _ = _make_runner()
+    observed: list[tuple[float, HeldObjectGuardRequest]] = []
+
+    def verifier(
+        context: PlanningContext,
+        request: HeldObjectGuardRequest,
+    ) -> None:
+        observed.append((context.robot.timestamp, request))
+        return None
+
+    first = runner.step(held_object_guard_verifier=verifier)
+
+    assert first.status is RunnerStatus.RUNNING
+    assert len(sink.sent) == 1
+    assert len(observed) == 1
+    timestamp, request = observed[0]
+    assert timestamp == 0.0
+    assert request.verification_id == 0
+    assert request.segment_name == "timed"
+    assert request.attempt_generation == 0
+    assert request.invocation_index == 0
+    assert request.next_waypoint_index == 0
+
+
+def test_runner_guard_exception_performs_cancel_then_observed_hold() -> None:
+    runner, clock, _, sink, _ = _make_runner()
+    runner.step()
+    clock.advance(FIRST_INTERVAL)
+
+    def verifier(
+        context: PlanningContext,
+        request: HeldObjectGuardRequest,
+    ) -> None:
+        del context, request
+        raise RuntimeError("guard evidence unavailable")
+
+    failed = runner.step(held_object_guard_verifier=verifier)
+
+    assert failed.status is RunnerStatus.FAILED
+    assert [dispatch.operation for dispatch in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert [target.target_id for target in sink.cancelled[0]] == ["arm"]
+    assert failed.message is not None
+    assert "guard evidence unavailable" in failed.message
 
 
 def test_runner_dispatches_transport_neutral_endpoint_frames() -> None:
