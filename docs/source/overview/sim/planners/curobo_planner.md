@@ -237,7 +237,7 @@ tighter collision coverage, or set `force=True` to bypass the cache.
 
 For an Open3D overlay of the live robot/obstacle meshes and the exact spheres
 read back from those YAML caches, call
-`planner.visualize_collision_models(control_part)`. Robot sphere centers are
+`planner.visualize_robot_collision_models(control_part)`. Robot sphere centers are
 transformed by the simulator's live link poses. The interactive cuRobo example
 calls this once after planner initialization; close the Open3D window to continue.
 

@@ -1599,7 +1599,7 @@ class CuroboPlanner(BasePlanner):
             hasher.update(pose.detach().to("cpu").to(torch.float32).numpy().tobytes())
         return hasher.hexdigest()
 
-    def visualize_collision_models(
+    def visualize_robot_collision_models(
         self,
         control_part: str,
         env_id: int = 0,

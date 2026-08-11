@@ -723,7 +723,9 @@ def main() -> None:
             seed=args.seed,
         )
         use_independent_worlds = args.num_envs > 1
-        visualize_collision_models = not args.headless and not use_independent_worlds
+        visualize_robot_collision_models = (
+            not args.headless and not use_independent_worlds
+        )
         if use_independent_worlds:
             for name, poses in obstacle_poses.items():
                 yaw_deg = torch.rad2deg(torch.atan2(poses[:, 1, 0], poses[:, 0, 0]))
@@ -760,11 +762,11 @@ def main() -> None:
                 )
             )
         )
-        if visualize_collision_models:
+        if visualize_robot_collision_models:
             # This overlays the exact cached robot spheres and obstacle ESDF
             # surface used by cuRobo in the DexSim window. Press Enter in the
             # terminal to remove the overlay and continue planner creation.
-            motion_generator.planner.visualize_collision_models(control_part)
+            motion_generator.planner.visualize_robot_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
         engine.register(
             MoveEndEffector(
