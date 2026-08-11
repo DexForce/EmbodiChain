@@ -1,5 +1,6 @@
 {
     "id": "OpenDrawer-v1",
+    "expert_program_path": "../../expert_program/tableware/open_drawer.json",
     "max_episodes": 3,
     "max_episode_steps": 300,
     "env": {
