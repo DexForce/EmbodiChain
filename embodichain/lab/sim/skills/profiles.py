@@ -20,10 +20,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
+from enum import Enum
 from itertools import product
 from types import MappingProxyType
 from typing import ClassVar, Mapping, TYPE_CHECKING
+
+import torch
 
 from embodichain.lab.sim.atomic_actions.bindings import (
     ActionBinding,
@@ -37,6 +40,7 @@ from embodichain.lab.sim.atomic_actions.control import (
     JointPositionCommand,
 )
 from embodichain.lab.sim.atomic_actions.core import SkillDescriptor
+from embodichain.lab.sim.atomic_actions.invocation import ActionOptions
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
 from embodichain.lab.sim.atomic_actions.tracking import (
     JOINT_POSITION_CHANNEL,
@@ -104,6 +108,167 @@ def _validate_identifier(value: str, *, field_name: str) -> str:
             f"{field_name} must be a non-empty string without outer whitespace."
         )
     return value
+
+
+def _snapshot_graph_tokens(
+    value: object,
+    *,
+    path: str,
+    visited: set[int],
+) -> set[tuple[object, ...]]:
+    """Collect identities for every mutable value and tensor storage.
+
+    Immutable containers are traversed because they may retain mutable leaves.
+    Unknown opaque values fail closed: an action-options declaration must expose
+    its complete snapshot graph through dataclass fields and built-in containers.
+    """
+    if value is None or type(value) in {
+        bool,
+        int,
+        float,
+        complex,
+        str,
+        bytes,
+        range,
+        slice,
+        torch.device,
+        torch.dtype,
+    }:
+        return set()
+    if isinstance(value, (Enum, type)):
+        return set()
+
+    value_id = id(value)
+    if value_id in visited:
+        return set()
+    visited.add(value_id)
+
+    if isinstance(value, torch.Tensor):
+        tokens: set[tuple[object, ...]] = {("object", value_id)}
+        storage = value.untyped_storage()
+        if storage.nbytes() > 0:
+            tokens.add(
+                (
+                    "tensor_storage",
+                    value.device.type,
+                    value.device.index,
+                    storage.data_ptr(),
+                )
+            )
+        return tokens
+    if is_dataclass(value) and not isinstance(value, type):
+        tokens = {("object", value_id)}
+        for data_field in fields(value):
+            tokens.update(
+                _snapshot_graph_tokens(
+                    getattr(value, data_field.name),
+                    path=f"{path}.{data_field.name}",
+                    visited=visited,
+                )
+            )
+        return tokens
+    if type(value) is dict:
+        tokens = {("object", value_id)}
+        for key, nested in value.items():
+            tokens.update(
+                _snapshot_graph_tokens(
+                    key,
+                    path=f"{path}.<key>",
+                    visited=visited,
+                )
+            )
+            tokens.update(
+                _snapshot_graph_tokens(
+                    nested,
+                    path=f"{path}[{key!r}]",
+                    visited=visited,
+                )
+            )
+        return tokens
+    if type(value) in {list, set, bytearray}:
+        tokens = {("object", value_id)}
+        for index, nested in enumerate(value):
+            tokens.update(
+                _snapshot_graph_tokens(
+                    nested,
+                    path=f"{path}[{index}]",
+                    visited=visited,
+                )
+            )
+        return tokens
+    if type(value) in {tuple, frozenset}:
+        tokens = set()
+        for index, nested in enumerate(value):
+            tokens.update(
+                _snapshot_graph_tokens(
+                    nested,
+                    path=f"{path}[{index}]",
+                    visited=visited,
+                )
+            )
+        return tokens
+    raise TypeError(
+        f"Action-options snapshot graph contains unsupported opaque value "
+        f"{type(value).__module__}.{type(value).__qualname__} at {path}."
+    )
+
+
+def _snapshot_action_options(options: ActionOptions) -> ActionOptions:
+    """Return one exact action-options snapshot with no mutable aliasing."""
+    if not isinstance(options, ActionOptions):
+        raise TypeError(
+            "action_option_templates values must be ActionOptions instances."
+        )
+    option_type = type(options)
+    dataclass_params = option_type.__dict__.get("__dataclass_params__")
+    dataclass_fields = option_type.__dict__.get("__dataclass_fields__")
+    if (
+        dataclass_params is None
+        or dataclass_fields is None
+        or dataclass_params.frozen is not True
+    ):
+        raise TypeError(
+            "action_option_templates values must be exact frozen @dataclass "
+            "declarations, not inherited undecorated ActionOptions subclasses."
+        )
+    if hasattr(options, "__dict__"):
+        raise TypeError("action_option_templates values must not carry __dict__ state.")
+    field_names = {data_field.name for data_field in fields(options)}
+    declared_slots: set[str] = set()
+    for base in option_type.__mro__:
+        slots = base.__dict__.get("__slots__", ())
+        if isinstance(slots, str):
+            declared_slots.add(slots)
+        else:
+            declared_slots.update(slots)
+    opaque_slots = declared_slots.difference(field_names, {"__weakref__"})
+    if opaque_slots:
+        raise TypeError(
+            "action_option_templates values must not carry non-dataclass "
+            f"slot state: {sorted(opaque_slots)}."
+        )
+    snapshot = deepcopy(options)
+    if type(snapshot) is not option_type or snapshot is options:
+        raise TypeError(
+            "action_option_templates values must support independent deep-copy "
+            "snapshots of their exact type."
+        )
+    source_tokens = _snapshot_graph_tokens(
+        options,
+        path=option_type.__name__,
+        visited=set(),
+    )
+    snapshot_tokens = _snapshot_graph_tokens(
+        snapshot,
+        path=option_type.__name__,
+        visited=set(),
+    )
+    if source_tokens.intersection(snapshot_tokens):
+        raise TypeError(
+            "action_option_templates values must support independently owned "
+            "snapshots without shared mutable objects or tensor storage."
+        )
+    return snapshot
 
 
 def _normalize_identifier_set(
@@ -400,6 +565,21 @@ class ResourceEndpointAdapter(ABC):
     endpoint_type: ClassVar[type[ResourceEndpoint]]
     """Exact endpoint declaration type accepted by this adapter."""
 
+    runtime_transport_ids: ClassVar[frozenset[str]]
+    """Exact endpoint-command transport IDs this adapter may resolve."""
+
+    runtime_target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]]
+    """Exact immutable runtime-target value types this adapter may resolve."""
+
+    tracking_feedback_source_keys: ClassVar[frozenset[tuple[str, str]]]
+    """Exact ``(provider_id, revision)`` tracking-feedback routes emitted."""
+
+    tracking_projector_keys: ClassVar[frozenset[tuple[str, str]]]
+    """Exact ``(projector_id, revision)`` desired-state routes emitted."""
+
+    effect_evidence_source_keys: ClassVar[frozenset[tuple[str, str]]]
+    """Exact ``(provider_id, revision)`` effect-evidence routes emitted."""
+
     @abstractmethod
     def resolve(
         self,
@@ -423,6 +603,26 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
 
     adapter_id: ClassVar[str] = "control_part"
     endpoint_type: ClassVar[type[ResourceEndpoint]] = ControlPartEndpoint
+    runtime_transport_ids: ClassVar[frozenset[str]] = frozenset(
+        {JointPositionTarget.TRANSPORT_ID}
+    )
+    runtime_target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]] = (
+        JointPositionTarget,
+    )
+    tracking_feedback_source_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset(
+        {("planning_context.robot", "1")}
+    )
+    tracking_projector_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset(
+        {("joint_position_payload", "1")}
+    )
+    effect_evidence_source_keys: ClassVar[frozenset[tuple[str, str]]] = frozenset(
+        {
+            (
+                CONTROL_PART_EVIDENCE_PROVIDER_ID,
+                CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
+            )
+        }
+    )
 
     def resolve(
         self,
@@ -717,7 +917,7 @@ class ResourceBinding:
 
 @dataclass(frozen=True, slots=True, init=False)
 class SkillPolicyPreset:
-    """Versioned planning, tracking, recovery, runner, and monitor bundle."""
+    """Versioned policies and typed semantic-call option templates."""
 
     preset_id: str
     schema_version: int
@@ -728,11 +928,14 @@ class SkillPolicyPreset:
     _recovery_policy: RecoveryPolicy
     _runner_cfg: ExecutionRunnerCfg
     _effect_monitors: Mapping[str, EffectMonitorRef]
+    _action_option_templates: Mapping[str, ActionOptions]
 
     def __init__(
         self,
         preset_id: str,
-        schema_version: int = 1,
+        *,
+        action_option_templates: Mapping[str, ActionOptions],
+        schema_version: int = 2,
         motion_policy: MotionPolicy | None = None,
         tracking_policy: TrackingPolicy | None = None,
         recovery_policy: RecoveryPolicy | None = None,
@@ -744,10 +947,10 @@ class SkillPolicyPreset:
         _validate_identifier(preset_id, field_name="SkillPolicyPreset.preset_id")
         if not isinstance(schema_version, int) or isinstance(schema_version, bool):
             raise TypeError("SkillPolicyPreset.schema_version must be an integer.")
-        if schema_version != 1:
+        if schema_version != 2:
             raise ValueError(
                 "Unsupported SkillPolicyPreset.schema_version "
-                f"{schema_version}; supported versions are [1]."
+                f"{schema_version}; supported versions are [2]."
             )
         if required_planner is not None:
             _validate_identifier(
@@ -801,6 +1004,17 @@ class SkillPolicyPreset:
                     "effect_monitors values must be EffectMonitorRef instances."
                 )
             normalized_effect_monitors[semantic_id] = monitor_ref.snapshot()
+        if not isinstance(action_option_templates, Mapping):
+            raise TypeError("action_option_templates must be a mapping.")
+        normalized_action_option_templates: dict[str, ActionOptions] = {}
+        for semantic_id, options in action_option_templates.items():
+            _validate_identifier(
+                semantic_id,
+                field_name="SkillPolicyPreset action-option semantic IDs",
+            )
+            normalized_action_option_templates[semantic_id] = _snapshot_action_options(
+                options
+            )
         object.__setattr__(self, "preset_id", preset_id)
         object.__setattr__(self, "schema_version", schema_version)
         object.__setattr__(self, "required_planner", required_planner)
@@ -812,6 +1026,11 @@ class SkillPolicyPreset:
             self,
             "_effect_monitors",
             MappingProxyType(normalized_effect_monitors),
+        )
+        object.__setattr__(
+            self,
+            "_action_option_templates",
+            MappingProxyType(normalized_action_option_templates),
         )
 
     @property
@@ -844,6 +1063,35 @@ class SkillPolicyPreset:
             }
         )
 
+    @property
+    def action_option_templates(self) -> Mapping[str, ActionOptions]:
+        """Return owned option templates keyed by exact semantic call ID."""
+        return MappingProxyType(
+            {
+                semantic_id: _snapshot_action_options(options)
+                for semantic_id, options in self._action_option_templates.items()
+            }
+        )
+
+    def action_option_template(self, semantic_id: str) -> ActionOptions:
+        """Return one owned template for an exact semantic call ID.
+
+        Raises:
+            KeyError: If this preset does not declare the semantic call.
+        """
+        _validate_identifier(
+            semantic_id,
+            field_name="SkillPolicyPreset action-option semantic ID",
+        )
+        try:
+            template = self._action_option_templates[semantic_id]
+        except KeyError as exc:
+            raise KeyError(
+                f"Preset {self.preset_id!r} has no action-option template for "
+                f"semantic call {semantic_id!r}."
+            ) from exc
+        return _snapshot_action_options(template)
+
     def snapshot(self) -> SkillPolicyPreset:
         """Return an independently owned preset value."""
         return SkillPolicyPreset(
@@ -854,7 +1102,7 @@ class SkillPolicyPreset:
             recovery_policy=self.recovery_policy,
             runner_cfg=self.runner_cfg,
             effect_monitors=self.effect_monitors,
-            required_planner=self.required_planner,
+            action_option_templates=self.action_option_templates,
         )
 
 

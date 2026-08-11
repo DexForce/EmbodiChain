@@ -80,7 +80,7 @@ from .decoder import (
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
 from .simulation_policies import default_simulation_settle_presets
 
-_CATALOG_FINGERPRINT_SCHEMA_VERSION = 1
+_CATALOG_FINGERPRINT_SCHEMA_VERSION = 2
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
 _VALIDATOR_KINDS = frozenset({"object_near_target"})
 
@@ -810,6 +810,7 @@ def _profile_with_control_dt(
                 recovery_policy=preset.recovery_policy,
                 runner_cfg=preset.runner_cfg,
                 effect_monitors=preset.effect_monitors,
+                action_option_templates=preset.action_option_templates,
             )
             for preset_id, preset in profile.presets.items()
         },

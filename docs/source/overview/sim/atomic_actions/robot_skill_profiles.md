@@ -77,7 +77,10 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     ControlPartCommandProfile,
+    HandOverOptions,
     MotionPolicy,
+    PickUpOptions,
+    PlaceOptions,
 )
 from embodichain.lab.sim.skills import (
     COMPOSITE_EFFECT_MONITOR_ID,
@@ -140,6 +143,11 @@ profile = RobotSkillProfile(
     presets={
         "default": SkillPolicyPreset(
             preset_id="default",
+            action_option_templates={
+                "pick": PickUpOptions(),
+                "place": PlaceOptions(),
+                "hand_over": HandOverOptions(),
+            },
             motion_policy=MotionPolicy(strategy="ik_interp"),
             effect_monitors={
                 semantic_id: EffectMonitorRef(
@@ -194,6 +202,28 @@ A linked call receives an effective immutable preset snapshot with
 `DynamicCollisionMode.REQUIRED`; the source profile preset is not mutated.
 Other presets, and scenes without dynamic collision entities, retain their
 configured collision mode.
+
+## Configure semantic action behavior with the preset
+
+`SkillPolicyPreset.action_option_templates` is the required, typed action-
+behavior table for semantic calls that can select the preset. Each key is the
+exact semantic call ID (`pick`, `place`, `hand_over`, or
+`operate_articulation`), and each value must be the target action's exact frozen
+`ActionOptions` dataclass. Static linking rejects a missing entry, an unknown
+call ID, or an options value of the wrong exact type before simulation starts.
+
+The preset owns independent snapshots of each template. Pick and HandOver
+grounding only replace their compiler-owned dynamic target fields; distances,
+directions, waypoint counts, and other reusable behavior remain configuration.
+A registered semantic lowerer may build a goal but cannot return replacement
+options. This keeps task extensions from silently moving action parameters back
+into Python code.
+
+Pick's `downstream_object_target_poses` and HandOver's
+`middle_object_pose`/`final_object_pose` are reserved for the semantic compiler
+and must remain empty in a template. Planner choice, sample count, tracking,
+recovery, runner timing, and effect monitors stay in their dedicated preset
+fields rather than `ActionOptions`.
 
 ## Select semantic effect monitors with the preset
 

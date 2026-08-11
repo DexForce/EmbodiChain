@@ -936,6 +936,7 @@ class SimulationExpertProgramFactory(ExpertProgramEnvironmentFactory):
                 recovery_policy=preset.recovery_policy,
                 runner_cfg=preset.runner_cfg,
                 effect_monitors=preset.effect_monitors,
+                action_option_templates=preset.action_option_templates,
             )
             for preset_id, preset in profile.presets.items()
         }

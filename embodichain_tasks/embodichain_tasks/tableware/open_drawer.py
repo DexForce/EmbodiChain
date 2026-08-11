@@ -46,6 +46,7 @@ from embodichain.lab.sim.atomic_actions import (
     CARTESIAN_POSE_CAPABILITY,
     GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
+    OperateArticulationOptions,
 )
 from embodichain.lab.sim.skills import SceneCollisionRole, SceneDynamics
 from embodichain.lab.sim.skills.profiles import SkillPolicyPreset
@@ -201,7 +202,14 @@ def create_open_drawer_robot_profile_binding() -> SimulationRobotSkillProfileBin
         defaults={
             "operate_articulation": {"primary": "right_manipulator"},
         },
-        presets=(SkillPolicyPreset("safe"),),
+        presets=(
+            SkillPolicyPreset(
+                "safe",
+                action_option_templates={
+                    "operate_articulation": OperateArticulationOptions(),
+                },
+            ),
+        ),
         default_preset="safe",
     )
 
