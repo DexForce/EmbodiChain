@@ -9,6 +9,16 @@ covered by a more focused API-reference page. Prefer curated pages for APIs
 that need deeper explanations or examples. Sphinx obtains signatures and
 summaries here from the canonical Python docstrings.
 
+embodichain.agents.mllm.expert_program
+--------------------------------------
+
+.. currentmodule:: embodichain.agents.mllm.expert_program
+
+.. autosummary::
+
+   compile_mllm_expert_program
+   decode_mllm_expert_program
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
