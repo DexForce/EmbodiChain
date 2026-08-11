@@ -509,6 +509,37 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @staticmethod
+    def _minimal_gym_config() -> dict[str, object]:
+        """Return a minimal config that reaches the generic parser."""
+        return {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+        }
+
+    @staticmethod
+    def _expert_program_payload() -> dict[str, object]:
+        """Return one minimal strict Expert Program payload."""
+        return {
+            "schema_version": 1,
+            "program_id": "configured_pick",
+            "integration": {
+                "robot_profile": "default_robot",
+                "scene_registry": "default_scene",
+                "runtime_preset": "default_runtime",
+            },
+            "targets": {},
+            "program": {
+                "kind": "invoke",
+                "call": {"kind": "pick", "object": "cube"},
+            },
+        }
+
     def test_robot_class_type_preserves_ur_variant(self):
         config = {
             "id": "EmbodiedEnv-v1",
@@ -531,6 +562,107 @@ class TestConfigToCfgFromFile:
             "robot_type": "ur5",
             "uid": "TestUR5",
         }
+
+    def test_expert_program_path_is_resolved_from_gym_config_source(
+        self,
+        tmp_path,
+    ) -> None:
+        """A serialized program path is relative to its Gym config file."""
+        gym_dir = tmp_path / "gym" / "task"
+        program_dir = tmp_path / "expert_program"
+        gym_dir.mkdir(parents=True)
+        program_dir.mkdir()
+        gym_path = gym_dir / "gym_config.json"
+        program_path = program_dir / "program.yaml"
+        save_config(program_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "../../expert_program/program.yaml"
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=gym_path,
+        )
+
+        assert cfg.expert_program.program_id == "configured_pick"
+        assert cfg.expert_program.integration.scene_registry == "default_scene"
+
+    def test_build_env_cfg_loads_source_relative_expert_program(
+        self,
+        tmp_path,
+    ) -> None:
+        """The normal file launcher attaches the decoded program before init."""
+        gym_dir = tmp_path / "gym"
+        program_dir = tmp_path / "programs"
+        gym_dir.mkdir()
+        program_dir.mkdir()
+        gym_path = gym_dir / "gym_config.json"
+        program_path = program_dir / "program.json"
+        save_config(program_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "../programs/program.json"
+        save_config(gym_path, config)
+        args = argparse.Namespace(
+            gym_config=str(gym_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            action_config=None,
+        )
+
+        cfg, _, _ = build_env_cfg_from_args(args)
+
+        assert cfg.expert_program.program_id == "configured_pick"
+
+    def test_config_to_cfg_uses_cwd_without_source_path(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """Dictionary-only callers retain explicit current-directory semantics."""
+        program_path = tmp_path / "program.yaml"
+        save_config(program_path, self._expert_program_payload())
+        monkeypatch.chdir(tmp_path)
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "program.yaml"
+
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert cfg.expert_program.program_id == "configured_pick"
+
+    @pytest.mark.parametrize("value", [None, True, 1, {}, "", " program.yaml"])
+    def test_expert_program_path_rejects_ambiguous_values(
+        self,
+        value,
+    ) -> None:
+        """The path field never accepts coercion, null, or outer whitespace."""
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = value
+
+        with pytest.raises((TypeError, ValueError), match="expert_program_path"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    def test_expert_program_path_missing_file_fails_before_environment_init(
+        self,
+        tmp_path,
+    ) -> None:
+        """A configured program must exist when the Gym config is decoded."""
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "missing.yaml"
+
+        with pytest.raises(FileNotFoundError, match="missing.yaml"):
+            config_to_cfg(
+                config,
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "gym_config.json",
+            )
 
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {

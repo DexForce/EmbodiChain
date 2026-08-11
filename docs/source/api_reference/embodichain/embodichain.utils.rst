@@ -19,6 +19,7 @@ and image processing.
       warp
       cfg
       configclass
+      config_paths
       device_utils
       file
       img_utils
@@ -45,6 +46,12 @@ Configuration Classes
    :members:
    :undoc-members:
    :show-inheritance:
+
+Configuration Paths
+-------------------
+
+.. automodule:: embodichain.utils.config_paths
+   :members:
 
 Configuration Nodes
 -------------------
