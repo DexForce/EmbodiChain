@@ -124,11 +124,12 @@ def test_direct_default_cfg_loads_the_same_typed_program() -> None:
     assert settle.params["entity_cfgs"][0].uid == "cube"
 
 
-def test_robot_profile_calibrates_physical_tracking_tolerance() -> None:
-    """The UR5 preset tolerates its measured drive lag without disabling feedback."""
+def test_robot_profile_calibrates_physical_motion_and_tracking() -> None:
+    """The UR5 preset slows motion without weakening feedback or recovery."""
     binding = create_cube_robot_profile_binding()
 
     assert binding.presets[0].preset_id == "safe"
+    assert binding.presets[0].motion_policy.sample_count == 100
     tracking = binding.presets[0].tracking_policy
     assert tracking.in_flight is not None
     assert tracking.in_flight.metrics[0].tolerance == 0.08
