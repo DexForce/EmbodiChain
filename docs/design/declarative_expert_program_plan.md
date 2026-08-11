@@ -1,9 +1,12 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
 - Status: core contracts are implemented through Phase 7 on stacked feature
-  branches. Open Drawer has completed its supported-simulation physical run;
-  repeated cube pick/place has completed one Pick/Place/settle/validator cycle,
-  while the full three-cycle run remains in threshold calibration.
+  branches. A real CUDA/cuRobo dynamic-obstacle recovery gate is landed and
+  runs conditionally when cuRobo is installed, CUDA is available, and GPU/slow
+  tests are explicitly enabled. Open Drawer has completed its
+  supported-simulation physical run; repeated cube pick/place has completed one
+  Pick/Place/settle/validator cycle, while the full three-cycle run remains in
+  threshold calibration.
 - Baseline: `main@bcccb787e8f9165e9c8acf6f39f165ba6ac752a4`
 - Last updated: 2026-08-11
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
@@ -1127,8 +1130,11 @@ Implementation status: when `safe` is reachable and the registry declares
 dynamic collision entities, binding rejects an unsupported active planner
 before observation or planning. Linking produces an effective
 `DynamicCollisionMode.REQUIRED` preset snapshot without mutating the profile's
-source preset. This preflight coverage does not replace the remaining
-end-to-end dynamic-obstacle recovery simulation.
+source preset. A real-simulation gate now covers semantic lowering, CUDA/cuRobo
+planning, a post-plan dynamic-obstacle world change, collision-revision-aware
+replanning, and successful completion. This is a conditional GPU gate: the
+module skips when cuRobo is unavailable or CUDA is unavailable, and pytest runs
+it only when GPU and slow tests are explicitly selected.
 
 ### Phase 2: semantic facade and compiler
 
@@ -1279,6 +1285,13 @@ tests pass before the legacy task is switched.
 
 ### Phase 8: rollout, documentation, and deprecation
 
+The deterministic framework/integration capability matrix and migration-size
+snapshot are maintained in
+[`expert_program_rollout_report.md`](expert_program_rollout_report.md). Demo
+success collection uses the no-retry benchmark harness; real success-rate
+claims and gates remain deferred until the repeated Cube threshold contract and
+three-cycle physical acceptance are settled.
+
 Implementation status: partial. The canonical semantic/Expert Program documentation,
 project-development context, task vertical slices, and public integration
 guidance are included in this stack. Metrics, migrations that touch Action
@@ -1339,7 +1352,8 @@ independent of adoption of the new path.
 - grasp/release/handover effect monitors;
 - settling success and timeout metadata;
 - Open Drawer articulation effect;
-- GPU-backed dynamic cuRobo coverage where supported;
+- conditionally executed real CUDA/cuRobo dynamic-obstacle recovery coverage
+  where cuRobo and CUDA are available and GPU/slow tests are enabled;
 - parallel PourWater only after Phase 7 contracts land.
 
 ## 14. Acceptance criteria
@@ -1350,6 +1364,10 @@ The design is complete when all of the following hold:
       `DynamicCollisionMode.REQUIRED` and rejects an unsupported active planner
       before observation, planning, or command emission without mutating the
       profile configuration.
+- [x] On supported CUDA/cuRobo installations, a conditional real-simulation
+      gate moves a dynamic obstacle after the initial plan, observes the
+      collision-world change and replan, and reaches the target successfully;
+      environments without cuRobo or CUDA skip this GPU/slow gate.
 - [x] A versioned Expert Program is fully validated before execution and cannot
       evaluate arbitrary code or traverse environment attributes by string.
 - [x] Python, configuration, and MLLM calls share one semantic compiler,
