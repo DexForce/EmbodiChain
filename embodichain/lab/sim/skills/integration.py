@@ -25,6 +25,7 @@ from typing import TypeVar
 
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
+    DynamicCollisionMode,
     DisjointResourceSlots,
     DisjointSlotEndpoints,
     SkillResourceSlot,
@@ -32,6 +33,7 @@ from embodichain.lab.sim.atomic_actions import (
 
 from .calls import (
     HandOver,
+    OperateArticulation,
     Pick,
     Place,
     RegisteredSemanticCall,
@@ -50,6 +52,7 @@ from .profiles import (
     SkillPolicyPreset,
 )
 from .scene import (
+    ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
     GRASP_AFFORDANCE_CAPABILITY,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
@@ -407,7 +410,13 @@ class LinkedSemanticCall:
     affordances: Mapping[str, SceneAffordanceRef] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if type(self.call) not in (Pick, Place, HandOver, RegisteredSemanticCall):
+        if type(self.call) not in (
+            Pick,
+            Place,
+            HandOver,
+            OperateArticulation,
+            RegisteredSemanticCall,
+        ):
             raise TypeError("call must be an exact supported semantic call value.")
         if type(self.descriptor) is not SemanticCallDescriptor:
             raise TypeError("descriptor must be exactly SemanticCallDescriptor.")
@@ -429,16 +438,42 @@ class LinkedSemanticCall:
         object.__setattr__(self, "affordances", MappingProxyType(normalized))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class BoundSemanticCall:
-    """Call linked to one installed engine/profile combination."""
+    """Factory-owned call linked to one installed engine/profile combination."""
 
     linked: LinkedSemanticCall
     binding: ResolvedSkillBinding
     preset: SkillPolicyPreset
     _robot_profile: BoundRobotSkillProfile = field(repr=False, compare=False)
 
-    def __post_init__(self) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Reject construction outside :class:`BoundSemanticIntegration`."""
+        del args, kwargs
+        raise TypeError(
+            "BoundSemanticCall values are created by "
+            "BoundSemanticIntegration.link_call()."
+        )
+
+    @classmethod
+    def _create(
+        cls,
+        *,
+        linked: LinkedSemanticCall,
+        binding: ResolvedSkillBinding,
+        preset: SkillPolicyPreset,
+        robot_profile: BoundRobotSkillProfile,
+    ) -> BoundSemanticCall:
+        """Create and validate one engine/profile-owned result."""
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "linked", linked)
+        object.__setattr__(instance, "binding", binding)
+        object.__setattr__(instance, "preset", preset)
+        object.__setattr__(instance, "_robot_profile", robot_profile)
+        instance._validate()
+        return instance
+
+    def _validate(self) -> None:
         """Validate the static and live ownership links."""
         if not isinstance(self.linked, LinkedSemanticCall):
             raise TypeError("linked must be a LinkedSemanticCall.")
@@ -489,6 +524,29 @@ class SemanticIntegrationManifest:
             raise TypeError("robot_profile must be exactly RobotSkillProfile.")
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
+        known_semantic_ids = set(self.call_catalog.descriptors)
+        for preset_id, preset in self.robot_profile.presets.items():
+            unknown_monitor_ids = sorted(
+                set(preset.effect_monitors).difference(known_semantic_ids)
+            )
+            if unknown_monitor_ids:
+                semantic_id = unknown_monitor_ids[0]
+                raise SemanticValidationError(
+                    SemanticDiagnostic(
+                        "unknown_effect_monitor_call",
+                        (
+                            "integration",
+                            "robot_profile",
+                            "presets",
+                            preset_id,
+                            "effect_monitors",
+                            semantic_id,
+                        ),
+                        f"Effect monitor configuration references unknown semantic "
+                        f"call {semantic_id!r}.",
+                        tuple(self.call_catalog.descriptors),
+                    )
+                )
         if self.runtime_preset is not None:
             _validate_identifier(
                 self.runtime_preset,
@@ -585,6 +643,24 @@ class SemanticIntegrationManifest:
             )
             normalized_call = replace(call, object=object_ref)
             affordances["receiver_grasp"] = grasp
+        elif isinstance(call, OperateArticulation):
+            articulation_ref = self.scene.resolve(
+                call.articulation,
+                expected_type=SceneArticulationRef,
+                path=(*path, "articulation"),
+            )
+            handle = self.scene.resolve_affordance(
+                articulation_ref,
+                capability=ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
+                explicit=call.handle,
+                path=(*path, "handle"),
+            )
+            normalized_call = replace(
+                call,
+                articulation=articulation_ref,
+                handle=handle,
+            )
+            affordances["handle"] = handle
         elif isinstance(call, RegisteredSemanticCall):
             normalized_call = replace(
                 call,
@@ -615,6 +691,34 @@ class SemanticIntegrationManifest:
             descriptor=descriptor,
             preset_id=preset_id,
             affordances=affordances,
+        )
+
+    def _selects_preset(self, preset_id: str) -> bool:
+        """Return whether one preset is reachable through this integration.
+
+        Args:
+            preset_id: Stable policy preset identifier.
+
+        Returns:
+            ``True`` when the integration-wide override or at least one
+            catalogued target skill can resolve to ``preset_id`` through its
+            per-skill or profile-default selection. This is intentionally a
+            conservative integration-level check, not a concrete-program
+            reachability analysis.
+        """
+        _validate_identifier(preset_id, field_name="preset_id")
+        if self.runtime_preset is not None:
+            return self.runtime_preset == preset_id
+        skill_ids = {
+            descriptor.skill_id for descriptor in self.call_catalog.descriptors.values()
+        }
+        return any(
+            self.robot_profile.skill_presets.get(
+                skill_id,
+                self.robot_profile.default_preset,
+            )
+            == preset_id
+            for skill_id in skill_ids
         )
 
     def _resolve_declared_preset(
@@ -923,6 +1027,12 @@ class SemanticIntegrationManifest:
     ) -> BoundSemanticIntegration:
         """Validate live scene and robot bindings without observing or planning."""
         self.scene.validate_registry(scene_registry)
+        if not isinstance(engine, AtomicActionEngine):
+            raise TypeError("engine must be an AtomicActionEngine.")
+        self._validate_safe_dynamic_collision_policy(
+            scene_registry=scene_registry,
+            engine=engine,
+        )
         try:
             bound_profile = engine.bind_skill_profile(
                 self.robot_profile,
@@ -942,6 +1052,53 @@ class SemanticIntegrationManifest:
             robot_profile=bound_profile,
             engine=engine,
         )
+
+    def _validate_safe_dynamic_collision_policy(
+        self,
+        *,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> None:
+        """Fail before observation when selected safe planning cannot be strict."""
+        if not scene_registry.dynamic_collision_entity_ids or not self._selects_preset(
+            "safe"
+        ):
+            return
+        preset = self.robot_profile.presets["safe"]
+        policy_path: tuple[PathPart, ...] = (
+            "integration",
+            "robot_profile",
+            "presets",
+            "safe",
+            "motion_policy",
+        )
+        if preset.motion_policy.strategy != "motion_gen":
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "safe_dynamic_collision_unsupported",
+                    (*policy_path, "strategy"),
+                    "The 'safe' preset requires strategy='motion_gen' when the "
+                    "scene registry declares dynamic collision entities.",
+                    ("motion_gen",),
+                )
+            )
+        if (
+            getattr(
+                engine.motion_generator,
+                "supports_dynamic_collision_world",
+                False,
+            )
+            is not True
+        ):
+            raise SemanticValidationError(
+                SemanticDiagnostic(
+                    "safe_dynamic_collision_unsupported",
+                    (*policy_path, "dynamic_collision_mode"),
+                    "The 'safe' preset requires an active planner with dynamic "
+                    "collision-world support for the registered dynamic entities "
+                    f"{scene_registry.dynamic_collision_entity_ids!r}.",
+                )
+            )
 
 
 class BoundSemanticIntegration:
@@ -963,6 +1120,11 @@ class BoundSemanticIntegration:
             raise TypeError("robot_profile must be exactly BoundRobotSkillProfile.")
         if not isinstance(engine, AtomicActionEngine):
             raise TypeError("engine must be an AtomicActionEngine.")
+        manifest.scene.validate_registry(scene_registry)
+        manifest._validate_safe_dynamic_collision_policy(
+            scene_registry=scene_registry,
+            engine=engine,
+        )
         if robot_profile.engine is not engine:
             raise ValueError("robot_profile belongs to a different engine.")
         if engine.skill_profile is not robot_profile:
@@ -1043,11 +1205,26 @@ class BoundSemanticIntegration:
                     str(exc),
                 )
             ) from exc
-        return BoundSemanticCall(
+        if (
+            linked.preset_id == "safe"
+            and self._scene_registry.dynamic_collision_entity_ids
+        ):
+            preset = SkillPolicyPreset(
+                preset_id=preset.preset_id,
+                schema_version=preset.schema_version,
+                motion_policy=replace(
+                    preset.motion_policy,
+                    dynamic_collision_mode=DynamicCollisionMode.REQUIRED,
+                ),
+                recovery_policy=preset.recovery_policy,
+                runner_cfg=preset.runner_cfg,
+                effect_monitors=preset.effect_monitors,
+            )
+        return BoundSemanticCall._create(
             linked=linked,
             binding=binding,
             preset=preset,
-            _robot_profile=self._robot_profile,
+            robot_profile=self._robot_profile,
         )
 
 

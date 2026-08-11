@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import math
 import re
 from types import MappingProxyType
@@ -295,6 +295,36 @@ class SemanticPose:
         output[:, :3, 3] = position
         return output[0] if was_unbatched else output
 
+    def to_metadata(self) -> dict[str, object]:
+        """Return the pose as deterministic JSON-safe semantic data."""
+        return {
+            "position": self._position.detach().cpu().tolist(),
+            "quaternion_wxyz": self._quaternion_wxyz.detach().cpu().tolist(),
+        }
+
+
+def _call_value_to_metadata(value: DeclarativeValue | object) -> object:
+    """Serialize one already validated semantic-call payload value."""
+    if value is None or type(value) in (bool, int, float, str):
+        return value
+    if isinstance(value, SceneEntityRef):
+        return {
+            "entity_type": type(value).__name__,
+            "entity_id": value.entity_id,
+        }
+    if type(value) is SemanticPose:
+        return value.to_metadata()
+    if isinstance(value, Mapping):
+        return {
+            key: _call_value_to_metadata(nested)
+            for key, nested in sorted(value.items())
+        }
+    if isinstance(value, tuple):
+        return [_call_value_to_metadata(nested) for nested in value]
+    raise TypeError(
+        f"Unsupported validated semantic-call metadata value {type(value).__name__}."
+    )
+
 
 @dataclass(frozen=True, slots=True, kw_only=True, eq=False)
 class SemanticCallSpec:
@@ -315,6 +345,21 @@ class SemanticCallSpec:
     def semantic_id(self) -> str:
         """Return the stable catalog identifier for this call."""
         return self.call_kind
+
+    def to_metadata(self) -> dict[str, object]:
+        """Return this semantic call as deterministic JSON-safe data."""
+        arguments = {
+            data_field.name: _call_value_to_metadata(getattr(self, data_field.name))
+            for data_field in fields(self)
+            if data_field.name != "resources"
+        }
+        return {
+            "semantic_id": self.semantic_id,
+            "call_kind": self.call_kind,
+            "call_type": type(self).__name__,
+            "resources": _call_value_to_metadata(self.resources),
+            "arguments": arguments,
+        }
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -421,6 +466,76 @@ class HandOver(SemanticCallSpec):
                 "final_target",
                 self.final_target.snapshot(),
             )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class OperateArticulation(SemanticCallSpec):
+    """Operate one registered articulation through a typed handle affordance.
+
+    Select either a named affordance target or an explicit absolute joint
+    position plus handle-relative displacement. Grounding captures the current
+    live joint position as the source of that declared stroke. Recovery
+    replans then combine the latest handle pose and joint position to execute
+    only the remaining signed displacement.
+
+    Args:
+        articulation: Authoritative articulation reference.
+        handle: Optional explicit operation affordance. Omission requests the
+            capability-scoped default registered on the articulation.
+        target: Optional target name registered by the affordance.
+        target_position: Explicit absolute desired joint position.
+        target_displacement: Explicit full signed operation displacement from
+            the joint position and handle pose captured during grounding.
+        resources: Optional skill-local resource overrides.
+    """
+
+    call_kind: ClassVar[str] = "operate_articulation"
+
+    articulation: SceneArticulationRef
+    handle: SceneAffordanceRef | None = None
+    target: str | None = None
+    target_position: float | None = None
+    target_displacement: float | None = None
+
+    def __post_init__(self) -> None:
+        SemanticCallSpec.__post_init__(self)
+        if type(self.articulation) is not SceneArticulationRef:
+            raise TypeError(
+                "OperateArticulation.articulation must be a SceneArticulationRef."
+            )
+        if self.handle is not None and type(self.handle) is not SceneAffordanceRef:
+            raise TypeError(
+                "OperateArticulation.handle must be a SceneAffordanceRef or None."
+            )
+        named = self.target is not None
+        explicit_position = self.target_position is not None
+        explicit_displacement = self.target_displacement is not None
+        if named:
+            _validate_identifier(
+                self.target,
+                field_name="OperateArticulation.target",
+            )
+            if explicit_position or explicit_displacement:
+                raise ValueError(
+                    "OperateArticulation.target is mutually exclusive with "
+                    "target_position and target_displacement."
+                )
+            return
+        if not (explicit_position and explicit_displacement):
+            raise ValueError(
+                "OperateArticulation requires either target or the explicit "
+                "target_position and target_displacement pair."
+            )
+        for field_name in ("target_position", "target_displacement"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(
+                    f"OperateArticulation.{field_name} must be a finite scalar."
+                )
+            normalized = float(value)
+            if not math.isfinite(normalized):
+                raise ValueError(f"OperateArticulation.{field_name} must be finite.")
+            object.__setattr__(self, field_name, normalized)
 
 
 DeclarativeValue: TypeAlias = (
@@ -577,11 +692,18 @@ class SemanticCallDescriptor:
 
     def __post_init__(self) -> None:
         _validate_identifier(self.call_id, field_name="SemanticCallDescriptor.call_id")
-        if self.spec_type not in (Pick, Place, HandOver, RegisteredSemanticCall):
+        if self.spec_type not in (
+            Pick,
+            Place,
+            HandOver,
+            OperateArticulation,
+            RegisteredSemanticCall,
+        ):
             raise TypeError(
-                "spec_type must be exactly Pick, Place, HandOver, or "
-                "RegisteredSemanticCall; extensions use the registered payload "
-                "contract rather than executable call subclasses."
+                "spec_type must be exactly Pick, Place, HandOver, "
+                "OperateArticulation, or RegisteredSemanticCall; extensions use "
+                "the registered payload contract rather than executable call "
+                "subclasses."
             )
         if not isinstance(self.schema_version, int) or isinstance(
             self.schema_version, bool
@@ -633,6 +755,7 @@ class SemanticCallDescriptor:
             Pick.call_kind,
             Place.call_kind,
             HandOver.call_kind,
+            OperateArticulation.call_kind,
             RegisteredSemanticCall.call_kind,
         }:
             raise ValueError(
@@ -711,7 +834,13 @@ class SemanticCallCatalog:
         if type(call) is str:
             call_id = _validate_identifier(call, field_name="semantic call ID")
             call_value = None
-        elif type(call) in (Pick, Place, HandOver, RegisteredSemanticCall):
+        elif type(call) in (
+            Pick,
+            Place,
+            HandOver,
+            OperateArticulation,
+            RegisteredSemanticCall,
+        ):
             call_id = call.semantic_id
             call_value = call
         else:
@@ -747,6 +876,9 @@ def _builtin_call_target(
     from embodichain.lab.sim.atomic_actions.primitives.hand_over import (
         HandOver as HandOverAction,
     )
+    from embodichain.lab.sim.atomic_actions.primitives.operate_articulation import (
+        OperateArticulation as OperateArticulationAction,
+    )
     from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
     from embodichain.lab.sim.atomic_actions.primitives.place import Place as PlaceAction
 
@@ -754,6 +886,7 @@ def _builtin_call_target(
         Pick: PickUp.descriptor(),
         Place: PlaceAction.descriptor(),
         HandOver: HandOverAction.descriptor(),
+        OperateArticulation: OperateArticulationAction.descriptor(),
     }
     try:
         return targets[spec_type]
@@ -773,7 +906,7 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
             call_id=spec_type.call_kind,
             spec_type=spec_type,
         )
-        for spec_type in (Pick, Place, HandOver)
+        for spec_type in (Pick, Place, HandOver, OperateArticulation)
     )
     return SemanticCallCatalog(descriptors)
 
@@ -781,6 +914,7 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
 __all__ = [
     "DeclarativeValue",
     "HandOver",
+    "OperateArticulation",
     "Pick",
     "Place",
     "PlaceRelationTarget",

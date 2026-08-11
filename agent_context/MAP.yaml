@@ -646,10 +646,10 @@ topics:
       - SemanticIntegrationManifest
       - BoundSemanticIntegration
       - SemanticSkillCompiler
-      - SemanticSkillRuntime
-      - SemanticTask
-      - SemanticExecution
-      - SemanticTaskResult
+      - SkillRuntime
+      - SkillResult
+      - ParallelSkillRuntime
+      - AtomicSkills
       - SemanticWorkflow
       - SemanticLowering
       - GroundedSemanticCall

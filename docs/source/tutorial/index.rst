@@ -22,19 +22,18 @@ Follow the tutorials in this order for the best learning experience:
 9. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
 10. :doc:`robot_articulation` — Plan contact-rich motion to open a passive drawer and push it halfway back.
 11. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
-12. :doc:`semantic_skills` — Build robot-independent Pick, Place, and dual-arm workflows on top of atomic actions.
-13. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
+12. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
 
 **Phase 2: Environments**
 
-14. :doc:`basic_env` — Create a simple Gymnasium environment with ``BaseEnv``. Prerequisite: Phase 1 basics.
-15. :doc:`modular_env` — Build a config-driven environment with ``EmbodiedEnv``, managers, and randomization. Prerequisite: :doc:`basic_env`.
-16. :doc:`data_generation` — Generate expert demonstration datasets for imitation learning. Prerequisite: :doc:`modular_env`.
-17. :doc:`rl` — Train RL agents with PPO or GRPO. Prerequisite: :doc:`basic_env`.
+13. :doc:`basic_env` — Create a simple Gymnasium environment with ``BaseEnv``. Prerequisite: Phase 1 basics.
+14. :doc:`modular_env` — Build a config-driven environment with ``EmbodiedEnv``, managers, and randomization. Prerequisite: :doc:`basic_env`.
+15. :doc:`data_generation` — Generate expert demonstration datasets for imitation learning. Prerequisite: :doc:`modular_env`.
+16. :doc:`rl` — Train RL agents with PPO or GRPO. Prerequisite: :doc:`basic_env`.
 
 **Phase 3: Extending the Framework**
 
-18. :doc:`/guides/add_robot` — Add a new robot model to EmbodiChain.
+17. :doc:`/guides/add_robot` — Add a new robot model to EmbodiChain.
 
 .. toctree::
    :maxdepth: 1
@@ -52,7 +51,6 @@ Follow the tutorials in this order for the best learning experience:
    motion_gen
    robot_articulation
    atomic_actions
-   semantic_skills
    gizmo
    basic_env
    modular_env

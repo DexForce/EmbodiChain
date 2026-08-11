@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Hashable, Iterable, Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import Enum
@@ -32,11 +32,14 @@ from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
+    ArticulationOperationAffordance,
     EntityState,
     ObjectSemantics,
+    ObservedArticulationJointState,
     SceneProvider,
     SceneSnapshot,
 )
+from .effects import EffectEvidenceAddress
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.planners import MotionGenerator
@@ -48,11 +51,37 @@ RefT = TypeVar("RefT", bound="SceneEntityRef")
 GRASP_AFFORDANCE_CAPABILITY = "affordance.grasp"
 """Capability for an affordance usable by object pickup or handover."""
 
+ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY = "affordance.articulation.operation"
+"""Capability for a typed handle-driven articulation operation."""
+
 PLACE_ON_AFFORDANCE_CAPABILITY = "affordance.place.on"
 """Capability for an affordance that defines an ``on`` placement relation."""
 
 PLACE_IN_AFFORDANCE_CAPABILITY = "affordance.place.in"
 """Capability for an affordance that defines an ``inside`` placement relation."""
+
+SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID = "builtin.scene_articulation"
+"""Stable route for explicitly injected articulation-joint observations."""
+
+SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION = "1"
+"""Exact contract revision for articulation-joint evidence addresses."""
+
+
+@dataclass(frozen=True, slots=True)
+class ArticulationJointEvidenceAddress(EffectEvidenceAddress):
+    """Canonical scene articulation and joint observation address."""
+
+    articulation_id: str
+    joint_id: str
+
+    def __post_init__(self) -> None:
+        _validate_identifier(self.articulation_id, "articulation_id")
+        _validate_identifier(self.joint_id, "joint_id")
+
+    @property
+    def address_fingerprint(self) -> Hashable:
+        """Return the exact provider-independent joint address."""
+        return type(self), self.articulation_id, self.joint_id
 
 
 class UnsupportedSceneAffordanceError(ValueError):
@@ -321,6 +350,18 @@ class SceneEntityMetadata:
                 raise TypeError(
                     f"{GRASP_AFFORDANCE_CAPABILITY!r} requires an "
                     "AntipodalAffordance payload."
+                )
+            if (
+                ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY
+                in self.affordance_capabilities
+                and not issubclass(
+                    self.affordance_payload_type,
+                    ArticulationOperationAffordance,
+                )
+            ):
+                raise TypeError(
+                    f"{ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY!r} requires "
+                    "an ArticulationOperationAffordance payload."
                 )
             return
         if self.parent is not None or self.native_name is not None:
@@ -638,6 +679,19 @@ class SceneEntityStateProvider(Protocol):
 
 
 @runtime_checkable
+class SceneArticulationJointStateProvider(Protocol):
+    """Observe canonical joints for one registered scene articulation."""
+
+    def observe_joints(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> Mapping[str, ObservedArticulationJointState]:
+        """Return live joint observations whose rows follow ``env_ids``."""
+
+
+@runtime_checkable
 class SceneGeometryProvider(Protocol):
     """Provide one entity's planner-facing collision geometry descriptor."""
 
@@ -660,6 +714,7 @@ class SceneEntityRegistration:
     Args:
         ref: Canonical typed reference.
         state_provider: Optional dynamic pose/confidence source.
+        joint_state_provider: Optional live articulation-joint source.
         aliases: External names normalized at the registry boundary.
         parent: Canonical parent for a link or affordance.
         native_name: Backend-local member name under ``parent``.
@@ -719,6 +774,9 @@ class SceneEntityRegistration:
     relative_pose: torch.Tensor | None = None
     """Optional parent-relative pose when no explicit state provider exists."""
 
+    joint_state_provider: SceneArticulationJointStateProvider | None = None
+    """Explicit live joint source for an articulation registration."""
+
     def __post_init__(self) -> None:
         if type(self.ref) not in {
             SceneEntityRef,
@@ -733,6 +791,14 @@ class SceneEntityRegistration:
             SceneEntityStateProvider,
         ):
             raise TypeError("state_provider must implement SceneEntityStateProvider.")
+        if self.joint_state_provider is not None and not isinstance(
+            self.joint_state_provider,
+            SceneArticulationJointStateProvider,
+        ):
+            raise TypeError(
+                "joint_state_provider must implement "
+                "SceneArticulationJointStateProvider."
+            )
 
         if isinstance(self.aliases, (str, bytes)):
             raise TypeError("aliases must be an iterable of identifiers, not a string.")
@@ -831,9 +897,22 @@ class SceneEntityRegistration:
                     "affordance_capabilities require a SceneAffordanceRef "
                     "registration."
                 )
+            if (
+                isinstance(self.ref, SceneObjectRef)
+                and self.joint_state_provider is not None
+            ):
+                raise ValueError(
+                    "joint_state_provider requires a SceneArticulationRef "
+                    "registration."
+                )
             return
 
         if isinstance(self.ref, SceneLinkRef):
+            if self.joint_state_provider is not None:
+                raise ValueError(
+                    "joint_state_provider requires a SceneArticulationRef "
+                    "registration."
+                )
             if (
                 not isinstance(self.parent, SceneArticulationRef)
                 or self.native_name is None
@@ -855,6 +934,11 @@ class SceneEntityRegistration:
             return
 
         if isinstance(self.ref, SceneAffordanceRef):
+            if self.joint_state_provider is not None:
+                raise ValueError(
+                    "joint_state_provider requires a SceneArticulationRef "
+                    "registration."
+                )
             if (
                 not isinstance(
                     self.parent,
@@ -879,6 +963,10 @@ class SceneEntityRegistration:
 
         if self.parent is not None or self.native_name is not None:
             raise ValueError("Generic entity registrations cannot declare a parent.")
+        if self.joint_state_provider is not None:
+            raise ValueError(
+                "joint_state_provider requires a SceneArticulationRef registration."
+            )
         if self.state_provider is None:
             raise ValueError("Generic entity registrations require state_provider.")
         if self.affordance_capabilities:
@@ -1550,7 +1638,7 @@ class SceneRegistry:
                 SceneEntityRegistration(
                     ref=SceneObjectRef(registry_id),
                     state_provider=_SimulationEntityStateProvider(entity),
-                    aliases=(uid,),
+                    aliases=(() if uid == registry_id else (uid,)),
                     geometry_provider=geometry.get(
                         registry_id,
                         _SimulationEntityGeometryProvider(entity),
@@ -1572,7 +1660,10 @@ class SceneRegistry:
                 SceneEntityRegistration(
                     ref=SceneArticulationRef(registry_id),
                     state_provider=_SimulationEntityStateProvider(entity),
-                    aliases=(uid,),
+                    joint_state_provider=(
+                        _SimulationArticulationJointStateProvider(entity)
+                    ),
+                    aliases=(() if uid == registry_id else (uid,)),
                     geometry_provider=geometry.get(registry_id),
                     collision_role=roles.get(
                         registry_id,
@@ -1641,6 +1732,51 @@ class _SimulationEntityStateProvider:
 
 
 @dataclass(frozen=True, slots=True)
+class _SimulationArticulationJointStateProvider:
+    """Read named measured qpos from one selected simulation articulation."""
+
+    entity: Any
+
+    def observe_joints(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> Mapping[str, ObservedArticulationJointState]:
+        del timestamp
+        qpos = self.entity.get_qpos(target=False)
+        if not isinstance(qpos, torch.Tensor):
+            raise TypeError("Simulation articulation get_qpos() must return a tensor.")
+        if qpos.dim() != 2 or qpos.shape[0] == 0 or qpos.shape[1] == 0:
+            raise ValueError(
+                "Simulation articulation qpos must have non-empty shape (N, J)."
+            )
+        joint_names = tuple(self.entity.joint_names)
+        if len(joint_names) != qpos.shape[1]:
+            raise ValueError(
+                "Simulation articulation joint_names must match qpos width."
+            )
+        for joint_name in joint_names:
+            _validate_identifier(joint_name, "simulation articulation joint name")
+        if len(set(joint_names)) != len(joint_names):
+            raise ValueError("Simulation articulation joint_names must be unique.")
+        indices = env_ids.to(device=qpos.device)
+        if bool((indices < 0).any()) or int(indices.max().item()) >= qpos.shape[0]:
+            raise ValueError(
+                "Simulation scene env_ids must address valid articulation rows."
+            )
+        selected = qpos.index_select(0, indices)
+        return MappingProxyType(
+            {
+                joint_name: ObservedArticulationJointState(
+                    selected[:, index : index + 1]
+                )
+                for index, joint_name in enumerate(joint_names)
+            }
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class _SimulationEntityGeometryProvider:
     """Expose a selected live rigid object as planner geometry input."""
 
@@ -1696,6 +1832,8 @@ class RegistrySceneProvider(SceneProvider):
         self._env_ids: torch.Tensor | None = None
         self._published_poses: dict[str, torch.Tensor] = {}
         self._published_confidences: dict[str, float] = {}
+        self._published_joint_positions: dict[tuple[str, str], torch.Tensor] = {}
+        self._published_joint_validity: dict[tuple[str, str], torch.Tensor] = {}
         self._scene_version = 0
         self._collision_revisions: list[int] = []
         self._effective_collision_world_mode = (
@@ -1771,6 +1909,10 @@ class RegistrySceneProvider(SceneProvider):
             timestamp=float(timestamp),
             env_ids=env_ids,
         )
+        articulation_joints = self._observe_articulation_joints(
+            timestamp=float(timestamp),
+            env_ids=env_ids,
+        )
         poses = {entity_id: state.pose for entity_id, state in states.items()}
         confidences = {
             entity_id: state.confidence for entity_id, state in states.items()
@@ -1787,8 +1929,11 @@ class RegistrySceneProvider(SceneProvider):
                 confidences[entity_id] != self._published_confidences[entity_id]
                 for entity_id in confidences
             )
-            if confidence_changed or any(
-                changed.any().item() for changed in changed_by_entity.values()
+            joint_changed = self._joint_observations_changed(articulation_joints)
+            if (
+                confidence_changed
+                or joint_changed
+                or any(changed.any().item() for changed in changed_by_entity.values())
             ):
                 self._scene_version += 1
             collision_changed = torch.zeros(batch_size, dtype=torch.bool)
@@ -1814,6 +1959,7 @@ class RegistrySceneProvider(SceneProvider):
                 entity_id: pose.clone() for entity_id, pose in poses.items()
             }
             self._published_confidences = confidences.copy()
+            self._store_joint_baseline(articulation_joints)
 
         self._last_timestamp = float(timestamp)
         return SceneSnapshot(
@@ -1822,7 +1968,111 @@ class RegistrySceneProvider(SceneProvider):
             entities=states,
             collision_world_revision=tuple(self._collision_revisions),
             collision_entity_ids=self.collision_entity_ids,
+            articulation_joints=articulation_joints,
         )
+
+    def _observe_articulation_joints(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> dict[tuple[str, str], ObservedArticulationJointState]:
+        """Observe every explicitly registered articulation-joint provider."""
+        batch_size = int(env_ids.numel())
+        observed: dict[tuple[str, str], ObservedArticulationJointState] = {}
+        for registration in self.registry._registrations:
+            provider = registration.joint_state_provider
+            if provider is None:
+                continue
+            assert isinstance(registration.ref, SceneArticulationRef)
+            supplied = provider.observe_joints(
+                timestamp=timestamp,
+                env_ids=env_ids.clone(),
+            )
+            if not isinstance(supplied, Mapping):
+                raise TypeError(
+                    f"Joint provider for {registration.ref.entity_id!r} must "
+                    "return a mapping."
+                )
+            for joint_id, state in supplied.items():
+                _validate_identifier(joint_id, "joint provider joint_id")
+                if not isinstance(state, ObservedArticulationJointState):
+                    raise TypeError(
+                        f"Joint provider for {registration.ref.entity_id!r} must "
+                        "return ObservedArticulationJointState values."
+                    )
+                key = registration.ref.entity_id, joint_id
+                observed[key] = self._normalize_joint_observation(
+                    state,
+                    batch_size=batch_size,
+                    address=key,
+                )
+        return observed
+
+    @staticmethod
+    def _normalize_joint_observation(
+        state: ObservedArticulationJointState,
+        *,
+        batch_size: int,
+        address: tuple[str, str],
+    ) -> ObservedArticulationJointState:
+        """Broadcast one live joint observation to the scene batch."""
+        position = state.position
+        if position.dim() == 1:
+            position = position.unsqueeze(0).expand(batch_size, -1).clone()
+        elif position.shape[0] != batch_size:
+            raise ValueError(
+                f"Articulation joint {address!r} observation must have {batch_size} "
+                "rows."
+            )
+        valid = state.valid_mask
+        if valid is None:
+            valid = torch.ones(
+                batch_size,
+                dtype=torch.bool,
+                device=position.device,
+            )
+        return ObservedArticulationJointState(position, valid)
+
+    def _joint_observations_changed(
+        self,
+        states: Mapping[tuple[str, str], ObservedArticulationJointState],
+    ) -> bool:
+        """Update live joint baselines and report any material value change."""
+        changed = set(states) != set(self._published_joint_positions)
+        if not changed:
+            for key, state in states.items():
+                previous_position = self._published_joint_positions[key]
+                previous_validity = self._published_joint_validity[key]
+                current_position = state.position.to(
+                    device=previous_position.device,
+                    dtype=previous_position.dtype,
+                )
+                assert state.valid_mask is not None
+                current_validity = state.valid_mask.to(previous_validity.device)
+                if not torch.equal(
+                    current_position, previous_position
+                ) or not torch.equal(
+                    current_validity,
+                    previous_validity,
+                ):
+                    changed = True
+                    break
+        self._store_joint_baseline(states)
+        return changed
+
+    def _store_joint_baseline(
+        self,
+        states: Mapping[tuple[str, str], ObservedArticulationJointState],
+    ) -> None:
+        """Own the current live joint values used for scene revisioning."""
+        self._published_joint_positions = {
+            key: state.position.clone() for key, state in states.items()
+        }
+        self._published_joint_validity = {}
+        for key, state in states.items():
+            assert state.valid_mask is not None
+            self._published_joint_validity[key] = state.valid_mask.clone()
 
     def _observe_states(
         self,
@@ -1913,11 +2163,16 @@ class RegistrySceneProvider(SceneProvider):
 
 
 __all__ = [
+    "ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY",
+    "ArticulationJointEvidenceAddress",
     "AmbiguousSceneAffordanceError",
     "GRASP_AFFORDANCE_CAPABILITY",
     "PLACE_IN_AFFORDANCE_CAPABILITY",
     "PLACE_ON_AFFORDANCE_CAPABILITY",
     "RegistrySceneProvider",
+    "SCENE_ARTICULATION_EVIDENCE_PROVIDER_ID",
+    "SCENE_ARTICULATION_EVIDENCE_PROVIDER_REVISION",
+    "SceneArticulationJointStateProvider",
     "SceneAffordanceRef",
     "SceneArticulationRef",
     "SceneCollisionRole",
