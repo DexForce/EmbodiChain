@@ -42,6 +42,7 @@ from embodichain.lab.sim.atomic_actions import (
     EndpointTrackingChannelBinding,
     EndpointTrackingFeedbackAddress,
     EntityState,
+    EffectExpectationResult,
     ExecutionEventKind,
     ExecutionSession,
     ExecutionStatus,
@@ -81,6 +82,30 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
 from embodichain.lab.sim.planners import PlanOptions
+
+
+def _effect_result(
+    verification_id: int,
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    *,
+    invalidation_mask: torch.Tensor | None = None,
+    retry_mask: torch.Tensor | None = None,
+    expectation_results: tuple[EffectExpectationResult, ...] = (),
+) -> EffectVerificationResult:
+    """Build an explicit terminal decision with legacy retry semantics."""
+    return EffectVerificationResult(
+        verification_id=verification_id,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        invalidation_mask=(
+            torch.zeros_like(failure_mask)
+            if invalidation_mask is None
+            else invalidation_mask
+        ),
+        retry_mask=failure_mask if retry_mask is None else retry_mask,
+        expectation_results=expectation_results,
+    )
 
 
 class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
@@ -692,6 +717,7 @@ def _effect_session(
     action_timeout: float = 30.0,
     eligible_mask: torch.Tensor | None = None,
     action: DynamicAction | None = None,
+    task_state: TaskState | None = None,
 ) -> tuple[ExecutionSession, ExecutionTick]:
     """Advance a test effect action to its verification boundary."""
     engine, _ = _engine(batch_size=batch_size)
@@ -711,9 +737,12 @@ def _effect_session(
     )
     qpos = tuple(0.0 for _ in range(batch_size))
     target = tuple(0.2 for _ in range(batch_size))
+    initial_context = _context(0.0, qpos, target, 0)
+    if task_state is not None:
+        initial_context = replace(initial_context, task=task_state)
     session = engine.start(
         (invocation,),
-        _context(0.0, qpos, target, 0),
+        initial_context,
         eligible_mask=eligible_mask,
     )
     session.tick(_context(0.0, qpos, target, 0))
@@ -1988,7 +2017,7 @@ def test_explicit_verification_with_empty_delta_preserves_task_state() -> None:
 
     completed = session.tick(
         _context(0.21, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True]),
             failure_mask=torch.tensor([False]),
@@ -2013,7 +2042,7 @@ def test_explicit_verification_keeps_partial_and_retry_row_lifecycle() -> None:
 
     retry = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, True]),
@@ -2043,7 +2072,7 @@ def test_explicit_verification_keeps_partial_and_retry_row_lifecycle() -> None:
 
     completed = session.tick(
         _context(0.25, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             second_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -2068,7 +2097,7 @@ def test_explicit_verification_partial_success_shrinks_request_without_state_del
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2087,7 +2116,7 @@ def test_explicit_verification_partial_success_shrinks_request_without_state_del
 
     completed = session.tick(
         _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             second_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -2143,7 +2172,7 @@ def test_nonempty_effect_is_committed_only_after_external_verification() -> None
     still_waiting = session.tick(_context(0.25, 0.2, 0.2, 0))
     completed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([True]),
             torch.tensor([False]),
@@ -2186,7 +2215,7 @@ def test_initially_ineligible_rows_never_receive_effects() -> None:
 
     completed = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2207,7 +2236,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
 
     no_progress = session.tick(
         _context(0.205, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([False, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2218,7 +2247,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             first_request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2241,7 +2270,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
     with pytest.raises(ValueError, match="verification_id"):
         session.tick(
             _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-            effect_result=EffectVerificationResult(
+            effect_result=_effect_result(
                 first_request.verification_id,
                 success_mask=torch.tensor([False, True]),
                 failure_mask=torch.tensor([False, False]),
@@ -2251,7 +2280,7 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
     current_request = partial.pending_effect
     completed = session.tick(
         _context(0.23, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             current_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -2267,17 +2296,45 @@ def test_partial_effect_success_commits_resolved_rows_and_shrinks_request() -> N
 def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
     success = torch.tensor([True, False])
     failure = torch.tensor([False, True])
-    result = EffectVerificationResult(0, success, failure)
+    result = _effect_result(0, success, failure)
     success.fill_(False)
     failure.fill_(False)
     assert result.success_mask.tolist() == [True, False]
     assert result.failure_mask.tolist() == [False, True]
 
     with pytest.raises(ValueError, match="must not overlap"):
-        EffectVerificationResult(
+        _effect_result(
             0,
             torch.tensor([True, False]),
             torch.tensor([True, False]),
+        )
+    with pytest.raises(ValueError, match="invalidation_mask must be a subset"):
+        _effect_result(
+            0,
+            torch.tensor([False, False]),
+            torch.tensor([True, False]),
+            invalidation_mask=torch.tensor([False, True]),
+        )
+    with pytest.raises(ValueError, match="retry_mask must be a subset"):
+        _effect_result(
+            0,
+            torch.tensor([False, False]),
+            torch.tensor([True, False]),
+            retry_mask=torch.tensor([False, True]),
+        )
+    with pytest.raises(ValueError, match="conjunction"):
+        _effect_result(
+            0,
+            torch.tensor([False, False]),
+            torch.tensor([False, True]),
+            expectation_results=(
+                EffectExpectationResult(
+                    expectation_id="destination",
+                    satisfied_mask=torch.tensor([True, False]),
+                    contradicted_mask=torch.tensor([False, True]),
+                    inverse_satisfied_mask=torch.tensor([False, False]),
+                ),
+            ),
         )
 
     session, waiting = _effect_session(batch_size=2)
@@ -2300,7 +2357,7 @@ def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             preserved.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2315,7 +2372,7 @@ def test_effect_result_masks_are_owned_disjoint_and_request_scoped() -> None:
     with pytest.raises(ValueError, match="subsets"):
         session.tick(
             _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-            effect_result=EffectVerificationResult(
+            effect_result=_effect_result(
                 current.verification_id,
                 success_mask=torch.tensor([True, False]),
                 failure_mask=torch.tensor([False, False]),
@@ -2366,7 +2423,7 @@ def test_partial_effect_failure_waits_for_unresolved_rows_then_retries_failure()
 
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([False, False]),
             failure_mask=torch.tensor([True, False]),
@@ -2382,7 +2439,7 @@ def test_partial_effect_failure_waits_for_unresolved_rows_then_retries_failure()
     unresolved_request = partial.pending_effect
     resolved = session.tick(
         _context(0.22, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             unresolved_request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -2410,6 +2467,95 @@ def test_partial_effect_failure_waits_for_unresolved_rows_then_retries_failure()
     assert retry_command.command.active_mask.tolist() == [True, False]
 
 
+def test_effect_failure_applies_request_owned_invalidation_before_recovery() -> None:
+    initial = _with_held_object(_context(0.0, (0.0, 0.0), (0.2, 0.2), 0)).task
+    session, waiting = _effect_session(
+        batch_size=2,
+        max_action_retries=1,
+        task_state=initial,
+    )
+    request = waiting.pending_effect
+    assert request is not None
+    assert request.failure_invalidation.held_object_updates == {"arm": None}
+
+    terminal = session.tick(
+        _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
+        effect_result=_effect_result(
+            request.verification_id,
+            success_mask=torch.tensor([False, True]),
+            failure_mask=torch.tensor([True, False]),
+            invalidation_mask=torch.tensor([True, False]),
+            retry_mask=torch.tensor([False, False]),
+        ),
+    )
+
+    held = terminal.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None
+    assert held.env_mask.tolist() == [False, True]
+    assert terminal.eligible_mask.tolist() == [False, True]
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_REQUIRED
+        and event.env_mask.tolist() == [True, False]
+        for event in terminal.events
+    )
+    assert not any(
+        event.kind is ExecutionEventKind.ACTION_RETRY for event in terminal.events
+    )
+
+
+def test_inverse_proof_can_preserve_state_while_failure_requires_recovery() -> None:
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0)).task
+    session, waiting = _effect_session(task_state=initial)
+    request = waiting.pending_effect
+    assert request is not None
+    failure = torch.tensor([True])
+
+    terminal = session.tick(
+        _context(0.21, 0.2, 0.2, 0),
+        effect_result=_effect_result(
+            request.verification_id,
+            success_mask=torch.tensor([False]),
+            failure_mask=failure,
+            invalidation_mask=torch.tensor([False]),
+            retry_mask=torch.tensor([False]),
+            expectation_results=(
+                EffectExpectationResult(
+                    expectation_id="source",
+                    satisfied_mask=torch.tensor([False]),
+                    contradicted_mask=failure,
+                    inverse_satisfied_mask=failure,
+                ),
+            ),
+        ),
+    )
+
+    held = terminal.task_state.get_held_object("arm")
+    assert held is not None and held.env_mask is not None and held.env_mask.all()
+    assert terminal.status is ExecutionStatus.FAILED
+    assert any(
+        event.kind is ExecutionEventKind.RECOVERY_REQUIRED for event in terminal.events
+    )
+
+
+def test_unresolved_effect_timeout_invalidates_active_state_fail_closed() -> None:
+    initial = _with_held_object(_context(0.0, 0.0, 0.2, 0)).task
+    session, waiting = _effect_session(
+        action_timeout=0.25,
+        max_action_retries=1,
+        task_state=initial,
+    )
+    assert waiting.pending_effect is not None
+
+    terminal = session.tick(_context(0.26, 0.2, 0.2, 0))
+
+    assert terminal.status is ExecutionStatus.FAILED
+    assert terminal.task_state.get_held_object("arm") is None
+    kinds = {event.kind for event in terminal.events}
+    assert ExecutionEventKind.EFFECT_VERIFICATION_TIMEOUT in kinds
+    assert ExecutionEventKind.RECOVERY_REQUIRED in kinds
+    assert ExecutionEventKind.ACTION_RETRY not in kinds
+
+
 def test_effect_failure_exhaustion_advances_completed_rows_without_empty_request() -> (
     None
 ):
@@ -2419,7 +2565,7 @@ def test_effect_failure_exhaustion_advances_completed_rows_without_empty_request
 
     terminal = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, True]),
@@ -2449,7 +2595,7 @@ def test_deactivating_last_unresolved_effect_row_advances_barrier() -> None:
     assert request is not None
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2508,7 +2654,7 @@ def test_effect_request_deadline_is_stable_and_accepts_result_at_boundary() -> N
 
     completed = session.tick(
         _context(0.25, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True]),
             failure_mask=torch.tensor([False]),
@@ -2540,7 +2686,7 @@ def test_session_revision_cannot_abandon_pending_effect_verification() -> None:
     assert session.effect_verification_pending is True
     completed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([True]),
             torch.tensor([False]),
@@ -2569,7 +2715,7 @@ def test_effect_failure_does_not_commit_and_exhausts_retry_budget() -> None:
     assert waiting.pending_effect is not None
     failed = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([False]),
             torch.tensor([True]),
@@ -2606,7 +2752,7 @@ def test_pending_effect_timeout_exhausts_without_committing_late_result() -> Non
 
     timed_out = session.tick(
         _context(0.3, 0.2, 0.2, 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             waiting.pending_effect.verification_id,
             torch.tensor([True]),
             torch.tensor([False]),
@@ -2631,7 +2777,7 @@ def test_effect_timeout_exhaustion_advances_rows_already_verified() -> None:
     assert request is not None
     partial = session.tick(
         _context(0.21, (0.2, 0.2), (0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -2702,7 +2848,7 @@ def test_deferred_effect_failure_charges_concurrent_planning_failures() -> None:
     assert request is not None
     partial = session.tick(
         _context(0.21, (0.2, 0.2, 0.2), (0.2, 0.2, 0.2), 0),
-        effect_result=EffectVerificationResult(
+        effect_result=_effect_result(
             request.verification_id,
             success_mask=torch.tensor([False, False, False]),
             failure_mask=torch.tensor([True, False, False]),
@@ -2770,7 +2916,7 @@ def test_effect_retry_invalidates_previous_verification_id() -> None:
     with pytest.raises(ValueError, match="verification_id"):
         session.tick(
             _context(0.55, 0.2, 0.2, 0),
-            effect_result=EffectVerificationResult(
+            effect_result=_effect_result(
                 old_id,
                 torch.tensor([True]),
                 torch.tensor([False]),

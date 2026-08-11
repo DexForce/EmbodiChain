@@ -60,7 +60,7 @@ from embodichain.lab.sim.atomic_actions import (
     TrackingProjectorRef,
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
-from embodichain.lab.sim.skills.calls import RegisteredSemanticCall
+from embodichain.lab.sim.skills.calls import HandOver, Place, RegisteredSemanticCall
 from embodichain.lab.sim.skills.compiler import (
     GroundedHeldObjectGuard,
     HeldObjectGuardBaseline,
@@ -73,6 +73,7 @@ from embodichain.lab.sim.skills.effects import (
     ControlPartEvidenceAddress,
     EffectEvidenceBatch,
     EffectEvidenceSourceRef,
+    EffectExpectationDecision,
     EffectMonitor,
     EffectMonitorDecision,
     HeldObjectRelation,
@@ -91,7 +92,7 @@ from embodichain.lab.sim.skills.runtime import (
 from embodichain.lab.sim.skills.parallel import ParallelTimingPolicy
 from embodichain.lab.sim.skills.parallel_runtime import ParallelSkillRuntime
 from embodichain.lab.sim.skills.profiles import ResourceClaim
-from embodichain.lab.sim.skills.scene import SceneRegistry
+from embodichain.lab.sim.skills.scene import SceneObjectRef, SceneRegistry
 
 BATCH_SIZE = 2
 
@@ -213,6 +214,7 @@ class _DecisionMonitor(EffectMonitor):
         return EffectMonitorDecision(
             self._decision.success_mask,
             self._decision.failure_mask,
+            self._decision.expectation_decisions,
         )
 
 
@@ -612,6 +614,88 @@ def test_nonblocking_step_routes_effect_feedback_through_collector() -> None:
     assert system.collector.calls[0][0] == 0
     assert torch.equal(system.collector.calls[0][2], torch.tensor([0, 1]))
     assert system.compiler.monitors[0].requests[0].verification_id == 0
+
+
+def test_runtime_preserves_per_expectation_effect_outcomes_in_trace() -> None:
+    expectation = EffectExpectationDecision(
+        expectation_id="joint_target",
+        satisfied_mask=_mask(True, True),
+        contradicted_mask=_mask(False, False),
+        inverse_satisfied_mask=_mask(False, False),
+    )
+    system = _system(
+        (
+            EffectMonitorDecision(
+                _mask(True, True),
+                _mask(False, False),
+                (expectation,),
+            ),
+        )
+    )
+
+    result = system.runtime.run(_call("expectation_trace"))
+
+    assert result.status is SkillStatus.COMPLETED
+    assert len(result.effects) == 1
+    recorded = result.effects[0].expectation_decisions
+    assert len(recorded) == 1
+    assert recorded[0].expectation_id == "joint_target"
+    assert result.to_metadata()["effects"][0]["decision"]["expectations"] == [
+        {
+            "expectation_id": "joint_target",
+            "satisfied_mask": [True, True],
+            "contradicted_mask": [False, False],
+            "inverse_satisfied_mask": [False, False],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("call", "expected_invalidation", "expected_retry"),
+    (
+        (
+            Place(
+                object=SceneObjectRef("cube"),
+                inside=SceneObjectRef("bin"),
+            ),
+            _mask(False, True),
+            _mask(True, False),
+        ),
+        (
+            HandOver(object=SceneObjectRef("cube")),
+            _mask(False, True),
+            _mask(False, False),
+        ),
+    ),
+)
+def test_terminal_failure_policy_only_retains_strongly_proven_source_attachment(
+    call: Place | HandOver,
+    expected_invalidation: torch.Tensor,
+    expected_retry: torch.Tensor,
+) -> None:
+    failure = _mask(True, True)
+    source = EffectExpectationDecision(
+        expectation_id="source",
+        satisfied_mask=_mask(False, False),
+        contradicted_mask=failure,
+        inverse_satisfied_mask=_mask(True, False),
+    )
+    destination = EffectExpectationDecision(
+        expectation_id="destination",
+        satisfied_mask=_mask(False, False),
+        contradicted_mask=failure,
+        inverse_satisfied_mask=_mask(False, False),
+    )
+    grounded = SimpleNamespace(analyzed=SimpleNamespace(call=call))
+
+    invalidation, retry = SkillRuntime._terminal_failure_policy(
+        grounded,
+        failure,
+        (source, destination),
+    )
+
+    assert torch.equal(invalidation, expected_invalidation)
+    assert torch.equal(retry, expected_retry)
 
 
 def test_in_flight_guard_collects_live_evidence_and_builds_loss_reconciliation() -> (

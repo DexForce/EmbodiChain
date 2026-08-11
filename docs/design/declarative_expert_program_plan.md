@@ -603,16 +603,22 @@ the affected row's assumed relation, and enter bounded recovery instead of
 repairing the scene. The runtime now exposes the active named motion phase,
 observes phase-scoped held-object invariants from fresh physical evidence, and
 applies removal-only ``StateDelta`` reconciliation to failed rows before any
-retry or recovery hand-off. ``Pick`` can use the existing bounded action retry;
-``Place`` and ``HandOver`` currently emit a typed ``RECOVERY_REQUIRED`` boundary
-because replaying the same invocation after its required relation was removed
-would be invalid. A workflow-level re-acquisition policy, blocking acquisition
-gates, per-expectation terminal failure reconciliation, and fail-closed
-reconciliation for evidence that remains unresolved at the action deadline
-remain explicit design decisions rather than implicit scene repair. For
-handover, success transfers the verified relation from source to destination
-while the destination remains physically closed. Releasing the destination is
-a separate ``Place`` or ``Release`` semantic call.
+retry or recovery hand-off. The monitor publishes one current-observation
+outcome per physical expectation, including the stronger proof that every
+clause reached its inverse band. ``Pick`` can use the existing bounded action
+retry. ``Place`` retries only when that complete inverse proof shows the source
+is still attached; otherwise it invalidates the relation and emits a typed
+``RECOVERY_REQUIRED`` boundary. ``HandOver`` always hands terminal failure to
+workflow recovery, retaining the source relation only when complete inverse
+evidence proves it is still attached. A verifier selects row-local retry versus
+external recovery, but the core owns the removal-only invalidation delta and
+applies it before either path. Evidence that remains unresolved at the action
+deadline is reconciled fail-closed: any active verified state covered by the
+pending effect is removed before external recovery. Workflow-level
+re-acquisition and blocking acquisition gates remain open; neither may repair
+the scene implicitly. For handover, success transfers the verified relation
+from source to destination while the destination remains physically closed.
+Releasing the destination is a separate ``Place`` or ``Release`` semantic call.
 
 The first pure-dynamics rollout uses the staged **B** continuation policy. The
 standard simulation factory lowers both trajectory ``control_dt`` and runner
@@ -1226,9 +1232,11 @@ implemented. Physical simulation acceptance is partial: Open Drawer and one
 cube Pick/Place/settle/validator cycle have completed. The embodiment-owned
 dual-UR5/PGI HandOver slice now completes Pick, transfer, terminal
 physical-effect verification, settling, and target validation through real
-contact dynamics; blocking acquisition gates, workflow-level re-acquisition,
-per-expectation terminal reconciliation, fault-injection coverage, and the full
-repeated-cube run remain validation or design work.
+contact dynamics. Per-expectation terminal outcomes, core-owned failure
+invalidation, row-local retry/recovery decisions, and fail-closed deadline
+reconciliation are implemented. Blocking acquisition gates, workflow-level
+re-acquisition, fault-injection coverage, and the full repeated-cube run remain
+validation or design work.
 
 Deliverables:
 
@@ -1485,10 +1493,11 @@ The design is complete when all of the following hold:
 - [ ] Physical held-object loss is observed as effect failure, invalidates the
       affected symbolic relation, and exercises bounded recovery rather than
       being hidden by a simulator-side attachment. The phase-aware observation,
-      row-local invalidation, bounded Pick retry, and typed recovery boundary
-      are implemented; blocking acquisition, per-expectation terminal
-      reconciliation, workflow-level re-acquisition, and real-simulation fault
-      injection remain open.
+      row-local core-owned invalidation, per-expectation terminal
+      reconciliation, fail-closed deadline handling, bounded Pick/retained-Place
+      retry, and typed recovery boundary are implemented; blocking acquisition,
+      workflow-level re-acquisition, and real-simulation fault injection remain
+      open.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break

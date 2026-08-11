@@ -442,14 +442,26 @@ asynchronous integrations instead pass `effect_result` explicitly on a due
 `step()` call.
 
 ```python
+import torch
+
 request = tick.pending_effect
 effect_result = EffectVerificationResult(
     verification_id=request.verification_id,
     success_mask=observed_success,
     failure_mask=observed_failure,
+    invalidation_mask=observed_failure,
+    retry_mask=torch.zeros_like(observed_failure),
 )
 result = runner.step(effect_result=effect_result)
 ```
+
+Both failure-policy masks must be subsets of `failure_mask`.
+`invalidation_mask` selects rows on which the core applies the request-owned,
+removal-only `failure_invalidation` delta; it does not let the verifier inject
+state. `retry_mask` is reserved for rows whose physical preconditions still
+make replay of the same invocation valid. Other failed rows require external
+recovery. Unresolved evidence at the action deadline is reconciled fail-closed
+when the pending effect covers active verified state.
 
 The semantic layer keeps physical observation separate from symbolic effect
 commit. `SkillPolicyPreset.effect_monitors` maps exact semantic call IDs to

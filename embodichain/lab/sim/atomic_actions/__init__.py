@@ -59,6 +59,7 @@ from .engine import (
     unregister_action,
 )
 from .execution import (
+    EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEvent,
@@ -262,6 +263,7 @@ __all__ = [
     "EndpointCommandRouter",
     "EndpointCommandTransport",
     "EntityState",
+    "EffectExpectationResult",
     "EffectVerificationRequest",
     "EffectVerificationRequirement",
     "EffectVerificationResult",

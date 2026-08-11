@@ -775,6 +775,8 @@ At the terminal waypoint, an `ExecutionSession` requests an external,
 correlated per-environment result before committing a non-empty effect:
 
 ```python
+import torch
+
 from embodichain.lab.sim.atomic_actions import EffectVerificationResult
 
 tick = session.tick(latest_context)
@@ -785,6 +787,8 @@ if tick.pending_effect is not None:
         verification_id=request.verification_id,
         success_mask=success_mask,
         failure_mask=failure_mask,
+        invalidation_mask=failure_mask,
+        retry_mask=torch.zeros_like(failure_mask),
     )
     tick = session.tick(latest_context, effect_result=effect_result)
 ```
@@ -796,6 +800,14 @@ misreported as a successful grasp, release, or handover. The typed
 and failure masks are disjoint subsets of the request mask; omitted request rows
 remain unresolved. Request IDs change after mask shrinkage or whole-action
 retry, so a delayed result cannot commit a newer attempt.
+
+Every result also classifies failed rows with `invalidation_mask` and
+`retry_mask`, both subsets of `failure_mask`. Invalidation applies the
+request's core-owned removal-only `failure_invalidation`; the verifier cannot
+inject replacement state. Retry is valid only when the same invocation's
+physical preconditions remain satisfied. Failed rows outside `retry_mask`
+enter external recovery, and unresolved evidence at the action deadline removes
+covered active verified state before recovery.
 
 `request.deadline` is expressed in the robot-observation timestamp domain.
 `RecoveryPolicy.action_timeout` covers both trajectory execution and the
