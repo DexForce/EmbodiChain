@@ -2019,6 +2019,8 @@ embodichain_tasks.multi_segments.cube_pick_place
 .. autosummary::
 
    MultiSegmentsCubePickPlaceEnv
+   create_cube_robot_profile_binding
+   create_cube_scene_binding
 
 embodichain_tasks.rl
 --------------------
@@ -2110,6 +2112,8 @@ embodichain_tasks.tableware.open_drawer
 .. autosummary::
 
    OpenDrawerEnv
+   create_open_drawer_robot_profile_binding
+   create_open_drawer_scene_binding
 
 embodichain_tasks.tableware.place_object_drawer
 -----------------------------------------------

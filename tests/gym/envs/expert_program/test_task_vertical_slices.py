@@ -47,7 +47,11 @@ from embodichain.lab.sim.skills.scene import (
     SceneObjectRef,
     SceneRegistry,
 )
+from embodichain.lab.gym.utils.registration import discover_task_packages
 from embodichain_tasks.configs import get_config_path
+
+discover_task_packages()
+
 from embodichain_tasks.multi_segments import cube_pick_place as cube_task
 from embodichain_tasks.tableware import open_drawer as drawer_task
 
