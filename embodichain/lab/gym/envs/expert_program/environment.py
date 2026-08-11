@@ -80,6 +80,7 @@ from .bridge import (
     SegmentPostPolicyPort,
     SegmentValidatorPort,
 )
+from .catalog import ExpertProgramIntegrationCatalog
 from .cfg import ExpertProgramCfg, ExpertProgramIntegrationCfg
 from .compiler import (
     CompiledProgram,
@@ -279,6 +280,8 @@ class ExpertProgramEnvironmentAdapter:
     Args:
         factory: Environment-owned live-provider and engine factory.
         step_dt: Authoritative Gym control cadence in seconds.
+        integration_catalog: Optional immutable task-registration catalog used
+            for provider-free compilation.
         call_catalog: Optional immutable semantic call catalog.  The built-in
             catalog is used when omitted.
         endpoint_adapters: Optional custom robot endpoint adapters.
@@ -302,6 +305,7 @@ class ExpertProgramEnvironmentAdapter:
         factory: ExpertProgramEnvironmentFactory,
         *,
         step_dt: float,
+        integration_catalog: ExpertProgramIntegrationCatalog | None = None,
         call_catalog: SemanticCallCatalog | None = None,
         endpoint_adapters: (
             Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
@@ -330,7 +334,32 @@ class ExpertProgramEnvironmentAdapter:
             factory.robot_profile_id,
             field_name="factory.robot_profile_id",
         )
-        selected_catalog = call_catalog or builtin_semantic_call_catalog()
+        if (
+            integration_catalog is not None
+            and type(integration_catalog) is not ExpertProgramIntegrationCatalog
+        ):
+            raise TypeError(
+                "integration_catalog must be exactly "
+                "ExpertProgramIntegrationCatalog or None."
+            )
+        if integration_catalog is not None:
+            if integration_catalog.scene_registry_id != scene_registry_id:
+                raise ValueError(
+                    "integration_catalog scene_registry_id does not match factory."
+                )
+            if integration_catalog.robot_profile_id != robot_profile_id:
+                raise ValueError(
+                    "integration_catalog robot_profile_id does not match factory."
+                )
+            if call_catalog is not None and (
+                call_catalog is not integration_catalog.call_catalog
+            ):
+                raise ValueError(
+                    "call_catalog cannot override the task registration catalog."
+                )
+            selected_catalog = integration_catalog.call_catalog
+        else:
+            selected_catalog = call_catalog or builtin_semantic_call_catalog()
         if type(selected_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog or None.")
         if endpoint_adapters is not None and not isinstance(endpoint_adapters, Mapping):
@@ -364,6 +393,7 @@ class ExpertProgramEnvironmentAdapter:
         self._scene_registry_id = scene_registry_id
         self._robot_profile_id = robot_profile_id
         self._step_dt = float(step_dt)
+        self._integration_catalog = integration_catalog
         self._call_catalog = selected_catalog
         self._endpoint_adapters = (
             None if endpoint_adapters is None else dict(endpoint_adapters)
@@ -417,6 +447,8 @@ class ExpertProgramEnvironmentAdapter:
         if type(program) is not ExpertProgramCfg:
             raise TypeError("program must be exactly ExpertProgramCfg.")
         self._validate_selection(program.integration)
+        if self._integration_catalog is not None:
+            return self._integration_catalog.preflight(program)
         registry = self._create_scene_registry()
         return ExpertProgramCompiler.from_scene_registry(registry).compile(program)
 

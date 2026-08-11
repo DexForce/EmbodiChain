@@ -43,6 +43,7 @@ from embodichain_tasks.tableware.open_drawer import (  # noqa: E402
     DRAWER_OPEN_POSITION,
     DRAWER_ROBOT_PROFILE_ID,
     DRAWER_UID,
+    OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION,
     OpenDrawerEnv,
     create_open_drawer_scene_binding,
 )
@@ -68,6 +69,8 @@ def test_registered_drawer_task_uses_shared_expert_program_mixin() -> None:
     spec = REGISTERED_ENVS["OpenDrawer-v1"]
 
     assert spec.cls is OpenDrawerEnv
+    assert spec.expert_program_registration is OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
+    assert "expert_program_registration" not in spec.default_kwargs
     assert issubclass(OpenDrawerEnv, ExpertProgramEnvironmentMixin)
     assert issubclass(OpenDrawerEnv, EmbodiedEnv)
     assert "create_demo_action_list" not in OpenDrawerEnv.__dict__
@@ -144,8 +147,10 @@ def test_task_initialization_delegates_to_shared_simulation_factory(
 
     assert env.expert_program_adapter is adapter
     assert captured["environment"] is env
-    assert captured["scene_binding"].links[0].native_link_name == "handle_xpos"
-    assert captured["robot_profile_binding"].profile_id == DRAWER_ROBOT_PROFILE_ID
+    registration = captured["registration"]
+    assert registration is OPEN_DRAWER_EXPERT_PROGRAM_REGISTRATION
+    assert registration.scene_binding.links[0].native_link_name == "handle_xpos"
+    assert registration.robot_profile_binding.profile_id == DRAWER_ROBOT_PROFILE_ID
 
 
 def test_task_config_compiles_through_real_simulation_factory(

@@ -27,6 +27,7 @@ import torch
 
 from tensordict import TensorDict
 
+from embodichain.lab.gym.envs.expert_program import IntegrationFingerprintMismatch
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -39,6 +40,11 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
+from embodichain_tasks.multi_segments.cube_pick_place import (
+    CUBE_EXPERT_PROGRAM_REGISTRATION,
+    CUBE_ROBOT_PROFILE_ID,
+    CUBE_SCENE_REGISTRY_ID,
+)
 
 
 class TestInitRolloutBufferFromConfig:
@@ -513,7 +519,7 @@ class TestConfigToCfgFromFile:
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
         return {
-            "id": "EmbodiedEnv-v1",
+            "id": "MultiSegmentsCubePickPlace-v1",
             "env": {},
             "robot": {
                 "class_type": "URRobot",
@@ -529,9 +535,9 @@ class TestConfigToCfgFromFile:
             "schema_version": 1,
             "program_id": "configured_pick",
             "integration": {
-                "robot_profile": "default_robot",
-                "scene_registry": "default_scene",
-                "runtime_preset": "default_runtime",
+                "robot_profile": CUBE_ROBOT_PROFILE_ID,
+                "scene_registry": CUBE_SCENE_REGISTRY_ID,
+                "runtime_preset": "safe",
             },
             "targets": {},
             "program": {
@@ -585,7 +591,7 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.expert_program.program_id == "configured_pick"
-        assert cfg.expert_program.integration.scene_registry == "default_scene"
+        assert cfg.expert_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
 
     def test_build_env_cfg_loads_source_relative_expert_program(
         self,
@@ -620,6 +626,81 @@ class TestConfigToCfgFromFile:
         cfg, _, _ = build_env_cfg_from_args(args)
 
         assert cfg.expert_program.program_id == "configured_pick"
+
+    def test_cli_program_override_is_selected_and_loaded_once(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """The CLI override replaces the Gym path at the single loader boundary."""
+        from embodichain.lab.gym.envs.expert_program import loader
+
+        gym_path = tmp_path / "gym_config.json"
+        override_path = tmp_path / "override.yaml"
+        save_config(override_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = "must_not_be_loaded.yaml"
+        save_config(gym_path, config)
+        args = argparse.Namespace(
+            gym_config=str(gym_path),
+            expert_program=str(override_path),
+            num_envs=1,
+            device="cpu",
+            headless=True,
+            renderer=None,
+            gpu_id=0,
+            arena_space=2.0,
+            max_episodes=None,
+            filter_visual_rand=False,
+            filter_dataset_saving=False,
+            preview=False,
+            action_config=None,
+        )
+        calls: list[str] = []
+        original = loader.load_expert_program
+
+        def load_once(path, **kwargs):
+            calls.append(str(path))
+            return original(path, **kwargs)
+
+        monkeypatch.setattr(loader, "load_expert_program", load_once)
+
+        cfg, _, _ = build_env_cfg_from_args(args)
+
+        assert cfg.expert_program.program_id == "configured_pick"
+        assert calls == [str(override_path)]
+
+    def test_registration_drift_fails_before_program_loader(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        """The config boundary checks registration integrity before file loading."""
+        from embodichain.lab.gym.envs.expert_program import loader
+
+        program_path = tmp_path / "program.yaml"
+        save_config(program_path, self._expert_program_payload())
+        config = self._minimal_gym_config()
+        config["expert_program_path"] = str(program_path)
+        generator_cfg = CUBE_EXPERT_PROGRAM_REGISTRATION.scene_binding.antipodal_grasps[
+            0
+        ].generator_cfg
+        assert generator_cfg is not None
+        sampler_cfg = generator_cfg.antipodal_sampler_cfg
+        monkeypatch.setattr(sampler_cfg, "n_sample", sampler_cfg.n_sample + 1)
+        loader_calls: list[str] = []
+
+        def unexpected_load(path, **kwargs):
+            del kwargs
+            loader_calls.append(str(path))
+            raise AssertionError("Drift must fail before program loading.")
+
+        monkeypatch.setattr(loader, "load_expert_program", unexpected_load)
+
+        with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+            config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert loader_calls == []
 
     def test_config_to_cfg_uses_cwd_without_source_path(
         self,

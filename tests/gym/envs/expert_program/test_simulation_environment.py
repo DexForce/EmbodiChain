@@ -48,6 +48,7 @@ from embodichain.lab.gym.envs.expert_program import (
     InvokeCfg,
     RobotResourceBinding,
     SharedTickSceneProvider,
+    SimulationExpertProgramRegistration,
     SimulationExpertProgramFactory,
     SimulationPlanningObservationProvider,
     SimulationRigidObjectBinding,
@@ -72,7 +73,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     StateDelta,
     TaskState,
-    TimedTrajectory,
+    TrackingPolicy,
 )
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
@@ -103,7 +104,6 @@ from embodichain.lab.sim.skills import (
     SemanticObjectTarget,
     SemanticPose,
     SemanticRelationTarget,
-    SemanticValidationError,
     SkillPolicyPreset,
 )
 from embodichain.lab.sim.skills.effects import (
@@ -686,9 +686,6 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
 
     provider_id: ClassVar[str] = "test.handover_pose"
 
-    def __init__(self) -> None:
-        self.calls = 0
-
     def resolve(
         self,
         call: HandOver,
@@ -698,7 +695,6 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
     ) -> HandOverPoseTargets:
         """Return owned direct targets without embedding task-side motion code."""
         del call, context, bound
-        self.calls += 1
         pose = SemanticPose(
             position=(0.0, 0.0, 0.5),
             quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
@@ -848,7 +844,11 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
-                motion_policy=MotionPolicy(sample_count=17),
+                motion_policy=MotionPolicy(control_dt=0.01),
+                tracking_policy=TrackingPolicy.joint_position(
+                    in_flight_max_abs_error=0.037,
+                    terminal_max_abs_error=0.019,
+                ),
             ),
         ),
         default_preset="safe",
@@ -975,8 +975,10 @@ def _factory() -> tuple[SimulationExpertProgramFactory, _Robot]:
         SimulationExpertProgramFactory(
             simulation,  # type: ignore[arg-type]
             robot,  # type: ignore[arg-type]
-            SimulationSceneBinding(registry_id="scene"),
-            _profile_binding(),
+            SimulationExpertProgramRegistration(
+                scene_binding=SimulationSceneBinding(registry_id="scene"),
+                robot_profile_binding=_profile_binding(),
+            ),
             step_dt=_STEP_DT,
             motion_generator_factory=lambda: _motion_generator(robot),
         ),
@@ -1120,8 +1122,10 @@ def _evidence_adapter_runtime() -> tuple[
     factory = SimulationExpertProgramFactory(
         simulation,  # type: ignore[arg-type]
         robot,  # type: ignore[arg-type]
-        scene_binding,
-        _evidence_profile_binding(),
+        SimulationExpertProgramRegistration(
+            scene_binding=scene_binding,
+            robot_profile_binding=_evidence_profile_binding(),
+        ),
         step_dt=_STEP_DT,
         motion_generator_factory=lambda: _motion_generator(robot),
     )
@@ -1530,13 +1534,17 @@ def _assert_invocation_equivalent(
     )
 
 
-def test_simulation_factory_preserves_declarative_motion_policy() -> None:
-    """Gym cadence stays on observations rather than mutating motion policy."""
+def test_simulation_factory_aligns_every_motion_policy_to_gym_step() -> None:
+    """Cadence alignment preserves the exact registered tracking contract."""
     factory, _ = _factory()
 
     profile = factory.create_robot_skill_profile()
 
-    assert profile.presets["safe"].motion_policy.sample_count == 17
+    assert profile.presets["safe"].motion_policy.control_dt == pytest.approx(_STEP_DT)
+    assert profile.presets["safe"].tracking_policy == TrackingPolicy.joint_position(
+        in_flight_max_abs_error=0.037,
+        terminal_max_abs_error=0.019,
+    )
 
 
 def test_mllm_config_and_atomic_skills_share_invocations_and_verified_results(
@@ -1695,8 +1703,8 @@ def test_simulation_factory_returns_exact_environment_adapter() -> None:
     assert factory.segment_policy_port is not None
 
 
-def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
-    """Both explicit grounding seams reach the runtime compiler unchanged."""
+def test_simulation_helper_consumes_registered_semantic_grounding_extensions() -> None:
+    """Both registration-owned grounding seams reach the compiler unchanged."""
     robot = _Robot()
     environment = SimpleNamespace(
         sim=_Simulation(robot),
@@ -1707,11 +1715,13 @@ def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
     handover_provider = _ForwardedHandOverPoseProvider()
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        scene_binding=SimulationSceneBinding(registry_id="scene"),
-        robot_profile_binding=_profile_binding(),
+        registration=SimulationExpertProgramRegistration(
+            scene_binding=SimulationSceneBinding(registry_id="scene"),
+            robot_profile_binding=_profile_binding(),
+            relation_grounders=(relation_grounder,),
+            handover_pose_providers=(handover_provider,),
+        ),
         motion_generator_factory=lambda: _motion_generator(robot),
-        relation_grounders=(relation_grounder,),
-        handover_pose_providers=(handover_provider,),
     )
 
     assembly = adapter.assemble_runtime(
@@ -1728,41 +1738,35 @@ def test_simulation_helper_forwards_semantic_grounding_extensions() -> None:
     )
 
 
-def test_simulation_helper_handover_preflight_is_fail_closed_by_default() -> None:
-    """Selecting a provider ID does not infer or auto-install an implementation."""
-    environment, scene_binding, profile_binding = _handover_helper_inputs()
-    robot = environment.robot
-    adapter = create_simulation_expert_program_adapter(
-        environment,  # type: ignore[arg-type]
-        scene_binding=scene_binding,
-        robot_profile_binding=profile_binding,
-        motion_generator_factory=lambda: _motion_generator(robot),
-    )
-    compiled = adapter.compile(_handover_program())
+def test_handover_registration_is_fail_closed_without_selected_provider() -> None:
+    """A profile-selected provider must be installed before simulation startup."""
+    _, scene_binding, profile_binding = _handover_helper_inputs()
 
-    with pytest.raises(SemanticValidationError) as error:
-        adapter.create_bridge(compiled)
-
-    assert error.value.diagnostic.code == "handover_grounding_provider_not_installed"
+    with pytest.raises(ValueError, match="selects handover pose provider"):
+        SimulationExpertProgramRegistration(
+            scene_binding=scene_binding,
+            robot_profile_binding=profile_binding,
+        )
 
 
-def test_simulation_helper_forwards_handover_provider_to_preflight() -> None:
-    """An explicitly supplied embodiment provider satisfies standard preflight."""
+def test_simulation_helper_uses_registered_handover_provider_for_preflight() -> None:
+    """A registration-owned embodiment provider satisfies standard preflight."""
     environment, scene_binding, profile_binding = _handover_helper_inputs()
     robot = environment.robot
     provider = _ForwardedHandOverPoseProvider()
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        scene_binding=scene_binding,
-        robot_profile_binding=profile_binding,
+        registration=SimulationExpertProgramRegistration(
+            scene_binding=scene_binding,
+            robot_profile_binding=profile_binding,
+            handover_pose_providers=(provider,),
+        ),
         motion_generator_factory=lambda: _motion_generator(robot),
-        handover_pose_providers=(provider,),
     )
 
     bridge = adapter.create_bridge(adapter.compile(_handover_program()))
 
     assert bridge is not None
-    assert provider.calls == 0
 
 
 def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joints() -> (
@@ -1795,8 +1799,10 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
 
     adapter = create_simulation_expert_program_adapter(
         environment,  # type: ignore[arg-type]
-        scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
-        robot_profile_binding=profile_binding,
+        registration=SimulationExpertProgramRegistration(
+            scene_binding=SimulationSceneBinding(registry_id="mobile_scene"),
+            robot_profile_binding=profile_binding,
+        ),
         motion_generator_factory=lambda: _motion_generator(robot),  # type: ignore[arg-type]
         endpoint_adapters={_MobileEndpoint: _MobileEndpointAdapter()},
         runtime_transports=(_MobileTransportEncoder(),),

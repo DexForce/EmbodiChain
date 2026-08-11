@@ -40,6 +40,7 @@ discover_task_packages()
 from embodichain_tasks.multi_segments.cube_pick_place import (  # noqa: E402
     CUBE_ROBOT_PROFILE_ID,
     CUBE_SCENE_REGISTRY_ID,
+    CUBE_EXPERT_PROGRAM_REGISTRATION,
     MultiSegmentsCubePickPlaceEnv,
     _create_default_env_cfg,
     create_cube_robot_profile_binding,
@@ -70,6 +71,8 @@ def test_registered_task_uses_shared_expert_program_mixin() -> None:
     spec = REGISTERED_ENVS["MultiSegmentsCubePickPlace-v1"]
     assert spec.cls is MultiSegmentsCubePickPlaceEnv
     assert spec.max_episode_steps == 1200
+    assert spec.expert_program_registration is CUBE_EXPERT_PROGRAM_REGISTRATION
+    assert "expert_program_registration" not in spec.default_kwargs
     assert issubclass(MultiSegmentsCubePickPlaceEnv, ExpertProgramEnvironmentMixin)
     assert issubclass(MultiSegmentsCubePickPlaceEnv, EmbodiedEnv)
 
@@ -82,11 +85,7 @@ def test_gym_config_selects_packaged_expert_program() -> None:
     assert payload["expert_program_path"] == (
         "../../expert_program/multi_segments/repeated_cube_pick_place.yaml"
     )
-    extensions = payload["env"]["extensions"]
-    assert extensions == {
-        "grasp_samples": 10000,
-        "force_reannotate": False,
-    }
+    assert payload["env"]["extensions"] == {}
     settle = payload["env"]["events"]["settle_cube_on_reset"]
     assert settle["func"] == "wait_for_dynamic_objects_to_settle"
     assert settle["mode"] == "reset"
@@ -130,7 +129,10 @@ def test_robot_profile_calibrates_physical_tracking_tolerance() -> None:
     binding = create_cube_robot_profile_binding()
 
     assert binding.presets[0].preset_id == "safe"
-    assert binding.presets[0].recovery_policy.tracking_error_threshold == 0.08
+    tracking = binding.presets[0].tracking_policy
+    assert tracking.in_flight is not None
+    assert tracking.in_flight.metrics[0].tolerance == 0.08
+    assert tracking.terminal.metrics[0].tolerance == 0.08
 
 
 def test_task_initialization_delegates_to_shared_simulation_factory(
@@ -162,14 +164,16 @@ def test_task_initialization_delegates_to_shared_simulation_factory(
 
     assert env.expert_program_adapter is adapter
     assert captured["environment"] is env
+    registration = captured["registration"]
+    assert registration is CUBE_EXPERT_PROGRAM_REGISTRATION
     assert (
-        captured["scene_binding"]
-        .antipodal_grasps[0]
-        .generator_cfg.antipodal_sampler_cfg.n_sample
-        == 48
+        registration.scene_binding.antipodal_grasps[
+            0
+        ].generator_cfg.antipodal_sampler_cfg.n_sample
+        == 10000
     )
-    assert captured["scene_binding"].antipodal_grasps[0].force_reannotate is True
-    assert captured["robot_profile_binding"].profile_id == CUBE_ROBOT_PROFILE_ID
+    assert registration.scene_binding.antipodal_grasps[0].force_reannotate is False
+    assert registration.robot_profile_binding.profile_id == CUBE_ROBOT_PROFILE_ID
 
 
 def test_task_config_compiles_through_real_simulation_factory(
