@@ -74,18 +74,6 @@ _CUROBO_INSTALL_URL = (
     "https://nvlabs.github.io/curobo/latest/getting-started/installation.html"
 )
 
-# Bumped whenever the auto-generated robot-YAML schema/logic changes so that
-# cached YAMLs from an older generator are regenerated instead of reused. v2
-# excluded URDF mimic joints from cspace/lock_joints; v3 switched both robot
-# and obstacle fitting to DexSim MorphIt with fixed convex-hull limits; v4
-# removes self-collision metadata because the backend temporarily disables
-# cuRobo self-collision checking.
-_CUROBO_ROBOT_YAML_GENERATOR_VERSION = "v4-no-self-collision"
-
-# World caches contain tensor-backed ESDF voxel grids and are intentionally
-# versioned independently from robot sphere YAMLs.
-_CUROBO_WORLD_CACHE_VERSION = "v1-visacd16-voxel"
-
 # cuRobo 0.8 does not expose PyTorch's CUDA stream-capture error mode. The
 # temporary adapter below therefore replaces ``torch.cuda.graph`` only while
 # cuRobo can lazily record graphs. Serialize that small process-wide patch.
@@ -164,7 +152,7 @@ class CuroboWorldCfg:
     voxel_size: float = 0.01
     """ESDF voxel edge length in meters for every world collision object."""
 
-    voxel_padding: float = 0.1
+    voxel_padding: float = 0.005
     """Free-space padding around each object-local voxel grid in meters.
 
     The padding must cover the largest robot collision-sphere radius plus the
@@ -1523,7 +1511,6 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
-        hasher.update(_CUROBO_ROBOT_YAML_GENERATOR_VERSION.encode("utf-8"))
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:
@@ -1583,7 +1570,6 @@ class CuroboPlanner(BasePlanner):
     def _world_scene_cache_key(self, world_cfg: CuroboWorldCfg) -> str:
         """Hash object geometry, initial poses, and voxel settings."""
         hasher = hashlib.md5()
-        hasher.update(_CUROBO_WORLD_CACHE_VERSION.encode("utf-8"))
         hasher.update(str(world_cfg.voxel_size).encode("utf-8"))
         hasher.update(str(world_cfg.voxel_padding).encode("utf-8"))
         for idx, obj in enumerate(world_cfg.rigid_objects or []):

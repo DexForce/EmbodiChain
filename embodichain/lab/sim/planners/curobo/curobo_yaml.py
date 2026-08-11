@@ -346,7 +346,7 @@ def _convex_hulls_to_voxel_entry(
     pose: torch.Tensor,
     *,
     voxel_size: float = 0.01,
-    voxel_padding: float = 0.1,
+    voxel_padding: float = 0.005,
 ) -> tuple[str, dict[str, object]]:
     """Decompose one mesh with VisACD and convert its union to an ESDF grid.
 
@@ -422,7 +422,7 @@ def generate_curobo_world_scene(
     *,
     env_id: int = 0,
     voxel_size: float = 0.01,
-    voxel_padding: float = 0.1,
+    voxel_padding: float = 0.005,
 ) -> dict[str, dict[str, dict[str, object]]]:
     """Build a VisACD-decomposed ESDF voxel scene for cuRobo.
 
