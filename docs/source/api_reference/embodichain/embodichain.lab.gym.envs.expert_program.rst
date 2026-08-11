@@ -48,6 +48,17 @@ and 2. Version 2 adds deterministic parallel blocks with explicit barriers.
 
 .. autofunction:: decode_expert_program
 
+MLLM frontend
+-------------
+
+The MLLM frontend intentionally accepts only the constrained schema version 1
+surface. Trusted host code remains responsible for authoring version 2
+parallel structure and the integration selection.
+
+.. autofunction:: embodichain.agents.mllm.decode_mllm_expert_program
+
+.. autofunction:: embodichain.agents.mllm.compile_mllm_expert_program
+
 Compilation and environment integration
 ---------------------------------------
 
