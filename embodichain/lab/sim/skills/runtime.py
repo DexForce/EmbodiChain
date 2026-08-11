@@ -31,6 +31,7 @@ from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.engine import AtomicActionEngine
 from ..atomic_actions.effects import StateDelta
 from ..atomic_actions.execution import (
+    EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEvent,
@@ -57,7 +58,7 @@ from ..atomic_actions.tracking import (
     TrackingMetricCfg,
     TrackingPolicy,
 )
-from .calls import SemanticCallSpec
+from .calls import HandOver, Pick, Place, SemanticCallSpec
 from .compiler import (
     GroundedHeldObjectGuard,
     HeldObjectGuardBaseline,
@@ -66,6 +67,7 @@ from .compiler import (
 from .effects import (
     BinaryEffectEvidenceBatch,
     EffectEvidenceBatch,
+    EffectExpectationDecision,
     EffectMonitor,
     EffectMonitorDecision,
     EffectMonitorRef,
@@ -951,6 +953,7 @@ class SkillEffectTrace:
     timestamp: float
     success_mask: torch.Tensor
     failure_mask: torch.Tensor
+    expectation_decisions: tuple[EffectExpectationDecision, ...]
     effect_spec: SemanticEffectSpec
     monitor_id: str
     monitor_revision: str | None
@@ -999,6 +1002,54 @@ class SkillEffectTrace:
             raise ValueError("Effect trace masks must not overlap.")
         if not isinstance(self.effect_spec, SemanticEffectSpec):
             raise TypeError("effect_spec must be a SemanticEffectSpec.")
+        expectation_decisions = tuple(self.expectation_decisions)
+        if not all(
+            type(value) is EffectExpectationDecision for value in expectation_decisions
+        ):
+            raise TypeError(
+                "expectation_decisions must contain exact "
+                "EffectExpectationDecision values."
+            )
+        for value in expectation_decisions:
+            if value.satisfied_mask.shape != self.success_mask.shape:
+                raise ValueError(
+                    "Expectation and aggregate trace masks must have equal shapes."
+                )
+            if value.satisfied_mask.device != self.success_mask.device:
+                raise ValueError(
+                    "Expectation and aggregate trace masks must share a device."
+                )
+        physical_ids = tuple(
+            expectation.expectation_id
+            for expectation in self.effect_spec.state_expectations
+            if any(
+                clause.expectation_id == expectation.expectation_id
+                for clause in self.effect_spec.clauses
+            )
+        )
+        outcome_ids = tuple(value.expectation_id for value in expectation_decisions)
+        if outcome_ids != physical_ids:
+            raise ValueError(
+                "Effect trace must contain one ordered outcome for every "
+                f"physical expectation; expected={physical_ids}, "
+                f"got={outcome_ids}."
+            )
+        if expectation_decisions:
+            expected_success = torch.ones_like(self.success_mask)
+            expected_failure = torch.zeros_like(self.failure_mask)
+            for value in expectation_decisions:
+                expected_success &= value.satisfied_mask
+                expected_failure |= value.contradicted_mask
+            if not torch.equal(self.success_mask, expected_success):
+                raise ValueError(
+                    "success_mask must equal the conjunction of expectation "
+                    "trace outcomes."
+                )
+            if not torch.equal(self.failure_mask, expected_failure):
+                raise ValueError(
+                    "failure_mask must equal the union of expectation trace "
+                    "outcomes."
+                )
         if type(self.monitor_id) is not str or not self.monitor_id:
             raise ValueError("monitor_id must be a non-empty string.")
         if self.monitor_revision is not None and (
@@ -1022,6 +1073,11 @@ class SkillEffectTrace:
             evidence[evidence_id] = batch.snapshot()
         object.__setattr__(self, "success_mask", self.success_mask.clone())
         object.__setattr__(self, "failure_mask", self.failure_mask.clone())
+        object.__setattr__(
+            self,
+            "expectation_decisions",
+            tuple(value.snapshot() for value in expectation_decisions),
+        )
         object.__setattr__(self, "effect_spec", self.effect_spec.snapshot())
         object.__setattr__(
             self,
@@ -1044,6 +1100,7 @@ class SkillEffectTrace:
             timestamp=self.timestamp,
             success_mask=self.success_mask,
             failure_mask=self.failure_mask,
+            expectation_decisions=self.expectation_decisions,
             effect_spec=self.effect_spec,
             monitor_id=self.monitor_id,
             monitor_revision=self.monitor_revision,
@@ -1076,6 +1133,17 @@ class SkillEffectTrace:
             "decision": {
                 "success_mask": _metadata_value(self.success_mask),
                 "failure_mask": _metadata_value(self.failure_mask),
+                "expectations": [
+                    {
+                        "expectation_id": value.expectation_id,
+                        "satisfied_mask": _metadata_value(value.satisfied_mask),
+                        "contradicted_mask": _metadata_value(value.contradicted_mask),
+                        "inverse_satisfied_mask": _metadata_value(
+                            value.inverse_satisfied_mask
+                        ),
+                    }
+                    for value in self.expectation_decisions
+                ],
             },
         }
         metadata["boundary"] = {"kind": self.boundary_kind}
@@ -2145,11 +2213,93 @@ class SkillRuntime:
             spec=spec,
             monitor=monitor,
         )
+        expectation_decisions = self._validated_expectation_decisions(
+            spec,
+            decision,
+        )
+        invalidation_mask, retry_mask = self._terminal_failure_policy(
+            grounded,
+            decision.failure_mask,
+            expectation_decisions,
+        )
         return EffectVerificationResult(
             verification_id=request.verification_id,
             success_mask=decision.success_mask,
             failure_mask=decision.failure_mask,
+            invalidation_mask=invalidation_mask,
+            retry_mask=retry_mask,
+            expectation_results=tuple(
+                EffectExpectationResult(
+                    expectation_id=value.expectation_id,
+                    satisfied_mask=value.satisfied_mask,
+                    contradicted_mask=value.contradicted_mask,
+                    inverse_satisfied_mask=value.inverse_satisfied_mask,
+                )
+                for value in expectation_decisions
+            ),
         )
+
+    @staticmethod
+    def _validated_expectation_decisions(
+        spec: SemanticEffectSpec,
+        decision: EffectMonitorDecision,
+    ) -> tuple[EffectExpectationDecision, ...]:
+        """Require one current-observation outcome per physical expectation."""
+        physical_ids = tuple(
+            expectation.expectation_id
+            for expectation in spec.state_expectations
+            if any(
+                clause.expectation_id == expectation.expectation_id
+                for clause in spec.clauses
+            )
+        )
+        outcomes = tuple(decision.expectation_decisions)
+        if not outcomes and len(physical_ids) == 1:
+            outcomes = (
+                EffectExpectationDecision(
+                    expectation_id=physical_ids[0],
+                    satisfied_mask=decision.success_mask,
+                    contradicted_mask=decision.failure_mask,
+                    inverse_satisfied_mask=torch.zeros_like(decision.failure_mask),
+                ),
+            )
+        outcome_ids = tuple(value.expectation_id for value in outcomes)
+        if outcome_ids != physical_ids:
+            raise ValueError(
+                "Effect monitor must return one ordered outcome for every "
+                f"physical expectation; expected={physical_ids}, got={outcome_ids}."
+            )
+        return outcomes
+
+    @staticmethod
+    def _terminal_failure_policy(
+        grounded: object,
+        failure_mask: torch.Tensor,
+        expectation_decisions: tuple[EffectExpectationDecision, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select fail-closed invalidation and safe local retry rows."""
+        call = getattr(getattr(grounded, "analyzed", None), "call", None)
+        invalidation = failure_mask.clone()
+        retry = failure_mask.clone()
+        if type(call) is Pick:
+            return invalidation, retry
+        if type(call) is Place:
+            source = next(
+                value
+                for value in expectation_decisions
+                if value.expectation_id == "source"
+            )
+            retained = failure_mask & source.inverse_satisfied_mask
+            return failure_mask & ~retained, retained
+        if type(call) is HandOver:
+            source = next(
+                value
+                for value in expectation_decisions
+                if value.expectation_id == "source"
+            )
+            retained = failure_mask & source.inverse_satisfied_mask
+            return failure_mask & ~retained, torch.zeros_like(failure_mask)
+        return invalidation, retry
 
     def _held_object_guard_verifier(
         self,
@@ -2308,7 +2458,16 @@ class SkillRuntime:
             observation_revision=observation_revision,
             env_ids=selected_env_ids,
         )
-        decision = monitor.observe(request, evidence)
+        observed = monitor.observe(request, evidence)
+        expectation_decisions = self._validated_expectation_decisions(
+            spec,
+            observed,
+        )
+        decision = EffectMonitorDecision(
+            success_mask=observed.success_mask,
+            failure_mask=observed.failure_mask,
+            expectation_decisions=expectation_decisions,
+        )
         analyzed = getattr(grounded, "analyzed", None)
         monitor_ref = getattr(analyzed, "effect_monitor_ref", None)
         if monitor_ref is not None and not isinstance(monitor_ref, EffectMonitorRef):
@@ -2331,6 +2490,7 @@ class SkillRuntime:
             timestamp=context.robot.timestamp,
             success_mask=decision.success_mask,
             failure_mask=decision.failure_mask,
+            expectation_decisions=decision.expectation_decisions,
             effect_spec=spec,
             monitor_id=monitor_id,
             monitor_revision=monitor_revision,

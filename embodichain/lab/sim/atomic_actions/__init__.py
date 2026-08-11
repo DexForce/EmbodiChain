@@ -57,6 +57,7 @@ from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
 from .engine import AtomicActionEngine
 from .execution import (
+    EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEvent,
@@ -264,6 +265,7 @@ __all__ = [
     "EndpointCommandRouter",
     "EndpointCommandTransport",
     "EntityState",
+    "EffectExpectationResult",
     "EffectVerificationRequest",
     "EffectVerificationRequirement",
     "EffectVerificationResult",

@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import math
 from typing import TYPE_CHECKING
@@ -229,6 +229,8 @@ class EffectVerificationRequest:
     only a newly installed plan starts a new attempt deadline.
     ``attempt_generation`` is session-local and remains stable when partial
     resolution or row deactivation replaces only the request ID.
+    ``failure_invalidation`` is a core-owned removal-only delta; verification
+    results may select failed rows on which to apply it but cannot replace it.
     """
 
     verification_id: int
@@ -243,6 +245,7 @@ class EffectVerificationRequest:
     env_mask: torch.Tensor
     expected_effects: StateDelta
     effect_verification: EffectVerificationRequirement | None = None
+    failure_invalidation: StateDelta = field(default_factory=StateDelta)
 
     def __post_init__(self) -> None:
         if type(self.verification_id) is not int or self.verification_id < 0:
@@ -290,8 +293,32 @@ class EffectVerificationRequest:
                 "Effect verification requires expected symbolic effects or an "
                 "explicit physical-effect requirement."
             )
+        if not isinstance(self.failure_invalidation, StateDelta):
+            raise TypeError("failure_invalidation must be a StateDelta.")
+        if (
+            any(
+                value is not None
+                for value in self.failure_invalidation.held_object_updates.values()
+            )
+            or any(
+                value is not None
+                for value in self.failure_invalidation.coordinated_held_object_updates.values()
+            )
+            or any(
+                value is not None
+                for value in self.failure_invalidation.articulation_joint_updates.values()
+            )
+        ):
+            raise ValueError(
+                "failure_invalidation may only remove previously verified state."
+            )
         object.__setattr__(self, "env_mask", self.env_mask.clone())
         object.__setattr__(self, "expected_effects", self.expected_effects.snapshot())
+        object.__setattr__(
+            self,
+            "failure_invalidation",
+            self.failure_invalidation.snapshot(),
+        )
         object.__setattr__(
             self,
             "effect_verification",
@@ -317,6 +344,74 @@ class EffectVerificationRequest:
             env_mask=self.env_mask,
             expected_effects=self.expected_effects,
             effect_verification=self.effect_verification,
+            failure_invalidation=self.failure_invalidation,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class EffectExpectationResult:
+    """Current-observation outcome for one physical state expectation.
+
+    ``inverse_satisfied_mask`` is stronger than contradiction: every clause
+    must have reached its explicit inverse band for the monitor's complete
+    hysteresis window.  It may therefore be used to retain a pre-existing
+    relation during failure reconciliation, while a single contradictory
+    clause may not.
+    """
+
+    expectation_id: str
+    satisfied_mask: torch.Tensor
+    contradicted_mask: torch.Tensor
+    inverse_satisfied_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.expectation_id) is not str
+            or not self.expectation_id
+            or self.expectation_id != self.expectation_id.strip()
+        ):
+            raise ValueError(
+                "expectation_id must be a non-empty string without outer whitespace."
+            )
+        for name in (
+            "satisfied_mask",
+            "contradicted_mask",
+            "inverse_satisfied_mask",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        masks = (
+            self.satisfied_mask,
+            self.contradicted_mask,
+            self.inverse_satisfied_mask,
+        )
+        if any(mask.shape != masks[0].shape for mask in masks[1:]):
+            raise ValueError("Expectation-result masks must have equal shapes.")
+        if any(mask.device != masks[0].device for mask in masks[1:]):
+            raise ValueError("Expectation-result masks must use the same device.")
+        if (self.satisfied_mask & self.contradicted_mask).any():
+            raise ValueError("satisfied_mask and contradicted_mask must not overlap.")
+        if (self.inverse_satisfied_mask & ~self.contradicted_mask).any():
+            raise ValueError(
+                "inverse_satisfied_mask must be a subset of contradicted_mask."
+            )
+        for name in (
+            "satisfied_mask",
+            "contradicted_mask",
+            "inverse_satisfied_mask",
+        ):
+            object.__setattr__(self, name, getattr(self, name).clone())
+
+    def snapshot(self) -> EffectExpectationResult:
+        """Return an independently owned expectation outcome."""
+        return EffectExpectationResult(
+            expectation_id=self.expectation_id,
+            satisfied_mask=self.satisfied_mask,
+            contradicted_mask=self.contradicted_mask,
+            inverse_satisfied_mask=self.inverse_satisfied_mask,
         )
 
 
@@ -324,32 +419,96 @@ class EffectVerificationRequest:
 class EffectVerificationResult:
     """Correlated per-environment update for one effect boundary.
 
-    Rows absent from both masks remain unresolved. This lets one shared batch
-    barrier commit verified rows while other rows continue observing the same
-    physical effect.
+    Rows absent from both ``success_mask`` and ``failure_mask`` remain
+    unresolved. ``invalidation_mask`` and ``retry_mask`` classify only failed
+    rows: the former selects the request's core-owned removal delta, while the
+    latter authorizes replay of the same invocation. Failed rows outside the
+    retry mask require external recovery. This lets one shared batch barrier
+    commit verified rows while other rows continue observing the same physical
+    effect.
     """
 
     verification_id: int
     success_mask: torch.Tensor
     failure_mask: torch.Tensor
+    invalidation_mask: torch.Tensor
+    retry_mask: torch.Tensor
+    expectation_results: tuple[EffectExpectationResult, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.verification_id) is not int or self.verification_id < 0:
             raise ValueError("verification_id must be a non-negative integer.")
-        for name in ("success_mask", "failure_mask"):
+        for name in (
+            "success_mask",
+            "failure_mask",
+            "invalidation_mask",
+            "retry_mask",
+        ):
             value = getattr(self, name)
             if not isinstance(value, torch.Tensor):
                 raise TypeError(f"{name} must be a torch.Tensor.")
             if value.dtype != torch.bool or value.dim() != 1:
                 raise ValueError(f"{name} must be a one-dimensional bool tensor.")
-        if self.success_mask.shape != self.failure_mask.shape:
-            raise ValueError("success_mask and failure_mask must have equal shapes.")
-        if self.success_mask.device != self.failure_mask.device:
-            raise ValueError("success_mask and failure_mask must use the same device.")
+        masks = (
+            self.success_mask,
+            self.failure_mask,
+            self.invalidation_mask,
+            self.retry_mask,
+        )
+        if any(mask.shape != masks[0].shape for mask in masks[1:]):
+            raise ValueError("Effect-result masks must have equal shapes.")
+        if any(mask.device != masks[0].device for mask in masks[1:]):
+            raise ValueError("Effect-result masks must use the same device.")
         if (self.success_mask & self.failure_mask).any():
             raise ValueError("success_mask and failure_mask must not overlap.")
-        object.__setattr__(self, "success_mask", self.success_mask.clone())
-        object.__setattr__(self, "failure_mask", self.failure_mask.clone())
+        if (self.invalidation_mask & ~self.failure_mask).any():
+            raise ValueError("invalidation_mask must be a subset of failure_mask.")
+        if (self.retry_mask & ~self.failure_mask).any():
+            raise ValueError("retry_mask must be a subset of failure_mask.")
+        expectation_results = tuple(self.expectation_results)
+        if not all(
+            type(value) is EffectExpectationResult for value in expectation_results
+        ):
+            raise TypeError(
+                "expectation_results must contain exact EffectExpectationResult values."
+            )
+        expectation_ids = [value.expectation_id for value in expectation_results]
+        if len(set(expectation_ids)) != len(expectation_ids):
+            raise ValueError("Effect expectation-result IDs must be unique.")
+        if expectation_results:
+            expected_success = torch.ones_like(self.success_mask)
+            expected_failure = torch.zeros_like(self.failure_mask)
+            for value in expectation_results:
+                if value.satisfied_mask.shape != self.success_mask.shape:
+                    raise ValueError(
+                        "Expectation and aggregate result masks must have equal shapes."
+                    )
+                if value.satisfied_mask.device != self.success_mask.device:
+                    raise ValueError(
+                        "Expectation and aggregate result masks must use the same device."
+                    )
+                expected_success &= value.satisfied_mask
+                expected_failure |= value.contradicted_mask
+            if not torch.equal(self.success_mask, expected_success):
+                raise ValueError(
+                    "success_mask must equal the conjunction of expectation results."
+                )
+            if not torch.equal(self.failure_mask, expected_failure):
+                raise ValueError(
+                    "failure_mask must equal the union of expectation results."
+                )
+        for name in (
+            "success_mask",
+            "failure_mask",
+            "invalidation_mask",
+            "retry_mask",
+        ):
+            object.__setattr__(self, name, getattr(self, name).clone())
+        object.__setattr__(
+            self,
+            "expectation_results",
+            tuple(value.snapshot() for value in expectation_results),
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -1063,12 +1222,36 @@ class ExecutionSession:
                 self._pending_effect.env_mask & self._pending & self._plan.plan_success
             )
             if self._action_timed_out(self._plan, execution_mask):
+                pending_request = self._pending_effect
                 timed_out = execution_mask.clone()
                 known_failures = self._effect_failures.clone()
                 planning_failed = self._pending & ~self._plan.plan_success
-                retry_mask = timed_out | known_failures | planning_failed
+                invalidation_presence = self._failure_invalidation_presence_mask(
+                    pending_request.failure_invalidation
+                )
+                external_recovery = timed_out & invalidation_presence
+                retry_mask = (
+                    (timed_out & ~external_recovery) | known_failures | planning_failed
+                )
+                self._apply_effect_failure_invalidation(
+                    pending_request.failure_invalidation,
+                    timed_out,
+                )
                 self._pending_effect = None
                 self._effect_failures.zero_()
+                if external_recovery.any():
+                    self._eligible &= ~external_recovery
+                    self._pending &= ~external_recovery
+                    self._last_command_mask &= ~external_recovery
+                    events.append(
+                        self._event(
+                            ExecutionEventKind.RECOVERY_REQUIRED,
+                            external_recovery,
+                            "Effect evidence remained unresolved at the action "
+                            "deadline, so previously verified state was "
+                            "invalidated before external recovery.",
+                        )
+                    )
                 if known_failures.any():
                     events.append(
                         self._event(
@@ -1762,6 +1945,8 @@ class ExecutionSession:
                 )
             return None, active_targets, events
         else:
+            assert self._pending_effect is not None
+            pending_request = self._pending_effect
             success_input = self._normalize_mask(
                 effect_result.success_mask,
                 "effect_result.success_mask",
@@ -1770,17 +1955,67 @@ class ExecutionSession:
                 effect_result.failure_mask,
                 "effect_result.failure_mask",
             )
+            invalidation_input = self._normalize_mask(
+                effect_result.invalidation_mask,
+                "effect_result.invalidation_mask",
+            )
+            retry_input = self._normalize_mask(
+                effect_result.retry_mask,
+                "effect_result.retry_mask",
+            )
             reported = success_input | failure_input
             if (reported & ~execution_mask).any():
                 raise ValueError(
                     "Effect verification masks must be subsets of the pending "
                     "effect request env_mask."
                 )
+            for outcome in effect_result.expectation_results:
+                for name in (
+                    "satisfied_mask",
+                    "contradicted_mask",
+                    "inverse_satisfied_mask",
+                ):
+                    outcome_mask = self._normalize_mask(
+                        getattr(outcome, name),
+                        f"effect_result.expectation_results.{name}",
+                    )
+                    if (outcome_mask & ~execution_mask).any():
+                        raise ValueError(
+                            "Effect expectation-result masks must be subsets "
+                            "of the pending effect request env_mask."
+                        )
             verified = execution_mask & success_input
             failed_effect = execution_mask & failure_input
             unresolved = execution_mask & ~reported
             made_progress = bool(reported.any().item())
-            self._effect_failures |= failed_effect
+            invalidated = failed_effect & invalidation_input
+            retryable_failure = failed_effect & retry_input
+            external_recovery = failed_effect & ~retry_input
+            self._apply_effect_failure_invalidation(
+                pending_request.failure_invalidation,
+                invalidated,
+            )
+            self._effect_failures |= retryable_failure
+            if external_recovery.any():
+                self._eligible &= ~external_recovery
+                self._pending &= ~external_recovery
+                self._effect_failures &= ~external_recovery
+                self._last_command_mask &= ~external_recovery
+                events.extend(
+                    (
+                        self._event(
+                            ExecutionEventKind.EFFECT_VERIFICATION_FAILED,
+                            external_recovery,
+                            "Required physical effects were contradicted.",
+                        ),
+                        self._event(
+                            ExecutionEventKind.RECOVERY_REQUIRED,
+                            external_recovery,
+                            "The reconciled effect failure cannot safely replay "
+                            "the current invocation.",
+                        ),
+                    )
+                )
             if not unresolved.any():
                 self._pending_effect = None
 
@@ -1800,8 +2035,12 @@ class ExecutionSession:
             if made_progress:
                 self._pending_effect = self._effect_verification_request(unresolved)
             return None, active_targets, events
-        retry_mask = self._effect_failures | planning_failed
-        if retry_mask.any():
+        terminal_event = self._update_terminal_status()
+        if terminal_event is not None:
+            events.append(terminal_event)
+            return None, active_targets, events
+        retry_candidates = self._effect_failures | planning_failed
+        if retry_candidates.any():
             effect_failure_mask = self._effect_failures.clone()
             self._effect_failures.zero_()
             reason = (
@@ -1810,7 +2049,7 @@ class ExecutionSession:
                 else ExecutionEventKind.ACTION_PLANNING_FAILED
             )
             reason_mask = (
-                effect_failure_mask if effect_failure_mask.any() else retry_mask
+                effect_failure_mask if effect_failure_mask.any() else retry_candidates
             )
             if effect_failure_mask.any() and planning_failed.any():
                 events.append(
@@ -1822,7 +2061,7 @@ class ExecutionSession:
                 )
             events.extend(
                 self._attempt_action_retry(
-                    retry_mask,
+                    retry_candidates,
                     reason,
                     "Planning or expected-effect verification failed.",
                     reason_mask=reason_mask,
@@ -2332,7 +2571,68 @@ class ExecutionSession:
             env_mask=env_mask,
             expected_effects=self._plan.expected_effects,
             effect_verification=self._plan.effect_verification,
+            failure_invalidation=self._effect_failure_invalidation(),
         )
+
+    def _effect_failure_invalidation(self) -> StateDelta:
+        """Build the core-owned fail-closed state removal for this effect."""
+        assert self._plan is not None
+        expected = self._plan.expected_effects
+        held_keys = set(expected.held_object_updates)
+        coordinated_keys = set(expected.coordinated_held_object_updates)
+        coordinated_keys.update(
+            resources
+            for resources in self._task_state.coordinated_held_objects
+            if not set(resources).isdisjoint(held_keys)
+        )
+        return StateDelta(
+            held_object_updates={key: None for key in held_keys},
+            coordinated_held_object_updates={
+                resources: None for resources in coordinated_keys
+            },
+            articulation_joint_updates={
+                key: None for key in expected.articulation_joint_updates
+            },
+        )
+
+    def _apply_effect_failure_invalidation(
+        self,
+        state_invalidation: StateDelta,
+        env_mask: torch.Tensor,
+    ) -> None:
+        """Apply a request-owned failure delta and refresh planning context."""
+        if not env_mask.any() or state_invalidation.is_empty:
+            return
+        self._task_state = state_invalidation.apply(self._task_state, env_mask)
+        self._context = PlanningContext(
+            robot=self._context.robot,
+            task=self._task_state,
+            scene=self._context.scene,
+            env_ids=self._context.env_ids,
+        )
+
+    def _failure_invalidation_presence_mask(
+        self,
+        state_invalidation: StateDelta,
+    ) -> torch.Tensor:
+        """Return rows whose verified state would actually be removed."""
+        present = torch.zeros_like(self._eligible)
+        for key in state_invalidation.held_object_updates:
+            value = self._task_state.held_objects.get(key)
+            if value is not None:
+                assert value.env_mask is not None
+                present |= value.env_mask.to(present.device)
+        for key in state_invalidation.coordinated_held_object_updates:
+            value = self._task_state.coordinated_held_objects.get(key)
+            if value is not None:
+                assert value.env_mask is not None
+                present |= value.env_mask.to(present.device)
+        for key in state_invalidation.articulation_joint_updates:
+            value = self._task_state.articulation_joints.get(key)
+            if value is not None:
+                assert value.env_mask is not None
+                present |= value.env_mask.to(present.device)
+        return present
 
     def _event(
         self,
@@ -2407,6 +2707,7 @@ class ExecutionSession:
 
 
 __all__ = [
+    "EffectExpectationResult",
     "EffectVerificationRequest",
     "EffectVerificationResult",
     "ExecutionEvent",

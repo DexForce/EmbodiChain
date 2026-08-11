@@ -84,6 +84,28 @@ MINIMUM_CYCLE_TIME = 0.01
 TARGET_POSITION = 1.0
 
 
+def _effect_result(
+    verification_id: int,
+    success_mask: torch.Tensor,
+    failure_mask: torch.Tensor,
+    *,
+    invalidation_mask: torch.Tensor | None = None,
+    retry_mask: torch.Tensor | None = None,
+) -> EffectVerificationResult:
+    """Build an explicit terminal decision with legacy retry semantics."""
+    return EffectVerificationResult(
+        verification_id=verification_id,
+        success_mask=success_mask,
+        failure_mask=failure_mask,
+        invalidation_mask=(
+            torch.zeros_like(failure_mask)
+            if invalidation_mask is None
+            else invalidation_mask
+        ),
+        retry_mask=failure_mask if retry_mask is None else retry_mask,
+    )
+
+
 class FakeClock:
     """Deterministic clock used by non-blocking runner tests."""
 
@@ -403,7 +425,7 @@ def _successful_effect_result(
     request: EffectVerificationRequest,
 ) -> EffectVerificationResult:
     """Correlate a successful result with the pending effect boundary."""
-    return EffectVerificationResult(
+    return _effect_result(
         verification_id=request.verification_id,
         success_mask=torch.ones(
             context.batch_size,
@@ -423,7 +445,7 @@ def _unresolved_effect_result(
     request: EffectVerificationRequest,
 ) -> EffectVerificationResult:
     """Keep every row pending at the current effect boundary."""
-    return EffectVerificationResult(
+    return _effect_result(
         verification_id=request.verification_id,
         success_mask=torch.zeros(
             context.batch_size,
@@ -1092,7 +1114,7 @@ def test_effect_verifier_is_not_called_after_deadline_and_session_retries() -> N
 
 def test_effect_result_and_effect_verifier_are_mutually_exclusive() -> None:
     runner, _, _, sink, action = _make_runner(with_effect=True)
-    result = EffectVerificationResult(
+    result = _effect_result(
         verification_id=0,
         success_mask=torch.tensor([True]),
         failure_mask=torch.tensor([False]),
@@ -1152,7 +1174,7 @@ def test_all_false_effect_updates_keep_polling_the_same_request() -> None:
         request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
         observed_requests.append((request.verification_id, request.attempt_generation))
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id,
             success_mask=torch.zeros(context.batch_size, dtype=torch.bool),
             failure_mask=torch.zeros(context.batch_size, dtype=torch.bool),
@@ -1188,7 +1210,7 @@ def test_partial_effect_verifier_receives_the_committed_task_state() -> None:
             None if held is None or held.env_mask is None else held.env_mask.tolist()
         )
         if request.env_mask.tolist() == [True, True]:
-            return EffectVerificationResult(
+            return _effect_result(
                 verification_id=request.verification_id,
                 success_mask=torch.tensor([True, False]),
                 failure_mask=torch.tensor([False, False]),
@@ -1197,7 +1219,7 @@ def test_partial_effect_verifier_receives_the_committed_task_state() -> None:
         assert held is not None and held.env_mask is not None
         assert held.env_mask.tolist() == [True, False]
         assert torch.equal(context.task.held_objects["arm"].env_mask, held.env_mask)
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id,
             success_mask=torch.tensor([False, True]),
             failure_mask=torch.tensor([False, False]),
@@ -1310,7 +1332,7 @@ def test_runner_deactivation_refreshes_cached_effect_request() -> None:
         context: PlanningContext,
         request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id,
             success_mask=torch.tensor([True, False]),
             failure_mask=torch.tensor([False, False]),
@@ -1330,7 +1352,7 @@ def test_blocking_runner_fails_safely_for_a_mismatched_effect_result() -> None:
         context: PlanningContext,
         request: EffectVerificationRequest,
     ) -> EffectVerificationResult:
-        return EffectVerificationResult(
+        return _effect_result(
             verification_id=request.verification_id + 1,
             success_mask=torch.ones(context.batch_size, dtype=torch.bool),
             failure_mask=torch.zeros(context.batch_size, dtype=torch.bool),
