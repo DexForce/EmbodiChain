@@ -53,6 +53,8 @@ from embodichain.lab.sim.atomic_actions import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
+    PickUpOptions,
+    PlaceOptions,
     RecoveryPolicy,
     TrackingPolicy,
 )
@@ -294,6 +296,10 @@ def create_cube_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                },
                 recovery_policy=RecoveryPolicy(),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.08,

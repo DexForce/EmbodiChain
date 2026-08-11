@@ -35,6 +35,7 @@ from embodichain.lab.sim.atomic_actions import (
     JOINT_POSITION_CAPABILITY,
     ObservedArticulationJointState,
     OperateArticulationGoal,
+    OperateArticulationOptions,
     PlanningContext,
     RobotObservation,
     SceneSnapshot,
@@ -210,7 +211,14 @@ def _profile() -> RobotSkillProfile:
                 grasp=torch.tensor((1.0,)),
             )
         },
-        presets={"safe": SkillPolicyPreset("safe")},
+        presets={
+            "safe": SkillPolicyPreset(
+                "safe",
+                action_option_templates={
+                    "operate_articulation": OperateArticulationOptions(),
+                },
+            )
+        },
         default_preset="safe",
     )
 

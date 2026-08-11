@@ -68,7 +68,10 @@ from embodichain.lab.sim.atomic_actions import (
     GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
     MotionPolicy,
+    OperateArticulationOptions,
+    PickUpOptions,
     PlanningContext,
+    PlaceOptions,
     RobotObservation,
     TaskState,
 )
@@ -200,6 +203,10 @@ def _robot_profile(
         presets={
             "safe": SkillPolicyPreset(
                 "safe",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                },
                 motion_policy=safe_motion_policy,
             )
         },
@@ -278,7 +285,14 @@ def _parallel_articulation_profile() -> RobotSkillProfile:
             )
             for hand in ("left_hand", "right_hand")
         },
-        presets={"safe": SkillPolicyPreset("safe")},
+        presets={
+            "safe": SkillPolicyPreset(
+                "safe",
+                action_option_templates={
+                    "operate_articulation": OperateArticulationOptions(),
+                },
+            )
+        },
         default_preset="safe",
     )
 

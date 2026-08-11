@@ -68,9 +68,12 @@ from embodichain.lab.sim.atomic_actions import (
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     HeldObjectState,
+    HandOverOptions,
     MotionPolicy,
     ObservedArticulationJointState,
     PlanningContext,
+    PickUpOptions,
+    PlaceOptions,
     StateDelta,
     TaskState,
     TrackingPolicy,
@@ -844,10 +847,20 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
         presets=(
             SkillPolicyPreset(
                 "safe",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                },
                 motion_policy=MotionPolicy(control_dt=0.01),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.037,
                     terminal_max_abs_error=0.019,
+                ),
+                runner_cfg=ExecutionRunnerCfg(
+                    command_timeout=0.37,
+                    safe_stop_timeout=0.61,
+                    minimum_cycle_time=0.04,
+                    hold_on_completion=False,
                 ),
             ),
         ),
@@ -900,7 +913,12 @@ def _handover_profile_binding() -> SimulationRobotSkillProfileBinding:
         defaults={
             "hand_over": {"source": "left", "destination": "right"},
         },
-        presets=(SkillPolicyPreset("safe"),),
+        presets=(
+            SkillPolicyPreset(
+                "safe",
+                action_option_templates={"hand_over": HandOverOptions()},
+            ),
+        ),
         default_preset="safe",
         grounding_providers={
             "hand_over": _ForwardedHandOverPoseProvider.provider_id,
@@ -1032,7 +1050,19 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
             "pick_up": {"primary": "manipulator"},
             "place": {"primary": "manipulator"},
         },
-        presets=(SkillPolicyPreset("evidence"),),
+        presets=(
+            SkillPolicyPreset(
+                "evidence",
+                action_option_templates={
+                    "pick": PickUpOptions(),
+                    "place": PlaceOptions(),
+                },
+                runner_cfg=ExecutionRunnerCfg(
+                    minimum_cycle_time=0.0,
+                    hold_on_completion=False,
+                ),
+            ),
+        ),
         default_preset="evidence",
     )
 
@@ -1783,7 +1813,7 @@ def test_simulation_helper_assembles_mobile_endpoint_and_transport_without_joint
                 },
             ),
         ),
-        presets=(SkillPolicyPreset("runtime"),),
+        presets=(SkillPolicyPreset("runtime", action_option_templates={}),),
         default_preset="runtime",
     )
     environment = SimpleNamespace(
