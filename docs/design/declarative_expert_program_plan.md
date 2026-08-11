@@ -10,7 +10,10 @@
   supported-simulation Pick/transfer/settle/validator runs using contact
   dynamics only. Named trajectory-segment effect gates now block Pick lift,
   Place retract, and HandOver source release until fresh physical evidence
-  confirms the required acquisition or release.
+  confirms the required acquisition or release. Preset-owned, row-local
+  workflow recovery now executes a real re-acquisition `Pick` when the source
+  relation is lost, or directly retries the failed semantic call when verified
+  state proves the source relation remains.
 - Baseline: `main@bcccb787dcafdafd7b944ba210e5e85f9cd1d0cb`
 - Last updated: 2026-08-11
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
@@ -427,7 +430,8 @@ an `arm + tool` schema. It contains a generic resource DAG:
   embodiment data owned by generic profile IDs selected by each endpoint
   adapter; only the current core bridge lowers applicable profiles to robot
   control-part keys;
-- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy;
+- versioned `SkillPolicyPreset` values own motion, atomic recovery, bounded
+  workflow recovery, and runner policy;
 - per-skill defaults map every skill-local slot to one resource ID.
 
 Resource and endpoint declarations are owned snapshots. A custom endpoint with
@@ -618,7 +622,19 @@ external recovery, but the core owns the removal-only invalidation delta and
 applies it before either path. Evidence that remains unresolved at the action
 deadline is reconciled fail-closed: any active verified state covered by the
 pending effect is removed before external recovery. Workflow-level
-re-acquisition remains open and may not repair the scene implicitly.
+re-acquisition is owned by the same ``SkillRuntime`` and may not repair the
+scene implicitly. ``SkillPolicyPreset`` schema version 3 adds a
+``WorkflowRecoveryPolicy`` whose per-row attempt budget defaults to zero. The
+runtime consults it only after the atomic core emits ``RECOVERY_REQUIRED``. A
+row whose reconciled ``TaskState`` still proves the source held-object relation
+retries the failed semantic call from a fresh observation. A row whose source
+relation was invalidated executes a real semantic ``Pick`` using the failed
+call's resolved source resource, then retries the original call. Each recovery
+call receives normal analysis, grounding, planning, command dispatch, physical
+effect verification, and trace metadata; it is not a state edit or simulator
+repair. Attempts are bounded independently per row, while already successful
+rows wait at the existing shared call barrier. This is runtime policy, not an
+Expert Program ``Retry`` node or a second workflow executor.
 
 Blocking physical-effect gates are enforced at named trajectory-segment
 entries. ``Pick`` requires destination attachment before ``lift``; ``Place``
@@ -1251,8 +1267,9 @@ physical-effect verification, settling, and target validation through real
 contact dynamics. Per-expectation terminal outcomes, core-owned failure
 invalidation, row-local retry/recovery decisions, fail-closed deadline
 reconciliation, and blocking named-segment effect gates are implemented.
-Workflow-level re-acquisition, fault-injection coverage, and the full
-repeated-cube run remain validation or design work.
+Workflow-level re-acquisition is implemented through the preset-owned bounded
+policy and canonical runtime. Real-simulation fault-injection coverage and the
+full repeated-cube run remain validation work.
 
 Deliverables:
 
@@ -1355,7 +1372,7 @@ migration is outside the current scope because it would require modifying
 Action Bank code.
 
 The current follow-up also makes task registration the sole standard-runtime
-extension owner. `SkillPolicyPreset` schema version 2 requires exact typed
+extension owner. `SkillPolicyPreset` schema version 3 requires exact typed
 action-option templates for every reachable semantic call; lowering may fill
 only explicitly compiler-owned dynamic target fields. Endpoint adapters,
 ordered Gym transports, and a parallel-safety factory are declared on
@@ -1512,8 +1529,9 @@ The design is complete when all of the following hold:
       row-local core-owned invalidation, per-expectation terminal
       reconciliation, fail-closed deadline handling, bounded Pick/retained-Place
       retry, typed recovery boundary, and blocking acquisition/release gates are
-      implemented; workflow-level re-acquisition and real-simulation fault
-      injection remain open.
+      implemented. Preset-owned per-row workflow re-acquisition now performs
+      real `Pick` and semantic-call retries; real-simulation fault injection
+      remains open.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break

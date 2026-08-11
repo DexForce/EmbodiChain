@@ -1485,6 +1485,7 @@ class BoundSemanticIntegration:
                 ),
                 tracking_policy=preset.tracking_policy,
                 recovery_policy=preset.recovery_policy,
+                workflow_recovery_policy=preset.workflow_recovery_policy,
                 runner_cfg=preset.runner_cfg,
                 effect_monitors=preset.effect_monitors,
                 action_option_templates=preset.action_option_templates,

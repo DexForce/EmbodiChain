@@ -54,6 +54,7 @@ from embodichain.lab.sim.skills import (
     RegisteredSemanticCall,
     SemanticCallDescriptor,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.atomic_actions.tracking import (
@@ -790,6 +791,26 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
 
     assert left.fingerprint == right.fingerprint
     assert len(left.fingerprint) == 64
+
+
+def test_fingerprint_covers_workflow_recovery_policy() -> None:
+    """A recovery budget is immutable registration-owned runtime behavior."""
+    base = create_cube_robot_profile_binding().presets[0]
+    changed = SkillPolicyPreset(
+        base.preset_id,
+        schema_version=base.schema_version,
+        action_option_templates=base.action_option_templates,
+        motion_policy=base.motion_policy,
+        tracking_policy=base.tracking_policy,
+        recovery_policy=base.recovery_policy,
+        workflow_recovery_policy=WorkflowRecoveryPolicy(
+            max_recovery_attempts=1,
+        ),
+        runner_cfg=base.runner_cfg,
+        effect_monitors=base.effect_monitors,
+    )
+
+    assert _registration().fingerprint != _registration_with_preset(changed).fingerprint
 
 
 def test_fingerprint_is_independent_of_catalog_and_provider_insertion_order() -> None:

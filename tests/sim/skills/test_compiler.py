@@ -150,7 +150,7 @@ def _preset(
     registered: bool = False,
     **kwargs: object,
 ) -> SkillPolicyPreset:
-    """Build one complete schema-v2 test preset."""
+    """Build one complete schema-v3 test preset."""
     kwargs.setdefault(
         "action_option_templates",
         _action_option_templates(registered=registered),

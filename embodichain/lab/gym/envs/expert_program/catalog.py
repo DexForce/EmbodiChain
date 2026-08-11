@@ -1107,6 +1107,7 @@ def _profile_with_step_dt(
                 motion_policy=replace(preset.motion_policy, control_dt=step_dt),
                 tracking_policy=preset.tracking_policy,
                 recovery_policy=preset.recovery_policy,
+                workflow_recovery_policy=preset.workflow_recovery_policy,
                 runner_cfg=replace(
                     preset.runner_cfg,
                     minimum_cycle_time=step_dt,

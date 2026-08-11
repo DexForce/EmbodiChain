@@ -70,7 +70,10 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.lab.sim.skills import SceneCollisionRole, SceneDynamics
-from embodichain.lab.sim.skills.profiles import SkillPolicyPreset
+from embodichain.lab.sim.skills.profiles import (
+    SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
+)
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalSamplerCfg,
     GraspGeneratorCfg,
@@ -455,6 +458,9 @@ def create_hand_over_robot_profile_binding() -> SimulationRobotSkillProfileBindi
                     ),
                 },
                 motion_policy=MotionPolicy(sample_count=HAND_OVER_SAMPLE_COUNT),
+                workflow_recovery_policy=WorkflowRecoveryPolicy(
+                    max_recovery_attempts=2,
+                ),
                 runner_cfg=ExecutionRunnerCfg(
                     hold_during_effect_verification=False,
                     hold_on_completion=False,

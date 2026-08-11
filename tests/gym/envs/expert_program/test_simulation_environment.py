@@ -117,6 +117,7 @@ from embodichain.lab.sim.skills import (
     SemanticPose,
     SemanticRelationTarget,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
 )
 from embodichain.lab.sim.skills.effects import (
     CONSTRAINT_EFFECT_CHANNEL,
@@ -1891,7 +1892,21 @@ def _assert_invocation_equivalent(
 def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
     """Cadence lowering preserves source declarations and unrelated policy."""
     binding = _profile_binding()
-    source_preset = binding.presets[0]
+    base_preset = binding.presets[0]
+    source_preset = SkillPolicyPreset(
+        base_preset.preset_id,
+        schema_version=base_preset.schema_version,
+        action_option_templates=base_preset.action_option_templates,
+        motion_policy=base_preset.motion_policy,
+        tracking_policy=base_preset.tracking_policy,
+        recovery_policy=base_preset.recovery_policy,
+        workflow_recovery_policy=WorkflowRecoveryPolicy(
+            max_recovery_attempts=2,
+        ),
+        runner_cfg=base_preset.runner_cfg,
+        effect_monitors=base_preset.effect_monitors,
+    )
+    binding = replace(binding, presets=(source_preset,))
     source_runner_cfg = source_preset.runner_cfg
     factory, _ = _factory(binding)
 
@@ -1912,6 +1927,7 @@ def test_simulation_factory_aligns_every_runtime_policy_to_gym_step() -> None:
         in_flight_max_abs_error=0.037,
         terminal_max_abs_error=0.019,
     )
+    assert aligned_preset.workflow_recovery_policy.max_recovery_attempts == 2
     assert binding.presets[0].motion_policy.control_dt == pytest.approx(
         _UNALIGNED_PROFILE_DT
     )

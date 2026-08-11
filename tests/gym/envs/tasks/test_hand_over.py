@@ -239,6 +239,7 @@ def test_hand_over_profile_binds_left_pick_and_left_to_right_transfer() -> None:
     }
     assert binding.presets[0].preset_id == "safe"
     assert binding.presets[0].motion_policy.sample_count == HAND_OVER_SAMPLE_COUNT
+    assert binding.presets[0].workflow_recovery_policy.max_recovery_attempts == 2
     assert binding.presets[0].runner_cfg.hold_during_effect_verification is False
     assert binding.presets[0].runner_cfg.hold_on_completion is False
     templates = binding.presets[0].action_option_templates
