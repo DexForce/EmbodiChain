@@ -387,12 +387,32 @@ profile = SimulationRobotSkillProfileBinding(
 
 adapter = create_simulation_expert_program_adapter(
     env,
-    scene_binding=scene_binding,
-    robot_profile_binding=profile,
-    endpoint_adapters={MobileVelocityEndpoint: MobileVelocityEndpointAdapter()},
-    runtime_transports=(MobileVelocityGymEncoder(),),
+    registration=SimulationExpertProgramRegistration(
+        scene_binding=scene_binding,
+        robot_profile_binding=profile,
+        endpoint_adapters=(MobileVelocityEndpointAdapter(),),
+        runtime_transports=(MobileVelocityGymEncoder(),),
+    ),
 )
 ```
+
+The adapter and encoder publish exact class-level declarations before a live
+robot is created. The adapter declares its endpoint type, runtime target types,
+transport IDs, and versioned tracking/evidence routes. The encoder declares its
+transport ID plus exact target and payload types; each target and payload type
+declares the same `TRANSPORT_ID`. Registration rejects missing, unused,
+duplicate, or conflicting declarations, and runtime profile binding verifies
+that `adapter.resolve()` returns only those declared routes. A stateful adapter,
+transport, grounding provider, or safety factory must be a frozen dataclass whose
+configuration is recursively immutable; mutable leaves such as lists, mappings,
+sets, byte arrays, and tensors are rejected before registration.
+
+The standard factory currently accepts its built-in tracking feedback,
+projector, evaluator, and effect-evidence routes only for
+`ControlPartEndpoint`. In C1, every custom endpoint adapter must declare empty
+route sets and therefore supports timed/open-loop execution only. Custom
+closed-loop mobile or whole-body tracking/evidence needs a registration-owned
+provider factory in C2; task code must not supply a live provider side channel.
 
 `RobotResourceBinding` snapshots arbitrary typed `ResourceEndpoint` values.
 `ControlPartResourceBinding` remains the stricter joint-backed convenience and

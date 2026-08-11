@@ -27,9 +27,10 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 import math
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import torch
 
@@ -41,11 +42,13 @@ from embodichain.lab.sim.atomic_actions.bindings import (
 from embodichain.lab.sim.atomic_actions.runner import (
     CommandAcknowledgement,
     ExecutionClock,
+    ExecutionRunnerCfg,
 )
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
     JointPositionPayload,
     RuntimeCommandFrame,
+    RuntimeCommandPayload,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext, TaskState
 from embodichain.lab.sim.skills.parallel import ParallelTimingPolicy
@@ -109,9 +112,14 @@ class RuntimeTransportActionEncoder(Protocol):
     action manager exposes a structured controller boundary.
     """
 
-    @property
-    def transport_id(self) -> str:
-        """Return the exact runtime transport ID handled by this encoder."""
+    transport_id: ClassVar[str]
+    """Exact runtime transport ID handled by this encoder."""
+
+    target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]]
+    """Exact runtime-target types accepted by this encoder."""
+
+    payload_types: ClassVar[tuple[type[RuntimeCommandPayload], ...]]
+    """Exact runtime-payload types accepted by this encoder."""
 
     def encode(
         self,
@@ -129,7 +137,12 @@ class RuntimeTransportActionEncoder(Protocol):
         base_action: EnvAction,
         context: PlanningContext,
     ) -> EnvAction:
-        """Merge this transport's safe state into ``base_action``."""
+        """Merge this transport's self-proven safe hold into ``base_action``.
+
+        The transport remains authoritative for neutralizing its own controller;
+        parallel command validation does not replace this transport-specific hold
+        contract.
+        """
 
 
 @runtime_checkable
@@ -423,10 +436,13 @@ class EnvironmentStepClock(ExecutionClock):
 class JointPositionGymTransportEncoder:
     """Built-in ``robot.joint_position`` to full-qpos action encoder."""
 
-    @property
-    def transport_id(self) -> str:
-        """Return the built-in joint-position transport ID."""
-        return JointPositionTarget.TRANSPORT_ID
+    transport_id: ClassVar[str] = JointPositionTarget.TRANSPORT_ID
+    target_types: ClassVar[tuple[type[RuntimeEndpointTarget], ...]] = (
+        JointPositionTarget,
+    )
+    payload_types: ClassVar[tuple[type[RuntimeCommandPayload], ...]] = (
+        JointPositionPayload,
+    )
 
     def encode(
         self,
@@ -495,7 +511,10 @@ class RuntimeCommandFrameEncoder:
     Args:
         qpos_provider: Full-qpos source aligned to a frame's explicit ``env_ids``.
         transports: Optional additional transport encoders.  The built-in
-            joint-position encoder is always installed first.
+            joint-position encoder precedes them when enabled.
+        include_joint_position: Whether to install the built-in joint-position
+            encoder. Standard assemblies disable it when their exact profile uses
+            only custom endpoint transports.
     """
 
     def __init__(
@@ -503,12 +522,17 @@ class RuntimeCommandFrameEncoder:
         qpos_provider: CurrentQposProvider,
         *,
         transports: Iterable[RuntimeTransportActionEncoder] = (),
+        include_joint_position: bool = True,
     ) -> None:
         if not isinstance(qpos_provider, CurrentQposProvider):
             raise TypeError("qpos_provider must implement CurrentQposProvider.")
+        if type(include_joint_position) is not bool:
+            raise TypeError("include_joint_position must be a bool.")
         self._qpos_provider = qpos_provider
         self._transports: dict[str, RuntimeTransportActionEncoder] = {}
-        self.register_transport(JointPositionGymTransportEncoder())
+        self._frozen = False
+        if include_joint_position:
+            self.register_transport(JointPositionGymTransportEncoder())
         for transport in transports:
             self.register_transport(transport)
 
@@ -517,6 +541,15 @@ class RuntimeCommandFrameEncoder:
         """Return registered transport IDs in deterministic encoding order."""
         return tuple(self._transports)
 
+    @property
+    def is_frozen(self) -> bool:
+        """Return whether runtime transport registration is permanently closed."""
+        return self._frozen
+
+    def freeze(self) -> None:
+        """Permanently close transport registration for a standard assembly."""
+        self._frozen = True
+
     def register_transport(
         self,
         transport: RuntimeTransportActionEncoder,
@@ -524,17 +557,83 @@ class RuntimeCommandFrameEncoder:
         replace: bool = False,
     ) -> None:
         """Register one shared transport-to-Gym action encoder."""
+        if self._frozen:
+            raise RuntimeError(
+                "Runtime transport registration is frozen for this command encoder."
+            )
         if not isinstance(transport, RuntimeTransportActionEncoder):
             raise TypeError("transport must implement RuntimeTransportActionEncoder.")
+        transport_type = type(transport)
         transport_id = _validate_identifier(
-            transport.transport_id,
+            getattr(transport_type, "transport_id", None),
             field_name="RuntimeTransportActionEncoder.transport_id",
+        )
+        self._validate_declared_types(
+            getattr(transport_type, "target_types", None),
+            base_type=RuntimeEndpointTarget,
+            field_name="RuntimeTransportActionEncoder.target_types",
+        )
+        self._validate_declared_types(
+            getattr(transport_type, "payload_types", None),
+            base_type=RuntimeCommandPayload,
+            field_name="RuntimeTransportActionEncoder.payload_types",
         )
         if type(replace) is not bool:
             raise TypeError("replace must be a bool.")
         if transport_id in self._transports and not replace:
             raise ValueError(f"Transport {transport_id!r} is already registered.")
         self._transports[transport_id] = transport
+
+    @staticmethod
+    def _validate_declared_types(
+        values: object,
+        *,
+        base_type: type[object],
+        field_name: str,
+    ) -> None:
+        """Validate one non-empty exact tuple of supported runtime types."""
+        if type(values) is not tuple or not values:
+            raise TypeError(f"{field_name} must be a non-empty exact tuple.")
+        if not all(
+            isinstance(value, type) and issubclass(value, base_type) for value in values
+        ):
+            raise TypeError(
+                f"{field_name} must contain {base_type.__name__} subclasses."
+            )
+        if len(set(values)) != len(values):
+            raise ValueError(f"{field_name} must not contain duplicate types.")
+
+    @staticmethod
+    def _validate_command_types(
+        transport: RuntimeTransportActionEncoder,
+        command: EndpointCommand,
+    ) -> None:
+        """Require exact target and payload coverage before transport routing."""
+        transport_type = type(transport)
+        if type(command.target) not in transport_type.target_types:
+            raise TypeError(
+                f"Transport {transport_type.transport_id!r} does not declare exact "
+                f"target type {type(command.target).__name__}."
+            )
+        if type(command.payload) not in transport_type.payload_types:
+            raise TypeError(
+                f"Transport {transport_type.transport_id!r} does not declare exact "
+                f"payload type {type(command.payload).__name__}."
+            )
+
+    @staticmethod
+    def _validate_hold_target_types(
+        transport: RuntimeTransportActionEncoder,
+        targets: Iterable[RuntimeEndpointTarget],
+    ) -> None:
+        """Require exact target coverage before safe-hold routing."""
+        transport_type = type(transport)
+        for target in targets:
+            if type(target) not in transport_type.target_types:
+                raise TypeError(
+                    f"Transport {transport_type.transport_id!r} does not declare "
+                    f"exact hold target type {type(target).__name__}."
+                )
 
     def _base_qpos(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Capture and validate one owned full-qpos hold action."""
@@ -556,6 +655,7 @@ class RuntimeCommandFrameEncoder:
         if not isinstance(frame, RuntimeCommandFrame):
             raise TypeError("frame must be a RuntimeCommandFrame.")
         action: EnvAction = self._base_qpos(frame.env_ids)
+        by_transport: dict[str, list[EndpointCommand]] = {}
         for command in frame.commands:
             transport = self._transports.get(command.transport_id)
             if transport is None:
@@ -563,11 +663,15 @@ class RuntimeCommandFrameEncoder:
                     f"No Gym action encoder is registered for runtime transport "
                     f"{command.transport_id!r}."
                 )
-            action = transport.encode(
-                command,
-                base_action=action,
-                active_mask=frame.active_mask,
-            )
+            self._validate_command_types(transport, command)
+            by_transport.setdefault(command.transport_id, []).append(command)
+        for transport_id, transport in self._transports.items():
+            for command in by_transport.get(transport_id, ()):
+                action = transport.encode(
+                    command,
+                    base_action=action,
+                    active_mask=frame.active_mask,
+                )
         return action
 
     def encode_hold(
@@ -591,6 +695,11 @@ class RuntimeCommandFrameEncoder:
                     f"No Gym action encoder is registered for runtime transport "
                     f"{transport_id!r}."
                 )
+            self._validate_hold_target_types(transport, grouped)
+        for transport_id, transport in self._transports.items():
+            grouped = by_transport.get(transport_id)
+            if grouped is None:
+                continue
             action = transport.hold(
                 tuple(grouped),
                 base_action=action,
@@ -897,6 +1006,7 @@ class AtomicDemoBridge:
         clock: The same environment-step clock installed in ``runtime``.
         post_policy_port: Optional environment-aware post-policy executor.
         validator_port: Optional environment-aware validator executor.
+        runner_cfg: Runner transport policy selected by the runtime preset.
         parallel_safety_validator: Optional authoritative physical-safety gate
             required before any parallel branch can start.
 
@@ -914,6 +1024,7 @@ class AtomicDemoBridge:
         *,
         post_policy_port: SegmentPostPolicyPort | None = None,
         validator_port: SegmentValidatorPort | None = None,
+        runner_cfg: ExecutionRunnerCfg | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
     ) -> None:
         if not isinstance(program, CompiledProgramPort):
@@ -937,6 +1048,8 @@ class AtomicDemoBridge:
             validator_port, SegmentValidatorPort
         ):
             raise TypeError("validator_port must implement SegmentValidatorPort.")
+        if runner_cfg is not None and not isinstance(runner_cfg, ExecutionRunnerCfg):
+            raise TypeError("runner_cfg must be an ExecutionRunnerCfg or None.")
         if parallel_safety_validator is not None and not isinstance(
             parallel_safety_validator, ParallelCommandSafetyValidator
         ):
@@ -950,6 +1063,7 @@ class AtomicDemoBridge:
         self._clock = clock
         self._post_policy_port = post_policy_port
         self._validator_port = validator_port
+        self._runner_cfg = deepcopy(runner_cfg or ExecutionRunnerCfg())
         self._parallel_safety_validator = parallel_safety_validator
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
@@ -1351,6 +1465,7 @@ class AtomicDemoBridge:
             self._parallel_safety_validator,
             timeout_steps=barrier.timeout_steps,
             failure_policy=barrier.failure_policy,
+            runner_cfg=self._runner_cfg,
             workflow_id=(
                 f"{self._program.program_id}/{segment.segment_id}:parallel_analysis"
             ),

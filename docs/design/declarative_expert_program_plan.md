@@ -1270,6 +1270,33 @@ validator and parallel physical integration remain pending. The PourWater task
 migration is outside the current scope because it would require modifying
 Action Bank code.
 
+The current follow-up also makes task registration the sole standard-runtime
+extension owner. `SkillPolicyPreset` schema version 2 requires exact typed
+action-option templates for every reachable semantic call; lowering may fill
+only explicitly compiler-owned dynamic target fields. Endpoint adapters,
+ordered Gym transports, and a parallel-safety factory are declared on
+`SimulationExpertProgramRegistration`, enter its provider-free fingerprint,
+and are cross-checked again against live endpoint resolution. The standard
+factory consumes the same registration objects, freezes the assembled command
+encoder, takes runner timing from the selected preset, and creates a fresh live
+safety validator for every runtime assembly. No helper argument can replace
+those registered components after preflight. Stateful extension declarations
+must be frozen dataclasses with recursively immutable configuration, preventing
+nested mutable values from becoming a post-registration runtime side channel.
+
+This registration slice deliberately covers command transport, not arbitrary
+closed-loop backend injection. In C1, every custom endpoint adapter must declare
+empty tracking and effect-evidence route sets and therefore supports only
+timed/open-loop completion. The built-in `ControlPartEndpoint` retains its exact
+built-in routes. A non-joint feedback provider, desired-state projector, metric
+evaluator, or effect-evidence backend needs a separate registration-owned
+live-provider factory contract before it can be advertised as standard
+mobile/whole-body closed-loop support. Such providers must become fingerprinted
+capabilities; they must not return as task-side runtime callbacks. Transport
+`hold()` remains a trusted safe primitive owned and tested by each transport,
+while the parallel safety validator authorizes active merged command frames
+before dispatch.
+
 Deliverables:
 
 - `Parallel` and explicit `Barrier` nodes in a new schema version;

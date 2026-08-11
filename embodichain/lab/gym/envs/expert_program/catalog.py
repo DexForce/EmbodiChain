@@ -24,6 +24,8 @@ from enum import Enum
 import hashlib
 import json
 import math
+from _thread import LockType
+from threading import Lock
 from types import MappingProxyType
 import torch
 
@@ -32,18 +34,36 @@ from embodichain.lab.sim.atomic_actions import (
     Affordance,
     ArticulationOperationAffordance,
     AtomicActionEngine,
+    EndpointTrackingFeedbackAddress,
+    GRASP_CAPABILITY,
+    JOINT_POSITION_CHANNEL,
     SkillDescriptor,
 )
 from embodichain.lab.sim.atomic_actions.primitives import BUILTIN_ACTION_TYPES
+from embodichain.lab.sim.atomic_actions.tracking import (
+    FeedbackTerminalAcceptance,
+    TrackingRuntime,
+)
 from embodichain.lab.sim.skills import (
     ARTICULATION_OPERATION_AFFORDANCE_CAPABILITY,
+    CONTACT_EFFECT_CHANNEL,
+    CONSTRAINT_EFFECT_CHANNEL,
+    ControlPartEndpoint,
+    ControlPartEvidenceAddress,
+    FORCE_EFFECT_CHANNEL,
+    JOINT_STATE_EFFECT_CHANNEL,
     PLACE_IN_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
+    POSE_RELATION_EFFECT_CHANNEL,
+    BoundRobotSkillProfile,
     HandOverPoseProvider,
     OperateArticulation,
     Place,
     RelationTargetGrounder,
     RobotSkillProfile,
+    RegisteredSemanticCall,
+    ResourceEndpoint,
+    ResourceEndpointAdapter,
     SceneAffordanceRef,
     SceneArticulationRef,
     SceneEntityRef,
@@ -55,6 +75,15 @@ from embodichain.lab.sim.skills import (
     SemanticValidationError,
     SkillPolicyPreset,
     builtin_semantic_call_catalog,
+)
+from embodichain.lab.sim.skills.effects import (
+    COMPOSITE_EFFECT_MONITOR_ID,
+    COMPOSITE_EFFECT_MONITOR_REVISION,
+    CompositeEffectMonitorFactory,
+    EffectMonitorRegistry,
+)
+from embodichain.lab.sim.skills.parallel_runtime import (
+    ParallelCommandSafetyValidator,
 )
 
 from .cfg import (
@@ -76,6 +105,16 @@ from .decoder import (
     ConfigPath,
     ExpertProgramValidationError,
     SceneReferenceRole,
+)
+from .bridge import RuntimeTransportActionEncoder
+from .extensions import (
+    EndpointAdapterDeclaration,
+    ParallelCommandSafetyValidatorFactory,
+    ParallelSafetyDeclaration,
+    RuntimeTransportDeclaration,
+    StandardExtensionDeclarations,
+    build_standard_extension_declarations,
+    validate_immutable_extension_declaration,
 )
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
 from .simulation_policies import default_simulation_settle_presets
@@ -239,51 +278,6 @@ def _relation_grounder_order_key(
     return capability, _qualified_name(affordance_type), revision
 
 
-def _validate_provider_declaration(provider: object, *, field_name: str) -> None:
-    """Accept only frozen dataclass declarations or stateless providers."""
-    dataclass_declaration = is_dataclass(provider)
-    dataclass_field_names: set[str] = set()
-    if dataclass_declaration:
-        params = getattr(type(provider), "__dataclass_params__", None)
-        if params is None or not params.frozen:
-            raise TypeError(
-                f"{field_name} stateful declarations must be frozen dataclasses "
-                "so every configuration field enters the registration fingerprint."
-            )
-        dataclass_field_names.update(
-            declaration_field.name for declaration_field in fields(provider)
-        )
-
-    state_names: set[str] = set()
-    instance_state = getattr(provider, "__dict__", None)
-    if isinstance(instance_state, Mapping):
-        state_names.update(instance_state)
-    for owner in type(provider).__mro__:
-        declared_slots = getattr(owner, "__slots__", ())
-        slots = (declared_slots,) if isinstance(declared_slots, str) else declared_slots
-        for slot_name in slots:
-            if slot_name in {"__dict__", "__weakref__"}:
-                continue
-            storage_name = (
-                f"_{owner.__name__.lstrip('_')}{slot_name}"
-                if slot_name.startswith("__") and not slot_name.endswith("__")
-                else slot_name
-            )
-            if hasattr(provider, storage_name):
-                state_names.add(storage_name)
-    undeclared_state = (
-        state_names.difference(dataclass_field_names)
-        if dataclass_declaration
-        else state_names
-    )
-    if undeclared_state:
-        raise TypeError(
-            f"{field_name} providers contain unfingerprinted state "
-            f"{sorted(undeclared_state)}. Use a frozen dataclass declaration with "
-            "every state field declared; non-dataclass providers must be stateless."
-        )
-
-
 def _snapshot_relation_grounders(
     values: tuple[RelationTargetGrounder, ...],
 ) -> tuple[RelationTargetGrounder, ...]:
@@ -296,7 +290,7 @@ def _snapshot_relation_grounders(
             raise TypeError(
                 "relation_grounders must contain RelationTargetGrounder instances."
             )
-        _validate_provider_declaration(
+        validate_immutable_extension_declaration(
             grounder,
             field_name="relation_grounders",
         )
@@ -351,7 +345,7 @@ def _snapshot_handover_pose_providers(
             raise TypeError(
                 "handover_pose_providers must contain HandOverPoseProvider instances."
             )
-        _validate_provider_declaration(
+        validate_immutable_extension_declaration(
             provider,
             field_name="handover_pose_providers",
         )
@@ -360,6 +354,72 @@ def _snapshot_handover_pose_providers(
             raise ValueError(f"Duplicate handover pose provider {provider_id!r}.")
         seen.add(provider_id)
     return tuple(values)
+
+
+def _validate_standard_call_catalog(call_catalog: SemanticCallCatalog) -> None:
+    """Reject semantic lowerer extensions from the standard registration path."""
+    builtins = builtin_semantic_call_catalog().descriptors
+    for descriptor in call_catalog.descriptors.values():
+        if descriptor.spec_type is RegisteredSemanticCall:
+            raise ValueError(
+                f"Registered semantic call {descriptor.call_id!r} is not "
+                "supported by the standard simulation registration; only "
+                "curated semantic calls may be registered."
+            )
+        expected = builtins.get(descriptor.call_id)
+        if expected != descriptor:
+            raise ValueError(
+                f"Semantic call {descriptor.call_id!r} does not match its exact "
+                "curated descriptor."
+            )
+
+
+def _validate_standard_effect_monitors(profile: RobotSkillProfile) -> None:
+    """Require every preset to use the exact built-in effect-monitor factory."""
+    registry = EffectMonitorRegistry((CompositeEffectMonitorFactory(),))
+    builtin_key = (
+        COMPOSITE_EFFECT_MONITOR_ID,
+        COMPOSITE_EFFECT_MONITOR_REVISION,
+    )
+    for preset_id, preset in profile.presets.items():
+        for semantic_id, monitor_ref in preset.effect_monitors.items():
+            key = monitor_ref.monitor_id, monitor_ref.revision
+            if key != builtin_key:
+                raise ValueError(
+                    f"Preset {preset_id!r} semantic call {semantic_id!r} selects "
+                    f"non-built-in effect monitor {key!r}; the standard "
+                    "simulation registration supports only {builtin_key!r}."
+                )
+            try:
+                registry.validate_ref(monitor_ref)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Preset {preset_id!r} semantic call {semantic_id!r} has an "
+                    "invalid built-in effect-monitor declaration."
+                ) from exc
+
+
+def _validate_standard_tracking_metrics(profile: RobotSkillProfile) -> None:
+    """Resolve every reachable metric through the exact built-in evaluator table."""
+    evaluators = TrackingRuntime.with_builtins().evaluators
+    for preset_id, preset in profile.presets.items():
+        policy = preset.tracking_policy
+        metric_groups = []
+        if policy.in_flight is not None:
+            metric_groups.append(("in_flight", policy.in_flight.metrics))
+        if isinstance(policy.terminal, FeedbackTerminalAcceptance):
+            metric_groups.append(("terminal", policy.terminal.metrics))
+        for phase, metrics in metric_groups:
+            for metric in metrics:
+                try:
+                    evaluators.resolve(metric)
+                except (KeyError, TypeError, ValueError) as exc:
+                    key = metric.metric_id, metric.revision, _qualified_name(metric)
+                    raise ValueError(
+                        f"Preset {preset_id!r} {phase} tracking metric {key!r} "
+                        "has no exact built-in evaluator in the standard "
+                        "simulation registration."
+                    ) from exc
 
 
 def _declared_articulation_operation_targets(
@@ -491,6 +551,11 @@ class ExpertProgramIntegrationCatalog:
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]]
     articulation_operation_targets: Mapping[str, frozenset[str]]
     settle_preset_ids: frozenset[str]
+    endpoint_adapter_declarations: Mapping[
+        type[ResourceEndpoint], EndpointAdapterDeclaration
+    ]
+    runtime_transport_declarations: tuple[RuntimeTransportDeclaration, ...]
+    parallel_safety_declaration: ParallelSafetyDeclaration | None
     fingerprint: str
     _required_skills: Mapping[str, SkillDescriptor] = field(
         repr=False,
@@ -520,6 +585,36 @@ class ExpertProgramIntegrationCatalog:
                 self.articulation_operation_targets,
                 scene=self.scene,
             ),
+        )
+        extensions = StandardExtensionDeclarations(
+            endpoint_adapters=self.endpoint_adapter_declarations,
+            runtime_transports=self.runtime_transport_declarations,
+            parallel_safety=self.parallel_safety_declaration,
+        )
+        profile_endpoint_types = frozenset(
+            type(endpoint)
+            for resource in self.robot_profile.resources.values()
+            for endpoint in resource.endpoints.values()
+        )
+        if profile_endpoint_types != frozenset(extensions.endpoint_adapters):
+            raise ValueError(
+                "endpoint_adapter_declarations must cover every exact robot "
+                "profile endpoint type and no others."
+            )
+        object.__setattr__(
+            self,
+            "endpoint_adapter_declarations",
+            extensions.endpoint_adapters,
+        )
+        object.__setattr__(
+            self,
+            "runtime_transport_declarations",
+            extensions.runtime_transports,
+        )
+        object.__setattr__(
+            self,
+            "parallel_safety_declaration",
+            extensions.parallel_safety,
         )
         if self.robot_profile.profile_id != self.robot_profile_id:
             raise ValueError("robot_profile_id must match robot_profile.profile_id.")
@@ -754,6 +849,16 @@ class ExpertProgramIntegrationCatalog:
             runtime_preset=program.integration.runtime_preset,
         )
         for segment in compiled.iter_segments():
+            if (
+                segment.parallel_block is not None
+                and self.parallel_safety_declaration is None
+            ):
+                raise ExpertProgramValidationError(
+                    "parallel_safety_factory_not_registered",
+                    segment.parallel_block.source_path,
+                    "Parallel execution requires a task-registration-owned "
+                    "physical safety-validator factory.",
+                )
             for call in segment.calls:
                 if (
                     type(call.call) is OperateArticulation
@@ -791,6 +896,200 @@ class ExpertProgramIntegrationCatalog:
                     f"Live skill {skill_id!r} differs from the registered "
                     "semantic target descriptor."
                 )
+        bound_profile = engine.skill_profile
+        if type(bound_profile) is not BoundRobotSkillProfile:
+            raise IntegrationFingerprintMismatch(
+                "The standard live engine must own one exact bound robot profile."
+            )
+        self.validate_bound_endpoint_extensions(bound_profile)
+
+    def validate_bound_endpoint_extensions(
+        self,
+        bound_profile: BoundRobotSkillProfile,
+    ) -> None:
+        """Match every live resolved endpoint to its fingerprinted declaration."""
+        if type(bound_profile) is not BoundRobotSkillProfile:
+            raise TypeError("bound_profile must be exactly BoundRobotSkillProfile.")
+        if bound_profile.profile_id != self.robot_profile_id:
+            raise IntegrationFingerprintMismatch(
+                "The bound robot profile ID differs from the registered profile."
+            )
+
+        transport_owner_by_target_type = {
+            target_type: transport
+            for transport in self.runtime_transport_declarations
+            for target_type in transport.target_types
+        }
+        expected_resource_ids = frozenset(self.robot_profile.resources)
+        live_resource_ids = frozenset(bound_profile.resources)
+        if live_resource_ids != expected_resource_ids:
+            raise IntegrationFingerprintMismatch(
+                "Bound robot resource IDs differ from the registered profile; "
+                f"expected {sorted(expected_resource_ids)}, "
+                f"got {sorted(live_resource_ids)}."
+            )
+        for resource_id, resource in bound_profile.resources.items():
+            expected_resource = self.robot_profile.resources[resource_id]
+            if resource.resource_id != expected_resource.resource_id:
+                raise IntegrationFingerprintMismatch(
+                    f"Bound resource {resource_id!r} declaration ID differs from "
+                    "the registered profile."
+                )
+            if resource.members != expected_resource.members:
+                raise IntegrationFingerprintMismatch(
+                    f"Bound resource {resource_id!r} members differ from the "
+                    "registered profile."
+                )
+            expected_endpoint_ids = frozenset(expected_resource.endpoints)
+            live_endpoint_ids = frozenset(resource.endpoints)
+            if live_endpoint_ids != expected_endpoint_ids:
+                raise IntegrationFingerprintMismatch(
+                    f"Bound resource {resource_id!r} endpoint IDs differ from the "
+                    f"registered profile; expected {sorted(expected_endpoint_ids)}, "
+                    f"got {sorted(live_endpoint_ids)}."
+                )
+            for endpoint_id, endpoint in resource.endpoints.items():
+                location = f"{resource_id}.{endpoint_id}"
+                expected_endpoint = expected_resource.endpoints[endpoint_id]
+                if type(endpoint.endpoint) is not type(expected_endpoint) or (
+                    _canonical_json(endpoint.endpoint)
+                    != _canonical_json(expected_endpoint)
+                ):
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} declaration differs from the "
+                        "registered robot profile."
+                    )
+                endpoint_type = type(endpoint.endpoint)
+                declaration = self.endpoint_adapter_declarations.get(endpoint_type)
+                if declaration is None:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} has undeclared exact type "
+                        f"{_qualified_name(endpoint_type)!r}."
+                    )
+                if endpoint.adapter_id != declaration.adapter_id:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} adapter ID "
+                        f"{endpoint.adapter_id!r} differs from registered "
+                        f"{declaration.adapter_id!r}."
+                    )
+
+                target = endpoint.runtime_target
+                target_type = type(target)
+                if target_type not in declaration.runtime_target_types:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} resolved undeclared exact "
+                        f"runtime target type {_qualified_name(target_type)!r}."
+                    )
+                owner = transport_owner_by_target_type.get(target_type)
+                if owner is None or owner.transport_id not in (
+                    declaration.runtime_transport_ids
+                ):
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} target type has no registered "
+                        "adapter transport owner."
+                    )
+                if target.transport_id != owner.transport_id:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} live transport "
+                        f"{target.transport_id!r} differs from target type owner "
+                        f"{owner.transport_id!r}."
+                    )
+
+                feedback_keys = frozenset(
+                    (binding.source.provider_id, binding.source.revision)
+                    for binding in endpoint.tracking_channels.values()
+                )
+                if feedback_keys != declaration.tracking_feedback_source_keys:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} tracking-feedback routes "
+                        "differ from its registered adapter declaration."
+                    )
+                projector_keys = frozenset(
+                    (binding.projector.projector_id, binding.projector.revision)
+                    for binding in endpoint.tracking_channels.values()
+                )
+                if projector_keys != declaration.tracking_projector_keys:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} tracking-projector routes "
+                        "differ from its registered adapter declaration."
+                    )
+                evidence_keys = frozenset(
+                    (source.provider_id, source.revision)
+                    for source in endpoint.effect_sources.values()
+                )
+                if evidence_keys != declaration.effect_evidence_source_keys:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound endpoint {location!r} effect-evidence routes "
+                        "differ from its registered adapter declaration."
+                    )
+                if endpoint_type is ControlPartEndpoint:
+                    control_part = endpoint.endpoint.control_part
+                    if getattr(target, "control_part", None) != control_part:
+                        raise IntegrationFingerprintMismatch(
+                            f"Bound endpoint {location!r} runtime target addresses "
+                            "a different control part."
+                        )
+                    if frozenset(endpoint.tracking_channels) != frozenset(
+                        {JOINT_POSITION_CHANNEL}
+                    ):
+                        raise IntegrationFingerprintMismatch(
+                            f"Bound endpoint {location!r} must expose exactly the "
+                            "built-in joint-position tracking channel."
+                        )
+                    tracking = endpoint.tracking_channels[JOINT_POSITION_CHANNEL]
+                    feedback_address = tracking.source.address
+                    if type(feedback_address) is not EndpointTrackingFeedbackAddress:
+                        raise IntegrationFingerprintMismatch(
+                            f"Bound endpoint {location!r} must use the exact "
+                            "built-in endpoint tracking address."
+                        )
+                    if (
+                        feedback_address.channel_id != JOINT_POSITION_CHANNEL
+                        or type(feedback_address.target) is not target_type
+                        or _canonical_json(feedback_address.target)
+                        != _canonical_json(target)
+                    ):
+                        raise IntegrationFingerprintMismatch(
+                            f"Bound endpoint {location!r} tracking address differs "
+                            "from its runtime target or channel."
+                        )
+
+                    expected_effect_channels = {
+                        POSE_RELATION_EFFECT_CHANNEL,
+                        JOINT_STATE_EFFECT_CHANNEL,
+                    }
+                    if GRASP_CAPABILITY in endpoint.endpoint.capabilities:
+                        expected_effect_channels.update(
+                            {
+                                CONTACT_EFFECT_CHANNEL,
+                                CONSTRAINT_EFFECT_CHANNEL,
+                                FORCE_EFFECT_CHANNEL,
+                            }
+                        )
+                    if frozenset(endpoint.effect_sources) != frozenset(
+                        expected_effect_channels
+                    ):
+                        raise IntegrationFingerprintMismatch(
+                            f"Bound endpoint {location!r} effect-evidence channels "
+                            "differ from the exact built-in control-part routes."
+                        )
+                    for channel, source in endpoint.effect_sources.items():
+                        address = source.address
+                        if (
+                            type(address) is not ControlPartEvidenceAddress
+                            or address.control_part != control_part
+                            or address.channel != channel
+                        ):
+                            raise IntegrationFingerprintMismatch(
+                                f"Bound endpoint {location!r} effect-evidence "
+                                f"address for channel {channel!r} differs from its "
+                                "control part or channel."
+                            )
+                elif endpoint.tracking_channels or endpoint.effect_sources:
+                    raise IntegrationFingerprintMismatch(
+                        f"Bound custom endpoint {location!r} exposes closed-loop "
+                        "routes forbidden by the C1 standard runtime."
+                    )
 
 
 def _profile_with_control_dt(
@@ -829,6 +1128,10 @@ def _registration_payload(
     relation_grounder_keys: frozenset[tuple[str, type[Affordance], str]],
     relation_grounders: tuple[RelationTargetGrounder, ...],
     handover_pose_providers: tuple[HandOverPoseProvider, ...],
+    extensions: StandardExtensionDeclarations,
+    endpoint_adapters: tuple[ResourceEndpointAdapter, ...],
+    runtime_transports: tuple[RuntimeTransportActionEncoder, ...],
+    parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     return {
@@ -865,6 +1168,48 @@ def _registration_payload(
                 key=_handover_pose_provider_id,
             )
         ),
+        "standard_extensions": {
+            "endpoint_adapters": tuple(
+                sorted(
+                    extensions.endpoint_adapters.values(),
+                    key=lambda declaration: declaration.adapter_id,
+                )
+            ),
+            "runtime_transports": extensions.runtime_transports,
+            "parallel_safety": extensions.parallel_safety,
+        },
+        "endpoint_adapters": tuple(
+            {
+                "declaration": extensions.endpoint_adapters[
+                    getattr(type(adapter), "endpoint_type")
+                ],
+                "provider": _provider_fingerprint_declaration(adapter),
+            }
+            for adapter in sorted(
+                endpoint_adapters,
+                key=lambda value: getattr(type(value), "adapter_id"),
+            )
+        ),
+        "runtime_transports": tuple(
+            {
+                "declaration": next(
+                    declaration
+                    for declaration in extensions.runtime_transports
+                    if declaration.transport_id
+                    == getattr(type(transport), "transport_id")
+                ),
+                "provider": _provider_fingerprint_declaration(transport),
+            }
+            for transport in runtime_transports
+        ),
+        "parallel_safety_factory": (
+            None
+            if parallel_safety_factory is None
+            else {
+                "declaration": extensions.parallel_safety,
+                "provider": _provider_fingerprint_declaration(parallel_safety_factory),
+            }
+        ),
         "post_policy_kinds": _POST_POLICY_KINDS,
         "settle_presets": settle_presets,
         "validator_kinds": _VALIDATOR_KINDS,
@@ -885,7 +1230,20 @@ class SimulationExpertProgramRegistration:
     )
     relation_grounders: tuple[RelationTargetGrounder, ...] = ()
     handover_pose_providers: tuple[HandOverPoseProvider, ...] = ()
+    endpoint_adapters: tuple[ResourceEndpointAdapter, ...] = ()
+    runtime_transports: tuple[RuntimeTransportActionEncoder, ...] = ()
+    parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None = None
     catalog: ExpertProgramIntegrationCatalog = field(init=False)
+    _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _parallel_safety_validator_lock: LockType = field(
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if type(self.scene_binding) is not SimulationSceneBinding:
@@ -897,6 +1255,7 @@ class SimulationExpertProgramRegistration:
             )
         if type(self.call_catalog) is not SemanticCallCatalog:
             raise TypeError("call_catalog must be exactly SemanticCallCatalog.")
+        _validate_standard_call_catalog(self.call_catalog)
         settle_presets = _snapshot_settle_presets(self.settle_presets)
         object.__setattr__(self, "settle_presets", settle_presets)
         relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
@@ -918,6 +1277,14 @@ class SimulationExpertProgramRegistration:
             self.scene_binding
         )
         profile = self.robot_profile_binding.declare()
+        _validate_standard_effect_monitors(profile)
+        _validate_standard_tracking_metrics(profile)
+        extensions = build_standard_extension_declarations(
+            profile=profile,
+            endpoint_adapters=self.endpoint_adapters,
+            runtime_transports=self.runtime_transports,
+            parallel_safety_factory=self.parallel_safety_factory,
+        )
         selected_handover_provider = profile.grounding_providers.get("hand_over")
         registered_handover_provider_ids = {
             _handover_pose_provider_id(provider) for provider in handover_pose_providers
@@ -961,6 +1328,10 @@ class SimulationExpertProgramRegistration:
                 relation_grounder_keys=relation_grounder_keys,
                 relation_grounders=relation_grounders,
                 handover_pose_providers=handover_pose_providers,
+                extensions=extensions,
+                endpoint_adapters=self.endpoint_adapters,
+                runtime_transports=self.runtime_transports,
+                parallel_safety_factory=self.parallel_safety_factory,
             )
         )
         object.__setattr__(
@@ -975,10 +1346,15 @@ class SimulationExpertProgramRegistration:
                 relation_grounder_keys=relation_grounder_keys,
                 articulation_operation_targets=articulation_operation_targets,
                 settle_preset_ids=frozenset(settle_presets),
+                endpoint_adapter_declarations=extensions.endpoint_adapters,
+                runtime_transport_declarations=extensions.runtime_transports,
+                parallel_safety_declaration=extensions.parallel_safety,
                 fingerprint=fingerprint,
                 _required_skills=required_skills,
             ),
         )
+        object.__setattr__(self, "_parallel_safety_validator_history", [])
+        object.__setattr__(self, "_parallel_safety_validator_lock", Lock())
 
     @property
     def fingerprint(self) -> str:
@@ -993,6 +1369,15 @@ class SimulationExpertProgramRegistration:
         )
         profile = self.robot_profile_binding.declare()
         try:
+            _validate_standard_call_catalog(self.call_catalog)
+            _validate_standard_effect_monitors(profile)
+            _validate_standard_tracking_metrics(profile)
+            extensions = build_standard_extension_declarations(
+                profile=profile,
+                endpoint_adapters=self.endpoint_adapters,
+                runtime_transports=self.runtime_transports,
+                parallel_safety_factory=self.parallel_safety_factory,
+            )
             relation_grounders = _snapshot_relation_grounders(self.relation_grounders)
             relation_grounder_keys = frozenset(
                 _relation_grounder_key(grounder) for grounder in relation_grounders
@@ -1012,6 +1397,10 @@ class SimulationExpertProgramRegistration:
                     relation_grounder_keys=relation_grounder_keys,
                     relation_grounders=relation_grounders,
                     handover_pose_providers=handover_pose_providers,
+                    extensions=extensions,
+                    endpoint_adapters=self.endpoint_adapters,
+                    runtime_transports=self.runtime_transports,
+                    parallel_safety_factory=self.parallel_safety_factory,
                 )
             )
         except (TypeError, ValueError) as exc:
@@ -1025,10 +1414,57 @@ class SimulationExpertProgramRegistration:
                 "registration."
             )
 
+    @property
+    def endpoint_adapter_map(
+        self,
+    ) -> Mapping[type[ResourceEndpoint], ResourceEndpointAdapter]:
+        """Return custom live adapters keyed by their exact endpoint type."""
+        return MappingProxyType(
+            {
+                getattr(type(adapter), "endpoint_type"): adapter
+                for adapter in self.endpoint_adapters
+            }
+        )
+
+    def create_parallel_safety_validator(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+    ) -> ParallelCommandSafetyValidator | None:
+        """Create and strictly validate the registration-owned live safety gate."""
+        self.assert_unchanged()
+        factory = self.parallel_safety_factory
+        if factory is None:
+            return None
+        with self._parallel_safety_validator_lock:
+            validator = factory.create(simulation=simulation, robot=robot)
+            if not isinstance(validator, ParallelCommandSafetyValidator):
+                raise TypeError(
+                    "parallel_safety_factory.create() must return a "
+                    "ParallelCommandSafetyValidator."
+                )
+            if any(
+                validator is previous
+                for previous in self._parallel_safety_validator_history
+            ):
+                raise ValueError(
+                    "ParallelCommandSafetyValidatorFactory.create() must return a "
+                    "fresh validator for every runtime assembly owned by this "
+                    "registration."
+                )
+            self._parallel_safety_validator_history.append(validator)
+        return validator
+
     def validate_scene_registry(self, registry: SceneRegistry) -> None:
         """Validate a live registry against the registered scene declaration."""
         self.assert_unchanged()
         self.catalog.scene.validate_registry(registry)
+
+    def validate_engine(self, engine: AtomicActionEngine) -> None:
+        """Validate live skills and resolved endpoints against this registration."""
+        self.assert_unchanged()
+        self.catalog.validate_engine(engine)
 
     def validate_robot_profile(
         self,
