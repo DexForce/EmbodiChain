@@ -21,6 +21,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from threading import Event, Lock
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -37,7 +38,11 @@ from embodichain.lab.gym.envs.expert_program import (
     decode_expert_program,
 )
 from embodichain.lab.gym.utils.registration import EnvSpec
-from embodichain.lab.sim.atomic_actions import Affordance, PlanningContext
+from embodichain.lab.sim.atomic_actions import (
+    Affordance,
+    AtomicActionEngine,
+    PlanningContext,
+)
 from embodichain.lab.sim.skills import (
     PLACEMENT_TARGET_AFFORDANCE_REVISION,
     PLACE_ON_AFFORDANCE_CAPABILITY,
@@ -54,6 +59,7 @@ from embodichain.lab.sim.skills import (
     SceneEntityManifest,
     SceneManifest,
     SceneObjectRef,
+    SceneRegistry,
     SemanticRelationTarget,
     RegisteredSemanticCall,
     SemanticCallDescriptor,
@@ -248,9 +254,11 @@ class _CatalogParallelSafetyFactory:
         *,
         simulation: object,
         robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
     ) -> ParallelCommandSafetyValidator:
         """Return one independent protocol-compatible safety gate."""
-        del simulation, robot
+        del simulation, robot, scene_registry, engine
         return _AcceptParallelSafety()
 
 
@@ -285,9 +293,11 @@ class _SerializedParallelSafetyFactory:
         *,
         simulation: object,
         robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
     ) -> ParallelCommandSafetyValidator:
         """Block the first call so a second call can attempt registration entry."""
-        del simulation, robot
+        del simulation, robot, scene_registry, engine
         with self._state_lock:
             call_index = self._calls
             type(self)._calls += 1
@@ -342,6 +352,14 @@ def _registration() -> SimulationExpertProgramRegistration:
         scene_binding=create_cube_scene_binding(grasp_samples=32),
         robot_profile_binding=create_cube_robot_profile_binding(),
     )
+
+
+def _parallel_live_inputs() -> tuple[object, SceneRegistry, AtomicActionEngine]:
+    """Build minimal identity-consistent inputs for factory lifecycle tests."""
+    robot = object()
+    engine = AtomicActionEngine.__new__(AtomicActionEngine)
+    engine._planning_services = SimpleNamespace(robot=robot)  # type: ignore[attr-defined]
+    return robot, SceneRegistry(), engine
 
 
 def _operate_articulation_payload(
@@ -547,9 +565,12 @@ def test_parallel_preflight_accepts_exact_registration_owned_safety_factory() ->
     )
 
     compiled = registration.catalog.preflight(program)
+    robot, scene_registry, engine = _parallel_live_inputs()
     validator = registration.create_parallel_safety_validator(
         simulation=object(),
-        robot=object(),
+        robot=robot,
+        scene_registry=scene_registry,
+        engine=engine,
     )
 
     assert tuple(compiled.iter_segments())[0].parallel_block is not None
@@ -566,8 +587,15 @@ def test_parallel_safety_factory_must_return_a_validator() -> None:
             {"robot.joint_position"}
         )
 
-        def create(self, *, simulation: object, robot: object) -> object:
-            del simulation, robot
+        def create(
+            self,
+            *,
+            simulation: object,
+            robot: object,
+            scene_registry: SceneRegistry,
+            engine: AtomicActionEngine,
+        ) -> object:
+            del simulation, robot, scene_registry, engine
             return object()
 
     registration = SimulationExpertProgramRegistration(
@@ -576,10 +604,13 @@ def test_parallel_safety_factory_must_return_a_validator() -> None:
         parallel_safety_factory=InvalidParallelSafetyFactory(),
     )
 
+    robot, scene_registry, engine = _parallel_live_inputs()
     with pytest.raises(TypeError, match="must return a ParallelCommandSafetyValidator"):
         registration.create_parallel_safety_validator(
             simulation=object(),
-            robot=object(),
+            robot=robot,
+            scene_registry=scene_registry,
+            engine=engine,
         )
 
 
@@ -592,11 +623,14 @@ def test_parallel_safety_creation_and_history_are_one_registration_lock_scope() 
         robot_profile_binding=create_cube_robot_profile_binding(),
         parallel_safety_factory=factory_type(),
     )
+    robot, scene_registry, engine = _parallel_live_inputs()
 
     def create_validator() -> ParallelCommandSafetyValidator | None:
         return registration.create_parallel_safety_validator(
             simulation=object(),
-            robot=object(),
+            robot=robot,
+            scene_registry=scene_registry,
+            engine=engine,
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:

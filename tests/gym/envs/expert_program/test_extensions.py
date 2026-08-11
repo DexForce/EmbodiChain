@@ -250,8 +250,15 @@ class _MobileSafetyFactory:
         {_MobileTarget.TRANSPORT_ID}
     )
 
-    def create(self, *, simulation: object, robot: object) -> _SafetyValidator:
-        del simulation, robot
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: object,
+        engine: object,
+    ) -> _SafetyValidator:
+        del simulation, robot, scene_registry, engine
         return _SafetyValidator()
 
 

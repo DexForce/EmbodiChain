@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable, TYPE_CHECKING
 
 import torch
 
@@ -56,6 +56,10 @@ from .bridge import (
     JointPositionGymTransportEncoder,
     RuntimeTransportActionEncoder,
 )
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+    from embodichain.lab.sim.skills import SceneRegistry
 
 VersionedKey = tuple[str, str]
 """Exact ``(provider_or_projector_id, revision)`` registry key."""
@@ -450,8 +454,10 @@ class ParallelCommandSafetyValidatorFactory(Protocol):
         *,
         simulation: object,
         robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
     ) -> ParallelCommandSafetyValidator:
-        """Create one live validator bound to the exact simulation and robot."""
+        """Create one live gate bound to the exact assembled runtime."""
 
 
 @dataclass(frozen=True, slots=True)

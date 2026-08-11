@@ -1457,14 +1457,27 @@ class SimulationExpertProgramRegistration:
         *,
         simulation: object,
         robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
     ) -> ParallelCommandSafetyValidator | None:
         """Create and strictly validate the registration-owned live safety gate."""
         self.assert_unchanged()
         factory = self.parallel_safety_factory
         if factory is None:
             return None
+        if type(scene_registry) is not SceneRegistry:
+            raise TypeError("scene_registry must be exactly SceneRegistry.")
+        if not isinstance(engine, AtomicActionEngine):
+            raise TypeError("engine must be an AtomicActionEngine.")
+        if engine.robot is not robot:
+            raise ValueError("engine and factory must reference the exact same robot.")
         with self._parallel_safety_validator_lock:
-            validator = factory.create(simulation=simulation, robot=robot)
+            validator = factory.create(
+                simulation=simulation,
+                robot=robot,
+                scene_registry=scene_registry,
+                engine=engine,
+            )
             if not isinstance(validator, ParallelCommandSafetyValidator):
                 raise TypeError(
                     "parallel_safety_factory.create() must return a "

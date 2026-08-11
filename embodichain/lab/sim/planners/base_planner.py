@@ -179,6 +179,9 @@ class BasePlanner(ABC):
     supports_collision_world_updates: bool = False
     """Whether per-plan dynamic obstacle poses can update the collision world."""
 
+    supports_joint_trajectory_validation: bool = False
+    """Whether exact joint samples can be checked against bounds/collisions."""
+
     @property
     def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
         """Return canonical entity IDs accepted for dynamic pose updates."""
@@ -252,6 +255,35 @@ class BasePlanner(ABC):
             Planning options unchanged for a backend without world updates.
         """
         return options
+
+    def validate_joint_trajectory(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        control_part: str,
+        obstacle_poses: Mapping[str, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Validate exact joint samples without replacing their path.
+
+        Backends that implement this contract must evaluate every supplied
+        sample against joint bounds, self-collision, and their configured world
+        collision model. They return a boolean mask with shape ``(B, T)``.
+
+        Args:
+            trajectory: Simulator-order joint samples with shape ``(B, T, D)``.
+            control_part: Robot control part whose ordered joints form ``D``.
+            obstacle_poses: Optional current dynamic-obstacle world poses.
+
+        Returns:
+            Per-environment, per-sample validity mask.
+
+        Raises:
+            NotImplementedError: Always for the base planner.
+        """
+        del trajectory, control_part, obstacle_poses
+        raise NotImplementedError(
+            f"{type(self).__name__} does not validate exact joint trajectories."
+        )
 
     @validate_plan_options
     @abstractmethod
