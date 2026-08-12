@@ -115,6 +115,29 @@ class TestAntipodalAffordance:
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
 
+    def test_valid_grasp_poses_applies_object_aware_cost_callback(self):
+        aff = AntipodalAffordance()
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        object_pose = torch.eye(4)
+        object_pose[0, 3] = 0.25
+        grasp_poses = torch.eye(4).repeat(2, 1, 1)
+        costs = torch.tensor([0.2, 0.4])
+
+        def get_valid_grasp_poses(**kwargs):
+            adjusted = kwargs["pose_cost_fn"](grasp_poses, costs)
+            return True, grasp_poses, 0.0, adjusted
+
+        generator.get_valid_grasp_poses.side_effect = get_valid_grasp_poses
+        aff._generator = generator
+
+        results = aff.get_valid_grasp_poses(
+            object_pose.unsqueeze(0),
+            grasp_cost_fn=lambda obj, _grasps, current: current + obj[0, 3],
+        )
+
+        assert torch.allclose(results[0][1], torch.tensor([0.45, 0.65]))
+
 
 class TestInteractionPoints:
     def test_default_points_shape(self):

@@ -1,0 +1,322 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+schema_version: action_engine_defaults_v1
+
+# Generation policy is materialized into fast_gym_config.json. It is not part
+# of the coordinate-free Execution Program or the runtime-policy hash.
+generation:
+  task:
+    default_robot_profile: ur10
+    max_episodes: 1
+    max_episode_steps: 2000
+  environment:
+    viewer_camera_uid: cam_high
+    ignore_terminations_during_agent: true
+    arm_aim_yaw_offset:
+      left: 0.0
+      right: 0.0
+  scene:
+    prompt2scene_z_rotation_degrees: -90.0
+    default_tabletop_z: 0.7
+    body_scale_policy: preserve
+    body_scale: [1.0, 1.0, 1.0]
+    object_length_sample_points: 5000
+  physics:
+    background:
+      mass: 10.0
+      static_friction: 0.95
+      dynamic_friction: 0.9
+      restitution: 0.01
+      max_convex_hull_num: 1
+    rigid_object:
+      mass: 0.1
+      static_friction: 0.95
+      dynamic_friction: 0.9
+      linear_damping: 0.9
+      angular_damping: 0.9
+      contact_offset: 0.003
+      rest_offset: 0.001
+      restitution: 0.05
+      max_depenetration_velocity: 0.8
+      max_linear_velocity: 5.0
+      max_angular_velocity: 5.0
+      min_position_iters: 32
+      min_velocity_iters: 8
+      max_convex_hull_num: 16
+      acd_method: vhacd
+  randomization:
+    rigid_object_position_range: [[-0.04, -0.04, 0.0], [0.04, 0.04, 0.0]]
+    rigid_object_rotation_range: [[0.0, 0.0, -30.0], [0.0, 0.0, 30.0]]
+    table_height_delta_range: [[-0.05], [0.05]]
+    table_material:
+      random_texture_prob: 0.0
+      base_color_range: [[0.55, 0.55, 0.55], [0.95, 0.95, 0.95]]
+      metallic_range: [0.0, 0.15]
+      roughness_range: [0.45, 0.95]
+  dataset:
+    control_frequency: 25
+    save_failed_episodes: true
+    use_videos: true
+
+# Runtime policy is resolved per robot profile, snapshotted in agent_config,
+# hash-verified at startup, and recorded with every execution.
+runtime:
+  common:
+    execution:
+      max_transitions: 1000
+      semantic_step_settle_steps: 10
+      max_retries_per_action: 2
+      max_graph_revisions: 8
+      max_recovery_actions: 12
+
+    planner:
+      backend: curobo
+      single_arm_strategy: motion_gen
+      coordinated_strategy: ik_interp
+      fallback_strategy: ik_interp
+      allow_fallback: true
+      dynamic_collision: false
+      static_obstacle_uids: []
+      dynamic_obstacle_uids: []
+      curobo:
+        log_level: error
+        obstacle_representation: cuboid
+        multi_env: false
+        use_cuda_graph: true
+        preserve_plan_samples: false
+        max_attempts: 5
+        collision_activation_distance: 0.01
+
+    # Crossing is measured along the live right-to-left arm-base axis so the
+    # same-side preference follows the robot under arbitrary world transforms.
+    arm_selection:
+      crossing_deadband_ratio: 0.08
+      pickup_crossing_weight: 1.0
+      placement_crossing_weight: 1.5
+      motion_cost_scale: 3.141592653589793
+      fallback_workspace_half_width: 0.5
+      orient_object_preferred_arm_deadband: 0.02
+
+    grounding:
+      semantic_defaults:
+        surface_clearance: 0.003
+        transport_clearance: 0.10
+        staging_lift_height: 0.12
+        relation_distance: 0.16
+        hover_height: 0.10
+        press_depth: 0.004
+        retreat_height: 0.10
+        maximum_eef_height: 0.80
+      arrangement:
+        slot_margin: 0.08
+        minimum_spacing: 0.07
+        layout_clearance: 0.025
+        row_search_step: 0.025
+        row_search_radius: 0.25
+      placement:
+        clearance: 0.012
+      coordinated_grasp:
+        inset_fraction: 0.15
+        minimum_inset: 0.01
+      handover:
+        retreat_height: 0.10
+        retreat_distance: 0.10
+        maximum_eef_height: 1.50
+        minimum_transfer_clearance: 0.10
+        minimum_transfer_lateral_clearance: 0.06
+      joint_state:
+        hand_close_sample_interval: 10
+        hand_open_sample_interval: 15
+
+    grasp:
+      antipodal_n_sample: 10000
+      antipodal_max_angle: 0.2617993877991494
+      max_open_length: 0.115
+      min_open_length: 0.01
+      finger_length: 0.13
+      point_sample_dense: 0.012
+      max_deviation_angle: 0.3490658503988659
+      viser_port: 11801
+      max_decomposition_hulls: 16
+      force_grasp_reannotate: false
+
+    motion_defaults:
+      PickUp:
+        pre_grasp_distance: 0.08
+        lift_height: 0.30
+        sample_interval: 45
+      MoveHeldObject:
+        sample_interval: 45
+        relation_distance: 0.18
+        robot_relative_distance: 0.10
+        relation_clearance: 0.02
+        exchange_clearance: 0.06
+        exchange_candidate_offset: 0.16
+        exchange_obstacle_clearance: 0.04
+        exchange_gripper_horizontal_envelope: 0.035
+        exchange_wrist_horizontal_envelope: 0.055
+        exchange_gripper_vertical_envelope: 0.025
+        exchange_wrist_vertical_envelope: 0.04
+        exchange_minimum_reach: 0.10
+        exchange_maximum_reach: 1.00
+        exchange_candidate_count: 4
+        hover_height: 0.10
+        line_spacing: 0.14
+        transport_clearance: 0.10
+        staging_lift_height: 0.30
+        surface_clearance: 0.005
+        postcondition_tolerance: 0.08
+        line_axis_tolerance: 0.06
+        line_perpendicular_tolerance: 0.06
+        preserve_orientation_tolerance: 0.2617993877991494
+      Place:
+        sample_interval: 15
+        lift_height: 0.0
+        post_hold_steps: 0
+        cartesian_waypoint_count: 4
+      MoveEndEffector:
+        sample_interval: 20
+        retreat_height: 0.30
+        minimum_retreat_height: 0.05
+        maximum_eef_height: 1.10
+        postcondition_tolerance: 0.05
+      MoveJoints:
+        sample_interval: 30
+        postcondition_tolerance: 0.05
+      Press:
+        sample_interval: 80
+        press_depth: 0.004
+        postcondition_tolerance: 0.03
+      CoordinatedPickment:
+        sample_interval: 120
+        object_motion_keyframes: 6
+        pre_grasp_distance: 0.10
+        lift_height: 0.08
+        postcondition_tolerance: 0.06
+      HandOver:
+        sample_interval: 140
+        pre_grasp_distance: 0.08
+        lift_height: 0.08
+        receiver_hold_joint_tolerance: 0.002
+        receive_pick_object_part: center
+        exchange_clearance: 0.06
+        exchange_candidate_offset: 0.16
+        exchange_obstacle_clearance: 0.04
+        exchange_gripper_horizontal_envelope: 0.035
+        exchange_wrist_horizontal_envelope: 0.055
+        exchange_gripper_vertical_envelope: 0.025
+        exchange_wrist_vertical_envelope: 0.04
+        exchange_minimum_reach: 0.10
+        exchange_maximum_reach: 1.00
+        exchange_candidate_count: 4
+        held_position_tolerance: 0.03
+        hand_interp_steps: 10
+        hold_steps: 4
+        retreat_steps: 28
+        postcondition_tolerance: 0.06
+      CoordinatedPlacement:
+        sample_interval: 100
+        hand_interp_steps: 10
+        hold_steps: 4
+        retreat_steps: 16
+        postcondition_tolerance: 0.06
+
+    motion_modifiers:
+      orientation:
+        upright:
+          PickUp:
+            rotate_upright: 0.7853981633974483
+            upright_yaw_samples: 8
+          MoveHeldObject:
+            staging_lift_height: 0.25
+            surface_clearance: 0.05
+            upright_yaw_samples: 8
+            upright_xy_tolerance: 0.05
+            upright_max_tilt: 0.2617993877991494
+          Place:
+            sample_interval: 64
+            post_hold_steps: 12
+            hand_interp_steps: 12
+          MoveEndEffector:
+            sample_interval: 30
+            retreat_height: 0.10
+            retreat_distance: 0.10
+            maximum_eef_height: 1.50
+      handover_role:
+        transfer:
+          PickUp:
+            sample_interval: 80
+            hand_interp_steps: 5
+            approach_direction_mode: handover_transfer
+
+    predicate_fallbacks:
+      held_position_tolerance: 0.06
+      held_gripper_tolerance: 0.01
+      position_tolerance: 0.05
+      xy_tolerance: 0.05
+      container_xy_radius: 0.20
+      container_min_z_offset: -0.05
+      container_max_z_offset: 0.35
+      support_xy_radius: 0.08
+      not_fallen_max_tilt: 0.7853981633974483
+      upright_max_tilt: 0.2617993877991494
+      axis_tolerance: 0.03
+      collinearity_tolerance: 0.03
+      ordering_tolerance: 0.02
+      minimum_lift_height: 0.08
+      arm_initial_qpos_tolerance: 0.05
+      gripper_state_tolerance: 0.001
+      gripper_clear_min_distance: 0.08
+      line_axis_tolerance: 0.06
+      line_perpendicular_tolerance: 0.06
+      preserve_orientation_tolerance: 0.2617993877991494
+      payload_minimum_upright_cosine: 0.94
+      payload_position_tolerance: 0.08
+      payload_support_margin: 0.015
+
+  profiles:
+    dual_franka:
+      motion_defaults:
+        MoveHeldObject:
+          exchange_maximum_reach: 0.85
+        HandOver:
+          exchange_maximum_reach: 0.85
+    dual_ur3:
+      motion_defaults:
+        MoveHeldObject:
+          exchange_maximum_reach: 0.55
+        HandOver:
+          exchange_maximum_reach: 0.55
+    dual_ur5:
+      motion_defaults:
+        MoveHeldObject:
+          exchange_maximum_reach: 0.85
+        HandOver:
+          exchange_maximum_reach: 0.85
+      motion_modifiers:
+        orientation:
+          upright:
+            PickUp:
+              lift_height: 0.12
+            MoveHeldObject:
+              staging_lift_height: 0.12
+    dual_ur10:
+      motion_defaults:
+        MoveHeldObject:
+          exchange_maximum_reach: 1.25
+        HandOver:
+          exchange_maximum_reach: 1.25

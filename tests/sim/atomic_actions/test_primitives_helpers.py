@@ -24,6 +24,14 @@ import torch
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
 )
+from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOverOptions
+from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
+    MoveHeldObjectOptions,
+)
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import (
+    PickUpOptions,
+    _upright_yaw_pose_variants,
+)
 
 
 def test_resolve_object_target_uses_custom_name_in_shape_error() -> None:
@@ -34,3 +42,24 @@ def test_resolve_object_target_uses_custom_name_in_shape_error() -> None:
             device=torch.device("cpu"),
             name="placing_object_target_pose",
         )
+
+
+def test_upright_yaw_pose_variants_preserve_translation() -> None:
+    pose = torch.eye(4).repeat(2, 1, 1)
+    pose[:, :3, 3] = torch.tensor([[0.2, -0.1, 0.8], [-0.3, 0.4, 0.7]])
+
+    variants = _upright_yaw_pose_variants(pose, 4)
+
+    assert variants.shape == (2, 4, 4, 4)
+    assert torch.allclose(variants[:, :, :3, 3], pose[:, None, :3, 3].expand(-1, 4, -1))
+    assert torch.allclose(variants[:, 0], pose)
+
+
+def test_upright_yaw_samples_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="upright_yaw_samples"):
+        PickUpOptions(upright_yaw_samples=0)
+
+
+def test_orientation_compatibility_options_preserve_mainline_defaults() -> None:
+    assert HandOverOptions().preserve_current_object_orientation is True
+    assert MoveHeldObjectOptions().allow_automatic_transport_rotation is True
