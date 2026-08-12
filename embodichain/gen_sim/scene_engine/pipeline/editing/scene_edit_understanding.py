@@ -24,7 +24,12 @@ from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
     SceneEditPlan,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
-from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
+from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    PlanarRelationType,
+    SceneGraph,
+    SceneGraphNode,
+    SceneGraphRelation,
+)
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
@@ -36,8 +41,8 @@ IDs list. IDs identify existing objects exactly; never invent, correct, or
 renumber them. The table ID is "table" and cannot be moved or deleted.
 
 Each operation is one of:
-1. move: move one existing object. object_id identifies it. target_id and
-   relation are either both provided or both null.
+1. move: move one existing object. object_id, target_id, and relation must all
+   be provided.
 2. delete: delete one existing object. Only object_id is provided.
 3. add: create one new object. object_id must be null. Provide a lower-case
    singular snake_case category, name, and description. Multiple add operations
@@ -45,9 +50,9 @@ Each operation is one of:
    program in operation order. target_id and relation are either both provided
    or both null.
 
-For a positioned move or add, target_id must be an Existing object ID and
-relation must be one of on, left_of, right_of, in_front_of, or behind. Do not
-position a new object relative to another newly added object.
+For every move and every positioned add, target_id must be an Existing object
+ID and relation must be one of on, left_of, right_of, in_front_of, or behind.
+Do not position a new object relative to another newly added object.
 
 Each existing object's center_xy is its center position [x, y] in the
 table-frame Z-up world coordinate system. Smaller x is left, larger x is right,
@@ -115,7 +120,7 @@ def understand_scene_edit(
     edit_prompt: str,
     vlm_client: OpenAICompatibleVLM,
     json_max_attempts: int = 3,
-) -> SceneEditPlan:
+) -> tuple[SceneEditPlan, SceneGraph]:
     """Understand one text edit instruction for an existing scene."""
     edit_prompt = edit_prompt.strip()
     if not edit_prompt:
@@ -133,10 +138,86 @@ def understand_scene_edit(
     )
 
     # SceneEditPlan validates all references against the immutable input scene graph.
-    return SceneEditPlan(
+    scene_edit_plan = SceneEditPlan(
         scene=scene,
         scene_graph=scene_graph,
         operations=operations,
+    )
+    updated_scene_graph = _build_updated_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=scene_edit_plan,
+    )
+    return scene_edit_plan, updated_scene_graph
+
+
+def _build_updated_scene_graph(
+    *,
+    scene_graph: SceneGraph,
+    scene_edit_plan: SceneEditPlan,
+) -> SceneGraph:
+    """Build and validate the target graph implied by one edit plan."""
+    # Copy every mutable graph value so the pre-edit graph remains unchanged.
+    updated_scene_graph = SceneGraph(
+        nodes=[
+            SceneGraphNode(
+                object_id=node.object_id,
+                parent_id=node.parent_id,
+                parent_relation=node.parent_relation,
+                table_region=node.table_region,
+            )
+            for node in scene_graph.nodes
+        ],
+        relations=[
+            SceneGraphRelation(
+                source_id=relation.source_id,
+                relation=relation.relation,
+                target_id=relation.target_id,
+            )
+            for relation in scene_graph.relations
+        ],
+        validate_on_refresh=scene_graph.validate_on_refresh,
+    )
+    _apply_scene_edit_plan_to_scene_graph(
+        scene_graph=updated_scene_graph,
+        scene_edit_plan=scene_edit_plan,
+    )
+    return updated_scene_graph
+
+
+def _apply_scene_edit_plan_to_scene_graph(
+    *,
+    scene_graph: SceneGraph,
+    scene_edit_plan: SceneEditPlan,
+) -> None:
+    """Apply the target graph updates implied by add and move operations."""
+    deleted_object_ids: set[str] = set()
+    added_object_ids: list[str] = []
+    on_parent_updates: list[tuple[str, str]] = []
+    planar_relation_updates: list[tuple[str, PlanarRelationType, str]] = []
+    for operation in scene_edit_plan.operations:
+        if operation.op == "delete":
+            if operation.object_id is not None:
+                deleted_object_ids.add(operation.object_id)
+            continue
+        if operation.object_id is None:
+            raise ValueError("Add and move operations must have an object_id.")
+        if operation.op == "add":
+            added_object_ids.append(operation.object_id)
+        if operation.target_id is None or operation.relation is None:
+            continue
+        if operation.relation == "on":
+            on_parent_updates.append((operation.object_id, operation.target_id))
+            continue
+        planar_relation_updates.append(
+            (operation.object_id, operation.relation, operation.target_id)
+        )
+
+    # Apply all graph changes atomically so intermediate edit states need not be valid.
+    scene_graph.apply_updates(
+        deleted_object_ids=deleted_object_ids,
+        added_object_ids=added_object_ids,
+        on_parent_updates=on_parent_updates,
+        planar_relation_updates=planar_relation_updates,
     )
 
 

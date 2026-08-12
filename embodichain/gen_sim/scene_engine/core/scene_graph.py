@@ -129,6 +129,158 @@ class SceneGraph:
             nodes_by_id[node.object_id] = node
         return nodes_by_id
 
+    def remove_nodes(self, object_ids: set[str]) -> None:
+        """Remove nodes and their incident planar relations, then validate."""
+        # If no node to be removed, return directly.
+        if not object_ids:
+            return
+        if TABLE_OBJECT_ID in object_ids:
+            raise ValueError("The table cannot be removed from a scene graph.")
+        unknown_object_ids = object_ids - set(self.node_by_id())
+        if unknown_object_ids:
+            raise ValueError(
+                f"Cannot remove unknown scene graph nodes: {sorted(unknown_object_ids)}"
+            )
+
+        # Removing every incident relation prevents dangling planar endpoints.
+        self.nodes = [node for node in self.nodes if node.object_id not in object_ids]
+        self.relations = [
+            relation
+            for relation in self.relations
+            if relation.source_id not in object_ids
+            and relation.target_id not in object_ids
+        ]
+        # Refresh.
+        self.refresh()
+
+    def add_node(self, node: SceneGraphNode) -> None:
+        """Add one node and validate the resulting graph."""
+        if node.object_id in self.node_by_id():
+            raise ValueError(f"Duplicate scene graph node: {node.object_id}")
+        self.nodes.append(node)
+        self.refresh()
+
+    def apply_updates(
+        self,
+        *,
+        deleted_object_ids: set[str],
+        added_object_ids: list[str],
+        on_parent_updates: list[tuple[str, str]],
+        planar_relation_updates: list[tuple[str, PlanarRelationType, str]],
+    ) -> None:
+        """Apply one atomic batch of node and relationship updates."""
+        if TABLE_OBJECT_ID in deleted_object_ids:
+            raise ValueError("The table cannot be removed from a scene graph.")
+
+        existing_object_ids = set(self.node_by_id())
+        unknown_object_ids = deleted_object_ids - existing_object_ids
+        if unknown_object_ids:
+            raise ValueError(
+                f"Cannot remove unknown scene graph nodes: {sorted(unknown_object_ids)}"
+            )
+
+        # Delete all requested nodes before resolving new parents and relations.
+        self.nodes = [
+            node for node in self.nodes if node.object_id not in deleted_object_ids
+        ]
+        self.relations = [
+            relation
+            for relation in self.relations
+            if relation.source_id not in deleted_object_ids
+            and relation.target_id not in deleted_object_ids
+        ]
+
+        remaining_object_ids = set(self.node_by_id())
+        if len(added_object_ids) != len(set(added_object_ids)):
+            raise ValueError("Added scene graph node ids must be unique.")
+        duplicate_object_ids = set(added_object_ids) & remaining_object_ids
+        if duplicate_object_ids:
+            raise ValueError(
+                f"Duplicate scene graph nodes: {sorted(duplicate_object_ids)}"
+            )
+
+        # New nodes default to the table; later updates replace that parent when needed.
+        self.nodes.extend(
+            SceneGraphNode(
+                object_id=object_id,
+                parent_id=TABLE_OBJECT_ID,
+                parent_relation="on",
+            )
+            for object_id in added_object_ids
+        )
+
+        # Apply support-parent changes before planar updates need the final parent.
+        for object_id, parent_id in on_parent_updates:
+            self._set_on_parent(object_id=object_id, parent_id=parent_id)
+
+        # Resolve chained planar parent inheritance before adding final relations.
+        self._resolve_planar_parent_updates(planar_relation_updates)
+        for source_id, relation, target_id in planar_relation_updates:
+            self._clear_incident_planar_relations(source_id)
+            self.relations.append(
+                SceneGraphRelation(
+                    source_id=source_id,
+                    relation=relation,
+                    target_id=target_id,
+                )
+            )
+
+        # Normalize inverse relations and reject invalid final graph constraints.
+        self.refresh()
+
+    def _set_on_parent(self, *, object_id: str, parent_id: str) -> None:
+        """Replace one node's support parent and stale planar constraints."""
+        nodes_by_id = self.node_by_id()
+        if object_id == TABLE_OBJECT_ID:
+            raise ValueError("The table cannot be moved onto another object.")
+        if object_id not in nodes_by_id or parent_id not in nodes_by_id:
+            raise ValueError(
+                "Parent updates must reference existing scene graph nodes."
+            )
+        if object_id == parent_id:
+            raise ValueError("A scene graph node cannot be its own parent.")
+
+        node = nodes_by_id[object_id]
+        node.parent_id = parent_id
+        node.parent_relation = "on"
+        node.table_region = None
+        self._clear_incident_planar_relations(object_id)
+
+    def _resolve_planar_parent_updates(
+        self,
+        planar_relation_updates: list[tuple[str, PlanarRelationType, str]],
+    ) -> None:
+        """Make every planar source share its target's final support parent."""
+        for _ in range(len(planar_relation_updates)):
+            changed = False
+            for source_id, _, target_id in planar_relation_updates:
+                nodes_by_id = self.node_by_id()
+                if source_id == TABLE_OBJECT_ID:
+                    raise ValueError("The table cannot have a planar relation.")
+                if source_id not in nodes_by_id or target_id not in nodes_by_id:
+                    raise ValueError(
+                        "Planar updates must reference existing scene graph nodes."
+                    )
+                target_parent_id = nodes_by_id[target_id].parent_id
+                if target_parent_id is None:
+                    raise ValueError("Planar relation targets must have a parent.")
+                source = nodes_by_id[source_id]
+                if source.parent_id != target_parent_id:
+                    source.parent_id = target_parent_id
+                    source.parent_relation = "on"
+                    source.table_region = None
+                    changed = True
+            if not changed:
+                return
+
+    def _clear_incident_planar_relations(self, object_id: str) -> None:
+        """Remove planar constraints invalidated when one node changes parent."""
+        self.relations = [
+            relation
+            for relation in self.relations
+            if relation.source_id != object_id and relation.target_id != object_id
+        ]
+
     def normalize(self) -> None:
         """Materialize inverse planar relations and remove duplicates."""
         self._materialize_inverse_planar_relations()
