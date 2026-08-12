@@ -155,6 +155,7 @@ def understand_scene(
     output_root: str | Path,
     *,
     vlm_client: OpenAICompatibleVLM,
+    image_segmentation_client: ImageSegmentationClient,
     json_max_attempts: int = 3,
 ) -> tuple[Scene, SceneGraph]:
 
@@ -173,19 +174,13 @@ def understand_scene(
         json_max_attempts=json_max_attempts,
     )
 
-    # Load .env settings and fail if the Image Segmentation Server is unavailable.
-    image_segmentation_client = ImageSegmentationClient.from_dotenv()
-    try:
-        image_segmentation_client.check_health()  # Error raising will happen internally.
-        _segment_scene(
-            image_path=resolved_image_path,
-            stage_output_root=stage_output_root,
-            scene=scene,
-            vlm_client=vlm_client,
-            image_segmentation_client=image_segmentation_client,
-        )
-    finally:
-        image_segmentation_client.close()  # Kill the session to avoid resource leaks.
+    _segment_scene(
+        image_path=resolved_image_path,
+        stage_output_root=stage_output_root,
+        scene=scene,
+        vlm_client=vlm_client,
+        image_segmentation_client=image_segmentation_client,
+    )
 
     # Use the segmented image to initialize the scene graph
     # with the help of the VLM client.

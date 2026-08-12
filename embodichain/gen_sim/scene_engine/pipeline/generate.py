@@ -25,6 +25,9 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
+from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
+    ImageSegmentationClient,
+)
 
 from embodichain.gen_sim.scene_engine.pipeline.generation.scene_understanding import (
     understand_scene,
@@ -51,12 +54,19 @@ def generate_scene_from_image(
 
     # 1. Scene Understanding
     log_info("Starting Scene Understanding")
-    scene, scene_graph = understand_scene(
-        scene=scene,
-        image_path=image_path,
-        output_root=resolved_output_root,
-        vlm_client=vlm_client,
-    )
+    # Load .env settings and fail if the Image Segmentation Server is unavailable.
+    image_segmentation_client = ImageSegmentationClient.from_dotenv()
+    try:
+        image_segmentation_client.check_health()
+        scene, scene_graph = understand_scene(
+            scene=scene,
+            image_path=image_path,
+            output_root=resolved_output_root,
+            vlm_client=vlm_client,
+            image_segmentation_client=image_segmentation_client,
+        )
+    finally:
+        image_segmentation_client.close()  # Close the session after scene understanding.
     log_info("Completed Scene Understanding")
 
     # 2. Objects + Coarse Layout Generation
