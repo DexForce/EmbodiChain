@@ -289,6 +289,9 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert config["sensor"][0]["uid"] == "cam_high"
     assert config["env"]["extensions"]["agent_robot_profile"] == "dual_franka"
     assert config["env"]["extensions"]["agent_static_obstacle_uids"] == ["table"]
+    assert config["env"]["extensions"]["agent_dynamic_obstacle_uids"] == [
+        "interact_can"
+    ]
     assert "agent_grasp_runtime_defaults" not in config["env"]["extensions"]
     assert config["env"]["extensions"]["agent_arm_slots"] == {
         "left": {"arm": "left_arm", "eef": "left_eef"},
@@ -797,6 +800,13 @@ def test_generation_calls_planner_compiler_and_renderer_once(
     assert agent_config["runtime_policy"]["schema_version"] == (
         "action_engine_runtime_policy_v4"
     )
+    assert agent_config["runtime_policy"]["planner"]["dynamic_collision"] is True
+    assert agent_config["runtime_policy"]["planner"]["static_obstacle_uids"] == [
+        "table"
+    ]
+    assert agent_config["runtime_policy"]["planner"]["dynamic_obstacle_uids"] == [
+        "interact_can"
+    ]
     assert len(agent_config["runtime_policy_hash"]) == 64
     assert "png" not in json.dumps(agent_config).lower()
 

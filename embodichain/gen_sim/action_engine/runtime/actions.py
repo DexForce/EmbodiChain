@@ -89,6 +89,9 @@ _DEFAULT_PLANNER_POLICY: dict[str, Any] = {
     },
 }
 
+# Preserve cuRobo's fixed world shape while disabling intentional-contact objects.
+_COLLISION_PARKING_Z_OFFSET = -100.0
+
 
 def _supported_kwargs(config_type: type, values: Mapping[str, Any]) -> dict[str, Any]:
     names: set[str] = set()
@@ -262,7 +265,7 @@ class AtomicActionAdapter:
         capability = self.capabilities.require_executable(grounded.action_class)
         state = state or self.initial_state()
         grounded = self._select_upright_transport_yaw(grounded, state)
-        context = self._planning_context(state)
+        context = self._planning_context(state, grounded)
         invocation = self._invocation(grounded, capability)
         plan = self._engine().plan(invocation, context)
         selected_positions = self._positions_with_agent_holds(
@@ -459,7 +462,11 @@ class AtomicActionAdapter:
         variants[:, :, :3, :3] = torch.matmul(yaw[None], target_pose[:, None, :3, :3])
         return variants
 
-    def _planning_context(self, state: ExecutionState) -> PlanningContext:
+    def _planning_context(
+        self,
+        state: ExecutionState,
+        grounded: GroundedAction,
+    ) -> PlanningContext:
         qpos = state.last_qpos.to(device=self.device, dtype=torch.float32)
         get_qvel = getattr(self.env.robot, "get_qvel", None)
         qvel = get_qvel() if callable(get_qvel) else None
@@ -470,7 +477,7 @@ class AtomicActionAdapter:
         return PlanningContext(
             robot=RobotObservation(timestamp=0.0, qpos=qpos, qvel=qvel),
             task=state.to_task_state(),
-            scene=self._scene_snapshot(),
+            scene=self._scene_snapshot(grounded, state),
             env_ids=torch.arange(
                 self.num_envs,
                 dtype=torch.long,
@@ -478,12 +485,17 @@ class AtomicActionAdapter:
             ),
         )
 
-    def _scene_snapshot(self) -> SceneSnapshot:
+    def _scene_snapshot(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState,
+    ) -> SceneSnapshot:
         dynamic_uids = tuple(
             str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
         )
         if not bool(self.planner_policy.get("dynamic_collision", False)):
             return SceneSnapshot.empty()
+        exclusion_masks = self._collision_exclusion_masks(grounded, state)
         entities: dict[str, EntityState] = {}
         for uid in dynamic_uids:
             entity = self.env.sim.get_rigid_object(uid)
@@ -494,6 +506,17 @@ class AtomicActionAdapter:
                 dtype=torch.float32,
                 device=self.device,
             )
+            if pose.shape == (4, 4):
+                pose = pose.unsqueeze(0).repeat(self.num_envs, 1, 1)
+            if pose.shape != (self.num_envs, 4, 4):
+                raise ValueError(
+                    f"Dynamic obstacle {uid!r} pose must have shape (4, 4) or "
+                    f"({self.num_envs}, 4, 4), got {tuple(pose.shape)}."
+                )
+            excluded = exclusion_masks.get(uid)
+            if excluded is not None and bool(excluded.any()):
+                pose = pose.clone()
+                pose[excluded, 2, 3] += _COLLISION_PARKING_Z_OFFSET
             entities[uid] = EntityState(pose=pose)
         self._scene_version += 1
         return SceneSnapshot(
@@ -503,6 +526,52 @@ class AtomicActionAdapter:
             collision_world_revision=self._scene_version,
             collision_entity_ids=dynamic_uids,
         )
+
+    def _collision_exclusion_masks(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState,
+    ) -> dict[str, torch.Tensor]:
+        """Return per-environment masks for obstacles intentionally in contact."""
+        dynamic_uids = {
+            str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+        }
+        masks: dict[str, torch.Tensor] = {}
+
+        def include(uid: str | None, env_mask: torch.Tensor | None = None) -> None:
+            if uid is None or uid not in dynamic_uids:
+                return
+            mask = (
+                torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+                if env_mask is None
+                else torch.as_tensor(
+                    env_mask,
+                    dtype=torch.bool,
+                    device=self.device,
+                ).reshape(-1)
+            )
+            if mask.shape != (self.num_envs,):
+                raise ValueError(
+                    f"Collision exclusion mask for {uid!r} must have shape "
+                    f"({self.num_envs},), got {tuple(mask.shape)}."
+                )
+            masks[uid] = masks.get(uid, torch.zeros_like(mask)) | mask
+
+        if self.capabilities.get(grounded.action_class).allows_target_contact:
+            target_uid = grounded.object_uid
+            if target_uid is None:
+                target_uid = getattr(
+                    getattr(grounded.target, "semantics", None),
+                    "label",
+                    None,
+                )
+            include(target_uid)
+
+        for held in state.held_objects.values():
+            include(held.semantics.label, held.env_mask)
+        for held in state.coordinated_held_objects.values():
+            include(held.semantics.label, held.env_mask)
+        return masks
 
     def _invocation(
         self,

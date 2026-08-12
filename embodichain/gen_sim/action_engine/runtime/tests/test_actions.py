@@ -63,6 +63,15 @@ class _MeshEntity:
         return torch.tensor([[0, 1, 2]], dtype=torch.int64)
 
 
+class _PoseEntity:
+    def __init__(self, pose: torch.Tensor) -> None:
+        self.pose = pose
+
+    def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
+        assert to_matrix
+        return self.pose.clone()
+
+
 class _PlannerRobot:
     uid = "test_robot"
     dof = 8
@@ -78,14 +87,19 @@ class _PlannerRobot:
         return list(self._ids[name])
 
 
-def _planner_env(*, table: Any | None = None) -> SimpleNamespace:
+def _planner_env(
+    *,
+    table: Any | None = None,
+    rigid_objects: dict[str, Any] | None = None,
+) -> SimpleNamespace:
+    entities = dict(rigid_objects or {})
+    if table is not None:
+        entities["table"] = table
     return SimpleNamespace(
         num_envs=2,
         device=torch.device("cpu"),
         robot=_PlannerRobot(),
-        sim=SimpleNamespace(
-            get_rigid_object=lambda uid: table if uid == "table" else None
-        ),
+        sim=SimpleNamespace(get_rigid_object=entities.get),
         left_arm_joints=[0, 1],
         left_eef_joints=[2, 3],
         right_arm_joints=[4, 5],
@@ -171,6 +185,7 @@ def test_curobo_generator_receives_generated_static_obstacles(
     monkeypatch: Any,
 ) -> None:
     table = object()
+    can = object()
     captured: dict[str, Any] = {}
 
     def fake_motion_generator(*, cfg: Any) -> object:
@@ -178,15 +193,99 @@ def test_curobo_generator_receives_generated_static_obstacles(
         return object()
 
     monkeypatch.setattr(actions, "MotionGenerator", fake_motion_generator)
-    adapter = AtomicActionAdapter(_planner_env(table=table))
+    adapter = AtomicActionAdapter(
+        _planner_env(table=table, rigid_objects={"can": can}),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": ["can"],
+        },
+    )
 
     generator = adapter._generator()
 
     assert generator is adapter._motion_generator
     planner = captured["cfg"].planner_cfg
     assert isinstance(planner, CuroboPlannerCfg)
-    assert planner.world.rigid_objects == [table]
+    assert planner.world.rigid_objects == [table, can]
+    assert planner.world.dynamic_obstacle_names == ["can"]
     assert planner.world.obstacle_representation == "cuboid"
+
+
+def test_dynamic_scene_parks_contact_target_and_held_rows() -> None:
+    actual = torch.eye(4).repeat(2, 1, 1)
+    actual[:, 2, 3] = torch.tensor([0.7, 0.8])
+    entities = {uid: _PoseEntity(actual.clone()) for uid in ("target", "held", "other")}
+    adapter = AtomicActionAdapter(
+        _planner_env(rigid_objects=entities),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": list(entities),
+        },
+    )
+    held_semantics = ObjectSemantics(
+        label="held",
+        entity=entities["held"],
+        geometry={},
+        affordance=Affordance(),
+    )
+    held = HeldObjectState(
+        semantics=held_semantics,
+        object_to_eef=torch.eye(4).repeat(2, 1, 1),
+        grasp_xpos=torch.eye(4).repeat(2, 1, 1),
+        env_mask=torch.tensor([True, False]),
+    )
+    state = ExecutionState(
+        last_qpos=torch.zeros(2, 8),
+        held_objects={"physical_left_arm": held},
+    )
+    grounded = GroundedAction(
+        "PickUp",
+        "right_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+        object_uid="target",
+    )
+
+    scene = adapter._scene_snapshot(grounded, state)
+
+    assert torch.equal(
+        scene.entities["target"].pose[:, 2, 3],
+        actual[:, 2, 3] + actions._COLLISION_PARKING_Z_OFFSET,
+    )
+    assert scene.entities["held"].pose[0, 2, 3] == (
+        actual[0, 2, 3] + actions._COLLISION_PARKING_Z_OFFSET
+    )
+    assert scene.entities["held"].pose[1, 2, 3] == actual[1, 2, 3]
+    assert torch.equal(scene.entities["other"].pose, actual)
+
+
+def test_released_object_returns_to_live_dynamic_collision_pose() -> None:
+    actual = torch.eye(4).repeat(2, 1, 1)
+    actual[:, 0, 3] = torch.tensor([0.2, 0.4])
+    entity = _PoseEntity(actual)
+    adapter = AtomicActionAdapter(
+        _planner_env(rigid_objects={"released": entity}),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": ["released"],
+        },
+    )
+    grounded = GroundedAction(
+        "MoveJoints",
+        "left_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+        object_uid="released",
+    )
+
+    scene = adapter._scene_snapshot(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    assert torch.equal(scene.entities["released"].pose, actual)
 
 
 def test_action_outcome_commits_state_delta_only_for_verified_rows() -> None:

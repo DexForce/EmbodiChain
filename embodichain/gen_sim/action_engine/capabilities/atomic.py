@@ -180,6 +180,8 @@ class AtomicCapability:
     contract_resolver_hook: (
         Callable[[Mapping[str, Any]], ResolvedActionContract] | None
     ) = None
+    allows_target_contact: bool = False
+    """Whether motion planning may temporarily exclude the action target."""
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -196,6 +198,8 @@ class AtomicCapability:
             raise ValueError(
                 f"AtomicCapability {self.name!r} has invalid retry_mode {self.retry_mode!r}."
             )
+        if not isinstance(self.allows_target_contact, bool):
+            raise TypeError("allows_target_contact must be a boolean.")
         if self.runtime_available:
             if self.action_type is None or self.config_type is None:
                 raise ValueError(
@@ -250,6 +254,7 @@ class AtomicCapability:
             "retry_mode": self.retry_mode,
             "runtime_available": self.runtime_available,
             "unavailable_reason": self.unavailable_reason,
+            "allows_target_contact": self.allows_target_contact,
             "custom_target_materializer": _callable_name(self.target_materializer_hook),
             "custom_config_materializer": _callable_name(self.config_materializer_hook),
             "custom_verifier": _callable_name(self.verifier_hook),
@@ -367,6 +372,7 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             "object_grasp",
             verifier="held_object",
             failure_classifier="grasp",
+            allows_target_contact=True,
         ),
         AtomicCapability(
             "MoveHeldObject",
@@ -421,6 +427,7 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             "preserve",
             "press",
             verifier="pressed",
+            allows_target_contact=True,
         ),
         AtomicCapability(
             "CoordinatedPickment",

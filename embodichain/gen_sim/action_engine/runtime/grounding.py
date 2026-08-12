@@ -908,6 +908,7 @@ class ActionGrounder:
             reference_pose=reference_pose,
             target_object_pose=target_object_pose,
             motion_policy=policy,
+            object_uid=step.object_uid,
         )
 
     def _handover_role_axis(

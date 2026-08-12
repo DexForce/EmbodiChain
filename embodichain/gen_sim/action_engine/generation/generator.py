@@ -271,6 +271,8 @@ def generate_action_engine_config(
         execution_program_hash=program_hash,
         source_config_path=scene.source_config_path,
         uid_map=scene.uid_map,
+        static_obstacle_uids=[str(config["uid"]) for config in scene.background],
+        dynamic_obstacle_uids=[str(config["uid"]) for config in scene.rigid_objects],
         planning_mode=planning_mode,
         seed_task_graph_path=graph_relative_path,
         vlm_model=vlm_model,

@@ -28,6 +28,7 @@ from typing import Any
 
 from embodichain.gen_sim.action_engine.config import (
     ACTION_ENGINE_DEFAULTS_SCHEMA,
+    RuntimePolicyCfg,
     default_runtime_policy,
     generation_defaults,
     runtime_policy_hash,
@@ -91,6 +92,8 @@ def build_agent_config(
     execution_program_hash: str,
     source_config_path: Path,
     uid_map: dict[str, str],
+    static_obstacle_uids: Sequence[str] | None = None,
+    dynamic_obstacle_uids: Sequence[str] | None = None,
     planning_mode: str = "offline",
     seed_task_graph_path: str | Path | None = EXECUTION_PROGRAM_FILENAME,
     vlm_model: str | None = None,
@@ -99,6 +102,17 @@ def build_agent_config(
     """Build the small manifest consumed by ``run_agent``."""
     profile = canonical_robot_profile(robot_profile)
     runtime_policy = default_runtime_policy(profile)
+    if static_obstacle_uids is not None or dynamic_obstacle_uids is not None:
+        policy = runtime_policy.as_mapping()
+        planner = policy["planner"]
+        if static_obstacle_uids is not None:
+            planner["static_obstacle_uids"] = [str(uid) for uid in static_obstacle_uids]
+        if dynamic_obstacle_uids is not None:
+            planner["dynamic_obstacle_uids"] = [
+                str(uid) for uid in dynamic_obstacle_uids
+            ]
+            planner["dynamic_collision"] = bool(dynamic_obstacle_uids)
+        runtime_policy = RuntimePolicyCfg.from_mapping(policy)
     _validate_planning_mode(planning_mode)
     graph_path = _validate_seed_graph_path(seed_task_graph_path)
     if planning_mode == "ab" and graph_path == EXECUTION_PROGRAM_FILENAME:
@@ -211,6 +225,7 @@ def build_fast_gym_config(
         "agent_robot_profile": profile,
         "agent_arm_slots": deepcopy(_ARM_SLOTS),
         "agent_static_obstacle_uids": background_uids,
+        "agent_dynamic_obstacle_uids": rigid_uids,
         "gripper_open_state": list(profile_config["gripper_open_state"]),
         "gripper_close_state": list(profile_config["gripper_close_state"]),
         "arm_aim_yaw_offset": deepcopy(environment_policy["arm_aim_yaw_offset"]),

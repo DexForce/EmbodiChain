@@ -141,6 +141,8 @@ class GroundedAction:
     reference_pose: torch.Tensor | None = None
     target_object_pose: torch.Tensor | None = None
     motion_policy: dict[str, Any] = field(default_factory=dict)
+    object_uid: str | None = None
+    """Scene UID of the object whose semantic step produced this action."""
 
 
 @dataclass
