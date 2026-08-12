@@ -24,6 +24,11 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    SceneGraph,
+    SceneGraphNode,
+    SceneGraphRelation,
+)
 from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
@@ -53,10 +58,28 @@ class SceneExportImporter:
         self.scene_export_root = self.output_root / "scene_export"
         self.mesh_assets_root = self.scene_export_root / "mesh_assets"
         self.scene_config_path = self.scene_export_root / "scene_config.json"
+        self.scene_graph_path = self.scene_export_root / "scene_graph.json"
         self.scene_json_path = self.scene_export_root / "scene.json"
 
     def import_scene(self) -> Scene:
         """Validate the scene export, write ``scene.json``, and return a ``Scene``."""
+        scene = self._load_scene()
+        self._write_scene_json(scene)
+        return scene
+
+    def import_scene_and_graph(self) -> tuple[Scene, SceneGraph]:
+        """Import a scene and graph after validating the complete edit input."""
+        scene = self._load_scene()
+        scene_graph = self._load_scene_graph()
+        if set(scene_graph.node_by_id()) != {
+            scene_object.id for scene_object in scene.objects
+        }:
+            raise ValueError("Scene graph nodes must match imported scene object ids.")
+        self._write_scene_json(scene)
+        return scene, scene_graph
+
+    def _load_scene(self) -> Scene:
+        """Validate the exported scene files and restore the ``Scene`` data."""
         # Editing only runs on an existing Scene Engine output directory.
         if not self.output_root.is_dir() or not any(self.output_root.iterdir()):
             raise ValueError(
@@ -86,15 +109,29 @@ class SceneExportImporter:
         if not isinstance(scene_config, dict):
             raise ValueError("Scene config must be a JSON object.")
 
-        scene = self._scene_from_config(scene_config)
-        if self.scene_json_path.exists():
-            self.scene_json_path.unlink()
+        return self._scene_from_config(scene_config)
+
+    def _load_scene_graph(self) -> SceneGraph:
+        """Read and validate the exported scene graph."""
+        if not self.scene_graph_path.is_file():
+            raise FileNotFoundError(f"Scene graph not found: {self.scene_graph_path}")
+        try:
+            scene_graph_data = json.loads(
+                self.scene_graph_path.read_text(encoding="utf-8")
+            )
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Scene graph is not valid JSON: {self.scene_graph_path}"
+            ) from exc
+        return self._scene_graph_from_data(scene_graph_data)
+
+    def _write_scene_json(self, scene: Scene) -> None:
+        """Write the restored scene debugging artifact after validation succeeds."""
         self.scene_json_path.write_text(
             json.dumps(scene.to_dict(), indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
         log_info(f"Imported scene JSON: {self.scene_json_path}")
-        return scene
 
     def _scene_from_config(self, scene_config: dict[str, Any]) -> Scene:
         """Build a y-up ``Scene`` from the z-up scene-export config."""
@@ -127,6 +164,88 @@ class SceneExportImporter:
             ]
         )
 
+    @staticmethod
+    def _scene_graph_from_data(value: object) -> SceneGraph:
+        """Build a validated ``SceneGraph`` from exported graph JSON."""
+        if not isinstance(value, dict) or set(value) != {"nodes", "relations"}:
+            raise ValueError("Scene graph must contain exactly nodes and relations.")
+        nodes_value = value["nodes"]
+        relations_value = value["relations"]
+        if not isinstance(nodes_value, list) or not isinstance(relations_value, list):
+            raise ValueError("Scene graph nodes and relations must be lists.")
+
+        nodes = [
+            SceneExportImporter._scene_graph_node_from_data(node)
+            for node in nodes_value
+        ]
+        relations = [
+            SceneExportImporter._scene_graph_relation_from_data(relation)
+            for relation in relations_value
+        ]
+        return SceneGraph(nodes=nodes, relations=relations)
+
+    @staticmethod
+    def _scene_graph_node_from_data(value: object) -> SceneGraphNode:
+        if not isinstance(value, dict) or set(value) != {
+            "object_id",
+            "parent_id",
+            "parent_relation",
+            "table_region",
+        }:
+            raise ValueError("Scene graph nodes must use the serialized node schema.")
+        object_id = value["object_id"]
+        parent_id = value["parent_id"]
+        parent_relation = value["parent_relation"]
+        table_region = value["table_region"]
+        if not isinstance(object_id, str) or not isinstance(
+            parent_id, (str, type(None))
+        ):
+            raise ValueError("Scene graph node ids must be strings or null.")
+        if parent_relation not in {None, "on"}:
+            raise ValueError("Scene graph parent_relation must be 'on' or null.")
+        if table_region not in {
+            None,
+            "left_back",
+            "back_center",
+            "right_back",
+            "left_center",
+            "center",
+            "right_center",
+            "left_front",
+            "front_center",
+            "right_front",
+        }:
+            raise ValueError("Scene graph table_region is invalid.")
+        return SceneGraphNode(
+            object_id=object_id,
+            parent_id=parent_id,
+            parent_relation=parent_relation,
+            table_region=table_region,
+        )
+
+    @staticmethod
+    def _scene_graph_relation_from_data(value: object) -> SceneGraphRelation:
+        if not isinstance(value, dict) or set(value) != {
+            "source_id",
+            "relation",
+            "target_id",
+        }:
+            raise ValueError(
+                "Scene graph relations must use the serialized relation schema."
+            )
+        source_id = value["source_id"]
+        relation = value["relation"]
+        target_id = value["target_id"]
+        if not isinstance(source_id, str) or not isinstance(target_id, str):
+            raise ValueError("Scene graph relation ids must be strings.")
+        if relation not in {"left_of", "right_of", "in_front_of", "behind"}:
+            raise ValueError("Scene graph relation is invalid.")
+        return SceneGraphRelation(
+            source_id=source_id,
+            relation=relation,
+            target_id=target_id,
+        )
+
     def _scene_object_from_export_entry(
         self,
         entry: object,
@@ -153,6 +272,9 @@ class SceneExportImporter:
             entry.get("body_scale", [1.0, 1.0, 1.0]),
             field_name=f"{uid}.body_scale",
         )
+        center_xy = entry.get("center_xy")
+        if center_xy is not None:
+            center_xy = self._vector2(center_xy, field_name=f"{uid}.center_xy")
 
         pos_y_up = _Z_UP_TO_Y_UP_ROTATION @ np.asarray(pos_z_up, dtype=float)
         rotation_z_up = Rotation.from_euler("XYZ", rot_z_up, degrees=True).as_matrix()
@@ -171,6 +293,7 @@ class SceneExportImporter:
             rot=rot_y_up.tolist(),
             pos=pos_y_up.tolist(),
             scale=scale,
+            center_xy=center_xy,
             physics=ObjectPhysics(
                 body_type=str(entry.get("body_type", "dynamic")),  # type: ignore[arg-type]
                 attrs=self._physics_attrs(entry.get("attrs", {"mass": 1.0})),
@@ -193,6 +316,11 @@ class SceneExportImporter:
             raise ValueError(f"Scene object {uid!r} shape.fpath must be relative.")
         if fpath.suffix.lower() != ".glb":
             raise ValueError(f"Scene object {uid!r} shape.fpath must point to a GLB.")
+        expected_fpath = Path("mesh_assets") / uid / f"{uid}.glb"
+        if fpath != expected_fpath:
+            raise ValueError(
+                f"Scene object {uid!r} shape.fpath must be {expected_fpath.as_posix()!r}."
+            )
         glb_path = (self.scene_export_root / fpath).resolve()
         if self.scene_export_root.resolve() not in glb_path.parents:
             raise ValueError(
@@ -209,6 +337,18 @@ class SceneExportImporter:
         if not isinstance(value, list) or len(value) != 3:
             raise ValueError(
                 f"Scene config field {field_name!r} must be a length-3 list."
+            )
+        vector = [float(item) for item in value]
+        if not np.all(np.isfinite(vector)):
+            raise ValueError(f"Scene config field {field_name!r} must be finite.")
+        return vector
+
+    @staticmethod
+    def _vector2(value: object, *, field_name: str) -> list[float]:
+        """Validate one length-2 numeric vector."""
+        if not isinstance(value, list) or len(value) != 2:
+            raise ValueError(
+                f"Scene config field {field_name!r} must be a length-2 list."
             )
         vector = [float(item) for item in value]
         if not np.all(np.isfinite(vector)):

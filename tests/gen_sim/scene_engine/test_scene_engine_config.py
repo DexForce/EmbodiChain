@@ -87,6 +87,58 @@ def test_scene_engine_cli_forwards_validated_paths(
     }
 
 
+def test_scene_engine_cli_edits_existing_output_without_an_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def edit_scene(*, output_root: Path, edit_prompt: str) -> None:
+        captured["output_root"] = output_root
+        captured["edit_prompt"] = edit_prompt
+
+    monkeypatch.setattr(start, "edit_scene", edit_scene)
+    output_root = tmp_path / "existing_output"
+
+    start.cli_scene_engine(None, output_root, edit_prompt="move the cup right")
+
+    assert captured == {
+        "output_root": output_root.resolve(),
+        "edit_prompt": "move the cup right",
+    }
+
+
+def test_scene_engine_cli_generates_then_edits_when_both_inputs_exist(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "scene.png"
+    image_path.write_bytes(b"png")
+    call_order: list[str] = []
+
+    def generate_scene(*, image_path: Path, output_root: Path) -> None:
+        call_order.append("generate")
+
+    def edit_scene(*, output_root: Path, edit_prompt: str) -> None:
+        call_order.append("edit")
+
+    monkeypatch.setattr(start, "generate_scene_from_image", generate_scene)
+    monkeypatch.setattr(start, "edit_scene", edit_scene)
+
+    start.cli_scene_engine(
+        image_path,
+        tmp_path / "output",
+        edit_prompt="move the cup right",
+    )
+
+    assert call_order == ["generate", "edit"]
+
+
+def test_scene_engine_cli_requires_an_image_or_edit_prompt(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="--image, --edit_prompt, or both"):
+        start.cli_scene_engine(None, tmp_path / "output")
+
+
 @pytest.mark.parametrize("image_name", ["missing.png", "scene.gif"])
 def test_scene_engine_cli_rejects_invalid_image_inputs(
     tmp_path: Path,
