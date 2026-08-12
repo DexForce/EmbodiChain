@@ -51,7 +51,7 @@ def generate_scene_from_image(
 
     # 1. Scene Understanding
     log_info("Starting Scene Understanding")
-    scene = understand_scene(
+    scene, scene_graph = understand_scene(
         scene=scene,
         image_path=image_path,
         output_root=resolved_output_root,
@@ -69,6 +69,7 @@ def generate_scene_from_image(
             image_path=image_path,
             output_root=resolved_output_root,
             scene=scene,
+            scene_graph=scene_graph,
             geometry_generation_client=geometry_generation_client,
         )
     finally:
@@ -79,6 +80,7 @@ def generate_scene_from_image(
     log_info("Starting Scene Export")
     scene_exporter = SceneExporter(
         scene=scene,
+        scene_graph=scene_graph,
         output_root=resolved_output_root,
     )
     scene_exporter.export()

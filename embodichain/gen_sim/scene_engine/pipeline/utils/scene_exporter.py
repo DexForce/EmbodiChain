@@ -26,6 +26,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.utils.logger import log_info
 
@@ -46,12 +47,15 @@ class SceneExporter:
         self,
         *,
         scene: Scene,
+        scene_graph: SceneGraph,
         output_root: str | Path,
     ) -> None:
         self.scene = scene
+        self.scene_graph = scene_graph
         self.output_root = Path(output_root).expanduser().resolve()
         self.export_root = self.output_root / "scene_export"
         self.scene_config_path: Path | None = None
+        self.scene_graph_path: Path | None = None
 
     def export(self) -> Path:
         """Write a scene-only config and copy SimReady GLBs into ``mesh_assets``.
@@ -72,6 +76,9 @@ class SceneExporter:
         object_ids = [scene_object.id for scene_object in scene_objects]
         if len(set(object_ids)) != len(object_ids):
             raise ValueError("Scene export requires unique table and asset ids.")
+        self.scene_graph.validate()
+        if set(self.scene_graph.node_by_id()) != set(object_ids):
+            raise ValueError("Scene graph nodes must match exported scene object ids.")
 
         exported_entries = {
             scene_object.id: self._copy_scene_object_to_assets(
@@ -106,6 +113,12 @@ class SceneExporter:
             encoding="utf-8",
         )
         log_info(f"Exported scene config: {self.scene_config_path}")
+        self.scene_graph_path = self.export_root / "scene_graph.json"
+        self.scene_graph_path.write_text(
+            json.dumps(self.scene_graph.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        log_info(f"Exported scene graph: {self.scene_graph_path}")
         return self.scene_config_path
 
     @staticmethod
@@ -179,6 +192,7 @@ class SceneExporter:
             # Do not permute this scale: it belongs to the original y-up GLB,
             # which SimulationManager itself converts to z-up.
             "body_scale": scale_y_up,
+            "center_xy": scene_object.center_xy,
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
         }
 

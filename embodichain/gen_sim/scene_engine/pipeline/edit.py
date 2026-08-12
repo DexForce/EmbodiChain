@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
@@ -41,11 +42,19 @@ def edit_scene(
     vlm_client = OpenAICompatibleVLM.from_dotenv()
     scene_importer = SceneExportImporter(output_root=output_root)
     # Validate scene_export, write scene.json, and return Scene; failures raise before editing.
-    scene = scene_importer.import_scene()
+    scene, scene_graph = scene_importer.import_scene_and_graph()
+    print(
+        json.dumps(
+            {"scene": scene.to_dict(), "scene_graph": scene_graph.to_dict()},
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
     # 1. Edit Understanding
+    # And update or initialize the scene graph
     log_info("Starting Edit Understanding")
-    edit_plan = understand_scene_edit(
+    updated_scene_graph = understand_scene_edit(
         scene=scene,
         edit_prompt=edit_prompt,
         output_root=output_root,  # Has already been resolved.
@@ -53,16 +62,7 @@ def edit_scene(
     )
     log_info("Completed Edit Understanding")
 
-    # 2. Scene Graph Update(or Initialization)
-    log_info("Starting Scene Graph Update")
-    # updated_scene_graph = update_scene_graph(
-    #     scene=scene,
-    #     edit_plan=edit_plan,
-    #     output_root=output_root,
-    # )
-    log_info("Completed Scene Graph Update")
-
-    # 3. Prepare Objects.
+    # 2. Prepare Objects.
     log_info("Preparing Objects if necessary")
     # scene = prepare_objects(
     #     scene=scene,
@@ -70,7 +70,7 @@ def edit_scene(
     # )
     log_info("Completed Preparing Objects")
 
-    # 4. Layout Editing
+    # 3. Layout Editing
     log_info("Starting Layout Editing")
     # scene = edit_layout(
     #     scene=scene,
@@ -80,7 +80,7 @@ def edit_scene(
     # )
     log_info("Completed Layout Editing")
 
-    # 5. Scene Export
+    # 4. Scene Export
     # Re export the scene to the same output format,
     # and delete some temporary files or folders.
     log_info("Starting Scene Export")

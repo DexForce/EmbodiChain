@@ -28,6 +28,7 @@ from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
@@ -62,11 +63,14 @@ def generate_scene_and_refine(
     image_path: str | Path,
     output_root: str | Path,
     scene: Scene,
+    scene_graph: SceneGraph,
     *,
     geometry_generation_client: GeometryGenerationClient,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
+    # Validate the scene graph before layout refinement consumes it.
+    scene_graph.validate()
     # Create stage output directory.
     stage_output_root = Path(output_root).expanduser().resolve() / "scene_generation"
     if stage_output_root.exists():
@@ -195,16 +199,18 @@ def _generate_coarse_results_from_masks(
     return None
 
 
-def _update_scene_final_y_up_layout(
+def _update_scene_final_y_up_layout_and_z_up_centers(
     *,
     scene: Scene,
     table_layout: dict[str, object],
     assets_layout: list[dict[str, object]],
+    geometry_root: str | Path,
 ) -> None:
-    """Copy final y-up layout values into the matching table and asset objects."""
+    """Write final y-up layouts and z-up XY centers into the scene."""
     if scene.table is None:
         raise ValueError("Cannot update a final layout without a table.")
 
+    # Keep final poses in the y-up layout convention used by exported GLBs.
     _copy_y_up_layout_to_scene_object(scene.table, table_layout)
     assets_by_id = {asset.id: asset for asset in scene.assets}
     layout_ids = set()
@@ -222,6 +228,17 @@ def _update_scene_final_y_up_layout(
         raise ValueError(
             f"Final layout is missing scene assets: {sorted(missing_assets)}."
         )
+
+    # Measure final geometry in z-up so scene edits can compare tabletop XY positions.
+    table_mesh, assets_aabb_corners_by_id = _measure_table_and_assets_in_z_up_world(
+        table_layout=table_layout,
+        assets_layout=assets_layout,
+        geometry_root=geometry_root,
+    )
+    # Persist AABB centers for future scene-edit object disambiguation.
+    scene.table.center_xy = table_mesh.bounds[:, :2].mean(axis=0).tolist()
+    for asset in scene.assets:
+        asset.center_xy = assets_aabb_corners_by_id[asset.id].mean(axis=0).tolist()
 
 
 def _copy_y_up_layout_to_scene_object(
@@ -407,11 +424,12 @@ def _layout_refinement(
     )
     refined_assets_layout = gravity_settler.settle()
 
-    # Update the scene data structure with the final y-up layout values.
-    _update_scene_final_y_up_layout(
+    # Update the scene data structure with the final layout and spatial metadata.
+    _update_scene_final_y_up_layout_and_z_up_centers(
         scene=scene,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
+        geometry_root=simready_geometry_output_root,
     )
     return refined_table_layout, refined_assets_layout
 

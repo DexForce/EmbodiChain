@@ -72,6 +72,7 @@ def _write_scene_export(
                 "init_pos": [1.0, -3.0, 2.0],
                 "init_rot": [0.0, 0.0, 0.0],
                 "body_scale": [1.0, 2.0, 3.0],
+                "center_xy": [1.0, -3.0],
                 "max_convex_hull_num": 32,
             }
         ],
@@ -99,6 +100,7 @@ def test_import_scene_from_output_root_writes_y_up_scene_json(tmp_path: Path) ->
     assert scene.assets[0].id == "cup"
     assert scene.assets[0].pos == [1.0, 2.0, 3.0]
     assert scene.assets[0].scale == [1.0, 2.0, 3.0]
+    assert scene.assets[0].center_xy == [1.0, -3.0]
     assert scene.assets[0].simready_glb_path == str(
         (tmp_path / "scene_export" / "mesh_assets" / "cup" / "cup.glb").resolve()
     )

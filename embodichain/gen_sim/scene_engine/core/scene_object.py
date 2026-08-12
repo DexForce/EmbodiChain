@@ -66,6 +66,7 @@ class SceneObject:
     rot: list[float] | None = None  # Final y-up Euler XYZ rotation in degrees.
     pos: list[float] | None = None  # Final y-up world position in metres.
     scale: list[float] | None = None  # Final y-up object scale.
+    center_xy: list[float] | None = None  # Z-up table-frame XY AABB center.
     physics: ObjectPhysics | None = None  # Assigned when SimReady processing succeeds.
 
     def to_dict(self) -> dict[str, object]:
@@ -81,5 +82,6 @@ class SceneObject:
             "rot": self.rot,
             "pos": self.pos,
             "scale": self.scale,
+            "center_xy": self.center_xy,
             "physics": self.physics.to_dict() if self.physics is not None else None,
         }
