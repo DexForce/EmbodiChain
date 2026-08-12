@@ -63,6 +63,14 @@ def test_image_object_analysis_rejects_location_words_in_object_names() -> None:
         )
 
 
+def test_image_object_analysis_rejects_location_words_in_object_descriptions() -> None:
+    response = json.loads(_response())
+    response["assets"][0]["description"] = "A small ceramic cup on the table."
+
+    with pytest.raises(ValueError, match="description must not contain location"):
+        scene_understanding._parse_image_object_analysis_response(json.dumps(response))
+
+
 def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> None:
     class VLM:
         def __init__(self) -> None:
