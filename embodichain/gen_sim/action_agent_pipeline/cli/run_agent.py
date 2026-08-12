@@ -88,6 +88,9 @@ def cli() -> None:
         with timing_scope("run_agent.final_reset"):
             _reset_env_with_physical_collision(env, options={"final": True})
 
+    log_info("Action-agent run completed. Closing environment.", color="green")
+    env.close()
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the action-agent runner argument parser."""

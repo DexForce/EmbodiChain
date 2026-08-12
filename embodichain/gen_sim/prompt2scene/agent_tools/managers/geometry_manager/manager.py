@@ -174,6 +174,12 @@ class GeometryManager:
         return geometry_utils._compose_sam3d_multi_object_transform(**kwargs)
 
     @staticmethod
+    def compose_glb_y_up_transform(**kwargs: Any) -> Any:
+        from . import utils as geometry_utils
+
+        return geometry_utils._compose_glb_y_up_transform(**kwargs)
+
+    @staticmethod
     def detect_table_fit_support_quad(
         mesh: Any,
         *,

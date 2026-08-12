@@ -208,7 +208,7 @@ def generate_image_scene_assets(
             status_parts: list[str] = []
             transform_matrix: list[list[float]] = []
             try:
-                transform = GeometryManager.compose_sam3d_multi_object_transform(
+                transform = GeometryManager.compose_glb_y_up_transform(
                     rotation_quaternion_wxyz=generated.rotation_quaternion_wxyz,
                     translation=generated.translation,
                     scale=generated.scale,

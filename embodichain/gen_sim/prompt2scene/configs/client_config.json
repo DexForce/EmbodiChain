@@ -3,19 +3,20 @@
       "base_url": "http://localhost:port1",
       "timeout_s": 1200,
       "health_path": "/health",
-      "segment_single_object_path": "/predict"
+      "segment_single_object_path": "/segment_by_prompt"
     },
     "sam3d_generation": {
       "base_url": "http://localhost:port2",
       "timeout_s": 1800,
       "health_path": "/health",
       "generate_multiple_objects_path": "/generate_multiple_objects",
-      "generate_single_object_path": "/generate_single_object"
+      "generate_single_object_path": "/generate_single_object",
+      "task_poll_interval_s": 1.0
     },
     "zimage": {
        "base_url": "http://localhost:port3",
        "timeout_s": 120,
        "health_path": "/health",
-       "generate_single_object_path": "/generate.png"
+       "generate_single_object_path": "/generate_image_by_prompt"
     }
 }
