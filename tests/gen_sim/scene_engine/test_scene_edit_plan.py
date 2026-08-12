@@ -31,7 +31,12 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding import (
+    _apply_scene_edit_plan_to_scene_graph,
+    _build_updated_scene_graph,
     _parse_scene_edit_operations,
+)
+from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation import (
+    prepare_scene_edit_assets,
 )
 
 
@@ -202,3 +207,181 @@ def test_scene_edit_plan_requires_deleting_all_children_of_a_deleted_parent() ->
             scene_graph=scene_graph,
             operations=[SceneEditOperation(op="delete", object_id="book_001")],
         )
+
+
+def test_scene_edit_plan_requires_a_position_for_move_operations() -> None:
+    scene, scene_graph = _scene_and_graph()
+
+    with pytest.raises(ValueError, match="must specify target_id and relation"):
+        SceneEditPlan(
+            scene=scene,
+            scene_graph=scene_graph,
+            operations=[SceneEditOperation(op="move", object_id="book_001")],
+        )
+
+
+def test_scene_edit_asset_preparation_skips_plans_without_adds() -> None:
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(
+                op="move",
+                object_id="book_001",
+                target_id="table",
+                relation="on",
+            )
+        ],
+    )
+
+    prepared_scene = prepare_scene_edit_assets(
+        scene=scene,
+        scene_edit_plan=plan,
+    )
+
+    assert prepared_scene is scene
+
+
+def test_scene_edit_graph_builder_copies_the_pre_edit_graph() -> None:
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(scene=scene, scene_graph=scene_graph)
+
+    updated_scene_graph = _build_updated_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=plan,
+    )
+
+    assert updated_scene_graph is not scene_graph
+    assert updated_scene_graph.nodes is not scene_graph.nodes
+    assert updated_scene_graph.relations is not scene_graph.relations
+    assert updated_scene_graph.to_dict() == scene_graph.to_dict()
+
+
+def test_scene_edit_graph_builder_removes_deleted_nodes() -> None:
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(op="delete", object_id="orange_001"),
+            SceneEditOperation(op="delete", object_id="book_001"),
+        ],
+    )
+
+    updated_scene_graph = _build_updated_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=plan,
+    )
+
+    assert set(updated_scene_graph.node_by_id()) == {"table"}
+    assert set(scene_graph.node_by_id()) == {"table", "book_001", "orange_001"}
+
+
+def test_scene_edit_graph_builder_adds_unpositioned_objects_on_the_table() -> None:
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(
+                op="add",
+                object_id="cup_001",
+                category="cup",
+                name="green cup",
+                description="A small green ceramic cup.",
+            )
+        ],
+    )
+
+    updated_scene_graph = _build_updated_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=plan,
+    )
+
+    added_node = updated_scene_graph.node_by_id()["cup_001"]
+    assert added_node.parent_id == "table"
+    assert added_node.parent_relation == "on"
+
+
+def test_scene_edit_graph_builder_updates_move_on_parent() -> None:
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(
+                op="move",
+                object_id="orange_001",
+                target_id="table",
+                relation="on",
+            )
+        ],
+    )
+
+    updated_scene_graph = _build_updated_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=plan,
+    )
+
+    assert updated_scene_graph.node_by_id()["orange_001"].parent_id == "table"
+
+
+def test_scene_edit_graph_builder_adds_planar_relation_with_target_parent() -> None:
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(
+                op="add",
+                object_id="cup_001",
+                target_id="book_001",
+                relation="right_of",
+                category="cup",
+                name="green cup",
+                description="A small green ceramic cup.",
+            )
+        ],
+    )
+
+    updated_scene_graph = _build_updated_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=plan,
+    )
+
+    assert updated_scene_graph.node_by_id()["cup_001"].parent_id == "table"
+    assert any(
+        relation.source_id == "cup_001"
+        and relation.relation == "right_of"
+        and relation.target_id == "book_001"
+        for relation in updated_scene_graph.relations
+    )
+
+
+def test_scene_edit_plan_application_adds_new_nodes_before_relationship_updates() -> (
+    None
+):
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(
+                op="add",
+                object_id="cup_001",
+                target_id="book_001",
+                relation="right_of",
+                category="cup",
+                name="green cup",
+                description="A small green ceramic cup.",
+            )
+        ],
+    )
+
+    _apply_scene_edit_plan_to_scene_graph(
+        scene_graph=scene_graph,
+        scene_edit_plan=plan,
+    )
+
+    assert scene_graph.node_by_id()["cup_001"].parent_id == "table"

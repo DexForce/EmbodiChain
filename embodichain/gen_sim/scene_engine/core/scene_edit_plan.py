@@ -78,6 +78,15 @@ class SceneEditPlan:
 
     def validate(self) -> None:
         """Validate object references and edit conflicts against the input scene."""
+        # Edit-plan rules:
+        # - move and delete identify one existing non-table object with object_id.
+        # - add carries generated object_id plus non-empty category, name, and description.
+        # - move always supplies target_id and relation; add may omit both.
+        # - target_id and relation are otherwise supplied together or both absent.
+        # - every target is from the pre-edit scene; new and deleted objects are invalid targets.
+        # - an existing object has at most one move or delete operation in one plan.
+        # - delete carries no placement or new-object metadata and must delete every descendant.
+        # - these checks validate intent only; they do not mutate Scene or SceneGraph.
         # Scene object IDs must remain a one-to-one lookup key for edit operations.
         scene_object_ids = {scene_object.id for scene_object in self.scene.objects}
         if len(scene_object_ids) != len(self.scene.objects):
@@ -88,7 +97,7 @@ class SceneEditPlan:
 
         existing_object_ids = set(scene_object_ids)
         added_object_ids: set[str] = set()
-        # Collect deletions first so other operations cannot target removed objects.
+        # Collect deletion intents first so move and add cannot target them regardless of order.
         deleted_object_ids = {
             operation.object_id
             for operation in self.operations
@@ -155,6 +164,8 @@ class SceneEditPlan:
                 raise ValueError("Delete operations may only specify object_id.")
             return
 
+        if operation.target_id is None or operation.relation is None:
+            raise ValueError("Move operations must specify target_id and relation.")
         self._validate_position_reference(
             operation=operation,
             existing_object_ids=existing_object_ids,
@@ -204,6 +215,7 @@ class SceneEditPlan:
             raise ValueError("target_id and relation must be specified together.")
         if operation.target_id is None:
             return
+        # Targets come only from the pre-edit scene, so new objects cannot be targets.
         if operation.target_id not in existing_object_ids:
             raise ValueError("Edit targets must reference existing scene objects.")
         # One edit may not position an object relative to a deleted target.
