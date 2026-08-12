@@ -67,8 +67,8 @@ Rules:
 3. Do not merge objects merely resting on another object. A mug on a table and
    the table are separate entries.
 4. List every visible physical instance separately. If two objects look alike,
-   keep the same category and name, but distinguish them in description using
-   location. Do not add location to name.
+   keep the same category and name. Do not encode location or spatial context
+   in any semantic field.
 5. category is a lower-case singular snake_case class, such as mug, book,
    potted_plant, or coffee_table. It must not contain color or material.
 6. name contains only color, material, texture, shape, and object description.
@@ -78,8 +78,9 @@ Rules:
    shape, and visible structural details. Do not mention image coverage, image
    position, camera framing, or viewpoint. For example, do not write "occupying
    most of the image" or "at the center of the image".
-8. For assets, description may include all visible details, including location
-   and spatial context.
+8. For assets, description contains only visible category, material, color,
+   texture, shape, and structural details. Do not mention location, the table,
+   or any relationship to another object.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
@@ -92,14 +93,14 @@ Return JSON only: no Markdown, comments, or prose outside this exact schema:
     {
       "category": "mug",
       "name": "blue ceramic mug",
-      "description": "small blue ceramic mug on the left side of the table"
+      "description": "small blue ceramic mug with a curved handle"
     }
   ]
 }
-For two identical blue mugs, output two asset entries with the same category and
-name, and use their descriptions to state left/right or front/back. Do not
-infer objects that are not visible. Use an empty assets array when no objects
-are visible. Every field must be a non-empty string."""
+For two identical blue mugs, output two asset entries with the same category,
+name, and description. Do not infer objects that are not visible. Use an empty
+assets array when no objects are visible. Every field must be a non-empty
+string."""
 
 _USER_PROMPT = "Analyze the provided image and return only the required JSON object."
 
@@ -363,11 +364,15 @@ def _parse_scene_object_fields(
             f"VLM JSON key {field_name}.category must be a lower-case snake_case "
             "class name."
         )
-    if _LOCATION_WORD_PATTERN.search(
-        fields["name"]
-    ):  # Check whether the name contains location.
+    # Check whether the name and description contain location or relationship words.
+    if _LOCATION_WORD_PATTERN.search(fields["name"]):
         raise ValueError(
             f"VLM JSON key {field_name}.name must not contain location or "
+            "relationship words."
+        )
+    if _LOCATION_WORD_PATTERN.search(fields["description"]):
+        raise ValueError(
+            f"VLM JSON key {field_name}.description must not contain location or "
             "relationship words."
         )
     return fields
