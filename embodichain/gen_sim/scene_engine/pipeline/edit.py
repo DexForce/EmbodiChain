@@ -43,6 +43,7 @@ def edit_scene(
     scene_importer = SceneExportImporter(output_root=output_root)
     # Validate scene_export, write scene.json, and return Scene; failures raise before editing.
     scene, scene_graph = scene_importer.import_scene_and_graph()
+    # Only for debug.
     print(
         json.dumps(
             {"scene": scene.to_dict(), "scene_graph": scene_graph.to_dict()},
@@ -52,12 +53,12 @@ def edit_scene(
     )
 
     # 1. Edit Understanding
-    # And update or initialize the scene graph
+    # Will return an already checked scene edit plan.
     log_info("Starting Edit Understanding")
-    updated_scene_graph = understand_scene_edit(
+    scene_edit_plan = understand_scene_edit(
         scene=scene,
+        scene_graph=scene_graph,
         edit_prompt=edit_prompt,
-        output_root=output_root,  # Has already been resolved.
         vlm_client=vlm_client,
     )
     log_info("Completed Edit Understanding")
