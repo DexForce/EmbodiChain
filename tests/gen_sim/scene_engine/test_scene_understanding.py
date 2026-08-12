@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understanding
 
 
@@ -83,3 +84,46 @@ def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> Non
 
     assert scene.table is not None
     assert [asset.id for asset in scene.assets] == ["cup_001"]
+
+
+def test_initial_scene_graph_places_every_asset_on_table() -> None:
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="wooden table",
+                description="A wooden table.",
+            ),
+            SceneObject(
+                id="cup_001",
+                kind="asset",
+                category="cup",
+                name="blue cup",
+                description="A blue cup.",
+            ),
+        ],
+    )
+
+    scene_graph = scene_understanding._initialize_scene_graph_from_segmented_scene(
+        scene
+    )
+
+    assert scene_graph.to_dict() == {
+        "nodes": [
+            {
+                "object_id": "table",
+                "parent_id": None,
+                "parent_relation": None,
+                "table_region": None,
+            },
+            {
+                "object_id": "cup_001",
+                "parent_id": "table",
+                "parent_relation": "on",
+                "table_region": None,
+            },
+        ],
+        "relations": [],
+    }

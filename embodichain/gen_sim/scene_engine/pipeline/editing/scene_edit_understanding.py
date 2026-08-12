@@ -20,6 +20,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    SceneGraph,
+    SceneGraphNode,
+    TABLE_OBJECT_ID,
+)
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )

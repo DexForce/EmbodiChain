@@ -29,6 +29,11 @@ from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
     ImageSegmentationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    SceneGraph,
+    SceneGraphNode,
+    TABLE_OBJECT_ID,
+)
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
@@ -150,7 +155,7 @@ def understand_scene(
     *,
     vlm_client: OpenAICompatibleVLM,
     json_max_attempts: int = 3,
-) -> Scene:
+) -> tuple[Scene, SceneGraph]:
 
     resolved_image_path = _validate_image_path(image_path)
     # The output in this stage will keep a JSON which contains
@@ -181,12 +186,40 @@ def understand_scene(
     finally:
         image_segmentation_client.close()  # Kill the session to avoid resource leaks.
 
+    # Use the segmented image to initialize the scene graph
+    # with the help of the VLM client.
+    # But at here, we do with the simplest way (hard code).
+    scene_graph = _initialize_scene_graph_from_segmented_scene(scene)
+
     # Write the Updated scene JSON for debugging.
     (stage_output_root / "scene.json").write_text(
         json.dumps(scene.to_dict(), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    return scene
+    (stage_output_root / "scene_graph.json").write_text(
+        json.dumps(scene_graph.to_dict(), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return scene, scene_graph
+
+
+def _initialize_scene_graph_from_segmented_scene(scene: Scene) -> SceneGraph:
+    """Build the initial graph assuming every segmented asset rests on the table."""
+    if scene.table is None:
+        raise ValueError("Cannot initialize a scene graph without a table.")
+    return SceneGraph(
+        nodes=[
+            SceneGraphNode(object_id=TABLE_OBJECT_ID, parent_id=None),
+            *[
+                SceneGraphNode(
+                    object_id=asset.id,
+                    parent_id=TABLE_OBJECT_ID,
+                    parent_relation="on",
+                )
+                for asset in scene.assets
+            ],
+        ],
+    )
 
 
 def _analyze_image_objects(
