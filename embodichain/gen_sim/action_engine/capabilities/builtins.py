@@ -25,6 +25,11 @@ from typing import Any
 from embodichain.gen_sim.action_engine.domain.motion import (
     motion_policy as build_motion_policy,
 )
+from embodichain.gen_sim.action_engine.domain.task_contracts import (
+    PLACEMENT_RELATIONS,
+    TERMINAL_BEHAVIORS,
+    TRANSPORT_DIRECTIONS,
+)
 
 from .registry import (
     ActionCapability,
@@ -38,37 +43,6 @@ __all__ = ["build_default_registry"]
 
 _SINGLE_ARM_PHASE_OPERATORS = frozenset(
     {"build_stack", "hold_hover", "orient_object", "place_relative"}
-)
-_RELATIONS = frozenset(
-    {
-        "inside",
-        "on",
-        "left_of",
-        "right_of",
-        "front_of",
-        "behind",
-        "front_left_of",
-        "front_right_of",
-        "back_left_of",
-        "back_right_of",
-    }
-)
-_TRANSPORT_DIRECTIONS = frozenset(
-    {
-        "none",
-        "world_x",
-        "world_y",
-        "front",
-        "back",
-        "left",
-        "right",
-        "front_left",
-        "front_right",
-        "back_left",
-        "back_right",
-        "up",
-        "down",
-    }
 )
 
 
@@ -307,7 +281,7 @@ def _expand_place_relative(step: Mapping[str, Any]) -> list[dict[str, Any]]:
     orientation_goal, orientation_axis = _orientation(goal, "place_relative")
     reference = _required_string(goal, "reference_object", "place_relative")
     relation = str(goal.get("relation", "on"))
-    if relation not in _RELATIONS:
+    if relation not in PLACEMENT_RELATIONS:
         raise ValueError(f"place_relative relation {relation!r} is unsupported.")
     normalized_goal = {
         "reference_object": reference,
@@ -461,17 +435,17 @@ def _expand_coordinated_transport(
         "coordinated_transport",
     )
     terminal_behavior = str(goal.get("terminal_behavior", "hold"))
-    if terminal_behavior not in {"hold", "place"}:
+    if terminal_behavior not in TERMINAL_BEHAVIORS - {"none"}:
         raise ValueError(
             "coordinated_transport terminal_behavior must be 'hold' or 'place'."
         )
     direction = str(goal.get("direction", "none"))
-    if direction not in _TRANSPORT_DIRECTIONS:
+    if direction not in TRANSPORT_DIRECTIONS:
         raise ValueError(
             f"coordinated_transport direction {direction!r} is unsupported."
         )
     relation = goal.get("relation")
-    if relation is not None and str(relation) not in _RELATIONS:
+    if relation is not None and str(relation) not in PLACEMENT_RELATIONS:
         raise ValueError(
             f"coordinated_transport relation {str(relation)!r} is unsupported."
         )
@@ -659,27 +633,26 @@ def _build_coordinated_transport_phases(
     if step["goal"]["terminal_behavior"] != "place":
         return phases
     return phases + (
-        _dual_arm_phase(
-            "dual_release",
-            "Both grippers release the transported object",
-            "MoveJoints",
-            {"kind": "joint_state", "source": "gripper_open"},
-            build_motion_policy(),
-            control="hand",
-        ),
-        _dual_arm_phase(
-            "dual_retreat",
-            "Both end effectors retreat from the released object",
-            "MoveEndEffector",
-            {"kind": "policy_pose"},
-            build_motion_policy(),
-        ),
-        _dual_arm_phase(
-            "dual_home",
-            "Both arms return to their initial state",
-            "MoveJoints",
-            {"kind": "joint_state", "source": "initial"},
-            build_motion_policy(),
+        PhaseTemplate(
+            name="dual_release",
+            state_semantic="Both grippers release the transported object",
+            actions=tuple(
+                ActionTemplate(
+                    "MoveJoints",
+                    {
+                        "kind": "joint_state",
+                        "source": "gripper_open",
+                        "coordinated_release_role": release_role,
+                    },
+                    build_motion_policy(),
+                    control="hand",
+                    actor={"mode": "required", "arm": arm},
+                )
+                for arm, release_role in (
+                    ("left_arm", "participant"),
+                    ("right_arm", "commit"),
+                )
+            ),
         ),
     )
 

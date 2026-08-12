@@ -88,6 +88,7 @@ from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
+    CoordinatedHeldObjectState,
     CoordinatedPickGoal,
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
@@ -252,6 +253,10 @@ class _FakeEnv:
     def get_current_qpos_agent(self) -> tuple[torch.Tensor, torch.Tensor]:
         qpos = self.robot.get_qpos()
         return qpos[:, self.left_arm_joints], qpos[:, self.right_arm_joints]
+
+    def get_current_gripper_state_agent(self) -> tuple[torch.Tensor, torch.Tensor]:
+        qpos = self.robot.get_qpos()
+        return qpos[:, self.left_eef_joints], qpos[:, self.right_eef_joints]
 
 
 def _box_vertices(half_extent: float) -> torch.Tensor:
@@ -697,6 +702,129 @@ def _held_state(
             )
         },
     )
+
+
+def _coordinated_held_state(
+    env: _FakeEnv,
+    entity: _FakeEntity,
+) -> ExecutionState:
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label=entity.uid,
+        entity=entity,
+    )
+    left_eef, right_eef = env.get_current_xpos_agent()
+    object_pose = entity.get_local_pose(to_matrix=True)
+    held = CoordinatedHeldObjectState(
+        semantics=semantics,
+        left_object_to_eef=torch.bmm(torch.linalg.inv(object_pose), left_eef),
+        right_object_to_eef=torch.bmm(torch.linalg.inv(object_pose), right_eef),
+        left_grasp_xpos=left_eef,
+        right_grasp_xpos=right_eef,
+        env_mask=torch.ones(env.num_envs, dtype=torch.bool),
+    )
+    return ExecutionState(
+        last_qpos=env.robot.get_qpos(),
+        coordinated_held_objects={("physical_left_arm", "physical_right_arm"): held},
+    )
+
+
+@pytest.mark.parametrize(
+    ("opens", "expected_failed", "expect_held"),
+    ((True, False, False), (False, True, True)),
+)
+def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
+    opens: bool,
+    expected_failed: bool,
+    expect_held: bool,
+) -> None:
+    entity = _FakeEntity("tray", _pose(0.0, 0.0, 0.75), _box_vertices(0.2))
+    env = _FakeEnv({"tray": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    env.robot._qpos[:, env.right_eef_joints] = env.close_state
+    state = _coordinated_held_state(env, entity)
+    executor = object.__new__(ProgramExecutor)
+    executor.env = env
+    executor._assignments = {"task_01": ["coordinated"]}
+    executor._step_states = {("task_01", "coordinated"): state}
+    executor._object_states = {}
+    executor._orientation_references = {}
+
+    def ground(
+        action: dict[str, Any],
+        _step: Any,
+        *,
+        arm: str,
+        **_kwargs: Any,
+    ) -> GroundedAction:
+        return GroundedAction(
+            action_class=str(action["atomic_action_class"]),
+            arm=arm,
+            control="hand",
+            target=None,
+            cfg={},
+        )
+
+    def plan(grounded: GroundedAction, current: ExecutionState) -> ActionOutcome:
+        return ActionOutcome(
+            trajectory=torch.zeros(1, 2, env.robot.dof),
+            success=torch.ones(1, dtype=torch.bool),
+            next_state=current,
+            grounded=grounded,
+        )
+
+    def execute_trajectory(
+        _trajectory: torch.Tensor,
+        *,
+        active: torch.Tensor,
+    ) -> list[torch.Tensor]:
+        if opens and bool(active.any()):
+            env.robot._qpos[:, env.left_eef_joints] = env.open_state
+            env.robot._qpos[:, env.right_eef_joints] = env.open_state
+        elif bool(active.any()):
+            env.robot._qpos[:, env.left_eef_joints] = env.open_state
+        return []
+
+    executor.grounder = SimpleNamespace(ground=ground)
+    executor.adapter = SimpleNamespace(
+        plan=plan,
+        combine=lambda _outcomes, _masks: (
+            torch.zeros(1, 2, env.robot.dof),
+            torch.ones(1, dtype=torch.bool),
+        ),
+        execute_trajectory=execute_trajectory,
+    )
+    actions = [
+        {
+            "atomic_action_class": "MoveJoints",
+            "actor": {"arm": arm},
+            "control": "hand",
+            "target_binding": {
+                "kind": "joint_state",
+                "source": "gripper_open",
+                "coordinated_release_role": role,
+            },
+        }
+        for arm, role in (
+            ("left_arm", "participant"),
+            ("right_arm", "commit"),
+        )
+    ]
+
+    result = executor._execute_explicit_dual(
+        SimpleNamespace(id="release", actions=actions),
+        SimpleNamespace(id="task_01"),
+        torch.zeros(1, dtype=torch.bool),
+    )
+
+    released_state = executor._step_states[("task_01", "coordinated")]
+    held = released_state.get_coordinated_held_object(
+        "physical_left_arm",
+        "physical_right_arm",
+    )
+    assert result.failed.tolist() == [expected_failed]
+    assert (held is not None) is expect_held
 
 
 def _handover_held_state(
@@ -2940,7 +3068,17 @@ def test_shared_container_placements_receive_non_overlapping_live_slots() -> Non
     assert torch.linalg.vector_norm(targets[0] - targets[1]) > 0.05
 
 
-def test_coordinated_transport_diagonal_is_grounded_from_live_pose() -> None:
+@pytest.mark.parametrize(
+    ("direction", "expected_position"),
+    (
+        ("front_left", (0.16, 0.16, 0.85)),
+        ("up", (0.0, 0.0, 0.91)),
+    ),
+)
+def test_coordinated_transport_direction_is_grounded_from_live_pose(
+    direction: str,
+    expected_position: tuple[float, float, float],
+) -> None:
     entities = {
         "shared_box": _FakeEntity(
             "shared_box",
@@ -2961,7 +3099,7 @@ def test_coordinated_transport_diagonal_is_grounded_from_live_pose() -> None:
                         "arms": ["left_arm", "right_arm"],
                     },
                     "goal": {
-                        "direction": "front_left",
+                        "direction": direction,
                         "terminal_behavior": "hold",
                     },
                     "depends_on": [],
@@ -2992,16 +3130,9 @@ def test_coordinated_transport_diagonal_is_grounded_from_live_pose() -> None:
     )
 
     assert isinstance(grounded.target, CoordinatedPickGoal)
-    default_relation_distance = 0.16
     assert torch.allclose(
         grounded.target.object_target_pose[0, :3, 3],
-        torch.tensor(
-            [
-                default_relation_distance,
-                default_relation_distance,
-                0.75,
-            ]
-        ),
+        torch.tensor(expected_position),
     )
 
 

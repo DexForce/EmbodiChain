@@ -30,6 +30,8 @@ from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
 )
 from embodichain.gen_sim.action_engine.domain import (
+    TASK_CONTRACTS,
+    task_success_type,
     validate_scene_requirements,
     validate_task_spec,
 )
@@ -52,84 +54,17 @@ class BatchGenerationResult:
     skipped_existing: tuple[str, ...] = ()
 
 
-_E_DEFINITIONS: dict[str, dict[str, Any]] = {
-    "E1": {
-        "actions": ("PickUp", "MoveHeldObject", "Place"),
-        "semantics": "Pick, move, and place one object at a symbolic relation.",
-        "category": "can",
-        "affordances": ("graspable", "placeable"),
-        "instruction": "把{object}放到{target}上。",
-    },
-    "E2": {
-        "actions": ("PickUp", "MoveHeldObject", "Place"),
-        "semantics": "Make one fallen object upright and place it stably.",
-        "category": "can",
-        "affordances": ("graspable", "orientable"),
-        "instruction": "扶正{object}。",
-    },
-    "E3": {
-        "actions": ("Pour",),
-        "semantics": "Pour from a held source container into a target container.",
-        "category": "pourable_container",
-        "affordances": ("graspable", "pourable"),
-        "instruction": "把{source}中的内容倒入{target}。",
-    },
-    "E4": {
-        "actions": ("PickUp", "MoveHeldObject", "HandOver"),
-        "semantics": "Transfer one held object from one arm to the other.",
-        "category": "cup",
-        "affordances": ("graspable", "handover"),
-        "instruction": "把{object}从左手交接到右手。",
-    },
-    "E5": {
-        "actions": ("CoordinatedPickment",),
-        "semantics": "Use both arms to pick and hold one shared rigid object.",
-        "category": "tray",
-        "affordances": ("dual_graspable", "rigid"),
-        "instruction": "双臂共同拿起{object}。",
-    },
-    "E6": {
-        "actions": ("PullArticulatedPart",),
-        "semantics": "Pull an articulated part to its requested state.",
-        "category": "drawer",
-        "affordances": ("articulated", "pullable"),
-        "instruction": "拉开{object}。",
-    },
-    "E7": {
-        "actions": ("PushArticulatedPart",),
-        "semantics": "Push an articulated part to its requested state.",
-        "category": "drawer",
-        "affordances": ("articulated", "pushable"),
-        "instruction": "推闭{object}。",
-    },
-    "E8": {
-        "actions": ("TurnKnob",),
-        "semantics": "Turn one knob to a requested setting.",
-        "category": "knob",
-        "affordances": ("turnable",),
-        "instruction": "把{object}旋转到目标档位。",
-    },
-    "E9": {
-        "actions": ("Press",),
-        "semantics": "Press one button until its requested terminal state.",
-        "category": "button",
-        "affordances": ("pressable",),
-        "instruction": "按下{object}。",
-    },
-}
-
-
 def task_capability_catalog() -> dict[str, dict[str, Any]]:
     """Return the thin E1-E9 semantics supplied to high-level planners."""
     registry = build_atomic_capability_registry()
     executable = set(registry.executable_names())
     return {
         task_type: {
-            "semantics": str(definition["semantics"]),
-            "core_actions": list(definition["actions"]),
-            "runtime_available": set(definition["actions"]) <= executable,
+            "semantics": contract.semantics,
+            "core_actions": list(contract.core_actions),
+            "runtime_available": set(contract.core_actions) <= executable,
         }
-        for task_type, definition in _E_DEFINITIONS.items()
+        for task_type, contract in TASK_CONTRACTS.items()
     }
 
 
@@ -158,8 +93,8 @@ class TaskFactory:
         executable = set(registry.executable_names())
         self.available_task_types = tuple(
             task_type
-            for task_type, definition in _E_DEFINITIONS.items()
-            if not executable_only or set(definition["actions"]).issubset(executable)
+            for task_type, contract in TASK_CONTRACTS.items()
+            if not executable_only or set(contract.core_actions).issubset(executable)
         )
         if not self.available_task_types:
             raise ValueError("No task types satisfy executable_only.")
@@ -349,7 +284,10 @@ class TaskFactory:
         else:
             instruction = "，然后".join(clauses) + "。"
         success_terms = [
-            {"type": _success_type(item["task_type"]), "task_instance_id": item["id"]}
+            {
+                "type": task_success_type(item["task_type"], item["params"]),
+                "task_instance_id": item["id"],
+            }
             for item in instances
         ]
         return (
@@ -372,7 +310,7 @@ class TaskFactory:
         *,
         shared_role: str | None,
     ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], str]:
-        definition = _E_DEFINITIONS[task_type]
+        contract = TASK_CONTRACTS[task_type]
         object_role = shared_role or f"object_{index:02d}"
         selector = (
             {}
@@ -386,8 +324,8 @@ class TaskFactory:
         roles = {
             object_role: _role(
                 object_role,
-                definition["category"],
-                definition["affordances"],
+                contract.example_category,
+                contract.scene_affordances,
                 initial_state=_initial_state(task_type),
                 attributes=selector,
             )
@@ -444,7 +382,7 @@ class TaskFactory:
             params.update({"target_setting": rng.randint(1, 4)})
         elif task_type == "E9":
             params.update({"terminal_state": "activated"})
-        clause = definition["instruction"].format(**names).rstrip("。")
+        clause = contract.instruction_template.format(**names).rstrip("。")
         return params, roles, clause
 
     def _l4_draft(
@@ -534,7 +472,9 @@ class TaskFactory:
                     "op": "all",
                     "terms": [
                         {
-                            "type": _success_type(item["task_type"]),
+                            "type": task_success_type(
+                                item["task_type"], item["params"]
+                            ),
                             "task_instance_id": item["id"],
                         }
                         for item in instances
@@ -764,7 +704,7 @@ def _role(
         "role_id": role_id,
         "category": category,
         "count": 1,
-        "affordances": list(affordances),
+        "affordances": sorted(affordances),
         "initial_state": dict(initial_state or {}),
         "attributes": dict(attributes or {}),
     }
@@ -873,20 +813,6 @@ def _l2_instruction(task_type: str, count: int) -> str:
         "E9": "按下所有指定的按钮。",
     }
     return templates[task_type]
-
-
-def _success_type(task_type: str) -> str:
-    return {
-        "E1": "semantic_goal",
-        "E2": "object_upright",
-        "E3": "poured",
-        "E4": "handover_complete",
-        "E5": "held_by_both_grippers",
-        "E6": "articulation_joint_near",
-        "E7": "articulation_joint_near",
-        "E8": "articulation_joint_near",
-        "E9": "pressed",
-    }[task_type]
 
 
 def _task_semantic_key(task: Mapping[str, Any]) -> str:

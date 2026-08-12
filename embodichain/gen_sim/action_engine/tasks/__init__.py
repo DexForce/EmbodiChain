@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from .factory import BatchGenerationResult, TaskFactory, task_capability_catalog
 from .interpretation import (
+    GroundingCaller,
     INSTRUCTION_INTENT_SCHEMA,
     InstructionCaller,
     InstructionIntent,
@@ -33,6 +34,7 @@ from .scene import SceneHandoff, validate_scene_handoff
 __all__ = [
     "BatchGenerationResult",
     "GroundedTaskSpec",
+    "GroundingCaller",
     "INSTRUCTION_INTENT_SCHEMA",
     "InstructionCaller",
     "InstructionIntent",

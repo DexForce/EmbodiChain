@@ -192,7 +192,7 @@ def generate_action_engine_config(
             validator=validate_task_spec,
             label="TaskSpec",
         )
-        # Persist the deterministic Scene-Engine hand-off alongside the shared
+        # Persist the validated Scene-Engine hand-off alongside the shared
         # semantic TaskSpec.  The binding is not an oracle for online planning,
         # but it is required for ``--regenerate`` and runtime-only loading.
         task_spec = _with_role_bindings(task_spec, planned.role_bindings)
@@ -511,11 +511,11 @@ def _infer_role_bindings_from_scene_requirements(
     robot_profile: str,
 ) -> dict[str, str]:
     """Bind abstract TaskFactory roles only when static evidence is unique."""
-    from embodichain.gen_sim.action_engine.tasks.planning import _SceneIndex
+    from embodichain.gen_sim.action_engine.tasks.assembly import SceneInventory
 
     requirements = _requirements_by_role(scene_requirements)
-    index = _SceneIndex(scene_objects, robot_profile=robot_profile)
-    entities = [entity for entity in index.entities if entity.uid in known_objects]
+    inventory = SceneInventory(scene_objects, robot_profile=robot_profile)
+    entities = [entity for entity in inventory.entities if entity.uid in known_objects]
     used_uids = set(existing_bindings.values())
     inferred: dict[str, str] = {}
     for role in sorted(roles):
@@ -560,10 +560,10 @@ def _validate_bound_role_requirements(
     robot_profile: str,
 ) -> None:
     """Ensure an explicit binding does not contradict its static sidecar."""
-    from embodichain.gen_sim.action_engine.tasks.planning import _SceneIndex
+    from embodichain.gen_sim.action_engine.tasks.assembly import SceneInventory
 
     requirements = _requirements_by_role(scene_requirements)
-    entities = _SceneIndex(scene_objects, robot_profile=robot_profile).by_uid
+    entities = SceneInventory(scene_objects, robot_profile=robot_profile).by_uid
     for role, uid in bindings.items():
         requirement = requirements.get(role)
         if requirement is None:
@@ -611,7 +611,10 @@ def _entity_matches_requirement(
 ) -> bool:
     """Match only static metadata; UID inference requires complete evidence."""
     category = requirement.get("category")
-    if not isinstance(category, str) or entity.category != category.strip().lower():
+    expected_category = category.strip().lower() if isinstance(category, str) else ""
+    if expected_category != entity.category.lower() and not _entity_text_contains(
+        entity, expected_category
+    ):
         return False
     required_affordances = requirement.get("affordances", [])
     if not isinstance(required_affordances, Sequence) or isinstance(
@@ -648,7 +651,10 @@ def _entity_matches_requirement(
 def _static_attribute_matches(entity: Any, name: str, expected: Any) -> bool:
     """Compare metadata directly, with bounded text evidence for labels."""
     if name == "color":
-        return isinstance(expected, str) and entity.color == expected.strip().lower()
+        return isinstance(expected, str) and (
+            (entity.color or "").lower() == expected.strip().lower()
+            or _entity_text_contains(entity, expected)
+        )
     marker = object()
     actual = entity.attributes.get(name, marker)
     if actual is not marker:
@@ -656,6 +662,19 @@ def _static_attribute_matches(entity: Any, name: str, expected: Any) -> bool:
     if not isinstance(expected, str) or not expected.strip():
         return False
     token = expected.strip().lower()
+    text = str(entity.text).lower()
+    if token.isascii() and token.replace("_", "").isalnum():
+        return (
+            re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text) is not None
+        )
+    return token in text
+
+
+def _entity_text_contains(entity: Any, value: Any) -> bool:
+    """Match literal exported labels without applying a semantic alias table."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    token = value.strip().lower()
     text = str(entity.text).lower()
     if token.isascii() and token.replace("_", "").isalnum():
         return (
@@ -882,26 +901,11 @@ def _scene_requirements_from_scene(
         uid = str(item.get("runtime_uid", item.get("uid", ""))).strip()
         if not uid:
             raise ValueError("Planner scene object is missing a runtime UID.")
-        role = str(item.get("role", "object"))
-        description = str(item.get("description", uid)).lower()
-        category = "table" if uid == "table" else role
-        if category in {"rigid_object", "object"}:
-            category = next(
-                (
-                    token
-                    for token in (
-                        "can",
-                        "cup",
-                        "bowl",
-                        "tray",
-                        "drawer",
-                        "knob",
-                        "button",
-                    )
-                    if token in description
-                ),
-                "movable_object",
-            )
+        role = str(item.get("role", "object")).strip().lower()
+        raw_category = item.get("category", item.get("object_category", ""))
+        category = str(raw_category).strip().lower()
+        if not category or category in {"none", "无", "没有"}:
+            category = "table" if uid == "table" else role
         objects.append(
             {
                 "role_id": uid,

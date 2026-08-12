@@ -1571,18 +1571,21 @@ class ActionGrounder:
         direction_offsets = {
             "world_x": (distance, 0.0, 0.0),
             "world_y": (0.0, distance, 0.0),
-            "left": (0.0, distance, 0.0),
-            "right": (0.0, -distance, 0.0),
-            "front": (distance, 0.0, 0.0),
-            "back": (-distance, 0.0, 0.0),
-            "front_left": (distance, distance, 0.0),
-            "front_right": (distance, -distance, 0.0),
-            "back_left": (-distance, distance, 0.0),
-            "back_right": (-distance, -distance, 0.0),
             "up": (0.0, 0.0, distance),
             "down": (0.0, 0.0, -distance),
         }
-        if direction in direction_offsets:
+        planar_direction_offset = relation_offset(
+            self.env,
+            direction,
+            frame=relation_frame,
+            forward_distance=distance,
+            lateral_distance=distance,
+            dtype=target.dtype,
+            device=target.device,
+        )
+        if planar_direction_offset is not None:
+            target[:, :3, 3] += planar_direction_offset
+        elif direction in direction_offsets:
             target[:, :3, 3] += torch.tensor(
                 direction_offsets[direction],
                 dtype=target.dtype,
@@ -1608,6 +1611,28 @@ class ActionGrounder:
             object_pose,
             orientation_reference_pose=orientation_reference_pose,
         )
+        if (
+            step.operator == "coordinated_transport"
+            and relation not in {"on", "on_top", "on_top_of", "inside"}
+            and direction not in {"up", "down"}
+        ):
+            release = str(step.goal.get("terminal_behavior", "hold")) == "place"
+            if not release:
+                target[:, 2, 3] = object_pose[:, 2, 3] + float(
+                    self._policy_value(policy, "transport_clearance")
+                )
+            else:
+                table = _object(self.env, "table")
+                moved = _object(self.env, step.object_uid)
+                clearance = float(self._policy_value(policy, "surface_clearance"))
+                for env_id in range(int(self.env.num_envs)):
+                    table_top = _world_vertices(table, self.env, env_id)[:, 2].max()
+                    bottom = self._rotated_local_z_min(
+                        moved,
+                        target[env_id, :3, :3],
+                        env_id,
+                    )
+                    target[env_id, 2, 3] = table_top + clearance - bottom
         if relation in {"on", "on_top", "on_top_of"} or root_stack_layer:
             support_uid = (
                 step.goal.get("reference_object")

@@ -741,7 +741,20 @@ class AtomicActionAdapter:
         action: GroundedAction,
         capability: AtomicCapability,
     ) -> Any:
-        return self._build_single_arm_config(action, capability)
+        from .frames import arm_base_poses
+
+        policy = self._config_policy(action)
+        left_base, right_base = arm_base_poses(self.env)
+        direction = right_base[0, :3, 3] - left_base[0, :3, 3]
+        norm = torch.linalg.vector_norm(direction)
+        if not torch.isfinite(direction).all() or norm <= 1.0e-6:
+            raise ValueError(
+                "Coordinated pickup requires distinct finite left/right arm bases."
+            )
+        policy["left_to_right_arm_direction"] = direction / norm
+        return capability.config_type(
+            **_supported_kwargs(capability.config_type, policy)
+        )
 
     def _build_coordinated_placement_config(
         self,

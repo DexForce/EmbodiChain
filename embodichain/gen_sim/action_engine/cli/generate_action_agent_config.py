@@ -127,7 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--instruction_parser",
         choices=("llm", "deterministic"),
         default="llm",
-        help="Interpret free language with a structured LLM or legacy exact rules.",
+        help=(
+            "Interpret free language with the structured two-stage LLM path, "
+            "or explicitly use the limited offline legacy rule adapter."
+        ),
     )
     parser.add_argument(
         "--source_scene_z_rotation_degrees",

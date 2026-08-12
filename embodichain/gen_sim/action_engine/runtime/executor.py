@@ -34,7 +34,7 @@ from embodichain.gen_sim.action_engine.config import (
     default_runtime_policy,
     runtime_policy_hash,
 )
-from embodichain.lab.sim.atomic_actions import HeldObjectState
+from embodichain.lab.sim.atomic_actions import HeldObjectState, StateDelta
 from embodichain.utils import logger as project_logger
 from embodichain.utils.logger import log_info, log_warning
 
@@ -635,6 +635,9 @@ class ProgramExecutor:
                 predicate,
                 held_owners=self._object_owners,
                 held_states=self._object_states,
+                coordinated_state=self._step_states.get(
+                    (str(node.get("task_instance_id", "")), "coordinated")
+                ),
             )
         except (TypeError, ValueError):
             return torch.zeros_like(failed)
@@ -2021,14 +2024,50 @@ class ProgramExecutor:
         trajectory, action_success = self.adapter.combine(outcomes, masks)
         active = assigned & ~failed & action_success
         actions = self.adapter.execute_trajectory(trajectory, active=active)
-        for arm, outcome in outcomes.items():
-            if outcome is not None:
-                self._step_states[(step.id, arm)] = outcome.state_after(
-                    active & outcome.success
+        is_coordinated_release = {
+            str(
+                action.get("target_binding", {}).get(
+                    "coordinated_release_role",
+                    "",
                 )
+            )
+            for action in edge.actions
+        } == {"participant", "commit"} and all(
+            action.get("control") == "hand"
+            and action.get("target_binding", {}).get("kind") == "joint_state"
+            and action.get("target_binding", {}).get("source") == "gripper_open"
+            for action in edge.actions
+        )
+        physical_failed = torch.zeros_like(failed)
+        if is_coordinated_release:
+            opened = evaluate_predicate(self.env, {"type": "both_grippers_open"})
+            released = active & opened
+            physical_failed = active & ~opened
+            control_parts = (
+                arm_control_part(self.env, "left_arm"),
+                arm_control_part(self.env, "right_arm"),
+            )
+            released_task = StateDelta(
+                coordinated_held_object_updates={control_parts: None}
+            ).apply(coordinated_state.to_task_state(), released)
+            released_state = ExecutionState.from_task_state(
+                released_task,
+                last_qpos=self.env.robot.get_qpos().clone(),
+            )
+            for key in ("coordinated", "left_arm", "right_arm"):
+                self._step_states[(step.id, key)] = released_state
+        else:
+            for arm, outcome in outcomes.items():
+                if outcome is not None:
+                    self._step_states[(step.id, arm)] = outcome.state_after(
+                        active & outcome.success
+                    )
         return _EdgeResult(
             actions,
-            failed | (~failed & ~assigned) | (assigned & ~action_success),
+            failed
+            | (~failed & ~assigned)
+            | (assigned & ~action_success)
+            | physical_failed,
             grounded_items,
         )
 
@@ -2312,6 +2351,19 @@ class ProgramExecutor:
                 step.postcondition,
                 coordinated_state=self._step_states.get((step.id, "coordinated")),
             )
+            target = self._targets.get(step.id)
+            if target is not None:
+                policy = self._policies.get(step.id, {})
+                tolerance = float(
+                    policy.get(
+                        "postcondition_tolerance",
+                        self.runtime_policy.predicate_fallbacks["position_tolerance"],
+                    )
+                )
+                target = target.to(device=observed.device, dtype=observed.dtype)
+                satisfied &= (
+                    torch.linalg.vector_norm(observed - target, dim=1) <= tolerance
+                )
         elif postcondition_type == "pressed":
             satisfied = evaluate_predicate(self.env, step.postcondition)
         elif relation == "inside" and isinstance(reference, str):

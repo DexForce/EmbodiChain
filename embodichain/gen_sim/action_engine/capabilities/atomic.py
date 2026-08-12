@@ -504,6 +504,11 @@ def capability_precondition(
     target_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Build the generic live precondition used to authorize a retry."""
+    if target_binding.get("coordinated_release_role") is not None:
+        # Opening a gripper is idempotent. A retry must remain legal when one
+        # hand opened on the first attempt and the physical dual-hold predicate
+        # therefore no longer holds.
+        return {}
     if capability.state_effect == "coordinated_release":
         return {"type": "held_by_both_grippers", "object": object_uid}
     if capability.state_effect in {"preserve_hold", "release", "transfer_hold"}:
@@ -736,6 +741,47 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
     if not isinstance(actor, Mapping):
         raise ValueError("MoveJoints contract requires an actor mapping.")
     arm = _required_arm(_actor_arms(actor)[0], "MoveJoints")
+    binding = node.get("target_binding", {})
+    if not isinstance(binding, Mapping):
+        raise ValueError("MoveJoints contract requires a target_binding mapping.")
+    release_role = binding.get("coordinated_release_role")
+    if release_role is not None:
+        if (
+            node.get("task_type") != "E5"
+            or node.get("control") != "hand"
+            or binding.get("source") != "gripper_open"
+            or not node.get("sync_group")
+        ):
+            raise ValueError(
+                "Coordinated MoveJoints release requires an E5 synchronized "
+                "hand action targeting gripper_open."
+            )
+        if release_role not in {"participant", "commit"}:
+            raise ValueError(
+                "coordinated_release_role must be 'participant' or 'commit'."
+            )
+        claims = (
+            ResourceClaim(f"arm:{arm}", lifetime="until_release"),
+            ResourceClaim(f"object:{object_uid}", lifetime="until_release"),
+        )
+        if release_role == "participant":
+            return ResolvedActionContract(
+                requires=(StateAtom("object_coordinated_held", object_uid=object_uid),),
+                claims=claims,
+            )
+        return ResolvedActionContract(
+            requires=(StateAtom("object_coordinated_held", object_uid=object_uid),),
+            effects=(
+                StateEffect(
+                    "delete",
+                    StateAtom("object_coordinated_held", object_uid=object_uid),
+                ),
+                StateEffect("add", StateAtom("object_free", object_uid=object_uid)),
+                StateEffect("add", StateAtom("arm_free", arm="left_arm")),
+                StateEffect("add", StateAtom("arm_free", arm="right_arm")),
+            ),
+            claims=claims,
+        )
     if node.get("control") == "hand":
         return ResolvedActionContract(
             requires=(StateAtom("object_held", object_uid=object_uid, arm=arm),),

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Structured language interpretation followed by deterministic scene grounding."""
+"""Structured language interpretation followed by validated scene grounding."""
 
 from __future__ import annotations
 
@@ -25,24 +25,29 @@ import os
 from time import perf_counter
 from typing import Any, TypeAlias
 
-from embodichain.gen_sim.action_engine.domain import TASK_TYPES
-
-from .factory import _E_DEFINITIONS
-from .planning import (
-    _AFFORDANCES,
-    GroundedTaskSpec,
-    _CATEGORIES,
-    _COLORS,
-    _Entity,
-    _SceneIndex,
-    _TaskBuilder,
-    plan_grounded_task_spec,
+from embodichain.gen_sim.action_engine.domain import (
+    RELATIONS,
+    TASK_CONTRACTS,
+    TASK_TYPES,
+    TERMINAL_BEHAVIORS,
+    TRANSPORT_DIRECTIONS,
 )
+
+from .assembly import (
+    GroundedTaskBuilder,
+    GroundedTaskSpec,
+    SceneEntity,
+    SceneInventory,
+    validate_source_compatibility,
+    validate_target_compatibility,
+)
+from .grounding import GroundingCaller, ground_scene_references
 
 __all__ = [
     "INSTRUCTION_INTENT_SCHEMA",
     "InstructionIntent",
     "InstructionCaller",
+    "GroundingCaller",
     "interpret_and_ground_task_spec",
     "validate_instruction_intent",
 ]
@@ -50,16 +55,15 @@ __all__ = [
 InstructionCaller = Callable[..., Mapping[str, Any]]
 InstructionIntent: TypeAlias = dict[str, Any]
 
-_RELATIONS = frozenset(
-    {"none", "on", "inside", "above", "left_of", "right_of", "front_of", "behind"}
-)
+_RELATIONS = RELATIONS
 _ARMS = frozenset({"none", "auto", "left_arm", "right_arm"})
 _ORIENTATIONS = frozenset({"preserve", "upright"})
 _TARGET_STATES = frozenset({"none", "open", "closed", "activated"})
 _LAYOUTS = frozenset({"none", "line"})
 _AXES = frozenset({"none", "world_x", "world_y"})
-_SELECTOR_KINDS = frozenset({"none", "selector", "step_result"})
-_SIDES = frozenset({"none", "left", "right", "leftmost", "rightmost"})
+_DIRECTIONS = TRANSPORT_DIRECTIONS
+_TERMINAL_BEHAVIORS = TERMINAL_BEHAVIORS
+_SELECTOR_KINDS = frozenset({"none", "scene_ref", "step_result"})
 _QUANTIFIERS = frozenset({"one", "all", "count"})
 _STEP_KEYS = frozenset(
     {
@@ -76,28 +80,14 @@ _STEP_KEYS = frozenset(
         "target_setting",
         "layout",
         "axis",
+        "direction",
+        "terminal_behavior",
         "depends_on",
     }
 )
 _INTENT_TASK_FIELD_REGISTRY = {
-    "E1": frozenset(
-        {
-            "target",
-            "relation",
-            "required_arm",
-            "orientation_goal",
-            "layout",
-            "axis",
-        }
-    ),
-    "E2": frozenset({"required_arm", "orientation_goal"}),
-    "E3": frozenset({"target", "relation", "required_arm"}),
-    "E4": frozenset({"transfer_arm", "receive_arm", "orientation_goal"}),
-    "E5": frozenset(),
-    "E6": frozenset({"required_arm", "target_state"}),
-    "E7": frozenset({"required_arm", "target_state"}),
-    "E8": frozenset({"required_arm", "target_setting"}),
-    "E9": frozenset({"required_arm", "target_state"}),
+    task_type: contract.applicable_intent_fields
+    for task_type, contract in TASK_CONTRACTS.items()
 }
 _INTENT_FIELD_DEFAULTS: dict[str, Any] = {
     "target": None,
@@ -110,15 +100,14 @@ _INTENT_FIELD_DEFAULTS: dict[str, Any] = {
     "target_setting": 0,
     "layout": "none",
     "axis": "none",
+    "direction": "none",
+    "terminal_behavior": "none",
 }
 _SELECTOR_KEYS = frozenset(
     {
         "kind",
         "step_id",
-        "uid",
-        "category",
-        "color",
-        "side",
+        "reference",
         "quantifier",
         "count",
     }
@@ -145,39 +134,6 @@ _FORBIDDEN_FIELDS = frozenset(
         "waypoints",
     }
 )
-_PROMPT_REDACTED_KEYS = _FORBIDDEN_FIELDS | frozenset(
-    {
-        "absolute_position",
-        "bbox",
-        "bounding_box",
-        "camera_matrix",
-        "center",
-        "centroid",
-        "coordinates",
-        "depth",
-        "extrinsics",
-        "init_pos",
-        "init_rot",
-        "intrinsics",
-        "location",
-        "matrix",
-        "orientation",
-        "position_xyz",
-        "position",
-        "quaternion",
-        "rotation",
-        "scale",
-        "transform",
-        "translation",
-        "world_x",
-        "world_y",
-        "world_z",
-        "x",
-        "y",
-        "z",
-    }
-)
-
 # MiMo's OpenAI-compatible endpoint can spend the whole completion budget in
 # hidden reasoning when the request leaves thinking enabled.  A sparse final
 # JSON object then looks like a schema failure to the deterministic verifier.
@@ -187,116 +143,13 @@ _MIMO_MAX_COMPLETION_TOKENS = 4096
 
 
 class _MissingRequiredTargetError(ValueError):
-    """Identify the one validation failure eligible for local completion."""
+    """Identify a validation failure that receives targeted repair guidance."""
 
 
-# Structured callers are asked for canonical English values.  The verifier
-# nevertheless accepts the small set of language aliases users commonly put
-# in mock responses; this keeps normalization deterministic and never adds a
-# model-defined extension field.
-_COLOR_ALIASES = {
-    alias.lower(): canonical
-    for canonical, aliases in _COLORS.items()
-    for alias in (*aliases, "橘色" if canonical == "orange" else "")
-    if alias
-}
-_CATEGORY_ALIASES = {
-    alias.lower(): canonical
-    for canonical, aliases in _CATEGORIES.items()
-    for alias in aliases
-}
-_CATEGORY_ALIASES.update(
-    {
-        "pourable_container": "pourable_container",
-        "container": "pourable_container",
-        "容器": "pourable_container",
-    }
-)
-_SIDE_ALIASES = {
-    "左": "left",
-    "左边": "left",
-    "左侧": "left",
-    "左手边": "left",
-    "左手侧": "left",
-    "右": "right",
-    "右边": "right",
-    "右侧": "right",
-    "右手边": "right",
-    "右手侧": "right",
-    "最左": "leftmost",
-    "最左边": "leftmost",
-    "最右": "rightmost",
-    "最右边": "rightmost",
-}
-_QUANTIFIER_ALIASES = {
-    "single": "one",
-    "one": "one",
-    "一个": "one",
-    "一": "one",
-    "all": "all",
-    "全部": "all",
-    "所有": "all",
-    "都": "all",
-    "count": "count",
-    "指定数量": "count",
-}
-_ARM_ALIASES = {
-    "左": "left_arm",
-    "左手": "left_arm",
-    "左臂": "left_arm",
-    "left": "left_arm",
-    "left hand": "left_arm",
-    "left arm": "left_arm",
-    "右": "right_arm",
-    "右手": "right_arm",
-    "右臂": "right_arm",
-    "right": "right_arm",
-    "right hand": "right_arm",
-    "right arm": "right_arm",
-    "自动": "auto",
-    "默认": "auto",
-    "automatic": "auto",
-    "none": "none",
-    "无": "none",
-}
-_RELATION_ALIASES = {
-    "none": "none",
-    "无": "none",
-    "on": "on",
-    "on top": "on",
-    "on_top": "on",
-    "on top of": "on",
-    "上面": "on",
-    "上方": "on",
-    "inside": "inside",
-    "in": "inside",
-    "into": "inside",
-    "里面": "inside",
-    "内部": "inside",
-    "above": "above",
-    "上": "above",
-    "left": "left_of",
-    "left of": "left_of",
-    "left_of": "left_of",
-    "左边": "left_of",
-    "左侧": "left_of",
-    "左手边": "left_of",
-    "左手侧": "left_of",
-    "right": "right_of",
-    "right of": "right_of",
-    "right_of": "right_of",
-    "右边": "right_of",
-    "右侧": "right_of",
-    "右手边": "right_of",
-    "右手侧": "right_of",
-    "front of": "front_of",
-    "front_of": "front_of",
-    "前面": "front_of",
-    "前方": "front_of",
-    "behind": "behind",
-    "后面": "behind",
-    "后方": "behind",
-}
+# Object semantics remain open natural-language references until the dedicated
+# scene-grounding phase resolves them. All other values are strict protocol
+# enums; non-canonical model output is repaired by the model, never guessed by
+# a local language alias table.
 
 _SELECTOR_SCHEMA = {
     "type": "object",
@@ -305,10 +158,7 @@ _SELECTOR_SCHEMA = {
     "properties": {
         "kind": {"type": "string", "enum": sorted(_SELECTOR_KINDS)},
         "step_id": {"type": "string"},
-        "uid": {"type": "string"},
-        "category": {"type": "string", "enum": ["none", *sorted(_CATEGORIES)]},
-        "color": {"type": "string", "enum": ["none", *sorted(_COLORS)]},
-        "side": {"type": "string", "enum": sorted(_SIDES)},
+        "reference": {"type": "string"},
         "quantifier": {"type": "string", "enum": sorted(_QUANTIFIERS)},
         "count": {"type": "integer", "minimum": 0},
     },
@@ -347,6 +197,14 @@ _INTENT_OUTPUT_SCHEMA = {
                     "target_setting": {"type": "integer"},
                     "layout": {"type": "string", "enum": sorted(_LAYOUTS)},
                     "axis": {"type": "string", "enum": sorted(_AXES)},
+                    "direction": {
+                        "type": "string",
+                        "enum": sorted(_DIRECTIONS),
+                    },
+                    "terminal_behavior": {
+                        "type": "string",
+                        "enum": sorted(_TERMINAL_BEHAVIORS),
+                    },
                     "depends_on": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -371,14 +229,15 @@ def interpret_and_ground_task_spec(
     robot_profile: str,
     model: str | None = None,
     caller: InstructionCaller | None = None,
+    grounding_caller: GroundingCaller | None = None,
 ) -> GroundedTaskSpec:
-    """Interpret free language and deterministically resolve it against a scene."""
+    """Interpret free language, then bind every scene reference to known UIDs."""
     task_id = str(task_name).strip()
     instruction = str(task_description).strip()
     if not task_id or not instruction:
         raise ValueError("task_name and task_description must be non-empty.")
-    index = _SceneIndex(scene_objects, robot_profile=robot_profile)
-    prompt = _instruction_prompt(instruction, index)
+    inventory = SceneInventory(scene_objects, robot_profile=robot_profile)
+    prompt = _instruction_prompt(instruction)
     invoke = caller or _default_instruction_caller
     # An injected caller owns its transport and does not need the production
     # model-resolution path (which also loads provider configuration).
@@ -391,8 +250,6 @@ def interpret_and_ground_task_spec(
     started = perf_counter()
     first_error: Exception | None = None
     intent: dict[str, Any] | None = None
-    grounded: GroundedTaskSpec | None = None
-    local_completion_fields: tuple[str, ...] = ()
     intent_normalizations: list[dict[str, Any]] = []
     attempts = 0
     for attempt in range(2):
@@ -401,7 +258,7 @@ def interpret_and_ground_task_spec(
             current_prompt += (
                 "\n\nREPAIR OVERRIDE: the previous JSON was invalid. Return a corrected "
                 "JSON object only; do not repeat the sparse response. Every step "
-                "must contain all 14 step keys and every selector all 8 selector "
+                "must contain all 16 step keys and every selector all 5 selector "
                 "keys. Keep semantic fields explicit: E4 requires transfer_arm "
                 "and receive_arm, and E1/E3 require target plus relation (unless "
                 "E1 layout=line). Use canonical defaults only for fields that do "
@@ -433,43 +290,39 @@ def interpret_and_ground_task_spec(
             break
         except (TypeError, ValueError) as error:
             if attempt:
-                completed = _complete_missing_explicit_target(
-                    response_value,
-                    error=error,
-                    task_id=task_id,
-                    instruction=instruction,
-                    scene_objects=scene_objects,
-                    robot_profile=robot_profile,
-                    index=index,
-                )
-                if completed is not None:
-                    intent, grounded, local_completion_fields = completed
-                    intent_normalizations = current_normalizations
-                    break
                 raise ValueError(
                     "Instruction intent failed validation after one repair: " f"{error}"
                 ) from error
             first_error = error
     if intent is None:
         raise AssertionError("unreachable")
-    if grounded is None:
-        grounded = _ground_intent(task_id, instruction, intent, index)
+    instruction_latency = perf_counter() - started
+    grounding = ground_scene_references(
+        instruction=instruction,
+        intent=intent,
+        inventory=inventory,
+        scene_objects=scene_objects,
+        model=selected_model,
+        caller=grounding_caller or invoke,
+    )
+    grounded = _ground_intent(
+        task_id,
+        instruction,
+        intent,
+        inventory,
+        grounding.bindings,
+    )
     grounded.task_spec["metadata"].update(
         {
-            "instruction_interpreter": "structured_llm_v1",
+            "instruction_interpreter": "structured_llm_v2",
             "instruction_model": selected_model or "injected_caller",
             "instruction_call_count": attempts,
-            "instruction_latency_seconds": perf_counter() - started,
+            "instruction_latency_seconds": instruction_latency,
+            "scene_grounding_model": selected_model or "injected_caller",
+            "scene_grounding_call_count": grounding.attempts,
+            "scene_grounding_latency_seconds": grounding.latency_seconds,
         }
     )
-    if local_completion_fields:
-        grounded.task_spec["metadata"].update(
-            {
-                "instruction_local_completion_count": len(local_completion_fields),
-                "instruction_local_completion_fields": list(local_completion_fields),
-                "instruction_local_completion_basis": ("deterministic_scene_grounding"),
-            }
-        )
     if intent_normalizations:
         grounded.task_spec["metadata"][
             "instruction_intent_normalizations"
@@ -480,12 +333,12 @@ def interpret_and_ground_task_spec(
 def _normalize_instruction_intent_fields(
     value: Mapping[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Canonicalize only fields that the selected E type cannot consume.
+    """Canonicalize inapplicable fields and action-defined semantic defaults.
 
     The strict public validator deliberately remains unchanged.  This pass is
     confined to the LLM boundary, where weak JSON-mode providers sometimes
     copy a meaningful value into an inapplicable slot such as E4.required_arm.
-    Required semantic fields are never inferred here and still fail closed.
+    Required scene facts are never inferred here and still fail closed.
     """
     result = deepcopy(dict(value))
     raw_steps = result.get("steps")
@@ -524,6 +377,24 @@ def _normalize_instruction_intent_fields(
                     "reason": f"inapplicable_for_{task_type}",
                 }
             )
+        target = raw_step.get("target")
+        if (
+            task_type == "E5"
+            and isinstance(target, Mapping)
+            and target.get("kind") == "none"
+            and raw_step.get("relation") == "none"
+            and raw_step.get("direction") == "none"
+            and raw_step.get("terminal_behavior") == "hold"
+        ):
+            raw_step["direction"] = "up"
+            changes.append(
+                {
+                    "path": f"steps[{index}].direction",
+                    "from": "none",
+                    "to": "up",
+                    "reason": "e5_hold_defaults_to_lift",
+                }
+            )
     return result, changes
 
 
@@ -532,143 +403,10 @@ def _empty_selector() -> dict[str, Any]:
     return {
         "kind": "none",
         "step_id": "",
-        "uid": "",
-        "category": "none",
-        "color": "none",
-        "side": "none",
+        "reference": "",
         "quantifier": "one",
         "count": 0,
     }
-
-
-def _complete_missing_explicit_target(
-    value: Mapping[str, Any] | None,
-    *,
-    error: Exception,
-    task_id: str,
-    instruction: str,
-    scene_objects: Sequence[Mapping[str, Any]],
-    robot_profile: str,
-    index: _SceneIndex,
-) -> tuple[dict[str, Any], GroundedTaskSpec, tuple[str, ...]] | None:
-    """Complete one explicit E1 target only when two parsers agree otherwise."""
-    if not isinstance(error, _MissingRequiredTargetError) or not isinstance(
-        value, Mapping
-    ):
-        return None
-    if set(value) != {"steps"}:
-        return None
-    steps = value.get("steps")
-    if not isinstance(steps, Sequence) or isinstance(steps, (str, bytes)):
-        return None
-
-    missing_indices = [
-        step_index
-        for step_index, step in enumerate(steps)
-        if isinstance(step, Mapping)
-        and step.get("task_type") == "E1"
-        and step.get("layout") != "line"
-        and isinstance(step.get("target"), Mapping)
-        and step["target"].get("kind") == "none"
-    ]
-    if len(missing_indices) != 1:
-        return None
-
-    try:
-        reference = plan_grounded_task_spec(
-            task_name=task_id,
-            task_description=instruction,
-            scene_objects=scene_objects,
-            robot_profile=robot_profile,
-        )
-    except (TypeError, ValueError):
-        return None
-    reference_instances = reference.task_spec.get("task_instances", [])
-    if len(reference_instances) != len(steps):
-        return None
-    if [step.get("task_type") for step in steps if isinstance(step, Mapping)] != [
-        instance.get("task_type")
-        for instance in reference_instances
-        if isinstance(instance, Mapping)
-    ]:
-        return None
-
-    missing_index = missing_indices[0]
-    reference_instance = reference_instances[missing_index]
-    if not isinstance(reference_instance, Mapping):
-        return None
-    params = reference_instance.get("params")
-    if not isinstance(params, Mapping):
-        return None
-    target_role = params.get("target_role")
-    target_uid = reference.role_bindings.get(str(target_role))
-    if not target_uid or target_uid not in index.by_uid:
-        return None
-
-    patched = deepcopy(dict(value))
-    patched["steps"][missing_index]["target"] = _uid_selector(target_uid)
-    try:
-        completed_intent = validate_instruction_intent(patched)
-        completed_grounding = _ground_intent(
-            task_id,
-            instruction,
-            completed_intent,
-            index,
-        )
-    except (TypeError, ValueError):
-        return None
-    if not _same_grounded_semantics(completed_grounding, reference):
-        return None
-    return (
-        completed_intent,
-        completed_grounding,
-        (f"steps[{missing_index}].target",),
-    )
-
-
-def _uid_selector(uid: str) -> dict[str, Any]:
-    """Return the canonical selector for one scene-authoritative UID."""
-    return {
-        "kind": "selector",
-        "step_id": "",
-        "uid": uid,
-        "category": "none",
-        "color": "none",
-        "side": "none",
-        "quantifier": "one",
-        "count": 0,
-    }
-
-
-def _same_grounded_semantics(
-    candidate: GroundedTaskSpec,
-    reference: GroundedTaskSpec,
-) -> bool:
-    """Compare task meaning after replacing symbolic roles with scene UIDs."""
-
-    def normalized_steps(value: GroundedTaskSpec) -> list[dict[str, Any]]:
-        result = []
-        for instance in value.task_spec.get("task_instances", []):
-            if not isinstance(instance, Mapping):
-                return []
-            params = deepcopy(dict(instance.get("params", {})))
-            for key, parameter in list(params.items()):
-                if key.endswith("_role") and isinstance(parameter, str):
-                    params[key] = value.role_bindings.get(parameter, parameter)
-                elif key.endswith("_roles") and isinstance(parameter, list):
-                    params[key] = [
-                        value.role_bindings.get(str(role), str(role))
-                        for role in parameter
-                    ]
-            result.append(
-                {
-                    "task_type": instance.get("task_type"),
-                    "params": params,
-                }
-            )
-        return result
-
-    return normalized_steps(candidate) == normalized_steps(reference)
 
 
 def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -721,6 +459,14 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{context}.target_setting must be an integer.")
         step["layout"] = _choice(step["layout"], _LAYOUTS, f"{context}.layout")
         step["axis"] = _choice(step["axis"], _AXES, f"{context}.axis")
+        step["direction"] = _choice(
+            step["direction"], _DIRECTIONS, f"{context}.direction"
+        )
+        step["terminal_behavior"] = _choice(
+            step["terminal_behavior"],
+            _TERMINAL_BEHAVIORS,
+            f"{context}.terminal_behavior",
+        )
         raw_depends = step["depends_on"]
         if not isinstance(raw_depends, Sequence) or isinstance(
             raw_depends, (str, bytes)
@@ -766,10 +512,16 @@ def _ground_intent(
     task_id: str,
     instruction: str,
     intent: Mapping[str, Any],
-    index: _SceneIndex,
+    inventory: SceneInventory,
+    scene_bindings: Mapping[str, Sequence[str]],
 ) -> GroundedTaskSpec:
-    builder = _TaskBuilder(task_id, instruction, index)
-    objects_by_step: dict[str, list[_Entity]] = {}
+    builder = GroundedTaskBuilder(
+        task_id,
+        instruction,
+        inventory,
+        planner="structured_llm_v2",
+    )
+    objects_by_step: dict[str, list[SceneEntity]] = {}
     task_ids_by_step: dict[str, list[str]] = {}
     # The intent validator restricts object references to preceding instruction
     # steps.  Preserve the explicit dependency DAG for independent operations,
@@ -778,23 +530,27 @@ def _ground_intent(
         step_id = str(step["id"])
         objects = _resolve_reference(
             step["object"],
-            index,
+            inventory,
             objects_by_step,
             context=f"instruction step {step_id!r} object",
+            reference_id=f"{step_id}.object",
+            scene_bindings=scene_bindings,
         )
-        _validate_compatibility(str(step["task_type"]), objects)
+        validate_source_compatibility(str(step["task_type"]), objects)
         target_objects = _resolve_reference(
             step["target"],
-            index,
+            inventory,
             objects_by_step,
             context=f"instruction step {step_id!r} target",
+            reference_id=f"{step_id}.target",
+            scene_bindings=scene_bindings,
             allow_none=True,
             exclude={item.uid for item in objects},
             allow_support=True,
         )
         if len(target_objects) > 1:
             raise ValueError(f"Instruction step {step_id!r} target is ambiguous.")
-        _validate_target_compatibility(
+        validate_target_compatibility(
             str(step["task_type"]),
             target_objects[0] if target_objects else None,
             relation=str(step["relation"]),
@@ -826,10 +582,10 @@ def _ground_intent(
 
 
 def _emit_step(
-    builder: _TaskBuilder,
+    builder: GroundedTaskBuilder,
     step: Mapping[str, Any],
-    objects: Sequence[_Entity],
-    target: _Entity | None,
+    objects: Sequence[SceneEntity],
+    target: SceneEntity | None,
     dependencies: Sequence[str],
 ) -> list[str]:
     task_type = str(step["task_type"])
@@ -874,7 +630,7 @@ def _emit_step(
                 # The only unambiguous implicit placement is onto the unique
                 # support surface.  A movable target could mean on/inside/
                 # beside and must be stated rather than guessed.
-                if target is None or target.category != "table":
+                if target is None or target not in builder.inventory.support:
                     raise ValueError(
                         "E1 omitted relation is only valid for a unique table "
                         "support target."
@@ -907,7 +663,14 @@ def _emit_step(
                 }
             )
         elif task_type == "E5":
-            params.update({"direction": "up", "terminal_behavior": "hold"})
+            params.update(
+                {
+                    "direction": step["direction"],
+                    "terminal_behavior": step["terminal_behavior"],
+                    "relation": step["relation"],
+                    "relation_frame": "robot",
+                }
+            )
         elif task_type in {"E6", "E7"}:
             params["target_state"] = step["target_state"]
         elif task_type == "E8":
@@ -928,14 +691,16 @@ def _emit_step(
 
 def _resolve_reference(
     selector: Mapping[str, Any],
-    index: _SceneIndex,
-    objects_by_step: Mapping[str, Sequence[_Entity]],
+    inventory: SceneInventory,
+    objects_by_step: Mapping[str, Sequence[SceneEntity]],
     *,
     context: str,
+    reference_id: str,
+    scene_bindings: Mapping[str, Sequence[str]],
     allow_none: bool = False,
     exclude: set[str] | None = None,
     allow_support: bool = False,
-) -> list[_Entity]:
+) -> list[SceneEntity]:
     kind = str(selector["kind"])
     if kind == "none":
         if allow_none:
@@ -957,66 +722,23 @@ def _resolve_reference(
             )
         return objects
 
+    if reference_id not in scene_bindings:
+        raise ValueError(f"{context} has no verified scene-grounding binding.")
     excluded = exclude or set()
-    source_pool = index.entities if allow_support else index.movable
-    pool = [entity for entity in source_pool if entity.uid not in excluded]
-    uid = str(selector["uid"])
-    category = str(selector["category"])
-    color = str(selector["color"])
-    if uid:
-        if uid not in index.by_uid:
-            raise ValueError(f"{context} references unknown scene UID {uid!r}.")
-        bound = index.by_uid[uid]
-        if bound.uid in excluded:
-            pool = []
-        else:
-            if category != "none" and bound.category != category:
-                raise ValueError(
-                    f"{context} selector conflicts with UID {uid!r}: "
-                    f"category is {bound.category!r}, not {category!r}."
-                )
-            if color != "none" and bound.color != color:
-                raise ValueError(
-                    f"{context} selector conflicts with UID {uid!r}: "
-                    f"color is {bound.color!r}, not {color!r}."
-                )
-    # Apply every non-UID constraint to the complete candidate set first.  An
-    # explicit UID is a conjunctive assertion, not permission to redefine
-    # "leftmost" after narrowing the set to that UID.
-    if category != "none":
-        pool = [entity for entity in pool if entity.category == category]
-    if color != "none":
-        pool = [entity for entity in pool if entity.color == color]
-    side = str(selector["side"])
-    if side == "left":
-        pool = [entity for entity in pool if index.left_score(entity) > 0.0]
-    elif side == "right":
-        pool = [entity for entity in pool if index.left_score(entity) < 0.0]
-    elif side in {"leftmost", "rightmost"} and pool:
-        scores = [index.left_score(entity) for entity in pool]
-        extreme = max(scores) if side == "leftmost" else min(scores)
-        tied = [entity for entity in pool if index.left_score(entity) == extreme]
-        if len(tied) != 1:
-            raise ValueError(f"{context} has an ambiguous {side} object selector.")
-        pool = tied
-    if uid:
-        pool = [entity for entity in pool if entity.uid == uid]
-        if not pool:
-            if uid in excluded:
-                raise ValueError(f"{context} selector references excluded UID {uid!r}.")
-            if side in {"left", "right"}:
-                raise ValueError(
-                    f"{context} selector conflicts with UID {uid!r} in "
-                    f"robot-relative {side} side."
-                )
-            if side in {"leftmost", "rightmost"}:
-                raise ValueError(
-                    f"{context} selector conflicts with UID {uid!r}: it is not "
-                    f"the unique robot-relative {side} candidate."
-                )
+    source_uids = (
+        {entity.uid for entity in inventory.entities}
+        if allow_support
+        else {entity.uid for entity in inventory.interactive}
+    )
+    resolved_uids = tuple(str(uid) for uid in scene_bindings[reference_id])
+    pool = [
+        inventory.by_uid[uid]
+        for uid in resolved_uids
+        if uid in source_uids and uid not in excluded
+    ]
     pool = sorted(pool, key=lambda item: item.uid)
     if not pool:
-        raise ValueError(f"{context} did not match any scene object.")
+        raise ValueError(f"{context} did not bind an eligible scene object.")
     quantifier = str(selector["quantifier"])
     count = int(selector["count"])
     if quantifier == "one" and len(pool) != 1:
@@ -1045,12 +767,9 @@ def _validate_selector(value: Any, context: str) -> dict[str, Any]:
     selector = deepcopy(dict(value))
     selector["kind"] = _choice(selector["kind"], _SELECTOR_KINDS, f"{context}.kind")
     selector["step_id"] = _selector_string(selector["step_id"], f"{context}.step_id")
-    selector["uid"] = _selector_string(selector["uid"], f"{context}.uid")
-    selector["category"] = _canonical_category(
-        selector["category"], f"{context}.category"
+    selector["reference"] = _selector_string(
+        selector["reference"], f"{context}.reference"
     )
-    selector["color"] = _canonical_color(selector["color"], f"{context}.color")
-    selector["side"] = _canonical_side(selector["side"], f"{context}.side")
     selector["quantifier"] = _canonical_quantifier(
         selector["quantifier"], f"{context}.quantifier"
     )
@@ -1059,26 +778,12 @@ def _validate_selector(value: Any, context: str) -> dict[str, Any]:
     if selector["count"] < 0:
         raise ValueError(f"{context}.count must be non-negative.")
     kind = selector["kind"]
-    if kind == "selector" and not any(
-        (
-            selector["uid"],
-            selector["category"] != "none",
-            selector["color"] != "none",
-            selector["side"] != "none",
-        )
-    ):
-        raise ValueError(f"{context} selector has no identifying constraint.")
+    if kind == "scene_ref" and not selector["reference"]:
+        raise ValueError(f"{context} scene_ref requires a reference.")
     if kind == "step_result":
         if not selector["step_id"]:
             raise ValueError(f"{context} step_result requires step_id.")
-        if any(
-            (
-                selector["uid"],
-                selector["category"] != "none",
-                selector["color"] != "none",
-                selector["side"] != "none",
-            )
-        ):
+        if selector["reference"]:
             raise ValueError(
                 f"{context} step_result may identify only a prior step_id."
             )
@@ -1086,17 +791,9 @@ def _validate_selector(value: Any, context: str) -> dict[str, Any]:
             raise ValueError(
                 f"{context} step_result requires quantifier=one and count=0."
             )
-    if kind == "selector" and selector["step_id"]:
-        raise ValueError(f"{context} selector cannot carry step_id.")
-    if kind == "none" and any(
-        (
-            selector["step_id"],
-            selector["uid"],
-            selector["category"] != "none",
-            selector["color"] != "none",
-            selector["side"] != "none",
-        )
-    ):
+    if kind == "scene_ref" and selector["step_id"]:
+        raise ValueError(f"{context} scene_ref cannot carry step_id.")
+    if kind == "none" and (selector["step_id"] or selector["reference"]):
         raise ValueError(f"{context} kind=none cannot carry constraints.")
     if kind == "none" and (selector["quantifier"] != "one" or selector["count"] != 0):
         raise ValueError(f"{context} kind=none requires quantifier=one and count=0.")
@@ -1112,7 +809,7 @@ def _validate_selector(value: Any, context: str) -> dict[str, Any]:
 def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     task_type = str(step["task_type"])
     target_kind = str(step["target"]["kind"])
-    if task_type not in {"E1", "E3"} and step["relation"] != "none":
+    if task_type not in {"E1", "E3", "E5"} and step["relation"] != "none":
         raise ValueError(f"{context} {task_type} does not accept relation.")
     if task_type == "E3" and step["relation"] != "above":
         raise ValueError(f"{context} E3 relation must be above.")
@@ -1148,8 +845,32 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
             )
         if step["relation"] == "none" and task_type == "E3":
             raise ValueError(f"{context} {task_type} requires a symbolic relation.")
+    elif task_type == "E5":
+        direction = str(step["direction"])
+        terminal = str(step["terminal_behavior"])
+        if terminal not in _TERMINAL_BEHAVIORS - {"none"}:
+            raise ValueError(f"{context} E5 requires terminal_behavior hold/place.")
+        if target_kind == "none":
+            if step["relation"] != "none":
+                raise ValueError(f"{context} E5 relation requires a target selector.")
+            if direction == "none" and terminal != "place":
+                raise ValueError(
+                    f"{context} E5 requires a direction or target relation."
+                )
+        else:
+            if step["relation"] == "none":
+                raise ValueError(f"{context} E5 target requires a relation.")
+            if direction != "none":
+                raise ValueError(
+                    f"{context} E5 target relation cannot also carry direction."
+                )
     elif target_kind != "none":
         raise ValueError(f"{context} {task_type} does not accept a target selector.")
+    if task_type != "E5":
+        if step["direction"] != "none":
+            raise ValueError(f"{context} direction is only valid for E5.")
+        if step["terminal_behavior"] != "none":
+            raise ValueError(f"{context} terminal_behavior is only valid for E5.")
     if task_type == "E4":
         transfer = str(step["transfer_arm"])
         receive = str(step["receive_arm"])
@@ -1176,119 +897,16 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
         raise ValueError(f"{context} only E1 supports layout=line.")
 
 
-def _validate_compatibility(task_type: str, objects: Sequence[_Entity]) -> None:
-    allowed_categories: dict[str, set[str]] = {
-        "E3": {"can", "cup", "bottle", "bowl", "pourable_container"},
-        "E5": {"tray", "basket", "bowl", "bucket"},
-        "E6": {"drawer", "tray"},
-        "E7": {"drawer", "tray"},
-        "E8": {"knob"},
-        "E9": {"button"},
-    }
-    allowed = allowed_categories.get(task_type)
-    if task_type in {"E2", "E4"}:
-        # These two operations are defined by grasp/orient or handover
-        # affordances rather than a closed object taxonomy.  When a scene
-        # export omits explicit affordances, reject only known non-graspable
-        # controls/support surfaces and let the runtime capability preflight
-        # make the final decision.
-        invalid_categories = {"button", "drawer", "knob", "table"}
-        invalid = [
-            entity.uid for entity in objects if entity.category in invalid_categories
-        ]
-        if invalid:
-            raise ValueError(
-                f"{task_type} is incompatible with non-graspable scene objects "
-                f"{invalid}."
-            )
-    elif allowed is not None:
-        invalid = [entity.uid for entity in objects if entity.category not in allowed]
-        if invalid:
-            raise ValueError(
-                f"{task_type} is incompatible with scene objects {invalid}; "
-                f"allowed categories are {sorted(allowed)}."
-            )
-    elif task_type == "E1":
-        invalid = [
-            entity.uid
-            for entity in objects
-            if entity.category in {"button", "drawer", "knob", "table"}
-        ]
-        if invalid:
-            raise ValueError(
-                f"E1 is incompatible with non-graspable scene objects {invalid}."
-            )
-    required_affordances = set(_AFFORDANCES.get(task_type, ()))
-    for entity in objects:
-        # Exported Prompt2Scene objects historically omit affordances.  In that
-        # case category compatibility is the available evidence; when a scene
-        # explicitly reports affordances, enforce them rather than guessing.
-        if entity.affordances:
-            missing = required_affordances - set(entity.affordances)
-            if missing:
-                raise ValueError(
-                    f"{task_type} is incompatible with scene object {entity.uid!r}; "
-                    f"missing affordances {sorted(missing)}."
-                )
-
-
-def _validate_target_compatibility(
-    task_type: str,
-    target: _Entity | None,
-    *,
-    relation: str,
-) -> None:
-    """Reject target selectors that cannot satisfy the requested E semantics."""
-    if task_type == "E3":
-        if target is None:
-            raise ValueError("E3 requires a target container.")
-        containers = {
-            "basket",
-            "bowl",
-            "bucket",
-            "can",
-            "cup",
-            "bottle",
-            "pourable_container",
-            "tray",
-        }
-        if target.category not in containers:
-            raise ValueError(f"E3 target {target.uid!r} is not a compatible container.")
-    if task_type == "E1" and relation == "inside":
-        if target is None:
-            raise ValueError("E1 inside relation requires a target container.")
-        containers = {"basket", "bowl", "bucket", "cup", "drawer", "tray"}
-        if target.category not in containers:
-            raise ValueError(
-                f"E1 inside target {target.uid!r} is not a compatible container."
-            )
-
-
-def _instruction_prompt(instruction: str, index: _SceneIndex) -> str:
-    inventory = [
-        {
-            "uid": entity.uid,
-            "role": entity.role,
-            "category": entity.category,
-            "color": entity.color,
-            "description": entity.description,
-            "affordances": sorted(entity.affordances),
-            "attributes": _prompt_attributes(entity.attributes),
-        }
-        for entity in index.entities
-    ]
+def _instruction_prompt(instruction: str) -> str:
     return (
         "Convert the user's explicit L1-L3 instruction into typed E1-E9 task "
         "intent. Understand synonyms, ellipsis, and pronouns such as it/其, but "
         "do not invent missing objects. Use step_result for cross-step pronouns. "
-        "Object left/right is robot-relative; arm names are robot body sides. "
-        "Prefer an exact inventory UID for a named object. When UID alone "
-        "identifies it, set category, color, and side to 'none'; selector fields "
-        "are conjunctive constraints, not descriptive metadata. "
-        "Use side=left/right for a robot half-space constraint and "
-        "leftmost/rightmost only for an ordinal request. Emit no AtomicAction, "
-        "UID not present in the inventory, coordinates, poses, paths, or "
-        "reasoning. Encode explicit ordering with depends_on; same-action set "
+        "Object directions are robot-relative; arm names are robot body sides. "
+        "Preserve each concrete object or target phrase from the instruction as "
+        "an open scene_ref.reference. Do not classify it or emit a scene UID. "
+        "Emit no AtomicAction, category label, affordance, coordinates, poses, "
+        "paths, or reasoning. Encode explicit ordering with depends_on; same-action set "
         "members may remain independent. Use empty strings and 'none' for "
         "inapplicable required fields. A request to retract the transfer arm "
         "immediately after an E4 handover is a mandatory runtime retreat/home "
@@ -1296,18 +914,24 @@ def _instruction_prompt(instruction: str, index: _SceneIndex) -> str:
         "not emit a separate task step for it. The exact output keys are steps -> id, "
         "task_type, object, target, relation, required_arm, transfer_arm, "
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
-        "axis, depends_on; each selector has kind, step_id, uid, category, "
-        "color, side, quantifier, count.\n\n"
+        "axis, direction, terminal_behavior, depends_on; each selector has kind, "
+        "step_id, reference, quantifier, count.\n\n"
         f"Instruction:\n{instruction}\n\n"
-        f"Scene inventory:\n{json.dumps(inventory, ensure_ascii=False, sort_keys=True)}\n\n"
         f"E1-E9 catalog:\n{json.dumps(_intent_capability_catalog(), ensure_ascii=False, sort_keys=True)}\n\n"
         "Shape-only complete JSON example (do not copy its step count or values; "
         "copy every key, including keys whose value is none/empty/0):\n"
         f"{json.dumps(_instruction_shape_example(), ensure_ascii=False, sort_keys=True)}\n\n"
         "Selector kind rules (these are not extra output fields):\n"
         f"{_instruction_selector_rules()}\n\n"
-        "Final checklist: every step has all 14 step keys; every object and target "
-        "has all 8 selector keys. For an inapplicable field use the canonical "
+        "For E5, use target+relation for moving an object relative to another "
+        "object, or direction for a small robot-relative move. A dual-arm pick, "
+        "lift, raise, or hold request without another target uses direction=up "
+        "and terminal_behavior=hold. Use hold unless the instruction explicitly "
+        "says to put/release the object. For pick "
+        "and release at the original location, use direction=none and place. A dual-arm "
+        "pick/move/transport request is E5, not E1. Final checklist: every step "
+        "has all 16 step keys; every object and target "
+        "has all 5 selector keys. For an inapplicable field use the canonical "
         "default shown in the example, never omit the field. E4 must explicitly "
         "state transfer_arm and receive_arm. E1/E3 must explicitly state target "
         "and relation (except E1 layout=line)."
@@ -1317,22 +941,16 @@ def _instruction_prompt(instruction: str, index: _SceneIndex) -> str:
 def _instruction_shape_example() -> dict[str, Any]:
     """Return a compact field-complete example for providers with weak schemas."""
     selector = {
-        "kind": "selector",
+        "kind": "scene_ref",
         "step_id": "",
-        "uid": "",
-        "category": "can",
-        "color": "purple",
-        "side": "none",
+        "reference": "紫色易拉罐",
         "quantifier": "one",
         "count": 0,
     }
     empty_selector = {
         "kind": "none",
         "step_id": "",
-        "uid": "",
-        "category": "none",
-        "color": "none",
-        "side": "none",
+        "reference": "",
         "quantifier": "one",
         "count": 0,
     }
@@ -1352,6 +970,8 @@ def _instruction_shape_example() -> dict[str, Any]:
                 "target_setting": 0,
                 "layout": "none",
                 "axis": "none",
+                "direction": "none",
+                "terminal_behavior": "none",
                 "depends_on": [],
             }
         ]
@@ -1363,23 +983,19 @@ def _instruction_selector_rules() -> str:
     step_result = {
         "kind": "step_result",
         "step_id": "step_1",
-        "uid": "",
-        "category": "none",
-        "color": "none",
-        "side": "none",
+        "reference": "",
         "quantifier": "one",
         "count": 0,
     }
     return (
-        "- kind=none: step_id and uid are empty strings; category, color, and "
-        "side are 'none'; quantifier='one'; count=0.\n"
-        "- kind=selector: step_id is an empty string; use at least one of uid, "
-        "category, color, or side to identify scene objects.\n"
+        "- kind=none: step_id and reference are empty strings; "
+        "quantifier='one'; count=0.\n"
+        "- kind=scene_ref: step_id is empty and reference preserves the concrete "
+        "object phrase from the user's instruction.\n"
         "- kind=step_result: use it only for a pronoun that means exactly one "
         "object from an earlier instruction step. Set step_id to that prior "
-        "step ID and set uid='', category='none', color='none', side='none', "
-        "quantifier='one', count=0. Do not copy the prior object's UID, "
-        "category, color, or side into this selector. Replace step_1 in this "
+        "step ID and set reference='', quantifier='one', count=0. Do not copy "
+        "the prior object's phrase into this selector. Replace step_1 in this "
         f"complete shape with the actual prior step ID: {json.dumps(step_result, sort_keys=True)}\n"
         "A step_result may identify only a prior step_id; it cannot carry any "
         "other object constraint."
@@ -1401,27 +1017,6 @@ def _instruction_repair_guidance(error: Exception) -> str:
     )
 
 
-def _prompt_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep descriptive scalar attributes while redacting nested geometry."""
-    result: dict[str, Any] = {}
-    for key, child in value.items():
-        name = str(key)
-        normalized_name = name.strip().lower().replace("-", "_")
-        if normalized_name in _PROMPT_REDACTED_KEYS:
-            continue
-        if isinstance(child, Mapping):
-            nested = _prompt_attributes(child)
-            if nested:
-                result[name] = nested
-        elif isinstance(child, (str, int, float, bool)) and not isinstance(
-            child, complex
-        ):
-            result[name] = child
-        # Numeric sequences are intentionally omitted: without a schema they
-        # are too easy to mistake for a coordinate or pose vector.
-    return result
-
-
 def _intent_capability_catalog() -> dict[str, dict[str, Any]]:
     """Return the LLM's thin, import-safe E1-E9 capability view.
 
@@ -1432,10 +1027,10 @@ def _intent_capability_catalog() -> dict[str, dict[str, Any]]:
     """
     return {
         task_type: {
-            "semantics": str(definition["semantics"]),
+            "semantics": contract.semantics,
             "applicable_fields": sorted(_INTENT_TASK_FIELD_REGISTRY[task_type]),
         }
-        for task_type, definition in _E_DEFINITIONS.items()
+        for task_type, contract in TASK_CONTRACTS.items()
     }
 
 
@@ -1490,7 +1085,7 @@ def _default_instruction_caller(
         [
             SystemMessage(
                 content=(
-                    "Return only the requested structured task intent. Never "
+                    "Return only the requested structured JSON response. Never "
                     "return reasoning, coordinates, or AtomicAction nodes."
                 )
             ),
@@ -1539,61 +1134,20 @@ def _selector_string(value: Any, context: str) -> str:
     return value.strip()
 
 
-def _canonical_value(
-    value: Any,
-    aliases: Mapping[str, str],
-    allowed: set[str] | frozenset[str],
-    context: str,
-) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{context} must be a string.")
-    text = value.strip()
-    canonical = aliases.get(text.lower(), text)
-    if canonical not in allowed:
-        raise ValueError(f"{context} must be one of {sorted(allowed)}.")
-    return canonical
-
-
-def _canonical_color(value: Any, context: str) -> str:
-    return _canonical_value(value, _COLOR_ALIASES, {"none", *_COLORS}, context)
-
-
-def _canonical_category(value: Any, context: str) -> str:
-    return _canonical_value(
-        value,
-        _CATEGORY_ALIASES,
-        {"none", *_CATEGORIES, "pourable_container"},
-        context,
-    )
-
-
-def _canonical_side(value: Any, context: str) -> str:
-    return _canonical_value(value, _SIDE_ALIASES, _SIDES, context)
-
-
 def _canonical_quantifier(value: Any, context: str) -> str:
-    return _canonical_value(value, _QUANTIFIER_ALIASES, _QUANTIFIERS, context)
+    return _choice(value, _QUANTIFIERS, context)
 
 
 def _canonical_arm(value: Any, context: str) -> str:
-    return _canonical_value(value, _ARM_ALIASES, _ARMS, context)
+    return _choice(value, _ARMS, context)
 
 
 def _canonical_relation(value: Any, context: str) -> str:
-    return _canonical_value(value, _RELATION_ALIASES, _RELATIONS, context)
+    return _choice(value, _RELATIONS, context)
 
 
 def _canonical_orientation(value: Any, context: str) -> str:
-    aliases = {
-        "upright": "upright",
-        "竖直": "upright",
-        "直立": "upright",
-        "扶正": "upright",
-        "preserve": "preserve",
-        "保持": "preserve",
-        "none": "preserve",
-    }
-    return _canonical_value(value, aliases, _ORIENTATIONS, context)
+    return _choice(value, _ORIENTATIONS, context)
 
 
 def _nonempty(value: Any, context: str) -> str:

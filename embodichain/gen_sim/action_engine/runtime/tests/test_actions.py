@@ -86,6 +86,12 @@ class _PlannerRobot:
     def get_joint_ids(self, *, name: str) -> list[int]:
         return list(self._ids[name])
 
+    def get_control_part_base_pose(self, *, name: str, to_matrix: bool) -> torch.Tensor:
+        assert to_matrix
+        pose = torch.eye(4).repeat(2, 1, 1)
+        pose[:, 1, 3] = 0.3 if name == "physical_left_arm" else -0.3
+        return pose
+
 
 def _planner_env(
     *,
@@ -178,6 +184,10 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
     assert single.motion_policy.planner == "curobo"
     assert single.motion_policy.strategy == "motion_gen"
     assert coordinated.motion_policy.strategy == "ik_interp"
+    assert torch.allclose(
+        coordinated.skill_options.left_to_right_arm_direction,
+        torch.tensor([0.0, -1.0, 0.0]),
+    )
     assert hand.motion_policy.strategy == "ik_interp"
 
 

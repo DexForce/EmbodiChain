@@ -42,13 +42,25 @@ Levels classify how the task is specified, not action count:
 - L4: an abstract instruction that requires memory, visual semantics, pattern,
   logic, common-sense, or constraint reasoning.
 
+Free-language L1-L3 generation uses two structured model calls. The first sees
+only the instruction and E1-E9 catalog and emits typed steps whose scene
+selectors are open natural-language references. The second sees those
+references plus a coordinate-free semantic inventory and may return only
+existing scene UIDs, status, and confidence. Local validation enforces complete
+request coverage, candidate roles, cardinality, confidence, and non-self
+targets; unresolved or ambiguous references fail instead of being guessed.
+The optional `deterministic` instruction parser is an explicitly selected,
+finite-vocabulary offline compatibility adapter. It is not imported by either
+LLM stage and is never used as an implicit fallback.
+
 ### SceneRequirements
 
 `SceneRequirements` is the JSON hand-off to the external Scene Engine. It
 declares object roles, counts, categories, affordances, initial states, spatial
 constraints, camera requirements, and distractors. Scene results are never
-silently repaired: a missing UID, affordance, initial state, or required camera
-invalidates the task instance.
+silently repaired. Structural contradictions and explicit affordance
+contradictions invalidate the task instance; an absent affordance declaration
+remains unknown and is deferred to runtime physical validation.
 
 ### SeedGraph
 
@@ -105,6 +117,11 @@ task mappings are:
 - `orient_object -> E2`
 - `coordinated_transport -> E5`
 - every member of `build_stack` and `arrange_line` -> one E1 instance
+
+E5 uses `coordinated_transport` only as the semantic task-group operator. Its
+motion graph contains one `CoordinatedPickment`; a `place` terminal behavior
+adds synchronized left/right `MoveJoints(gripper_open)` nodes. The executor
+clears coordinated hold state only after both grippers are observed open.
 
 The online path first extracts auditable visual facts from multi-view RGB and,
 when available, depth and camera calibration. Facts contain only known UIDs,

@@ -56,7 +56,6 @@ _SCENE_EXPORT_FORMAT = "embodichain.scene-export/v1"
 _SCENE_SECTIONS = ("background", "rigid_object", "articulation")
 _UID_SUFFIX_RE = re.compile(r"_0$")
 _UID_INVALID_RE = re.compile(r"[^0-9A-Za-z_.-]+")
-_CONTAINER_HINTS = ("basket", "bin", "bowl", "box", "container", "drawer", "tray")
 
 _GENERATION_DEFAULTS = generation_defaults()
 _SCENE_DEFAULTS = _GENERATION_DEFAULTS["scene"]
@@ -482,7 +481,6 @@ def _planner_object(
     role: str,
 ) -> dict[str, Any]:
     description = str(config.get("description", "")).strip()
-    text = f"{config['uid']} {description}".lower()
     shape = deepcopy(dict(config.get("shape", {})))
     raw_attributes = config.get("attributes", config.get("attrs", {}))
     if not isinstance(raw_attributes, Mapping):
@@ -508,7 +506,6 @@ def _planner_object(
         "init_pos": list(config["init_pos"]),
         "init_rot": list(config["init_rot"]),
         "body_scale": list(config.get("body_scale", [1.0, 1.0, 1.0])),
-        "is_container_like": any(hint in text for hint in _CONTAINER_HINTS),
         "category": config.get("category", config.get("object_category", "")),
         "color": config.get("color", raw_attributes.get("color")),
         "attributes": deepcopy(dict(raw_attributes)),

@@ -1,0 +1,258 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Import-safe executable contracts for the canonical E1-E9 task protocol."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any
+
+__all__ = [
+    "PLACEMENT_RELATIONS",
+    "RELATIONS",
+    "TASK_CONTRACTS",
+    "TERMINAL_BEHAVIORS",
+    "TRANSPORT_DIRECTIONS",
+    "TaskContract",
+    "task_contract",
+    "task_success_type",
+]
+
+
+# These are protocol values consumed by executable planners. They are not a
+# vocabulary for matching words in user instructions.
+RELATIONS = frozenset(
+    {
+        "none",
+        "on",
+        "inside",
+        "above",
+        "left_of",
+        "right_of",
+        "front_of",
+        "behind",
+        "front_left_of",
+        "front_right_of",
+        "back_left_of",
+        "back_right_of",
+    }
+)
+PLACEMENT_RELATIONS = RELATIONS - {"none", "above"}
+TRANSPORT_DIRECTIONS = frozenset(
+    {
+        "none",
+        "world_x",
+        "world_y",
+        "front",
+        "back",
+        "left",
+        "right",
+        "front_left",
+        "front_right",
+        "back_left",
+        "back_right",
+        "up",
+        "down",
+    }
+)
+TERMINAL_BEHAVIORS = frozenset({"none", "hold", "place"})
+
+
+@dataclass(frozen=True, slots=True)
+class TaskContract:
+    """One language-neutral E-task contract shared across the engine."""
+
+    task_type: str
+    semantics: str
+    core_actions: tuple[str, ...]
+    applicable_intent_fields: frozenset[str]
+    source_structure: str
+    required_affordances: frozenset[str]
+    example_category: str
+    instruction_template: str
+    success_type: str
+    scene_affordances: frozenset[str]
+
+
+def _contract(
+    task_type: str,
+    semantics: str,
+    core_actions: tuple[str, ...],
+    applicable_intent_fields: frozenset[str],
+    source_structure: str,
+    required_affordances: frozenset[str],
+    example_category: str,
+    instruction_template: str,
+    success_type: str,
+    *,
+    scene_affordances: frozenset[str] | None = None,
+) -> TaskContract:
+    return TaskContract(
+        task_type=task_type,
+        semantics=semantics,
+        core_actions=core_actions,
+        applicable_intent_fields=applicable_intent_fields,
+        source_structure=source_structure,
+        required_affordances=required_affordances,
+        example_category=example_category,
+        instruction_template=instruction_template,
+        success_type=success_type,
+        scene_affordances=scene_affordances or required_affordances,
+    )
+
+
+TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
+    {
+        "E1": _contract(
+            "E1",
+            "Pick, move, and place one object at a symbolic relation.",
+            ("PickUp", "MoveHeldObject", "Place"),
+            frozenset(
+                {
+                    "target",
+                    "relation",
+                    "required_arm",
+                    "orientation_goal",
+                    "layout",
+                    "axis",
+                }
+            ),
+            "rigid_object",
+            frozenset({"graspable", "placeable"}),
+            "can",
+            "把{object}放到{target}上。",
+            "semantic_goal",
+        ),
+        "E2": _contract(
+            "E2",
+            "Make one fallen object upright and place it stably.",
+            ("PickUp", "MoveHeldObject", "Place"),
+            frozenset({"required_arm", "orientation_goal"}),
+            "rigid_object",
+            frozenset({"graspable", "orientable"}),
+            "can",
+            "扶正{object}。",
+            "object_upright",
+        ),
+        "E3": _contract(
+            "E3",
+            "Pour from a held source container into a target container.",
+            ("Pour",),
+            frozenset({"target", "relation", "required_arm"}),
+            "rigid_object",
+            frozenset({"graspable", "pourable"}),
+            "pourable_container",
+            "把{source}中的内容倒入{target}。",
+            "poured",
+        ),
+        "E4": _contract(
+            "E4",
+            "Transfer one held object from one arm to the other.",
+            ("PickUp", "MoveHeldObject", "HandOver"),
+            frozenset({"transfer_arm", "receive_arm", "orientation_goal"}),
+            "rigid_object",
+            frozenset({"graspable", "handover"}),
+            "cup",
+            "把{object}从左手交接到右手。",
+            "handover_complete",
+        ),
+        "E5": _contract(
+            "E5",
+            "Use both arms to pick, move, and optionally release one shared rigid object.",
+            ("CoordinatedPickment",),
+            frozenset({"target", "relation", "direction", "terminal_behavior"}),
+            "rigid_object",
+            frozenset({"dual_graspable"}),
+            "tray",
+            "双臂共同拿起{object}。",
+            "held_by_both_grippers",
+            scene_affordances=frozenset({"dual_graspable", "rigid"}),
+        ),
+        "E6": _contract(
+            "E6",
+            "Pull an articulated part to its requested state.",
+            ("PullArticulatedPart",),
+            frozenset({"required_arm", "target_state"}),
+            "articulation",
+            frozenset({"pullable"}),
+            "drawer",
+            "拉开{object}。",
+            "articulation_joint_near",
+            scene_affordances=frozenset({"articulated", "pullable"}),
+        ),
+        "E7": _contract(
+            "E7",
+            "Push an articulated part to its requested state.",
+            ("PushArticulatedPart",),
+            frozenset({"required_arm", "target_state"}),
+            "articulation",
+            frozenset({"pushable"}),
+            "drawer",
+            "推闭{object}。",
+            "articulation_joint_near",
+            scene_affordances=frozenset({"articulated", "pushable"}),
+        ),
+        "E8": _contract(
+            "E8",
+            "Turn one knob to a requested setting.",
+            ("TurnKnob",),
+            frozenset({"required_arm", "target_setting"}),
+            "articulation",
+            frozenset({"turnable"}),
+            "knob",
+            "把{object}旋转到目标档位。",
+            "articulation_joint_near",
+        ),
+        "E9": _contract(
+            "E9",
+            "Press one button until its requested terminal state.",
+            ("Press",),
+            frozenset({"required_arm", "target_state"}),
+            "articulation",
+            frozenset({"pressable"}),
+            "button",
+            "按下{object}。",
+            "pressed",
+        ),
+    }
+)
+
+
+def task_contract(task_type: str) -> TaskContract:
+    """Return the canonical contract or reject an unknown E-task type."""
+    try:
+        return TASK_CONTRACTS[str(task_type)]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported task type {task_type!r}.") from exc
+
+
+def task_success_type(
+    task_type: str,
+    params: Mapping[str, Any] | None = None,
+) -> str:
+    """Resolve a TaskSpec success type, including E5's terminal behavior."""
+    contract = task_contract(task_type)
+    if contract.task_type != "E5":
+        return contract.success_type
+    terminal_behavior = str((params or {}).get("terminal_behavior", "hold"))
+    if terminal_behavior == "hold":
+        return "held_by_both_grippers"
+    if terminal_behavior == "place":
+        return "semantic_goal"
+    raise ValueError("E5 terminal_behavior must be 'hold' or 'place'.")

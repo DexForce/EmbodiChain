@@ -272,6 +272,8 @@ def _coordinated_held(
 
     object_pose = _pose(env, uid)
     result = _constant(env, True)
+    if held.env_mask is not None:
+        result &= held.env_mask.to(device=env.device)
     for arm_index, transform_name in enumerate(
         ("left_object_to_eef", "right_object_to_eef")
     ):

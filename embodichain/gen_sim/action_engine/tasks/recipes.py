@@ -27,7 +27,13 @@ from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
     capability_precondition,
 )
-from embodichain.gen_sim.action_engine.domain import motion_policy, validate_task_spec
+from embodichain.gen_sim.action_engine.domain import (
+    TERMINAL_BEHAVIORS,
+    TRANSPORT_DIRECTIONS,
+    motion_policy,
+    task_success_type,
+    validate_task_spec,
+)
 from embodichain.gen_sim.action_engine.planning.linker import (
     link_seed_graph,
     link_task_dependencies,
@@ -381,9 +387,9 @@ def _recipe(
         if terminal_behavior == "hold":
             goal["terminal_behavior"] = "hold"
         success = {
-            "type": "semantic_goal",
-            "relation": "none",
-            "orientation_goal": goal["orientation_goal"],
+            "type": task_success_type(task_type, params),
+            "object": object_uid,
+            "local_axis": goal["upright_local_axis"],
         }
         return (
             _single_arm_manipulation(
@@ -561,7 +567,35 @@ def _recipe(
             {"type": "handover_complete", "object": object_uid, "arm": receive},
         )
     if task_type == "E5":
-        node = _node(
+        terminal_behavior = str(params.get("terminal_behavior", "hold"))
+        if terminal_behavior not in TERMINAL_BEHAVIORS - {"none"}:
+            raise ValueError("E5 terminal_behavior must be 'hold' or 'place'.")
+        direction = str(params.get("direction", "up"))
+        if direction not in TRANSPORT_DIRECTIONS:
+            raise ValueError(f"E5 direction {direction!r} is unsupported.")
+        goal = {
+            "direction": direction,
+            "terminal_behavior": terminal_behavior,
+            "orientation_goal": "preserve",
+            "orientation_axis": "none",
+            "relation_frame": str(params.get("relation_frame", "robot")),
+        }
+        target = params.get("target_role")
+        relation = str(params.get("relation", "none"))
+        if isinstance(target, str) and target:
+            if relation == "none":
+                raise ValueError("E5 target_role requires a symbolic relation.")
+            goal.update(
+                {
+                    "reference_object": target,
+                    "reference_state": "live",
+                    "relation": relation,
+                    "direction": "none",
+                }
+            )
+        elif direction == "none" and terminal_behavior != "place":
+            raise ValueError("E5 requires a direction or target_role relation.")
+        pick = _node(
             group_id,
             1,
             "CoordinatedPickment",
@@ -575,16 +609,52 @@ def _recipe(
             {"type": "held_by_both_grippers", "object": object_uid},
             motion_policy(),
         )
+        nodes = [pick]
+        if terminal_behavior == "place":
+            release_sync_group = f"{group_id}__dual_release"
+            for index, arm, release_role in (
+                (2, "left_arm", "participant"),
+                (3, "right_arm", "commit"),
+            ):
+                release = _node(
+                    group_id,
+                    index,
+                    "MoveJoints",
+                    task_type,
+                    object_uid,
+                    {"mode": "required", "arm": arm},
+                    "hand",
+                    {
+                        "kind": "joint_state",
+                        "source": "gripper_open",
+                        "coordinated_release_role": release_role,
+                    },
+                    [pick["id"]],
+                    role,
+                    {},
+                    motion_policy(),
+                )
+                release["sync_group"] = release_sync_group
+                nodes.append(release)
+        success_type = task_success_type(task_type, params)
+        success = (
+            {"type": success_type, "object": object_uid}
+            if success_type == "held_by_both_grippers"
+            else {
+                "type": success_type,
+                "relation": relation,
+                **(
+                    {"reference_object": target}
+                    if isinstance(target, str) and target
+                    else {}
+                ),
+            }
+        )
         return (
-            [node],
+            nodes,
             "coordinated_transport",
-            {
-                "direction": str(params.get("direction", "up")),
-                "terminal_behavior": str(params.get("terminal_behavior", "hold")),
-                "orientation_goal": "preserve",
-                "orientation_axis": "none",
-            },
-            {"type": "held_by_both_grippers", "object": object_uid},
+            goal,
+            success,
         )
     planning = {
         "E6": ("PullArticulatedPart", "pull_articulated_part"),

@@ -21,6 +21,7 @@ from copy import deepcopy
 import pytest
 
 import embodichain.gen_sim.action_engine.tasks.interpretation as interpretation_module
+from embodichain.gen_sim.action_engine.tasks.assembly import SceneInventory
 from embodichain.gen_sim.action_engine.tasks import (
     INSTRUCTION_INTENT_SCHEMA,
     instantiate_seed_graph,
@@ -31,18 +32,49 @@ from embodichain.gen_sim.action_engine.tasks import (
 
 
 def _selector(kind: str = "none", **values):
+    legacy_kind = kind
+    if kind == "selector":
+        kind = "scene_ref"
+    reference = values.pop("reference", "")
+    if legacy_kind == "selector":
+        uid = str(values.pop("uid", "")).strip()
+        legacy_terms = [
+            str(values.pop(field, "")).strip()
+            for field in ("side", "color", "category")
+        ]
+        reference = reference or uid
+        if not reference:
+            reference = " ".join(
+                term for term in legacy_terms if term not in {"", "none"}
+            )
     result = {
         "kind": kind,
         "step_id": "",
-        "uid": "",
-        "category": "none",
-        "color": "none",
-        "side": "none",
+        "reference": reference,
         "quantifier": "one",
         "count": 0,
     }
     result.update(values)
     return result
+
+
+def _grounding(**bindings):
+    return {
+        "bindings": [
+            {
+                "reference_id": reference_id,
+                "status": "resolved",
+                "uids": [uid] if isinstance(uid, str) else list(uid),
+                "confidence": 1.0,
+            }
+            for reference_id, uid in bindings.items()
+        ]
+    }
+
+
+def _grounding_caller(**bindings):
+    response = _grounding(**bindings)
+    return lambda **_kwargs: deepcopy(response)
 
 
 def _step(step_id: str, task_type: str, object_selector: dict, **values):
@@ -60,6 +92,8 @@ def _step(step_id: str, task_type: str, object_selector: dict, **values):
         "target_setting": 0,
         "layout": "none",
         "axis": "none",
+        "direction": "none",
+        "terminal_behavior": "none",
         "depends_on": [],
     }
     result.update(values)
@@ -175,7 +209,7 @@ def _handover_intent():
             _step(
                 "orient",
                 "E2",
-                _selector("selector", category="can", color="purple"),
+                _selector("scene_ref", reference="紫色易拉罐"),
                 required_arm="right_arm",
             ),
             _step(
@@ -190,7 +224,7 @@ def _handover_intent():
                 "place",
                 "E1",
                 _selector("step_result", step_id="handover"),
-                target=_selector("selector", category="can", color="orange"),
+                target=_selector("scene_ref", reference="橘色易拉罐"),
                 relation="left_of",
                 required_arm="left_arm",
                 depends_on=["handover"],
@@ -205,13 +239,13 @@ def _two_object_handover_intent_with_missing_place_target():
             _step(
                 "orient_purple",
                 "E2",
-                _selector("selector", category="can", color="purple"),
+                _selector("scene_ref", reference="紫色易拉罐"),
                 required_arm="right_arm",
             ),
             _step(
                 "orient_orange",
                 "E2",
-                _selector("selector", category="can", color="orange"),
+                _selector("scene_ref", reference="橘色易拉罐"),
                 required_arm="left_arm",
                 depends_on=["orient_purple"],
             ),
@@ -249,6 +283,12 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
         robot_profile="ur10",
         model="test-model",
         caller=caller,
+        grounding_caller=_grounding_caller(
+            **{
+                "orient.object": "purple_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
     graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
 
@@ -312,29 +352,520 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
     assert calls[0]["model"] == "test-model"
 
 
-def test_selector_side_is_a_conjunctive_robot_frame_constraint() -> None:
+def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
+    scene = [
+        {
+            "runtime_uid": "table",
+            "uid": "table",
+            "role": "background",
+            "category": "table",
+            "description": "table",
+            "init_pos": [0.0, 0.0, 0.0],
+        },
+        {
+            "runtime_uid": "plastic_tray",
+            "uid": "plastic_tray",
+            "role": "object",
+            "category": "tray",
+            "description": "plastic tray",
+            "init_pos": [0.0, 0.0, 0.7],
+        },
+        {
+            "runtime_uid": "banana_left",
+            "uid": "banana_left",
+            "role": "object",
+            "category": "banana",
+            "description": "left banana",
+            "init_pos": [0.0, 0.25, 0.7],
+        },
+    ]
+    intent = {
+        "steps": [
+            _step(
+                "move_tray",
+                "E5",
+                _selector("selector", uid="plastic_tray"),
+                target=_selector("selector", uid="banana_left"),
+                relation="behind",
+                direction="none",
+                terminal_behavior="hold",
+            )
+        ]
+    }
+    deterministic = plan_grounded_task_spec(
+        task_name="dual_tray_deterministic",
+        task_description="用双臂把桌上的盘子移动到左边香蕉的后面",
+        scene_objects=scene,
+        robot_profile="franka",
+    )
+    deterministic_instance = deterministic.task_spec["task_instances"][0]
+    assert deterministic_instance["task_type"] == "E5"
+    assert deterministic_instance["params"]["relation"] == "behind"
+
+    grounded = interpret_and_ground_task_spec(
+        "dual_tray",
+        "用双臂把桌上的盘子移动到左边香蕉的后面",
+        scene,
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(
+            **{
+                "move_tray.object": "plastic_tray",
+                "move_tray.target": "banana_left",
+            }
+        ),
+    )
+
+    graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
+    assert [node["atomic_action"] for node in graph["nodes"]] == ["CoordinatedPickment"]
+    assert graph["task_groups"][0]["operator"] == "coordinated_transport"
+    assert graph["task_groups"][0]["goal"] == {
+        "direction": "none",
+        "terminal_behavior": "hold",
+        "orientation_goal": "preserve",
+        "orientation_axis": "none",
+        "relation_frame": "robot",
+        "reference_object": "banana_left",
+        "reference_state": "live",
+        "relation": "behind",
+    }
+
+    released_spec = deepcopy(grounded.task_spec)
+    released_spec["task_instances"][0]["params"]["terminal_behavior"] = "place"
+    released = instantiate_seed_graph(released_spec, grounded.role_bindings)
+    assert [node["atomic_action"] for node in released["nodes"]] == [
+        "CoordinatedPickment",
+        "MoveJoints",
+        "MoveJoints",
+    ]
+    release_nodes = released["nodes"][1:]
+    assert all(
+        node["depends_on"] == [released["nodes"][0]["id"]] for node in release_nodes
+    )
+    assert {node["actor"]["arm"] for node in release_nodes} == {
+        "left_arm",
+        "right_arm",
+    }
+    assert {node["control"] for node in release_nodes} == {"hand"}
+    assert len({node["sync_group"] for node in release_nodes}) == 1
+    assert all(node["precondition"] == {} for node in release_nodes)
+    assert {
+        node["target_binding"]["coordinated_release_role"] for node in release_nodes
+    } == {"participant", "commit"}
+    contracts = {
+        node["target_binding"]["coordinated_release_role"]: node["contract"]
+        for node in release_nodes
+    }
+    coordinated_hold = {
+        "predicate": "object_coordinated_held",
+        "object_uid": "plastic_tray",
+    }
+    assert contracts["participant"]["requires"] == [coordinated_hold]
+    assert contracts["participant"]["effects"] == []
+    assert contracts["commit"]["requires"] == [coordinated_hold]
+    assert {
+        (
+            effect["op"],
+            effect["atom"]["predicate"],
+            effect["atom"].get("arm"),
+        )
+        for effect in contracts["commit"]["effects"]
+    } == {
+        ("delete", "object_coordinated_held", None),
+        ("add", "object_free", None),
+        ("add", "arm_free", "left_arm"),
+        ("add", "arm_free", "right_arm"),
+    }
+    from embodichain.gen_sim.action_engine.runtime import load_execution_program
+
+    program = load_execution_program(released)
+    assert [
+        action["atomic_action_class"]
+        for edge in program.edges
+        for action in edge.actions
+    ] == ["CoordinatedPickment", "MoveJoints", "MoveJoints"]
+    assert len(program.edges[-1].actions) == 2
+
+    in_place_spec = deepcopy(released_spec)
+    in_place_params = in_place_spec["task_instances"][0]["params"]
+    in_place_params.pop("target_role")
+    in_place_params.update({"direction": "none", "relation": "none"})
+    in_place = instantiate_seed_graph(in_place_spec, grounded.role_bindings)
+    assert [node["atomic_action"] for node in in_place["nodes"]] == [
+        "CoordinatedPickment",
+        "MoveJoints",
+        "MoveJoints",
+    ]
+    assert "reference_object" not in in_place["task_groups"][0]["goal"]
+
+
+def test_e5_accepts_generic_rigid_object_without_exported_affordances() -> None:
+    scene = [
+        {
+            "runtime_uid": "interact_wooden_block",
+            "uid": "interact_wooden_block",
+            "role": "rigid_object",
+            "description": "A long rectangular wooden block.",
+            "init_pos": [0.0, 0.0, 0.7],
+        }
+    ]
+    intent = {
+        "steps": [
+            _step(
+                "move_block",
+                "E5",
+                _selector("selector", uid="interact_wooden_block"),
+                direction="left",
+                terminal_behavior="hold",
+            )
+        ]
+    }
+
+    grounded = interpret_and_ground_task_spec(
+        "dual_block",
+        "用双臂把桌上的长方体往左移动",
+        scene,
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(
+            **{"move_block.object": "interact_wooden_block"}
+        ),
+    )
+
+    instance = grounded.task_spec["task_instances"][0]
+    assert instance["task_type"] == "E5"
+    assert grounded.role_bindings[instance["params"]["object_role"]] == (
+        "interact_wooden_block"
+    )
+    assert instance["params"]["direction"] == "left"
+
+
+def test_task1_2_open_reference_generates_coordinated_pick_move_and_release() -> None:
+    scene = [
+        {
+            "runtime_uid": "table",
+            "uid": "table",
+            "role": "background",
+            "description": "A white table.",
+            "init_pos": [0.0, 0.0, 0.0],
+        },
+        {
+            "runtime_uid": "interact_apple",
+            "uid": "interact_apple",
+            "role": "rigid_object",
+            "description": "A red apple.",
+            "init_pos": [0.0, -0.2, 0.7],
+        },
+        {
+            "runtime_uid": "interact_wooden_tray",
+            "uid": "interact_wooden_tray",
+            "role": "rigid_object",
+            "description": "A long rectangular wooden tray.",
+            "init_pos": [0.0, 0.0, 0.7],
+        },
+        {
+            "runtime_uid": "interact_rubiks_cube",
+            "uid": "interact_rubiks_cube",
+            "role": "rigid_object",
+            "description": "A Rubik's cube.",
+            "init_pos": [0.0, 0.2, 0.7],
+        },
+    ]
+    intent = {
+        "steps": [
+            _step(
+                "move_block",
+                "E5",
+                _selector("scene_ref", reference="桌上的长方体"),
+                direction="left",
+                terminal_behavior="place",
+            )
+        ]
+    }
+
+    grounded = interpret_and_ground_task_spec(
+        "task1_2",
+        "用双臂把桌上的长方体往左移动并放下",
+        scene,
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(
+            **{"move_block.object": "interact_wooden_tray"}
+        ),
+    )
+    graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
+
+    instance = grounded.task_spec["task_instances"][0]
+    assert instance["params"]["direction"] == "left"
+    assert instance["params"]["terminal_behavior"] == "place"
+    assert grounded.task_spec["success"]["terms"] == [
+        {"type": "semantic_goal", "task_instance_id": instance["id"]}
+    ]
+    assert [node["atomic_action"] for node in graph["nodes"]] == [
+        "CoordinatedPickment",
+        "MoveJoints",
+        "MoveJoints",
+    ]
+    assert grounded.scene_requirements["objects"][0]["category"] == "rigid_object"
+    assert grounded.task_spec["metadata"]["instruction_call_count"] == 1
+    assert grounded.task_spec["metadata"]["scene_grounding_call_count"] == 1
+
+
+def test_e5_pick_and_hold_defaults_missing_direction_to_up() -> None:
+    scene = [
+        {
+            "runtime_uid": "table",
+            "uid": "table",
+            "role": "background",
+            "description": "A wooden table.",
+            "init_pos": [0.0, 0.0, 0.0],
+        },
+        {
+            "runtime_uid": "wooden_tray",
+            "uid": "wooden_tray",
+            "role": "rigid_object",
+            "description": "A shallow round wooden serving tray.",
+            "init_pos": [0.0, 0.0, 0.7],
+        },
+    ]
+    intent = {
+        "steps": [
+            _step(
+                "lift_tray",
+                "E5",
+                _selector("scene_ref", reference="桌上的木盘"),
+                required_arm="none",
+                direction="none",
+                terminal_behavior="hold",
+            )
+        ]
+    }
+
+    grounded = interpret_and_ground_task_spec(
+        "lift_tray",
+        "用双臂把桌上的木盘端起来",
+        scene,
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: deepcopy(intent),
+        grounding_caller=_grounding_caller(**{"lift_tray.object": "wooden_tray"}),
+    )
+    graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
+
+    instance = grounded.task_spec["task_instances"][0]
+    assert instance["params"]["direction"] == "up"
+    assert instance["params"]["terminal_behavior"] == "hold"
+    assert [node["atomic_action"] for node in graph["nodes"]] == ["CoordinatedPickment"]
+    assert grounded.task_spec["success"]["terms"] == [
+        {"type": "held_by_both_grippers", "task_instance_id": instance["id"]}
+    ]
+    assert grounded.task_spec["metadata"]["instruction_call_count"] == 1
+    assert grounded.task_spec["metadata"]["instruction_intent_normalizations"] == [
+        {
+            "path": "steps[0].direction",
+            "from": "none",
+            "to": "up",
+            "reason": "e5_hold_defaults_to_lift",
+        }
+    ]
+
+    deterministic = plan_grounded_task_spec(
+        task_name="lift_tray_deterministic",
+        task_description="用双臂把桌上的木盘端起来",
+        scene_objects=scene,
+        robot_profile="franka",
+    )
+    deterministic_instance = deterministic.task_spec["task_instances"][0]
+    assert deterministic_instance["params"]["direction"] == "up"
+    assert deterministic_instance["params"]["terminal_behavior"] == "hold"
+
+
+@pytest.mark.parametrize(
+    ("scene_update", "error"),
+    (
+        ({"affordances": ["rigid"]}, "missing affordances.*dual_graspable"),
+        ({"role": "articulation"}, "requires .*rigid.object structure"),
+    ),
+)
+def test_e5_rejects_explicitly_incompatible_scene_evidence(
+    scene_update: dict,
+    error: str,
+) -> None:
+    scene_object = {
+        "runtime_uid": "candidate",
+        "uid": "candidate",
+        "role": "rigid_object",
+        "description": "A candidate object.",
+        "init_pos": [0.0, 0.0, 0.7],
+        **scene_update,
+    }
+    intent = {
+        "steps": [
+            _step(
+                "move_candidate",
+                "E5",
+                _selector("selector", uid="candidate"),
+                direction="left",
+                terminal_behavior="hold",
+            )
+        ]
+    }
+
+    with pytest.raises(ValueError, match=error):
+        interpret_and_ground_task_spec(
+            "invalid_dual_object",
+            "用双臂把物体往左移动",
+            [scene_object],
+            robot_profile="franka",
+            model="test-model",
+            caller=lambda **_kwargs: intent,
+            grounding_caller=_grounding_caller(
+                **{"move_candidate.object": "candidate"}
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("scene_update", "should_succeed", "error"),
+    (
+        ({"role": "articulation"}, True, ""),
+        (
+            {"role": "articulation", "affordances": ["articulated"]},
+            False,
+            "missing affordances.*pullable",
+        ),
+        ({"role": "rigid_object"}, False, "requires articulation structure"),
+    ),
+)
+def test_articulated_task_uses_structural_and_explicit_affordance_evidence(
+    scene_update: dict,
+    should_succeed: bool,
+    error: str,
+) -> None:
+    scene_object = {
+        "runtime_uid": "cabinet_part",
+        "uid": "cabinet_part",
+        "description": "A cabinet moving part.",
+        "init_pos": [0.0, 0.0, 0.7],
+        **scene_update,
+    }
+    intent = {
+        "steps": [
+            _step(
+                "open_part",
+                "E6",
+                _selector("scene_ref", reference="柜子的活动部件"),
+                target_state="open",
+            )
+        ]
+    }
+
+    invoke = lambda: interpret_and_ground_task_spec(
+        "open_part",
+        "打开柜子的活动部件。",
+        [scene_object],
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(**{"open_part.object": "cabinet_part"}),
+    )
+    if should_succeed:
+        assert invoke().task_spec["task_instances"][0]["task_type"] == "E6"
+    else:
+        with pytest.raises(ValueError, match=error):
+            invoke()
+
+
+def test_open_container_target_is_allowed_until_runtime_when_metadata_is_unknown() -> (
+    None
+):
+    scene = [
+        {
+            "runtime_uid": "source_pitcher",
+            "uid": "source_pitcher",
+            "role": "rigid_object",
+            "category": "ceramic_pitcher",
+            "description": "A ceramic pitcher with water.",
+            "init_pos": [0.0, -0.2, 0.7],
+        },
+        {
+            "runtime_uid": "custom_receiver",
+            "uid": "custom_receiver",
+            "role": "rigid_object",
+            "category": "handmade_vessel",
+            "description": "A handmade receiving vessel.",
+            "init_pos": [0.0, 0.2, 0.7],
+        },
+    ]
+    intent = {
+        "steps": [
+            _step(
+                "pour",
+                "E3",
+                _selector("scene_ref", reference="水壶"),
+                target=_selector("scene_ref", reference="手工容器"),
+                relation="above",
+            )
+        ]
+    }
+
+    grounded = interpret_and_ground_task_spec(
+        "open_container",
+        "把水壶里的水倒入手工容器。",
+        scene,
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(
+            **{
+                "pour.object": "source_pitcher",
+                "pour.target": "custom_receiver",
+            }
+        ),
+    )
+    assert grounded.task_spec["task_instances"][0]["task_type"] == "E3"
+
+    explicit = deepcopy(scene)
+    explicit[1]["affordances"] = ["support_surface"]
+    with pytest.raises(ValueError, match="none support containment"):
+        interpret_and_ground_task_spec(
+            "explicit_non_container",
+            "把水壶里的水倒入手工容器。",
+            explicit,
+            robot_profile="franka",
+            model="test-model",
+            caller=lambda **_kwargs: intent,
+            grounding_caller=_grounding_caller(
+                **{
+                    "pour.object": "source_pitcher",
+                    "pour.target": "custom_receiver",
+                }
+            ),
+        )
+
+
+def test_open_scene_reference_is_not_limited_by_fixed_selector_fields() -> None:
     intent = {
         "steps": [
             _step(
                 "orient",
                 "E2",
-                _selector(
-                    "selector",
-                    category="can",
-                    color="purple",
-                    side="right",
-                ),
+                _selector("scene_ref", reference="右边紫色易拉罐"),
             )
         ]
     }
-    with pytest.raises(ValueError, match="did not match"):
-        interpret_and_ground_task_spec(
-            "conflict",
-            "扶正右边紫色易拉罐。",
-            _scene(),
-            robot_profile="ur10",
-            caller=lambda **_kwargs: intent,
-        )
+    grounded = interpret_and_ground_task_spec(
+        "open_reference",
+        "扶正右边紫色易拉罐。",
+        _scene(),
+        robot_profile="ur10",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(**{"orient.object": "purple_can"}),
+    )
+    assert grounded.role_bindings == {"object_01": "purple_can"}
 
 
 def test_intent_rejects_atomic_actions_coordinates_and_extra_fields() -> None:
@@ -363,6 +894,12 @@ def test_invalid_intent_gets_one_repair_attempt() -> None:
         _scene(),
         robot_profile="ur10",
         caller=caller,
+        grounding_caller=_grounding_caller(
+            **{
+                "orient.object": "purple_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
     assert len(prompts) == 2
     assert "previous JSON was invalid" in prompts[1]
@@ -382,6 +919,12 @@ def test_interpreter_normalizes_registry_inapplicable_e4_required_arm() -> None:
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: deepcopy(intent),
+        grounding_caller=_grounding_caller(
+            **{
+                "orient.object": "purple_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
 
     assert grounded.task_spec["metadata"]["instruction_call_count"] == 1
@@ -398,7 +941,7 @@ def test_interpreter_normalizes_registry_inapplicable_e4_required_arm() -> None:
 def test_invalid_step_result_gets_repair_with_selector_rules() -> None:
     """A malformed cross-step selector should reach the structured repair call."""
     invalid_intent = _handover_intent()
-    invalid_intent["steps"][1]["object"]["category"] = "can"
+    invalid_intent["steps"][1]["object"]["reference"] = "紫色易拉罐"
     responses = [invalid_intent, _handover_intent()]
     prompts: list[str] = []
 
@@ -412,17 +955,23 @@ def test_invalid_step_result_gets_repair_with_selector_rules() -> None:
         _scene(),
         robot_profile="ur10",
         caller=caller,
+        grounding_caller=_grounding_caller(
+            **{
+                "orient.object": "purple_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
 
     assert len(prompts) == 2
     repair_prompt = prompts[1]
-    for term in ("step_result", "step_id", "uid", "category", "color", "side"):
+    for term in ("step_result", "step_id", "reference"):
         assert term in repair_prompt
     assert "none" in repair_prompt
     assert grounded.task_spec["metadata"]["instruction_call_count"] == 2
 
 
-def test_repeated_missing_e1_target_gets_verified_local_completion() -> None:
+def test_repeated_missing_e1_target_fails_without_local_guessing() -> None:
     invalid_intent = _two_object_handover_intent_with_missing_place_target()
     prompts: list[str] = []
 
@@ -430,28 +979,18 @@ def test_repeated_missing_e1_target_gets_verified_local_completion() -> None:
         prompts.append(kwargs["prompt"])
         return deepcopy(invalid_intent)
 
-    grounded = interpret_and_ground_task_spec(
-        "verified_target_completion",
-        "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
-        "然后右臂撤回，然后左臂将其放到橘色易拉罐的左边。",
-        _scene(),
-        robot_profile="ur10",
-        caller=caller,
-    )
+    with pytest.raises(ValueError, match="after one repair"):
+        interpret_and_ground_task_spec(
+            "missing_target",
+            "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
+            "然后右臂撤回，然后左臂将其放到橘色易拉罐的左边。",
+            _scene(),
+            robot_profile="ur10",
+            caller=caller,
+        )
 
-    placement = grounded.task_spec["task_instances"][-1]
-    target_role = placement["params"]["target_role"]
-    metadata = grounded.task_spec["metadata"]
     assert len(prompts) == 2
     assert "Missing-target repair rule" in prompts[1]
-    assert grounded.role_bindings[target_role] == "orange_can"
-    assert metadata["instruction_call_count"] == 2
-    assert metadata["instruction_local_completion_count"] == 1
-    assert metadata["instruction_local_completion_fields"] == ["steps[3].target"]
-    assert (
-        metadata["instruction_local_completion_basis"]
-        == "deterministic_scene_grounding"
-    )
 
 
 def test_missing_target_completion_rejects_other_semantic_disagreement() -> None:
@@ -480,13 +1019,13 @@ def test_second_invalid_intent_fails_without_rule_fallback() -> None:
         )
 
 
-def test_intent_normalizes_orange_alias_and_infers_pronoun_dependency() -> None:
+def test_intent_infers_pronoun_dependency_from_canonical_symbols() -> None:
     intent = {
         "steps": [
             _step(
                 "handover",
                 "E4",
-                _selector("selector", category="can", color="purple"),
+                _selector("scene_ref", reference="紫色易拉罐"),
                 transfer_arm="right_arm",
                 receive_arm="left_arm",
             ),
@@ -494,9 +1033,9 @@ def test_intent_normalizes_orange_alias_and_infers_pronoun_dependency() -> None:
                 "place",
                 "E1",
                 _selector("step_result", step_id="handover"),
-                target=_selector("selector", category="can", color="橘色"),
-                relation="左边",
-                required_arm="左臂",
+                target=_selector("scene_ref", reference="橘色易拉罐"),
+                relation="left_of",
+                required_arm="left_arm",
                 depends_on=["handover"],
             ),
         ]
@@ -508,6 +1047,12 @@ def test_intent_normalizes_orange_alias_and_infers_pronoun_dependency() -> None:
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(
+            **{
+                "handover.object": "purple_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
 
     instances = grounded.task_spec["task_instances"]
@@ -517,72 +1062,41 @@ def test_intent_normalizes_orange_alias_and_infers_pronoun_dependency() -> None:
     assert instances[1]["params"]["required_arm"] == "left_arm"
 
 
-def test_selector_rejects_unknown_uid_and_attribute_conflicts() -> None:
-    unknown = {
-        "steps": [
-            _step(
-                "orient",
-                "E2",
-                _selector("selector", uid="invented_uid"),
-            )
-        ]
-    }
-    with pytest.raises(ValueError, match="unknown scene UID"):
-        interpret_and_ground_task_spec(
-            "unknown_uid",
-            "扶正它。",
-            _scene(),
-            robot_profile="ur10",
-            caller=lambda **_kwargs: unknown,
-        )
-
-    conflict = {
-        "steps": [
-            _step(
-                "orient",
-                "E2",
-                _selector(
-                    "selector",
-                    uid="purple_can",
-                    category="can",
-                    color="orange",
-                ),
-            )
-        ]
-    }
-    with pytest.raises(ValueError, match="conflicts with UID.*color"):
-        interpret_and_ground_task_spec(
-            "attribute_conflict",
-            "扶正紫色易拉罐。",
-            _scene(),
-            robot_profile="ur10",
-            caller=lambda **_kwargs: conflict,
-        )
-
-
-def test_selector_uid_and_ordinal_side_are_conjunctive() -> None:
+def test_scene_grounding_rejects_unknown_uid() -> None:
     intent = {
         "steps": [
             _step(
                 "orient",
                 "E2",
-                _selector(
-                    "selector",
-                    uid="orange_can",
-                    category="can",
-                    side="leftmost",
-                ),
+                _selector("scene_ref", reference="紫色易拉罐"),
             )
         ]
     }
-    with pytest.raises(ValueError, match="not the unique robot-relative leftmost"):
+    with pytest.raises(ValueError, match="after one repair.*unknown UIDs"):
         interpret_and_ground_task_spec(
-            "ordinal_uid_conflict",
-            "扶正最左边的橘色易拉罐。",
+            "unknown_uid",
+            "扶正紫色易拉罐。",
             _scene(),
             robot_profile="ur10",
             caller=lambda **_kwargs: intent,
+            grounding_caller=_grounding_caller(**{"orient.object": "invented_uid"}),
         )
+
+
+def test_instruction_intent_rejects_legacy_selector_protocol() -> None:
+    intent = _handover_intent()
+    intent["steps"][0]["object"] = {
+        "kind": "selector",
+        "step_id": "",
+        "uid": "purple_can",
+        "category": "can",
+        "color": "purple",
+        "side": "none",
+        "quantifier": "one",
+        "count": 0,
+    }
+    with pytest.raises(ValueError, match="requires exactly fields"):
+        validate_instruction_intent(intent)
 
 
 def test_step_result_must_reference_a_preceding_step() -> None:
@@ -598,7 +1112,7 @@ def test_step_result_must_reference_a_preceding_step() -> None:
             _step(
                 "orient",
                 "E2",
-                _selector("selector", category="can", color="purple"),
+                _selector("scene_ref", reference="紫色易拉罐"),
             ),
         ]
     }
@@ -606,20 +1120,9 @@ def test_step_result_must_reference_a_preceding_step() -> None:
         validate_instruction_intent(intent)
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("uid", "purple_can"),
-        ("category", "can"),
-        ("color", "purple"),
-        ("side", "left"),
-    ],
-)
-def test_step_result_selector_rejects_object_constraints(
-    field: str, value: str
-) -> None:
+def test_step_result_selector_rejects_object_constraints() -> None:
     intent = _handover_intent()
-    intent["steps"][1]["object"][field] = value
+    intent["steps"][1]["object"]["reference"] = "紫色易拉罐"
 
     with pytest.raises(ValueError, match="may identify only a prior step_id"):
         validate_instruction_intent(intent)
@@ -666,11 +1169,17 @@ def test_implicit_e1_relation_requires_an_unambiguous_support_target() -> None:
             _scene(),
             robot_profile="ur10",
             caller=lambda **_kwargs: intent,
+            grounding_caller=_grounding_caller(
+                **{
+                    "place.object": "purple_can",
+                    "place.target": "orange_can",
+                }
+            ),
         )
 
 
-def test_prompt_inventory_includes_table_and_schema_is_strict() -> None:
-    captured = {}
+def test_instruction_and_grounding_prompts_keep_their_boundaries() -> None:
+    captured: dict[str, dict] = {}
     intent = {
         "steps": [
             _step(
@@ -684,8 +1193,12 @@ def test_prompt_inventory_includes_table_and_schema_is_strict() -> None:
     }
 
     def caller(**kwargs):
-        captured.update(kwargs)
+        captured["intent"] = kwargs
         return intent
+
+    def grounding_caller(**kwargs):
+        captured["grounding"] = kwargs
+        return _grounding(**{"place.object": "purple_can", "place.target": "table"})
 
     grounded = interpret_and_ground_task_spec(
         "onto_table",
@@ -693,11 +1206,13 @@ def test_prompt_inventory_includes_table_and_schema_is_strict() -> None:
         _scene_with_table(),
         robot_profile="ur10",
         caller=caller,
+        grounding_caller=grounding_caller,
     )
 
-    assert '"uid": "table"' in captured["prompt"]
-    assert '"core_actions"' not in captured["prompt"]
-    assert captured["schema"] == INSTRUCTION_INTENT_SCHEMA
+    assert '"uid": "table"' not in captured["intent"]["prompt"]
+    assert '"uid": "table"' in captured["grounding"]["prompt"]
+    assert '"core_actions"' not in captured["intent"]["prompt"]
+    assert captured["intent"]["schema"] == INSTRUCTION_INTENT_SCHEMA
     assert grounded.role_bindings["object_02"] == "table"
 
 
@@ -710,7 +1225,7 @@ def test_instruction_intent_schema_declares_every_required_selector_field() -> N
     assert "quantifier" in selector_schema["properties"]
 
 
-def test_instruction_prompt_redacts_nested_scene_geometry() -> None:
+def test_grounding_prompt_redacts_nested_scene_geometry() -> None:
     scene = _scene()
     scene[0]["attributes"] = {
         "label": "purple",
@@ -718,24 +1233,25 @@ def test_instruction_prompt_redacts_nested_scene_geometry() -> None:
     }
     captured: dict[str, str] = {}
 
-    def caller(**kwargs):
+    def grounding_caller(**kwargs):
         captured["prompt"] = kwargs["prompt"]
-        return {
-            "steps": [
-                _step(
-                    "orient",
-                    "E2",
-                    _selector("selector", uid="purple_can"),
-                )
-            ]
-        }
+        return _grounding(**{"orient.object": "purple_can"})
 
     interpret_and_ground_task_spec(
         "redacted_inventory",
         "扶正紫色易拉罐。",
         scene,
         robot_profile="ur10",
-        caller=caller,
+        caller=lambda **_kwargs: {
+            "steps": [
+                _step(
+                    "orient",
+                    "E2",
+                    _selector("scene_ref", reference="紫色易拉罐"),
+                )
+            ]
+        },
+        grounding_caller=grounding_caller,
     )
     assert '"position"' not in captured["prompt"]
     assert '"label": "purple"' in captured["prompt"]
@@ -781,10 +1297,11 @@ def test_injected_caller_skips_production_model_resolution(
                 _step(
                     "orient",
                     "E2",
-                    _selector("selector", category="can", color="purple"),
+                    _selector("scene_ref", reference="紫色易拉罐"),
                 )
             ]
         },
+        grounding_caller=_grounding_caller(**{"orient.object": "purple_can"}),
     )
 
     assert grounded.task_spec["metadata"]["instruction_model"] == "injected_caller"
@@ -804,11 +1321,17 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
                 {
                     "id": "orient",
                     "task_type": "E2",
-                    "object": _selector("selector", category="can", color="purple"),
+                    "object": _selector("scene_ref", reference="紫色易拉罐"),
                 }
             ]
         },
         _handover_intent(),
+        _grounding(
+            **{
+                "orient.object": "purple_can",
+                "place.target": "orange_can",
+            }
+        ),
     ]
 
     class FakeRunnable:
@@ -850,7 +1373,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
         "E4",
         "E1",
     ]
-    assert len(calls) == 2
+    assert len(calls) == 3
     for call in calls:
         assert call["structured_kwargs"] == {"method": "json_mode"}
         assert call["kwargs"]["max_completion_tokens"] == 4096
@@ -860,25 +1383,21 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
 
 
 def test_instruction_prompt_contains_a_complete_shape_example() -> None:
-    index = interpretation_module._SceneIndex(_scene(), robot_profile="ur10")
-    prompt = interpretation_module._instruction_prompt("扶正紫色易拉罐。", index)
+    prompt = interpretation_module._instruction_prompt("扶正紫色易拉罐。")
     selector_rules = interpretation_module._instruction_selector_rules()
     assert '"target_setting": 0' in prompt
     assert '"depends_on": []' in prompt
-    assert "every step has all 14 step keys" in prompt
+    assert "every step has all 16 step keys" in prompt
     assert "step_result" in prompt
-    assert "Prefer an exact inventory UID" in prompt
-    assert "conjunctive constraints" in prompt
+    assert "open scene_ref.reference" in prompt
+    assert "Do not classify it or emit a scene UID" in prompt
     assert "step_result" in selector_rules
     assert "step_id" in selector_rules
-    for field in ("uid", "category", "color", "side"):
-        assert field in selector_rules
+    assert "reference" in selector_rules
 
 
 def test_scene_export_spatial_descriptions_do_not_create_false_supports() -> None:
-    index = interpretation_module._SceneIndex(
-        _scene_export_style_scene(), robot_profile="franka"
-    )
+    index = SceneInventory(_scene_export_style_scene(), robot_profile="franka")
 
     assert [entity.uid for entity in index.support] == ["table"]
     assert {entity.uid for entity in index.movable} == {
@@ -889,9 +1408,6 @@ def test_scene_export_spatial_descriptions_do_not_create_false_supports() -> Non
 
 
 def test_scene_export_exact_uids_ground_pick_and_place() -> None:
-    index = interpretation_module._SceneIndex(
-        _scene_export_style_scene(), robot_profile="franka"
-    )
     intent = {
         "steps": [
             _step(
@@ -905,11 +1421,19 @@ def test_scene_export_exact_uids_ground_pick_and_place() -> None:
         ]
     }
 
-    grounded = interpretation_module._ground_intent(
+    grounded = interpret_and_ground_task_spec(
         "scene_export_pick_place",
         "先用左臂把胡萝卜放到砧板上",
-        intent,
-        index,
+        _scene_export_style_scene(),
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: intent,
+        grounding_caller=_grounding_caller(
+            **{
+                "step_1.object": "carrot_001",
+                "step_1.target": "cutting_board_001",
+            }
+        ),
     )
 
     assert set(grounded.role_bindings.values()) == {
@@ -919,58 +1443,10 @@ def test_scene_export_exact_uids_ground_pick_and_place() -> None:
     assert grounded.task_spec["task_instances"][0]["params"]["required_arm"] == (
         "left_arm"
     )
-
-
-def test_deterministic_parser_handles_mixed_language_pronouns_and_handover() -> None:
-    grounded = plan_grounded_task_spec(
-        "mixed_language",
-        "Use right arm to upright the purple can, then transfer it to left arm, "
-        "then put it left of the orange can.",
-        _scene(),
-        robot_profile="ur10",
-    )
-
-    instances = grounded.task_spec["task_instances"]
-    assert [item["task_type"] for item in instances] == ["E2", "E4", "E1"]
-    assert instances[1]["params"]["transfer_arm"] == "right_arm"
-    assert instances[1]["params"]["receive_arm"] == "left_arm"
-    assert instances[2]["params"]["relation"] == "left_of"
-
-
-def test_deterministic_parser_consumes_transfer_arm_retreat_as_handover_cleanup() -> (
-    None
-):
-    grounded = plan_grounded_task_spec(
-        "handover_retreat",
-        "用右臂扶正紫色易拉罐，然后用右臂递给左臂，然后右臂撤回，"
-        "然后将其放到橘色易拉罐的左边。",
-        _scene(),
-        robot_profile="ur10",
-    )
-    graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
-
-    assert [item["task_type"] for item in grounded.task_spec["task_instances"]] == [
-        "E2",
-        "E4",
-        "E1",
-    ]
-    handover_nodes = [
-        node for node in graph["nodes"] if node["task_instance_id"] == "task_02"
-    ]
-    assert [node["atomic_action"] for node in handover_nodes] == [
-        "PickUp",
-        "MoveHeldObject",
-        "HandOver",
-        "MoveEndEffector",
-        "MoveJoints",
-    ]
-    placement = next(
-        node
-        for node in graph["nodes"]
-        if node["task_instance_id"] == "task_03"
-        and node["atomic_action"] == "MoveHeldObject"
-    )
-    assert placement["depends_on"] == [handover_nodes[-1]["id"]]
+    assert {item["category"] for item in grounded.scene_requirements["objects"]} == {
+        "carrot",
+        "cutting_board",
+    }
 
 
 def test_multi_object_handover_keeps_both_order_and_holder_dependencies() -> None:
@@ -1042,6 +1518,14 @@ def test_single_arm_e1_propagates_direct_payload_into_goal_and_contracts() -> No
         _payload_scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: deepcopy(intent),
+        grounding_caller=_grounding_caller(
+            **{
+                "handover_glue.object": "glue_stick",
+                "place_glue.target": "paper_cup",
+                "place_cup.object": "paper_cup",
+                "place_cup.target": "popcorn_bucket",
+            }
+        ),
     )
 
     graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
@@ -1087,86 +1571,3 @@ def test_seed_graph_repairs_missing_e2_handover_lifecycle_edge() -> None:
         if node["task_instance_id"] == "task_03" and node["atomic_action"] == "PickUp"
     )
     assert purple["node_ids"][-1] in pickup["depends_on"]
-
-
-def test_deterministic_parser_keeps_target_side_distinct_from_relation_side() -> None:
-    grounded = plan_grounded_task_spec(
-        "target_side",
-        "Put the purple can on the right can.",
-        _scene(),
-        robot_profile="ur10",
-    )
-
-    bindings = grounded.role_bindings
-    instance = grounded.task_spec["task_instances"][0]
-    assert bindings[instance["params"]["object_role"]] == "purple_can"
-    assert bindings[instance["params"]["target_role"]] == "orange_can"
-
-
-def test_deterministic_parser_resolves_explicit_multi_object_count() -> None:
-    grounded = plan_grounded_task_spec(
-        "two_cans",
-        "扶正两个易拉罐。",
-        _scene(),
-        robot_profile="ur10",
-    )
-
-    assert [item["task_type"] for item in grounded.task_spec["task_instances"]] == [
-        "E2",
-        "E2",
-    ]
-
-
-def test_deterministic_parser_does_not_treat_uid_digits_as_quantity() -> None:
-    scene = [
-        {
-            "runtime_uid": "can_10",
-            "uid": "can_10",
-            "role": "rigid_object",
-            "description": "A soda can.",
-            "init_pos": [0.0, 0.1, 0.7],
-        }
-    ]
-    grounded = plan_grounded_task_spec(
-        "uid_digits",
-        "扶正 can_10。",
-        scene,
-        robot_profile="ur10",
-    )
-    assert len(grounded.task_spec["task_instances"]) == 1
-    assert grounded.role_bindings["object_01"] == "can_10"
-
-
-def test_deterministic_parser_keeps_chinese_target_side_as_selector() -> None:
-    scene = [
-        {
-            "runtime_uid": "purple_can",
-            "uid": "purple_can",
-            "role": "rigid_object",
-            "description": "紫色易拉罐",
-            "init_pos": [0.0, 0.0, 0.7],
-        },
-        {
-            "runtime_uid": "orange_left",
-            "uid": "orange_left",
-            "role": "rigid_object",
-            "description": "橘色易拉罐",
-            "init_pos": [0.0, -0.25, 0.7],
-        },
-        {
-            "runtime_uid": "orange_right",
-            "uid": "orange_right",
-            "role": "rigid_object",
-            "description": "橘色易拉罐",
-            "init_pos": [0.0, 0.25, 0.7],
-        },
-    ]
-    grounded = plan_grounded_task_spec(
-        "target_side_zh",
-        "把紫色易拉罐放到左边的橘色易拉罐上。",
-        scene,
-        robot_profile="ur10",
-    )
-    instance = grounded.task_spec["task_instances"][0]
-    assert instance["params"]["relation"] == "on"
-    assert grounded.role_bindings[instance["params"]["target_role"]] == "orange_left"
