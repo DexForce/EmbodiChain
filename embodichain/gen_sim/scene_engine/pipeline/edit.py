@@ -44,31 +44,40 @@ def edit_scene(
     # Validate scene_export, write scene.json, and return Scene; failures raise before editing.
     scene, scene_graph = scene_importer.import_scene_and_graph()
     # Only for debug.
-    print(
-        json.dumps(
-            {"scene": scene.to_dict(), "scene_graph": scene_graph.to_dict()},
-            indent=2,
-            ensure_ascii=False,
-        )
-    )
+    # print(
+    #     json.dumps(
+    #         {"scene": scene.to_dict(), "scene_graph": scene_graph.to_dict()},
+    #         indent=2,
+    #         ensure_ascii=False,
+    #     )
+    # )
 
     # 1. Edit Understanding
-    # Will return an already checked scene edit plan.
+    # Will return an already checked scene edit plan
+    # and a validated updated scene graph.
     log_info("Starting Edit Understanding")
-    scene_edit_plan = understand_scene_edit(
+    scene_edit_plan, updated_scene_graph = understand_scene_edit(
         scene=scene,
         scene_graph=scene_graph,
         edit_prompt=edit_prompt,
         vlm_client=vlm_client,
     )
     log_info("Completed Edit Understanding")
+    # Only for debug.
+    # print(
+    #     json.dumps(
+    #         {"updated scene graph": updated_scene_graph.to_dict()},
+    #         indent=2,
+    #         ensure_ascii=False,
+    #     )
+    # )
 
     # 2. Prepare Objects.
     log_info("Preparing Objects if necessary")
-    # scene = prepare_objects(
-    #     scene=scene,
-    #     output_root=output_root,
-    # )
+    scene = prepare_scene_edit_assets(
+        scene=scene,
+        scene_edit_plan=scene_edit_plan,
+    )
     log_info("Completed Preparing Objects")
 
     # 3. Layout Editing
