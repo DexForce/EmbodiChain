@@ -71,9 +71,9 @@ Rules:
    in any semantic field.
 5. category is a lower-case singular snake_case class, such as mug, book,
    potted_plant, or coffee_table. It must not contain color or material.
-6. name contains only color, material, texture, shape, and object description.
-   It must not contain position or relations, such as left, right, on, in, or
-   near.
+6. name is a concise human-readable phrase containing only color, material,
+   texture, shape, and object details. It may contain spaces, but must not
+   contain position or relations, such as left, right, on, in, or near.
 7. For table, description contains only its category, material, color, texture,
    shape, and visible structural details. Do not mention image coverage, image
    position, camera framing, or viewpoint. For example, do not write "occupying
