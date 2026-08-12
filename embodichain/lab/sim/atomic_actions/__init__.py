@@ -33,6 +33,7 @@ from .affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
+    TurnAffordance,
 )
 from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
 from .control import (
@@ -100,6 +101,9 @@ from .primitives import (
     Press,
     PressGoal,
     PressOptions,
+    TurnKnob,
+    TurnKnobGoal,
+    TurnKnobOptions,
 )
 from .runner import (
     CommandAcknowledgement,
@@ -210,6 +214,9 @@ __all__ = [
     "Press",
     "PressGoal",
     "PressOptions",
+    "TurnKnob",
+    "TurnKnobGoal",
+    "TurnKnobOptions",
     "RecoveryPolicy",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
@@ -229,6 +236,7 @@ __all__ = [
     "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
+    "TurnAffordance",
     "TrajectorySegment",
     "get_registered_actions",
     "register_action",

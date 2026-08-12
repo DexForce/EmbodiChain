@@ -31,6 +31,7 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.common import BatchEntity
+    from embodichain.lab.sim.objects import Articulation
 
 
 @dataclass
@@ -63,13 +64,25 @@ class Affordance:
 
 @dataclass
 class AntipodalAffordance(Affordance):
-    """Antipodal grasp affordance for parallel-jaw grippers."""
+    """Antipodal grasp affordance for parallel-jaw grippers.
+
+    Geometry may be supplied directly as a triangle mesh, or resolved from one
+    link of an articulation.  The articulation form deliberately uses the
+    simulation object's public geometry API instead of parsing its source URDF,
+    so the sampled mesh matches the geometry instantiated by the simulator.
+    """
 
     mesh_vertices: torch.Tensor | None = None
     """Object mesh vertices, shape [N, 3]."""
 
     mesh_triangles: torch.Tensor | None = None
     """Object mesh triangle indices, shape [M, 3]."""
+
+    articulation: Articulation | None = None
+    """Optional articulation whose link supplies the grasp mesh and live pose."""
+
+    link_name: str | None = None
+    """Articulation link passed to ``get_link_vert_face``/``get_link_pose``."""
 
     generator_cfg: GraspGeneratorCfg | None = None
     """Optional grasp-generator configuration."""
@@ -81,6 +94,41 @@ class AntipodalAffordance(Affordance):
     """If True, recompute the grasp annotation on each access."""
 
     _generator: GraspGenerator | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Resolve articulation-link geometry while preserving mesh input."""
+        has_articulation = self.articulation is not None
+        has_link_name = self.link_name is not None
+        if has_articulation != has_link_name:
+            raise ValueError(
+                "articulation and link_name must be provided together for an "
+                "articulation AntipodalAffordance."
+            )
+        if not has_articulation:
+            return
+        if not isinstance(self.link_name, str) or not self.link_name.strip():
+            raise ValueError("link_name must be a non-empty string.")
+        if self.mesh_vertices is not None or self.mesh_triangles is not None:
+            raise ValueError(
+                "Provide either articulation + link_name or mesh_vertices + "
+                "mesh_triangles, not both."
+            )
+        vertices, triangles = self.articulation.get_link_vert_face(self.link_name)
+        self.mesh_vertices = torch.as_tensor(vertices)
+        self.mesh_triangles = torch.as_tensor(triangles)
+
+    @property
+    def is_articulation(self) -> bool:
+        """Whether geometry and pose are backed by an articulation link."""
+        return self.articulation is not None and self.link_name is not None
+
+    def get_articulation_link_pose(self) -> torch.Tensor:
+        """Return the current batched world pose of the configured link."""
+        if not self.is_articulation:
+            raise ValueError(
+                "This AntipodalAffordance is not backed by an articulation link."
+            )
+        return self.articulation.get_link_pose(self.link_name, to_matrix=True)
 
     def _init_generator(self) -> None:
         if self.mesh_vertices is None or self.mesh_triangles is None:
@@ -204,6 +252,102 @@ class AntipodalAffordance(Affordance):
 
 
 @dataclass
+class TurnAffordance(Affordance):
+    """Geometry and rotation semantics for one articulation link knob."""
+
+    articulation: Articulation | None = None
+    """Articulation whose link supplies the knob mesh and live pose."""
+
+    link_name: str = ""
+    """Articulation link passed to ``get_link_vert_face``/``get_link_pose``."""
+
+    turn_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
+    )
+    """Knob rotation axis expressed in the articulation-link frame."""
+
+    mesh_vertices: torch.Tensor = field(init=False, repr=False)
+    """Link-local mesh vertices returned by ``get_link_vert_face``."""
+
+    mesh_triangles: torch.Tensor = field(init=False, repr=False)
+    """Link-local mesh triangles returned by ``get_link_vert_face``."""
+
+    def __post_init__(self) -> None:
+        articulation = self.articulation
+        if articulation is None:
+            raise ValueError("TurnAffordance.articulation must be provided.")
+        if not isinstance(self.link_name, str) or not self.link_name.strip():
+            raise ValueError("TurnAffordance.link_name must be a non-empty string.")
+        if (
+            not isinstance(self.turn_axis, torch.Tensor)
+            or self.turn_axis.shape != (3,)
+            or not torch.isfinite(self.turn_axis).all()
+        ):
+            raise ValueError("TurnAffordance.turn_axis must be a finite (3,) tensor.")
+        if torch.linalg.vector_norm(self.turn_axis) <= 1.0e-6:
+            raise ValueError("TurnAffordance.turn_axis must be non-zero.")
+        self.turn_axis = self.turn_axis.clone()
+        vertices, triangles = articulation.get_link_vert_face(self.link_name)
+        self.mesh_vertices = torch.as_tensor(vertices)
+        self.mesh_triangles = torch.as_tensor(triangles)
+        if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
+            raise ValueError("TurnAffordance mesh vertices must have shape (N, 3).")
+        if self.mesh_vertices.shape[0] == 0:
+            raise ValueError("TurnAffordance requires a non-empty link mesh.")
+
+    def get_link_pose(self) -> torch.Tensor:
+        """Return the current batched world pose of the configured link."""
+        articulation = self.articulation
+        if articulation is None:
+            raise RuntimeError("TurnAffordance has no articulation.")
+        return articulation.get_link_pose(self.link_name, to_matrix=True)
+
+    def get_grasp_pose(self, link_pose: torch.Tensor | None = None) -> torch.Tensor:
+        """Construct the deterministic grasp pose at the link mesh center.
+
+        The pose z-axis follows :attr:`turn_axis` transformed into the world
+        frame, while its y-axis is fixed to world ``(0, 0, 1)``.
+
+        Returns:
+            Batched world-frame grasp poses with shape ``(B, 4, 4)``.
+
+        Raises:
+            ValueError: If the world turn axis is parallel to the fixed y-axis.
+        """
+        link_pose = self.get_link_pose() if link_pose is None else link_pose
+        if link_pose.dim() != 3 or link_pose.shape[1:] != (4, 4):
+            raise ValueError("Articulation link pose must have shape (B, 4, 4).")
+        link_pose = link_pose.to(dtype=torch.float32)
+        device = link_pose.device
+        center = self.mesh_vertices.to(device=device, dtype=torch.float32).mean(dim=0)
+        turn_axis = self.turn_axis.to(device=device, dtype=torch.float32)
+        turn_axis = turn_axis / torch.linalg.vector_norm(turn_axis)
+
+        z_axis = torch.matmul(link_pose[:, :3, :3], turn_axis)
+        z_axis = torch.nn.functional.normalize(z_axis, dim=1)
+        y_axis = torch.tensor(
+            [0.0, 0.0, 1.0], dtype=torch.float32, device=device
+        ).expand_as(z_axis)
+        x_axis = torch.linalg.cross(y_axis, z_axis, dim=1)
+        if torch.any(torch.linalg.vector_norm(x_axis, dim=1) <= 1.0e-6):
+            raise ValueError(
+                "TurnAffordance turn axis must not be parallel to world (0, 0, 1)."
+            )
+        x_axis = torch.nn.functional.normalize(x_axis, dim=1)
+
+        grasp_pose = torch.eye(4, dtype=torch.float32, device=device).repeat(
+            link_pose.shape[0], 1, 1
+        )
+        grasp_pose[:, :3, 0] = x_axis
+        grasp_pose[:, :3, 1] = y_axis
+        grasp_pose[:, :3, 2] = z_axis
+        grasp_pose[:, :3, 3] = (
+            torch.matmul(link_pose[:, :3, :3], center) + link_pose[:, :3, 3]
+        )
+        return grasp_pose
+
+
+@dataclass
 class InteractionPoints(Affordance):
     """Batch of 3D interaction points on an object surface."""
 
@@ -292,6 +436,7 @@ class AssembleAffordance(Affordance):
 __all__ = [
     "Affordance",
     "AntipodalAffordance",
+    "TurnAffordance",
     "InteractionPoints",
     "AssembleAffordance",
 ]

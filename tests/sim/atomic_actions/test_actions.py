@@ -70,6 +70,10 @@ from embodichain.lab.sim.atomic_actions import (
     SceneEntityPose,
     SceneSnapshot,
     TaskState,
+    TurnAffordance,
+    TurnKnob,
+    TurnKnobGoal,
+    TurnKnobOptions,
 )
 from embodichain.lab.sim.planners import (
     MotionGenerator,
@@ -77,6 +81,7 @@ from embodichain.lab.sim.planners import (
     PlanOptions,
     PlanResult,
 )
+from embodichain.lab.sim.objects import Articulation
 
 NUM_ENVS = 2
 ARM_DOF = 6
@@ -410,6 +415,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
     assert Press.GoalType is PressGoal
+    assert TurnKnob.GoalType is TurnKnobGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
     assert HandOver.GoalType is GraspGoal
@@ -422,6 +428,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
         MoveHeldObjectOptions(),
         PlaceOptions(),
         PressOptions(),
+        TurnKnobOptions(),
         CoordinatedPickmentOptions(),
         CoordinatedPlacementOptions(),
         HandOverOptions(),
@@ -923,6 +930,89 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
     assert projected_held is not None
     assert projected_held.semantics is held.semantics
     assert torch.equal(projected_held.object_to_eef, held.object_to_eef)
+
+
+def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
+    articulation = Mock(spec=Articulation)
+    articulation.get_link_vert_face.return_value = (
+        torch.zeros(8, 3),
+        torch.zeros(4, 3, dtype=torch.long),
+    )
+    articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    affordance = TurnAffordance(
+        articulation=articulation,
+        link_name="knob",
+        turn_axis=torch.tensor([0.0, 1.0, 0.0]),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="knob",
+        entity=articulation,
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, TurnKnob())
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="turn_knob",
+            goal=TurnKnobGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=TurnKnobOptions(hand_interp_steps=3),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "reach",
+        "close",
+        "turn",
+        "open",
+        "retract",
+    ]
+    assert torch.all(
+        plan.trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    assert torch.all(
+        plan.trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
+    )
+    articulation.get_link_pose.assert_called_with("knob", to_matrix=True)
+    first_target = generator.robot.compute_ik.call_args_list[0].kwargs["pose"]
+    grasp_pose = affordance.get_grasp_pose(torch.eye(4).repeat(NUM_ENVS, 1, 1))
+    expected_pre_grasp_position = (
+        grasp_pose[:, :3, 3]
+        - grasp_pose[:, :3, 2] * TurnKnobOptions().pre_grasp_distance
+    )
+    assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
+
+
+def test_turn_knob_rejects_non_turn_affordance() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.zeros(8, 3),
+            mesh_triangles=torch.zeros(4, 3, dtype=torch.long),
+        ),
+        geometry={},
+        label="mesh-knob",
+    )
+    action = _bind_action(_motion_generator(), TurnKnob())
+
+    with pytest.raises(ValueError, match="TurnAffordance"):
+        _plan_action(
+            action,
+            _invocation("turn_knob", TurnKnobGoal(semantics)),
+            _context(),
+        )
+
+
+def test_turn_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "turn_axis" not in TurnKnobOptions.__dataclass_fields__
+    assert "approach_direction" not in TurnKnobOptions.__dataclass_fields__
 
 
 def test_handover_does_not_mutate_cached_final_pose() -> None:

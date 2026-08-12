@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from unittest.mock import Mock
 
@@ -26,6 +27,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
+    TurnAffordance,
 )
 
 
@@ -56,6 +58,41 @@ class TestAntipodalAffordance:
         # The redesign removes the shared-geometry-dict footgun.
         aff = AntipodalAffordance()
         assert not hasattr(aff, "geometry")
+
+    def test_articulation_link_resolves_mesh_and_live_pose(self):
+        vertices = torch.randn(8, 3)
+        triangles = torch.randint(0, 8, (5, 3))
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (vertices, triangles)
+        articulation.get_link_pose.return_value = link_pose
+
+        aff = AntipodalAffordance(
+            articulation=articulation,
+            link_name="knob",
+        )
+
+        articulation.get_link_vert_face.assert_called_once_with("knob")
+        assert aff.is_articulation
+        assert aff.mesh_vertices is vertices
+        assert aff.mesh_triangles is triangles
+        assert aff.get_articulation_link_pose() is link_pose
+        articulation.get_link_pose.assert_called_once_with("knob", to_matrix=True)
+
+    def test_articulation_and_link_name_must_be_provided_together(self):
+        with pytest.raises(ValueError, match="must be provided together"):
+            AntipodalAffordance(articulation=Mock())
+        with pytest.raises(ValueError, match="must be provided together"):
+            AntipodalAffordance(link_name="knob")
+
+    def test_articulation_geometry_is_mutually_exclusive_with_mesh_input(self):
+        articulation = Mock()
+        with pytest.raises(ValueError, match="either articulation"):
+            AntipodalAffordance(
+                articulation=articulation,
+                link_name="knob",
+                mesh_vertices=torch.zeros(1, 3),
+            )
 
     def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
         aff = AntipodalAffordance()
@@ -114,6 +151,65 @@ class TestAntipodalAffordance:
         _, approach_direction = generator.get_grasp_poses.call_args.args
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
+
+
+class TestTurnAffordance:
+    def test_builds_grasp_pose_from_mesh_center_and_axes(self):
+        vertices = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [2.0, 2.0, 2.0],
+                [1.0, 1.0, 1.0],
+            ]
+        )
+        triangles = torch.tensor([[0, 1, 2]])
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (vertices, triangles)
+        articulation.get_link_pose.return_value = link_pose
+        affordance = TurnAffordance(
+            articulation=articulation,
+            link_name="knob",
+            turn_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        grasp_pose = affordance.get_grasp_pose()
+
+        assert torch.allclose(
+            grasp_pose[:, :3, 3],
+            torch.matmul(link_pose[:, :3, :3], vertices.mean(dim=0))
+            + link_pose[:, :3, 3],
+        )
+        assert torch.allclose(
+            grasp_pose[:, :3, 1],
+            torch.tensor([0.0, 0.0, 1.0]).expand(2, -1),
+        )
+        assert torch.allclose(
+            grasp_pose[:, :3, 2],
+            torch.tensor([0.0, 1.0, 0.0]).expand(2, -1),
+        )
+        articulation.get_link_vert_face.assert_called_once_with("knob")
+        articulation.get_link_pose.assert_called_once_with("knob", to_matrix=True)
+
+    def test_rejects_turn_axis_parallel_to_world_up(self):
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (
+            torch.ones(3, 3),
+            torch.tensor([[0, 1, 2]]),
+        )
+        articulation.get_link_pose.return_value = torch.eye(4).unsqueeze(0)
+        affordance = TurnAffordance(
+            articulation=articulation,
+            link_name="knob",
+            turn_axis=torch.tensor([0.0, 0.0, 1.0]),
+        )
+
+        with pytest.raises(ValueError, match="parallel"):
+            affordance.get_grasp_pose()
 
 
 class TestInteractionPoints:

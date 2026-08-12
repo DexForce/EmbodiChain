@@ -44,6 +44,7 @@ from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
+from .turn_knob import TurnKnob, TurnKnobGoal, TurnKnobOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
@@ -52,6 +53,7 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveHeldObject,
     Place,
     Press,
+    TurnKnob,
     CoordinatedPickment,
     CoordinatedPlacement,
     HandOver,
@@ -87,4 +89,7 @@ __all__ = [
     "Press",
     "PressGoal",
     "PressOptions",
+    "TurnKnob",
+    "TurnKnobGoal",
+    "TurnKnobOptions",
 ]

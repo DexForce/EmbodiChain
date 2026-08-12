@@ -5,12 +5,12 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships nine built-in action implementations with stable skill IDs;
+EmbodiChain ships ten built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
 `Place` additionally accepts an `AssembleGoal`, so assembly reuses the same
-release primitive instead of introducing a tenth skill ID.
+release primitive instead of introducing another skill ID.
 
 All built-ins implement
 `plan(request, context) -> ActionPlan`, where `request` is the engine-resolved
@@ -143,6 +143,7 @@ The animations below are the focused simulator demos under
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
+| `turn_knob` | `TurnKnobGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TurnAffordance` | none |
 | `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
 | `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held by source arm | transfer attachment to destination arm |
@@ -445,6 +446,36 @@ symbolic effect in the current action; applications that require force/contact
 confirmation should verify it externally.
 
 **Example:** `scripts/tutorials/atomic_action/press.py`
+
+(builtin-turn-knob)=
+
+## `TurnKnob`
+
+Plans **approach -> reach -> close -> turn -> open -> retract** for one
+articulation link. The goal requires a `TurnAffordance` constructed with an
+`Articulation`, `link_name`, and link-frame `turn_axis`. The affordance obtains
+link-local geometry through `get_link_vert_face()` and the current world pose
+through `get_link_pose()`.
+
+The grasp position is the world-space transform of the link mesh's mean vertex
+position. Its rotation z-axis follows the world-transformed turn axis, its
+y-axis is fixed to world `(0, 0, 1)`, and its x-axis completes the right-handed
+frame. No antipodal grasp sampling is performed.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `turn_knob` |
+| Goal | `TurnKnobGoal(semantics=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Motion | approach, reach, close, rotate about the link-frame axis, open, retract |
+| Effect | none |
+
+`TurnKnobOptions` controls the pre-grasp distance, close/open interpolation,
+Cartesian turn keyframes, and turn angle. The pre-grasp pose is offset along
+the grasp pose's negative z-axis; the link-frame turn axis belongs to
+`TurnAffordance`.
+
+**Example:** `scripts/tutorials/atomic_action/turn_knob.py`
 
 (builtin-coordinated-pickment)=
 

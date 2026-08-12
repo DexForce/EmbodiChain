@@ -29,6 +29,8 @@ full-robot timed trajectory and uncommitted expected effects.
       PlaceOptions
       Press
       PressOptions
+      TurnKnob
+      TurnKnobOptions
       CoordinatedPickment
       CoordinatedPickmentOptions
       CoordinatedPlacement
@@ -47,6 +49,7 @@ full-robot timed trajectory and uncommitted expected effects.
       PlaceGoal
       AssembleGoal
       PressGoal
+      TurnKnobGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
 
@@ -96,6 +99,14 @@ Press
 -----
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.press
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+TurnKnob
+--------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.turn_knob
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
