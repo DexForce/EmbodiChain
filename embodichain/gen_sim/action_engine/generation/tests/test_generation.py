@@ -39,7 +39,6 @@ from embodichain.gen_sim.action_engine.cli import (
 from embodichain.gen_sim.action_engine.cli.generate_action_agent_config import (
     build_parser,
 )
-from embodichain.gen_sim.action_engine.compiler import compile_task_agent
 from embodichain.gen_sim.action_engine.generation.artifacts import (
     artifact_paths,
     write_generation_artifacts,
@@ -218,6 +217,33 @@ def test_prepare_scene_supports_scene_export_v1(scene_export: Path) -> None:
         Path(config["shape"]["fpath"]).is_file()
         for config in (*scene.background, *scene.rigid_objects)
     )
+
+
+def test_prepare_scene_requires_exactly_one_background(gym_export: Path) -> None:
+    source_path = gym_export / "gym_config.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["background"].append(
+        {
+            **source["background"][0],
+            "uid": "floor_0",
+            "description": "A floor beneath the work surface.",
+        }
+    )
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exactly one background"):
+        prepare_scene(gym_export)
+
+
+def test_prepare_scene_does_not_treat_physics_attrs_as_semantics(
+    gym_export: Path,
+) -> None:
+    scene = prepare_scene(gym_export)
+    rigid_object = next(
+        item for item in scene.planner_objects if item["role"] == "rigid_object"
+    )
+
+    assert rigid_object["attributes"] == {}
 
 
 @pytest.mark.parametrize(
@@ -938,6 +964,8 @@ def test_task_factory_style_sidecar_binds_roles_without_text_llm(
     monkeypatch.setitem(sys.modules, renderer_module.__name__, renderer_module)
     source_path = gym_export / "gym_config.json"
     source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["rigid_object"][0]["category"] = "can"
+    source["rigid_object"][0]["attributes"] = {"color": "red"}
     source["rigid_object"][0]["affordances"] = ["graspable", "orientable"]
     source["rigid_object"][0]["initial_state"] = {"orientation": "fallen"}
     source_path.write_text(json.dumps(source), encoding="utf-8")
@@ -1058,6 +1086,51 @@ def test_task_factory_sidecar_requires_static_affordance_and_state_evidence() ->
         _task_spec_role_bindings(
             task,
             ["interact_can"],
+            scene_requirements=requirements,
+            scene_objects=scene,
+            robot_profile="ur10",
+        )
+
+
+@pytest.mark.parametrize(
+    ("scene_metadata", "required_attributes"),
+    (
+        ({}, {}),
+        ({"category": "can"}, {"color": "red"}),
+    ),
+)
+def test_task_factory_sidecar_does_not_infer_semantics_from_description(
+    scene_metadata: dict,
+    required_attributes: dict,
+) -> None:
+    task = _existing_v2_task_spec("no-text-evidence")
+    task["metadata"] = {}
+    requirements = {
+        "objects": [
+            {
+                "role_id": "object_01",
+                "category": "can",
+                "count": 1,
+                "affordances": [],
+                "initial_state": {},
+                "attributes": required_attributes,
+            }
+        ]
+    }
+    scene = [
+        {
+            "runtime_uid": "mystery_object",
+            "role": "rigid_object",
+            "description": "A red soda can.",
+            "init_pos": [0.0, 0.0, 0.7],
+            **scene_metadata,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="requires one unambiguous scene match"):
+        _task_spec_role_bindings(
+            task,
+            ["mystery_object"],
             scene_requirements=requirements,
             scene_objects=scene,
             robot_profile="ur10",
@@ -1288,7 +1361,7 @@ def test_generation_cli_reports_seed_png_path(
     )
 
 
-def test_task4_line_fallback_preserves_seed_capability() -> None:
+def test_removed_task4_line_fallback_reports_the_supported_adapter() -> None:
     can_uids = [
         "interact_pepsi_can",
         "interact_fanta_can",
@@ -1313,20 +1386,13 @@ def test_task4_line_fallback_preserves_seed_capability() -> None:
             for uid in can_uids
         ],
     ]
-    task_agent = plan_task(
-        task_name="task4_2",
-        task_description="将罐头摆成一排",
-        scene_objects=scene_objects,
-        deterministic_fallback=True,
-    )
-    execution_program = compile_task_agent(task_agent)
-
-    assert len(task_agent["semantic_steps"][0]["objects"]) == 5
-    assert len(execution_program["semantic_steps"]) == 5
-    assert len(execution_program["edges"]) == 30
-    assert {step["object"] for step in execution_program["semantic_steps"]} == set(
-        can_uids
-    )
+    with pytest.raises(ValueError, match="deterministic instruction parser"):
+        plan_task(
+            task_name="task4_2",
+            task_description="将罐头摆成一排",
+            scene_objects=scene_objects,
+            deterministic_fallback=True,
+        )
 
 
 def _task_agent() -> dict:

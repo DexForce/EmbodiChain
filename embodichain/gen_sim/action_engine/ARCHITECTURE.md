@@ -53,6 +53,12 @@ The optional `deterministic` instruction parser is an explicitly selected,
 finite-vocabulary offline compatibility adapter. It is not imported by either
 LLM stage and is never used as an implicit fallback.
 
+The older public `planning.plan_task` adapter still accepts an LLM-produced
+`TaskAgent`, but it does not reinterpret the instruction after that structured
+output exists. Axis, orientation, and arm-allocation fields come only from the
+validated model result. Its former keyword fallback is rejected; callers that
+need the bounded offline parser must select `tasks.deterministic` explicitly.
+
 ### SceneRequirements
 
 `SceneRequirements` is the JSON hand-off to the external Scene Engine. It
@@ -61,6 +67,20 @@ constraints, camera requirements, and distractors. Scene results are never
 silently repaired. Structural contradictions and explicit affordance
 contradictions invalidate the task instance; an absent affordance declaration
 remains unknown and is deferred to runtime physical validation.
+
+The current tabletop importer has one deliberately narrow structural contract:
+exactly one `background` object is the support surface and receives runtime UID
+`table`; every movable object is assumed to begin on that surface. Zero or
+multiple backgrounds are rejected rather than resolved from position, UID, or
+description text. Semantic `category`, `color`, and `attributes` come only from
+their explicit scene fields. Physics `attrs` are not semantic metadata.
+
+For task-first inputs, explicit role bindings are authoritative unless they
+contradict metadata that the scene actually declares. Automatic role binding
+requires a unique match with complete structured category, attribute, state,
+and affordance evidence. Object names and descriptions remain available to the
+LLM grounding call, but deterministic validation never searches them for
+semantic substrings.
 
 ### SeedGraph
 
@@ -125,9 +145,13 @@ clears coordinated hold state only after both grippers are observed open.
 
 The online path first extracts auditable visual facts from multi-view RGB and,
 when available, depth and camera calibration. Facts contain only known UIDs,
-normalized bboxes/keypoints, relations, and confidence. A second structured
-call produces a complete direct `AtomicAction` graph. Prompts request facts and
-graph JSON only; hidden chain-of-thought is neither requested nor stored.
+normalized bboxes/keypoints, canonical spatial relations, task predicates, and
+confidence. Spatial relations use a shared ontology and fixed participant
+order. Task-level judgments such as visual or pattern completion are accepted
+only when the current `TaskSpec.success` explicitly requests them. A second
+structured call produces a complete direct `AtomicAction` graph. Prompts
+request facts and graph JSON only; hidden chain-of-thought is neither requested
+nor stored.
 
 Image-space constraints may use normalized keypoints, masks, bboxes, and
 relative relations. The Grounder uses live depth and camera calibration to

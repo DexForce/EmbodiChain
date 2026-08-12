@@ -48,65 +48,6 @@ _GEN_CONFIG_PATH = (
 )
 _GEN_SIM_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 _UNSAFE_ID_RE = re.compile(r"[^0-9a-z]+")
-_ORIENTATION_REQUEST_MARKERS = (
-    "upright",
-    "stand upright",
-    "standing",
-    "vertical",
-    "lay flat",
-    "lying flat",
-    "orientation",
-    "orient",
-    "align",
-    "aligned",
-    "facing",
-    "扶正",
-    "竖直",
-    "直立",
-    "立起来",
-    "放平",
-    "平放",
-    "躺平",
-    "朝向",
-    "对齐",
-    "平行",
-)
-_ARRANGEMENT_WORLD_X_MARKERS = (
-    "world_x",
-    "world x",
-    "x-axis",
-    "x axis",
-    "x轴",
-    "x 轴",
-    "x方向",
-    "x 方向",
-    "纵向",
-    "前后排列",
-    "前后摆放",
-    "前后方向",
-    "从前到后",
-    "从前往后",
-    "从后到前",
-    "从后往前",
-    "排成一列",
-    "front-to-back",
-    "front to back",
-    "back-to-front",
-    "back to front",
-    "depth-wise",
-    "depthwise",
-    "longitudinal",
-    "in a column",
-)
-_ARRANGEMENT_TABLE_LONG_AXIS_MARKERS = (
-    "table_long_axis",
-    "table long axis",
-    "table's long axis",
-    "table longest axis",
-    "桌面长轴",
-    "桌子的长轴",
-    "桌子长轴",
-)
 _MODEL_STEP_KEYS = frozenset(
     {"id", "operator", "object", "objects", "actor", "goal", "depends_on"}
 )
@@ -185,9 +126,8 @@ def plan_task(
         llm_caller: Optional injected callable accepting ``prompt=`` and
             ``model=`` keyword arguments. It must return a mapping whose only
             top-level key is ``semantic_steps``.
-        deterministic_fallback: If true, handle only unambiguous line-arrange
-            and stack instructions without calling an LLM. This is intended for
-            offline verification, not as a general natural-language parser.
+        deterministic_fallback: Removed compatibility flag. Use the explicitly
+            selected ``tasks.deterministic`` instruction parser instead.
 
     Returns:
         A validated ``action_engine_task_agent_v1`` mapping.
@@ -197,15 +137,10 @@ def plan_task(
     scene = _normalize_scene_objects(scene_objects)
 
     if deterministic_fallback:
-        fallback_steps = _deterministic_semantic_steps(task_description, scene)
-        if fallback_steps is not None:
-            return _wrap_agent(
-                task_name,
-                task_description,
-                fallback_steps,
-                scene,
-                allocation_groups=[],
-            )
+        raise ValueError(
+            "plan_task no longer provides a keyword fallback; select the "
+            "deterministic instruction parser explicitly."
+        )
 
     prompt = _render_prompt(
         task_name=task_name,
@@ -292,16 +227,8 @@ def _wrap_agent(
     *,
     allocation_groups: Any,
 ) -> dict[str, Any]:
-    steps = _normalize_semantic_steps(
-        raw_steps,
-        scene,
-        task_description=task_description,
-    )
-    groups = _ensure_bilateral_allocation_group(
-        task_description,
-        steps,
-        allocation_groups,
-    )
+    steps = _normalize_semantic_steps(raw_steps, scene)
+    groups = deepcopy(allocation_groups)
     task_agent = validate_task_agent(
         {
             "schema_version": TASK_AGENT_SCHEMA,
@@ -335,39 +262,9 @@ def _validate_operator_contracts(task_agent: Mapping[str, Any]) -> None:
             )
 
 
-def _ensure_bilateral_allocation_group(
-    task_description: str,
-    steps: Sequence[Mapping[str, Any]],
-    allocation_groups: Any,
-) -> Any:
-    """Preserve explicit or unambiguous two-sided upright arm intent."""
-    if allocation_groups:
-        return deepcopy(allocation_groups)
-    normalized = task_description.casefold()
-    bilateral = any(marker in normalized for marker in ("用双臂", "双臂", "both arms"))
-    orient_steps = [
-        step
-        for step in steps
-        if step.get("operator") == "orient_object"
-        and not step.get("depends_on")
-        and step.get("actor", {}).get("mode", "auto") == "auto"
-    ]
-    if not bilateral or len(orient_steps) != 2 or len(steps) != 2:
-        return deepcopy(allocation_groups)
-    return [
-        {
-            "id": "dual_arms_1",
-            "semantic_step_ids": [step["id"] for step in orient_steps],
-            "arm_constraint": "distinct_arms",
-        }
-    ]
-
-
 def _normalize_semantic_steps(
     raw_steps: Sequence[Any],
     scene: Sequence[Mapping[str, Any]],
-    *,
-    task_description: str,
 ) -> list[dict[str, Any]]:
     if not raw_steps:
         raise ValueError("Planner semantic_steps must not be empty.")
@@ -428,17 +325,6 @@ def _normalize_semantic_steps(
         if not isinstance(raw_goal, Mapping):
             raise ValueError(f"Semantic step {step_id!r} goal must be an object.")
         goal = deepcopy(dict(raw_goal))
-        if operator == "arrange_line":
-            # The model chooses semantics, but an unspecified line direction
-            # has one stable robot-view default. Do not let sampling turn a
-            # left-to-right row into a depth-wise layout with weaker reachability.
-            goal["axis"] = _arrangement_line_axis(task_description)
-            if not _requests_orientation_change(task_description):
-                # A line-layout request does not imply reorientation. Silently
-                # adding it can turn a reachable transport into an infeasible
-                # fixed-grasp wrist flip.
-                goal["orientation_goal"] = "preserve"
-                goal["orientation_axis"] = "none"
         for key in (
             "anchor",
             "orientation_reference_object",
@@ -470,21 +356,6 @@ def _normalize_semantic_steps(
         normalized.append(result)
         previous_id = step_id
     return normalized
-
-
-def _requests_orientation_change(task_description: str) -> bool:
-    normalized = task_description.casefold()
-    return any(marker in normalized for marker in _ORIENTATION_REQUEST_MARKERS)
-
-
-def _arrangement_line_axis(task_description: str) -> str:
-    """Resolve line direction from explicit intent, defaulting left-to-right."""
-    normalized = task_description.casefold()
-    if any(marker in normalized for marker in _ARRANGEMENT_TABLE_LONG_AXIS_MARKERS):
-        return "table_long_axis"
-    if any(marker in normalized for marker in _ARRANGEMENT_WORLD_X_MARKERS):
-        return "world_x"
-    return "world_y"
 
 
 def _fuse_redundant_hold_place_steps(
@@ -915,89 +786,6 @@ def _scene_runtime_uid(item: Mapping[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value
     raise ValueError("Every scene object requires runtime_uid, uid, or source_uid.")
-
-
-def _deterministic_semantic_steps(
-    task_description: str,
-    scene: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]] | None:
-    lowered = task_description.lower()
-    line_requested = any(
-        phrase in lowered
-        for phrase in (
-            "摆成一排",
-            "排成一排",
-            "排成一行",
-            "arrange in a line",
-            "one row",
-        )
-    )
-    stack_requested = any(
-        phrase in lowered for phrase in ("堆叠", "叠放", "摞起来", "stack", "pile")
-    )
-    if not line_requested and not stack_requested:
-        return None
-
-    movable = [
-        item
-        for item in scene
-        if str(item.get("role", "")).lower() == "rigid_object"
-        and _scene_runtime_uid(item) != "table"
-    ]
-    if line_requested and any(token in lowered for token in ("罐头", "易拉罐", "can")):
-        cans = [
-            item
-            for item in movable
-            if any(
-                token
-                in (
-                    f"{item.get('uid', '')} {item.get('source_uid', '')} "
-                    f"{item.get('description', '')}"
-                ).lower()
-                for token in ("can", "soda", "罐", "易拉罐")
-            )
-        ]
-        if cans:
-            movable = cans
-    object_uids = [_scene_runtime_uid(item) for item in movable]
-    if line_requested:
-        if len(object_uids) < 2:
-            raise ValueError("Deterministic arrange_line requires two movable objects.")
-        return [
-            {
-                "id": "s01_arrange_line",
-                "operator": "arrange_line",
-                "objects": object_uids,
-                "actor": {"mode": "auto"},
-                "goal": {
-                    "anchor": "table_center",
-                    "axis": "world_y",
-                    "order_by": "explicit",
-                    "order_constraint": "free",
-                    "order_direction": "given",
-                    "orientation_axis": "none",
-                    "orientation_goal": "preserve",
-                },
-                "depends_on": [],
-            }
-        ]
-    if not object_uids:
-        raise ValueError("Deterministic build_stack requires a movable object.")
-    return [
-        {
-            "id": "s01_build_stack",
-            "operator": "build_stack",
-            "objects": object_uids,
-            "actor": {"mode": "auto"},
-            "goal": {
-                "anchor": "table_center",
-                "stack_mode": "on_top",
-                "orientation_axis": "none",
-                "orientation_goal": "preserve",
-            },
-            "depends_on": [],
-        }
-    ]
 
 
 def _nonempty(value: Any, context: str) -> str:

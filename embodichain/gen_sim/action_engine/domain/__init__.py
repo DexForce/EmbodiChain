@@ -52,11 +52,17 @@ from .v2 import (
     validate_seed_graph,
     validate_task_spec,
 )
+from .visual_contracts import (
+    OCCLUSION_RELATION,
+    VISUAL_RELATION_PARTICIPANTS,
+    requested_visual_task_predicates,
+)
 
 __all__ = [
     "EXECUTION_PROGRAM_SCHEMA",
     "MOTION_POLICY_VERSION",
     "MOTION_MODIFIER_MODES",
+    "OCCLUSION_RELATION",
     "REASONING_TYPES",
     "RELATIONS",
     "PLACEMENT_RELATIONS",
@@ -66,10 +72,12 @@ __all__ = [
     "TASK_AGENT_SCHEMA",
     "TERMINAL_BEHAVIORS",
     "TRANSPORT_DIRECTIONS",
+    "VISUAL_RELATION_PARTICIPANTS",
     "TaskContract",
     "execution_program_hash",
     "motion_policy",
     "public_task_spec",
+    "requested_visual_task_predicates",
     "seed_graph_hash",
     "task_contract",
     "task_success_type",

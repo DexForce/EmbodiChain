@@ -77,7 +77,8 @@ def test_visual_l4_oracles_use_post_execution_facts(
     env = _env(bindings)
     facts = {
         "entities": [],
-        "relations": [{"type": visual_relation, "uids": [], "confidence": 0.9}],
+        "relations": [],
+        "task_predicates": [{"type": visual_relation, "confidence": 0.9}],
         "confidence": 0.9,
     }
 
@@ -122,8 +123,34 @@ def test_common_sense_and_constraint_oracles_are_path_independent() -> None:
             }
         ],
         "relations": [],
+        "task_predicates": [],
         "confidence": 1.0,
     }
+    assert evaluate_task_oracle(
+        constrained,
+        constraint_env,
+        constraint_bindings,
+        visual_facts=facts,
+    ).all()
+
+    blocker_uid = next(
+        uid for role, uid in constraint_bindings.items() if role != "sign"
+    )
+    facts["relations"] = [
+        {
+            "type": "occludes",
+            "uids": [blocker_uid, constraint_bindings["sign"]],
+            "confidence": 1.0,
+        }
+    ]
+    assert not evaluate_task_oracle(
+        constrained,
+        constraint_env,
+        constraint_bindings,
+        visual_facts=facts,
+    ).any()
+
+    facts["relations"][0]["uids"].reverse()
     assert evaluate_task_oracle(
         constrained,
         constraint_env,

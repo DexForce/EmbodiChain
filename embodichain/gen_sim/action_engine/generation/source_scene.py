@@ -326,19 +326,13 @@ def _collect_source_entries(
 
 
 def _find_table_source_uid(entries: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
-    backgrounds = [(role, config) for role, config in entries if role == "background"]
-    if not backgrounds:
-        raise ValueError("A tabletop action scene requires a background object.")
-    for _, config in backgrounds:
-        text = " ".join(
-            (
-                str(config.get("uid", "")),
-                str(config.get("description", "")),
-            )
-        ).lower()
-        if "table" in text:
-            return _require_uid(config, role="background")
-    return _require_uid(backgrounds[0][1], role="background")
+    backgrounds = [config for role, config in entries if role == "background"]
+    if len(backgrounds) != 1:
+        raise ValueError(
+            "A tabletop action scene requires exactly one background object; "
+            f"found {len(backgrounds)}."
+        )
+    return _require_uid(backgrounds[0], role="background")
 
 
 def _make_uid_map(
@@ -482,7 +476,7 @@ def _planner_object(
 ) -> dict[str, Any]:
     description = str(config.get("description", "")).strip()
     shape = deepcopy(dict(config.get("shape", {})))
-    raw_attributes = config.get("attributes", config.get("attrs", {}))
+    raw_attributes = config.get("attributes", {})
     if not isinstance(raw_attributes, Mapping):
         raw_attributes = {}
     raw_initial_state = config.get("initial_state", config.get("state", {}))

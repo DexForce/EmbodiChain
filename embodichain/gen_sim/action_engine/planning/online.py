@@ -30,6 +30,7 @@ from embodichain.gen_sim.action_engine.capabilities import (
 )
 from embodichain.gen_sim.action_engine.domain import (
     public_task_spec,
+    requested_visual_task_predicates,
     validate_public_task_spec,
     validate_task_spec,
 )
@@ -90,11 +91,13 @@ def plan_online_seed_graph(
     if not known_uids:
         raise ValueError("Online scene observation contains no simulator entities.")
     visual_call_counter = [0]
+    allowed_task_predicates = requested_visual_task_predicates(task)
     facts = (
         validate_visual_facts(
             visual_facts,
             known_uids=known_uids,
             camera_uids={camera.uid for camera in observation.cameras},
+            allowed_task_predicates=allowed_task_predicates,
         )
         if visual_facts is not None
         else analyze_visual_scene(

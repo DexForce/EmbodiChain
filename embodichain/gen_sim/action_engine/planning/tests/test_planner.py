@@ -322,7 +322,7 @@ def test_spatial_two_sided_phrase_does_not_invent_arm_constraint() -> None:
     assert program["allocation_groups"] == []
 
 
-def test_explicit_both_arms_request_gets_distinct_arm_group() -> None:
+def test_planner_does_not_infer_arm_group_from_instruction_text() -> None:
     def caller(**_kwargs: Any) -> dict[str, Any]:
         return {
             "semantic_steps": [
@@ -348,7 +348,7 @@ def test_explicit_both_arms_request_gets_distinct_arm_group() -> None:
         llm_caller=caller,
     )
 
-    assert program["allocation_groups"][0]["arm_constraint"] == "distinct_arms"
+    assert program["allocation_groups"] == []
 
 
 def test_planner_does_not_expose_internal_operator_contracts() -> None:
@@ -386,27 +386,17 @@ def test_planner_does_not_expose_internal_operator_contracts() -> None:
         )
 
 
-def test_task4_2_fallback_selects_five_cans_and_excludes_table() -> None:
-    program = plan_task(
-        task_name="task4_2",
-        task_description="将罐头摆成一排",
-        scene_objects=_scene(),
-        deterministic_fallback=True,
-    )
-    step = program["semantic_steps"][0]
-
-    assert step["operator"] == "arrange_line"
-    assert step["objects"] == [
-        "interact_soda_can_0",
-        "interact_soda_can_1",
-        "interact_soda_can_2",
-        "interact_soda_can_3",
-        "interact_soda_can_4",
-    ]
-    assert "table" not in step["objects"]
+def test_legacy_deterministic_fallback_is_rejected() -> None:
+    with pytest.raises(ValueError, match="deterministic instruction parser"):
+        plan_task(
+            task_name="task4_2",
+            task_description="将罐头摆成一排",
+            scene_objects=_scene(),
+            deterministic_fallback=True,
+        )
 
 
-def test_arrange_line_discards_unrequested_orientation_change() -> None:
+def test_arrange_line_preserves_structured_orientation_output() -> None:
     def caller(**_kwargs: Any) -> dict[str, Any]:
         return {
             "semantic_steps": [
@@ -437,11 +427,11 @@ def test_arrange_line_discards_unrequested_orientation_change() -> None:
     )
 
     goal = program["semantic_steps"][0]["goal"]
-    assert goal["orientation_goal"] == "preserve"
-    assert goal["orientation_axis"] == "none"
+    assert goal["orientation_goal"] == "upright"
+    assert goal["orientation_axis"] == "long_axis"
 
 
-def test_arrange_line_defaults_ambiguous_direction_to_robot_view_horizontal() -> None:
+def test_arrange_line_preserves_structured_axis_output() -> None:
     def caller(**_kwargs: Any) -> dict[str, Any]:
         return {
             "semantic_steps": [
@@ -470,10 +460,10 @@ def test_arrange_line_defaults_ambiguous_direction_to_robot_view_horizontal() ->
         llm_caller=caller,
     )
 
-    assert program["semantic_steps"][0]["goal"]["axis"] == "world_y"
+    assert program["semantic_steps"][0]["goal"]["axis"] == "world_x"
 
 
-def test_arrange_line_uses_world_x_for_explicit_front_to_back_request() -> None:
+def test_instruction_text_does_not_override_structured_axis_output() -> None:
     def caller(**_kwargs: Any) -> dict[str, Any]:
         return {
             "semantic_steps": [
@@ -502,7 +492,7 @@ def test_arrange_line_uses_world_x_for_explicit_front_to_back_request() -> None:
         llm_caller=caller,
     )
 
-    assert program["semantic_steps"][0]["goal"]["axis"] == "world_x"
+    assert program["semantic_steps"][0]["goal"]["axis"] == "world_y"
 
 
 def test_arrange_line_preserves_explicit_orientation_request() -> None:

@@ -33,27 +33,26 @@ __all__ = [
 ]
 
 
-DIRECTIONAL_RELATIONS = frozenset(
-    {
-        "left",
-        "left_of",
-        "right",
-        "right_of",
-        "front",
-        "front_of",
-        "in_front_of",
-        "behind",
-        "back",
-        "front_left",
-        "front_left_of",
-        "front_right",
-        "front_right_of",
-        "back_left",
-        "back_left_of",
-        "back_right",
-        "back_right_of",
-    }
-)
+_RELATION_COMPONENTS = {
+    "left": ("left",),
+    "left_of": ("left",),
+    "right": ("right",),
+    "right_of": ("right",),
+    "front": ("front",),
+    "front_of": ("front",),
+    "in_front_of": ("front",),
+    "behind": ("back",),
+    "back": ("back",),
+    "front_left": ("front", "left"),
+    "front_left_of": ("front", "left"),
+    "front_right": ("front", "right"),
+    "front_right_of": ("front", "right"),
+    "back_left": ("back", "left"),
+    "back_left_of": ("back", "left"),
+    "back_right": ("back", "right"),
+    "back_right_of": ("back", "right"),
+}
+DIRECTIONAL_RELATIONS = frozenset(_RELATION_COMPONENTS)
 
 
 def arm_base_poses(env: Any) -> tuple[torch.Tensor, torch.Tensor]:
@@ -120,16 +119,13 @@ def relation_axes(
     else:
         raise ValueError(f"Unsupported directional relation frame {frame!r}.")
 
-    components: list[torch.Tensor] = []
-    if relation.startswith("front") or relation in {"front", "front_of", "in_front_of"}:
-        components.append(forward)
-    elif relation.startswith("back") or relation in {"behind", "back"}:
-        components.append(-forward)
-    if "left" in relation or relation in {"left", "left_of"}:
-        components.append(lateral)
-    elif "right" in relation or relation in {"right", "right_of"}:
-        components.append(-lateral)
-    return tuple(components)
+    component_axes = {
+        "front": forward,
+        "back": -forward,
+        "left": lateral,
+        "right": -lateral,
+    }
+    return tuple(component_axes[item] for item in _RELATION_COMPONENTS[relation])
 
 
 def relation_offset(
@@ -147,16 +143,14 @@ def relation_offset(
     if not axes:
         return None
     offset = torch.zeros((int(env.num_envs), 3), dtype=dtype, device=device)
-    has_forward = relation.startswith(("front", "back")) or relation in {
-        "front",
-        "front_of",
-        "in_front_of",
-        "behind",
-        "back",
-    }
-    for index, axis in enumerate(axes):
+    components = _RELATION_COMPONENTS[relation]
+    for component, axis in zip(components, axes):
         axis = axis.to(dtype=dtype, device=device)
-        distance = forward_distance if has_forward and index == 0 else lateral_distance
+        distance = (
+            forward_distance
+            if component in {"front", "back"}
+            else lateral_distance
+        )
         offset[:, :2] += axis * float(distance)
     return offset
 

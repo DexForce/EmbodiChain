@@ -19,7 +19,8 @@
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 import json
@@ -29,7 +30,11 @@ from typing import Any
 
 import torch
 
-from embodichain.gen_sim.action_engine.domain import public_task_spec
+from embodichain.gen_sim.action_engine.domain import (
+    VISUAL_RELATION_PARTICIPANTS,
+    public_task_spec,
+    requested_visual_task_predicates,
+)
 
 __all__ = [
     "CameraObservation",
@@ -52,6 +57,7 @@ _VISUAL_ENTITY_KEYS = frozenset(
     }
 )
 _VISUAL_RELATION_KEYS = frozenset({"type", "uids", "confidence"})
+_VISUAL_TASK_PREDICATE_KEYS = frozenset({"type", "confidence"})
 
 
 @dataclass(frozen=True)
@@ -78,7 +84,7 @@ _VISUAL_FACTS_SCHEMA = {
     "title": "ActionEngineVisualFacts",
     "type": "object",
     "additionalProperties": False,
-    "required": ["entities", "relations", "confidence"],
+    "required": ["entities", "relations", "task_predicates", "confidence"],
     "properties": {
         "entities": {
             "type": "array",
@@ -116,8 +122,28 @@ _VISUAL_FACTS_SCHEMA = {
                 "additionalProperties": False,
                 "required": ["type", "uids", "confidence"],
                 "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": sorted(VISUAL_RELATION_PARTICIPANTS),
+                    },
+                    "uids": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {"type": "string"},
+                    },
+                    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                },
+            },
+        },
+        "task_predicates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["type", "confidence"],
+                "properties": {
                     "type": {"type": "string"},
-                    "uids": {"type": "array", "items": {"type": "string"}},
                     "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 },
             },
@@ -253,6 +279,11 @@ def analyze_visual_scene(
     """Ask a VLM for auditable facts, never hidden reasoning or an action plan."""
     _reject_live_fields(observation.entities, "SceneObservation.entities")
     public = public_task_spec(task_spec)
+    allowed_task_predicates = requested_visual_task_predicates(public)
+    relation_contracts = {
+        name: list(participants)
+        for name, participants in VISUAL_RELATION_PARTICIPANTS.items()
+    }
     _reject_live_fields(public, "PublicTaskSpec")
     camera_manifest, images = _camera_evidence(observation)
     prompt = (
@@ -262,7 +293,12 @@ def analyze_visual_scene(
         "and do not provide reasoning or actions. The image blocks appear in the "
         "camera_evidence order: each RGB image is followed by that camera's "
         "normalized depth image when depth_image_index is present. Camera "
-        "calibration is input evidence only; never reproduce it in the facts.\n\n"
+        "calibration is input evidence only; never reproduce it in the facts. "
+        "Use only these canonical spatial relation contracts, whose values give "
+        "the ordered UID participants: "
+        f"{json.dumps(relation_contracts, sort_keys=True)}. Put task-level visual "
+        "judgments in task_predicates, never in relations; their allowed types "
+        f"are {json.dumps(sorted(allowed_task_predicates))}.\n\n"
         f"TaskSpec:\n{json.dumps(public, ensure_ascii=False, sort_keys=True)}\n\n"
         f"Entity inventory:\n{json.dumps(observation.entities, ensure_ascii=False, sort_keys=True)}\n\n"
         f"Camera evidence:\n{json.dumps(camera_manifest, ensure_ascii=False, sort_keys=True)}"
@@ -286,13 +322,14 @@ def analyze_visual_scene(
             response = invoke(
                 prompt=current_prompt,
                 images=images,
-                schema=_VISUAL_FACTS_SCHEMA,
+                schema=_visual_facts_schema(allowed_task_predicates),
                 model=selected_model,
             )
             facts = validate_visual_facts(
                 response,
                 known_uids={str(item["uid"]) for item in observation.entities},
                 camera_uids={camera.uid for camera in observation.cameras},
+                allowed_task_predicates=allowed_task_predicates,
             )
             if facts["confidence"] < 0.5:
                 raise ValueError(
@@ -318,22 +355,29 @@ def validate_visual_facts(
     *,
     known_uids: set[str],
     camera_uids: set[str],
+    allowed_task_predicates: Collection[str] = (),
 ) -> dict[str, Any]:
     """Validate entity identity and normalized image-space evidence."""
     if not isinstance(value, Mapping):
         raise TypeError("VLM visual facts must be a mapping.")
-    unknown = set(value) - {"entities", "relations", "confidence"}
-    if unknown:
+    required_fields = {"entities", "relations", "task_predicates", "confidence"}
+    if set(value) != required_fields:
         raise ValueError(
-            f"VLM visual facts contain unsupported fields: {sorted(unknown)}."
+            "VLM visual facts require exactly fields "
+            f"{sorted(required_fields)}; received {sorted(value)}."
         )
     confidence = _confidence(value.get("confidence"), "confidence")
     entities = value.get("entities")
     relations = value.get("relations")
+    task_predicates = value.get("task_predicates")
     if not isinstance(entities, Sequence) or isinstance(entities, (str, bytes)):
         raise ValueError("VLM visual facts entities must be a list.")
     if not isinstance(relations, Sequence) or isinstance(relations, (str, bytes)):
         raise ValueError("VLM visual facts relations must be a list.")
+    if not isinstance(task_predicates, Sequence) or isinstance(
+        task_predicates, (str, bytes)
+    ):
+        raise ValueError("VLM visual facts task_predicates must be a list.")
     normalized_entities = []
     for index, item in enumerate(entities):
         if not isinstance(item, Mapping):
@@ -405,8 +449,14 @@ def validate_visual_facts(
                 f"{sorted(unsupported)}."
             )
         relation_type = relation.get("type")
-        if not isinstance(relation_type, str) or not relation_type:
-            raise ValueError(f"visual relations[{index}].type must be non-empty.")
+        if (
+            not isinstance(relation_type, str)
+            or relation_type not in VISUAL_RELATION_PARTICIPANTS
+        ):
+            raise ValueError(
+                f"visual relations[{index}] relation type must be one of "
+                f"{sorted(VISUAL_RELATION_PARTICIPANTS)}."
+            )
         participants = relation.get("uids", [])
         if not isinstance(participants, Sequence) or isinstance(
             participants, (str, bytes)
@@ -415,6 +465,16 @@ def validate_visual_facts(
         if any(not isinstance(uid, str) or not uid for uid in participants):
             raise ValueError(
                 f"visual relations[{index}].uids must contain non-empty strings."
+            )
+        expected_count = len(VISUAL_RELATION_PARTICIPANTS[relation_type])
+        if len(participants) != expected_count:
+            raise ValueError(
+                f"visual relations[{index}].uids must contain exactly "
+                f"{expected_count} UIDs in canonical participant order."
+            )
+        if len(set(participants)) != len(participants):
+            raise ValueError(
+                f"visual relations[{index}].uids must contain distinct UIDs."
             )
         invalid = set(participants) - known_uids
         if invalid:
@@ -427,15 +487,61 @@ def validate_visual_facts(
             normalized.get("confidence"), f"visual relations[{index}].confidence"
         )
         normalized_relations.append(normalized)
+    normalized_task_predicates = []
+    allowed_predicates = {str(item) for item in allowed_task_predicates}
+    for index, predicate in enumerate(task_predicates):
+        if not isinstance(predicate, Mapping):
+            raise ValueError(f"visual task_predicates[{index}] must be a mapping.")
+        unsupported = set(predicate) - _VISUAL_TASK_PREDICATE_KEYS
+        if unsupported or set(predicate) != _VISUAL_TASK_PREDICATE_KEYS:
+            raise ValueError(
+                f"visual task_predicates[{index}] requires exactly fields "
+                f"{sorted(_VISUAL_TASK_PREDICATE_KEYS)}."
+            )
+        predicate_type = predicate.get("type")
+        if (
+            not isinstance(predicate_type, str)
+            or predicate_type not in allowed_predicates
+        ):
+            raise ValueError(
+                f"visual task_predicates[{index}].type must be one of "
+                f"{sorted(allowed_predicates)}."
+            )
+        normalized = dict(predicate)
+        _reject_live_fields(normalized, f"visual task_predicates[{index}]")
+        normalized["confidence"] = _confidence(
+            normalized.get("confidence"),
+            f"visual task_predicates[{index}].confidence",
+        )
+        normalized_task_predicates.append(normalized)
     _reject_live_fields(
-        {"entities": normalized_entities, "relations": normalized_relations},
+        {
+            "entities": normalized_entities,
+            "relations": normalized_relations,
+            "task_predicates": normalized_task_predicates,
+        },
         "VLM visual facts",
     )
     return {
         "entities": normalized_entities,
         "relations": normalized_relations,
+        "task_predicates": normalized_task_predicates,
         "confidence": confidence,
     }
+
+
+def _visual_facts_schema(
+    allowed_task_predicates: Collection[str],
+) -> dict[str, Any]:
+    """Return the visual-fact schema specialized for the current task."""
+    schema = deepcopy(_VISUAL_FACTS_SCHEMA)
+    predicate_schema = schema["properties"]["task_predicates"]
+    allowed = sorted(str(item) for item in allowed_task_predicates)
+    if allowed:
+        predicate_schema["items"]["properties"]["type"]["enum"] = allowed
+    else:
+        predicate_schema["maxItems"] = 0
+    return schema
 
 
 def _default_structured_caller(

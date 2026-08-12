@@ -90,6 +90,7 @@ def test_online_planner_sees_public_task_and_returns_complete_seed_graph() -> No
             }
         ],
         "relations": [],
+        "task_predicates": [],
         "confidence": 0.9,
     }
     prompts = []
@@ -159,6 +160,7 @@ def test_visual_facts_reject_unknown_uid_and_out_of_range_keypoint() -> None:
             }
         ],
         "relations": [],
+        "task_predicates": [],
         "confidence": 1.0,
     }
     with pytest.raises(ValueError, match="unknown UID"):
@@ -176,6 +178,7 @@ def test_visual_facts_reject_visible_entity_without_image_evidence() -> None:
             }
         ],
         "relations": [],
+        "task_predicates": [],
         "confidence": 0.9,
     }
 
@@ -194,6 +197,7 @@ def test_visual_facts_reject_non_numeric_image_coordinates() -> None:
             }
         ],
         "relations": [],
+        "task_predicates": [],
         "confidence": 0.9,
     }
 
@@ -230,6 +234,7 @@ def test_visual_fact_caller_receives_rgb_depth_and_calibration_evidence() -> Non
                 }
             ],
             "relations": [],
+            "task_predicates": [],
             "confidence": 0.9,
         }
 
@@ -239,6 +244,60 @@ def test_visual_fact_caller_receives_rgb_depth_and_calibration_evidence() -> Non
     assert len(captured["images"]) == 2
     assert '"depth_image_index": 1' in captured["prompt"]
     assert '"intrinsics": [[1.0, 0.0, 0.0]' in captured["prompt"]
+    assert captured["schema"]["properties"]["task_predicates"]["maxItems"] == 0
+
+
+def test_visual_task_predicates_are_limited_to_the_current_task() -> None:
+    task, _, bindings = _task("L4", reasoning="visual_semantics")
+    uid = next(iter(bindings.values()))
+    observation = SceneObservation(
+        (
+            CameraObservation(
+                "front",
+                torch.zeros((4, 5, 3), dtype=torch.uint8),
+                None,
+                None,
+                None,
+            ),
+        ),
+        ({"uid": uid},),
+    )
+    captured = {}
+
+    def caller(**kwargs):
+        captured.update(kwargs)
+        return {
+            "entities": [],
+            "relations": [],
+            "task_predicates": [
+                {"type": "mouth_completed", "confidence": 0.9}
+            ],
+            "confidence": 0.9,
+        }
+
+    facts = analyze_visual_scene(observation, task, caller=caller)
+
+    predicate_type = captured["schema"]["properties"]["task_predicates"][
+        "items"
+    ]["properties"]["type"]
+    assert predicate_type["enum"] == ["mouth_completed"]
+    assert facts["task_predicates"][0]["type"] == "mouth_completed"
+
+
+def test_visual_facts_reject_unrequested_task_predicate() -> None:
+    value = {
+        "entities": [],
+        "relations": [],
+        "task_predicates": [{"type": "mouth_completed", "confidence": 0.9}],
+        "confidence": 0.9,
+    }
+
+    with pytest.raises(ValueError, match="task_predicates.*must be one of"):
+        validate_visual_facts(
+            value,
+            known_uids={"known"},
+            camera_uids={"front"},
+        )
 
 
 def test_production_online_graph_caller_receives_reset_time_multiview_evidence(
@@ -289,11 +348,46 @@ def test_visual_facts_reject_unstructured_entity_fields() -> None:
             }
         ],
         "relations": [],
+        "task_predicates": [],
         "confidence": 0.9,
     }
 
     with pytest.raises(ValueError, match="unsupported fields"):
         validate_visual_facts(value, known_uids={"known"}, camera_uids={"front"})
+
+
+def test_visual_facts_reject_noncanonical_relation_type() -> None:
+    value = {
+        "entities": [],
+        "relations": [
+            {"type": "obstructs", "uids": ["box", "sign"], "confidence": 0.9}
+        ],
+        "task_predicates": [],
+        "confidence": 0.9,
+    }
+
+    with pytest.raises(ValueError, match="relation type"):
+        validate_visual_facts(
+            value,
+            known_uids={"box", "sign"},
+            camera_uids={"front"},
+        )
+
+
+def test_visual_facts_require_ordered_relation_participants() -> None:
+    value = {
+        "entities": [],
+        "relations": [{"type": "occludes", "uids": ["box"], "confidence": 0.9}],
+        "task_predicates": [],
+        "confidence": 0.9,
+    }
+
+    with pytest.raises(ValueError, match="exactly 2 UIDs"):
+        validate_visual_facts(
+            value,
+            known_uids={"box"},
+            camera_uids={"front"},
+        )
 
 
 def test_selection_prefers_exact_offline_and_l4_online() -> None:

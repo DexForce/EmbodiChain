@@ -304,6 +304,9 @@ def _grounding_inventory(
             "category",
             raw.get("object_category", entity.category),
         )
+        attributes = _redact_semantic_mapping(entity.attributes)
+        if entity.color is not None:
+            attributes.setdefault("color", entity.color)
         payload.append(
             {
                 "uid": entity.uid,
@@ -312,7 +315,7 @@ def _grounding_inventory(
                 "category": str(raw_category).strip() or entity.category,
                 "description": entity.description,
                 "affordances": sorted(entity.affordances),
-                "attributes": _redact_semantic_mapping(entity.attributes),
+                "attributes": attributes,
                 "initial_state": _redact_semantic_mapping(entity.initial_state),
                 "side": side,
                 "rank": rank_by_uid[entity.uid],

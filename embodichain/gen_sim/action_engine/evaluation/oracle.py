@@ -23,7 +23,10 @@ from typing import Any
 
 import torch
 
-from embodichain.gen_sim.action_engine.domain import validate_task_spec
+from embodichain.gen_sim.action_engine.domain import (
+    OCCLUSION_RELATION,
+    validate_task_spec,
+)
 from embodichain.gen_sim.action_engine.runtime.predicates import evaluate_predicate
 
 __all__ = ["evaluate_task_oracle"]
@@ -178,6 +181,7 @@ def _visual_result(
     for row in rows:
         entities = row.get("entities", ())
         relations = row.get("relations", ())
+        task_predicates = row.get("task_predicates", ())
         visible = True
         if required_visible_uid is not None:
             visible = any(
@@ -187,19 +191,40 @@ def _visual_result(
                 for entity in entities
             )
             visible &= not any(
-                isinstance(item, Mapping)
-                and str(item.get("type", "")).lower() in {"occludes", "obstructs"}
-                and required_visible_uid in item.get("uids", ())
+                _relation_has_patient(
+                    item,
+                    relation=OCCLUSION_RELATION,
+                    patient_uid=required_visible_uid,
+                )
                 for item in relations
             )
         relation_met = relation is None or any(
             isinstance(item, Mapping)
             and item.get("type") == relation
             and float(item.get("confidence", 0.0)) >= 0.5
-            for item in relations
+            for item in task_predicates
         )
         values.append(bool(visible and relation_met))
     return torch.tensor(values, dtype=torch.bool, device=env.device)
+
+
+def _relation_has_patient(
+    value: Any,
+    *,
+    relation: str,
+    patient_uid: str,
+) -> bool:
+    """Match one validated binary relation using canonical participant order."""
+    if not isinstance(value, Mapping) or value.get("type") != relation:
+        return False
+    participants = value.get("uids")
+    return bool(
+        isinstance(participants, Sequence)
+        and not isinstance(participants, (str, bytes))
+        and len(participants) == 2
+        and participants[1] == patient_uid
+        and float(value.get("confidence", 0.0)) >= 0.5
+    )
 
 
 def _fact_rows(

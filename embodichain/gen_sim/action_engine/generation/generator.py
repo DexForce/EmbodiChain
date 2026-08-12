@@ -23,7 +23,6 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
-import re
 from typing import Any
 
 from embodichain.gen_sim.action_engine.config import (
@@ -609,19 +608,24 @@ def _entity_matches_requirement(
     *,
     require_complete_static_evidence: bool,
 ) -> bool:
-    """Match only static metadata; UID inference requires complete evidence."""
+    """Match explicit metadata; UID inference requires complete evidence."""
     category = requirement.get("category")
-    expected_category = category.strip().lower() if isinstance(category, str) else ""
-    if expected_category != entity.category.lower() and not _entity_text_contains(
-        entity, expected_category
-    ):
-        return False
+    expected_category = category.strip().casefold() if isinstance(category, str) else ""
+    actual_category = str(entity.category).strip().casefold()
+    if expected_category:
+        if not actual_category:
+            if require_complete_static_evidence:
+                return False
+        elif expected_category != actual_category:
+            return False
     required_affordances = requirement.get("affordances", [])
     if not isinstance(required_affordances, Sequence) or isinstance(
         required_affordances, (str, bytes)
     ):
         return False
-    expected_affordances = {str(value) for value in required_affordances}
+    expected_affordances = {
+        str(value).strip().casefold() for value in required_affordances
+    }
     if (
         expected_affordances
         and (require_complete_static_evidence or entity.affordances)
@@ -632,7 +636,12 @@ def _entity_matches_requirement(
     if not isinstance(expected_attributes, Mapping):
         return False
     for name, expected in expected_attributes.items():
-        if not _static_attribute_matches(entity, str(name), expected):
+        if not _static_attribute_matches(
+            entity,
+            str(name),
+            expected,
+            require_complete_static_evidence=require_complete_static_evidence,
+        ):
             return False
     expected_state = requirement.get("initial_state", {})
     if not isinstance(expected_state, Mapping):
@@ -648,39 +657,21 @@ def _entity_matches_requirement(
     return True
 
 
-def _static_attribute_matches(entity: Any, name: str, expected: Any) -> bool:
-    """Compare metadata directly, with bounded text evidence for labels."""
-    if name == "color":
-        return isinstance(expected, str) and (
-            (entity.color or "").lower() == expected.strip().lower()
-            or _entity_text_contains(entity, expected)
-        )
+def _static_attribute_matches(
+    entity: Any,
+    name: str,
+    expected: Any,
+    *,
+    require_complete_static_evidence: bool,
+) -> bool:
+    """Compare one requirement against explicit exported metadata only."""
     marker = object()
-    actual = entity.attributes.get(name, marker)
-    if actual is not marker:
-        return actual == expected
-    if not isinstance(expected, str) or not expected.strip():
-        return False
-    token = expected.strip().lower()
-    text = str(entity.text).lower()
-    if token.isascii() and token.replace("_", "").isalnum():
-        return (
-            re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text) is not None
-        )
-    return token in text
-
-
-def _entity_text_contains(entity: Any, value: Any) -> bool:
-    """Match literal exported labels without applying a semantic alias table."""
-    if not isinstance(value, str) or not value.strip():
-        return False
-    token = value.strip().lower()
-    text = str(entity.text).lower()
-    if token.isascii() and token.replace("_", "").isalnum():
-        return (
-            re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text) is not None
-        )
-    return token in text
+    actual = entity.color if name == "color" else entity.attributes.get(name, marker)
+    if actual is marker or actual is None or actual == "":
+        return not require_complete_static_evidence
+    if name == "color" and isinstance(actual, str) and isinstance(expected, str):
+        return actual.strip().casefold() == expected.strip().casefold()
+    return actual == expected
 
 
 def _task_spec_role_references(value: Any, key: str = "") -> set[str]:
@@ -903,9 +894,16 @@ def _scene_requirements_from_scene(
             raise ValueError("Planner scene object is missing a runtime UID.")
         role = str(item.get("role", "object")).strip().lower()
         raw_category = item.get("category", item.get("object_category", ""))
-        category = str(raw_category).strip().lower()
-        if not category or category in {"none", "无", "没有"}:
-            category = "table" if uid == "table" else role
+        category = str(raw_category).strip().lower() or role or "object"
+        raw_attributes = item.get("attributes", {})
+        attributes = (
+            deepcopy(dict(raw_attributes))
+            if isinstance(raw_attributes, Mapping)
+            else {}
+        )
+        color = item.get("color")
+        if color not in (None, ""):
+            attributes.setdefault("color", color)
         objects.append(
             {
                 "role_id": uid,
@@ -913,7 +911,7 @@ def _scene_requirements_from_scene(
                 "count": 1,
                 "affordances": [],
                 "initial_state": {},
-                "attributes": {"description": str(item.get("description", ""))},
+                "attributes": attributes,
             }
         )
     return {

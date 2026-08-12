@@ -73,22 +73,6 @@ class SceneEntity:
     attributes: Mapping[str, Any] = field(default_factory=dict)
     source_uid: str = ""
 
-    @property
-    def text(self) -> str:
-        """Return bounded text evidence for static requirement matching."""
-        return " ".join(
-            value
-            for value in (
-                self.uid,
-                self.source_uid,
-                self.name,
-                self.description,
-                self.category,
-            )
-            if value
-        )
-
-
 class SceneInventory:
     """Structural scene index without natural-language matching rules."""
 
@@ -306,9 +290,9 @@ class GroundedTaskBuilder:
             return existing
         role = f"object_{len(self.role_by_uid) + 1:02d}"
         self.role_by_uid[entity.uid] = role
-        attributes: dict[str, Any] = {"description": entity.description}
+        attributes = deepcopy(dict(entity.attributes))
         if entity.color is not None:
-            attributes["color"] = entity.color
+            attributes.setdefault("color", entity.color)
         self.requirements[role] = {
             "role_id": role,
             "category": entity.category or entity.role,
