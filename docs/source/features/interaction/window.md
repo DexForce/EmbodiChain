@@ -10,6 +10,8 @@ The native window and the Viser backend are mutually exclusive;
 native window while Viser is enabled.
 Likewise, `SimulationManager.start_visualization()` rejects Viser startup while
 the native window is open.
+See {doc}`Viser browser visualization </overview/sim/viser_visualization>` for
+the headless browser frontend.
 
 ## Default Window Controls
 

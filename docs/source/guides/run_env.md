@@ -404,6 +404,7 @@ re-simulated rather than merely restored. Results may diverge if the replay
 configuration changes physics, control, randomization, assets, or timestep
 settings that are not stored in the trajectory file.
 
+(run-env-interactive-replay)=
 ### Interactive control replay
 
 Control mode uses kinematic state restoration and lets you scrub the trajectory
