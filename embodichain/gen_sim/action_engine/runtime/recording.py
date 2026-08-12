@@ -142,6 +142,7 @@ class RuntimeRecorder:
         active: torch.Tensor,
         failed: torch.Tensor,
         action_steps: int,
+        planner_traces: Sequence[Mapping[str, Any]] = (),
         diagnostics: Sequence[str] = (),
     ) -> None:
         if not self.enabled:
@@ -175,6 +176,8 @@ class RuntimeRecorder:
             }
             if diagnostics:
                 event["diagnostics"] = [str(item) for item in diagnostics]
+            if planner_traces:
+                event["planner_attempts"] = _jsonable(planner_traces, env_id)
             self.events[env_id].append(event)
 
     def step(

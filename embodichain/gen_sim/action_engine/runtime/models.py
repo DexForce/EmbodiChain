@@ -155,6 +155,7 @@ class ActionOutcome:
     grounded: GroundedAction
     prior_state: ExecutionState | None = None
     expected_effects: StateDelta | None = None
+    planner_trace: dict[str, Any] = field(default_factory=dict)
 
     def state_after(self, verified: torch.Tensor) -> ExecutionState:
         """Commit expected effects only for physically verified rows."""

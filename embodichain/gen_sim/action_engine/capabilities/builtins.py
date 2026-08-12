@@ -814,7 +814,11 @@ def _release_retreat_home(
             actions=(
                 ActionTemplate(
                     "MoveEndEffector",
-                    {"kind": "policy_pose"},
+                    {
+                        "kind": "policy_pose",
+                        "source": "release",
+                        "operation": "retreat",
+                    },
                     retreat_policy or build_motion_policy(),
                 ),
             ),

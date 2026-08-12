@@ -273,17 +273,25 @@ class AtomicActionAdapter:
             grounded,
             capability,
         )
-        combined_success = plan.plan_success.to(self.device)
+        primary_success = plan.plan_success.to(self.device)
+        combined_success = primary_success.clone()
         fallback_plan: ActionPlan | None = None
         use_fallback = torch.zeros_like(combined_success)
+        fallback_attempted = torch.zeros_like(combined_success)
+        fallback_success = torch.zeros_like(combined_success)
 
         fallback_strategy = self.planner_policy.get("fallback_strategy")
+        collision_safety = str(grounded.motion_policy.get("collision_safety", "auto"))
+        fallback_allowed = bool(self.planner_policy.get("allow_fallback", True)) and (
+            collision_safety != "required"
+        )
         if (
-            bool(self.planner_policy.get("allow_fallback", True))
+            fallback_allowed
             and invocation.motion_policy.strategy == "motion_gen"
             and fallback_strategy in {"ik_interp"}
             and not bool(combined_success.all())
         ):
+            fallback_attempted = ~primary_success
             fallback_policy = replace(
                 invocation.motion_policy,
                 strategy=str(fallback_strategy),
@@ -299,9 +307,8 @@ class AtomicActionAdapter:
                 grounded,
                 capability,
             )
-            use_fallback = ~combined_success & fallback_plan.plan_success.to(
-                self.device
-            )
+            fallback_success = fallback_plan.plan_success.to(self.device)
+            use_fallback = fallback_attempted & fallback_success
             selected_positions = self._merge_plan_rows(
                 selected_positions,
                 fallback_positions,
@@ -329,7 +336,7 @@ class AtomicActionAdapter:
             if selected_positions.shape[1]
             else state.last_qpos
         )
-        primary_rows = combined_success & plan.plan_success.to(self.device)
+        primary_rows = combined_success & primary_success
         projected_task = plan.expected_effects.apply(
             context.task,
             primary_rows,
@@ -368,7 +375,68 @@ class AtomicActionAdapter:
             grounded=grounded,
             prior_state=state,
             expected_effects=committed_effects,
+            planner_trace=self._planner_trace(
+                grounded=grounded,
+                invocation=invocation,
+                context=context,
+                state=state,
+                primary_success=primary_success,
+                fallback_allowed=fallback_allowed,
+                fallback_strategy=(
+                    str(fallback_strategy)
+                    if invocation.motion_policy.strategy == "motion_gen"
+                    and fallback_strategy in {"ik_interp"}
+                    else None
+                ),
+                fallback_attempted=fallback_attempted,
+                fallback_success=fallback_success,
+                fallback_used=use_fallback,
+            ),
         )
+
+    def _planner_trace(
+        self,
+        *,
+        grounded: GroundedAction,
+        invocation: ActionInvocation,
+        context: PlanningContext,
+        state: ExecutionState,
+        primary_success: torch.Tensor,
+        fallback_allowed: bool,
+        fallback_strategy: str | None,
+        fallback_attempted: torch.Tensor,
+        fallback_success: torch.Tensor,
+        fallback_used: torch.Tensor,
+    ) -> dict[str, Any]:
+        """Build compact per-row evidence for the planner route actually used."""
+        exclusions = self._collision_exclusion_masks(grounded, state)
+        obstacle_positions = {
+            uid: context.scene.entities[uid].pose[:, :3, 3].detach().clone()
+            for uid in context.scene.collision_entity_ids
+        }
+        revisions = torch.as_tensor(
+            context.scene.collision_world_revisions(self.num_envs),
+            dtype=torch.int64,
+            device=self.device,
+        )
+        return {
+            "action_class": grounded.action_class,
+            "arm": grounded.arm,
+            "planner": invocation.motion_policy.planner,
+            "primary_strategy": invocation.motion_policy.strategy,
+            "dynamic_collision_mode": invocation.motion_policy.dynamic_collision_mode.value,
+            "primary_success": primary_success.detach().clone(),
+            "fallback_allowed": fallback_allowed,
+            "fallback_strategy": fallback_strategy,
+            "fallback_attempted": fallback_attempted.detach().clone(),
+            "fallback_success": fallback_success.detach().clone(),
+            "fallback_used": fallback_used.detach().clone(),
+            "collision_world_revision": revisions,
+            "collision_obstacle_positions": obstacle_positions,
+            "collision_exclusions": {
+                uid: mask.detach().clone() for uid, mask in exclusions.items()
+            },
+        }
 
     def _select_upright_transport_yaw(
         self,
@@ -586,12 +654,18 @@ class AtomicActionAdapter:
             strategy = str(self.planner_policy["single_arm_strategy"])
         sample_count = max(2, int(grounded.cfg.get("sample_interval", 50)))
         control_dt = float(getattr(self.env, "step_dt", 1.0 / 60.0))
-        dynamic_mode = (
-            DynamicCollisionMode.AUTO
-            if bool(self.planner_policy.get("dynamic_collision", False))
-            and strategy == "motion_gen"
-            else DynamicCollisionMode.OFF
+        dynamic_collision = bool(self.planner_policy.get("dynamic_collision", False))
+        collision_required = (
+            grounded.motion_policy.get("collision_safety") == "required"
         )
+        if dynamic_collision and strategy == "motion_gen":
+            dynamic_mode = (
+                DynamicCollisionMode.REQUIRED
+                if collision_required
+                else DynamicCollisionMode.AUTO
+            )
+        else:
+            dynamic_mode = DynamicCollisionMode.OFF
         return ActionInvocation(
             skill_id=str(capability.action_type.skill_id),
             goal=grounded.target,

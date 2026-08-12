@@ -393,7 +393,7 @@ def build_atomic_capability_registry() -> AtomicCapabilityRegistry:
             "single_arm",
             "preserve",
             "eef_pose",
-            verifier_hook=_verify_transfer_arm_clearance,
+            verifier_hook=_verify_arm_clearance,
             contract_resolver_hook=_resolve_end_effector_contract,
         ),
         AtomicCapability(
@@ -806,7 +806,7 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
     )
 
 
-def _verify_transfer_arm_clearance(
+def _verify_arm_clearance(
     *,
     executor: Any,
     step: Any,
@@ -814,7 +814,7 @@ def _verify_transfer_arm_clearance(
     outcome: Any,
     attempted: torch.Tensor,
 ) -> torch.Tensor:
-    """Verify the released transfer TCP is clear and back on its own side."""
+    """Verify a released TCP is clear, plus the transfer side for handover."""
     policy = outcome.grounded.motion_policy
     object_uid = policy.get("clearance_object_uid")
     if not isinstance(object_uid, str) or not object_uid:
@@ -843,7 +843,11 @@ def _verify_transfer_arm_clearance(
         object_pose = object_pose.unsqueeze(0).repeat(int(executor.env.num_envs), 1, 1)
     offset = eef[:, :3, 3] - object_pose[:, :3, 3]
     distance = torch.linalg.vector_norm(offset, dim=1)
-    clear = distance >= float(policy.get("minimum_transfer_clearance", 0.10))
+    minimum_clearance = policy.get(
+        "minimum_clearance",
+        policy.get("minimum_transfer_clearance", 0.10),
+    )
+    clear = distance >= float(minimum_clearance)
     role_axis = policy.get("transfer_role_axis")
     if role_axis is None:
         return attempted & clear

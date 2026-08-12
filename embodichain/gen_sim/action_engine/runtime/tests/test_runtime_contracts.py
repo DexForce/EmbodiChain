@@ -455,6 +455,13 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         active=torch.tensor([True, False]),
         failed=torch.tensor([False, True]),
         action_steps=4,
+        planner_traces=[
+            {
+                "primary_strategy": "motion_gen",
+                "primary_success": torch.tensor([True, False]),
+                "fallback_used": torch.tensor([False, True]),
+            }
+        ],
     )
     recorder.step(
         step,
@@ -483,6 +490,13 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
     assert checkpoint["events"][0]["actions"][0]["motion_policy"][
         "obj_upright_direction"
     ] == [0.0, 0.0, 1.0]
+    assert checkpoint["events"][0]["planner_attempts"] == [
+        {
+            "primary_strategy": "motion_gen",
+            "primary_success": True,
+            "fallback_used": False,
+        }
+    ]
     assert checkpoint["events"][1]["assigned_arm"] == "left_arm"
     assert checkpoint["events"][1]["physical_control_part"] == "physical_right_arm"
 
@@ -1041,6 +1055,9 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
         for edge in edges
         if edge.actions[0]["atomic_action_class"] == "MoveEndEffector"
     )
+    home = next(
+        edge for edge in edges if edge.actions[0]["atomic_action_class"] == "MoveJoints"
+    )
 
     grounded_staging = grounder.ground(
         staging.actions[0], step, arm="right_arm", state=state
@@ -1062,6 +1079,7 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
     grounded_retreat = grounder.ground(
         retreat.actions[0], step, arm="right_arm", state=state
     )
+    grounded_home = grounder.ground(home.actions[0], step, arm="right_arm", state=state)
     upright = motion_policy(("orientation", "upright"))
     release_defaults = resolve_motion_policy("dual_ur10", "Place", upright)
     retreat_defaults = resolve_motion_policy("dual_ur10", "MoveEndEffector", upright)
@@ -1084,6 +1102,10 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
     assert grounded_retreat.cfg["retreat_height"] == pytest.approx(
         retreat_defaults["retreat_height"]
     )
+    assert grounded_retreat.cfg["retreat_height"] == pytest.approx(0.30)
+    assert grounded_retreat.motion_policy["clearance_object_uid"] == "can"
+    assert grounded_retreat.motion_policy["collision_safety"] == "required"
+    assert grounded_home.motion_policy["collision_safety"] == "required"
 
 
 def test_dual_franka_handover_uses_explicit_exchange_clearance() -> None:
@@ -1436,6 +1458,93 @@ def test_handover_retreat_and_home_block_receiver_continuation() -> None:
 
     assert not executor._is_cleanup_edge(retreat)
     assert not executor._is_cleanup_edge(home)
+
+
+def test_release_retreat_and_home_are_required_safety_barriers() -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)),
+        "target": _FakeEntity("target", _pose(0.2, 0.0, 0.75), _box_vertices(0.03)),
+    }
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "can",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "target",
+                        "relation": "left_of",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    executor = ProgramExecutor(program, _FakeEnv(entities), record_runtime=False)
+    step = program.semantic_steps[0]
+    edges = [edge for edge in program.edges if edge.id in step.edge_ids]
+    retreat = next(
+        edge
+        for edge in edges
+        if edge.actions[0]["atomic_action_class"] == "MoveEndEffector"
+    )
+    home = next(
+        edge for edge in edges if edge.actions[0]["atomic_action_class"] == "MoveJoints"
+    )
+
+    assert not executor._is_cleanup_edge(retreat)
+    assert not executor._is_cleanup_edge(home)
+
+
+def test_on_relation_rejects_preserve_orientation_drift() -> None:
+    rotated = _pose(0.0, 0.0, 0.82)
+    rotated[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    entities = {
+        "can": _FakeEntity("can", rotated, _rect_vertices(0.03, 0.03, 0.06)),
+        "notebook": _FakeEntity(
+            "notebook",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.10, 0.08, 0.01),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "can",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "notebook",
+                            "relation": "on",
+                            "orientation_goal": "preserve",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    executor._orientation_references[step.id] = _pose(0.0, 0.0, 0.82)
+    executor._policies[step.id] = {
+        "preserve_orientation_tolerance": torch.pi / 12,
+    }
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert bool(failed[0])
+    assert not bool(success[0])
+    assert executor._orientation_errors[step.id][0] > torch.pi / 12
 
 
 def test_standalone_handover_assigns_its_pickup_candidate(

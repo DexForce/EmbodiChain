@@ -679,6 +679,11 @@ class ActionGrounder:
                 policy["sample_interval"] = int(
                     joint_defaults["hand_open_sample_interval"]
                 )
+            elif source == "initial" and control == "arm":
+                # Returning home after release is a safety motion. If the
+                # collision-aware planner cannot find a route, do not silently
+                # replace it with collision-unaware joint interpolation.
+                policy["collision_safety"] = "required"
         if (
             kind == "handover_staging"
             and capability.target_materializer == "semantic_held_object"
@@ -826,9 +831,12 @@ class ActionGrounder:
                 )
             )
         elif kind == "policy_pose":
-            if binding.get("source") == "handover":
-                policy.update(self.runtime_policy.grounding["handover"])
+            source = binding.get("source")
+            if source in {"release", "handover"}:
                 policy["clearance_object_uid"] = step.object_uid
+                policy["collision_safety"] = "required"
+            if source == "handover":
+                policy.update(self.runtime_policy.grounding["handover"])
                 policy["transfer_arm"] = arm
                 policy["transfer_role_axis"] = self._handover_role_axis(
                     arm,
@@ -840,7 +848,7 @@ class ActionGrounder:
                     arm,
                     policy,
                     reference_eef_pose,
-                    clear_exchange=binding.get("source") == "handover",
+                    clear_exchange=source == "handover",
                 )
             )
         elif kind == "visual_constraint":

@@ -253,7 +253,7 @@ runtime:
             hand_interp_steps: 12
           MoveEndEffector:
             sample_interval: 30
-            retreat_height: 0.10
+            retreat_height: 0.30
             retreat_distance: 0.10
             maximum_eef_height: 1.50
       handover_role:

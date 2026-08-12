@@ -425,3 +425,71 @@ def test_fallback_rows_keep_the_fallback_plan_effects(monkeypatch: Any) -> None:
     assert held is not None
     assert held.object_to_eef[0, 0, 3] == 1.0
     assert held.object_to_eef[1, 0, 3] == 2.0
+    assert torch.equal(
+        outcome.planner_trace["primary_success"], torch.tensor([True, False])
+    )
+    assert torch.equal(
+        outcome.planner_trace["fallback_attempted"], torch.tensor([False, True])
+    )
+    assert torch.equal(
+        outcome.planner_trace["fallback_used"], torch.tensor([False, True])
+    )
+
+
+def test_collision_required_cleanup_does_not_use_unsafe_fallback(
+    monkeypatch: Any,
+) -> None:
+    pose = torch.eye(4).repeat(2, 1, 1)
+    adapter = AtomicActionAdapter(
+        _planner_env(rigid_objects={"released": _PoseEntity(pose)}),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": ["released"],
+        },
+    )
+    failed_plan = ActionPlan(
+        skill_id="move_joints",
+        plan_success=torch.tensor([False, False]),
+        trajectory=TimedTrajectory.from_positions(
+            torch.zeros(2, 2, 8),
+            env_ids=torch.arange(2),
+            control_dt=0.01,
+        ),
+        recovery_policy=RecoveryPolicy(),
+        planned_scene_version=1,
+        planned_collision_world_revision=(1, 1),
+        diagnostics=PlannerDiagnostics(backend="fake"),
+        expected_effects=StateDelta(),
+    )
+    strategies: list[str] = []
+
+    def plan(invocation: Any, _context: Any) -> ActionPlan:
+        strategies.append(invocation.motion_policy.strategy)
+        assert invocation.motion_policy.dynamic_collision_mode.value == "required"
+        return failed_plan
+
+    monkeypatch.setattr(adapter, "_engine", lambda: SimpleNamespace(plan=plan))
+    grounded = GroundedAction(
+        "MoveJoints",
+        "left_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+        motion_policy={"collision_safety": "required"},
+        object_uid="released",
+    )
+
+    outcome = adapter.plan(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    assert strategies == ["motion_gen"]
+    assert not bool(outcome.success.any())
+    assert outcome.planner_trace["fallback_allowed"] is False
+    assert not bool(outcome.planner_trace["fallback_attempted"].any())
+    assert not bool(outcome.planner_trace["fallback_used"].any())
+    assert outcome.planner_trace["collision_obstacle_positions"]["released"].shape == (
+        2,
+        3,
+    )

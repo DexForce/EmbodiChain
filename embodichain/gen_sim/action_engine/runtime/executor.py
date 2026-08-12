@@ -72,6 +72,7 @@ class _EdgeResult:
     actions: list[torch.Tensor]
     failed: torch.Tensor
     grounded: list[GroundedAction]
+    planner_traces: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _score_arm_candidate(
@@ -369,6 +370,7 @@ class ProgramExecutor:
                             active=active,
                             failed=result.failed,
                             action_steps=len(result.actions),
+                            planner_traces=getattr(result, "planner_traces", ()),
                             diagnostics=self._edge_diagnostics(
                                 step,
                                 edge,
@@ -413,6 +415,7 @@ class ProgramExecutor:
                         active=active,
                         failed=edge_result.failed,
                         action_steps=len(edge_result.actions),
+                        planner_traces=getattr(edge_result, "planner_traces", ()),
                         diagnostics=self._edge_diagnostics(
                             step,
                             edge,
@@ -578,6 +581,7 @@ class ProgramExecutor:
             return result
         aggregate_actions = list(result.actions)
         grounded = list(result.grounded)
+        planner_traces = list(getattr(result, "planner_traces", ()))
         current_failed = result.failed.clone()
         attempted_failure = current_failed & ~failed
         while bool(attempted_failure.any()):
@@ -612,10 +616,16 @@ class ProgramExecutor:
             )
             aggregate_actions.extend(retry_result.actions)
             grounded.extend(retry_result.grounded)
+            planner_traces.extend(getattr(retry_result, "planner_traces", ()))
             succeeded = decision.retry & ~retry_result.failed
             current_failed &= ~succeeded
             attempted_failure = decision.retry & retry_result.failed
-        return _EdgeResult(aggregate_actions, current_failed, grounded)
+        return _EdgeResult(
+            aggregate_actions,
+            current_failed,
+            grounded,
+            planner_traces,
+        )
 
     def _retry_precondition(
         self,
@@ -1665,7 +1675,16 @@ class ProgramExecutor:
             | (assigned & ~action_success)
             | physical_failed
         )
-        return _EdgeResult(actions, edge_failed, grounded_items)
+        return _EdgeResult(
+            actions,
+            edge_failed,
+            grounded_items,
+            [
+                outcome.planner_trace
+                for outcome in outcomes.values()
+                if outcome is not None
+            ],
+        )
 
     def _physical_pickup(
         self,
@@ -1920,6 +1939,7 @@ class ProgramExecutor:
             | (active & ~outcome.success)
             | physical_failed,
             [grounded],
+            [outcome.planner_trace],
         )
 
     def _rebase_held_state(
@@ -2069,6 +2089,11 @@ class ProgramExecutor:
             | (assigned & ~action_success)
             | physical_failed,
             grounded_items,
+            [
+                outcome.planner_trace
+                for outcome in outcomes.values()
+                if outcome is not None
+            ],
         )
 
     def _execute_parallel_pickups(
@@ -2154,6 +2179,7 @@ class ProgramExecutor:
                 grounded, outcome = candidates[(step.id, arm)].plans[edge.id]
                 outcomes[arm] = outcome
                 results[edge.id].grounded.append(grounded)
+                results[edge.id].planner_traces.append(outcome.planner_trace)
             trajectory, action_success = self.adapter.combine(outcomes, masks)
             active = partition & ~base_failed & action_success
             commands = self.adapter.execute_trajectory(trajectory, active=active)
@@ -2465,30 +2491,6 @@ class ProgramExecutor:
                 satisfied = (delta[:, arrangement.axis_index] <= axis_tolerance) & (
                     delta[:, arrangement.perpendicular_index] <= perpendicular_tolerance
                 )
-                orientation_reference = self._orientation_references.get(step.id)
-                if (
-                    step.goal.get("orientation_goal", "preserve") == "preserve"
-                    and orientation_reference is not None
-                ):
-                    reference_rotation = orientation_reference[:, :3, :3].to(
-                        device=observed_pose.device,
-                        dtype=observed_pose.dtype,
-                    )
-                    relative = torch.bmm(
-                        reference_rotation.transpose(1, 2),
-                        observed_pose[:, :3, :3],
-                    )
-                    cosine = (
-                        relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0
-                    ) * 0.5
-                    orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
-                    self._orientation_errors[step.id] = orientation_error
-                    satisfied &= orientation_error <= float(
-                        policy.get(
-                            "preserve_orientation_tolerance",
-                            fallbacks["preserve_orientation_tolerance"],
-                        )
-                    )
             else:
                 satisfied = (
                     torch.linalg.vector_norm(observed - target, dim=-1) <= tolerance
@@ -2508,6 +2510,32 @@ class ProgramExecutor:
                     "minimum_distance": float(policy.get("relation_clearance", 0.01)),
                 },
             )
+        if (
+            postcondition_type == "semantic_goal"
+            or self.arrangements.get(step.id) is not None
+        ) and step.goal.get("orientation_goal", "preserve") == "preserve":
+            orientation_reference = self._orientation_references.get(step.id)
+            if orientation_reference is not None:
+                reference_rotation = orientation_reference[:, :3, :3].to(
+                    device=observed_pose.device,
+                    dtype=observed_pose.dtype,
+                )
+                relative = torch.bmm(
+                    reference_rotation.transpose(1, 2),
+                    observed_pose[:, :3, :3],
+                )
+                cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
+                orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
+                self._orientation_errors[step.id] = orientation_error
+                policy = self._policies.get(step.id, {})
+                satisfied &= orientation_error <= float(
+                    policy.get(
+                        "preserve_orientation_tolerance",
+                        self.runtime_policy.predicate_fallbacks[
+                            "preserve_orientation_tolerance"
+                        ],
+                    )
+                )
         if step.goal.get("payloads"):
             satisfied &= self._verify_payloads(step)
         success = active & satisfied
@@ -2598,11 +2626,10 @@ class ProgramExecutor:
         for action in edge.actions:
             binding = action.get("target_binding", {})
             if binding.get("kind") == "policy_pose":
-                # A post-handover retreat is a required safety barrier rather
-                # than best-effort housekeeping.  If it cannot be planned,
-                # block the dependent receiver-side operation instead of
-                # letting the transfer arm remain at the exchange point.
-                if binding.get("source") == "handover":
+                # A release retreat is a required safety barrier. If it cannot
+                # be planned or verified, do not allow the home motion or a
+                # dependent semantic step to proceed past the nearby object.
+                if binding.get("operation") == "retreat":
                     return False
                 continue
             if (
@@ -2613,11 +2640,8 @@ class ProgramExecutor:
                 and binding.get("kind") == "joint_state"
                 and binding.get("source") == "initial"
             ):
-                # The E4 handover recipe marks its transfer-arm home move so
-                # an unsuccessful return cannot leave that arm in the
-                # receiver's workspace while the dependent operation starts.
-                if binding.get("operation") == "handover_home":
-                    return False
-                continue
+                # Returning home can sweep links back through the released
+                # object's workspace and is therefore part of task safety.
+                return False
             return False
         return True
