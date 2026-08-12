@@ -92,20 +92,18 @@ def main():
     if not args.headless:
         entity_gizmo_config = dexsim.interaction.EntityGizmoConfig()
         entity_gizmo_config.max_gizmos = 0
-        native_window_opened = sim.open_window(
-            entity_gizmo_config=entity_gizmo_config,
-        )
+        native_window_opened = sim.open_window()
+        if native_window_opened:
+            sim.enable_entity_gizmo(entity_gizmo_config)
 
-    # Native windows use DexSim's raycast-selected entity controller; headless
-    # Viser uses one backend-neutral Gizmo per published object.
+    # Native windows use DexSim's entity controller; Viser publishes one
+    # EmbodiChain-side transform control per object.
     if args.viser:
         sim.enable_gizmo(
             uid="cube1",
-            enable_native=False,
         )
         sim.enable_gizmo(
             uid="cube2",
-            enable_native=False,
         )
     elif native_window_opened:
         logger.log_info("Left-click an entity and press G to attach/detach its Gizmo.")
@@ -146,8 +144,8 @@ def run_simulation(sim: SimulationManager):
             # Disable Gizmo control after 200000 steps (example).
             if step_count == 200000 and gizmo_enabled:
                 logger.log_info("Disabling Gizmo control at step 200000")
-                if sim.has_entity_gizmo():
-                    sim.disable_entity_gizmo()
+                if sim.get_world().get_entity_gizmo() is not None:
+                    sim.get_world().disable_entity_gizmo()
                 else:
                     sim.disable_gizmo("cube1")
                     sim.disable_gizmo("cube2")

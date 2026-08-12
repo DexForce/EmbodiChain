@@ -105,22 +105,22 @@ def main():
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo for interactive camera control using the new unified API
-    if native_window_opened or args.viser:
+    if args.viser:
         sim.enable_gizmo(
             uid="gizmo_camera",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("gizmo_camera"):
             logger.log_error("Failed to enable gizmo for camera!")
             return
-    else:
+    elif not native_window_opened:
         logger.log_warning(
             "Gizmo interaction is disabled in headless mode without Viser."
         )
+    else:
+        logger.log_warning("Camera Gizmo control is available through Viser only.")
 
     logger.log_info("Gizmo-Camera tutorial started!")
-    if native_window_opened or args.viser:
+    if args.viser:
         logger.log_info(
             "Use the gizmo to interactively control the camera position and orientation"
         )
@@ -145,7 +145,7 @@ def run_simulation(
     last_step = 0
 
     if show_camera_window:
-        logger.log_info("Camera view window will open. Press Ctrl+C or 'q' to exit")
+        logger.log_info("Camera view window will open. Press Ctrl+C to exit")
     if sim.has_gizmo("gizmo_camera"):
         logger.log_info(
             "Use the gizmo in the 3D view to control camera position and orientation"
@@ -177,25 +177,20 @@ def run_simulation(
                     # Convert RGB to BGR for OpenCV
                     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
 
-                # Add text overlay
-                cv2.putText(
-                    bgr_image,
-                    "Press 'h' to toggle camera gizmo visibility",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
+                    # Add text overlay
+                    cv2.putText(
+                        bgr_image,
+                        "Camera sensor preview",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
+                    )
 
-                # Display the image
-                cv2.imshow("Gizmo Camera View", bgr_image)
-
-                # Check for key press
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("h"):
-                    # Toggle the camera gizmo visibility using SimulationManager API
-                    sim.toggle_gizmo_visibility("gizmo_camera")
+                    # Display the image
+                    cv2.imshow("Gizmo Camera View", bgr_image)
+                    cv2.waitKey(1)
 
             # Example: Destroy gizmo after certain steps to test cleanup
             if step_count == 30000 and sim.has_gizmo("gizmo_camera"):

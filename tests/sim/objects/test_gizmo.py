@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import threading
 from types import SimpleNamespace
 
 import numpy as np
@@ -24,7 +23,12 @@ import pytest
 import torch
 
 import embodichain.lab.sim.objects.gizmo as gizmo_module
-from embodichain.lab.sim.objects.gizmo import Gizmo, GizmoCfg, _RobotGizmoAdapter
+from embodichain.lab.sim.objects.gizmo import (
+    Gizmo,
+    GizmoCfg,
+    _RobotGizmoAdapter,
+    create_robot_ik_gizmo_controller,
+)
 
 
 class _FakeAdapterRobot:
@@ -36,7 +40,8 @@ class _FakeAdapterRobot:
         self.joint_names = ["joint_a", "joint_mimic", "joint_b"]
         self.link_names = ["base_link", "tool_link"]
         self.device = torch.device("cpu")
-        self.cfg = SimpleNamespace(solver_cfg=None)
+        self.uid = "robot"
+        self.cfg = SimpleNamespace(solver_cfg=None, fpath="robot.urdf")
         self.current_qpos = torch.tensor([[0.1, 0.2, 0.3]], dtype=torch.float32)
         self.target_qpos = torch.tensor([[0.4, 0.5, 0.6]], dtype=torch.float32)
         self.write_calls: list[dict[str, object]] = []
@@ -110,86 +115,67 @@ def test_robot_adapter_rejects_wrong_qpos_shape() -> None:
 
 
 def test_robot_native_ik_chain_can_be_configured_without_solver() -> None:
-    gizmo = object.__new__(Gizmo)
-    gizmo.cfg = GizmoCfg(
+    cfg = GizmoCfg(
         ik_root_link_name="base_link",
         ik_end_link_name="tool_link",
     )
-    gizmo._control_part = "arm"
 
-    root_link, end_link, tcp_pose = gizmo._resolve_robot_ik_chain(_FakeAdapterRobot())
+    root_link, end_link, tcp_pose = gizmo_module._resolve_robot_ik_chain(
+        _FakeAdapterRobot(),
+        "arm",
+        cfg,
+    )
 
     assert (root_link, end_link) == ("base_link", "tool_link")
     np.testing.assert_allclose(tcp_pose, np.eye(4))
 
 
-def test_robot_update_delegates_to_dexsim_ik_controller() -> None:
-    calls: list[int] = []
+def test_native_robot_factory_returns_dexsim_owned_controllers(monkeypatch) -> None:
+    robot = _FakeAdapterRobot()
+    adapter = _RobotGizmoAdapter(robot, "arm")
+    solver = object()
+    monkeypatch.setattr(
+        gizmo_module,
+        "_build_robot_ik",
+        lambda robot, control_part, cfg: (
+            adapter,
+            solver,
+            "tool_link",
+            np.eye(4, dtype=np.float32),
+        ),
+    )
 
-    class _Controller:
-        def update(self, *, iterations: int) -> None:
-            calls.append(iterations)
+    class _InputController:
+        pass
 
-    gizmo = object.__new__(Gizmo)
-    gizmo.target = object()
-    gizmo._ik_controller = _Controller()
-    gizmo.cfg = GizmoCfg(ik_iterations=12)
+    class _IKController:
+        def __init__(self, *args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
 
-    gizmo.update()
+    import dexsim.engine
+    import dexsim.kit.ik
 
-    assert calls == [12]
+    monkeypatch.setattr(dexsim.engine, "GizmoController", _InputController)
+    monkeypatch.setattr(dexsim.kit.ik, "IKGizmoController", _IKController)
+    window = SimpleNamespace(controls=[])
+    window.add_input_control = window.controls.append
+    world = SimpleNamespace(get_windows=lambda: window)
 
+    controller, input_controller = create_robot_ik_gizmo_controller(
+        robot,
+        world=world,
+    )
 
-def test_destroy_removes_gizmo_from_dexsim_environment() -> None:
-    class _DexsimGizmo:
-        def __init__(self) -> None:
-            self.detached = False
-
-        def set_flush_localpose_callback(self, callback: object | None) -> None:
-            pass
-
-        def set_transform_flush_callback(self, callback: object | None) -> None:
-            pass
-
-        def set_visible(self, visible: bool) -> None:
-            pass
-
-        def detach_parent(self) -> None:
-            self.detached = True
-
-    class _Environment:
-        def __init__(self) -> None:
-            self.removed: object | None = None
-
-        def remove_gizmo(self, gizmo: object) -> None:
-            self.removed = gizmo
-
-    native_gizmo = _DexsimGizmo()
-    environment = _Environment()
-    gizmo = object.__new__(Gizmo)
-    gizmo._env = environment
-    gizmo._gizmo = native_gizmo
-    gizmo._proxy_cube = None
-    gizmo._ik_controller = None
-    gizmo._ik_solver = None
-    gizmo._ik_model = None
-    gizmo._robot_adapter = None
-    gizmo._state_lock = threading.RLock()
-    gizmo._interaction_owner = None
-    gizmo._pending_target_transform = None
-    gizmo._desired_target_transform = None
-    gizmo.target = object()
-    gizmo._target_type = "rigid_object"
-
-    gizmo.destroy()
-
-    assert environment.removed is native_gizmo
-    assert native_gizmo.detached is True
-    assert gizmo._gizmo is None
+    assert controller.args[:3] == (world, adapter, solver)
+    assert controller.kwargs["follow_robot_base"] is True
+    assert isinstance(input_controller, _InputController)
+    assert window.controls == [input_controller]
 
 
 class _RigidObject:
     def __init__(self) -> None:
+        self.num_instances = 1
         self.device = torch.device("cpu")
         self.cfg = SimpleNamespace(uid="cube")
         self.pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
@@ -212,22 +198,12 @@ class _Camera(_RigidObject):
     pass
 
 
-def _patch_headless_dexsim(monkeypatch) -> None:
-    monkeypatch.setattr(gizmo_module.dexsim, "get_world_num", lambda: 1)
-    monkeypatch.setattr(
-        gizmo_module.dexsim,
-        "default_world",
-        lambda: SimpleNamespace(get_env=lambda: object()),
-    )
-
-
 def test_headless_gizmo_applies_shared_pose_and_arbitrates_sources(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(gizmo_module, "RigidObject", _RigidObject)
-    _patch_headless_dexsim(monkeypatch)
     target = _RigidObject()
-    gizmo = Gizmo(target, enable_native=False)
+    gizmo = Gizmo(target)
     pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
     pose[0, :3, 3] = torch.tensor([0.2, 0.3, 0.4])
 
@@ -237,16 +213,14 @@ def test_headless_gizmo_applies_shared_pose_and_arbitrates_sources(
     gizmo.update()
     assert gizmo.end_interaction("viser:client-a")
 
-    assert not gizmo.native_enabled
     assert target.set_calls[-1][1] == [0]
     torch.testing.assert_close(target.pose, pose)
 
 
 def test_headless_camera_gizmo_uses_shared_pose_path(monkeypatch) -> None:
     monkeypatch.setattr(gizmo_module, "Camera", _Camera)
-    _patch_headless_dexsim(monkeypatch)
     target = _Camera()
-    gizmo = Gizmo(target, enable_native=False)
+    gizmo = Gizmo(target)
     pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
     pose[0, 2, 3] = 1.2
 
@@ -265,7 +239,6 @@ def test_headless_robot_gizmo_uses_dexsim_newton_ik(monkeypatch) -> None:
     instead of calling the EmbodiChain ``compute_ik`` solver.
     """
     monkeypatch.setattr(gizmo_module, "Robot", _FakeAdapterRobot)
-    _patch_headless_dexsim(monkeypatch)
     target = _FakeAdapterRobot()
 
     solved_qpos = np.array([0.4, -0.2], dtype=np.float32)
@@ -291,16 +264,15 @@ def test_headless_robot_gizmo_uses_dexsim_newton_ik(monkeypatch) -> None:
     def _inject_solver(self) -> None:
         self._robot_adapter = _RobotGizmoAdapter(target, "arm")
         self._ik_solver = fake_solver
-        self._native_robot_end_link = "tool_link"
-        self._native_robot_tcp_pose = np.eye(4, dtype=np.float32)
+        self._robot_end_link = "tool_link"
+        self._robot_tcp_pose = np.eye(4, dtype=np.float32)
 
     monkeypatch.setattr(Gizmo, "_setup_robot_ik_solver", _inject_solver)
 
-    gizmo = Gizmo(target, control_part="arm", enable_native=False)
+    gizmo = Gizmo(target, control_part="arm")
     pose = torch.eye(4, dtype=torch.float32).unsqueeze(0)
     pose[0, 0, 3] = 0.5
 
-    assert not gizmo.native_enabled
     assert gizmo.request_local_pose(pose, source_id="viser:client-a")
     gizmo.update()
 

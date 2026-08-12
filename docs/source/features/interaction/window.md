@@ -53,15 +53,16 @@ The camera-pose hotkey is controlled by `SimulationManagerCfg.window_camera_pose
 
 ### Entity Gizmo Control
 
-Opening a non-headless `SimulationManager` window enables dexsim's world-owned
-`EntityGizmoManipulator` by default:
+DexSim owns native entity selection and manipulation. Enable it explicitly after
+opening a native window:
 
 ```python
 import dexsim
 
 gizmo_config = dexsim.interaction.EntityGizmoConfig()
 gizmo_config.max_gizmos = 0  # Unlimited simultaneous bindings.
-sim.open_window(entity_gizmo_config=gizmo_config)
+sim.open_window()
+sim.enable_entity_gizmo(gizmo_config)
 ```
 
 While enabled, left-click a render mesh, dynamic/kinematic rigid body, or
@@ -74,28 +75,19 @@ EmbodiChain's built-in `default_plane` is registered as an immovable target and
 cannot receive an entity gizmo. Other supported scene entities remain
 selectable normally.
 
-For a view-only window, opt out explicitly:
+`sim.enable_entity_gizmo(config)` is a thin helper that also excludes
+EmbodiChain's render-only default plane. All other lifecycle operations stay on
+DexSim's world object:
 
 ```python
-sim.open_window(enable_entity_gizmo=False)
+world = sim.get_world()
+controller = world.get_entity_gizmo()
+world.disable_entity_gizmo()
 ```
 
-Set `SimulationManagerCfg.enable_entity_gizmo_on_window_open=False` to change
-the default for constructor-opened and subsequently opened windows. Headless
-simulations do not create or enable the controller.
-
-`sim.enable_entity_gizmo(config)` can reconfigure or reactivate the controller
-at any time, and `sim.disable_entity_gizmo()` cancels it without closing the
-window. The last explicit configuration is restored if the window is closed
-and reopened.
-
-Use `sim.get_entity_gizmo()` to access the native controller and
-`sim.has_entity_gizmo()` to query its lifecycle state. Closing the window or
-destroying the `SimulationManager` disables it automatically.
-
-This controller is distinct from the target-specific Robot TCP IK gizmo. When
-both are active, **G** controls entity roots and **I** shows or hides the Robot
-TCP IK gizmo.
+This controller is distinct from DexSim's target-specific Robot TCP IK
+controller. When both are active, **G** controls entity roots and **I** shows or
+hides the Robot TCP target.
 
 The entity gizmo is native-window only. The Viser backend offers an analogous
 **click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the

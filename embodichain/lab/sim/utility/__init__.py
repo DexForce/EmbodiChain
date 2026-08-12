@@ -18,6 +18,5 @@
 
 from .sim_utils import *
 from .mesh_utils import *
-from .gizmo_utils import *
 from .keyboard_utils import *
 from .render_utils import *

@@ -38,6 +38,8 @@ from embodichain.lab.visualization import (
     VisualizationRuntime,
 )
 from embodichain.lab.visualization.backends.base import VisualizationBackend
+from embodichain.lab.visualization.protocol import PickCommand
+from embodichain.lab.visualization.runtime import PickCommandQueue
 
 REPLAY_CURRENT_STEP = 6
 REPLAY_MAX_STEP = 9
@@ -121,6 +123,21 @@ def test_joint_control_queue_keeps_latest_value_per_control() -> None:
     assert [(command.control_id, command.sequence) for command in drained] == [
         ("joint-b", 2),
         ("joint-a", 3),
+    ]
+
+
+def test_pick_command_queue_keeps_latest_click_in_arrival_order() -> None:
+    commands = PickCommandQueue(maxsize=3)
+
+    commands.put(PickCommand("run", 1, "client-a", "node-a-1"))
+    commands.put(PickCommand("run", 1, "client-b", "node-b"))
+    commands.put(PickCommand("run", 1, "client-a", "node-a-2"))
+
+    drained = commands.drain()
+
+    assert [(command.client_id, command.node_id) for command in drained] == [
+        ("client-b", "node-b"),
+        ("client-a", "node-a-2"),
     ]
 
 

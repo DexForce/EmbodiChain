@@ -189,7 +189,7 @@ The recommended CLI entrypoint is:
        --headless
 
 For interactive inspection, you can use preview mode: replace ``--headless`` with ``--preview``.
-When ``--preview`` is enabled, the script opens the environment in an interactive debugging mode. In a native single-environment preview, press ``I`` in the DexSim window to show or hide solver-backed robot IK Gizmos and drag them to operate the robot. This mode is for inspection and does not save datasets.
+When ``--preview`` is enabled, the script opens the environment in an interactive debugging mode. This mode is for inspection and does not save datasets.
 
 For a detailed comparison of preview, structured dataset recording, debug-video
 recording, trajectory recording, and the three replay modes, see

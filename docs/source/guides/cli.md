@@ -222,9 +222,6 @@ configuration, remote access, and performance details, see
 
 When ``--preview`` is enabled, an interactive REPL is available:
 
-- **``i``** — show or hide solver-backed robot IK Gizmos; in the native DexSim
-  window, **``I``** provides the same toggle and the Gizmos can be dragged to
-  operate the robot (single-environment previews only)
 - **``p``** — enter an IPython embed session with ``env`` in scope
 - **``q``** — quit
 

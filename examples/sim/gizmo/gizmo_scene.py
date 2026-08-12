@@ -44,6 +44,7 @@ from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.objects import create_robot_ik_gizmo_controller
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
@@ -166,12 +167,21 @@ def main():
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo for all assets after all are created and initialized
-    if native_window_opened or args.viser:
+    native_controls = []
+    if native_window_opened:
+        sim.enable_entity_gizmo()
+        for control_part in ("left_arm", "right_arm"):
+            native_controls.append(
+                create_robot_ik_gizmo_controller(
+                    robot,
+                    control_part=control_part,
+                    world=sim.get_world(),
+                )
+            )
+    elif args.viser:
         sim.enable_gizmo(
             uid="w1_gizmo_test",
             control_part="left_arm",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("w1_gizmo_test", control_part="left_arm"):
             logger.log_error("Failed to enable left arm gizmo!")
@@ -180,7 +190,6 @@ def main():
         sim.enable_gizmo(
             uid="w1_gizmo_test",
             control_part="right_arm",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("w1_gizmo_test", control_part="right_arm"):
             logger.log_error("Failed to enable right arm gizmo!")
@@ -188,7 +197,6 @@ def main():
 
         sim.enable_gizmo(
             uid="interactive_cube",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("interactive_cube"):
             logger.log_error("Failed to enable gizmo for cube!")
@@ -196,7 +204,6 @@ def main():
 
         sim.enable_gizmo(
             uid="scene_camera",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("scene_camera"):
             logger.log_error("Failed to enable gizmo for camera!")
@@ -207,7 +214,7 @@ def main():
         )
 
     logger.log_info("Gizmo Scene example started!")
-    if native_window_opened or args.viser:
+    if args.viser:
         logger.log_info("Four gizmos are active in the scene:")
         logger.log_info(
             "1. Left arm gizmo - Use to drag the left arm end-effector (EE)"
@@ -217,14 +224,22 @@ def main():
         )
         logger.log_info("3. Cube gizmo - Use to drag and position the cube")
         logger.log_info("4. Camera gizmo - Use to drag and orient the camera")
+    elif native_window_opened:
+        logger.log_info("Press I to show or hide each robot TCP IK Gizmo.")
+        logger.log_info("Select a scene entity and press G to manipulate its root.")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
-    run_simulation(sim, show_camera_window=native_window_opened)
+    run_simulation(
+        sim,
+        native_controls=native_controls,
+        show_camera_window=native_window_opened,
+    )
 
 
 def run_simulation(
     sim: SimulationManager,
     *,
+    native_controls=(),
     show_camera_window: bool,
 ) -> None:
     step_count = 0
@@ -235,6 +250,8 @@ def run_simulation(
         last_step = 0
         while True:
             time.sleep(0.033)  # 30Hz
+            for controller, _ in native_controls:
+                controller.update()
             sim.update_gizmos()
             sim.capture_visualization_safely()
             step_count += 1
@@ -248,7 +265,7 @@ def run_simulation(
                     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
                     cv2.putText(
                         bgr_image,
-                        "Press 'h' to toggle camera gizmo visibility",
+                        "Camera sensor preview",
                         (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
@@ -256,10 +273,7 @@ def run_simulation(
                         2,
                     )
                     cv2.imshow("Camera Sensor View", bgr_image)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord("h"):
-                        # Toggle the camera gizmo visibility using SimulationManager API
-                        sim.toggle_gizmo_visibility("scene_camera")
+                    cv2.waitKey(1)
 
             if step_count % 100 == 0:
                 current_time = time.time()

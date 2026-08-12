@@ -80,20 +80,8 @@ embodichain run-env \
 
 After constructing and resetting the environment, the terminal accepts:
 
-- `i`: show or hide the robot IK Gizmo (native single-environment preview);
 - `p`: enter an IPython session with `env` in scope;
 - `q`: close the preview.
-
-For a native preview with one environment, `run-env` prepares an IK Gizmo for
-each task-selected robot control part that has an IK solver. The controls start
-hidden. Focus the DexSim window and press `I` to show or hide them, then drag an
-end-effector Gizmo to operate the robot. While preview waits for terminal input,
-it continues stepping the simulation so IK targets are applied immediately.
-Pressing `i` in the terminal provides the same visibility toggle.
-
-IK Gizmos require `num_envs=1`, a native window, and solver metadata for the
-selected control part. Headless and Viser previews skip this native shortcut;
-use Viser's click-to-pick Gizmo interaction in the browser instead.
 
 IPython is required only when entering the embedded session. Install it with
 `pip install ipython` if the `p` command reports that it is unavailable.

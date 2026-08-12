@@ -1681,6 +1681,13 @@ class ViserBackend(VisualizationBackend):
         self._gizmo_owners.clear()
         self._gizmo_drag_poses.clear()
         self._gizmo_sequence = 0
+        self._picker.clear()
+        self._pick_enabled = False
+        self._node_geometry.clear()
+        self._frame_positions = None
+        self._frame_wxyz = None
+        self._frame_visible = None
+        self._pointer_handler = None
         self._joint_control_handles.clear()
         self._joint_control_specs.clear()
         self._joint_control_states.clear()

@@ -161,8 +161,8 @@ class PickCommandQueue:
         with self._lock:
             for index in range(len(self._commands) - 1, -1, -1):
                 if self._commands[index].client_id == command.client_id:
-                    self._commands[index] = command
-                    return
+                    del self._commands[index]
+                    break
             if len(self._commands) >= self._maxsize:
                 self._commands.popleft()
             self._commands.append(command)
