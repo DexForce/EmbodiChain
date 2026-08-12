@@ -23,8 +23,7 @@ authors = [ { name = "EmbodiChain Developers" } ]
 requires-python = ">=3.10"
 dynamic = ["version"]
 
-# Core install dependencies (kept from requirements.txt). Some VCS links are
-# specified using PEP 508 direct references where present.
+# Core install dependencies (kept from requirements.txt).
 dependencies = [
   "dexsim_engine==0.4.3",
   "setuptools>=78.1.1",
@@ -43,12 +42,13 @@ dependencies = [
   "tensorboard>=2.20.0",
   "ortools",
   "prettytable",
+  "psutil>=5.9",
   "black==26.3.1",
   "fvcore",
   "h5py",
   "tensordict",
   "viser==1.0.21",
-  "lerobot>=0.4.4"
+  "lerobot>=0.4.4,<0.5"
 ]
 
 [project.optional-dependencies]
@@ -60,31 +60,15 @@ gensim = [
   "scipy",
   "matplotlib",
 ]
-# cuRobo V2 is distributed from its source repository and provides separate
-# dependency sets for CUDA 12 and CUDA 13. Keep it optional so CPU-only and
-# non-NVIDIA EmbodiChain installations do not pull in CUDA packages. Select
-# exactly one of these extras for the target environment.
-curobo-cu12 = [
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
-curobo-cu12-torch = [
-  "nvidia-curobo[cu12-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
-curobo-cu13 = [
-  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
-curobo-cu13-torch = [
-  "nvidia-curobo[cu13-torch] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
-]
 
 [project.scripts]
 # Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).
 # ``embodichain run-env`` discovers all installed task packages (via the
 # ``embodichain.tasks`` entry points) and runs their init hooks (via
 # ``embodichain.init``) before building and launching the environment.
-# Other commands cover data assets, SimReady generation, asset preview,
-# grasp annotation, RL training, URDF convex decomposition, benchmarks, and
-# workspace cache management.
+# Other commands cover data assets, SimReady generation, asset and LeRobot
+# dataset preview, grasp annotation, RL training, URDF convex decomposition,
+# benchmarks, and workspace cache management.
 embodichain = "embodichain.__main__:main"
 
 [project.entry-points."embodichain.tasks"]
@@ -106,9 +90,16 @@ include-package-data = false
 [tool.black]
 
 [tool.pytest.ini_options]
+addopts = ["-m", "not slow"]
+filterwarnings = [
+    "ignore:`torch\\.jit\\.script(_method)?` is deprecated.*:DeprecationWarning:torch\\.jit\\._script",
+]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "requires_sim: marks tests that require a real simulation backend",
+    "no_sim: marks mock-only tests that must not initialize a simulation backend",
+    "requires_tasks: marks tests that require installed task-package discovery",
     "gpu: marks tests that execute CUDA/GPU code (run serially)",
     "renderer: marks tests that exercise a rendering backend",
+    "xdist_group(name): keeps resource-sharing tests on one pytest-xdist worker",
 ]

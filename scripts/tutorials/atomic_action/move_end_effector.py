@@ -28,12 +28,12 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.atomic_actions import (
+    ActionBinding,
+    ActionInvocation,
     AtomicActionEngine,
-    EndEffectorPoseTarget,
-    MoveEndEffector,
-    MoveEndEffectorCfg,
+    EndEffectorPoseGoal,
+    MotionPolicy,
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -41,6 +41,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     create_toppra_motion_generator,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     make_top_down_eef_pose,
@@ -55,12 +56,10 @@ POST_TRAJECTORY_STEPS = 120
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the MoveEndEffector tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Demonstrate MoveEndEffector with a multi-waypoint pose trajectory."
+    parser = create_tutorial_argument_parser(
+        "Demonstrate MoveEndEffector with a multi-waypoint pose trajectory.",
+        features=("visualize_axes",),
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--auto_play", action="store_true")
-    parser.add_argument("--no_vis_eef_axis", action="store_true")
     return parser.parse_args()
 
 
@@ -72,12 +71,6 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    engine.register(
-        MoveEndEffector(
-            motion_gen,
-            cfg=MoveEndEffectorCfg(sample_interval=MOVE_SAMPLE_INTERVAL),
-        )
-    )
 
     poses = torch.stack(
         [
@@ -99,15 +92,17 @@ def main() -> None:
         sim, args, "Inspect the robot, then press Enter to plan MoveEndEffector..."
     )
 
-    success, trajectory, _ = engine.run(
-        [
-            (
-                "move_end_effector",
-                EndEffectorPoseTarget(broadcast_waypoint_pose_batch(poses, n_envs)),
-            )
-        ]
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                skill_id="move_end_effector",
+                goal=EndEffectorPoseGoal(broadcast_waypoint_pose_batch(poses, n_envs)),
+                binding=ActionBinding(manipulators={"primary": "arm"}),
+                motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+            ),
+        )
     )
-    if not success.all():
+    if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveEndEffector demo trajectory.")
         return
 
@@ -116,7 +111,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory,
         args,
         video_prefix="move_end_effector_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

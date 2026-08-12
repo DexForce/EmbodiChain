@@ -99,6 +99,20 @@ _NO_MIMIC_URDF = """\
 """
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_torch_precision_settings():
+    """Keep cuRobo's process-wide TF32 changes local to this test module."""
+    matmul_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    cudnn_allow_tf32 = torch.backends.cudnn.allow_tf32
+    matmul_precision = torch.get_float32_matmul_precision()
+
+    yield
+
+    torch.set_float32_matmul_precision(matmul_precision)
+    torch.backends.cuda.matmul.allow_tf32 = matmul_allow_tf32
+    torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+
+
 def _raise_module_not_found(*args, **kwargs):
     raise ModuleNotFoundError("curobo not installed")
 
@@ -202,6 +216,24 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
 
     assert cfg.collision_cache == {"cuboid": 8, "mesh": 2}
     assert cfg.obstacle_representation == "sphere"
+
+
+def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
+    planner = object.__new__(CuroboPlanner)
+    configured_pose = torch.eye(4).unsqueeze(0)
+    observed_pose = torch.eye(4).unsqueeze(0)
+    observed_pose[:, 0, 3] = 0.5
+    options = CuroboPlanOptions(dynamic_obstacle_poses={"configured": configured_pose})
+
+    bound = planner.with_collision_world(
+        options,
+        obstacle_poses={"observed": observed_pose},
+    )
+
+    assert bound is options
+    assert set(bound.dynamic_obstacle_poses) == {"configured", "observed"}
+    assert torch.equal(bound.dynamic_obstacle_poses["observed"], observed_pose)
+    assert bound.dynamic_obstacle_poses["observed"] is not observed_pose
 
 
 def test_auto_gen_defaults_keep_sphere_count_low():
@@ -660,8 +692,6 @@ def _make_curobo_engine(
 ) -> object:
     from embodichain.lab.sim.atomic_actions import (
         AtomicActionEngine,
-        MoveEndEffector,
-        MoveEndEffectorCfg,
     )
     from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
 
@@ -675,17 +705,6 @@ def _make_curobo_engine(
         )
     )
     engine = AtomicActionEngine(motion_generator)
-    engine.register(
-        MoveEndEffector(
-            motion_generator,
-            MoveEndEffectorCfg(
-                motion_source="motion_gen",
-                control_part=_SIM_CONTROL_PART,
-                sample_interval=80,
-            ),
-        ),
-        name="move_end_effector",
-    )
     return engine
 
 
@@ -693,7 +712,12 @@ def _make_curobo_engine(
 @pytest.mark.slow
 def test_curobo_reuses_non_graph_backend():
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
+    from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
+        EndEffectorPoseGoal,
+        MotionPolicy,
+    )
 
     pytest.importorskip("curobo", reason="cuRobo V2 not installed.")
     sim, robot, block = _build_curobo_scene()
@@ -701,9 +725,18 @@ def test_curobo_reuses_non_graph_backend():
         engine = _make_curobo_engine(block)
         target = _target_beyond_block(robot)
 
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target))]
+        result = engine.compile(
+            (
+                ActionInvocation(
+                    "move_end_effector",
+                    EndEffectorPoseGoal(xpos=target),
+                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
+                ),
+            )
         )
+        success = result.plan_success
+        trajectory = result.trajectory.positions
         assert bool(success.item()), "first plan failed"
         assert trajectory.shape[0] == 1
 
@@ -711,9 +744,17 @@ def test_curobo_reuses_non_graph_backend():
         assert planner.cfg.use_cuda_graph is False
         assert len(planner._backend_cache) == 1
 
-        success, _, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target))]
+        result = engine.compile(
+            (
+                ActionInvocation(
+                    "move_end_effector",
+                    EndEffectorPoseGoal(xpos=target),
+                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
+                ),
+            )
         )
+        success = result.plan_success
         assert bool(success.item()), "second plan failed"
         assert len(planner._backend_cache) == 1
     finally:
@@ -725,7 +766,12 @@ def test_curobo_reuses_non_graph_backend():
 @pytest.mark.slow
 def test_curobo_uses_accelerator_with_cpu_physics():
     from embodichain.lab.sim import SimulationManager
-    from embodichain.lab.sim.atomic_actions import EndEffectorPoseTarget
+    from embodichain.lab.sim.atomic_actions import (
+        ActionBinding,
+        ActionInvocation,
+        EndEffectorPoseGoal,
+        MotionPolicy,
+    )
 
     pytest.importorskip("curobo", reason="cuRobo V2 not installed.")
     sim, robot, block = _build_curobo_scene(sim_device="cpu")
@@ -733,9 +779,18 @@ def test_curobo_uses_accelerator_with_cpu_physics():
         engine = _make_curobo_engine(block, use_cuda_graph=True)
         target = _target_beyond_block(robot)
 
-        success, trajectory, _ = engine.run(
-            [("move_end_effector", EndEffectorPoseTarget(xpos=target))]
+        result = engine.compile(
+            (
+                ActionInvocation(
+                    "move_end_effector",
+                    EndEffectorPoseGoal(xpos=target),
+                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
+                ),
+            )
         )
+        success = result.plan_success
+        trajectory = result.trajectory.positions
 
         planner = engine.motion_generator.planner
         backend = next(iter(planner._backend_cache.values()))

@@ -29,6 +29,7 @@ EXPECTED_COMMANDS = {
     "data",
     "decompose-urdf",
     "preview-asset",
+    "preview_lerobot_data",
     "run-env",
     "scene-engine",
     "simready",
@@ -100,6 +101,21 @@ def test_preview_scene_help_includes_output_and_viser_options(
     output = capsys.readouterr().out
     assert "--output_root" in output
     assert "--viser" in output
+
+
+def test_preview_lerobot_data_help_includes_validation_options(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The unified dataset preview exposes its path and validation arguments."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["preview_lerobot_data", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "usage: embodichain preview_lerobot_data" in output
+    assert "dataset_root" in output
+    assert "--expect-segments" in output
+    assert "--latest" in output
 
 
 def test_nested_benchmark_help_uses_suite_parser(

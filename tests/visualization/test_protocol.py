@@ -103,6 +103,22 @@ def test_camera_spec_accepts_valid_pinhole_parameters() -> None:
     )
 
     assert spec.aspect == 4.0 / 3.0
+    assert spec.role == "sensor"
+
+
+def test_camera_spec_rejects_unknown_role() -> None:
+    with pytest.raises(ValueError, match="Camera role"):
+        CameraSpec(
+            camera_id="env:0/camera:wrist",
+            sensor_uid="wrist",
+            env_id=0,
+            path="/envs/0/cameras/wrist",
+            fov_y=0.8,
+            aspect=4.0 / 3.0,
+            near=0.01,
+            far=10.0,
+            role="debug",  # type: ignore[arg-type]
+        )
 
 
 def test_camera_image_owns_rgb_copy() -> None:

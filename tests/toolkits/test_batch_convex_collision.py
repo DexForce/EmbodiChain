@@ -16,15 +16,19 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
-from embodichain.data import get_data_path
 import trimesh
+import warp as wp
+
+from embodichain.data import get_data_path
 from embodichain.toolkits.graspkit.pg_grasp.collision_checker import (
     ConvexCollisionChecker,
     ConvexCollisionCheckerCfg,
 )
 from embodichain.utils.math import transform_points_mat
-import warp as wp
+
+pytestmark = pytest.mark.gpu
 
 
 def batch_convex_collision_query(device=torch.device("cuda")):

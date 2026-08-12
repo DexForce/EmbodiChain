@@ -29,6 +29,7 @@ from dexsim.types import (
     ArticulationFlag,
     ArticulationGPUAPIWriteType,
     ArticulationGPUAPIReadType,
+    DriveType,
 )
 from dexsim.engine import CudaArray, MaterialInst, PhysicsScene
 
@@ -1674,7 +1675,7 @@ class Articulation(BatchEntity):
             max_velocity (torch.Tensor): The maximum velocity of the joint drive with shape (len(env_ids), len(joint_ids)).
             friction (torch.Tensor): The joint friction coefficient with shape (len(env_ids), len(joint_ids)).
             armature (torch.Tensor): The joint armature with shape (len(env_ids), len(joint_ids)).
-            drive_type (str, optional): The type of drive to apply. Defaults to "force".
+            drive_type (str, optional): The type of drive to apply. Defaults to "none".
             joint_ids (Sequence[int] | None, optional): The joint indices to apply the drive to. If None, applies to all joints. Defaults to None.
             env_ids (Sequence[int] | None, optional): The environment indices to apply the drive to. If None, applies to all environments. Defaults to None.
         """
@@ -1683,23 +1684,27 @@ class Articulation(BatchEntity):
         cache_env_ids = self._resolve_env_ids(env_ids)
         cache_joint_ids = self._resolve_joint_ids(joint_ids)
 
+        def _drive_arg(value: torch.Tensor, index: int) -> float | np.ndarray:
+            result = value[index].detach().cpu().numpy()
+            return result.item() if result.size == 1 else result
+
         for i, env_idx in enumerate(local_env_ids):
             drive_args = {
                 "drive_type": get_dexsim_drive_type(drive_type),
                 "joint_ids": local_joint_ids,
             }
             if stiffness is not None:
-                drive_args["stiffness"] = stiffness[i].cpu().numpy()
+                drive_args["stiffness"] = _drive_arg(stiffness, i)
             if damping is not None:
-                drive_args["damping"] = damping[i].cpu().numpy()
+                drive_args["damping"] = _drive_arg(damping, i)
             if max_effort is not None:
-                drive_args["max_force"] = max_effort[i].cpu().numpy()
+                drive_args["max_force"] = _drive_arg(max_effort, i)
             if max_velocity is not None:
-                drive_args["max_velocity"] = max_velocity[i].cpu().numpy()
+                drive_args["max_velocity"] = _drive_arg(max_velocity, i)
             if friction is not None:
-                drive_args["joint_friction"] = friction[i].cpu().numpy()
+                drive_args["joint_friction"] = _drive_arg(friction, i)
             if armature is not None:
-                drive_args["armature"] = armature[i].cpu().numpy()
+                drive_args["armature"] = _drive_arg(armature, i)
             self._entities[env_idx].set_drive(**drive_args)
 
         if max_velocity is not None:
@@ -1812,6 +1817,39 @@ class Articulation(BatchEntity):
                 armature_i, dtype=torch.float32, device=self.device
             )[local_joint_ids_tensor]
         return stiffness, damping, max_effort, max_velocity, friction, armature
+
+    def get_joint_drive_type(
+        self,
+        joint_ids: Sequence[int] | None = None,
+        env_ids: Sequence[int] | None = None,
+    ) -> list[list[DriveType]]:
+        """Get the backend drive type for the selected joints.
+
+        Args:
+            joint_ids: Joint indices to query. If None, queries all joints.
+            env_ids: Environment indices to query. If None, queries all environments.
+
+        Returns:
+            Backend drive types grouped by environment, with one
+            :class:`~dexsim.types.DriveType` per selected joint.
+        """
+        local_env_ids = self._all_indices if env_ids is None else env_ids
+        if joint_ids is None:
+            local_joint_ids = np.arange(self.dof, dtype=np.int32)
+        elif isinstance(joint_ids, torch.Tensor):
+            local_joint_ids = (
+                joint_ids.detach().cpu().numpy().astype(np.int32, copy=False)
+            )
+        else:
+            local_joint_ids = np.asarray(joint_ids, dtype=np.int32)
+
+        drive_types: list[list[DriveType]] = []
+        for env_idx in local_env_ids:
+            entity_drive_types = self._entities[int(env_idx)].get_drive(
+                local_joint_ids
+            )[-1]
+            drive_types.append(list(entity_drive_types))
+        return drive_types
 
     def get_user_ids(
         self, link_name: str | None = None, env_ids: Sequence[int] | None = None

@@ -62,6 +62,8 @@ def _create_minimal_distributed_config():
     not torch.distributed.is_available(),
     reason="torch.distributed is not available",
 )
+@pytest.mark.gpu
+@pytest.mark.slow
 def test_distributed_training_via_torchrun():
     """Run distributed training via torchrun (subprocess) to exercise the distributed path.
 

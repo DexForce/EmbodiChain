@@ -34,7 +34,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
@@ -376,17 +376,18 @@ class CuroboPlannerCfg(BasePlannerCfg):
     preserve_plan_samples: bool = False
     """Whether callers must retain cuRobo's raw collision-checked samples exactly.
 
-    When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-    resamples the returned trajectory to the atomic action's ``sample_interval``
-    waypoint count - matching the documented contract of
-    :class:`~embodichain.lab.sim.atomic_actions.primitives.move_end_effector.MoveEndEffectorCfg.sample_interval`
+    When ``False`` (default),
+    :class:`~embodichain.lab.sim.planners.motion_generator.MotionGenerator`
+    resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
+    matching the documented contract of
+    :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
     sample density changes (cuRobo's own count is derived from
     :attr:`interpolation_dt` and the trajectory duration, e.g. ~82 for a 2 s
     plan at 0.025 s).
 
-    When ``True``, the builder returns cuRobo's own samples unchanged. Use this
+    When ``True``, the generator returns cuRobo's own samples unchanged. Use this
     when you need cuRobo's exact time-parameterized, collision-checked samples
     rather than a fixed waypoint count.
     """
@@ -640,7 +641,7 @@ def _require_curobo(log_level: str = "error") -> "Any":
 
     Raises:
         ImportError: If cuRobo V2 is not installed, with an actionable message
-            naming NVIDIA's CUDA-matched extras.
+            naming NVIDIA's CUDA-matched source variants.
     """
     _configure_curobo_logging(log_level)
     # cuRobo 0.8 references ``wp.torch.*``, which Warp >= 1.13 relocated.
@@ -652,10 +653,10 @@ def _require_curobo(log_level: str = "error") -> "Any":
     except ModuleNotFoundError as exc:
         raise ImportError(
             "cuRobo V2 is required for the 'curobo' planner but was not found. "
-            "From the EmbodiChain repository root, install the CUDA-matched "
-            "extra, e.g. `pip install -e '.[curobo-cu12]'` for CUDA 12.x or "
-            "`pip install -e '.[curobo-cu13]'` for CUDA 13.x "
-            "(also `.[curobo-cu12-torch]` / `.[curobo-cu13-torch]`). "
+            "Install NVIDIA's CUDA-matched source package separately, e.g. "
+            "`pip install 'nvidia-curobo[cu12] @ "
+            "git+https://github.com/NVlabs/curobo.git@v0.8.0'` for CUDA 12.x "
+            "or replace `cu12` with `cu13` for CUDA 13.x. "
             f"See {_CUROBO_INSTALL_URL} for details."
         ) from exc
     return SimpleNamespace(
@@ -748,15 +749,15 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_collision_world_updates = True
 
     @property
     def preserve_plan_samples(self) -> bool:
         """Whether callers must retain this planner's raw samples exactly.
 
-        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by
-        :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-        to decide whether to resample the returned trajectory to the action's
-        ``sample_interval``.
+        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by the
+        atomic-action motion adapter to decide whether to resample the returned
+        trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
 
@@ -837,6 +838,80 @@ class CuroboPlanner(BasePlanner):
             options.start_qpos = start_qpos
         if options.control_part is None:
             options.control_part = control_part
+        return options
+
+    def prepare_backend(
+        self,
+        *,
+        control_part: str,
+        batch_size: int,
+        move_type: MoveType = MoveType.EEF_MOVE,
+    ) -> dict[str, object]:
+        """Materialize and warm one lazy cuRobo backend without planning a case.
+
+        This explicit lifecycle hook lets deployment tooling and benchmarks
+        separate one-time robot/world YAML generation, collision-sphere setup,
+        CUDA graph capture, and cuRobo warmup from the first real planning call.
+        Repeated calls for the same backend key reuse the cached backend.
+
+        Args:
+            control_part: Robot control part to prepare.
+            batch_size: Goal batch size used by the future planning calls.
+            move_type: Goal type whose cuRobo buffers and graph are prepared.
+
+        Returns:
+            Metadata describing the resolved backend and actual CUDA graph mode.
+
+        Raises:
+            ValueError: If the batch size or move type is unsupported.
+        """
+        if batch_size < 1:
+            logger.log_error("batch_size must be >= 1.", ValueError)
+        if move_type not in self.supported_move_types:
+            logger.log_error(
+                f"cuRobo cannot prepare unsupported move type {move_type}.",
+                ValueError,
+            )
+        robot_batch_size = int(getattr(self.robot, "num_instances", 1))
+        if batch_size not in (1, robot_batch_size):
+            logger.log_error(
+                f"batch_size={batch_size} must be 1 or robot.num_instances="
+                f"{robot_batch_size}.",
+                ValueError,
+            )
+        backend = self._get_backend(control_part, batch_size, move_type)
+        return {
+            "control_part": backend.control_part,
+            "batch_size": backend.batch_size,
+            "move_type": backend.planning_mode.name,
+            "multi_env": bool(self.cfg.world.multi_env),
+            "use_cuda_graph": backend.use_cuda_graph,
+        }
+
+    def with_collision_world(
+        self,
+        options: PlanOptions,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> CuroboPlanOptions:
+        """Bind snapshot obstacle poses to one cuRobo planning attempt.
+
+        Args:
+            options: Reusable caller options copied by the atomic-action layer.
+            obstacle_poses: Batched simulator-world poses keyed by configured
+                dynamic obstacle name.
+
+        Returns:
+            cuRobo options containing an owned obstacle-pose mapping.
+        """
+        if not isinstance(options, CuroboPlanOptions):
+            logger.log_error("CuroboPlanner requires CuroboPlanOptions", TypeError)
+        merged = {
+            name: pose.clone()
+            for name, pose in (options.dynamic_obstacle_poses or {}).items()
+        }
+        merged.update({name: pose.clone() for name, pose in obstacle_poses.items()})
+        options.dynamic_obstacle_poses = merged or None
         return options
 
     @validate_plan_options(options_cls=CuroboPlanOptions)
