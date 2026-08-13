@@ -81,6 +81,7 @@ def generate_scene_from_image(
             scene=scene,
             scene_graph=scene_graph,
             geometry_generation_client=geometry_generation_client,
+            vlm_client=vlm_client,
         )
     finally:
         geometry_generation_client.close()  # Kill the session to avoid resource leaks.

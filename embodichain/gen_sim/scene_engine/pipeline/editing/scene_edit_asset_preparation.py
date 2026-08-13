@@ -35,6 +35,9 @@ from embodichain.gen_sim.scene_engine.clients.image_segmentation import (
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import SceneEditPlan
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
+    OpenAICompatibleVLM,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
@@ -44,6 +47,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessor,
+    SimReadyProcessorConfig,
 )
 
 __all__ = ["prepare_scene_edit_assets"]
@@ -66,6 +70,7 @@ def prepare_scene_edit_assets(
     image_generation_client: ImageGenerationClient,
     geometry_generation_client: GeometryGenerationClient,
     image_segmentation_client: ImageSegmentationClient,
+    vlm_client: OpenAICompatibleVLM | None = None,
 ) -> list[SceneObject]:
     """Prepare and return SimReady assets required by add operations."""
     # Prepare descriptions for all newly added objects.
@@ -112,6 +117,12 @@ def prepare_scene_edit_assets(
         coarse_layout_by_id=_coarse_layouts_by_id(generated_asset_glbs),
         coarse_geometry_root=stage_output_root / "coarse_geometry",
         simready_geometry_root=stage_output_root / "simready_geometry",
+        # Scene editing will later provide the VLM-selected scale and rotation.
+        config=SimReadyProcessorConfig(
+            use_vlm_scale=vlm_client is not None,
+            use_vlm_rotation=vlm_client is not None,
+        ),
+        vlm_client=vlm_client,
     )
     # process_assets() validates and processes assets only; it does not require a table.
     simready_processor.process_assets()

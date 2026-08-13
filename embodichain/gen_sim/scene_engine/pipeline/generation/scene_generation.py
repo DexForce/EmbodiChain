@@ -30,6 +30,9 @@ from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
+    OpenAICompatibleVLM,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
 )
@@ -50,6 +53,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessor,
+    SimReadyProcessorConfig,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
     TableSupportSurfaceDetector,
@@ -66,6 +70,7 @@ def generate_scene_and_refine(
     scene_graph: SceneGraph,
     *,
     geometry_generation_client: GeometryGenerationClient,
+    vlm_client: OpenAICompatibleVLM,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
@@ -110,6 +115,12 @@ def generate_scene_and_refine(
         coarse_layout_by_id=coarse_layout_by_id,
         coarse_geometry_root=coarse_geometry_output_root,
         simready_geometry_root=simready_geometry_output_root,
+        # Image-to-scene uses the geometry service's coarse scale directly.
+        config=SimReadyProcessorConfig(
+            use_vlm_scale=False,
+            use_vlm_rotation=False,
+        ),
+        vlm_client=vlm_client,
     )
     simready_assets_layout = simready_processor.process_assets()
     simready_table_layout = simready_processor.process_table()
