@@ -110,6 +110,44 @@ class SimulatorEnvironment(Environment):
         self.exit_process_values.append(exit_process)
 
 
+class ViewerWindow:
+    def __init__(self) -> None:
+        self.titles = []
+
+    def set_window_title(self, title):
+        self.titles.append(title)
+
+    def native(self):
+        return self
+
+    def key_state(self, _key):
+        return False
+
+
+class ViewerWorld:
+    def __init__(self) -> None:
+        self.window = ViewerWindow()
+        self.open = True
+        self.update_dts = []
+
+    def is_window_initialized(self):
+        return self.open
+
+    def get_windows(self):
+        return self.window
+
+    def update(self, dt):
+        self.update_dts.append(dt)
+        self.open = False
+
+
+class ViewerSimulatorEnvironment(SimulatorEnvironment):
+    def __init__(self) -> None:
+        super().__init__()
+        self.world = ViewerWorld()
+        self.sim = SimpleNamespace(get_world=lambda: self.world)
+
+
 def test_native_adapter_uses_shared_deterministic_inference_chain():
     policy = Policy()
     observation = {"policy": torch.tensor([[0.25, 0.75]])}
@@ -224,6 +262,30 @@ def test_native_task_closes_simulator_without_exiting_process():
     assert result.reason == "control steps reached"
     assert env.closed == 1
     assert env.exit_process_values == [False]
+
+
+def test_native_task_pause_waits_for_viewer_close_after_termination():
+    env = ViewerSimulatorEnvironment()
+    runtime = PolicyRuntime(
+        env=env,
+        policy=Policy(),
+        device=torch.device("cpu"),
+        env_id="ExampleViewerTask",
+    )
+
+    result = evaluate_native_task(
+        runtime,
+        seed=1,
+        viewer=True,
+        episodes=None,
+        control_steps=None,
+        duration=None,
+        termination_behavior="pause",
+    )
+
+    assert result.reason == "viewer closed"
+    assert result.control_steps == 2
+    assert env.world.update_dts == [0.0]
 
 
 def test_native_task_viewer_requires_a_simulator_environment():
