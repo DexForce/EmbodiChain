@@ -20,19 +20,20 @@ Follow the tutorials in this order for the best learning experience:
 7. :doc:`sensor` — Add cameras and capture RGB/depth/segmentation data.
 8. :doc:`solver` — Configure IK solvers for end-effector control.
 9. :doc:`motion_gen` — Generate smooth trajectories with motion planners.
-10. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
-11. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
+10. :doc:`robot_articulation` — Plan contact-rich motion to open a passive drawer and push it halfway back.
+11. :doc:`atomic_actions` — Use built-in action primitives (move, move joints, pick, move held object, place).
+12. :doc:`gizmo` — Interactively control robots with on-screen gizmos.
 
 **Phase 2: Environments**
 
-12. :doc:`basic_env` — Create a simple Gymnasium environment with ``BaseEnv``. Prerequisite: Phase 1 basics.
-13. :doc:`modular_env` — Build a config-driven environment with ``EmbodiedEnv``, managers, and randomization. Prerequisite: :doc:`basic_env`.
-14. :doc:`data_generation` — Generate expert demonstration datasets for imitation learning. Prerequisite: :doc:`modular_env`.
-15. :doc:`rl` — Train RL agents with PPO or GRPO. Prerequisite: :doc:`basic_env`.
+13. :doc:`basic_env` — Create a simple Gymnasium environment with ``BaseEnv``. Prerequisite: Phase 1 basics.
+14. :doc:`modular_env` — Build a config-driven environment with ``EmbodiedEnv``, managers, and randomization. Prerequisite: :doc:`basic_env`.
+15. :doc:`data_generation` — Generate expert demonstration datasets for imitation learning. Prerequisite: :doc:`modular_env`.
+16. :doc:`rl` — Train RL agents with PPO or GRPO. Prerequisite: :doc:`basic_env`.
 
 **Phase 3: Extending the Framework**
 
-16. :doc:`add_robot` — Add a new robot model to EmbodiChain.
+17. :doc:`add_robot` — Add a new robot model to EmbodiChain.
 
 .. toctree::
    :maxdepth: 1
@@ -49,6 +50,7 @@ Follow the tutorials in this order for the best learning experience:
    solver
    sensor
    motion_gen
+   robot_articulation
    atomic_actions
    gizmo
    basic_env
