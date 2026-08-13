@@ -82,6 +82,11 @@ COMMANDS = (
         help="Train an RL agent from a JSON or YAML config.",
     ),
     Command(
+        name="eval-motion-policy",
+        target="embodichain.learning.rl.motion_policy_evaluation.cli:cli",
+        help="Visualize a policy through DexSim Motion Policy Kit.",
+    ),
+    Command(
         name="annotate-grasp",
         target="embodichain.toolkits.graspkit.scripts.annotate_grasp:cli",
         help="Interactively annotate a grasp region on a mesh.",

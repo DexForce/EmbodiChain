@@ -26,10 +26,11 @@ import numpy as np
 import torch
 import wandb
 from torch.utils.tensorboard import SummaryWriter
-from copy import deepcopy
 
-from embodichain.learning.rl.models import build_policy, get_registered_policy_names
-from embodichain.learning.rl.models import build_mlp_from_cfg
+from embodichain.learning.rl.models import get_registered_policy_names
+from embodichain.learning.rl.motion_policy_evaluation.manifest import (
+    write_run_manifest,
+)
 from embodichain.learning.rl.algo import (
     RolloutKind,
     build_algo,
@@ -40,21 +41,21 @@ from embodichain.learning.rl.differentiable_trainer import (
     DifferentiableTrainerCfg,
 )
 from embodichain.learning.rl.env import build_learning_env
+from embodichain.learning.rl.runtime import (
+    build_gym_environment,
+    build_gym_policy_runtime,
+    build_learning_policy_runtime,
+)
 from embodichain.learning.rl.routing import get_trainer_class
-from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.registration import (
-    build_env,
     discover_task_packages,
     execute_init_hooks,
 )
-from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
 from embodichain.lab.gym.utils.profiler import EnvProfilerCfg
 from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
 
@@ -114,51 +115,19 @@ def _resolve_profile_output(
     return str(output.with_name(f"{output.stem}_rank{rank}{output.suffix}"))
 
 
-def _build_learning_policy(
-    policy_block: dict,
-    env,
-    device: torch.device,
-):
-    obs_dim = int(env.single_observation_space.shape[-1])
-    action_dim = int(env.single_action_space.shape[-1])
-    policy_name = policy_block["name"].lower()
-    actor_cfg = policy_block.get("actor")
-    critic_cfg = policy_block.get("critic")
-    actor = (
-        build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
-        if actor_cfg is not None
-        else None
-    )
-    critic = (
-        build_mlp_from_cfg(critic_cfg, obs_dim, 1) if critic_cfg is not None else None
-    )
-    policy = build_policy(
-        policy_block,
-        env.single_observation_space,
-        env.single_action_space,
-        device,
-        actor=actor,
-        critic=critic,
-    )
-    if "initial_log_std" in policy_block and hasattr(policy, "log_std"):
-        with torch.no_grad():
-            policy.log_std.fill_(float(policy_block["initial_log_std"]))
-    return policy
-
-
 def _train_learning_env(
     cfg_data: dict,
     *,
+    config_path: str | Path,
     distributed: bool | None,
     profile: bool = False,
-):
+) -> dict[str, object]:
     """Train a lightweight registered environment through the unified CLI."""
     if profile:
         raise ValueError(
             "--profile requires trainer.gym_config; learning_env is unsupported."
         )
     trainer_cfg = cfg_data["trainer"]
-    policy_block = cfg_data["policy"]
     algorithm_block = cfg_data["algorithm"]
     distributed = (
         bool(trainer_cfg.get("distributed", False))
@@ -182,24 +151,24 @@ def _train_learning_env(
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    env_block = trainer_cfg["learning_env"]
-    if isinstance(env_block, str):
-        env_name = env_block
-        env_cfg = {}
-    else:
-        env_name = env_block["name"]
-        env_cfg = dict(env_block.get("cfg", {}))
     num_envs = int(trainer_cfg.get("num_envs", 64))
-    env = build_learning_env(
-        env_name,
+    runtime = build_learning_policy_runtime(
+        cfg_data,
         num_envs=num_envs,
         device=device,
-        **env_cfg,
     )
+    env = runtime.env
+    policy = runtime.policy
+    env_name = runtime.env_id
 
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_env = None
     if enable_eval:
+        env_block = trainer_cfg["learning_env"]
+        if isinstance(env_block, str):
+            env_cfg = {}
+        else:
+            env_cfg = dict(env_block.get("cfg", {}))
         eval_env = build_learning_env(
             env_name,
             num_envs=int(trainer_cfg.get("num_eval_envs", 16)),
@@ -207,7 +176,6 @@ def _train_learning_env(
             **env_cfg,
         )
 
-    policy = _build_learning_policy(policy_block, env, device)
     algorithm = build_algo(
         algorithm_block["name"],
         dict(algorithm_block.get("cfg", {})),
@@ -291,7 +259,14 @@ def _train_learning_env(
         total_timesteps = int(trainer_cfg.get("total_timesteps", default_steps))
         trainer.train(total_timesteps)
         trainer.save_checkpoint()
-        return trainer.get_summary()
+        summary = trainer.get_summary()
+        _write_motion_run_manifest(
+            run_base,
+            config_path,
+            trainer_cfg,
+            summary,
+        )
+        return summary
     finally:
         writer.close()
         if use_wandb:
@@ -307,7 +282,7 @@ def train_from_config(
     *,
     profile: bool = False,
     profile_output: str | None = None,
-):
+) -> dict[str, object] | None:
     """Run training from a config file path.
 
     Args:
@@ -316,6 +291,9 @@ def train_from_config(
             If None, use trainer.distributed from config.
         profile: Enable gym ``EnvProfiler`` on the training environment.
         profile_output: Optional JSON dump path for the profiling report.
+
+    Returns:
+        The lightweight trainer summary, or ``None`` for simulator training.
     """
     if profile_output is not None and not profile:
         raise ValueError("--profile_output requires --profile.")
@@ -326,6 +304,7 @@ def train_from_config(
     if "learning_env" in trainer_cfg:
         return _train_learning_env(
             cfg_data,
+            config_path=config_path,
             distributed=distributed,
             profile=profile,
         )
@@ -441,32 +420,11 @@ def train_from_config(
     if use_wandb and rank == 0:
         wandb.init(project=wandb_project_name, name=exp_name, config=cfg_data)
 
-    gym_config_path = Path(trainer_cfg["gym_config"])
     if rank == 0:
         logger.log_info(f"Current working directory: {Path.cwd()}")
 
-    gym_config_data = load_config(str(gym_config_path))
-    gym_env_cfg = config_to_cfg(gym_config_data, manager_modules=get_manager_modules())
-    if num_envs is not None:
-        gym_env_cfg.num_envs = int(num_envs)
-
-    # Ensure sim configuration mirrors runtime overrides
-    if gym_env_cfg.sim_cfg is None:
-        gym_env_cfg.sim_cfg = SimulationManagerCfg()
-    if device.type == "cuda":
-        gpu_index = device.index
-        if gpu_index is None:
-            gpu_index = torch.cuda.current_device()
-        gym_env_cfg.sim_cfg.sim_device = torch.device(f"cuda:{gpu_index}")
-        if hasattr(gym_env_cfg.sim_cfg, "gpu_id"):
-            gym_env_cfg.sim_cfg.gpu_id = gpu_index
-    else:
-        gym_env_cfg.sim_cfg.sim_device = torch.device("cpu")
-    gym_env_cfg.sim_cfg.headless = headless
-    gym_env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
-    gym_env_cfg.sim_cfg.gpu_id = gpu_id
-    if profile:
-        gym_env_cfg.profiler = EnvProfilerCfg(
+    profiler = (
+        EnvProfilerCfg(
             enable_time=True,
             output_path=_resolve_profile_output(
                 profile_output,
@@ -474,83 +432,50 @@ def train_from_config(
                 world_size=world_size,
             ),
         )
+        if profile
+        else None
+    )
+    runtime = build_gym_policy_runtime(
+        cfg_data,
+        device=device,
+        num_envs=num_envs,
+        headless=headless,
+        renderer=renderer,
+        gpu_id=gpu_id,
+        config_dir=Path(config_path).expanduser().resolve().parent,
+        profiler=profiler,
+    )
+    env = runtime.env
+    policy = runtime.policy
+    gym_config_path = runtime.gym_config_path
+    gym_config_data = runtime.gym_config
+    gym_env_cfg = runtime.env_cfg
+    if gym_config_path is None or gym_config_data is None or gym_env_cfg is None:
+        raise RuntimeError("Simulator Policy runtime is missing task configuration")
     if rank == 0:
         logger.log_info(
             f"Loaded gym_config from {gym_config_path} (env_id={gym_config_data['id']}, num_envs={gym_env_cfg.num_envs}, headless={gym_env_cfg.sim_cfg.headless}, renderer={gym_env_cfg.sim_cfg.render_cfg.renderer}, sim_device={gym_env_cfg.sim_cfg.sim_device})"
         )
 
-    env = build_env(gym_config_data["id"], base_env_cfg=gym_env_cfg)
-    sample_obs, _ = env.reset()
-    sample_obs_td = dict_to_tensordict(sample_obs, device)
-    obs_dim = flatten_dict_observation(sample_obs_td).shape[-1]
-    flat_obs_space = env.flattened_observation_space
-
     # Create evaluation environment only if enabled
     eval_env = None
     num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
     if enable_eval and rank == 0:
-        eval_gym_env_cfg = deepcopy(gym_env_cfg)
-        eval_gym_env_cfg.num_envs = num_eval_envs
-        eval_gym_env_cfg.sim_cfg.headless = True
-        eval_gym_env_cfg.profiler = None
-        eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
+        eval_runtime = build_gym_environment(
+            cfg_data,
+            simulation_device=device,
+            num_envs=int(num_eval_envs),
+            headless=True,
+            renderer=renderer,
+            gpu_id=gpu_id,
+            config_dir=Path(config_path).expanduser().resolve().parent,
+        )
+        eval_env = eval_runtime.env
         logger.log_info(
             f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
         )
 
-    # Build Policy via registry
     policy_name = policy_block["name"]
-    env_action_dim = (
-        env.get_wrapper_attr("action_manager").total_action_dim
-        if env.get_wrapper_attr("action_manager") is not None
-        else len(env.get_wrapper_attr("active_joint_ids"))
-    )
-    action_dim = policy_block.get("action_dim", env_action_dim)
-    action_dim = int(action_dim)
-    if action_dim != env_action_dim:
-        raise ValueError(
-            f"Configured policy.action_dim={action_dim} does not match env action dim {env_action_dim}."
-        )
-    # Build Policy via registry (actor/critic must be explicitly defined in JSON when using actor_critic/actor_only)
-    if policy_name.lower() == "actor_critic":
-        actor_cfg = policy_block.get("actor")
-        critic_cfg = policy_block.get("critic")
-        if actor_cfg is None or critic_cfg is None:
-            raise ValueError(
-                "ActorCritic requires 'actor' and 'critic' definitions in JSON (policy.actor / policy.critic)."
-            )
-
-        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
-        critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)
-
-        policy = build_policy(
-            policy_block,
-            flat_obs_space,
-            env.action_space,
-            device,
-            actor=actor,
-            critic=critic,
-        )
-    elif policy_name.lower() == "actor_only":
-        actor_cfg = policy_block.get("actor")
-        if actor_cfg is None:
-            raise ValueError(
-                "ActorOnly requires 'actor' definition in JSON (policy.actor)."
-            )
-
-        actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
-
-        policy = build_policy(
-            policy_block,
-            flat_obs_space,
-            env.action_space,
-            device,
-            actor=actor,
-        )
-    else:
-        policy = build_policy(
-            policy_block, env.observation_space, env.action_space, device
-        )
 
     # Build Algorithm via factory
     algo_name = algo_block["name"].lower()
@@ -682,7 +607,36 @@ def train_from_config(
             torch.distributed.destroy_process_group()
 
         if rank == 0:
+            _write_motion_run_manifest(
+                run_base,
+                config_path,
+                trainer_cfg,
+                trainer.get_summary(),
+                gym_config=gym_config_path,
+            )
             logger.log_info("Training finished")
+
+
+def _write_motion_run_manifest(
+    run_base: str | Path,
+    config_path: str | Path,
+    trainer_cfg: dict,
+    summary: dict,
+    *,
+    gym_config: str | Path | None = None,
+) -> Path:
+    """Write the final checkpoint and config index for motion evaluation."""
+    latest = summary.get("latest_checkpoint_path")
+    if latest is None:
+        raise RuntimeError("Training finished without a checkpoint")
+    return write_run_manifest(
+        run_base,
+        train_config=config_path,
+        gym_config=gym_config,
+        latest_checkpoint=latest,
+        best_checkpoint=summary.get("best_checkpoint_path"),
+        motion_profile=trainer_cfg.get("motion_profile"),
+    )
 
 
 def cli(argv: Sequence[str] | None = None) -> None:

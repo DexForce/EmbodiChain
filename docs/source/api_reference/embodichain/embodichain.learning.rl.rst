@@ -18,6 +18,8 @@ collection logic, policy/model builders, and training entry points.
       buffer
       collector
       models
+      motion_policy_evaluation
+      runtime
       train
       utils
 

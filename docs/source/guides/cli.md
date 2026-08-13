@@ -372,6 +372,76 @@ See the Profiling section under Run Env for report format. Outputs are written t
 
 ---
 
+## Motion Policy Evaluation
+
+Run visual evaluation for a simulator training run. EmbodiChain restores the
+training Environment, observation, Policy, action manager, and task reset:
+
+```bash
+embodichain eval-motion-policy outputs/my_policy_<timestamp> \
+    --checkpoint best \
+    --device cuda \
+    --sim-device gpu \
+    --viewer
+```
+
+Evaluate an older EmbodiChain `.pt` checkpoint:
+
+```bash
+embodichain eval-motion-policy \
+    --checkpoint /path/to/policy.pt \
+    --config /path/to/train.yaml \
+    --gym-config /path/to/gym.yaml \
+    --viewer
+```
+
+Evaluate a checkpoint from an external Policy project with a registered Motion
+Profile:
+
+```bash
+embodichain eval-motion-policy \
+    --profile my-joint-policy \
+    --checkpoint /path/to/policy.pt \
+    --config /path/to/train.yaml \
+    --resource-root /path/to/task-resources \
+    --viewer
+```
+
+Viewer runs continuously when `--episodes`, `--control-steps`, and `--duration`
+are omitted. An EmbodiChain task Headless run completes one episode. An external
+Motion Profile Headless run defaults to 100 control steps per episode.
+
+### Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| ``RUN`` | *(optional)* | Training run containing ``run-manifest.json`` |
+| ``--profile`` | manifest or EmbodiChain task | Registered external Motion Profile ID |
+| ``--checkpoint`` | ``best`` with RUN | ``best``, ``latest``, a path within RUN, or an explicit `.pt` path |
+| ``--config`` | *(optional)* | Training config for an explicit checkpoint |
+| ``--gym-config`` | *(optional)* | Task config for an explicit checkpoint |
+| ``--resource-root`` | *(optional)* | Task assets and local reference data passed to the Profile |
+| ``--episodes`` | EmbodiChain task Headless: ``1`` | Completed EmbodiChain task episodes, or independent Motion Profile runs |
+| ``--control-steps`` | Viewer continuous | Exact Policy action count |
+| ``--duration`` | *(optional)* | Seconds converted upward to integer control steps |
+| ``--command`` | Profile | External Motion Profile command values |
+| ``--device`` | Training config or ``cpu`` | PyTorch inference device |
+| ``--sim-device`` | Inference device or ``cpu`` | Simulation device |
+| ``--physics-backend`` | Policy Spec | External Motion Profile backend override |
+| ``--renderer`` | ``hybrid`` | ``raster``, ``hybrid``, ``fastrt``, or ``offlinert`` |
+| ``--gpu-id`` | ``0`` | GPU index |
+| ``--scene-config`` | Profile: ``standard`` | External Motion Profile scene style or YAML path |
+| ``--termination-behavior`` | EmbodiChain task: ``auto_reset`` | EmbodiChain task: ``pause`` or ``auto_reset``; Profile also supports ``continue`` |
+| ``--viewer`` | Headless | Open the DexSim Viewer |
+| ``--cache-dir`` | DexSim cache | External Motion Profile resource cache |
+| ``--offline`` | ``False`` | Resolve external Motion Profile resources from cache |
+| ``--output`` | RUN or checkpoint evaluations | Evaluation output parent directory |
+
+See {doc}`motion_policy_evaluation` for EmbodiChain training runs, external
+Motion Profiles, run manifests, reports, and complete examples.
+
+---
+
 ## Annotate Grasp
 
 Launch the browser-based grasp-region annotation tool.

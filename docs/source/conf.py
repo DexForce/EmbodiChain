@@ -40,6 +40,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",  # optional, shows type hints
     "sphinx_design",
+    "sphinxcontrib.mermaid",
     "myst_parser",  # if you prefer Markdown pages
     "sphinx_copybutton",
 ]
@@ -59,6 +60,7 @@ autodoc_default_options = {
 
 # If using MyST and writing .md API stubs:
 myst_enable_extensions = ["colon_fence", "deflist", "html_admonition"]
+myst_fence_as_directive = ["mermaid"]
 
 
 templates_path = ["_templates"]
