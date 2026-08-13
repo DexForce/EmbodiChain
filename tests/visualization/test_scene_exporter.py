@@ -342,6 +342,30 @@ class _GizmoSimulation(_EmptySimulation):
         return (("cube", _Gizmo()),)
 
 
+class _AxisMarkerHandle:
+    def __init__(self, pose: np.ndarray, visible: bool = False) -> None:
+        self._pose = pose
+        self._visible = visible
+
+    def get_world_pose(self) -> np.ndarray:
+        return self._pose
+
+    def is_visible(self) -> bool:
+        return self._visible
+
+
+class _AxisMarkerSimulation(_EmptySimulation):
+    def __init__(self) -> None:
+        pose = np.eye(4, dtype=np.float32)
+        pose[:3, 3] = [-0.4, 0.48, 0.1]
+        self.marker = _AxisMarkerHandle(pose)
+
+    def get_axis_marker_items(
+        self,
+    ) -> tuple[tuple[str, tuple[_AxisMarkerHandle, ...], float, float], ...]:
+        return (("place_target_axis", (self.marker,), 0.2, 0.01),)
+
+
 class _Camera:
     def __init__(self, visualization_role: str = "sensor") -> None:
         self.cfg = SimpleNamespace(
@@ -565,6 +589,26 @@ def test_gizmo_manifest_and_authoritative_pose_are_exported() -> None:
     assert manifest.gizmos[0].gizmo_id == "cube"
     assert manifest.gizmos[0].path == "/interactions/gizmos/cube"
     np.testing.assert_allclose(result.frame.gizmos[0].position, [0.2, 0.3, 0.4])
+
+
+def test_axis_markers_ignore_headless_native_visibility() -> None:
+    exporter = SceneExporter(
+        _AxisMarkerSimulation(),
+        VisualizationCfg(backend="viser"),
+        run_id="axis-marker-run",
+    )
+
+    exporter.build_manifest()
+    result = exporter.capture(sim_step=1, sim_time=0.01)
+
+    assert len(result.frame.overlays.frames) == 1
+    overlay = result.frame.overlays.frames[0]
+    assert overlay.overlay_id == "marker:place_target_axis:0"
+    np.testing.assert_allclose(overlay.position, [-0.4, 0.48, 0.1])
+    np.testing.assert_allclose(overlay.wxyz, [1.0, 0.0, 0.0, 0.0])
+    assert overlay.axes_length == 0.2
+    assert overlay.axes_radius == 0.01
+    assert overlay.visible
 
 
 def test_camera_frustum_pose_and_low_frequency_rgb_are_exported() -> None:

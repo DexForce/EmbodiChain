@@ -32,6 +32,7 @@ from .protocol import (
     CameraImageFrame,
     CameraSpec,
     DynamicMeshUpdate,
+    FrameOverlay,
     GizmoSpec,
     GizmoState,
     JointControlProvider,
@@ -702,9 +703,34 @@ class SceneExporter:
                         )
                     )
 
+    def _capture_axis_marker_overlays(self) -> tuple[FrameOverlay, ...]:
+        """Capture native simulation axes as Viser coordinate-frame overlays."""
+        get_axis_marker_items = getattr(self._sim, "get_axis_marker_items", None)
+        if get_axis_marker_items is None:
+            return ()
+
+        frames: list[FrameOverlay] = []
+        for marker_name, handles, axis_length, axis_radius in get_axis_marker_items():
+            for index, handle in enumerate(handles):
+                position, wxyz = pose_to_position_wxyz(handle.get_world_pose())
+                frames.append(
+                    FrameOverlay(
+                        overlay_id=f"marker:{marker_name}:{index}",
+                        position=position,
+                        wxyz=wxyz,
+                        axes_length=axis_length,
+                        axes_radius=axis_radius,
+                        # Native handles report hidden in headless mode even
+                        # though draw_marker() requested a visible marker.
+                        visible=True,
+                    )
+                )
+        return tuple(frames)
+
     def _prepare_overlays(self, overlays: SceneOverlays | None) -> SceneOverlays:
+        marker_frames = self._capture_axis_marker_overlays()
         if overlays is None:
-            return SceneOverlays()
+            return SceneOverlays(frames=marker_frames)
         point_clouds: list[PointCloudOverlay] = []
         for point_cloud in overlays.point_clouds:
             point_count = point_cloud.points.shape[0]
@@ -732,7 +758,7 @@ class SceneExporter:
                 )
             )
         return SceneOverlays(
-            frames=overlays.frames,
+            frames=marker_frames + overlays.frames,
             trajectories=overlays.trajectories,
             targets=overlays.targets,
             point_clouds=tuple(point_clouds),
