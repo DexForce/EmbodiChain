@@ -29,6 +29,8 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
     SceneGraphNode,
     SceneGraphRelation,
+    TABLE_REGIONS,
+    TableRegion,
 )
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
@@ -52,6 +54,17 @@ Each operation is one of:
 
 For every move and every positioned add, target_id must be an Existing object
 ID and relation must be one of on, left_of, right_of, in_front_of, or behind.
+When the target is the tabletop, use target_id "table", relation "on", and set
+table_region to one of left_back, back_center, right_back, left_center, center,
+right_center, left_front, front_center, or right_front. Do not use a planar
+relation with the table. For non-table placement, table_region must be null.
+If an add operation has no target_id and relation, it is placed on the table by
+default and table_region must be null.
+In the tabletop 9-grid, smaller x means left, larger x means right, smaller y
+means back, and larger y means front: left_back is the upper-left/back cell,
+back_center is the upper-center/back cell, right_back is the upper-right/back
+cell, left_center/center/right_center are the middle row, and
+left_front/front_center/right_front are the lower/front row.
 Do not position a new object relative to another newly added object.
 
 Each existing object's center_xy is its center position [x, y] in the
@@ -67,8 +80,8 @@ and structural details. name and description must not mention position, the
 table, or relations to any object.
 
 Return JSON only: no Markdown, comments, or prose. Every operation must contain
-exactly these fields: op, object_id, target_id, relation, category, name, and
-description. Use null for every field that does not apply to an operation:
+exactly these fields: op, object_id, target_id, relation, table_region, category,
+name, and description. Use null for every field that does not apply:
 {
   "operations": [
     {
@@ -76,6 +89,7 @@ description. Use null for every field that does not apply to an operation:
       "object_id": "bottle_001",
       "target_id": "book_001",
       "relation": "right_of",
+      "table_region": null,
       "category": null,
       "name": null,
       "description": null
@@ -85,6 +99,7 @@ description. Use null for every field that does not apply to an operation:
       "object_id": "cup_001",
       "target_id": null,
       "relation": null,
+      "table_region": null,
       "category": null,
       "name": null,
       "description": null
@@ -92,8 +107,9 @@ description. Use null for every field that does not apply to an operation:
     {
       "op": "add",
       "object_id": null,
-      "target_id": null,
-      "relation": null,
+      "target_id": "table",
+      "relation": "on",
+      "table_region": "back_center",
       "category": "orange",
       "name": "small orange",
       "description": "small round orange with a textured peel"
@@ -103,9 +119,20 @@ description. Use null for every field that does not apply to an operation:
       "object_id": null,
       "target_id": "book_001",
       "relation": "right_of",
+      "table_region": null,
       "category": "orange",
       "name": "small orange",
       "description": "small round orange with a textured peel"
+    },
+    {
+      "op": "add",
+      "object_id": null,
+      "target_id": null,
+      "relation": null,
+      "table_region": null,
+      "category": "banana",
+      "name": "yellow banana",
+      "description": "curved yellow banana with a green stem"
     }
   ]
 }
@@ -128,7 +155,10 @@ def understand_scene_edit(
     if json_max_attempts < 1:
         raise ValueError("json_max_attempts must be at least 1.")
     # Give the VLM only the scene metadata needed to identify existing objects.
-    simplified_scene_info = _simplify_scene_info(scene=scene)
+    simplified_scene_info = _simplify_scene_info(
+        scene=scene,
+        scene_graph=scene_graph,
+    )
     operations = _vlm_understand_scene_edit(
         scene=scene,
         edit_prompt=edit_prompt,
@@ -192,7 +222,7 @@ def _apply_scene_edit_plan_to_scene_graph(
     """Apply the target graph updates implied by add and move operations."""
     deleted_object_ids: set[str] = set()
     added_object_ids: list[str] = []
-    on_parent_updates: list[tuple[str, str]] = []
+    on_parent_updates: list[tuple[str, str, TableRegion | None]] = []
     planar_relation_updates: list[tuple[str, PlanarRelationType, str]] = []
     for operation in scene_edit_plan.operations:
         if operation.op == "delete":
@@ -206,7 +236,13 @@ def _apply_scene_edit_plan_to_scene_graph(
         if operation.target_id is None or operation.relation is None:
             continue
         if operation.relation == "on":
-            on_parent_updates.append((operation.object_id, operation.target_id))
+            on_parent_updates.append(
+                (
+                    operation.object_id,
+                    operation.target_id,
+                    operation.table_region,
+                )
+            )
             continue
         planar_relation_updates.append(
             (operation.object_id, operation.relation, operation.target_id)
@@ -221,8 +257,15 @@ def _apply_scene_edit_plan_to_scene_graph(
     )
 
 
-def _simplify_scene_info(scene: Scene) -> dict[str, object]:
+def _simplify_scene_info(
+    *,
+    scene: Scene,
+    scene_graph: SceneGraph,
+) -> dict[str, object]:
     """Return the object metadata needed for edit instruction resolution."""
+    table_regions_by_id = {
+        node.object_id: node.table_region for node in scene_graph.nodes
+    }
     return {
         "existing_object_ids": [scene_object.id for scene_object in scene.objects],
         "objects": [
@@ -232,6 +275,7 @@ def _simplify_scene_info(scene: Scene) -> dict[str, object]:
                 "name": scene_object.name,
                 "description": scene_object.description,
                 "center_xy": scene_object.center_xy,
+                "table_region": table_regions_by_id.get(scene_object.id),
             }
             for scene_object in scene.objects
         ],
@@ -302,6 +346,7 @@ def _parse_scene_edit_operations(
         "object_id",
         "target_id",
         "relation",
+        "table_region",
         "category",
         "name",
         "description",
@@ -345,6 +390,7 @@ def _parse_scene_edit_operations(
                     value.get("target_id"), field_name="target_id"
                 ),
                 relation=_optional_relation(value.get("relation")),
+                table_region=_optional_table_region(value.get("table_region")),
                 category=category,
                 name=_optional_string(value.get("name"), field_name="name"),
                 description=_optional_string(
@@ -386,4 +432,12 @@ def _optional_relation(value: object) -> str | None:
         return None
     if value not in {"on", "left_of", "right_of", "in_front_of", "behind"}:
         raise ValueError("Scene edit operation relation is invalid.")
+    return value
+
+
+def _optional_table_region(value: object) -> TableRegion | None:
+    if value is None:
+        return None
+    if value not in TABLE_REGIONS:
+        raise ValueError("Scene edit operation table_region is invalid.")
     return value

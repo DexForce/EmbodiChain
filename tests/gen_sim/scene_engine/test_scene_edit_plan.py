@@ -17,8 +17,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+from PIL import Image
+import trimesh
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
@@ -108,6 +111,7 @@ def test_scene_edit_plan_accepts_add_without_a_position() -> None:
             "object_id": "cup_001",
             "target_id": None,
             "relation": None,
+            "table_region": None,
             "category": "cup",
             "name": "green cup",
             "description": "A small green ceramic cup.",
@@ -151,6 +155,7 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
                 "object_id": None,
                 "target_id": None,
                 "relation": None,
+                "table_region": None,
                 "category": "orange",
                 "name": "small_orange",
                 "description": "A small round orange with a textured peel.",
@@ -160,6 +165,7 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
                 "object_id": None,
                 "target_id": None,
                 "relation": None,
+                "table_region": None,
                 "category": "orange",
                 "name": "small_orange",
                 "description": "A small round orange with a textured peel.",
@@ -220,7 +226,9 @@ def test_scene_edit_plan_requires_a_position_for_move_operations() -> None:
         )
 
 
-def test_scene_edit_asset_preparation_skips_plans_without_adds() -> None:
+def test_scene_edit_asset_preparation_skips_plans_without_adds(
+    tmp_path: Path,
+) -> None:
     scene, scene_graph = _scene_and_graph()
     plan = SceneEditPlan(
         scene=scene,
@@ -234,13 +242,141 @@ def test_scene_edit_asset_preparation_skips_plans_without_adds() -> None:
             )
         ],
     )
+    previous_asset_output = tmp_path / "scene_editing" / "asset_preparation"
+    previous_asset_output.mkdir(parents=True)
+    (previous_asset_output / "previous.txt").write_text("keep", encoding="utf-8")
 
-    prepared_scene = prepare_scene_edit_assets(
-        scene=scene,
+    prepared_assets = prepare_scene_edit_assets(
         scene_edit_plan=plan,
+        output_root=tmp_path,
+        image_generation_client=object(),  # type: ignore[arg-type]
+        geometry_generation_client=object(),  # type: ignore[arg-type]
+        image_segmentation_client=object(),  # type: ignore[arg-type]
     )
 
-    assert prepared_scene is scene
+    assert prepared_assets == []
+    assert (previous_asset_output / "previous.txt").is_file()
+
+
+def test_scene_edit_asset_preparation_generates_one_image_per_add(
+    tmp_path: Path,
+) -> None:
+    class ImageGenerationClient:
+        def __init__(self) -> None:
+            self.requests: list[tuple[str, Path]] = []
+
+        def generate_image_by_prompt(self, *, prompt: str, output_path: Path) -> Path:
+            self.requests.append((prompt, output_path))
+            Image.new("RGB", (6, 6), "white").save(output_path)
+            return output_path
+
+    class ImageSegmentationClient:
+        def __init__(self) -> None:
+            self.requests: list[tuple[Path, str]] = []
+
+        def segment_single_object(
+            self,
+            *,
+            image_path: Path,
+            prompt: str,
+        ) -> list[dict[str, object]]:
+            self.requests.append((image_path, prompt))
+            return [
+                {
+                    "size": [6, 6],
+                    "counts": [7, 4, 2, 4, 2, 4, 2, 4, 7],
+                    "starts_with": 1,
+                }
+            ]
+
+    class GeometryGenerationClient:
+        def __init__(self) -> None:
+            self.requests: list[tuple[Path, list[tuple[str, Path]], Path]] = []
+
+        def generate_objects(
+            self,
+            *,
+            image_path: Path,
+            object_masks: list[tuple[str, Path]],
+            output_root: Path,
+        ) -> tuple[dict[str, object], list[dict[str, object]]]:
+            self.requests.append((image_path, object_masks, output_root))
+            output_root.mkdir(parents=True, exist_ok=True)
+            for object_id, _ in object_masks:
+                trimesh.creation.box().export(output_root / f"{object_id}.glb")
+            return {}, [{"scale": [1.25, 1.5, 1.75]}]
+
+    scene, scene_graph = _scene_and_graph()
+    plan = SceneEditPlan(
+        scene=scene,
+        scene_graph=scene_graph,
+        operations=[
+            SceneEditOperation(
+                op="add",
+                object_id="cup_001",
+                category="cup",
+                name="green cup",
+                description="A small green ceramic cup.",
+            )
+        ],
+    )
+    image_generation_client = ImageGenerationClient()
+    image_segmentation_client = ImageSegmentationClient()
+    geometry_generation_client = GeometryGenerationClient()
+
+    prepared_assets = prepare_scene_edit_assets(
+        scene_edit_plan=plan,
+        output_root=tmp_path,
+        image_generation_client=image_generation_client,  # type: ignore[arg-type]
+        geometry_generation_client=geometry_generation_client,  # type: ignore[arg-type]
+        image_segmentation_client=image_segmentation_client,  # type: ignore[arg-type]
+    )
+
+    expected_image_path = (
+        tmp_path
+        / "scene_editing"
+        / "asset_preparation"
+        / "generated_images"
+        / "cup_001.png"
+    )
+    assert [asset.id for asset in prepared_assets] == ["cup_001"]
+    assert prepared_assets[0].simready_glb_path is not None
+    assert prepared_assets[0].rot == [0.0, 0.0, 0.0]
+    assert prepared_assets[0].pos == [0.0, 0.0, 0.0]
+    assert prepared_assets[0].scale == [1.0, 1.0, 1.0]
+    assert image_generation_client.requests == [
+        ("A small green ceramic cup.", expected_image_path)
+    ]
+    assert expected_image_path.is_file()
+    assert image_segmentation_client.requests == [
+        (expected_image_path, "A small green ceramic cup.")
+    ]
+    generated_mask_path = (
+        tmp_path
+        / "scene_editing"
+        / "asset_preparation"
+        / "generated_masks"
+        / "cup_001_mask.png"
+    )
+    assert generated_mask_path.is_file()
+    with Image.open(generated_mask_path) as mask:
+        assert mask.getpixel((3, 3)) == 255
+        assert mask.getpixel((0, 0)) == 0
+    generated_glb_path = (
+        tmp_path
+        / "scene_editing"
+        / "asset_preparation"
+        / "coarse_geometry"
+        / "cup_001.glb"
+    )
+    assert geometry_generation_client.requests == [
+        (
+            expected_image_path,
+            [("cup_001", generated_mask_path)],
+            generated_glb_path.parent,
+        )
+    ]
+    assert generated_glb_path.read_bytes().startswith(b"glTF")
 
 
 def test_scene_edit_graph_builder_copies_the_pre_edit_graph() -> None:

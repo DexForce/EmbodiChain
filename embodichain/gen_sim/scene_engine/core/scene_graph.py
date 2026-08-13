@@ -21,7 +21,7 @@ from typing import Literal
 
 TABLE_OBJECT_ID = "table"
 
-# 9-grid table regions, treat the table as a 3x3 grid.
+# Static type constraint for the nine regions of the tabletop 3x3 grid.
 TableRegion = Literal[
     "left_back",
     "back_center",
@@ -33,6 +33,20 @@ TableRegion = Literal[
     "front_center",
     "right_front",
 ]
+# Runtime membership set for validating serialized and user-provided regions.
+TABLE_REGIONS = frozenset(
+    {
+        "left_back",
+        "back_center",
+        "right_back",
+        "left_center",
+        "center",
+        "right_center",
+        "left_front",
+        "front_center",
+        "right_front",
+    }
+)
 
 # A on B, then B is the parent node of A.
 SupportRelationType = Literal["on"]
@@ -55,6 +69,8 @@ class SceneGraphNode:
         """Validate local node fields before graph-level checks."""
         if not self.object_id:
             raise ValueError("object_id must be non-empty.")
+        if self.table_region not in {None, *TABLE_REGIONS}:
+            raise ValueError("table_region is invalid.")
         # If the node is the table.
         if self.object_id == TABLE_OBJECT_ID:
             if self.parent_id is not None:
@@ -165,7 +181,7 @@ class SceneGraph:
         *,
         deleted_object_ids: set[str],
         added_object_ids: list[str],
-        on_parent_updates: list[tuple[str, str]],
+        on_parent_updates: list[tuple[str, str, TableRegion | None]],
         planar_relation_updates: list[tuple[str, PlanarRelationType, str]],
     ) -> None:
         """Apply one atomic batch of node and relationship updates."""
@@ -210,8 +226,12 @@ class SceneGraph:
         )
 
         # Apply support-parent changes before planar updates need the final parent.
-        for object_id, parent_id in on_parent_updates:
-            self._set_on_parent(object_id=object_id, parent_id=parent_id)
+        for object_id, parent_id, table_region in on_parent_updates:
+            self._set_on_parent(
+                object_id=object_id,
+                parent_id=parent_id,
+                table_region=table_region,
+            )
 
         # Resolve chained planar parent inheritance before adding final relations.
         self._resolve_planar_parent_updates(planar_relation_updates)
@@ -228,7 +248,13 @@ class SceneGraph:
         # Normalize inverse relations and reject invalid final graph constraints.
         self.refresh()
 
-    def _set_on_parent(self, *, object_id: str, parent_id: str) -> None:
+    def _set_on_parent(
+        self,
+        *,
+        object_id: str,
+        parent_id: str,
+        table_region: TableRegion | None = None,
+    ) -> None:
         """Replace one node's support parent and stale planar constraints."""
         nodes_by_id = self.node_by_id()
         if object_id == TABLE_OBJECT_ID:
@@ -243,7 +269,7 @@ class SceneGraph:
         node = nodes_by_id[object_id]
         node.parent_id = parent_id
         node.parent_relation = "on"
-        node.table_region = None
+        node.table_region = table_region
         self._clear_incident_planar_relations(object_id)
 
     def _resolve_planar_parent_updates(
