@@ -87,6 +87,7 @@ def edit_scene(
             image_generation_client=image_generation_client,
             geometry_generation_client=geometry_generation_client,
             image_segmentation_client=image_segmentation_client,
+            vlm_client=vlm_client,
         )
     finally:
         image_generation_client.close()
