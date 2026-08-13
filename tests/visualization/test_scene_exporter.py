@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from embodichain.lab.visualization import (
+    FrameOverlay,
     JointControlSpec,
     JointControlState,
     PointCloudOverlay,
@@ -609,6 +610,34 @@ def test_axis_markers_ignore_headless_native_visibility() -> None:
     assert overlay.axes_length == 0.2
     assert overlay.axes_radius == 0.01
     assert overlay.visible
+
+
+def test_axis_marker_id_does_not_collide_with_caller_frame() -> None:
+    exporter = SceneExporter(
+        _AxisMarkerSimulation(),
+        VisualizationCfg(backend="viser"),
+        run_id="axis-marker-collision-run",
+    )
+    caller_frame = FrameOverlay(
+        overlay_id="marker:place_target_axis:0",
+        position=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+        wxyz=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+    )
+
+    exporter.build_manifest()
+    result = exporter.capture(
+        sim_step=1,
+        sim_time=0.01,
+        overlays=SceneOverlays(frames=(caller_frame,)),
+    )
+
+    frames = result.frame.overlays.frames
+    assert [frame.overlay_id for frame in frames] == [
+        "marker:place_target_axis:0#1",
+        "marker:place_target_axis:0",
+    ]
+    np.testing.assert_allclose(frames[0].position, [-0.4, 0.48, 0.1])
+    np.testing.assert_allclose(frames[1].position, caller_frame.position)
 
 
 def test_camera_frustum_pose_and_low_frequency_rgb_are_exported() -> None:
