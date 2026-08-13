@@ -28,6 +28,7 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
     SceneGraphNode,
     SceneGraphRelation,
+    TABLE_REGIONS,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
@@ -203,18 +204,7 @@ class SceneExportImporter:
             raise ValueError("Scene graph node ids must be strings or null.")
         if parent_relation not in {None, "on"}:
             raise ValueError("Scene graph parent_relation must be 'on' or null.")
-        if table_region not in {
-            None,
-            "left_back",
-            "back_center",
-            "right_back",
-            "left_center",
-            "center",
-            "right_center",
-            "left_front",
-            "front_center",
-            "right_front",
-        }:
+        if table_region is not None and table_region not in TABLE_REGIONS:
             raise ValueError("Scene graph table_region is invalid.")
         return SceneGraphNode(
             object_id=object_id,

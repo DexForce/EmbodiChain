@@ -53,7 +53,7 @@ _FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and exp
 
 
 @dataclass(frozen=True)
-class SimReadySceneProcessorConfig:
+class SimReadyProcessorConfig:
     """Object-category policy for SimReady mesh canonicalization."""
 
     upright_container_id_tokens: frozenset[str] = frozenset(
@@ -61,8 +61,8 @@ class SimReadySceneProcessorConfig:
     )  # Object-id tokens that enable upright-container standardization.
 
 
-class SimReadySceneProcessor:
-    """Create SimReady GLBs and layouts for one table and its scene assets."""
+class SimReadyProcessor:
+    """Create SimReady GLBs and layouts for scene objects."""
 
     def __init__(
         self,
@@ -71,7 +71,7 @@ class SimReadySceneProcessor:
         coarse_layout_by_id: dict[str, dict[str, object]],
         coarse_geometry_root: str | Path,
         simready_geometry_root: str | Path,
-        config: SimReadySceneProcessorConfig | None = None,
+        config: SimReadyProcessorConfig | None = None,
     ) -> None:
         self.scene = scene
         self.coarse_layout_by_id = coarse_layout_by_id
@@ -81,7 +81,7 @@ class SimReadySceneProcessor:
         )
         self.simready_table_layout: dict[str, object] | None = None
         self.simready_assets_layout: list[dict[str, object]] | None = None
-        self.config = config if config is not None else SimReadySceneProcessorConfig()
+        self.config = config if config is not None else SimReadyProcessorConfig()
         if not self.config.upright_container_id_tokens:
             raise ValueError("upright_container_id_tokens must not be empty.")
 
@@ -317,8 +317,8 @@ class SimReadySceneProcessor:
         lower_points = standardized_points[
             standardized_points[:, 2] < axis_min + axis_range * 0.2
         ]
-        upper_volume = SimReadySceneProcessor._convex_hull_volume(upper_points)
-        lower_volume = SimReadySceneProcessor._convex_hull_volume(lower_points)
+        upper_volume = SimReadyProcessor._convex_hull_volume(upper_points)
+        lower_volume = SimReadyProcessor._convex_hull_volume(lower_points)
 
         # Bottles usually have a smaller top (neck) than bottom; flip if necessary.
         if upper_volume > lower_volume:

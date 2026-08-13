@@ -48,8 +48,8 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
     quaternion_wxyz_to_euler_xyz_degrees,
     transform_matrix_to_layout_object,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.simready_scene_processor import (
-    SimReadySceneProcessor,
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
+    SimReadyProcessor,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
     TableSupportSurfaceDetector,
@@ -105,7 +105,7 @@ def generate_scene_and_refine(
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
-    simready_processor = SimReadySceneProcessor(
+    simready_processor = SimReadyProcessor(
         scene=scene,
         coarse_layout_by_id=coarse_layout_by_id,
         coarse_geometry_root=coarse_geometry_output_root,

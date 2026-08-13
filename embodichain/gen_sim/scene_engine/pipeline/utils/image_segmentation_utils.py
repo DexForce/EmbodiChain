@@ -94,6 +94,35 @@ def decode_rle_mask(mask_rle: dict[str, Any]) -> Image.Image:
     return Image.frombytes("L", (width, height), bytes(pixels))
 
 
+def invert_mask_if_foreground_is_off_center(candidate: MaskCandidate) -> MaskCandidate:
+    """Invert a mask when its foreground is less concentrated at image center.
+
+    This heuristic is intended for generated single-object images, where the
+    object is expected near the center and SAM3 may return its background.
+    """
+    mask = decode_rle_mask(candidate.mask_rle)
+    width, height = mask.size
+    left, top = width // 6, height // 6
+    right, bottom = width - left, height - top
+    center_mask = mask.crop((left, top, right, bottom))
+
+    center_foreground_ratio = _foreground_ratio(center_mask)
+    total_foreground_pixels = _foreground_pixel_count(mask)
+    outside_foreground_pixels = total_foreground_pixels - _foreground_pixel_count(
+        center_mask
+    )
+    outside_pixel_count = width * height - center_mask.width * center_mask.height
+    outside_foreground_ratio = outside_foreground_pixels / outside_pixel_count
+    if center_foreground_ratio >= outside_foreground_ratio:
+        return candidate
+
+    inverted_mask = mask.point(lambda value: 0 if value else 255)
+    return MaskCandidate(
+        index=candidate.index,
+        mask_rle=_encode_binary_mask_rle(inverted_mask),
+    )
+
+
 def union_overlapping_mask_candidates(
     candidates: list[MaskCandidate],
     *,
@@ -359,6 +388,19 @@ def _mask_iou(first_mask: Image.Image, second_mask: Image.Image) -> float:
     if union_pixels == 0:
         return 0.0
     return intersection.histogram()[255] / union_pixels
+
+
+def _foreground_pixel_count(mask: Image.Image) -> int:
+    """Return the number of white pixels in one binary mask."""
+    return mask.convert("L").histogram()[255]
+
+
+def _foreground_ratio(mask: Image.Image) -> float:
+    """Return the white-pixel ratio in one non-empty image region."""
+    pixel_count = mask.width * mask.height
+    if pixel_count == 0:
+        raise ValueError("Mask region must contain at least one pixel.")
+    return _foreground_pixel_count(mask) / pixel_count
 
 
 def _encode_binary_mask_rle(mask: Image.Image) -> dict[str, Any]:

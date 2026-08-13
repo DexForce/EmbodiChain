@@ -23,6 +23,7 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneConstraintType,
     SceneGraph,
+    TableRegion,
     TABLE_OBJECT_ID,
 )
 
@@ -39,6 +40,7 @@ class SceneEditOperation:
     object_id: str | None = None
     target_id: str | None = None
     relation: SceneConstraintType | None = None
+    table_region: TableRegion | None = None
     category: str | None = None
     name: str | None = None
     description: str | None = None
@@ -50,6 +52,7 @@ class SceneEditOperation:
             "object_id": self.object_id,
             "target_id": self.target_id,
             "relation": self.relation,
+            "table_region": self.table_region,
             "category": self.category,
             "name": self.name,
             "description": self.description,
@@ -82,6 +85,7 @@ class SceneEditPlan:
         # - move and delete identify one existing non-table object with object_id.
         # - add carries generated object_id plus non-empty category, name, and description.
         # - move always supplies target_id and relation; add may omit both.
+        # - table_region is only valid with target_id=table and relation=on.
         # - target_id and relation are otherwise supplied together or both absent.
         # - every target is from the pre-edit scene; new and deleted objects are invalid targets.
         # - an existing object has at most one move or delete operation in one plan.
@@ -156,6 +160,7 @@ class SceneEditPlan:
                 for value in (
                     operation.target_id,
                     operation.relation,
+                    operation.table_region,
                     operation.category,
                     operation.name,
                     operation.description,
@@ -213,6 +218,12 @@ class SceneEditPlan:
     ) -> None:
         if (operation.target_id is None) != (operation.relation is None):
             raise ValueError("target_id and relation must be specified together.")
+        if operation.table_region is not None and (
+            operation.target_id != TABLE_OBJECT_ID or operation.relation != "on"
+        ):
+            raise ValueError(
+                "table_region requires target_id='table' and relation='on'."
+            )
         if operation.target_id is None:
             return
         # Targets come only from the pre-edit scene, so new objects cannot be targets.
