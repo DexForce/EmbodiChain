@@ -628,15 +628,15 @@ def _table_region_bounds(
         "right_front": 2,
     }
     row_by_region = {
-        "left_front": 0,
-        "front_center": 0,
-        "right_front": 0,
+        "left_back": 0,
+        "back_center": 0,
+        "right_back": 0,
         "left_center": 1,
         "center": 1,
         "right_center": 1,
-        "left_back": 2,
-        "back_center": 2,
-        "right_back": 2,
+        "left_front": 2,
+        "front_center": 2,
+        "right_front": 2,
     }
     if table_region not in column_by_region:
         raise ValueError(f"Unsupported table region {table_region!r}.")
