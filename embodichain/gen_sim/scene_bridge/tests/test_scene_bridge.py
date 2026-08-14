@@ -16,13 +16,18 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from embodichain.gen_sim.scene_bridge import (
     FeasibilityBroker,
     SceneEngineV1Adapter,
 )
+from embodichain.gen_sim.task_engine.agent import derive_scene_request
+from embodichain.gen_sim.task_engine.contracts import TASK_DRAFT_SCHEMA
 
 
 def _prepared_scene(tmp_path: Path) -> SimpleNamespace:
@@ -114,6 +119,82 @@ def _catalog(*, pour_available: bool = False) -> dict[str, dict]:
             "unavailable_reason": None if pour_available else "Pour is planning-only.",
         }
     }
+
+
+def _selector(kind: str, *, reference: str = "") -> dict[str, object]:
+    return {
+        "kind": kind,
+        "step_id": "",
+        "reference": reference,
+        "quantifier": "one",
+        "count": 0,
+    }
+
+
+def _relation_candidate(relation: str) -> dict:
+    draft = {
+        "schema_version": TASK_DRAFT_SCHEMA,
+        "task_id": "place_relative",
+        "instruction": "place the can relative to the target",
+        "steps": [
+            {
+                "id": "step_01",
+                "task_type": "E1",
+                "object": _selector("scene_ref", reference="red can"),
+                "target": _selector("scene_ref", reference="target"),
+                "relation": relation,
+                "required_arm": "auto",
+                "transfer_arm": "none",
+                "receive_arm": "none",
+                "orientation_goal": "preserve",
+                "target_state": "none",
+                "target_setting": 0,
+                "layout": "none",
+                "axis": "none",
+                "direction": "none",
+                "terminal_behavior": "none",
+                "depends_on": [],
+            }
+        ],
+    }
+    return {
+        "candidate_id": "candidate_01",
+        "draft": draft,
+        "scene_request": derive_scene_request(draft),
+    }
+
+
+def _manifest_with_target_kinds(tmp_path: Path) -> dict:
+    manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        _prepared_scene(tmp_path),
+        source_format="test",
+        robot_profile="dual_franka",
+    )
+    by_uid = {item["uid"]: item for item in manifest["objects"]}
+    by_uid["red_can"]["affordances"].append(
+        {
+            "type": "container",
+            "status": "declared",
+            "confidence": None,
+            "source": "test",
+            "link_uid": "",
+            "frame": {},
+            "parameters": {},
+        }
+    )
+    articulation = deepcopy(by_uid["red_can"])
+    articulation.update(
+        uid="cabinet",
+        source_uid="cabinet_0",
+        role="articulation",
+        name="cabinet",
+        category="cabinet",
+        physics={},
+        articulation={"runtime_uid": "cabinet"},
+        affordances=[],
+    )
+    manifest["objects"].append(articulation)
+    return manifest
 
 
 def test_scene_engine_v1_adapter_preserves_static_execution_evidence(
@@ -255,6 +336,125 @@ def test_physical_object_can_be_a_runtime_support_without_support_affordance(
         "final_support_revalidation",
     ]
     assert report["blockers"] == []
+
+
+@pytest.mark.parametrize(
+    ("relation", "target_uid", "expected_structure", "expected_status"),
+    [
+        ("on", "red_can", "physical_entity", "proven"),
+        ("on", "table", "physical_entity", "proven"),
+        ("on", "cabinet", "physical_entity", "proven"),
+        ("inside", "red_can", "rigid_object", "proven"),
+        ("inside", "table", "rigid_object", "contradicted"),
+        ("inside", "cabinet", "rigid_object", "contradicted"),
+        ("behind", "red_can", "spatial_reference", "proven"),
+        ("behind", "table", "spatial_reference", "proven"),
+        ("behind", "cabinet", "spatial_reference", "runtime_probe"),
+        ("front_of", "red_can", "spatial_reference", "proven"),
+        ("front_of", "table", "spatial_reference", "proven"),
+        ("front_of", "cabinet", "spatial_reference", "runtime_probe"),
+        ("left_of", "red_can", "spatial_reference", "proven"),
+        ("left_of", "table", "spatial_reference", "proven"),
+        ("left_of", "cabinet", "spatial_reference", "runtime_probe"),
+        ("right_of", "red_can", "spatial_reference", "proven"),
+        ("right_of", "table", "spatial_reference", "proven"),
+        ("right_of", "cabinet", "spatial_reference", "runtime_probe"),
+    ],
+)
+def test_relation_target_structure_matrix_uses_capability_semantics(
+    tmp_path: Path,
+    relation: str,
+    target_uid: str,
+    expected_structure: str,
+    expected_status: str,
+) -> None:
+    candidate = _relation_candidate(relation)
+    target_request = next(
+        item
+        for item in candidate["scene_request"]["references"]
+        if item["role"] == "target"
+    )
+    report = FeasibilityBroker().assess(
+        candidate,
+        {
+            "step_01.object": ["red_can"],
+            "step_01.target": [target_uid],
+        },
+        _manifest_with_target_kinds(tmp_path),
+        capability_catalog=_catalog(),
+        task_actions={"E1": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    structure = next(
+        check
+        for check in report["checks"]
+        if check["kind"] == "structure"
+        and check["subject"] == f"step_01.target:{target_uid}"
+    )
+    assert target_request["source_structure"] == expected_structure
+    assert structure["status"] == expected_status
+
+
+def test_legacy_scene_entity_target_is_treated_as_an_abstract_structure(
+    tmp_path: Path,
+) -> None:
+    candidate = _relation_candidate("behind")
+    target_request = next(
+        item
+        for item in candidate["scene_request"]["references"]
+        if item["role"] == "target"
+    )
+    target_request["source_structure"] = "scene_entity"
+
+    report = FeasibilityBroker().assess(
+        candidate,
+        {
+            "step_01.object": ["red_can"],
+            "step_01.target": ["red_can"],
+        },
+        _manifest_with_target_kinds(tmp_path),
+        capability_catalog=_catalog(),
+        task_actions={"E1": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    structure = next(
+        check
+        for check in report["checks"]
+        if check["kind"] == "structure" and check["subject"] == "step_01.target:red_can"
+    )
+    assert structure["status"] == "proven"
+    assert report["blockers"] == []
+
+
+def test_unknown_structure_contract_is_not_a_scene_contradiction(
+    tmp_path: Path,
+) -> None:
+    candidate = _relation_candidate("behind")
+    target_request = next(
+        item
+        for item in candidate["scene_request"]["references"]
+        if item["role"] == "target"
+    )
+    target_request["source_structure"] = "future_spatial_capability"
+
+    report = FeasibilityBroker().assess(
+        candidate,
+        {
+            "step_01.object": ["red_can"],
+            "step_01.target": ["red_can"],
+        },
+        _manifest_with_target_kinds(tmp_path),
+        capability_catalog=_catalog(),
+        task_actions={"E1": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    structure = next(
+        check
+        for check in report["checks"]
+        if check["kind"] == "structure" and check["subject"] == "step_01.target:red_can"
+    )
+    assert structure["status"] == "unknown"
+    assert not any("future_spatial_capability" in item for item in report["blockers"])
 
 
 def test_required_arm_world_y_mismatch_is_risk_not_static_blocker(

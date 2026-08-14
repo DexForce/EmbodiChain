@@ -286,4 +286,4 @@ def _target_structure(task_type: str, relation: str) -> str:
         return "physical_entity"
     if task_type == "E3" or (task_type == "E1" and relation == "inside"):
         return "rigid_object"
-    return "scene_entity"
+    return "spatial_reference"

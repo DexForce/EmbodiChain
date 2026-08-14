@@ -136,12 +136,27 @@ def test_scene_request_and_success_are_deterministic_contract_derivations():
     assert success["terms"] == [{"step_id": "orient", "type": "object_upright"}]
 
 
-def test_on_target_requires_a_physical_entity_not_a_unary_support_label():
+@pytest.mark.parametrize(
+    ("relation", "expected_structure", "expected_affordances"),
+    [
+        ("on", "physical_entity", []),
+        ("inside", "rigid_object", ["container"]),
+        ("behind", "spatial_reference", []),
+        ("front_of", "spatial_reference", []),
+        ("left_of", "spatial_reference", []),
+        ("right_of", "spatial_reference", []),
+    ],
+)
+def test_target_requirements_describe_capabilities_not_concrete_roles(
+    relation: str,
+    expected_structure: str,
+    expected_affordances: list[str],
+) -> None:
     step = _step(step_id="place", reference="green can")
     step.update(
         task_type="E1",
         target=_selector("scene_ref", reference="red can"),
-        relation="on",
+        relation=relation,
         orientation_goal="preserve",
     )
     draft = {
@@ -158,8 +173,8 @@ def test_on_target_requires_a_physical_entity_not_a_unary_support_label():
         for reference in request["references"]
         if reference["role"] == "target"
     )
-    assert target["source_structure"] == "physical_entity"
-    assert target["affordances"] == []
+    assert target["source_structure"] == expected_structure
+    assert target["affordances"] == expected_affordances
 
 
 def test_lower_task_candidate_expands_success_for_all_binding():

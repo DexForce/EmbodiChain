@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
+import math
 from typing import Any
 
 from .contracts import (
@@ -368,6 +369,65 @@ class FeasibilityBroker:
     ) -> dict[str, Any]:
         expected = str(request.get("source_structure", ""))
         role = str(entity.get("role", ""))
+        if expected in {"scene_entity", "spatial_reference"}:
+            if role in {"camera", "light", "robot", "sensor"}:
+                return _check(
+                    "structure",
+                    subject,
+                    "contradicted",
+                    f"Scene entity role {role!r} cannot be a spatial action target.",
+                    evidence={"static_pose": _has_static_pose(entity)},
+                )
+            if not _has_static_pose(entity):
+                return _check(
+                    "structure",
+                    subject,
+                    "unknown",
+                    "Static scene evidence does not provide a finite spatial pose.",
+                    evidence={"static_pose": False},
+                )
+            if role == "articulation":
+                return _check(
+                    "structure",
+                    subject,
+                    "runtime_probe",
+                    "Articulation has a static pose, but live spatial target lookup "
+                    "must be validated at runtime.",
+                    evidence={
+                        "static_pose": True,
+                        "runtime_entity_kind": "articulation",
+                    },
+                )
+            has_runtime_body = bool(entity.get("physics"))
+            if (
+                role
+                in {
+                    "background",
+                    "object",
+                    "rigid_object",
+                    "support_surface",
+                    "table",
+                }
+                and has_runtime_body
+            ):
+                return _check(
+                    "structure",
+                    subject,
+                    "proven",
+                    "Scene entity has a static pose and a rigid runtime body.",
+                    evidence={
+                        "static_pose": True,
+                        "runtime_entity_kind": "rigid_object",
+                    },
+                )
+            return _check(
+                "structure",
+                subject,
+                "runtime_probe",
+                "Scene entity has a static pose, but its live target interface is "
+                "not proven by the static manifest.",
+                evidence={"static_pose": True, "runtime_entity_kind": "unknown"},
+            )
         if expected == "physical_entity":
             geometry = entity.get("geometry", {})
             shape = geometry.get("shape", {}) if isinstance(geometry, Mapping) else {}
@@ -399,20 +459,29 @@ class FeasibilityBroker:
             return _check(
                 "structure",
                 subject,
-                "contradicted",
-                "Scene entity lacks physical geometry or a runtime body required "
-                "for placement.",
+                "unknown",
+                "Static scene evidence does not prove physical geometry and a "
+                "runtime body required for placement.",
                 evidence={
                     "physical_geometry": has_physical_geometry,
                     "runtime_body": has_runtime_body,
                 },
             )
-        accepted = {
+        accepted_by_structure = {
             "articulation": {"articulation"},
             "rigid_object": {"object", "rigid_object"},
             "movable": {"object", "rigid_object"},
             "support_surface": {"background", "support_surface", "table"},
-        }.get(expected, {expected})
+        }
+        accepted = accepted_by_structure.get(expected)
+        if accepted is None:
+            return _check(
+                "structure",
+                subject,
+                "unknown",
+                f"Structure contract {expected!r} is not recognized by the broker.",
+                evidence={"scene_role": role},
+            )
         if role in accepted:
             return _check(
                 "structure",
@@ -463,6 +532,25 @@ class FeasibilityBroker:
                 "sources": sorted({str(item.get("source")) for item in evidence}),
             },
         )
+
+
+def _has_static_pose(entity: Mapping[str, Any]) -> bool:
+    pose = entity.get("initial_pose")
+    if not isinstance(pose, Mapping):
+        return False
+    position = pose.get("position")
+    if (
+        not isinstance(position, Sequence)
+        or isinstance(position, (str, bytes, bytearray))
+        or len(position) != 3
+    ):
+        return False
+    return all(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        for value in position
+    )
 
 
 def _step_selector_uids(
