@@ -66,7 +66,8 @@ GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
 GRIPPER_TCP_Z = 0.15
 GRIPPER_MAX_OPEN_WIDTH = 0.100
-GRIPPER_FINGER_LENGTH = 0.12
+GRIPPER_MIN_OPEN_WIDTH = 0.003
+GRIPPER_FINGER_LENGTH = 0.10
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
@@ -224,6 +225,7 @@ def run_tutorial(main: Callable[[], None]) -> None:
 def add_ur5_gripper_robot(
     sim: SimulationManager,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
 ) -> Robot:
     """Add the standard UR5 plus PGI gripper tutorial robot.
 
@@ -234,7 +236,9 @@ def add_ur5_gripper_robot(
     Returns:
         The added robot instance.
     """
-    return sim.add_robot(cfg=create_ur5_gripper_robot_cfg(init_pos=init_pos))
+    return sim.add_robot(
+        cfg=create_ur5_gripper_robot_cfg(init_pos=init_pos, init_qpos=init_qpos)
+    )
 
 
 def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
@@ -308,7 +312,7 @@ def create_antipodal_semantics(
                 finger_length=GRIPPER_FINGER_LENGTH,
                 y_thickness=GRIPPER_Y_THICKNESS,
                 root_z_width=GRIPPER_ROOT_Z_WIDTH,
-                open_check_margin=0.002,
+                open_check_margin=0.03,
                 point_sample_dense=0.012,
             ),
             generator_cfg=GraspGeneratorCfg(
@@ -316,7 +320,7 @@ def create_antipodal_semantics(
                 antipodal_sampler_cfg=AntipodalSamplerCfg(
                     n_sample=n_sample,
                     max_length=GRIPPER_MAX_OPEN_WIDTH,
-                    min_length=0.005,
+                    min_length=GRIPPER_MIN_OPEN_WIDTH,
                 ),
                 is_partial_annotate=False,
                 is_filter_ground_collision=False,
@@ -749,6 +753,7 @@ def clone_local_pose_from_first_env(entity) -> torch.Tensor:
 
 def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -773,6 +778,11 @@ def create_ur5_gripper_robot_cfg(
     Returns:
         A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
     """
+    qpos = (
+        [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+        if init_qpos is None
+        else list(init_qpos)
+    )
     return URRobotCfg.from_dict(
         {
             "robot_type": "ur5",
@@ -809,7 +819,7 @@ def create_ur5_gripper_robot_cfg(
                     ]
                 }
             },
-            "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
+            "init_qpos": qpos,
             "init_pos": init_pos,
         }
     )
