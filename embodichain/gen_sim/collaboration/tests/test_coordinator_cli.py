@@ -140,6 +140,18 @@ def _candidate_set() -> dict:
     }
 
 
+def _candidate_set_with_alternative() -> dict:
+    candidates = _candidate_set()
+    alternative = deepcopy(candidates["candidates"][0])
+    alternative["candidate_id"] = "candidate_02"
+    alternative["draft"]["steps"][0]["required_arm"] = "left_arm"
+    alternative["semantic_hash"] = canonical_hash(alternative["draft"]["steps"])
+    candidates["candidates"].append(alternative)
+    candidates["requested_candidate_count"] = 2
+    candidates["valid_response_count"] = 2
+    return candidates
+
+
 def _prepared_scene(tmp_path: Path) -> PreparedScene:
     scene_path = tmp_path / "scene_config.json"
     scene_path.write_text("{}", encoding="utf-8")
@@ -238,6 +250,30 @@ def _adaptation(tmp_path: Path, *, status: str = "bound") -> SceneAdaptation:
         selected_candidate=deepcopy(candidate) if status == "bound" else None,
         prepared_scene=_prepared_scene(tmp_path),
         source_config_path=tmp_path / "scene_config.json",
+    )
+
+
+def _adaptation_with_alternative(tmp_path: Path) -> SceneAdaptation:
+    candidate_set = _candidate_set_with_alternative()
+    adaptation = _adaptation(tmp_path)
+    alternative = candidate_set["candidates"][1]
+    alternative_audit = deepcopy(adaptation.binding_report["candidates"][0])
+    alternative_audit["candidate_id"] = "candidate_02"
+    alternative_audit["semantic_hash"] = alternative["semantic_hash"]
+    alternative_bindings = {
+        **deepcopy(adaptation.role_bindings),
+        "candidate_id": "candidate_02",
+    }
+    return replace(
+        adaptation,
+        binding_report={
+            **deepcopy(adaptation.binding_report),
+            "candidates": [
+                *deepcopy(adaptation.binding_report["candidates"]),
+                alternative_audit,
+            ],
+        },
+        candidate_bindings={"candidate_02": alternative_bindings},
     )
 
 
@@ -465,6 +501,118 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
     assert (result.output_dir / "seed_task_graph.json").is_file()
 
 
+def test_prepare_falls_back_after_candidate_action_planning_failure(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set_with_alternative()
+    adaptation = _adaptation_with_alternative(tmp_path)
+    planned_candidates: list[str] = []
+    graph = {"graph": "planned"}
+
+    def plan(grounded_plan):
+        candidate_id = grounded_plan["selected_candidate_id"]
+        planned_candidates.append(candidate_id)
+        if candidate_id == "candidate_01":
+            raise ValueError(
+                "SeedGraph TaskGroup 'task_04' requires unavailable state "
+                "{'predicate': 'arm_free', 'arm': 'right_arm'}."
+            )
+        return deepcopy(graph)
+
+    def generator(_scene, output, **_kwargs):
+        paths = artifact_paths(output)
+        for path in (
+            paths.gym_config,
+            paths.agent_config,
+            paths.task_spec,
+            paths.scene_requirements,
+            paths.seed_task_graph,
+        ):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            value = graph if path == paths.seed_task_graph else {}
+            path.write_text(json.dumps(value), encoding="utf-8")
+        paths.seed_task_graph_png.write_bytes(b"png")
+        return paths
+
+    result = CollaborationCoordinator(
+        task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
+        scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
+        action_agent=SimpleNamespace(plan=plan),
+        bundle_generator=generator,
+    ).prepare(
+        "upright_can",
+        "扶正红色易拉罐。",
+        tmp_path / "scene_config.json",
+        tmp_path / "fallback-bundle",
+        candidate_count=2,
+    )
+
+    assert result.bound
+    assert result.selected_candidate_id == "candidate_02"
+    assert planned_candidates == ["candidate_01", "candidate_02"]
+    assert (
+        "candidate_01 failed action_planning"
+        in result.adaptation.binding_report["selection_reason"]
+    )
+    assert not result.collaboration_artifacts.preparation_failure.exists()
+
+
+def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set_with_alternative()
+    adaptation = _adaptation_with_alternative(tmp_path)
+    output = tmp_path / "failed-bundle"
+    output.mkdir()
+    (output / "stale.txt").write_text("old", encoding="utf-8")
+
+    result = CollaborationCoordinator(
+        task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
+        scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
+        action_agent=SimpleNamespace(
+            plan=lambda _plan: (_ for _ in ()).throw(
+                ValueError(
+                    "SeedGraph TaskGroup 'task_04' requires unavailable state "
+                    "{'predicate': 'arm_free', 'arm': 'right_arm'}."
+                )
+            )
+        ),
+        bundle_generator=lambda *_args, **_kwargs: pytest.fail(
+            "bundle generation must not run"
+        ),
+    ).prepare(
+        "upright_can",
+        "扶正红色易拉罐。",
+        tmp_path / "scene_config.json",
+        output,
+        candidate_count=2,
+        overwrite=True,
+    )
+
+    assert result.status == "planning_failed"
+    assert not result.bound
+    assert result.collaboration_artifacts.preparation_failure.is_file()
+    assert not (result.output_dir / "stale.txt").exists()
+    failure = json.loads(
+        result.collaboration_artifacts.preparation_failure.read_text(encoding="utf-8")
+    )
+    assert failure["schema_version"] == "action_engine_preparation_failure_v1"
+    assert failure["task_id"] == "upright_can"
+    assert failure["selected_candidate_id"] == "candidate_01"
+    assert [attempt["candidate_id"] for attempt in failure["attempts"]] == [
+        "candidate_01",
+        "candidate_02",
+    ]
+    for index, attempt in enumerate(failure["attempts"]):
+        candidate_id = f"candidate_{index + 1:02d}"
+        assert attempt["stage"] == "action_planning"
+        assert attempt["draft"] == candidates["candidates"][index]["draft"]
+        assert attempt["bindings"]["candidate_id"] == candidate_id
+        assert attempt["grounded_task_plan"]["selected_candidate_id"] == candidate_id
+        assert attempt["error"]["type"] == "ValueError"
+        assert "arm_free" in attempt["error"]["message"]
+
+
 def test_run_bundle_forwards_arguments_without_leaking_sys_argv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -511,7 +659,8 @@ def test_prepare_prints_the_next_run_command(
         selected_candidate_id="candidate_01",
         output_dir=output_dir,
         collaboration_artifacts=SimpleNamespace(
-            grounded_task_plan=output_dir / "grounded_task_plan.json"
+            grounded_task_plan=output_dir / "grounded_task_plan.json",
+            preparation_failure=output_dir / "preparation_failure.json",
         ),
     )
 

@@ -37,6 +37,7 @@ __all__ = [
     "EXECUTION_REPORT_FILENAME",
     "GROUNDED_TASK_PLAN_FILENAME",
     "FEASIBILITY_REPORT_FILENAME",
+    "PREPARATION_FAILURE_FILENAME",
     "ROLE_BINDINGS_FILENAME",
     "SCENE_MANIFEST_FILENAME",
     "STATIC_SCENE_MANIFEST_FILENAME",
@@ -49,6 +50,7 @@ __all__ = [
     "collaboration_artifact_paths",
     "write_collaboration_artifacts",
     "write_execution_report",
+    "write_preparation_failure",
 ]
 
 
@@ -62,6 +64,7 @@ ROLE_BINDINGS_FILENAME = "role_bindings.json"
 BINDING_REPORT_FILENAME = "binding_report.json"
 FEASIBILITY_REPORT_FILENAME = "feasibility_report.json"
 GROUNDED_TASK_PLAN_FILENAME = "grounded_task_plan.json"
+PREPARATION_FAILURE_FILENAME = "preparation_failure.json"
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,7 @@ class CollaborationArtifactPaths:
     binding_report: Path
     feasibility_report: Path
     grounded_task_plan: Path
+    preparation_failure: Path
     execution_report: Path
 
 
@@ -99,6 +103,7 @@ def collaboration_artifact_paths(
         binding_report=root / BINDING_REPORT_FILENAME,
         feasibility_report=root / FEASIBILITY_REPORT_FILENAME,
         grounded_task_plan=root / GROUNDED_TASK_PLAN_FILENAME,
+        preparation_failure=root / PREPARATION_FAILURE_FILENAME,
         execution_report=root / EXECUTION_REPORT_FILENAME,
     )
 
@@ -222,6 +227,14 @@ def write_collaboration_artifacts(
 def write_execution_report(output_dir: str | Path, value: Any) -> Path:
     """Publish through the Action Engine-owned report boundary."""
     return _write_execution_report(output_dir, value)
+
+
+def write_preparation_failure(output_dir: str | Path, value: Any) -> Path:
+    """Write a strict-JSON audit for a failed candidate planning transaction."""
+    path = collaboration_artifact_paths(output_dir).preparation_failure
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(path, value)
+    return path
 
 
 def _write_json(path: Path, value: Any) -> None:

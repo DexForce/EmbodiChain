@@ -198,6 +198,11 @@ def _prepare(args: argparse.Namespace) -> int:
                 if result.bound
                 else None
             ),
+            "preparation_failure": (
+                str(result.collaboration_artifacts.preparation_failure)
+                if result.collaboration_artifacts.preparation_failure.is_file()
+                else None
+            ),
             "run_command": (
                 _bundle_run_command(result.output_dir) if result.bound else None
             ),

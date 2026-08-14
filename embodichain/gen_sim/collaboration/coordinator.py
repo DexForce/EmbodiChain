@@ -52,6 +52,7 @@ from .artifacts import (
     CollaborationArtifactPaths,
     collaboration_artifact_paths,
     write_collaboration_artifacts,
+    write_preparation_failure,
 )
 from .contracts import (
     GROUNDED_TASK_PLAN_SCHEMA,
@@ -75,6 +76,7 @@ __all__ = [
 
 
 BundleGenerator = Callable[..., GeneratedConfigPaths]
+_PREPARATION_FAILURE_SCHEMA = "action_engine_preparation_failure_v1"
 
 
 def lower_task_candidate(
@@ -131,6 +133,17 @@ class PreparationResult:
     @property
     def selected_candidate_id(self) -> str | None:
         return self.adaptation.selected_candidate_id
+
+
+@dataclass(frozen=True)
+class _PlannedCandidate:
+    adaptation: SceneAdaptation
+    selected: TaskCandidate
+    role_bindings: RoleBindings
+    feasibility_report: FeasibilityReport | None
+    grounded: GroundedTaskSpec
+    grounded_plan: GroundedTaskPlan
+    action_graph: dict[str, Any]
 
 
 class CollaborationCoordinator:
@@ -253,33 +266,51 @@ class CollaborationCoordinator:
                     feasibility_report=deepcopy(feasibility_report),
                 )
             robot_profile = str(adaptation.scene_manifest["robot_profile"])
-            grounded = lower_task_candidate(
+            planned, planning_failures = self._plan_with_candidate_fallback(
+                candidate_set,
+                adaptation,
                 selected,
                 raw_role_bindings,
-                adaptation.prepared_scene.planner_objects,
-                robot_profile,
+                feasibility_report,
+                robot_profile=robot_profile,
             )
-            role_bindings = validate_role_bindings(
-                {
-                    **deepcopy(raw_role_bindings),
-                    "role_bindings": deepcopy(grounded.role_bindings),
-                }
-            )
-            grounded_plan = build_grounded_task_plan(
-                candidate=selected,
-                task_spec=grounded.task_spec,
-                scene_requirements=grounded.scene_requirements,
-                scene_manifest=adaptation.scene_manifest,
-                role_bindings=role_bindings,
-                binding_report=adaptation.binding_report,
-            )
-            action_graph = self.action_agent.plan(grounded_plan)
-            preflight = getattr(self.action_agent, "preflight", None)
-            if callable(preflight):
-                preflight(
-                    action_graph,
+            if planned is None:
+                write_collaboration_artifacts(
+                    staging_dir,
+                    candidate_set=candidate_set,
                     scene_manifest=adaptation.scene_manifest,
+                    role_bindings=raw_role_bindings,
+                    binding_report=adaptation.binding_report,
+                    static_scene_manifest=adaptation.static_scene_manifest,
+                    feasibility_report=feasibility_report,
                 )
+                write_preparation_failure(
+                    staging_dir,
+                    {
+                        "schema_version": _PREPARATION_FAILURE_SCHEMA,
+                        "task_id": str(candidate_set["task_id"]),
+                        "status": "planning_failed",
+                        "selected_candidate_id": str(selected["candidate_id"]),
+                        "attempts": planning_failures,
+                    },
+                )
+                published = transaction.commit()
+                return PreparationResult(
+                    status="planning_failed",
+                    output_dir=published,
+                    candidate_set=deepcopy(candidate_set),
+                    adaptation=adaptation,
+                    collaboration_artifacts=collaboration_artifact_paths(published),
+                    feasibility_report=deepcopy(feasibility_report),
+                )
+
+            adaptation = planned.adaptation
+            selected = planned.selected
+            role_bindings = planned.role_bindings
+            feasibility_report = planned.feasibility_report
+            grounded = planned.grounded
+            grounded_plan = planned.grounded_plan
+            action_graph = planned.action_graph
 
             generator_kwargs: dict[str, Any] = {
                 "task_name": grounded_plan["task_id"],
@@ -344,6 +375,135 @@ class CollaborationCoordinator:
                 ),
                 feasibility_report=deepcopy(feasibility_report),
             )
+
+    def _plan_with_candidate_fallback(
+        self,
+        candidate_set: Mapping[str, Any],
+        adaptation: SceneAdaptation,
+        selected: TaskCandidate,
+        role_bindings: RoleBindings,
+        feasibility_report: FeasibilityReport | None,
+        *,
+        robot_profile: str,
+    ) -> tuple[_PlannedCandidate | None, list[dict[str, Any]]]:
+        """Treat lowering and Action planning failures as candidate-local."""
+        candidates = {
+            str(candidate["candidate_id"]): candidate
+            for candidate in candidate_set.get("candidates", ())
+            if isinstance(candidate, Mapping) and candidate.get("candidate_id")
+        }
+        resolved = {
+            str(audit["candidate_id"])
+            for audit in adaptation.binding_report["candidates"]
+            if audit["status"] == "resolved"
+        }
+        selected_id = str(selected["candidate_id"])
+        ordered_ids = [selected_id] + [
+            candidate_id
+            for candidate_id in candidates
+            if candidate_id != selected_id and candidate_id in resolved
+        ]
+        failures: list[dict[str, Any]] = []
+
+        for candidate_id in ordered_ids:
+            candidate = candidates.get(candidate_id)
+            raw_bindings = (
+                role_bindings
+                if candidate_id == selected_id
+                else adaptation.candidate_bindings.get(candidate_id)
+            )
+            if candidate is None or raw_bindings is None:
+                continue
+            report = (
+                feasibility_report
+                if candidate_id == selected_id
+                else self._assess_feasibility(candidate, raw_bindings, adaptation)
+            )
+            if report is not None and report["status"] == "contradicted":
+                failures.append(
+                    _candidate_failure(
+                        candidate,
+                        raw_bindings,
+                        stage="static_feasibility",
+                        error_type="FeasibilityContradiction",
+                        error_message="Static feasibility contradicted this candidate.",
+                        feasibility_report=report,
+                    )
+                )
+                continue
+
+            candidate_adaptation = _select_candidate_adaptation(
+                adaptation,
+                candidate,
+                raw_bindings,
+                failures,
+            )
+            grounded: GroundedTaskSpec | None = None
+            grounded_plan: GroundedTaskPlan | None = None
+            stage = "lowering"
+            try:
+                grounded = lower_task_candidate(
+                    candidate,
+                    raw_bindings,
+                    adaptation.prepared_scene.planner_objects,
+                    robot_profile,
+                )
+                canonical_bindings = validate_role_bindings(
+                    {
+                        **deepcopy(raw_bindings),
+                        "role_bindings": deepcopy(grounded.role_bindings),
+                    }
+                )
+                candidate_adaptation = replace(
+                    candidate_adaptation,
+                    role_bindings=deepcopy(canonical_bindings),
+                )
+                stage = "grounded_plan"
+                grounded_plan = build_grounded_task_plan(
+                    candidate=candidate,
+                    task_spec=grounded.task_spec,
+                    scene_requirements=grounded.scene_requirements,
+                    scene_manifest=adaptation.scene_manifest,
+                    role_bindings=canonical_bindings,
+                    binding_report=candidate_adaptation.binding_report,
+                )
+                stage = "action_planning"
+                action_graph = self.action_agent.plan(grounded_plan)
+                stage = "preflight"
+                preflight = getattr(self.action_agent, "preflight", None)
+                if callable(preflight):
+                    preflight(
+                        action_graph,
+                        scene_manifest=adaptation.scene_manifest,
+                    )
+            except (TypeError, ValueError, OSError) as error:
+                failures.append(
+                    _candidate_failure(
+                        candidate,
+                        raw_bindings,
+                        stage=stage,
+                        error_type=type(error).__name__,
+                        error_message=str(error),
+                        feasibility_report=report,
+                        grounded_task_plan=grounded_plan,
+                    )
+                )
+                continue
+
+            assert grounded is not None and grounded_plan is not None
+            return (
+                _PlannedCandidate(
+                    adaptation=candidate_adaptation,
+                    selected=deepcopy(candidate),
+                    role_bindings=canonical_bindings,
+                    feasibility_report=deepcopy(report),
+                    grounded=grounded,
+                    grounded_plan=grounded_plan,
+                    action_graph=deepcopy(action_graph),
+                ),
+                failures,
+            )
+        return None, failures
 
     def _fallback_feasible_candidate(
         self,
@@ -450,6 +610,61 @@ class CollaborationCoordinator:
         return SceneSourceRef(path)
 
 
+def _select_candidate_adaptation(
+    adaptation: SceneAdaptation,
+    candidate: Mapping[str, Any],
+    role_bindings: Mapping[str, Any],
+    prior_failures: Sequence[Mapping[str, Any]],
+) -> SceneAdaptation:
+    candidate_id = str(candidate["candidate_id"])
+    current_id = adaptation.selected_candidate_id
+    if candidate_id == current_id and not prior_failures:
+        return adaptation
+    failed = ", ".join(
+        f"{failure['candidate_id']} failed {failure['stage']}"
+        for failure in prior_failures
+    )
+    reason = f"Selected {candidate_id} after {failed}."
+    binding_report = validate_binding_report(
+        {
+            **deepcopy(adaptation.binding_report),
+            "selected_candidate_id": candidate_id,
+            "selection_reason": reason,
+        }
+    )
+    return replace(
+        adaptation,
+        selected_candidate=deepcopy(candidate),
+        role_bindings=deepcopy(role_bindings),
+        binding_report=binding_report,
+    )
+
+
+def _candidate_failure(
+    candidate: Mapping[str, Any],
+    role_bindings: Mapping[str, Any],
+    *,
+    stage: str,
+    error_type: str,
+    error_message: str,
+    feasibility_report: Mapping[str, Any] | None = None,
+    grounded_task_plan: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "candidate_id": str(candidate["candidate_id"]),
+        "stage": stage,
+        "draft": deepcopy(candidate["draft"]),
+        "bindings": deepcopy(dict(role_bindings)),
+        "grounded_task_plan": (
+            None if grounded_task_plan is None else deepcopy(dict(grounded_task_plan))
+        ),
+        "feasibility_report": (
+            None if feasibility_report is None else deepcopy(dict(feasibility_report))
+        ),
+        "error": {"type": error_type, "message": error_message},
+    }
+
+
 # Short public name used in the phase-one design document.
 Coordinator = CollaborationCoordinator
 
@@ -550,10 +765,9 @@ def _topological_steps(
         ]
         if not ready:
             raise ValueError("TaskDraft step dependencies contain a cycle.")
-        ready.sort(key=lambda step: positions[str(step["id"])])
-        for step in ready:
-            result.append(step)
-            emitted.add(str(step["id"]))
+        step = min(ready, key=lambda item: positions[str(item["id"])])
+        result.append(step)
+        emitted.add(str(step["id"]))
     return result
 
 

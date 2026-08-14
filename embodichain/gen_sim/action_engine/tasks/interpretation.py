@@ -394,7 +394,11 @@ def _topological_steps(
         ]
         if not ready:
             raise ValueError("Instruction intent dependencies contain a cycle.")
-        for step_id in ready:
-            ordered.append(by_id[step_id])
-            pending.remove(step_id)
+        # Select one earliest-ready step at a time. Emitting the whole ready
+        # frontier lets a later independent step leapfrog an earlier step that
+        # becomes ready after its predecessor, changing the instruction's
+        # resource-order tie break without any causal reason.
+        step_id = ready[0]
+        ordered.append(by_id[step_id])
+        pending.remove(step_id)
     return ordered

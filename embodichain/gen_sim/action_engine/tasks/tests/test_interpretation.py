@@ -353,6 +353,124 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
     assert calls[0]["model"] == "test-model"
 
 
+def test_six_step_repeated_objects_preserve_two_handover_continuations() -> None:
+    intent = {
+        "steps": [
+            _step(
+                "orient_purple",
+                "E2",
+                _selector("scene_ref", reference="紫色易拉罐"),
+                required_arm="right_arm",
+            ),
+            _step(
+                "orient_orange",
+                "E2",
+                _selector("scene_ref", reference="橘色罐头"),
+                required_arm="left_arm",
+            ),
+            _step(
+                "handover_orange",
+                "E4",
+                _selector("step_result", step_id="orient_orange"),
+                transfer_arm="left_arm",
+                receive_arm="right_arm",
+                depends_on=["orient_orange"],
+            ),
+            _step(
+                "place_orange",
+                "E1",
+                _selector("step_result", step_id="handover_orange"),
+                target=_selector("scene_ref", reference="本子"),
+                relation="on",
+                required_arm="right_arm",
+                depends_on=["handover_orange"],
+            ),
+            _step(
+                "handover_purple",
+                "E4",
+                _selector("step_result", step_id="orient_purple"),
+                transfer_arm="right_arm",
+                receive_arm="left_arm",
+                # The model may preserve only the object-lineage dependency.
+                # Stable lowering must not let this step leapfrog an earlier
+                # placement that releases its transfer arm.
+                depends_on=["orient_purple"],
+            ),
+            _step(
+                "place_purple",
+                "E1",
+                _selector("step_result", step_id="handover_purple"),
+                target=_selector("scene_ref", reference="橘色罐头"),
+                relation="on",
+                required_arm="left_arm",
+                depends_on=["handover_purple"],
+            ),
+        ]
+    }
+    scene = [
+        *_scene(),
+        {
+            "runtime_uid": "notebook",
+            "uid": "notebook",
+            "role": "rigid_object",
+            "description": "A spiral notebook.",
+            "init_pos": [0.2, 0.0, 0.7],
+        },
+    ]
+
+    grounded = interpret_and_ground_task_spec(
+        "two_handover_task",
+        "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用左臂把橘色罐头递给右臂，"
+        "然后用右臂把橘色罐头放到本子上，然后右臂把紫色罐头拿起来递给左臂，"
+        "然后左臂把紫色罐头放到橘色罐头上。",
+        scene,
+        robot_profile="franka",
+        model="test-model",
+        caller=lambda **_kwargs: deepcopy(intent),
+        grounding_caller=_grounding_caller(
+            **{
+                "orient_purple.object": "purple_can",
+                "orient_orange.object": "orange_can",
+                "place_orange.target": "notebook",
+                "place_purple.target": "orange_can",
+            }
+        ),
+    )
+    assert [
+        instance["task_type"] for instance in grounded.task_spec["task_instances"]
+    ] == ["E2", "E2", "E4", "E1", "E4", "E1"]
+    graph = instantiate_seed_graph(grounded.task_spec, grounded.role_bindings)
+    groups = {group["id"]: group for group in graph["task_groups"]}
+    actions_by_group = {
+        group_id: [
+            node["atomic_action"]
+            for node in graph["nodes"]
+            if node["task_instance_id"] == group_id
+        ]
+        for group_id in groups
+    }
+
+    assert actions_by_group["task_04"][0] == "MoveHeldObject"
+    assert "PickUp" not in actions_by_group["task_04"]
+    assert actions_by_group["task_05"][0] == "PickUp"
+    assert actions_by_group["task_06"][0] == "MoveHeldObject"
+    assert "PickUp" not in actions_by_group["task_06"]
+    assert groups["task_04"]["contract"]["entry_requires"] == [
+        {
+            "predicate": "object_held",
+            "object_uid": "orange_can",
+            "arm": "right_arm",
+        }
+    ]
+    assert groups["task_06"]["contract"]["entry_requires"] == [
+        {
+            "predicate": "object_held",
+            "object_uid": "purple_can",
+            "arm": "left_arm",
+        }
+    ]
+
+
 def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
     scene = [
         {

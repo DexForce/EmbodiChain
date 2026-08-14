@@ -267,6 +267,29 @@ def test_linker_rejects_missing_cleanup_wrong_holder_and_duplicate_pickup() -> N
         link_seed_graph(duplicate_pickup)
 
 
+def test_unavailable_arm_reports_current_holder_and_requested_object() -> None:
+    task = _handover_task()
+    placement = task["task_instances"][3]
+    placement["params"].update(
+        {
+            "object_role": "orange",
+            "target_role": "purple",
+            "required_arm": "left_arm",
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "left_arm.*currently holds 'purple_can'.*" "primary object is 'orange_can'"
+        ),
+    ):
+        instantiate_seed_graph(
+            task,
+            {"purple": "purple_can", "orange": "orange_can"},
+        )
+
+
 def test_readers_remain_parallel_and_writer_waits_for_both() -> None:
     task = {
         "schema_version": TASK_SPEC_SCHEMA,

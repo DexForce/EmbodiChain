@@ -26,9 +26,11 @@ from .artifacts import (
     ArtifactTransaction,
     CollaborationArtifactPaths,
     FEASIBILITY_REPORT_FILENAME,
+    PREPARATION_FAILURE_FILENAME,
     STATIC_SCENE_MANIFEST_FILENAME,
     collaboration_artifact_paths,
     write_execution_report,
+    write_preparation_failure,
 )
 from .contracts import (
     BINDING_REPORT_SCHEMA,
@@ -72,6 +74,7 @@ __all__ = [
     "GROUNDED_TASK_PLAN_SCHEMA",
     "GroundedTaskPlan",
     "PreparationResult",
+    "PREPARATION_FAILURE_FILENAME",
     "ROLE_BINDINGS_SCHEMA",
     "RoleBindings",
     "SCENE_MANIFEST_SCHEMA",
@@ -91,4 +94,5 @@ __all__ = [
     "collaboration_artifact_paths",
     "lower_task_candidate",
     "write_execution_report",
+    "write_preparation_failure",
 ]

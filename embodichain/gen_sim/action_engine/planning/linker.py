@@ -752,8 +752,12 @@ def _validate_symbolic_state(
             key = _atom_key(requirement)
             if key not in state:
                 raise ValueError(
-                    f"SeedGraph TaskGroup {group_id!r} requires unavailable state "
-                    f"{requirement}."
+                    _unavailable_group_state_message(
+                        group_id,
+                        requirement,
+                        state,
+                        groups[group_id],
+                    )
                 )
         for effect in summaries[group_id]["exit_effects"]:
             key = _atom_key(effect["atom"])
@@ -761,6 +765,42 @@ def _validate_symbolic_state(
                 state.add(key)
             else:
                 state.discard(key)
+
+
+def _unavailable_group_state_message(
+    group_id: str,
+    requirement: Mapping[str, Any],
+    state: Collection[str],
+    group: Mapping[str, Any],
+) -> str:
+    """Explain held-object conflicts without weakening symbolic validation."""
+    if requirement.get("predicate") != "arm_free":
+        return (
+            f"SeedGraph TaskGroup {group_id!r} requires unavailable state "
+            f"{dict(requirement)}."
+        )
+    arm = str(requirement.get("arm", ""))
+    held_objects = sorted(
+        parts[1]
+        for item in state
+        if len(parts := item.split("|", maxsplit=2)) == 3
+        and parts[0] == "object_held"
+        and parts[2] == arm
+        and parts[1]
+    )
+    if not held_objects:
+        return (
+            f"SeedGraph TaskGroup {group_id!r} requires unavailable state "
+            f"{dict(requirement)}."
+        )
+    primary = str(group.get("object_uid", ""))
+    held = ", ".join(repr(item) for item in held_objects)
+    return (
+        f"SeedGraph TaskGroup {group_id!r} requires arm {arm!r} to be free, "
+        f"but it currently holds {held}; the group's primary object is "
+        f"{primary!r}. A post-handover continuation must preserve object "
+        "identity and consume object_held instead of scheduling a fresh pickup."
+    )
 
 
 def _goal_read_claims(value: Any) -> list[dict[str, str]]:

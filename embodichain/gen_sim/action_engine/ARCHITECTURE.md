@@ -349,9 +349,19 @@ A normal generated bundle contains:
 Strict A/B adds branch-local graph/result artifacts and `comparison.json`.
 Review graphs, runtime records, and videos never become execution inputs.
 
+`prepare` lowers and preflights resolved semantic candidates in selection order.
+A candidate-local lowering, symbolic planning, or preflight error rejects only
+that candidate. If no resolved candidate is executable, the transaction
+publishes `preparation_failure.json` with each attempted draft, verified
+bindings, available grounded plan, failure stage, and exception instead of
+leaving an older successful bundle in place.
+
 ## Invariants
 
 - SeedGraph nodes are direct AtomicActions, not E-level operators.
+- Lowering uses original instruction-step order as the stable tie-break among
+  dependency-ready steps. Independent steps remain independent; the contract
+  linker serializes only actual resource conflicts.
 - E labels are subgraph grouping semantics only.
 - Planning artifacts contain no grounded motion coordinates.
 - Online planning never receives the private oracle.
