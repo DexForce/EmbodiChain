@@ -193,6 +193,9 @@ class SceneExporter:
             # which SimulationManager itself converts to z-up.
             "body_scale": scale_y_up,
             "center_xy": scene_object.center_xy,
+            "support_surface_z": scene_object.support_surface_z,
+            "support_contour_xy": scene_object.support_contour_xy,
+            "support_optimization_rect_xy": scene_object.support_optimization_rect_xy,
             "max_convex_hull_num": scene_object.physics.max_convex_hull_num,
         }
 
