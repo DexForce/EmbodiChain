@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from embodichain.learning.rl.motion_policy_evaluation import RunManifest
-from embodichain.learning.rl.train import _write_motion_run_manifest
+from embodichain.learning.rl.train import _event_params, _write_motion_run_manifest
 
 
 def test_training_summary_writes_minimal_motion_manifest(tmp_path):
@@ -41,3 +41,27 @@ def test_training_summary_writes_minimal_motion_manifest(tmp_path):
     manifest = RunManifest.load(run)
     assert manifest.motion_profile == "example-motion"
     assert manifest.checkpoints["latest"] == checkpoint
+
+
+def test_camera_recorder_defaults_to_the_run_video_directory(tmp_path):
+    params = _event_params(
+        {"func": "record_camera_data_async", "params": {"name": "main"}},
+        run_base=tmp_path / "run",
+        phase="eval",
+    )
+
+    assert params["save_path"] == str(tmp_path / "run" / "videos" / "eval")
+
+
+def test_camera_recorder_keeps_an_explicit_output_directory(tmp_path):
+    custom = tmp_path / "custom-videos"
+    params = _event_params(
+        {
+            "func": "record_camera_data",
+            "params": {"save_path": str(custom)},
+        },
+        run_base=tmp_path / "run",
+        phase="train",
+    )
+
+    assert params["save_path"] == str(custom)

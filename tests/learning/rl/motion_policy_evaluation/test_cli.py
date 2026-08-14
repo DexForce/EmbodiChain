@@ -72,6 +72,42 @@ def test_original_task_overrides_manifest_profile(tmp_path):
     assert resolved.configs["train"] == run / "configs" / "train.yaml"
 
 
+def test_explicit_configs_override_manifest_configs(tmp_path):
+    run = tmp_path / "run"
+    checkpoint = run / "checkpoints" / "policy.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    train = tmp_path / "train.yaml"
+    train.write_text("trainer: {}\n", encoding="utf-8")
+    gym = tmp_path / "gym.yaml"
+    gym.write_text("id: Original\n", encoding="utf-8")
+    write_run_manifest(
+        run,
+        train_config=train,
+        gym_config=gym,
+        latest_checkpoint=checkpoint,
+    )
+    replacement_train = tmp_path / "replacement-train.yaml"
+    replacement_train.write_text("trainer: {}\n", encoding="utf-8")
+    replacement_gym = tmp_path / "replacement-gym.yaml"
+    replacement_gym.write_text("id: Replacement\n", encoding="utf-8")
+
+    resolved = _resolve_input(
+        parse_args(
+            (
+                str(run),
+                "--config",
+                str(replacement_train),
+                "--gym-config",
+                str(replacement_gym),
+            )
+        )
+    )
+
+    assert resolved.configs["train"] == replacement_train
+    assert resolved.configs["gym"] == replacement_gym
+
+
 def test_viewer_defaults_to_hybrid_without_a_time_limit():
     args = parse_args(
         (

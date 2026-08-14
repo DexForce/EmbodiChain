@@ -141,13 +141,13 @@ class EmbodiChainTaskEnvironment:
         self._episodes: list[dict[str, float | int | bool | str]] = []
         self._reported_metrics: dict[str, float] = {}
         self._closed = False
+        self._policy_context = _policy_context_from_env(self._base_env)
         self._previous_no_auto_reset = getattr(
             self._base_env,
             "_demo_no_auto_reset",
             _MISSING,
         )
         self._base_env._demo_no_auto_reset = True
-        self._policy_context = _policy_context_from_env(self._base_env)
 
     @property
     def policy_context(self) -> PolicyContext:
@@ -282,7 +282,11 @@ class EmbodiChainTaskEnvironment:
         return result
 
     def wait_for_reset_or_close(self) -> str:
-        """Keep a paused Viewer responsive until it is closed."""
+        """Keep a paused Viewer responsive until it is closed.
+
+        ``MotionPolicyEvaluator`` calls this method after a task termination
+        when the selected behavior is ``pause``.
+        """
         while self.viewer_is_open:
             event = self.poll()
             if event is not None:

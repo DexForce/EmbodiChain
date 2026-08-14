@@ -417,9 +417,10 @@ Motion Profile Headless run defaults to 100 control steps per episode.
 |---|---|---|
 | ``RUN`` | *(optional)* | Training run containing ``run-manifest.json`` |
 | ``--profile`` | manifest or EmbodiChain task | Registered external Motion Profile ID |
+| ``--original-task`` | disabled | Use the EmbodiChain task configs when RUN declares a Motion Profile |
 | ``--checkpoint`` | ``best`` with RUN | ``best``, ``latest``, a path within RUN, or an explicit `.pt` path |
-| ``--config`` | *(optional)* | Training config for an explicit checkpoint |
-| ``--gym-config`` | *(optional)* | Task config for an explicit checkpoint |
+| ``--config`` | manifest with RUN | Training config for an explicit checkpoint or a RUN override |
+| ``--gym-config`` | manifest with RUN | Task config for an explicit checkpoint or a RUN override |
 | ``--resource-root`` | *(optional)* | Task assets and local reference data passed to the Profile |
 | ``--episodes`` | EmbodiChain task Headless: ``1`` | Completed EmbodiChain task episodes, or independent Motion Profile runs |
 | ``--control-steps`` | Viewer continuous | Exact Policy action count |

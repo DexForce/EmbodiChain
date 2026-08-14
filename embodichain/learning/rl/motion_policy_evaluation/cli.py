@@ -185,13 +185,21 @@ def _resolve_input(args: argparse.Namespace) -> MotionInput:
                 if candidate.is_absolute()
                 else (manifest.root / candidate).resolve()
             )
-        profile = (
-            None if args.original_task else args.profile or manifest.motion_profile
-        )
+        configs = dict(manifest.configs)
+        if args.config is not None:
+            configs["train"] = Path(args.config).expanduser().resolve()
+        if args.gym_config is not None:
+            configs["gym"] = Path(args.gym_config).expanduser().resolve()
+        if args.original_task:
+            profile = None
+        elif args.profile is not None:
+            profile = args.profile
+        else:
+            profile = manifest.motion_profile
         return MotionInput(
             checkpoint=checkpoint,
             profile=profile,
-            configs=manifest.configs,
+            configs=configs,
             run=manifest.root,
             requested_checkpoint=requested,
             selected_checkpoint=selected,

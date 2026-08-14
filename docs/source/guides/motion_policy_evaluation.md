@@ -19,8 +19,22 @@ outputs/<experiment>_<timestamp>/
 ├── configs/
 │   ├── train.yaml
 │   └── gym.yaml
+├── logs/
+│   └── <experiment>/
+├── videos/
+│   ├── train/
+│   └── eval/
+├── evaluations/
+│   └── <timestamp>-motion-policy/evaluation.json
 └── run-manifest.json
 ```
+
+Configurations are captured once when training completes. Checkpoint filenames
+carry their training step, recorder filenames carry their episode index, and
+each visual evaluation receives its own timestamped directory. Camera recorder
+events use `videos/train` or `videos/eval` when `save_path` is omitted; an
+explicit `save_path` keeps the configured location. The `evaluations` directory
+is created by the first evaluation run.
 
 A simulator RL task manifest has the following structure:
 
@@ -57,6 +71,10 @@ recorded in `evaluation.json`.
 When the manifest declares a `motion_profile`, the CLI uses that Profile by
 default. Add `--original-task` to recreate the EmbodiChain Environment recorded
 by the training configurations instead.
+
+`--config` and `--gym-config` replace the corresponding manifest entries for
+one command. This is useful when checking a checkpoint with an updated local
+configuration while retaining the run's checkpoint selection and report path.
 
 Open the Viewer for a training run:
 
@@ -253,6 +271,10 @@ Each run writes an `evaluation.json` report containing:
 - inference and simulation devices, renderer, versions, and commits;
 - termination reason, integer simulation steps, and control steps;
 - episode reward, episode length, success, and task metrics.
+
+During native task evaluation, every `info["metrics"]` scalar is forwarded to
+the Evaluator on that control step. The latest values are included in the final
+report with the completed-episode reward, length, and success aggregates.
 
 A training run writes reports under `<run>/evaluations/`. An explicit
 checkpoint writes them under the `evaluations/` directory next to that

@@ -58,6 +58,8 @@ from embodichain.utils.utility import load_config
 from embodichain.utils.module_utils import find_function_from_modules
 from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
+_CAMERA_RECORDERS = {"record_camera_data", "record_camera_data_async"}
+
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments.
@@ -113,6 +115,20 @@ def _resolve_profile_output(
         return path
     output = Path(path)
     return str(output.with_name(f"{output.stem}_rank{rank}{output.suffix}"))
+
+
+def _event_params(
+    event_info: dict,
+    *,
+    run_base: str | Path,
+    phase: str,
+) -> dict:
+    """Resolve event parameters that belong to one training run."""
+    params = dict(event_info.get("params", {}))
+    function_name = str(event_info.get("func", "")).rsplit(".", 1)[-1]
+    if function_name in _CAMERA_RECORDERS:
+        params.setdefault("save_path", str(Path(run_base) / "videos" / phase))
+    return params
 
 
 def _train_learning_env(
@@ -506,7 +522,7 @@ def train_from_config(
     for event_name, event_info in events_dict.get("train", {}).items():
         event_func_str = event_info.get("func")
         mode = event_info.get("mode", "interval")
-        params = event_info.get("params", {})
+        params = _event_params(event_info, run_base=run_base, phase="train")
         interval_step = event_info.get("interval_step", 1)
         event_func = find_function_from_modules(
             event_func_str, event_modules, raise_if_not_found=True
@@ -522,7 +538,7 @@ def train_from_config(
         for event_name, event_info in events_dict.get("eval", {}).items():
             event_func_str = event_info.get("func")
             mode = event_info.get("mode", "interval")
-            params = event_info.get("params", {})
+            params = _event_params(event_info, run_base=run_base, phase="eval")
             interval_step = event_info.get("interval_step", 1)
             event_func = find_function_from_modules(
                 event_func_str, event_modules, raise_if_not_found=True
