@@ -40,7 +40,7 @@ from embodichain.lab.sim.atomic_actions import (
     TurnKnobGoal,
     TurnKnobOptions,
 )
-from embodichain.lab.sim.cfg import ArticulationCfg
+from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
 from embodichain.lab.sim.objects import Articulation, Robot
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -56,7 +56,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven.urdf"
+# MICROWAVE_ASSET = "MicrowaveOven/microwave_oven.urdf"
+MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
 KNOB_LINK_NAME = "cap_1"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
@@ -83,6 +84,9 @@ def create_microwave(sim) -> Articulation:
             fpath=get_data_path(MICROWAVE_ASSET),
             init_pos=MICROWAVE_POSITION,
             init_rot=MICROWAVE_ORIENTATION,
+            drive_pros=JointDrivePropertiesCfg(
+                stiffness=1e-3, damping=1e2, max_effort=1e-2
+            ),
             fix_base=True,
         )
     )
