@@ -240,6 +240,7 @@ class ProgramExecutor:
                 "Every execution edge must belong to one semantic step; missing "
                 f"{sorted(missing)}."
             )
+        self._completion_only_dependencies = self._completion_only_dependency_edges()
         self.group_by_step = {
             str(step_id): group
             for group in program.allocation_groups
@@ -1483,13 +1484,66 @@ class ProgramExecutor:
         edge: ExecutionEdge,
         failures: Mapping[str, torch.Tensor],
     ) -> torch.Tensor:
-        """Return only failures that can reach this edge through the DAG."""
+        """Return success-required failures that can reach this edge."""
         result = torch.zeros(
             int(self.env.num_envs), dtype=torch.bool, device=self.env.device
         )
         for dependency in edge.depends_on:
+            if (dependency, edge.id) in self._completion_only_dependencies:
+                continue
             result |= failures[dependency]
         return result
+
+    def _completion_only_dependency_edges(self) -> frozenset[tuple[str, str]]:
+        """Resolve linker-added resource ordering to executable edge pairs."""
+        graph = self.program.seed_graph
+        if not isinstance(graph, Mapping):
+            return frozenset()
+        metadata = graph.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            return frozenset()
+
+        reasons_by_pair: dict[tuple[str, str], set[str]] = {}
+        sources = (
+            ("action_contract_task_linker", "linked_dependencies"),
+            ("action_contract_linker", "group_dependencies"),
+        )
+        for metadata_key, dependency_key in sources:
+            provenance = metadata.get(metadata_key, {})
+            if not isinstance(provenance, Mapping):
+                continue
+            dependencies = provenance.get(dependency_key, ())
+            if not isinstance(dependencies, Sequence) or isinstance(
+                dependencies, (str, bytes, bytearray)
+            ):
+                continue
+            for dependency in dependencies:
+                if not isinstance(dependency, Mapping):
+                    continue
+                parent = dependency.get("from")
+                child = dependency.get("to")
+                reason = dependency.get("reason")
+                if not all(
+                    isinstance(value, str) and value for value in (parent, child)
+                ):
+                    continue
+                if reason not in {"causal", "resource"}:
+                    continue
+                reasons_by_pair.setdefault((parent, child), set()).add(reason)
+
+        completion_only_steps = {
+            pair for pair, reasons in reasons_by_pair.items() if reasons == {"resource"}
+        }
+        return frozenset(
+            (dependency, edge.id)
+            for edge in self.program.edges
+            for dependency in edge.depends_on
+            if (
+                self.step_by_edge[dependency].id,
+                self.step_by_edge[edge.id].id,
+            )
+            in completion_only_steps
+        )
 
     def _reset_runtime_state(self) -> None:
         self.retry_count = 0

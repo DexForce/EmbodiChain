@@ -3858,6 +3858,81 @@ def test_failure_propagates_only_to_dependent_branch(monkeypatch: Any) -> None:
     assert not bool(result.success[0])
 
 
+def test_resource_ordering_waits_without_propagating_semantic_failure() -> None:
+    task = {
+        "schema_version": TASK_SPEC_SCHEMA,
+        "task_id": "resource_ordering",
+        "level": "L3",
+        "instruction": "Stand both cans, then hand over the second can.",
+        "reasoning_type": "none",
+        "task_instances": [
+            {
+                "id": "task_01",
+                "task_type": "E2",
+                "params": {
+                    "object_role": "first",
+                    "required_arm": "right_arm",
+                },
+                "depends_on": [],
+                "role": "primary",
+            },
+            {
+                "id": "task_02",
+                "task_type": "E2",
+                "params": {
+                    "object_role": "second",
+                    "required_arm": "left_arm",
+                },
+                "depends_on": [],
+                "role": "primary",
+            },
+            {
+                "id": "task_03",
+                "task_type": "E4",
+                "params": {
+                    "object_role": "second",
+                    "transfer_arm": "left_arm",
+                    "receive_arm": "right_arm",
+                },
+                "depends_on": ["task_02"],
+                "role": "primary",
+            },
+        ],
+        "success": {"type": "all_complete"},
+        "oracle": {},
+        "metadata": {},
+    }
+    program = load_execution_program(
+        instantiate_seed_graph(
+            task,
+            {"first": "first_can", "second": "second_can"},
+        )
+    )
+    executor = ProgramExecutor(program, _FakeEnv(), record_runtime=False)
+    handover_entry = next(
+        edge
+        for edge in program.edges
+        if executor.step_by_edge[edge.id].id == "task_03"
+        and all(
+            executor.step_by_edge[dependency].id != "task_03"
+            for dependency in edge.depends_on
+        )
+    )
+    dependencies = {
+        executor.step_by_edge[dependency].id: dependency
+        for dependency in handover_entry.depends_on
+    }
+    failures = {
+        dependency: torch.tensor([step_id == "task_01"])
+        for step_id, dependency in dependencies.items()
+    }
+
+    assert not bool(executor._dependency_failures(handover_entry, failures)[0])
+
+    failures[dependencies["task_02"]][:] = True
+    assert bool(executor._dependency_failures(handover_entry, failures)[0])
+
+
 def test_v2_executor_retries_one_complete_atomic_action_twice(
     monkeypatch: Any,
 ) -> None:

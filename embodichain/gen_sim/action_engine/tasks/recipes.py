@@ -120,6 +120,21 @@ def instantiate_seed_graph(
             }
         )
 
+    graph_metadata = {
+        "task_spec_id": task["task_id"],
+        "role_bindings": dict(sorted(bindings.items())),
+        "allocation_groups": deepcopy(
+            task.get("metadata", {}).get("allocation_groups", [])
+        ),
+        "direct_payload_links": payload_links,
+        "oracle_exposed": False,
+        "planning_latency_seconds": 0.0,
+        "vlm_call_count": 0,
+    }
+    task_linker = task.get("metadata", {}).get("action_contract_task_linker")
+    if isinstance(task_linker, Mapping):
+        graph_metadata["action_contract_task_linker"] = deepcopy(dict(task_linker))
+
     graph = {
         "schema_version": SEED_GRAPH_SCHEMA,
         "task_id": task["task_id"],
@@ -134,17 +149,7 @@ def instantiate_seed_graph(
             "terms": [deepcopy(group["success"]) for group in groups],
         },
         "capability_catalog_hash": capabilities.catalog_hash(),
-        "metadata": {
-            "task_spec_id": task["task_id"],
-            "role_bindings": dict(sorted(bindings.items())),
-            "allocation_groups": deepcopy(
-                task.get("metadata", {}).get("allocation_groups", [])
-            ),
-            "direct_payload_links": payload_links,
-            "oracle_exposed": False,
-            "planning_latency_seconds": 0.0,
-            "vlm_call_count": 0,
-        },
+        "metadata": graph_metadata,
     }
     known_objects = set(bindings.values()) | {"table"}
     graph = link_seed_graph(

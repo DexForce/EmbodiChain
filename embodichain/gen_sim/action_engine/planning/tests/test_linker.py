@@ -118,6 +118,32 @@ def test_task_linker_preserves_parallel_arms_and_waits_for_both_before_handover(
     assert by_id["task_03"]["depends_on"] == ["task_02", "task_01"]
 
 
+def test_resource_dependency_provenance_is_persisted_in_seed_graph() -> None:
+    task = _handover_task()
+    task["task_instances"] = task["task_instances"][:3]
+    handover = task["task_instances"][2]
+    handover["params"] = {
+        "object_role": "orange",
+        "transfer_arm": "left_arm",
+        "receive_arm": "right_arm",
+    }
+
+    graph = instantiate_seed_graph(
+        task,
+        {"purple": "purple_can", "orange": "orange_can"},
+    )
+
+    provenance = graph["metadata"]["action_contract_task_linker"]
+    assert provenance["linked_dependencies"] == [
+        {
+            "from": "task_01",
+            "to": "task_03",
+            "reason": "resource",
+            "detail": "arm:right_arm",
+        }
+    ]
+
+
 def test_same_object_e2_handover_gets_direct_causal_edge_through_a_chain() -> None:
     task = _handover_task()
     task["task_instances"][1]["depends_on"] = ["task_01"]
