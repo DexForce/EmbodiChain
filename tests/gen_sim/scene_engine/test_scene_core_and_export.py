@@ -161,6 +161,8 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert (export_path.parent / "mesh_assets/cup/cup.glb").read_bytes() == b"glTF-cup"
     entry = exported["rigid_object"][0]
     assert entry["uid"] == "cup"
+    assert entry["category"] == "asset"
+    assert entry["name"] == "cup"
     assert entry["body_type"] == "dynamic"
     assert entry["init_pos"] == [1.0, -3.0, 2.0]
     assert entry["body_scale"] == [1.0, 2.0, 3.0]
@@ -188,7 +190,74 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         output_root=tmp_path / "output"
     ).import_scene_and_graph()
     assert [asset.id for asset in imported_scene.assets] == ["cup"]
+    assert imported_scene.assets[0].category == "asset"
+    assert imported_scene.assets[0].name == "cup"
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
+
+
+def test_scene_export_overwrites_an_existing_scene_export(tmp_path: Path) -> None:
+    table_glb = tmp_path / "table.glb"
+    cup_glb = tmp_path / "cup.glb"
+    banana_glb = tmp_path / "banana.glb"
+    table_glb.write_bytes(b"glTF-table")
+    cup_glb.write_bytes(b"glTF-cup")
+    banana_glb.write_bytes(b"glTF-banana")
+    output_root = tmp_path / "output"
+
+    initial_table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_glb,
+        physics=_physics("kinematic"),
+    )
+    initial_cup = _scene_object(
+        object_id="cup",
+        kind="asset",
+        glb_path=cup_glb,
+        physics=_physics("dynamic"),
+    )
+    initial_scene = Scene(objects=[initial_table, initial_cup])
+    SceneExporter(
+        scene=initial_scene,
+        scene_graph=_scene_graph(initial_scene),
+        output_root=output_root,
+    ).export()
+
+    # The imported table mesh already occupies its final export location.
+    exported_table_glb = (
+        output_root / "scene_export" / "mesh_assets" / "table" / "table.glb"
+    )
+    updated_table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=exported_table_glb,
+        physics=_physics("kinematic"),
+    )
+    banana = _scene_object(
+        object_id="banana",
+        kind="asset",
+        glb_path=banana_glb,
+        physics=_physics("dynamic"),
+    )
+    updated_scene = Scene(objects=[updated_table, banana])
+    SceneExporter(
+        scene=updated_scene,
+        scene_graph=_scene_graph(updated_scene),
+        output_root=output_root,
+    ).export()
+
+    scene_export_root = output_root / "scene_export"
+    assert exported_table_glb.read_bytes() == b"glTF-table"
+    assert (
+        scene_export_root / "mesh_assets" / "banana" / "banana.glb"
+    ).read_bytes() == b"glTF-banana"
+    assert not (scene_export_root / "mesh_assets" / "cup").exists()
+    assert (
+        json.loads((scene_export_root / "scene.json").read_text(encoding="utf-8"))[
+            "objects"
+        ][1]["id"]
+        == "banana"
+    )
 
 
 def test_scene_export_requires_final_physics(tmp_path: Path) -> None:
