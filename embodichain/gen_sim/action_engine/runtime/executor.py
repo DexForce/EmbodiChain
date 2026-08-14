@@ -34,7 +34,11 @@ from embodichain.gen_sim.action_engine.config import (
     default_runtime_policy,
     runtime_policy_hash,
 )
-from embodichain.lab.sim.atomic_actions import HeldObjectState, StateDelta
+from embodichain.lab.sim.atomic_actions import (
+    HeldObjectState,
+    SceneProvider,
+    StateDelta,
+)
 from embodichain.utils import logger as project_logger
 from embodichain.utils.logger import log_info, log_warning
 
@@ -154,6 +158,7 @@ class ProgramExecutor:
         record_root: str | None = None,
         runtime_policy: RuntimePolicyCfg | None = None,
         capability_registry: Any | None = None,
+        scene_provider: SceneProvider | None = None,
     ) -> None:
         self.program = program
         self.env = env
@@ -261,6 +266,7 @@ class ProgramExecutor:
             grasp_policy=runtime_policy.grasp,
             planner_policy=runtime_policy.planner,
             capability_registry=capability_registry,
+            scene_provider=scene_provider,
         )
         self.grounder = ActionGrounder(
             program,

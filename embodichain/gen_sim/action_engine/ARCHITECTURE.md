@@ -31,6 +31,9 @@ Action Engine:
   `TaskAgent`.
 - `embodichain.gen_sim.scene_engine` remains the existing scene generation
   subsystem and is not modified by the collaboration workflow.
+- `embodichain.gen_sim.scene_bridge` is the anti-corruption boundary for Scene
+  Engine exports. It owns the richer static manifest and deterministic
+  scene/action feasibility report without changing Scene Engine schemas.
 - `embodichain.gen_sim.action_engine.agent` owns `ActionAgent`; Action Engine's
   existing `domain`, `planning`, and `runtime` packages remain authoritative
   for graph compilation and execution.
@@ -46,15 +49,18 @@ removed after downstream callers migrate to the owning packages above.
 
 1. `TaskFactory` or a caller creates a validated `TaskSpec`.
 2. Action Engine emits `SceneRequirements` for the external Scene Engine.
-3. After scene generation, Action Engine validates role-to-UID bindings,
-   affordances, initial state, cameras, and spatial requirements.
-4. Offline recipes and the online planner independently create complete
+3. After scene generation, Scene Bridge preserves geometry, physics,
+   articulation, affordance evidence, and provenance in a versioned
+   `StaticSceneManifest` while the existing redacted manifest remains compatible.
+4. `FeasibilityBroker` intersects the selected task, role bindings, static scene,
+   robot profile, and executable capability catalog without repairing unknowns.
+5. Offline recipes and the online planner independently create complete
    `SeedGraph` candidates whose nodes are `AtomicAction` calls.
-5. Runtime preflight checks the capability catalog and rejects planning-only
+6. Runtime preflight checks the capability catalog and rejects planning-only
    actions before simulator motion starts.
-6. `ActionGrounder` reads live robot, object, articulation, and camera state and
+7. `ActionGrounder` reads live robot, object, articulation, and camera state and
    materializes the typed goal and immutable action options just in time.
-7. `ProgramExecutor` schedules the DAG, executes vectorized action masks, and
+8. `ProgramExecutor` schedules the DAG, executes vectorized action masks, and
    verifies semantic postconditions from live state.
 
 There is no persisted semantic task graph between `TaskSpec` and `SeedGraph`.
@@ -119,6 +125,21 @@ requires a unique match with complete structured category, attribute, state,
 and affordance evidence. Object names and descriptions remain available to the
 LLM grounding call, but deterministic validation never searches them for
 semantic substrings.
+
+### StaticSceneManifest And FeasibilityReport
+
+`StaticSceneManifest` is an additive Scene Bridge artifact. It keeps the legacy
+scene manifest stable while recording initial poses, geometry hashes, physics,
+articulation payloads, structured affordance evidence, and provenance. Legacy
+affordance strings become `declared` evidence; only structural facts derived by
+the adapter are marked `verified`.
+
+`FeasibilityReport` classifies each check as `proven`, `runtime_probe`, `unknown`,
+or `contradicted`. Missing evidence remains unknown. Declared geometric
+affordances require a runtime probe, and unavailable AtomicActions are explicit
+contradictions. A contradicted report publishes an `infeasible` audit result and
+does not invoke graph or bundle generation. Executable preflight remains a
+second authoritative gate before bundle generation.
 
 ### SeedGraph
 
@@ -212,6 +233,13 @@ qpos and held-object relations. Each plan converts that state to the mainline
 submits an `ActionInvocation` to `AtomicActionEngine`. The returned
 `StateDelta` remains speculative until physical and semantic verification; only
 verified vectorized rows are committed.
+
+`AtomicActionAdapter` accepts a shared `SceneProvider` and otherwise builds a
+`RigidObjectSceneProvider` from live simulation entities. Planning snapshots now
+carry monotonic timestamps and material-change scene/collision revisions. The
+adapter also exposes `start_session(...)` for callers adopting
+`ExecutionSession`; the existing compound and per-arm merged trajectory
+scheduler remains as the compatibility execution path.
 
 Single-arm arm motion uses cuRobo `motion_gen` by default. Hand-only and
 coordinated dual-arm actions use `ik_interp`, because mainline coordinated

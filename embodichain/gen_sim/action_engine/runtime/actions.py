@@ -40,11 +40,14 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     DynamicCollisionMode,
     EntityState,
+    ExecutionSession,
     MotionPolicy,
     ObjectSemantics,
     PlanningContext,
     RecoveryPolicy,
     RobotObservation,
+    RigidObjectSceneProvider,
+    SceneProvider,
     SceneSnapshot,
     StateDelta,
 )
@@ -151,6 +154,7 @@ class AtomicActionAdapter:
         grasp_policy: Mapping[str, Any] | None = None,
         planner_policy: Mapping[str, Any] | None = None,
         capability_registry: Any | None = None,
+        scene_provider: SceneProvider | None = None,
     ) -> None:
         self.env = env
         self.num_envs = int(env.num_envs)
@@ -180,7 +184,10 @@ class AtomicActionAdapter:
         self._motion_generator: MotionGenerator | None = None
         self._atomic_engine: AtomicActionEngine | None = None
         self._semantics: dict[str, ObjectSemantics] = {}
-        self._scene_version = 0
+        self._scene_time = 0.0
+        if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
+        self.scene_provider = scene_provider or self._build_scene_provider()
 
     @staticmethod
     def _merge_planner_policy(
@@ -196,6 +203,55 @@ class AtomicActionAdapter:
     def initial_state(self) -> ExecutionState:
         """Capture the initial full-robot planning seed."""
         return ExecutionState(last_qpos=self.env.robot.get_qpos().clone())
+
+    def start_session(
+        self,
+        grounded: GroundedAction,
+        state: ExecutionState | None = None,
+    ) -> ExecutionSession:
+        """Start one closed-loop AtomicAction session from live scene state.
+
+        ProgramExecutor may continue using its compatibility scheduler for
+        compound and per-arm merged trajectories. New callers can use this
+        boundary to adopt feedback-driven execution without constructing
+        private planning contexts.
+        """
+        capability = self.capabilities.require_executable(grounded.action_class)
+        state = state or self.initial_state()
+        grounded = self._select_upright_transport_yaw(grounded, state)
+        context = self._planning_context(state, grounded)
+        invocation = self._invocation(grounded, capability)
+        return self._engine().start((invocation,), context)
+
+    def _build_scene_provider(self) -> SceneProvider | None:
+        """Create the shared live rigid-object provider when entities are available."""
+        sim = getattr(self.env, "sim", None)
+        if sim is None:
+            return None
+        dynamic_uids = tuple(
+            str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
+        )
+        list_uids = getattr(sim, "get_rigid_object_uid_list", None)
+        uids = tuple(str(uid) for uid in list_uids()) if callable(list_uids) else ()
+        if not uids:
+            uids = dynamic_uids
+        get_rigid_object = getattr(sim, "get_rigid_object", None)
+        if not callable(get_rigid_object):
+            return None
+        entities = {
+            uid: entity for uid in uids if (entity := get_rigid_object(uid)) is not None
+        }
+        if not entities:
+            return None
+        collision_uids = (
+            dynamic_uids
+            if bool(self.planner_policy.get("dynamic_collision", False))
+            else ()
+        )
+        return RigidObjectSceneProvider(
+            entities,
+            collision_entity_ids=collision_uids,
+        )
 
     def semantics(self, uid: str) -> ObjectSemantics:
         """Build object semantics once while retaining the live entity handle."""
@@ -553,7 +609,7 @@ class AtomicActionAdapter:
         else:
             qvel = qvel.to(device=self.device, dtype=qpos.dtype)
         return PlanningContext(
-            robot=RobotObservation(timestamp=0.0, qpos=qpos, qvel=qvel),
+            robot=RobotObservation(timestamp=self._scene_time, qpos=qpos, qvel=qvel),
             task=state.to_task_state(),
             scene=self._scene_snapshot(grounded, state),
             env_ids=torch.arange(
@@ -571,19 +627,29 @@ class AtomicActionAdapter:
         dynamic_uids = tuple(
             str(uid) for uid in self.planner_policy.get("dynamic_obstacle_uids", ())
         )
-        if not bool(self.planner_policy.get("dynamic_collision", False)):
-            return SceneSnapshot.empty()
-        exclusion_masks = self._collision_exclusion_masks(grounded, state)
-        entities: dict[str, EntityState] = {}
-        for uid in dynamic_uids:
-            entity = self.env.sim.get_rigid_object(uid)
-            if entity is None:
-                raise ValueError(f"Unknown cuRobo dynamic obstacle {uid!r}.")
-            pose = torch.as_tensor(
-                entity.get_local_pose(to_matrix=True),
-                dtype=torch.float32,
-                device=self.device,
+        env_ids = torch.arange(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.device,
+        )
+        if self.scene_provider is None:
+            base = SceneSnapshot(timestamp=self._scene_time, version=0)
+        else:
+            base = self.scene_provider.snapshot(
+                timestamp=self._scene_time,
+                env_ids=env_ids,
             )
+        if not bool(self.planner_policy.get("dynamic_collision", False)):
+            return base
+        exclusion_masks = self._collision_exclusion_masks(grounded, state)
+        entities = dict(base.entities)
+        for uid in dynamic_uids:
+            entity_state = entities.get(uid)
+            if entity_state is None:
+                raise ValueError(
+                    f"SceneProvider omitted cuRobo dynamic obstacle {uid!r}."
+                )
+            pose = entity_state.pose.to(dtype=torch.float32, device=self.device)
             if pose.shape == (4, 4):
                 pose = pose.unsqueeze(0).repeat(self.num_envs, 1, 1)
             if pose.shape != (self.num_envs, 4, 4):
@@ -595,13 +661,15 @@ class AtomicActionAdapter:
             if excluded is not None and bool(excluded.any()):
                 pose = pose.clone()
                 pose[excluded, 2, 3] += _COLLISION_PARKING_Z_OFFSET
-            entities[uid] = EntityState(pose=pose)
-        self._scene_version += 1
+            entities[uid] = EntityState(
+                pose=pose,
+                confidence=entity_state.confidence,
+            )
         return SceneSnapshot(
-            timestamp=0.0,
-            version=self._scene_version,
+            timestamp=base.timestamp,
+            version=base.version,
             entities=entities,
-            collision_world_revision=self._scene_version,
+            collision_world_revision=base.collision_world_revision,
             collision_entity_ids=dynamic_uids,
         )
 
@@ -973,6 +1041,7 @@ class AtomicActionAdapter:
         for waypoint in trajectory.unbind(dim=1):
             command = torch.where(active[:, None], waypoint, current)
             self.env.step(command)
+            self._scene_time += self._scene_step_duration()
             update = getattr(self.env, "update_obj_info", None)
             if callable(update):
                 update()
@@ -982,6 +1051,20 @@ class AtomicActionAdapter:
         if callable(sync) and commands:
             sync(commands[-1])
         return commands
+
+    def _scene_step_duration(self) -> float:
+        """Return one positive logical waypoint duration for scene timestamps."""
+        sim_config = getattr(getattr(self.env, "sim", None), "sim_config", None)
+        candidates = (
+            getattr(self.env, "physics_dt", None),
+            getattr(sim_config, "physics_dt", None),
+        )
+        for value in candidates:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                duration = float(value)
+                if math.isfinite(duration) and duration > 0.0:
+                    return duration
+        return 1.0
 
     def combine(
         self,

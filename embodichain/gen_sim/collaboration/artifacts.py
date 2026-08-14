@@ -36,8 +36,10 @@ __all__ = [
     "BINDING_REPORT_FILENAME",
     "EXECUTION_REPORT_FILENAME",
     "GROUNDED_TASK_PLAN_FILENAME",
+    "FEASIBILITY_REPORT_FILENAME",
     "ROLE_BINDINGS_FILENAME",
     "SCENE_MANIFEST_FILENAME",
+    "STATIC_SCENE_MANIFEST_FILENAME",
     "SUCCESS_SPEC_FILENAME",
     "TASK_CANDIDATE_SET_FILENAME",
     "TASK_DRAFT_FILENAME",
@@ -55,8 +57,10 @@ TASK_DRAFT_FILENAME = "task_draft.json"
 SCENE_REQUEST_FILENAME = "scene_request.json"
 SUCCESS_SPEC_FILENAME = "success_spec.json"
 SCENE_MANIFEST_FILENAME = "scene_manifest.json"
+STATIC_SCENE_MANIFEST_FILENAME = "static_scene_manifest.json"
 ROLE_BINDINGS_FILENAME = "role_bindings.json"
 BINDING_REPORT_FILENAME = "binding_report.json"
+FEASIBILITY_REPORT_FILENAME = "feasibility_report.json"
 GROUNDED_TASK_PLAN_FILENAME = "grounded_task_plan.json"
 
 
@@ -70,8 +74,10 @@ class CollaborationArtifactPaths:
     scene_request: Path
     success_spec: Path
     scene_manifest: Path
+    static_scene_manifest: Path
     role_bindings: Path
     binding_report: Path
+    feasibility_report: Path
     grounded_task_plan: Path
     execution_report: Path
 
@@ -88,8 +94,10 @@ def collaboration_artifact_paths(
         scene_request=root / SCENE_REQUEST_FILENAME,
         success_spec=root / SUCCESS_SPEC_FILENAME,
         scene_manifest=root / SCENE_MANIFEST_FILENAME,
+        static_scene_manifest=root / STATIC_SCENE_MANIFEST_FILENAME,
         role_bindings=root / ROLE_BINDINGS_FILENAME,
         binding_report=root / BINDING_REPORT_FILENAME,
+        feasibility_report=root / FEASIBILITY_REPORT_FILENAME,
         grounded_task_plan=root / GROUNDED_TASK_PLAN_FILENAME,
         execution_report=root / EXECUTION_REPORT_FILENAME,
     )
@@ -175,6 +183,8 @@ def write_collaboration_artifacts(
     role_bindings: Mapping[str, Any] | None,
     binding_report: Mapping[str, Any],
     grounded_task_plan: Mapping[str, Any] | None = None,
+    static_scene_manifest: Mapping[str, Any] | None = None,
+    feasibility_report: Mapping[str, Any] | None = None,
 ) -> CollaborationArtifactPaths:
     """Write collaboration protocols into an unpublished staging directory.
 
@@ -187,9 +197,13 @@ def write_collaboration_artifacts(
     _write_json(paths.task_candidate_set, candidate_set)
     if scene_manifest is not None:
         _write_json(paths.scene_manifest, scene_manifest)
+    if static_scene_manifest is not None:
+        _write_json(paths.static_scene_manifest, static_scene_manifest)
     if role_bindings is not None:
         _write_json(paths.role_bindings, role_bindings)
     _write_json(paths.binding_report, binding_report)
+    if feasibility_report is not None:
+        _write_json(paths.feasibility_report, feasibility_report)
 
     if grounded_task_plan is not None:
         _write_json(paths.grounded_task_plan, grounded_task_plan)

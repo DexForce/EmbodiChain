@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 import shlex
@@ -51,6 +52,7 @@ from embodichain.gen_sim.action_engine.protocol import (
     FAST_GYM_CONFIG_FILENAME,
 )
 from embodichain.gen_sim.action_engine.runtime import ExecutionReport
+from embodichain.gen_sim.scene_bridge import SceneEngineV1Adapter
 
 
 def _candidate_set() -> dict:
@@ -287,6 +289,61 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     assert not (result.output_dir / "role_bindings.json").exists()
     assert not (result.output_dir / "grounded_task_plan.json").exists()
     assert not (result.output_dir / FAST_GYM_CONFIG_FILENAME).exists()
+
+
+def test_contradicted_feasibility_publishes_audit_without_planning(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    adaptation = _adaptation(tmp_path)
+    static_manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        adaptation.prepared_scene,
+        source_format="test",
+        robot_profile="dual_franka",
+    )
+    adaptation = replace(
+        adaptation,
+        static_scene_manifest=static_manifest,
+    )
+    task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
+    scene_adapter = SimpleNamespace(adapt=lambda *args, **kwargs: adaptation)
+    registry = SimpleNamespace(
+        catalog=lambda: {
+            name: {
+                "runtime_available": name != "PickUp",
+                "unavailable_reason": (
+                    "PickUp disabled for test." if name == "PickUp" else None
+                ),
+            }
+            for name in ("PickUp", "MoveHeldObject", "Place")
+        }
+    )
+    action_agent = SimpleNamespace(
+        registry=registry,
+        plan=lambda *_args, **_kwargs: pytest.fail("Action Agent must not plan"),
+    )
+
+    result = CollaborationCoordinator(
+        task_agent=task_agent,
+        scene_adapter=scene_adapter,
+        action_agent=action_agent,
+        bundle_generator=lambda *_args, **_kwargs: pytest.fail(
+            "legacy generator must not run"
+        ),
+    ).prepare(
+        "upright_can",
+        "扶正红色易拉罐。",
+        tmp_path / "scene_config.json",
+        tmp_path / "infeasible-bundle",
+        candidate_count=1,
+    )
+
+    assert result.status == "infeasible"
+    assert result.feasibility_report is not None
+    assert result.feasibility_report["status"] == "contradicted"
+    assert result.collaboration_artifacts.static_scene_manifest.is_file()
+    assert result.collaboration_artifacts.feasibility_report.is_file()
+    assert not result.collaboration_artifacts.grounded_task_plan.exists()
 
 
 def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(

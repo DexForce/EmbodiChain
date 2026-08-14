@@ -25,6 +25,8 @@ from embodichain.gen_sim.task_engine import TaskAgent, TaskGenerationError
 from .artifacts import (
     ArtifactTransaction,
     CollaborationArtifactPaths,
+    FEASIBILITY_REPORT_FILENAME,
+    STATIC_SCENE_MANIFEST_FILENAME,
     collaboration_artifact_paths,
     write_execution_report,
 )
@@ -66,12 +68,14 @@ __all__ = [
     "Coordinator",
     "EXECUTION_REPORT_SCHEMA",
     "ExecutionReport",
+    "FEASIBILITY_REPORT_FILENAME",
     "GROUNDED_TASK_PLAN_SCHEMA",
     "GroundedTaskPlan",
     "PreparationResult",
     "ROLE_BINDINGS_SCHEMA",
     "RoleBindings",
     "SCENE_MANIFEST_SCHEMA",
+    "STATIC_SCENE_MANIFEST_FILENAME",
     "SceneAdaptation",
     "SceneAdapter",
     "SceneAdapterProtocolError",

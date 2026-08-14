@@ -340,6 +340,12 @@ def test_scene_adapter_selects_bindable_majority_and_redacts_manifest(
     assert (
         result.prepared_scene.source_config_path == scene_export / "scene_config.json"
     )
+    assert result.static_scene_manifest is not None
+    static_by_uid = {
+        item["uid"]: item for item in result.static_scene_manifest["objects"]
+    }
+    assert static_by_uid["red_can"]["physics"]["body_type"] == "dynamic"
+    assert static_by_uid["red_can"]["geometry"]["asset_sha256"]
 
 
 def test_scene_adapter_returns_report_for_business_level_non_binding(

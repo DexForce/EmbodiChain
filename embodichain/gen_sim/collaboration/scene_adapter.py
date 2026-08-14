@@ -45,6 +45,10 @@ from embodichain.gen_sim.task_engine import TaskCandidate, TaskCandidateSet
 from embodichain.gen_sim.task_engine.interpretation import (
     _default_instruction_caller,
 )
+from embodichain.gen_sim.scene_bridge import (
+    SceneEngineV1Adapter,
+    StaticSceneManifest,
+)
 
 from .contracts import (
     BINDING_REPORT_SCHEMA,
@@ -130,6 +134,7 @@ class SceneAdaptation:
     prepared_scene: PreparedScene
     source_config_path: Path
     scene_package: ScenePackageRef | None = None
+    static_scene_manifest: StaticSceneManifest | None = None
 
     @property
     def selected_candidate_id(self) -> str | None:
@@ -157,12 +162,14 @@ class SceneAdapter:
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,
         robot_profile: str = "franka",
+        scene_bridge: SceneEngineV1Adapter | None = None,
     ) -> None:
         self.store = store or ScenePackageStore()
         self.model = model
         self.grounding_caller = grounding_caller
         self.adjudicator = adjudicator
         self.robot_profile = robot_profile
+        self.scene_bridge = scene_bridge or SceneEngineV1Adapter()
 
     def adapt(
         self,
@@ -190,6 +197,11 @@ class SceneAdapter:
             prepared,
             inventory,
             source_format=resolved_source.source_format,
+        )
+        static_manifest = self.scene_bridge.adapt_prepared_scene(
+            prepared,
+            source_format=resolved_source.source_format,
+            robot_profile=inventory.profile,
         )
 
         invoke = grounding_caller or self.grounding_caller
@@ -265,6 +277,7 @@ class SceneAdapter:
             prepared_scene=prepared,
             source_config_path=prepared.source_config_path,
             scene_package=package_ref,
+            static_scene_manifest=static_manifest,
         )
 
     def _resolve_source(

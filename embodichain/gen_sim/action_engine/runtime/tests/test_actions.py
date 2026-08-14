@@ -39,6 +39,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     PlannerDiagnostics,
     RecoveryPolicy,
+    SceneSnapshot,
     StateDelta,
     TimedTrajectory,
 )
@@ -322,6 +323,101 @@ def test_released_object_returns_to_live_dynamic_collision_pose() -> None:
     )
 
     assert torch.equal(scene.entities["released"].pose, actual)
+
+
+def test_default_scene_provider_advances_only_after_material_change() -> None:
+    actual = torch.eye(4).repeat(2, 1, 1)
+    entity = _PoseEntity(actual.clone())
+    adapter = AtomicActionAdapter(
+        _planner_env(rigid_objects={"can": entity}),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": ["can"],
+        },
+    )
+    grounded = GroundedAction(
+        "MoveJoints",
+        "left_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+        object_uid="can",
+    )
+    state = ExecutionState(last_qpos=torch.zeros(2, 8))
+
+    first = adapter._scene_snapshot(grounded, state)
+    unchanged = adapter._scene_snapshot(grounded, state)
+    entity.pose[:, 0, 3] += 0.1
+    changed = adapter._scene_snapshot(grounded, state)
+
+    assert first.version == unchanged.version == 0
+    assert changed.version == 1
+    assert changed.collision_world_revisions(2) == (1, 1)
+
+
+def test_external_scene_provider_is_used_by_planning_snapshot() -> None:
+    pose = torch.eye(4).repeat(2, 1, 1)
+
+    class _Provider:
+        def snapshot(self, *, timestamp: float, env_ids: torch.Tensor) -> SceneSnapshot:
+            assert timestamp == 0.0
+            assert torch.equal(env_ids, torch.tensor([0, 1]))
+            return SceneSnapshot(
+                timestamp=timestamp,
+                version=7,
+                entities={"can": actions.EntityState(pose)},
+            )
+
+    adapter = AtomicActionAdapter(
+        _planner_env(),
+        scene_provider=_Provider(),
+    )
+    grounded = GroundedAction(
+        "MoveJoints",
+        "left_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+        object_uid="can",
+    )
+
+    scene = adapter._scene_snapshot(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    assert scene.version == 7
+    assert torch.equal(scene.entities["can"].pose, pose)
+
+
+def test_start_session_delegates_to_shared_atomic_engine(monkeypatch: Any) -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+    grounded = GroundedAction(
+        "MoveJoints",
+        "left_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+    )
+    state = ExecutionState(last_qpos=torch.zeros(2, 8))
+    marker = object()
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(adapter, "_planning_context", lambda *_args: "context")
+    monkeypatch.setattr(adapter, "_invocation", lambda *_args: "invocation")
+
+    class _Engine:
+        def start(self, invocations: tuple[Any, ...], context: Any) -> object:
+            captured["invocations"] = invocations
+            captured["context"] = context
+            return marker
+
+    monkeypatch.setattr(adapter, "_engine", lambda: _Engine())
+
+    result = adapter.start_session(grounded, state)
+
+    assert result is marker
+    assert captured == {"invocations": ("invocation",), "context": "context"}
 
 
 def test_retreat_parks_intentional_contact_objects() -> None:

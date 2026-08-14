@@ -32,6 +32,9 @@ from embodichain.gen_sim.action_engine.generation import (
 )
 from embodichain.gen_sim.action_engine.generation.artifacts import artifact_paths
 from embodichain.gen_sim.action_engine.agent import ActionAgent
+from embodichain.gen_sim.action_engine.domain.task_contracts import (
+    TASK_CONTRACTS as ACTION_TASK_CONTRACTS,
+)
 from embodichain.gen_sim.action_engine.tasks import (
     GroundedTaskSpec,
     ground_instruction_draft,
@@ -42,6 +45,7 @@ from embodichain.gen_sim.task_engine import (
     TaskCandidateSet,
     validate_task_candidate,
 )
+from embodichain.gen_sim.scene_bridge import FeasibilityBroker, FeasibilityReport
 
 from .artifacts import (
     ArtifactTransaction,
@@ -117,6 +121,7 @@ class PreparationResult:
     grounded_task_plan: GroundedTaskPlan | None = None
     action_graph: dict[str, Any] | None = None
     generated_paths: GeneratedConfigPaths | None = None
+    feasibility_report: FeasibilityReport | None = None
 
     @property
     def bound(self) -> bool:
@@ -137,11 +142,13 @@ class CollaborationCoordinator:
         scene_adapter: SceneAdapter | None = None,
         action_agent: ActionAgent | None = None,
         bundle_generator: BundleGenerator = generate_action_engine_config,
+        feasibility_broker: FeasibilityBroker | None = None,
     ) -> None:
         self.task_agent = task_agent or TaskAgent()
         self.scene_adapter = scene_adapter or SceneAdapter()
         self.action_agent = action_agent or ActionAgent()
         self.bundle_generator = bundle_generator
+        self.feasibility_broker = feasibility_broker or FeasibilityBroker()
 
     def prepare(
         self,
@@ -186,6 +193,7 @@ class CollaborationCoordinator:
                     scene_manifest=None,
                     role_bindings=None,
                     binding_report=adaptation.binding_report,
+                    static_scene_manifest=adaptation.static_scene_manifest,
                 )
                 published = transaction.commit()
                 return PreparationResult(
@@ -202,6 +210,33 @@ class CollaborationCoordinator:
                 raise ValueError(
                     "A bound SceneAdaptation must include a selected candidate "
                     "and RoleBindings."
+                )
+            feasibility_report = self._assess_feasibility(
+                selected,
+                raw_role_bindings,
+                adaptation,
+            )
+            if (
+                feasibility_report is not None
+                and feasibility_report["status"] == "contradicted"
+            ):
+                write_collaboration_artifacts(
+                    staging_dir,
+                    candidate_set=candidate_set,
+                    scene_manifest=adaptation.scene_manifest,
+                    role_bindings=raw_role_bindings,
+                    binding_report=adaptation.binding_report,
+                    static_scene_manifest=adaptation.static_scene_manifest,
+                    feasibility_report=feasibility_report,
+                )
+                published = transaction.commit()
+                return PreparationResult(
+                    status="infeasible",
+                    output_dir=published,
+                    candidate_set=deepcopy(candidate_set),
+                    adaptation=adaptation,
+                    collaboration_artifacts=collaboration_artifact_paths(published),
+                    feasibility_report=deepcopy(feasibility_report),
                 )
             robot_profile = str(adaptation.scene_manifest["robot_profile"])
             grounded = lower_task_candidate(
@@ -225,6 +260,12 @@ class CollaborationCoordinator:
                 binding_report=adaptation.binding_report,
             )
             action_graph = self.action_agent.plan(grounded_plan)
+            preflight = getattr(self.action_agent, "preflight", None)
+            if callable(preflight):
+                preflight(
+                    action_graph,
+                    scene_manifest=adaptation.scene_manifest,
+                )
 
             generator_kwargs: dict[str, Any] = {
                 "task_name": grounded_plan["task_id"],
@@ -271,6 +312,8 @@ class CollaborationCoordinator:
                 role_bindings=role_bindings,
                 binding_report=adaptation.binding_report,
                 grounded_task_plan=grounded_plan,
+                static_scene_manifest=adaptation.static_scene_manifest,
+                feasibility_report=feasibility_report,
             )
             published = transaction.commit()
             return PreparationResult(
@@ -285,7 +328,33 @@ class CollaborationCoordinator:
                     published,
                     planning_mode=planning_mode,
                 ),
+                feasibility_report=deepcopy(feasibility_report),
             )
+
+    def _assess_feasibility(
+        self,
+        candidate: Mapping[str, Any],
+        role_bindings: Mapping[str, Any],
+        adaptation: SceneAdaptation,
+    ) -> FeasibilityReport | None:
+        """Intersect task requirements with scene and Action Engine capabilities."""
+        manifest = adaptation.static_scene_manifest
+        registry = getattr(self.action_agent, "registry", None)
+        if manifest is None or registry is None:
+            return None
+        catalog = getattr(registry, "catalog", None)
+        if not callable(catalog):
+            return None
+        return self.feasibility_broker.assess(
+            candidate,
+            role_bindings,
+            manifest,
+            capability_catalog=catalog(),
+            task_actions={
+                task_type: contract.core_actions
+                for task_type, contract in ACTION_TASK_CONTRACTS.items()
+            },
+        )
 
     @staticmethod
     def _coerce_source(
