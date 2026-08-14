@@ -55,6 +55,7 @@ class TableSupportRegion:
     vertices: np.ndarray  # Full z-up table vertex array referenced by ``faces``.
     faces: np.ndarray  # Indices of triangles selected as the main support surface.
     support_polygon: Polygon  # Largest valid outer support contour in z-up XY.
+    optimization_rectangle: Polygon  # Axis-aligned rectangle fully inside the contour.
 
 
 class TableSupportSurfaceDetector:
@@ -131,11 +132,13 @@ class TableSupportSurfaceDetector:
         selected_vertices = face_vertices[selected_faces]
         vertices = mesh.vertices.copy()
         faces = mesh.faces[selected_faces].copy()
+        support_polygon = self._extract_largest_support_polygon(vertices[faces, :2])
         self.support_region = TableSupportRegion(
             top_z=float(selected_vertices[:, :, 2].max()),
             vertices=vertices,
             faces=faces,
-            support_polygon=self._extract_largest_support_polygon(vertices[faces, :2]),
+            support_polygon=support_polygon,
+            optimization_rectangle=self._largest_inscribed_rectangle(support_polygon),
         )
         return self.support_region
 
@@ -368,6 +371,46 @@ class TableSupportSurfaceDetector:
         return Polygon(boundary_xy)
 
     @staticmethod
+    def _largest_inscribed_rectangle(polygon: Polygon) -> Polygon:
+        """Find a conservative axis-aligned rectangle contained by the support contour."""
+        coordinates = np.asarray(polygon.exterior.coords[:-1], dtype=float)
+        x_values = np.unique(coordinates[:, 0])
+        y_values = np.unique(coordinates[:, 1])
+        # Keep the search bounded for highly tessellated support contours.
+        if len(x_values) > 48:
+            x_values = x_values[np.linspace(0, len(x_values) - 1, 48, dtype=int)]
+        if len(y_values) > 48:
+            y_values = y_values[np.linspace(0, len(y_values) - 1, 48, dtype=int)]
+
+        best_rectangle: Polygon | None = None
+        best_area = 0.0
+        for x_index, minimum_x in enumerate(x_values[:-1]):
+            for maximum_x in x_values[x_index + 1 :]:
+                if maximum_x <= minimum_x:
+                    continue
+                for y_index, minimum_y in enumerate(y_values[:-1]):
+                    for maximum_y in y_values[y_index + 1 :]:
+                        if maximum_y <= minimum_y:
+                            continue
+                        rectangle = Polygon(
+                            [
+                                (minimum_x, minimum_y),
+                                (maximum_x, minimum_y),
+                                (maximum_x, maximum_y),
+                                (minimum_x, maximum_y),
+                            ]
+                        )
+                        area = rectangle.area
+                        if area > best_area and polygon.covers(rectangle):
+                            best_rectangle = rectangle
+                            best_area = area
+        if best_rectangle is None:
+            raise ValueError(
+                "Support contour has no non-degenerate inscribed rectangle."
+            )
+        return best_rectangle
+
+    @staticmethod
     def _face_adjacency(mesh: trimesh.Trimesh) -> dict[int, set[int]]:
         """Build a face adjacency dictionary for the mesh."""
         adjacency: dict[int, set[int]] = {}
@@ -475,6 +518,14 @@ class TableSupportSurfaceDetector:
             color="saddlebrown",
             linewidth=2.0,
             label="outer support contour",
+        )
+        rectangle_xy = np.asarray(support_region.optimization_rectangle.exterior.coords)
+        axis.plot(
+            rectangle_xy[:, 0],
+            rectangle_xy[:, 1],
+            color="seagreen",
+            linewidth=2.0,
+            label="optimization rectangle",
         )
         axis.autoscale_view()
         axis.set_aspect("equal", adjustable="box")

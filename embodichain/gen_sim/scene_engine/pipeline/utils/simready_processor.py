@@ -41,6 +41,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils im
     render_object_front_top_views,
     rotate_glb_about_x_axis,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
+    TableSupportSurfaceDetector,
+)
 from embodichain.utils.logger import log_info
 
 _TABLE_PHYSICS_ATTRS = {
@@ -83,6 +86,7 @@ class SimReadyProcessor:
         coarse_layout_by_id: dict[str, dict[str, object]],
         coarse_geometry_root: str | Path,
         simready_geometry_root: str | Path,
+        debug_output_root: str | Path | None = None,
         config: SimReadyProcessorConfig | None = None,
         vlm_client: OpenAICompatibleVLM | None = None,
     ) -> None:
@@ -91,6 +95,12 @@ class SimReadyProcessor:
         self.coarse_geometry_root = Path(coarse_geometry_root).expanduser().resolve()
         self.simready_geometry_root = (
             Path(simready_geometry_root).expanduser().resolve()
+        )
+        # Save rendered debug images.
+        self.debug_output_root = (
+            Path(debug_output_root).expanduser().resolve()
+            if debug_output_root is not None
+            else None
         )
         self.simready_table_layout: dict[str, object] | None = None
         self.simready_assets_layout: list[dict[str, object]] | None = None
@@ -159,8 +169,37 @@ class SimReadyProcessor:
             )
         scene_object.simready_glb_path = str(output_path)
         scene_object.physics = self._fixed_physics_for_kind(object_role)
+        # For table. (currently the id is fixed into table)
+        if object_role == "table":
+            # Detect and persist all reusable tabletop support geometry at SimReady time.
+            support_detector = TableSupportSurfaceDetector(
+                table_world_mesh=self._z_up_table_mesh(simready_mesh),
+                debug_output_root=self.debug_output_root,
+            )
+            support_region = support_detector.detect()
+            scene_object.support_surface_z = support_region.top_z
+            scene_object.support_contour_xy = [
+                [float(x), float(y)]
+                for x, y in support_region.support_polygon.exterior.coords[:-1]
+            ]
+            scene_object.support_optimization_rect_xy = [
+                [float(x), float(y)]
+                for x, y in support_region.optimization_rectangle.exterior.coords[:-1]
+            ]
+            if self.debug_output_root is not None:
+                # Keep the 3D selected surface and 2D contour diagnostics beside SimReady output.
+                support_detector.save_support_surface_debug_images()
         log_info(f"Created SimReady {object_role}: {object_id!r}.")
         return {"id": object_id, **simready_transform}
+
+    @staticmethod
+    def _z_up_table_mesh(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        """Convert one canonical y-up GLB mesh into the detector's z-up frame."""
+        y_up_to_z_up = np.eye(4)
+        y_up_to_z_up[:3, :3] = Rotation.from_euler("x", 90.0, degrees=True).as_matrix()
+        z_up_mesh = mesh.copy()
+        z_up_mesh.apply_transform(y_up_to_z_up)
+        return z_up_mesh
 
     def _prepare_vlm_rotated_glb(
         self, scene_object: SceneObject

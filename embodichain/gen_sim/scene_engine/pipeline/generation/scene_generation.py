@@ -23,6 +23,7 @@ import shutil
 
 import numpy as np
 import trimesh
+from shapely.geometry import Polygon
 
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
@@ -54,9 +55,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessor,
     SimReadyProcessorConfig,
-)
-from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
-    TableSupportSurfaceDetector,
 )
 from embodichain.utils.logger import log_info
 
@@ -115,6 +113,7 @@ def generate_scene_and_refine(
         coarse_layout_by_id=coarse_layout_by_id,
         coarse_geometry_root=coarse_geometry_output_root,
         simready_geometry_root=simready_geometry_output_root,
+        debug_output_root=debug_output_root,
         # Image-to-scene uses the geometry service's coarse scale directly.
         config=SimReadyProcessorConfig(
             use_vlm_scale=False,
@@ -248,6 +247,18 @@ def _update_scene_final_y_up_layout_and_z_up_centers(
     )
     # Persist AABB centers for future scene-edit object disambiguation.
     scene.table.center_xy = table_mesh.bounds[:, :2].mean(axis=0).tolist()
+    if scene.table.support_contour_xy is not None:
+        # Move SimReady-local support geometry into the final table-frame position.
+        table_center_xy = np.asarray(scene.table.center_xy, dtype=float)
+        scene.table.support_contour_xy = [
+            (np.asarray(point, dtype=float) + table_center_xy).tolist()
+            for point in scene.table.support_contour_xy
+        ]
+        if scene.table.support_optimization_rect_xy is not None:
+            scene.table.support_optimization_rect_xy = [
+                (np.asarray(point, dtype=float) + table_center_xy).tolist()
+                for point in scene.table.support_optimization_rect_xy
+            ]
     for asset in scene.assets:
         asset.center_xy = assets_aabb_corners_by_id[asset.id].mean(axis=0).tolist()
 
@@ -360,31 +371,36 @@ def _layout_refinement(
         log_info("Scene has no movable assets; skipping support-region clamping.")
         return refined_table_layout, []
 
-    # 4. Detect the actual upward support triangles instead of projecting the
-    # entire table mesh to one convex hull.  The result retains concavities
-    # (for example, an L-shaped tabletop) and is the only boundary used for
-    # placement below.
-    (
-        table_world_mesh_z_up,
-        assets_aabb_2d_z_up_world_corners_by_id,
-    ) = _measure_table_and_assets_in_z_up_world(
-        table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
-        geometry_root=simready_geometry_output_root,
+    # 4. Reuse support geometry detected during SimReady processing.
+    if (
+        scene.table is None
+        or scene.table.support_contour_xy is None
+        or scene.table.support_optimization_rect_xy is None
+    ):
+        raise ValueError("Scene table has no persisted support geometry.")
+    table_support_polygon = Polygon(scene.table.support_contour_xy)
+    table_optimization_rectangle = Polygon(scene.table.support_optimization_rect_xy)
+    if not table_support_polygon.is_valid or table_support_polygon.is_empty:
+        raise ValueError("Scene table support contour is not a valid polygon.")
+    if (
+        not table_optimization_rectangle.is_valid
+        or table_optimization_rectangle.is_empty
+    ):
+        raise ValueError("Scene table optimization rectangle is not valid.")
+    _, assets_aabb_2d_z_up_world_corners_by_id = (
+        _measure_table_and_assets_in_z_up_world(
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=simready_geometry_output_root,
+        )
     )
-    support_detector = TableSupportSurfaceDetector(
-        table_world_mesh=table_world_mesh_z_up,
-        debug_output_root=debug_output_root,
-    )
-    table_support_region = support_detector.detect()
-    support_detector.save_support_surface_debug_images()
 
     # 5. Keep the complete clutter rigid in the table plane.  A successful
     # result applies one shared z-up XY delta to every AABB, so it preserves
     # all existing asset-to-asset relations.  It is *not* an asset packing
     # pass: pre-existing overlap is deliberately left to a later optimizer.
     group_clamp = AssetsGroupSupportClamp(
-        support_region=table_support_region.support_polygon,
+        support_region=table_support_polygon,
         assets_aabb_2d_z_up_world_corners_by_id=(
             assets_aabb_2d_z_up_world_corners_by_id
         ),
@@ -405,13 +421,10 @@ def _layout_refinement(
         )
     )
 
-    # 6. Restore the previous pairwise AABB separation stage, but constrain
-    # every candidate with the actual support polygon rather than the legacy
-    # largest internal rectangle.  Assets may now move independently only as
-    # much as needed to remove overlap; every resulting AABB remains on the
-    # L-shaped, circular, or otherwise non-convex support region.
+    # 6. Optimize independent asset positions inside the conservative rectangle.
+    # The clamp above already used the exact outer contour for the shared shift.
     overlap_optimizer = AssetsSupportLayoutOptimizer(
-        support_region=table_support_region.support_polygon,
+        support_region=table_optimization_rectangle,
         assets_aabb_2d_z_up_world_corners_by_id=(
             clamped_assets_aabb_2d_z_up_world_corners_by_id
         ),
