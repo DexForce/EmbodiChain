@@ -1240,6 +1240,26 @@ def test_agent_config_uses_relative_program_paths(gym_export: Path) -> None:
     assert len(config["runtime_policy_hash"]) == 64
 
 
+def test_agent_config_anchors_absolute_motion_heights_to_tabletop(
+    gym_export: Path,
+) -> None:
+    scene = prepare_scene(gym_export)
+    config = build_agent_config(
+        task_name="high_table_task",
+        robot_profile="franka",
+        execution_program_hash="c" * 64,
+        source_config_path=scene.source_config_path,
+        uid_map=scene.uid_map,
+        table_top_z=1.05,
+    )
+
+    policy = config["runtime_policy"]
+    assert policy["motion_defaults"]["MoveEndEffector"][
+        "maximum_eef_height"
+    ] == pytest.approx(1.45)
+    assert policy["grounding"]["handover"]["maximum_eef_height"] == pytest.approx(1.85)
+
+
 def test_documented_cli_accepts_franka_profile() -> None:
     args = build_parser().parse_args(
         [

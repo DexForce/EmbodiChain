@@ -94,6 +94,7 @@ def build_agent_config(
     uid_map: dict[str, str],
     static_obstacle_uids: Sequence[str] | None = None,
     dynamic_obstacle_uids: Sequence[str] | None = None,
+    table_top_z: float | None = None,
     planning_mode: str = "offline",
     seed_task_graph_path: str | Path | None = EXECUTION_PROGRAM_FILENAME,
     vlm_model: str | None = None,
@@ -102,7 +103,11 @@ def build_agent_config(
     """Build the small manifest consumed by ``run_agent``."""
     profile = canonical_robot_profile(robot_profile)
     runtime_policy = default_runtime_policy(profile)
-    if static_obstacle_uids is not None or dynamic_obstacle_uids is not None:
+    if (
+        static_obstacle_uids is not None
+        or dynamic_obstacle_uids is not None
+        or table_top_z is not None
+    ):
         policy = runtime_policy.as_mapping()
         planner = policy["planner"]
         if static_obstacle_uids is not None:
@@ -112,6 +117,22 @@ def build_agent_config(
                 str(uid) for uid in dynamic_obstacle_uids
             ]
             planner["dynamic_collision"] = bool(dynamic_obstacle_uids)
+        if table_top_z is not None:
+            tabletop = float(table_top_z)
+            if not math.isfinite(tabletop):
+                raise ValueError("table_top_z must be finite when provided.")
+            height_offset = tabletop - _DEFAULT_TABLETOP_Z
+            height_policies = (
+                policy["grounding"]["semantic_defaults"],
+                policy["grounding"]["handover"],
+                policy["motion_defaults"]["MoveEndEffector"],
+                policy["motion_modifiers"]["orientation"]["upright"]["MoveEndEffector"],
+            )
+            for height_policy in height_policies:
+                height_policy["maximum_eef_height"] = round(
+                    float(height_policy["maximum_eef_height"]) + height_offset,
+                    6,
+                )
         runtime_policy = RuntimePolicyCfg.from_mapping(policy)
     _validate_planning_mode(planning_mode)
     graph_path = _validate_seed_graph_path(seed_task_graph_path)

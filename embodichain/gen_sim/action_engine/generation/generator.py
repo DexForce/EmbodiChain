@@ -272,6 +272,7 @@ def generate_action_engine_config(
         uid_map=scene.uid_map,
         static_obstacle_uids=[str(config["uid"]) for config in scene.background],
         dynamic_obstacle_uids=[str(config["uid"]) for config in scene.rigid_objects],
+        table_top_z=scene.table_top_z,
         planning_mode=planning_mode,
         seed_task_graph_path=graph_relative_path,
         vlm_model=vlm_model,

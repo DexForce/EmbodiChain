@@ -207,6 +207,35 @@ class RuntimeRecorder:
             self.events[env_id].append(event)
             self._write_step_checkpoint(env_id, step, event)
 
+    def recovery(
+        self,
+        *,
+        failure_type: str,
+        failed_node_id: str,
+        active: torch.Tensor,
+        status: str,
+        recovery_group_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Record one bounded local-recovery phase for the selected rows."""
+        if not self.enabled:
+            return
+        if status not in {"started", "succeeded", "failed", "rejected"}:
+            raise ValueError(f"Unknown recovery status {status!r}.")
+        for env_id in range(self.num_envs):
+            if not bool(active[env_id]):
+                continue
+            event = {
+                "event": "local_recovery",
+                "failure_type": str(failure_type),
+                "failed_node_id": str(failed_node_id),
+                "recovery_group_id": recovery_group_id,
+                "status": status,
+                "error": error,
+                "time_utc": datetime.now(timezone.utc).isoformat(),
+            }
+            self.events[env_id].append(event)
+
     def _env_dir(self, env_id: int) -> Path:
         return self.output_dir / f"env_{env_id:04d}"
 

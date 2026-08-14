@@ -29,7 +29,13 @@ from .recovery import (
     build_upright_recovery,
     classify_failure,
 )
-from .models import ExecutionProgram, ExecutionResult
+from .models import ExecutionProgram, ExecutionReport, ExecutionResult
+from .reporting import (
+    EXECUTION_REPORT_FILENAME,
+    EXECUTION_REPORT_SCHEMA,
+    validate_execution_report,
+    write_execution_report,
+)
 from .predicates import PREDICATE_TYPES, evaluate_predicate
 from .state import ExecutionState
 
@@ -39,6 +45,9 @@ __all__ = [
     "DynamicRecoveryController",
     "PREDICATE_TYPES",
     "ExecutionResult",
+    "ExecutionReport",
+    "EXECUTION_REPORT_FILENAME",
+    "EXECUTION_REPORT_SCHEMA",
     "FAILURE_TYPES",
     "GraphRevision",
     "ProgramExecutor",
@@ -50,4 +59,6 @@ __all__ = [
     "evaluate_predicate",
     "load_agent_execution_program",
     "load_execution_program",
+    "validate_execution_report",
+    "write_execution_report",
 ]

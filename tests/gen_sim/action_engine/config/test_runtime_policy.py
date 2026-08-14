@@ -107,6 +107,7 @@ def test_default_runtime_policy_returns_detached_profile_snapshots() -> None:
     assert second.arm_selection.pickup_crossing_weight == 1.0
     assert second.motion_defaults["PickUp"]["lift_height"] == 0.30
     assert franka.arm_selection.pickup_crossing_weight == 1.0
+    assert franka.motion_defaults["MoveEndEffector"]["retreat_height"] == 0.10
 
 
 def test_generation_defaults_return_detached_values() -> None:

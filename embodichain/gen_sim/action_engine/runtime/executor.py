@@ -290,6 +290,8 @@ class ProgramExecutor:
         self._policies: dict[str, dict[str, Any]] = {}
         self._payload_initial: dict[str, dict[str, torch.Tensor]] = {}
         self._robot_lateral_axis_cache: torch.Tensor | None = None
+        self._transition_count = 0
+        self._retry_counts = [0] * int(self.env.num_envs)
 
     def run(
         self,
@@ -320,7 +322,6 @@ class ProgramExecutor:
         completed: set[str] = set()
         remaining = [edge.id for edge in self.program.edges]
         executed_actions: list[torch.Tensor] = []
-        transitions = 0
         error_message = None
         try:
             while remaining:
@@ -349,9 +350,7 @@ class ProgramExecutor:
                     blocked[batch[0].id], blocked[batch[1].id]
                 ):
                     batch = (batch[0],)
-                transitions += len(batch)
-                if transitions > self.max_transitions:
-                    raise RuntimeError("Execution exceeded max_transitions.")
+                self._consume_transitions(len(batch))
 
                 if len(batch) == 2:
                     edge_results, _ = self._execute_parallel_pickups(
@@ -401,6 +400,15 @@ class ProgramExecutor:
                         step,
                         failed=branch_failed,
                     )
+                    attempted_failed = edge_result.failed & ~branch_failed
+                    if not self._is_cleanup_edge(edge):
+                        edge_result = self._recover_object_fallen(
+                            edge,
+                            step,
+                            edge_result,
+                            inherited_failed=branch_failed,
+                            recorder=recorder,
+                        )
                     if self._is_cleanup_edge(edge):
                         # Cleanup degradation is observable in the record but does
                         # not invalidate an already achieved semantic relation.
@@ -429,7 +437,7 @@ class ProgramExecutor:
                             self._failure_events(
                                 edge,
                                 step,
-                                next_failed & ~branch_failed,
+                                attempted_failed,
                                 postcondition=False,
                             )
                         )
@@ -484,6 +492,7 @@ class ProgramExecutor:
             semantic_success=semantic_success,
             record_dir=record_dir,
             retry_count=self.retry_count,
+            retry_counts=list(self._retry_counts),
             recovery_count=(
                 0
                 if self.runtime_graph is None
@@ -594,6 +603,11 @@ class ProgramExecutor:
             if not bool(decision.retry.any()):
                 break
             self.retry_count += int(decision.retry.sum())
+            for env_id in (
+                torch.nonzero(decision.retry, as_tuple=False).flatten().tolist()
+            ):
+                self._retry_counts[env_id] += 1
+            self._consume_transitions(1)
             for arm in ("left_arm", "right_arm"):
                 self._candidate_cache.pop((step.id, arm), None)
                 self._candidate_failures.pop((step.id, arm), None)
@@ -626,6 +640,283 @@ class ProgramExecutor:
             grounded,
             planner_traces,
         )
+
+    def _recover_object_fallen(
+        self,
+        edge: ExecutionEdge,
+        step: SemanticStep,
+        result: _EdgeResult,
+        *,
+        inherited_failed: torch.Tensor,
+        recorder: RuntimeRecorder,
+    ) -> _EdgeResult:
+        """Run the bounded E2 repair and replay only the failed vector rows."""
+        if self.runtime_graph is None or len(edge.actions) != 1:
+            return result
+        node_id = edge.actions[0].get("seed_node_id")
+        if not isinstance(node_id, str) or not node_id:
+            return result
+        newly_failed = result.failed & ~inherited_failed
+        if not bool(newly_failed.any()):
+            return result
+        try:
+            fallen = newly_failed & ~evaluate_predicate(
+                self.env,
+                {"type": "object_not_fallen", "object": step.object_uid},
+            )
+        except (TypeError, ValueError):
+            return result
+        if not bool(fallen.any()):
+            return result
+
+        env_ids = torch.nonzero(fallen, as_tuple=False).flatten().tolist()
+        original_assignment = list(
+            self._assignments.get(step.id, [None] * int(self.env.num_envs))
+        )
+        try:
+            patched = self.runtime_graph.insert_default_recovery(
+                failed_node_id=node_id,
+                failure_type="object_fallen",
+                active_env_ids=env_ids,
+                resume_failed_group=True,
+            )
+            revision = self.runtime_graph.revisions[-1]
+            recovery_group_id = revision.inserted_group_ids[0]
+            from .loader import load_execution_program
+
+            recovery_program = load_execution_program(
+                patched,
+                registry=self.capability_registry,
+                require_executable=True,
+            )
+            recovery_step = next(
+                item
+                for item in recovery_program.semantic_steps
+                if item.id == recovery_group_id
+            )
+            recovery_edges = {
+                item.id: item
+                for item in recovery_program.edges
+                if item.id in set(recovery_step.edge_ids)
+            }
+            if set(recovery_edges) != set(recovery_step.edge_ids):
+                raise RuntimeError("Compiled recovery group is incomplete.")
+        except Exception as exc:
+            recorder.recovery(
+                failure_type="object_fallen",
+                failed_node_id=node_id,
+                active=fallen,
+                status="rejected",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return result
+
+        recorder.recovery(
+            failure_type="object_fallen",
+            failed_node_id=node_id,
+            active=fallen,
+            status="started",
+            recovery_group_id=recovery_group_id,
+        )
+        aggregate_actions = list(result.actions)
+        grounded = list(result.grounded)
+        planner_traces = list(result.planner_traces)
+        self._clear_recovery_rows(step, fallen)
+
+        # Recovery edges are compiled from the revised graph but execute through
+        # this executor so live ownership, recorder, and simulator state remain
+        # continuous. They are removed from the scheduling maps afterwards.
+        installed_edge_ids: list[str] = []
+        self.steps[recovery_step.id] = recovery_step
+        for recovery_edge in recovery_edges.values():
+            self.edges[recovery_edge.id] = recovery_edge
+            self.step_by_edge[recovery_edge.id] = recovery_step
+            installed_edge_ids.append(recovery_edge.id)
+        recovery_failed = ~fallen
+        try:
+            self._assignments.pop(recovery_step.id, None)
+            self._ensure_assignment(recovery_step, recovery_failed)
+            for recovery_edge_id in recovery_step.edge_ids:
+                self._consume_transitions(1)
+                recovery_edge = recovery_edges[recovery_edge_id]
+                recovery_result = self._execute_edge_with_retries(
+                    recovery_edge,
+                    recovery_step,
+                    failed=recovery_failed,
+                )
+                recorder.edge(
+                    recovery_edge.id,
+                    recovery_step,
+                    assignments=self._assignments[recovery_step.id],
+                    grounded=recovery_result.grounded,
+                    active=~recovery_failed,
+                    failed=recovery_result.failed,
+                    action_steps=len(recovery_result.actions),
+                    planner_traces=recovery_result.planner_traces,
+                )
+                aggregate_actions.extend(recovery_result.actions)
+                grounded.extend(recovery_result.grounded)
+                planner_traces.extend(recovery_result.planner_traces)
+                recovery_failed = recovery_result.failed
+            _, recovery_success, observed = self._verify_step(
+                recovery_step,
+                recovery_failed,
+            )
+            recorder.step(
+                recovery_step,
+                recovery_success,
+                observed=observed,
+                target=self._targets.get(recovery_step.id),
+                metadata=(
+                    self._step_runtime_metadata(recovery_step)
+                    if self.record_runtime
+                    else None
+                ),
+            )
+        except Exception as exc:
+            recorder.recovery(
+                failure_type="object_fallen",
+                failed_node_id=node_id,
+                active=fallen,
+                status="failed",
+                recovery_group_id=recovery_group_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return _EdgeResult(
+                aggregate_actions,
+                result.failed,
+                grounded,
+                planner_traces,
+            )
+        finally:
+            for recovery_edge_id in installed_edge_ids:
+                self.edges.pop(recovery_edge_id, None)
+                self.step_by_edge.pop(recovery_edge_id, None)
+            self.steps.pop(recovery_step.id, None)
+
+        recovered = fallen & recovery_success
+        if not bool(recovered.any()):
+            recorder.recovery(
+                failure_type="object_fallen",
+                failed_node_id=node_id,
+                active=fallen,
+                status="failed",
+                recovery_group_id=recovery_group_id,
+            )
+            return _EdgeResult(
+                aggregate_actions,
+                result.failed,
+                grounded,
+                planner_traces,
+            )
+
+        # Recompute this TaskGroup's assignment for recovered rows, retaining
+        # the untouched assignments of healthy vector rows. Replay the prefix
+        # through the failed edge; the ordinary main loop will then continue at
+        # the next edge and verify the TaskGroup exactly once.
+        try:
+            self._assignments.pop(step.id, None)
+            for arm in ("left_arm", "right_arm"):
+                self._candidate_cache.pop((step.id, arm), None)
+                self._candidate_failures.pop((step.id, arm), None)
+            self._ensure_assignment(step, ~recovered)
+            replay_assignment = self._assignments[step.id]
+            self._assignments[step.id] = [
+                (
+                    replay_assignment[index]
+                    if bool(recovered[index])
+                    else original_assignment[index]
+                )
+                for index in range(int(self.env.num_envs))
+            ]
+            replay_failed = ~recovered
+            for prefix_edge_id in step.edge_ids:
+                self._consume_transitions(1)
+                prefix_edge = self.edges[prefix_edge_id]
+                prefix_result = self._execute_edge_with_retries(
+                    prefix_edge,
+                    step,
+                    failed=replay_failed,
+                )
+                aggregate_actions.extend(prefix_result.actions)
+                grounded.extend(prefix_result.grounded)
+                planner_traces.extend(prefix_result.planner_traces)
+                replay_failed = prefix_result.failed
+                if prefix_edge_id == edge.id:
+                    break
+        except Exception as exc:
+            recorder.recovery(
+                failure_type="object_fallen",
+                failed_node_id=node_id,
+                active=fallen,
+                status="failed",
+                recovery_group_id=recovery_group_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return _EdgeResult(
+                aggregate_actions,
+                result.failed,
+                grounded,
+                planner_traces,
+            )
+        final_failed = result.failed.clone()
+        final_failed[fallen] = replay_failed[fallen]
+        recorder.recovery(
+            failure_type="object_fallen",
+            failed_node_id=node_id,
+            active=fallen,
+            status=("succeeded" if not bool(final_failed[fallen].any()) else "failed"),
+            recovery_group_id=recovery_group_id,
+        )
+        return _EdgeResult(
+            aggregate_actions,
+            final_failed,
+            grounded,
+            planner_traces,
+        )
+
+    def _clear_recovery_rows(
+        self,
+        step: SemanticStep,
+        mask: torch.Tensor,
+    ) -> None:
+        """Discard stale hold projections only for rows entering recovery."""
+        owners = self._object_owners.setdefault(
+            step.object_uid, [None] * int(self.env.num_envs)
+        )
+        for env_id in torch.nonzero(mask, as_tuple=False).flatten().tolist():
+            owner = owners[env_id]
+            owners[env_id] = None
+            if owner in self._arm_owners and (
+                self._arm_owners[str(owner)][env_id] == step.object_uid
+            ):
+                self._arm_owners[str(owner)][env_id] = None
+            for arm in ("left_arm", "right_arm"):
+                if self._arm_owners[arm][env_id] == step.object_uid:
+                    self._arm_owners[arm][env_id] = None
+
+        candidate_keys = [
+            key for key in self._object_states if key[0] == step.object_uid
+        ]
+        step_keys = [key for key in self._step_states if key[0] == step.id]
+        for cache, keys in (
+            (self._object_states, candidate_keys),
+            (self._step_states, step_keys),
+        ):
+            for key in keys:
+                state = cache[key]
+                delta = StateDelta(
+                    held_object_updates={name: None for name in state.held_objects},
+                    coordinated_held_object_updates={
+                        name: None for name in state.coordinated_held_objects
+                    },
+                )
+                if delta.is_empty:
+                    continue
+                cache[key] = ExecutionState.from_task_state(
+                    delta.apply(state.to_task_state(), mask),
+                    last_qpos=self.env.robot.get_qpos().clone(),
+                )
 
     def _retry_precondition(
         self,
@@ -694,6 +985,14 @@ class ProgramExecutor:
         self._policies.clear()
         self._payload_initial.clear()
         self._robot_lateral_axis_cache = None
+        self._transition_count = 0
+        self._retry_counts = [0] * int(self.env.num_envs)
+
+    def _consume_transitions(self, count: int) -> None:
+        """Charge ordinary, retry, and recovery edges to one runtime budget."""
+        self._transition_count += int(count)
+        if self._transition_count > self.max_transitions:
+            raise RuntimeError("Execution exceeded max_transitions.")
 
     def _pack_ready_edges(
         self,
@@ -1136,6 +1435,21 @@ class ProgramExecutor:
                         ):
                             target_pose = target
                     if not bool((feasible & ~failed).any()):
+                        target = getattr(grounded.target, "xpos", None)
+                        target_detail = ""
+                        if isinstance(target, torch.Tensor) and target.shape[-2:] == (
+                            4,
+                            4,
+                        ):
+                            target_z = target[..., 2, 3]
+                            target_detail = (
+                                f" target_z=[{float(target_z.min()):.3f}, "
+                                f"{float(target_z.max()):.3f}]"
+                            )
+                        warnings.append(
+                            f"{arm} candidate became infeasible at {edge_id} "
+                            f"({capability.name}).{target_detail}"
+                        )
                         break
                 warnings.extend(captured)
         except Exception as exc:
@@ -1258,7 +1572,15 @@ class ProgramExecutor:
                 f"Speculative arm candidates for {step.id}: feasible=[{feasible}], "
                 f"suppressed_warnings={warning_count}, exceptions={len(failures)}."
             )
-            for message in diagnostics[:3]:
+            edge_failures = tuple(
+                message
+                for message in diagnostics
+                if "candidate became infeasible" in message
+            )
+            prioritized = tuple(
+                dict.fromkeys((*failures, *edge_failures, *diagnostics))
+            )
+            for message in prioritized[:3]:
                 log_warning(f"Candidate planning for {step.id}: {message}")
         self._reported_candidates.add(step.id)
 
@@ -2511,9 +2833,13 @@ class ProgramExecutor:
                 },
             )
         if (
-            postcondition_type == "semantic_goal"
-            or self.arrangements.get(step.id) is not None
-        ) and step.goal.get("orientation_goal", "preserve") == "preserve":
+            (
+                postcondition_type == "semantic_goal"
+                or self.arrangements.get(step.id) is not None
+            )
+            and relation != "inside"
+            and step.goal.get("orientation_goal", "preserve") == "preserve"
+        ):
             orientation_reference = self._orientation_references.get(step.id)
             if orientation_reference is not None:
                 reference_rotation = orientation_reference[:, :3, :3].to(

@@ -219,6 +219,32 @@ def test_curobo_generator_receives_generated_static_obstacles(
     assert planner.world.rigid_objects == [table, can]
     assert planner.world.dynamic_obstacle_names == ["can"]
     assert planner.world.obstacle_representation == "cuboid"
+    assert planner.world.collision_cache == {"cuboid": 8, "mesh": 2}
+
+
+def test_curobo_generator_sizes_collision_cache_for_large_scene(
+    monkeypatch: Any,
+) -> None:
+    rigid_objects = {f"object_{index:02d}": object() for index in range(13)}
+    captured: dict[str, Any] = {}
+
+    def fake_motion_generator(*, cfg: Any) -> object:
+        captured["cfg"] = cfg
+        return object()
+
+    monkeypatch.setattr(actions, "MotionGenerator", fake_motion_generator)
+    adapter = AtomicActionAdapter(
+        _planner_env(rigid_objects=rigid_objects),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": list(rigid_objects),
+        },
+    )
+
+    adapter._generator()
+
+    planner = captured["cfg"].planner_cfg
+    assert planner.world.collision_cache == {"cuboid": 13, "mesh": 2}
 
 
 def test_dynamic_scene_parks_contact_target_and_held_rows() -> None:
@@ -296,6 +322,41 @@ def test_released_object_returns_to_live_dynamic_collision_pose() -> None:
     )
 
     assert torch.equal(scene.entities["released"].pose, actual)
+
+
+def test_retreat_parks_intentional_contact_objects() -> None:
+    actual = torch.eye(4).repeat(2, 1, 1)
+    entities = {
+        uid: _PoseEntity(actual.clone()) for uid in ("released", "container", "other")
+    }
+    adapter = AtomicActionAdapter(
+        _planner_env(rigid_objects=entities),
+        planner_policy={
+            "dynamic_collision": True,
+            "dynamic_obstacle_uids": list(entities),
+        },
+    )
+    grounded = GroundedAction(
+        "MoveEndEffector",
+        "left_arm",
+        "arm",
+        JointPositionGoal(target=torch.zeros(2, 2)),
+        {},
+        motion_policy={
+            "collision_exclusion_uids": ["released", "container"],
+        },
+        object_uid="released",
+    )
+
+    scene = adapter._scene_snapshot(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    parked_z = actual[:, 2, 3] + actions._COLLISION_PARKING_Z_OFFSET
+    assert torch.equal(scene.entities["released"].pose[:, 2, 3], parked_z)
+    assert torch.equal(scene.entities["container"].pose[:, 2, 3], parked_z)
+    assert torch.equal(scene.entities["other"].pose, actual)
 
 
 def test_action_outcome_commits_state_delta_only_for_verified_rows() -> None:

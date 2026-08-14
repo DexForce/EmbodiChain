@@ -21,6 +21,7 @@ from copy import deepcopy
 import pytest
 
 import embodichain.gen_sim.action_engine.tasks.interpretation as interpretation_module
+import embodichain.gen_sim.task_engine.interpretation as task_interpretation_module
 from embodichain.gen_sim.action_engine.tasks.assembly import SceneInventory
 from embodichain.gen_sim.action_engine.tasks import (
     INSTRUCTION_INTENT_SCHEMA,
@@ -1262,7 +1263,7 @@ def test_default_llm_parser_requires_the_documented_model_configuration(
 ) -> None:
     monkeypatch.delenv("ACTION_ENGINE_LLM_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_MODEL", raising=False)
-    monkeypatch.setattr(interpretation_module, "_load_local_env", lambda: {})
+    monkeypatch.setattr(task_interpretation_module, "_load_local_env", lambda: {})
 
     with pytest.raises(ValueError, match="text LLM model is required"):
         interpret_and_ground_task_spec(
@@ -1282,7 +1283,7 @@ def test_injected_caller_skips_production_model_resolution(
         )
 
     monkeypatch.setattr(
-        interpretation_module,
+        task_interpretation_module,
         "_instruction_model",
         unexpected_model_resolution,
     )
@@ -1312,7 +1313,6 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
 ) -> None:
     """MiMo-compatible endpoints must not use the lossy JSON-schema route."""
     import langchain_openai
-    from embodichain.gen_sim.action_engine.planning import planner
 
     calls: list[dict] = []
     responses = [
@@ -1350,7 +1350,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
 
     monkeypatch.setattr(langchain_openai, "ChatOpenAI", FakeChatOpenAI)
     monkeypatch.setattr(
-        planner,
+        task_interpretation_module,
         "_load_llm_settings",
         lambda *, model: {
             "api_key": "test-key",

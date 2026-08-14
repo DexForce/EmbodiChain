@@ -155,6 +155,7 @@ class RuntimeGraph:
         recovery_group: Mapping[str, Any],
         failure_type: str,
         active_env_ids: Sequence[int] | None = None,
+        preserve_failed_group_suffix: bool = False,
     ) -> dict[str, Any]:
         """Insert a complete recovery TaskGroup and rewire the unfinished suffix."""
         if failure_type not in FAILURE_TYPES:
@@ -220,7 +221,10 @@ class RuntimeGraph:
             if str(node_by_id[node_id]["task_instance_id"]) == failed_group_id
         }
         cleanup_suffix_ids: set[str] = set()
-        if str(failed_node["atomic_action"]) == "HandOver":
+        if (
+            str(failed_node["atomic_action"]) == "HandOver"
+            and not preserve_failed_group_suffix
+        ):
             # A failed handover leaves ownership indeterminate.  Its
             # transfer-arm retreat/home tail must not execute from a stale
             # handover pose; recovery owns the cleanup before replanning.
@@ -260,7 +264,11 @@ class RuntimeGraph:
             if node["id"] in recovery_ids:
                 raise ValueError(f"RuntimeGraph already contains node {node['id']!r}.")
             node_id = str(node["id"])
-            if node_id not in descendants or node_id in same_group_descendants:
+            if (
+                preserve_failed_group_suffix
+                or node_id not in descendants
+                or node_id in same_group_descendants
+            ):
                 continue
             node["depends_on"] = list(
                 dict.fromkeys(
@@ -295,7 +303,10 @@ class RuntimeGraph:
         group.pop("contract", None)
         group["node_ids"] = [str(node["id"]) for node in nodes]
         for downstream in patched["task_groups"]:
-            if failed_group_id in downstream["depends_on"]:
+            if (
+                not preserve_failed_group_suffix
+                and failed_group_id in downstream["depends_on"]
+            ):
                 downstream["depends_on"] = [
                     dependency
                     for dependency in downstream["depends_on"]
@@ -333,6 +344,7 @@ class RuntimeGraph:
         failed_node_id: str,
         failure_type: str,
         active_env_ids: Sequence[int] | None = None,
+        resume_failed_group: bool = False,
     ) -> dict[str, Any]:
         """Insert one of the deliberately small built-in recovery strategies."""
         if failure_type != "object_fallen":
@@ -343,6 +355,7 @@ class RuntimeGraph:
             self._graph,
             failed_node_id=failed_node_id,
             revision=len(self.revisions) + 1,
+            resume_failed_group=resume_failed_group,
         )
         return self.insert_recovery_subgraph(
             failed_node_id=failed_node_id,
@@ -350,6 +363,7 @@ class RuntimeGraph:
             recovery_group=group,
             failure_type=failure_type,
             active_env_ids=active_env_ids,
+            preserve_failed_group_suffix=resume_failed_group,
         )
 
     def replace_unfinished_suffix(
@@ -458,12 +472,15 @@ def build_upright_recovery(
     *,
     failed_node_id: str,
     revision: int,
+    resume_failed_group: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build a coordinate-free E2 recovery group for a fallen rigid object."""
     failed = _node(graph, failed_node_id)
     object_uid = str(failed["object_uid"])
     group_id = f"recovery_e2_{int(revision):02d}_{failed_node_id}"
-    held_consumer_arm = _downstream_held_consumer_arm(graph, failed, object_uid)
+    held_consumer_arm = None
+    if not resume_failed_group:
+        held_consumer_arm = _downstream_held_consumer_arm(graph, failed, object_uid)
     actor = (
         {"mode": "required", "arm": held_consumer_arm}
         if held_consumer_arm is not None

@@ -835,6 +835,11 @@ class ActionGrounder:
             if source in {"release", "handover"}:
                 policy["clearance_object_uid"] = step.object_uid
                 policy["collision_safety"] = "required"
+                contact_uids = [step.object_uid]
+                reference_uid = step.goal.get("reference_object")
+                if isinstance(reference_uid, str) and reference_uid:
+                    contact_uids.append(reference_uid)
+                policy["collision_exclusion_uids"] = list(dict.fromkeys(contact_uids))
             if source == "handover":
                 policy.update(self.runtime_policy.grounding["handover"])
                 policy["transfer_arm"] = arm
@@ -1662,8 +1667,13 @@ class ActionGrounder:
                     - bottom
                 )
         elif relation == "inside" and reference_pose is not None:
-            # Preserve the object's live height while centering it in container XY.
-            target[:, 2, 3] = object_pose[:, 2, 3]
+            # Grounding the final move happens after the staging lift. Preserve
+            # the pre-pick supported height rather than the lifted live height.
+            supported_pose = orientation_reference_pose
+            if supported_pose is None:
+                supported_pose = object_pose
+            supported_pose = _batched_pose(supported_pose, self.env)
+            target[:, 2, 3] = supported_pose[:, 2, 3]
         if phase == "staging":
             # Staging is a runtime waypoint, not a persisted coordinate. This
             # keeps in-place orientation robust to the object's live height.

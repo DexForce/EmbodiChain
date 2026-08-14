@@ -293,6 +293,8 @@ runtime:
       motion_defaults:
         MoveHeldObject:
           exchange_maximum_reach: 0.85
+        MoveEndEffector:
+          retreat_height: 0.10
         HandOver:
           exchange_maximum_reach: 0.85
     dual_ur3:

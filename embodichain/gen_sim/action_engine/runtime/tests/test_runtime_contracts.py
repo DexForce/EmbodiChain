@@ -1104,6 +1104,10 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
     )
     assert grounded_retreat.cfg["retreat_height"] == pytest.approx(0.30)
     assert grounded_retreat.motion_policy["clearance_object_uid"] == "can"
+    assert grounded_retreat.motion_policy["collision_exclusion_uids"] == [
+        "can",
+        "target",
+    ]
     assert grounded_retreat.motion_policy["collision_safety"] == "required"
     assert grounded_home.motion_policy["collision_safety"] == "required"
 
@@ -1545,6 +1549,52 @@ def test_on_relation_rejects_preserve_orientation_drift() -> None:
     assert bool(failed[0])
     assert not bool(success[0])
     assert executor._orientation_errors[step.id][0] > torch.pi / 12
+
+
+def test_inside_relation_accepts_settling_orientation_drift() -> None:
+    rotated = _pose(0.02, -0.02, 0.72)
+    rotated[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    entities = {
+        "can": _FakeEntity("can", rotated, _rect_vertices(0.03, 0.03, 0.06)),
+        "basket": _FakeEntity(
+            "basket",
+            _pose(0.0, 0.0, 0.70),
+            _rect_vertices(0.10, 0.10, 0.08),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "can",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "basket",
+                            "relation": "inside",
+                            "orientation_goal": "preserve",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    executor._orientation_references[step.id] = _pose(0.02, -0.02, 0.72)
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert not bool(failed[0])
+    assert bool(success[0])
+    assert step.id not in executor._orientation_errors
 
 
 def test_standalone_handover_assigns_its_pickup_candidate(
@@ -2601,6 +2651,53 @@ def test_place_uses_preceding_or_live_eef_pose_not_original_grasp() -> None:
     assert torch.equal(planned.target.xpos, reference)
     assert torch.equal(live.target.xpos, env.get_current_xpos_agent()[0])
     assert not torch.equal(live.target.xpos, held_object.grasp_xpos)
+
+
+def test_inside_target_preserves_pre_pick_supported_height() -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, 0.2, 1.40), _box_vertices(0.03)),
+        "basket": _FakeEntity("basket", _pose(0.0, 0.0, 0.70), _box_vertices(0.10)),
+    }
+    env = _FakeEnv(entities)
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "can",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "basket",
+                        "relation": "inside",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    step = program.semantic_steps[0]
+    final = next(
+        edge
+        for edge in program.edges
+        if edge.actions[0]["atomic_action_class"] == "MoveHeldObject"
+    )
+    state = _held_state(env, entities["can"])
+    held = state.get_held_object("physical_left_arm")
+    assert held is not None
+    grounder = ActionGrounder(program, env, lambda _uid: held.semantics)
+    supported_pose = _pose(0.0, 0.2, 0.75)
+
+    grounded = grounder.ground(
+        final.actions[0],
+        step,
+        arm="left_arm",
+        state=state,
+        orientation_reference_pose=supported_pose,
+    )
+
+    assert grounded.target_object_pose is not None
+    assert grounded.target_object_pose[0, 2, 3] == pytest.approx(0.75)
 
 
 def test_coordinated_step_rejects_an_arm_reserved_by_terminal_hold() -> None:

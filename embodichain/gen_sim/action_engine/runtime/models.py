@@ -34,6 +34,7 @@ __all__ = [
     "ActionOutcome",
     "ExecutionEdge",
     "ExecutionProgram",
+    "ExecutionReport",
     "ExecutionResult",
     "GroundedAction",
     "SemanticStep",
@@ -213,6 +214,7 @@ class ExecutionResult(Sequence[torch.Tensor]):
     revision_count: int = 0
     failure_events: list[dict[str, Any]] = field(default_factory=list)
     runtime_revisions: list[dict[str, Any]] = field(default_factory=list)
+    retry_counts: list[int] = field(default_factory=list)
 
     @property
     def runtime_success(self) -> torch.Tensor:
@@ -230,6 +232,58 @@ class ExecutionResult(Sequence[torch.Tensor]):
 
     def __getitem__(self, index):
         return self.actions[index]
+
+
+@dataclass(frozen=True)
+class ExecutionReport:
+    """JSON-safe collaboration result built from an ``ExecutionResult``.
+
+    The runtime result deliberately keeps tensors because the legacy demo
+    runner consumes them.  The collaboration boundary instead exposes only a
+    compact, serializable audit view and never retains the action tensors.
+    """
+
+    task_id: str
+    plan_hash: str
+    action_graph_hash: str
+    status: str
+    run_id: str
+    episode_id: str
+    environments: tuple[dict[str, Any], ...] = ()
+    action_count: int = 0
+    retry_count: int = 0
+    recovery_count: int = 0
+    revision_count: int = 0
+    failure_events: tuple[dict[str, Any], ...] = ()
+    graph_revisions: tuple[dict[str, Any], ...] = ()
+    record_dir: str | None = None
+    error: str | None = None
+    schema_version: str = "action_engine_execution_report_v1"
+
+    def as_mapping(self) -> dict[str, Any]:
+        """Return a detached mapping suitable for strict JSON serialization."""
+        return {
+            "schema_version": self.schema_version,
+            "task_id": self.task_id,
+            "plan_hash": self.plan_hash,
+            "action_graph_hash": self.action_graph_hash,
+            "status": self.status,
+            "run_id": self.run_id,
+            "episode_id": self.episode_id,
+            "environments": deepcopy(list(self.environments)),
+            "action_count": self.action_count,
+            "retry_count": self.retry_count,
+            "recovery_count": self.recovery_count,
+            "revision_count": self.revision_count,
+            "failure_events": deepcopy(list(self.failure_events)),
+            "graph_revisions": deepcopy(list(self.graph_revisions)),
+            "record_dir": self.record_dir,
+            "error": self.error,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Compatibility spelling for artifact and CLI publishers."""
+        return self.as_mapping()
 
 
 def success_mask(value: bool | torch.Tensor, count: int, device: Any) -> torch.Tensor:

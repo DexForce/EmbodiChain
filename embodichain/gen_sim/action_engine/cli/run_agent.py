@@ -90,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional runtime override for A/B visual facts and online planning.",
     )
+    parser.add_argument(
+        "--collaboration-report",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
@@ -129,7 +134,7 @@ def _validate_run_contract(
         )
 
 
-def cli() -> None:
+def cli() -> int | None:
     """Launch the environment and execute all configured episodes."""
     np.set_printoptions(precision=5, suppress=True)
     torch.set_printoptions(precision=5, sci_mode=False)
@@ -152,26 +157,36 @@ def cli() -> None:
             gym_config=gym_config,
             agent_config=agent_config,
         )
-        return
+        return 0 if args.collaboration_report else None
     if planning_mode != "offline":
         raise ValueError(f"Unsupported Action Engine planning_mode {planning_mode!r}.")
-    load_agent_execution_program(
+    execution_program = load_agent_execution_program(
         agent_config,
         agent_config_path=args.agent_config,
         regenerate=bool(args.regenerate),
     )
+    grounded_plan = _load_grounded_task_plan(args.agent_config)
+    action_reporter = None
+    if grounded_plan is not None:
+        from embodichain.gen_sim.action_engine.agent import ActionAgent
 
-    env = gymnasium.make(
-        id=gym_config["id"],
-        cfg=env_cfg,
-        agent_config=agent_config,
-        agent_config_path=args.agent_config,
-        task_name=args.task_name,
-        runtime_backend=args.runtime_backend,
-    )
+        action_reporter = ActionAgent()
+
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     episodes = int(gym_config.get("max_episodes", _DEFAULT_MAX_EPISODES))
+    any_failed = False
+    episode_index = 0
+    seed_graph = getattr(execution_program, "seed_graph", None)
+    env = None
     try:
+        env = gymnasium.make(
+            id=gym_config["id"],
+            cfg=env_cfg,
+            agent_config=agent_config,
+            agent_config_path=args.agent_config,
+            task_name=args.task_name,
+            runtime_backend=args.runtime_backend,
+        )
         for episode_index in range(episodes):
             episode_seed = None if args.seed is None else int(args.seed) + episode_index
             env.reset(seed=episode_seed)
@@ -191,6 +206,7 @@ def cli() -> None:
                 getattr(result, "runtime_success"),
                 dtype=torch.bool,
             )
+            any_failed = any_failed or not bool(success.all())
             log_info(
                 "Action Engine episode "
                 f"{episode_index}: {int(success.sum())}/{success.numel()} "
@@ -200,16 +216,79 @@ def cli() -> None:
             record_dir = getattr(result, "runtime_graph_output_dir", None)
             if record_dir:
                 log_info(f"Runtime records: {record_dir}", color="green")
+            if action_reporter is not None and isinstance(seed_graph, Mapping):
+                report = action_reporter.report_execution_result(
+                    result,
+                    action_graph=seed_graph,
+                    grounded_plan=grounded_plan,
+                    run_id=run_id,
+                    episode_index=episode_index,
+                )
+                log_info(
+                    "Execution report: "
+                    f"status={report.status}, actions={report.action_count}",
+                    color="green" if report.status == "succeeded" else "yellow",
+                )
         # EmbodiedEnv publishes the just-finished rollout during reset. Flush
         # the final episode as well; otherwise only episodes followed by a next
         # iteration reach the configured dataset recorder.
         env.reset(options={"final": True})
     except KeyboardInterrupt:
         log_warning("Action Engine run interrupted by user.")
+        return 130 if args.collaboration_report else None
+    except Exception as exc:
+        if action_reporter is not None and isinstance(seed_graph, Mapping):
+            report = action_reporter.abortion_report(
+                seed_graph,
+                exc,
+                grounded_plan=grounded_plan,
+                environment_count=_runtime_environment_count(env),
+                run_id=run_id,
+                episode_index=episode_index,
+            )
+            from embodichain.gen_sim.action_engine.runtime import (
+                write_execution_report,
+            )
+
+            write_execution_report(Path(args.agent_config).resolve().parent, report)
+        if args.collaboration_report:
+            log_warning(f"Action Engine execution aborted: {type(exc).__name__}: {exc}")
+            return 3
+        raise
     finally:
-        close = getattr(env, "close", None)
+        close = getattr(env, "close", None) if env is not None else None
         if callable(close):
             close()
+    return int(any_failed) if args.collaboration_report else None
+
+
+def _load_grounded_task_plan(agent_config_path: str | Path) -> dict[str, Any] | None:
+    """Load the optional collaboration hand-off beside a legacy agent config."""
+    path = (
+        Path(agent_config_path).expanduser().resolve().parent
+        / "grounded_task_plan.json"
+    )
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Unable to read GroundedTaskPlan at {path}: {exc}") from exc
+    if not isinstance(value, Mapping):
+        raise ValueError("grounded_task_plan.json must contain a JSON object.")
+    from embodichain.gen_sim.collaboration.contracts import (
+        validate_grounded_task_plan,
+    )
+
+    return validate_grounded_task_plan(value)
+
+
+def _runtime_environment_count(env: Any) -> int:
+    value = getattr(getattr(env, "unwrapped", env), "num_envs", 1)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 1
 
 
 class _BranchExecutor:
@@ -1492,4 +1571,4 @@ def _show_physical_collision(env: gymnasium.Env) -> None:
 
 
 if __name__ == "__main__":
-    cli()
+    raise SystemExit(cli())

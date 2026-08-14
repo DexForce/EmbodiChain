@@ -4,6 +4,44 @@ Action Engine v2 uses a task-first protocol and executes a direct
 `AtomicAction` graph. The persisted graph is symbolic and coordinate-free;
 simulator geometry is resolved immediately before each action executes.
 
+The phase-one collaboration entry point wraps that existing pipeline with
+three narrow owners:
+
+1. `TaskAgent` produces three scene-independent `TaskDraft` candidates and
+   deterministically derives each `SceneRequest` and `SuccessSpec`.
+2. `SceneAdapter` binds one verified candidate to an existing scene or exact
+   content-addressed `ScenePackage`, producing `SceneManifest`, `RoleBindings`,
+   and a complete `BindingReport`.
+3. `ActionAgent` lowers the selected `GroundedTaskPlan` to the existing
+   `action_engine_seed_graph_v3`, performs executable capability preflight,
+   runs it through `ProgramExecutor`, and emits a tensor-free
+   `ExecutionReport`.
+
+The public CLI is `embodichain gen-sim-task import-scene|prepare|run`. This
+layer does not modify Scene Engine and continues to publish all legacy bundle
+artifacts for existing runners.
+
+## Package Ownership
+
+The collaboration workflow is split by ownership rather than nested under
+Action Engine:
+
+- `embodichain.gen_sim.task_engine` owns scene-independent interpretation,
+  E1-E9 semantic ontology, `TaskDraft`, `SceneRequest`, `SuccessSpec`, and
+  `TaskAgent`.
+- `embodichain.gen_sim.scene_engine` remains the existing scene generation
+  subsystem and is not modified by the collaboration workflow.
+- `embodichain.gen_sim.action_engine.agent` owns `ActionAgent`; Action Engine's
+  existing `domain`, `planning`, and `runtime` packages remain authoritative
+  for graph compilation and execution.
+- `embodichain.gen_sim.collaboration` owns cross-engine contracts, scene
+  adaptation, the content-addressed scene store, orchestration, artifacts, and
+  the unified CLI.
+
+The former `embodichain.gen_sim.action_engine.collaboration` namespace is a
+deprecated import bridge. It contains no workflow implementation and may be
+removed after downstream callers migrate to the owning packages above.
+
 ## Data Flow
 
 1. `TaskFactory` or a caller creates a validated `TaskSpec`.

@@ -93,6 +93,16 @@ _DEFAULT_PLANNER_POLICY: dict[str, Any] = {
 _COLLISION_PARKING_Z_OFFSET = -100.0
 
 
+def _collision_cache_for_world(
+    representation: str, obstacle_count: int
+) -> dict[str, int]:
+    """Size cuRobo's fixed collision cache for the generated scene."""
+    cache = {"cuboid": 8, "mesh": 2}
+    if representation in cache:
+        cache[representation] = max(cache[representation], obstacle_count)
+    return cache
+
+
 def _supported_kwargs(config_type: type, values: Mapping[str, Any]) -> dict[str, Any]:
     names: set[str] = set()
     for cls in reversed(config_type.__mro__):
@@ -639,6 +649,13 @@ class AtomicActionAdapter:
             include(held.semantics.label, held.env_mask)
         for held in state.coordinated_held_objects.values():
             include(held.semantics.label, held.env_mask)
+        collision_exclusion_uids = grounded.motion_policy.get(
+            "collision_exclusion_uids", ()
+        )
+        if isinstance(collision_exclusion_uids, str):
+            collision_exclusion_uids = (collision_exclusion_uids,)
+        for uid in collision_exclusion_uids:
+            include(str(uid))
         return masks
 
     def _invocation(
@@ -1039,10 +1056,15 @@ class AtomicActionAdapter:
                     if entity is None:
                         raise ValueError(f"Unknown cuRobo obstacle {uid!r}.")
                     rigid_objects.append(entity)
+                obstacle_representation = str(
+                    options.get("obstacle_representation", "cuboid")
+                )
                 world = CuroboWorldCfg(
                     rigid_objects=rigid_objects or None,
-                    obstacle_representation=str(
-                        options.get("obstacle_representation", "cuboid")
+                    obstacle_representation=obstacle_representation,
+                    collision_cache=_collision_cache_for_world(
+                        obstacle_representation,
+                        len(rigid_objects),
                     ),
                     dynamic_obstacle_names=[
                         str(uid)

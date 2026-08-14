@@ -106,6 +106,11 @@ COMMANDS = (
         target="embodichain.lab.scripts.analyze_workspace:cli",
         help="Analyze a robot's reachable workspace from a URDF/USD asset.",
     ),
+    Command(
+        name="gen-sim-task",
+        target="embodichain.gen_sim.collaboration.cli:main",
+        help="Prepare and run a three-agent collaboration task.",
+    ),
 )
 
 
@@ -141,14 +146,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_handler(target: str) -> Callable[[Sequence[str] | None], None]:
+def _load_handler(target: str) -> Callable[[Sequence[str] | None], int | None]:
     """Load a command handler from a ``module:attribute`` target."""
     module_name, attribute = target.split(":", maxsplit=1)
     module = importlib.import_module(module_name)
     return getattr(module, attribute)
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None) -> int | None:
     """Dispatch a command through the unified CLI.
 
     Args:
@@ -179,11 +184,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     handler = _load_handler(command.target)
-    handler(arguments[1:])
+    return handler(arguments[1:])
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
 
 
 __all__ = ["COMMANDS", "Command", "build_parser", "main"]
