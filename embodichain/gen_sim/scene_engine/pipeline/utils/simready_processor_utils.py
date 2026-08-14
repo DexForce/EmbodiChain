@@ -17,7 +17,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import sys
+from typing import Callable
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -92,8 +95,12 @@ def render_object_front_top_views(
             "Blender's bpy is required for SimReady VLM view rendering."
         ) from exc
 
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    bpy.ops.import_scene.gltf(filepath=str(source_path))
+    _run_blender_operation_silently(
+        lambda: bpy.ops.wm.read_factory_settings(use_empty=True)
+    )
+    _run_blender_operation_silently(
+        lambda: bpy.ops.import_scene.gltf(filepath=str(source_path))
+    )
     if not any(obj.type == "MESH" for obj in bpy.context.scene.objects):
         raise ValueError(f"GLB contains no mesh objects: {source_path}")
     scene = bpy.context.scene
@@ -141,7 +148,7 @@ def render_object_front_top_views(
             .to_euler()
         )
         scene.render.filepath = str(path)
-        bpy.ops.render.render(write_still=True)
+        _run_blender_operation_silently(lambda: bpy.ops.render.render(write_still=True))
 
     # Blender uses a right-handed z-up world; front is viewed along +y.
     render_view(front_path, (0.0, -3.0, 0.0))
@@ -195,6 +202,25 @@ def render_object_front_top_views(
         )
         composed.save(output_path)
     return output_path
+
+
+def _run_blender_operation_silently(operation: Callable[[], object]) -> object:
+    """Run one bpy operation without forwarding Blender-native console output."""
+    # bpy writes render progress directly to process file descriptors, not Python streams.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved_stdout_fd = os.dup(1)
+    saved_stderr_fd = os.dup(2)
+    try:
+        with open(os.devnull, "w", encoding="utf-8") as null_output:
+            os.dup2(null_output.fileno(), 1)
+            os.dup2(null_output.fileno(), 2)
+            return operation()
+    finally:
+        os.dup2(saved_stdout_fd, 1)
+        os.dup2(saved_stderr_fd, 2)
+        os.close(saved_stdout_fd)
+        os.close(saved_stderr_fd)
 
 
 def _draw_arrow(
@@ -311,6 +337,10 @@ def compute_uniform_xy_scale_for_target(
         raise ValueError(f"GLB is not a mesh: {glb_path}")
     if len(target_xy_size_cm) != 2 or any(value <= 0 for value in target_xy_size_cm):
         raise ValueError("target_xy_size_cm must contain two positive values.")
+    # GLB geometry is y-up, while the target footprint is defined on z-up table XY.
+    y_up_to_z_up = np.eye(4)
+    y_up_to_z_up[:3, :3] = Rotation.from_euler("x", 90.0, degrees=True).as_matrix()
+    mesh.apply_transform(y_up_to_z_up)
     if rotate_about_x:
         center = mesh.bounds.mean(axis=0)
         mesh.apply_translation(-center)
