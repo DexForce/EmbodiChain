@@ -26,6 +26,7 @@ from __future__ import annotations
 import atexit
 import html
 import json
+import math
 import os
 import queue
 import shutil
@@ -79,6 +80,7 @@ _VISER_START_TIMEOUT_SECONDS = 15.0
 _ARTICRAFT_PYTHON_VERSION = "3.12"
 _CONDA_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
 _INTERACTION_ANNOTATION_TIMEOUT_SECONDS = 600
+_ARTICRAFT_PART_MASS_KG = 0.1
 _ROTATE_JOINT_TYPES = frozenset({"revolute", "continuous"})
 _TRANSLATE_JOINT_TYPES = frozenset({"prismatic"})
 _INTERACTION_RESPONSE_SCHEMA = {
@@ -498,13 +500,57 @@ def _materialized_record_dir(record_id: str) -> Path:
     )
 
 
+def _validate_link_inertials(urdf_path: Path, *, expected_mass: float) -> None:
+    """Require every generated URDF link to have finite inertial properties."""
+    try:
+        root = ET.parse(urdf_path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        raise ValueError(f"Could not parse generated URDF: {urdf_path}") from exc
+
+    failures: list[str] = []
+    for link in root.findall("link"):
+        link_name = (link.get("name") or "<unnamed>").strip()
+        inertial = link.find("inertial")
+        mass_element = None if inertial is None else inertial.find("mass")
+        inertia_element = None if inertial is None else inertial.find("inertia")
+        if mass_element is None or inertia_element is None:
+            failures.append(f"{link_name}: missing <inertial>, <mass>, or <inertia>")
+            continue
+        try:
+            mass = float(mass_element.get("value", ""))
+            inertia_values = [
+                float(inertia_element.get(name, ""))
+                for name in ("ixx", "ixy", "ixz", "iyy", "iyz", "izz")
+            ]
+        except ValueError:
+            failures.append(f"{link_name}: mass or inertia tensor is not numeric")
+            continue
+        if not math.isfinite(mass) or not math.isclose(
+            mass,
+            expected_mass,
+            rel_tol=0.0,
+            abs_tol=1.0e-9,
+        ):
+            failures.append(f"{link_name}: expected mass {expected_mass}, got {mass}")
+        if not all(math.isfinite(value) for value in inertia_values):
+            failures.append(f"{link_name}: inertia tensor contains a non-finite value")
+
+    if failures:
+        raise ValueError(
+            "Generated URDF does not provide the required inertial properties for every link: "
+            + "; ".join(failures)
+        )
+
+
 def _prepare_result_bundle(record_id: str) -> Path:
     """Copy a materialized record into a mutable, record-scoped export directory."""
     materialized = _materialized_record_dir(record_id)
-    if not (materialized / "model.urdf").is_file():
+    model_path = materialized / "model.urdf"
+    if not model_path.is_file():
         raise FileNotFoundError(
             "Articraft completed without a compiled model.urdf output."
         )
+    _validate_link_inertials(model_path, expected_mass=_ARTICRAFT_PART_MASS_KG)
     exports_root = ARTICRAFT_OUTPUT_ROOT / "exports"
     exports_root.mkdir(parents=True, exist_ok=True)
     result_dir = exports_root / record_id
@@ -1000,6 +1046,10 @@ workbench record to the dataset.
 Create a realistic mechanically meaningful articulated object matching the request. Use semantic
 parts, visible plausible joints, appropriate materials, and prompt-specific run_tests(). Iterate
 until this succeeds:
+
+Do not spend generation effort hand-authoring `part.inertial` values or inertial-specific tests.
+Articraft deterministically derives missing link mass, center of mass, and inertia from the complete
+link geometry during URDF compilation.
 
 {_conda_path()} run --no-capture-output -n {ARTICRAFT_CONDA_ENV} python -m cli.main external --repo-root {ARTICRAFT_OUTPUT_ROOT} check {record_id}
 

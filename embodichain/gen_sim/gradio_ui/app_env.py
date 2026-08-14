@@ -46,6 +46,7 @@ __all__ = [
     "build_gradio_blocked_paths",
     "configure_direct_network_env",
     "configure_simready_llm_env",
+    "get_inherited_network_env",
     "get_gradio_auth",
     "validate_gradio_artifact_root",
 ]
@@ -65,6 +66,10 @@ PROXY_ENV_KEYS = (
     "ftp_proxy",
 )
 DIRECT_NO_PROXY_VALUE = "*"
+_NETWORK_ENV_KEYS = (*PROXY_ENV_KEYS, "NO_PROXY", "no_proxy")
+_INHERITED_NETWORK_ENV = {
+    key: value for key in _NETWORK_ENV_KEYS if (value := os.environ.get(key))
+}
 
 
 def _getenv(name: str, default: str) -> str:
@@ -107,6 +112,19 @@ def configure_direct_network_env(env: Any = None) -> None:
     env["NO_PROXY"] = DIRECT_NO_PROXY_VALUE
     env["no_proxy"] = DIRECT_NO_PROXY_VALUE
     env.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
+
+
+def get_inherited_network_env() -> dict[str, str]:
+    """Return the network environment captured before Gradio forces direct access.
+
+    Articulation's Codex process uses this snapshot because it may require the
+    launching shell's proxy configuration to reach its remote model provider.
+    Other GenSim pipelines continue to use :func:`configure_direct_network_env`.
+
+    Returns:
+        A copy of the inherited proxy and proxy-bypass variables.
+    """
+    return _INHERITED_NETWORK_ENV.copy()
 
 
 def configure_simready_llm_env(env: Any = None) -> None:

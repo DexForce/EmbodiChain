@@ -33,6 +33,7 @@ from app_env import (
     EMBODICHAIN_ROOT,
     configure_direct_network_env,
     configure_simready_llm_env,
+    get_inherited_network_env,
 )
 
 __all__ = [
@@ -310,6 +311,8 @@ def build_codex_env() -> dict[str, str]:
     The Codex CLI may still use its own login state through ``CODEX_HOME`` or
     the normal user configuration directory, but GenSim service credentials
     and dotenv-specific settings are not inherited by the command sandbox.
+    Network routing variables are restored from the environment captured
+    before Gradio applies its direct-only policy.
 
     Returns:
         An allowlisted child-process environment.
@@ -320,11 +323,13 @@ def build_codex_env() -> dict[str, str]:
         credential store instead. Passing the server key to a user-directed
         process would recreate the disclosure boundary this function removes.
     """
-    return {
+    env = {
         key: value
         for key, value in os.environ.items()
         if key in _CODEX_ENV_ALLOWLIST and value
     }
+    env.update(get_inherited_network_env())
+    return env
 
 
 def redact_sensitive_text(text: str) -> str:

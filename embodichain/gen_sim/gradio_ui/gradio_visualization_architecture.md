@@ -62,7 +62,7 @@ conda run -n embodichain python gradio_app.py
 | `ARTICRAFT_CONDA_ENV` | `articraft` | 运行 Articraft CLI 的 Conda 环境。 |
 | `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft 记录、运行日志和导出 bundle。 |
 
-`app.launch()` 仅开放 UI 静态资源、`.gen_sim/` 生成物和配置的 Articraft 输出目录，并显式禁止 `.env`、`.git/` 等敏感路径。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`；Scene Engine、DexSim、Viser 和 Articraft 直接继承 `.env` 中的原始配置。Codex 作为用户指令驱动的子进程，使用独立登录状态和最小化环境，不继承 GenSim 服务凭据。
+`app.launch()` 仅开放 UI 静态资源、`.gen_sim/` 生成物和配置的 Articraft 输出目录，并显式禁止 `.env`、`.git/` 等敏感路径。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`；Scene Engine、DexSim、Viser 和 Articraft 直接继承 `.env` 中的原始配置。Codex 作为用户指令驱动的子进程，使用独立登录状态和最小化环境，不继承 GenSim 服务凭据；但 Articulation 启动 Codex 时会恢复 Gradio 强制直连前的代理与 `NO_PROXY` 变量，以便 Codex 按启动 shell 的原始网络路由访问模型服务。
 
 ## 页面与引擎
 
@@ -120,7 +120,7 @@ description + optional image
   → Articraft external check
       └─ 旧版 CLI 无 check 时：compile --validate --strict-geom-qc + compile_report
   → Articraft external finalize
-  → materialized model.urdf + meshes
+  → materialized model.urdf + meshes（编译器为缺少惯性的 link 聚合几何并自动补齐 mass/COM/inertia）
   → 复制到 exports/<record-id>/，保留 model.raw.urdf
   → Codex 读取完整 URDF 并选择真实操作面（link + visual）
   → 校验后按 joint 类型注入 <interact type="rotate|translate"/>
