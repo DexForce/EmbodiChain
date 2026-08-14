@@ -149,7 +149,14 @@ _NODE_ROLES = frozenset({"primary", "recovery", "cleanup"})
 _GROUP_ROLES = frozenset({"primary", "recovery"})
 _PLANNER_ROUTES = frozenset({"offline", "online", "selected", "fused"})
 _ACTION_CONTRACT_KEYS = frozenset(
-    {"version", "requires", "effects", "claims", "completion"}
+    {
+        "version",
+        "requires",
+        "effects",
+        "claims",
+        "completion",
+        "failure_policy",
+    }
 )
 _TASK_GROUP_CONTRACT_KEYS = frozenset(
     {
@@ -179,6 +186,7 @@ _CLAIM_KEYS = frozenset({"resource", "access", "lifetime"})
 _CLAIM_ACCESS = frozenset({"shared_read", "exclusive"})
 _CLAIM_LIFETIMES = frozenset({"action", "until_release"})
 _ACTION_COMPLETION = frozenset({"ordinary", "cleanup", "terminal_barrier"})
+_FAILURE_POLICIES = frozenset({"task_required", "safety_required", "best_effort"})
 _GROUP_COMPLETION = frozenset({"ordinary", "terminal_barrier"})
 _OBJECT_REFERENCE_KEYS = frozenset(
     {
@@ -951,8 +959,8 @@ def _action_contract(value: Any, context: str) -> dict[str, Any]:
     if set(contract) != _ACTION_CONTRACT_KEYS:
         missing = sorted(_ACTION_CONTRACT_KEYS - set(contract))
         raise ValueError(f"{context} is missing required fields: {missing}.")
-    if contract["version"] != "action_contract_v1":
-        raise ValueError(f"{context}.version must be 'action_contract_v1'.")
+    if contract["version"] != "action_contract_v2":
+        raise ValueError(f"{context}.version must be 'action_contract_v2'.")
     contract["requires"] = [
         _state_atom(item, f"{context}.requires[{index}]")
         for index, item in enumerate(
@@ -975,6 +983,11 @@ def _action_contract(value: Any, context: str) -> dict[str, Any]:
     )
     contract["completion"] = _enum(
         contract["completion"], _ACTION_COMPLETION, f"{context}.completion"
+    )
+    contract["failure_policy"] = _enum(
+        contract["failure_policy"],
+        _FAILURE_POLICIES,
+        f"{context}.failure_policy",
     )
     return contract
 

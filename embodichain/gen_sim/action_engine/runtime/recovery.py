@@ -44,6 +44,7 @@ __all__ = [
 FAILURE_TYPES = frozenset(
     {
         "plan_failed",
+        "search_exhausted",
         "grasp_missed",
         "object_fallen",
         "object_dropped",
@@ -455,7 +456,7 @@ def classify_failure(
             )
         return result
     if not planning_succeeded:
-        return "plan_failed"
+        return "search_exhausted"
     if object_fallen:
         return "object_fallen"
     if held_before and not held_after:
@@ -478,13 +479,22 @@ def build_upright_recovery(
     failed = _node(graph, failed_node_id)
     object_uid = str(failed["object_uid"])
     group_id = f"recovery_e2_{int(revision):02d}_{failed_node_id}"
+    actor = _recovery_actor(graph, failed)
     held_consumer_arm = None
     if not resume_failed_group:
         held_consumer_arm = _downstream_held_consumer_arm(graph, failed, object_uid)
-    actor = (
-        {"mode": "required", "arm": held_consumer_arm}
-        if held_consumer_arm is not None
-        else {"mode": "auto"}
+    if held_consumer_arm is not None and not (
+        actor.get("mode") == "required" and actor.get("arm") == held_consumer_arm
+    ):
+        raise ValueError(
+            "Recovery cannot satisfy the downstream held-object contract without "
+            "changing the failed TaskGroup actor; resume and replay the failed "
+            "TaskGroup instead."
+        )
+    hold_for_downstream = (
+        held_consumer_arm is not None
+        and actor.get("mode") == "required"
+        and actor.get("arm") == held_consumer_arm
     )
     upright = motion_policy(("orientation", "upright"))
     full_specs = (
@@ -506,7 +516,7 @@ def build_upright_recovery(
             motion_policy(),
         ),
     )
-    specs = full_specs[:2] if held_consumer_arm is not None else full_specs
+    specs = full_specs[:2] if hold_for_downstream else full_specs
     nodes = []
     registry = build_atomic_capability_registry()
     dependencies: list[str] = []
@@ -550,7 +560,7 @@ def build_upright_recovery(
             "position_anchor": "live_xy",
             "support_object": "table",
             "upright_local_axis": "long_axis",
-            "terminal_behavior": ("hold" if held_consumer_arm is not None else "place"),
+            "terminal_behavior": "hold" if hold_for_downstream else "place",
         },
         "depends_on": [],
         "parent_task_instance_id": str(failed["task_instance_id"]),
@@ -558,6 +568,37 @@ def build_upright_recovery(
         "success": {"type": "object_upright", "object": object_uid},
     }
     return nodes, group
+
+
+def _recovery_actor(
+    graph: Mapping[str, Any],
+    failed: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Preserve the failed TaskGroup's arm-selection contract."""
+    group_id = str(failed["task_instance_id"])
+    group = next(
+        (item for item in graph["task_groups"] if str(item["id"]) == group_id),
+        None,
+    )
+    source = (group or failed).get("actor", {"mode": "auto"})
+    if not isinstance(source, Mapping):
+        raise ValueError(f"Failed TaskGroup {group_id!r} has an invalid actor.")
+    actor = deepcopy(dict(source))
+    mode = str(actor.get("mode", "auto"))
+    if mode == "required":
+        if actor.get("arm") not in {"left_arm", "right_arm"}:
+            raise ValueError(
+                f"Failed TaskGroup {group_id!r} has an invalid required arm."
+            )
+    elif mode == "auto":
+        actor = {"mode": "auto"}
+    elif mode == "coordinated":
+        raise ValueError(
+            "The single-arm upright recovery cannot inherit a coordinated actor."
+        )
+    else:
+        raise ValueError(f"The upright recovery cannot inherit actor mode {mode!r}.")
+    return actor
 
 
 def _downstream_held_consumer_arm(

@@ -552,7 +552,7 @@ def _result_summary(
         "revision_count": revisions,
         "failure_events": list(getattr(result, "failure_events", ())),
         "ik_failure_count": sum(
-            item.get("failure_type") == "plan_failed"
+            item.get("failure_type") in {"plan_failed", "search_exhausted"}
             for item in getattr(result, "failure_events", ())
         ),
         "record_dir": getattr(result, "record_dir", None),

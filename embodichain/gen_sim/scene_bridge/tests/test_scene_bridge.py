@@ -201,3 +201,109 @@ def test_missing_affordance_remains_unknown_instead_of_becoming_supported(
         check["status"] == "unknown" and "liquid_safe" in check["reason"]
         for check in report["checks"]
     )
+
+
+def test_physical_object_can_be_a_runtime_support_without_support_affordance(
+    tmp_path: Path,
+) -> None:
+    manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        _prepared_scene(tmp_path),
+        source_format="test",
+        robot_profile="dual_franka",
+    )
+    candidate = _candidate("E1", ["graspable", "placeable"])
+    candidate["draft"]["steps"][0].update(
+        target={"kind": "scene_ref"},
+        relation="on",
+    )
+    candidate["scene_request"]["references"].append(
+        {
+            "reference_id": "step_01.target",
+            "role": "target",
+            "source_structure": "physical_entity",
+            "affordances": [],
+            "initial_state": {},
+            "attributes": {},
+        }
+    )
+
+    report = FeasibilityBroker().assess(
+        candidate,
+        {
+            "step_01.object": ["red_can"],
+            "step_01.target": ["red_can"],
+        },
+        manifest,
+        capability_catalog=_catalog(),
+        task_actions={"E1": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    structure = next(
+        check
+        for check in report["checks"]
+        if check["kind"] == "structure" and check["subject"] == "step_01.target:red_can"
+    )
+    assert structure["status"] == "proven"
+    support_probe = next(
+        check for check in report["checks"] if check["kind"] == "placement_support"
+    )
+    assert support_probe["status"] == "runtime_probe"
+    assert support_probe["evidence"]["runtime_obligations"] == [
+        "placement_candidates",
+        "object_supported_by",
+        "stable_for",
+        "final_support_revalidation",
+    ]
+    assert report["blockers"] == []
+
+
+def test_required_arm_world_y_mismatch_is_risk_not_static_blocker(
+    tmp_path: Path,
+) -> None:
+    manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        _prepared_scene(tmp_path),
+        source_format="test",
+        robot_profile="dual_franka",
+    )
+    red_can = next(item for item in manifest["objects"] if item["uid"] == "red_can")
+    red_can["initial_pose"]["position"][1] = -0.20
+    candidate = _candidate("E2", ["graspable", "orientable"])
+    candidate["draft"]["steps"][0]["required_arm"] = "right_arm"
+
+    report = FeasibilityBroker().assess(
+        candidate,
+        {"step_01.object": ["red_can"]},
+        manifest,
+        capability_catalog=_catalog(),
+        task_actions={"E2": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    mismatch = next(
+        check for check in report["checks"] if check["kind"] == "arm_layout_risk"
+    )
+    assert mismatch["status"] == "runtime_probe"
+    assert mismatch["evidence"]["mismatch_risk"] is True
+    assert mismatch["evidence"]["geometry_certificate"] is False
+    assert report["blockers"] == []
+
+
+def test_workspace_report_covers_complete_task_phases(tmp_path: Path) -> None:
+    manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        _prepared_scene(tmp_path),
+        source_format="test",
+        robot_profile="dual_franka",
+    )
+    report = FeasibilityBroker().assess(
+        _candidate("E2", ["graspable", "orientable"]),
+        {"step_01.object": ["red_can"]},
+        manifest,
+        capability_catalog=_catalog(),
+        task_actions={"E2": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    workflow = next(
+        check for check in report["checks"] if check["kind"] == "task_workspace"
+    )
+    phases = {item["phase"] for item in workflow["evidence"]["phases"]}
+    assert phases == {"pickup", "safety_clearance"}
+    assert workflow["status"] == "runtime_probe"

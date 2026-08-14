@@ -111,7 +111,18 @@ class DynamicRecoveryController:
         events = getattr(result, "failure_events", None)
         if not isinstance(events, Sequence) or not events:
             raise ValueError("Execution result contains no recoverable failure event.")
-        event = events[0]
+        event = next(
+            (
+                item
+                for item in events
+                if isinstance(item, Mapping) and bool(item.get("fatal", True))
+            ),
+            None,
+        )
+        if event is None:
+            raise ValueError(
+                "Execution result contains no fatal recoverable failure event."
+            )
         if not isinstance(event, Mapping):
             raise ValueError("Execution failure events must be mappings.")
         node_id = event.get("node_id")

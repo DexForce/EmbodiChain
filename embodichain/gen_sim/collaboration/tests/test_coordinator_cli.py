@@ -346,6 +346,67 @@ def test_contradicted_feasibility_publishes_audit_without_planning(
     assert not result.collaboration_artifacts.grounded_task_plan.exists()
 
 
+def test_feasibility_contradiction_falls_back_to_next_resolved_candidate(
+    tmp_path: Path,
+) -> None:
+    candidate_set = _candidate_set()
+    first = candidate_set["candidates"][0]
+    second = deepcopy(first)
+    second["candidate_id"] = "candidate_02"
+    second["semantic_hash"] = "b" * 64
+    candidate_set["candidates"].append(second)
+    adaptation = _adaptation(tmp_path)
+    second_audit = deepcopy(adaptation.binding_report["candidates"][0])
+    second_audit["candidate_id"] = "candidate_02"
+    second_audit["semantic_hash"] = "b" * 64
+    binding_report = deepcopy(adaptation.binding_report)
+    binding_report["candidates"].append(second_audit)
+    second_bindings = {
+        **deepcopy(adaptation.role_bindings),
+        "candidate_id": "candidate_02",
+    }
+    adaptation = replace(
+        adaptation,
+        binding_report=binding_report,
+        candidate_bindings={"candidate_02": second_bindings},
+        static_scene_manifest={},
+    )
+
+    class _Broker:
+        @staticmethod
+        def assess(candidate, *_args, **_kwargs):
+            return {
+                "status": (
+                    "runtime_probe"
+                    if candidate["candidate_id"] == "candidate_02"
+                    else "contradicted"
+                )
+            }
+
+    registry = SimpleNamespace(catalog=lambda: {})
+    coordinator = CollaborationCoordinator(
+        action_agent=SimpleNamespace(registry=registry),
+        feasibility_broker=_Broker(),
+    )
+
+    updated, selected, bindings, report = coordinator._fallback_feasible_candidate(
+        candidate_set,
+        adaptation,
+        first,
+        adaptation.role_bindings,
+        {"status": "contradicted"},
+    )
+
+    assert selected["candidate_id"] == "candidate_02"
+    assert bindings["candidate_id"] == "candidate_02"
+    assert report["status"] == "runtime_probe"
+    assert updated.binding_report["selected_candidate_id"] == "candidate_02"
+    assert (
+        "static feasibility contradicted candidate_01"
+        in updated.binding_report["selection_reason"]
+    )
+
+
 def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
     tmp_path: Path,
 ) -> None:

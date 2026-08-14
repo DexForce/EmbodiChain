@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import torch
@@ -832,6 +832,13 @@ class ActionGrounder:
             )
         elif kind == "policy_pose":
             source = binding.get("source")
+            retreat_reference = self._retreat_reference_pose(
+                arm,
+                reference_eef_pose,
+            )
+            if binding.get("operation") == "retreat":
+                policy["retreat_reachability_search"] = True
+                policy["retreat_reference_pose"] = retreat_reference.clone()
             if source in {"release", "handover"}:
                 policy["clearance_object_uid"] = step.object_uid
                 policy["collision_safety"] = "required"
@@ -852,7 +859,7 @@ class ActionGrounder:
                 xpos=self._retreat_pose(
                     arm,
                     policy,
-                    reference_eef_pose,
+                    retreat_reference,
                     clear_exchange=source == "handover",
                 )
             )
@@ -960,7 +967,39 @@ class ActionGrounder:
     ) -> tuple[GroundedAction, ...]:
         """Return deterministic grounding candidates for an opt-in capability."""
         binding = action.get("target_binding", {})
-        if not isinstance(binding, Mapping) or binding.get("kind") != "handover_goal":
+        if not isinstance(binding, Mapping):
+            return (
+                self.ground(
+                    action,
+                    step,
+                    arm=arm,
+                    state=state,
+                    reference_eef_pose=reference_eef_pose,
+                    orientation_reference_pose=orientation_reference_pose,
+                ),
+            )
+        placement_support_uid = self._placement_support_uid(step)
+        is_on_placement = (
+            binding.get("kind") == "semantic_goal"
+            and binding.get("phase", "final") != "staging"
+            and step.goal.get("relation") in {"on", "on_top", "on_top_of"}
+            and placement_support_uid is not None
+        )
+        if is_on_placement:
+            base = self.ground(
+                action,
+                step,
+                arm=arm,
+                state=state,
+                reference_eef_pose=reference_eef_pose,
+                orientation_reference_pose=orientation_reference_pose,
+            )
+            return self._placement_grounding_candidates(
+                base,
+                step,
+                support_uid=placement_support_uid,
+            )
+        if binding.get("kind") != "handover_goal":
             return (
                 self.ground(
                     action,
@@ -998,6 +1037,121 @@ class ActionGrounder:
             )
             for workspace in workspaces
         )
+
+    def _placement_grounding_candidates(
+        self,
+        base: GroundedAction,
+        step: SemanticStep,
+        *,
+        support_uid: str,
+    ) -> tuple[GroundedAction, ...]:
+        """Sample bounded support-relative poses from live object geometry."""
+        if base.target_object_pose is None or not isinstance(
+            base.target, HeldObjectPoseGoal
+        ):
+            return (base,)
+        support = _object(self.env, support_uid)
+        moved = _object(self.env, step.object_uid)
+        placement = self.runtime_policy.grounding["placement"]
+        count = int(placement["candidate_count"])
+        fraction = float(placement["candidate_offset_fraction"])
+        margin = float(placement["support_margin"])
+        patterns = (
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (-1.0, 0.0),
+            (0.0, 1.0),
+            (0.0, -1.0),
+            (1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, 1.0),
+            (-1.0, -1.0),
+        )[:count]
+        candidates: list[GroundedAction] = []
+        seen_offsets: list[torch.Tensor] = []
+        for candidate_index, pattern in enumerate(patterns):
+            target_pose = base.target_object_pose.clone()
+            offsets = target_pose.new_zeros((int(self.env.num_envs), 2))
+            for env_id in range(int(self.env.num_envs)):
+                support_vertices = _world_vertices(support, self.env, env_id)
+                moved_local = _local_vertices(moved, self.env, env_id)
+                rotated = moved_local @ target_pose[env_id, :3, :3].transpose(0, 1)
+                support_lower = support_vertices[:, :2].min(dim=0).values
+                support_upper = support_vertices[:, :2].max(dim=0).values
+                moved_lower = rotated[:, :2].min(dim=0).values
+                moved_upper = rotated[:, :2].max(dim=0).values
+                allowed_lower = support_lower + margin - moved_lower
+                allowed_upper = support_upper - margin - moved_upper
+                if bool(torch.all(allowed_lower <= allowed_upper)):
+                    base_xy = target_pose[env_id, :2, 3].clone()
+                    center = torch.minimum(
+                        torch.maximum(base_xy, allowed_lower),
+                        allowed_upper,
+                    )
+                    direction = target_pose.new_tensor(pattern)
+                    room = torch.where(
+                        direction >= 0.0,
+                        allowed_upper - center,
+                        center - allowed_lower,
+                    )
+                    candidate_xy = center + direction * room * fraction
+                    offsets[env_id] = candidate_xy - base_xy
+                    target_pose[env_id, :2, 3] = candidate_xy
+
+                footprint_lower = target_pose[env_id, :2, 3] + moved_lower
+                footprint_upper = target_pose[env_id, :2, 3] + moved_upper
+                local_mask = torch.all(
+                    (support_vertices[:, :2] >= footprint_lower - margin)
+                    & (support_vertices[:, :2] <= footprint_upper + margin),
+                    dim=1,
+                )
+                if bool(local_mask.any()):
+                    support_height = support_vertices[local_mask, 2].max()
+                else:
+                    distances = torch.linalg.vector_norm(
+                        support_vertices[:, :2] - target_pose[env_id, :2, 3],
+                        dim=1,
+                    )
+                    nearest_count = min(8, int(support_vertices.shape[0]))
+                    nearest = torch.topk(
+                        distances,
+                        nearest_count,
+                        largest=False,
+                    ).indices
+                    support_height = support_vertices[nearest, 2].max()
+                target_pose[env_id, 2, 3] = (
+                    support_height
+                    + float(self._policy_value(base.motion_policy, "surface_clearance"))
+                    - rotated[:, 2].min()
+                )
+            if any(torch.allclose(offsets, prior) for prior in seen_offsets):
+                continue
+            seen_offsets.append(offsets)
+            candidates.append(
+                replace(
+                    base,
+                    target=replace(base.target, object_target_pose=target_pose),
+                    target_object_pose=target_pose,
+                    motion_policy={
+                        **base.motion_policy,
+                        "placement_candidate_index": candidate_index,
+                        "placement_xy_offset": offsets,
+                    },
+                )
+            )
+        return tuple(candidates) or (base,)
+
+    @staticmethod
+    def _placement_support_uid(step: SemanticStep) -> str | None:
+        value = step.goal.get("reference_object", step.goal.get("support_object"))
+        if isinstance(value, str) and value:
+            return value
+        if (
+            step.postcondition.get("type") == "stack_layer_supported"
+            and int(step.goal.get("layer_index", -1)) == 0
+        ):
+            return "table"
+        return None
 
     def _is_handover_continuation(self, step: SemanticStep) -> bool:
         if step.operator != "place_relative":
@@ -1759,6 +1913,8 @@ class ActionGrounder:
         orientation_reference_pose: torch.Tensor | None = None,
     ) -> torch.Tensor:
         goal = str(step.goal.get("orientation_goal", "preserve"))
+        if goal == "none":
+            return object_pose[:, :3, :3].clone()
         if goal == "preserve":
             if orientation_reference_pose is not None:
                 reference = _batched_pose(orientation_reference_pose, self.env)
@@ -1947,13 +2103,7 @@ class ActionGrounder:
         *,
         clear_exchange: bool = False,
     ) -> torch.Tensor:
-        pose = reference
-        if pose is None and hasattr(self.env, "get_current_xpos_agent"):
-            left, right = self.env.get_current_xpos_agent()
-            pose = left if arm == "left_arm" else right
-        if pose is None:
-            raise ValueError("Retreat grounding requires a live end-effector pose.")
-        target = _batched_pose(pose, self.env).clone()
+        target = self._retreat_reference_pose(arm, reference).clone()
         desired = float(self._policy_value(policy, "retreat_height"))
         if clear_exchange:
             _, lateral = robot_frame_axes(self.env)
@@ -1970,6 +2120,20 @@ class ActionGrounder:
         height = torch.clamp(ceiling - target[:, 2, 3], min=0.0, max=desired)
         target[:, 2, 3] += height
         return target
+
+    def _retreat_reference_pose(
+        self,
+        arm: str,
+        reference: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Resolve the live or speculative TCP pose from which retreat starts."""
+        pose = reference
+        if pose is None and hasattr(self.env, "get_current_xpos_agent"):
+            left, right = self.env.get_current_xpos_agent()
+            pose = left if arm == "left_arm" else right
+        if pose is None:
+            raise ValueError("Retreat grounding requires a live end-effector pose.")
+        return _batched_pose(pose, self.env)
 
     def _joint_target(
         self,

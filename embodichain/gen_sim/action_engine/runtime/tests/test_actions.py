@@ -21,6 +21,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 import torch
 
 from embodichain.gen_sim.action_engine.runtime import actions
@@ -33,6 +34,7 @@ from embodichain.gen_sim.action_engine.runtime.state import ExecutionState
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     ActionPlan,
+    EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectState,
     JointPositionGoal,
@@ -143,8 +145,10 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
         observed.update(kwargs)
         return SimpleNamespace(status="hit")
 
-    def fake_affordance(**_kwargs: Any) -> Affordance:
+    def fake_affordance(**kwargs: Any) -> Affordance:
         events.append("affordance")
+        observed["generator_cfg"] = kwargs["generator_cfg"]
+        observed["gripper_collision_cfg"] = kwargs["gripper_collision_cfg"]
         return Affordance()
 
     monkeypatch.setattr(
@@ -163,6 +167,8 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
     assert observed["max_decomposition_hulls"] == 8
     assert observed["mesh_vertices"].dtype == torch.float32
     assert observed["mesh_triangles"].dtype == torch.int64
+    assert observed["generator_cfg"].n_deviated_approach_directions == 4
+    assert observed["gripper_collision_cfg"] is not None
 
 
 def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None:
@@ -190,6 +196,78 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
         torch.tensor([0.0, -1.0, 0.0]),
     )
     assert hand.motion_policy.strategy == "ik_interp"
+
+
+def test_retreat_uses_row_local_motion_planner_reachability_search(
+    monkeypatch: Any,
+) -> None:
+    env = _planner_env()
+    adapter = AtomicActionAdapter(env)
+    reference = torch.eye(4).repeat(2, 1, 1)
+    reference[:, 2, 3] = 1.05
+    requested = reference.clone()
+    requested[:, 2, 3] = 1.35
+    height_thresholds = torch.tensor([1.24, 1.00])
+    attempted_targets: list[torch.Tensor] = []
+
+    def plan(invocation: Any, _context: Any) -> ActionPlan:
+        target = invocation.goal.xpos.clone()
+        attempted_targets.append(target)
+        height_reachable = target[:, 2, 3] <= height_thresholds
+        baseward_reachable = target[:, 1, 3] < -0.05
+        success = height_reachable | baseward_reachable
+        terminal = target[:, 2, 3, None].repeat(1, 8)
+        positions = torch.stack((torch.zeros_like(terminal), terminal), dim=1)
+        return ActionPlan(
+            skill_id="move_end_effector",
+            plan_success=success,
+            trajectory=TimedTrajectory.from_positions(
+                positions,
+                env_ids=torch.arange(2),
+                control_dt=0.01,
+            ),
+            recovery_policy=RecoveryPolicy(),
+            planned_scene_version=0,
+            planned_collision_world_revision=(0, 0),
+            diagnostics=PlannerDiagnostics(backend="fake"),
+            expected_effects=StateDelta(),
+        )
+
+    monkeypatch.setattr(adapter, "_engine", lambda: SimpleNamespace(plan=plan))
+    grounded = GroundedAction(
+        "MoveEndEffector",
+        "right_arm",
+        "arm",
+        EndEffectorPoseGoal(xpos=requested),
+        {
+            "sample_interval": 10,
+            "retreat_height": 0.30,
+            "minimum_retreat_height": 0.05,
+            "retreat_distance": 0.10,
+        },
+        motion_policy={
+            "collision_safety": "required",
+            "retreat_reachability_search": True,
+            "retreat_reference_pose": reference,
+            "minimum_retreat_height": 0.05,
+            "retreat_distance": 0.10,
+        },
+    )
+
+    outcome = adapter.plan(
+        grounded,
+        ExecutionState(last_qpos=torch.zeros(2, 8)),
+    )
+
+    assert len(attempted_targets) > 1
+    assert bool(outcome.success.all())
+    selected_z = outcome.grounded.target.xpos[:, 2, 3]
+    assert selected_z.tolist() == pytest.approx([1.20, 1.35])
+    assert outcome.grounded.target.xpos[:, 1, 3].tolist() == pytest.approx([0.0, -0.10])
+    search = outcome.planner_trace["reachability_search"]
+    assert search["strategy"] == "bounded_motion_planner"
+    assert search["selected_target_z"].tolist() == pytest.approx([1.20, 1.35])
+    assert len(search["attempts"]) == len(attempted_targets)
 
 
 def test_curobo_generator_receives_generated_static_obstacles(

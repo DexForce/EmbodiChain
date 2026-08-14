@@ -39,6 +39,7 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
     ControlPartCommandProfile,
     DynamicCollisionMode,
+    EndEffectorPoseGoal,
     EntityState,
     ExecutionSession,
     MotionPolicy,
@@ -289,7 +290,9 @@ class AtomicActionAdapter:
             viser_port=int(grasp_options["viser_port"]),
             antipodal_sampler_cfg=sampler,
             max_deviation_angle=float(grasp_options["max_deviation_angle"]),
-            n_deviated_approach_directions=1,
+            n_deviated_approach_directions=int(
+                grasp_options["n_deviated_approach_directions"]
+            ),
         )
         max_hulls = int(grasp_options["max_decomposition_hulls"])
         collision = GripperCollisionCfg(
@@ -340,6 +343,23 @@ class AtomicActionAdapter:
             capability,
         )
         primary_success = plan.plan_success.to(self.device)
+        reachability_search = None
+        if bool(grounded.motion_policy.get("retreat_reachability_search", False)):
+            (
+                grounded,
+                selected_positions,
+                primary_success,
+                reachability_search,
+            ) = self._search_reachable_retreat(
+                grounded=grounded,
+                capability=capability,
+                state=state,
+                context=context,
+                invocation=invocation,
+                initial_positions=selected_positions,
+                initial_success=primary_success,
+            )
+            invocation = replace(invocation, goal=grounded.target)
         combined_success = primary_success.clone()
         fallback_plan: ActionPlan | None = None
         use_fallback = torch.zeros_like(combined_success)
@@ -457,8 +477,187 @@ class AtomicActionAdapter:
                 fallback_attempted=fallback_attempted,
                 fallback_success=fallback_success,
                 fallback_used=use_fallback,
+                reachability_search=reachability_search,
             ),
         )
+
+    def _search_reachable_retreat(
+        self,
+        *,
+        grounded: GroundedAction,
+        capability: AtomicCapability,
+        state: ExecutionState,
+        context: PlanningContext,
+        invocation: ActionInvocation,
+        initial_positions: torch.Tensor,
+        initial_success: torch.Tensor,
+    ) -> tuple[GroundedAction, torch.Tensor, torch.Tensor, dict[str, Any]]:
+        """Select the highest row-local retreat accepted by the live planner."""
+        candidates = self._retreat_search_targets(grounded)
+        target = getattr(grounded.target, "xpos", None)
+        if not isinstance(target, torch.Tensor) or len(candidates) <= 1:
+            return (
+                grounded,
+                initial_positions,
+                initial_success,
+                {
+                    "strategy": "bounded_motion_planner",
+                    "attempts": [],
+                    "selected_target_z": (
+                        None
+                        if not isinstance(target, torch.Tensor)
+                        else target[:, 2, 3]
+                    ),
+                },
+            )
+
+        selected_target = candidates[0][1].clone()
+        selected_positions = initial_positions
+        success = initial_success.clone()
+        attempts: list[dict[str, Any]] = [
+            {
+                "candidate": candidates[0][0],
+                "target_z": candidates[0][1][:, 2, 3].detach().clone(),
+                "success": initial_success.detach().clone(),
+            }
+        ]
+        for label, candidate_target in candidates[1:]:
+            unresolved = ~success
+            if not bool(unresolved.any()):
+                break
+            row_target = torch.where(
+                unresolved[:, None, None],
+                candidate_target,
+                selected_target,
+            )
+            candidate_grounded = replace(
+                grounded,
+                target=EndEffectorPoseGoal(xpos=row_target),
+            )
+            candidate_invocation = replace(
+                invocation,
+                goal=candidate_grounded.target,
+            )
+            candidate_plan = self._engine().plan(candidate_invocation, context)
+            candidate_positions = self._positions_with_agent_holds(
+                candidate_plan,
+                candidate_grounded,
+                capability,
+            )
+            candidate_success = candidate_plan.plan_success.to(self.device)
+            selected_rows = unresolved & candidate_success
+            selected_positions = self._merge_plan_rows(
+                selected_positions,
+                candidate_positions,
+                selected_rows,
+                state.last_qpos,
+            )
+            selected_target = torch.where(
+                selected_rows[:, None, None],
+                candidate_target,
+                selected_target,
+            )
+            success |= candidate_success
+            attempts.append(
+                {
+                    "candidate": label,
+                    "target_z": candidate_target[:, 2, 3].detach().clone(),
+                    "success": candidate_success.detach().clone(),
+                }
+            )
+
+        metadata = {
+            "retreat_selected_target_z": selected_target[:, 2, 3].detach().clone(),
+            "retreat_reachability_found": success.detach().clone(),
+        }
+        selected_grounded = replace(
+            grounded,
+            target=EndEffectorPoseGoal(xpos=selected_target),
+            cfg={**grounded.cfg, **metadata},
+            motion_policy={**grounded.motion_policy, **metadata},
+        )
+        return (
+            selected_grounded,
+            selected_positions,
+            success,
+            {
+                "strategy": "bounded_motion_planner",
+                "attempts": attempts,
+                "selected_target_z": selected_target[:, 2, 3].detach().clone(),
+            },
+        )
+
+    def _retreat_search_targets(
+        self,
+        grounded: GroundedAction,
+    ) -> list[tuple[str, torch.Tensor]]:
+        """Build bounded height and baseward retreat candidates from live poses."""
+        target = getattr(grounded.target, "xpos", None)
+        reference = grounded.motion_policy.get("retreat_reference_pose")
+        if not isinstance(target, torch.Tensor) or not isinstance(
+            reference, torch.Tensor
+        ):
+            return []
+        target = target.to(device=self.device, dtype=torch.float32)
+        reference = reference.to(device=self.device, dtype=torch.float32)
+        if target.shape == (4, 4):
+            target = target.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        if reference.shape == (4, 4):
+            reference = reference.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        expected = (self.num_envs, 4, 4)
+        if target.shape != expected or reference.shape != expected:
+            return []
+
+        sample_count = int(grounded.cfg.get("retreat_search_samples", 6))
+        if not 2 <= sample_count <= 16:
+            raise ValueError("retreat_search_samples must be in [2, 16].")
+        minimum_height = float(grounded.cfg.get("minimum_retreat_height", 0.05))
+        if not math.isfinite(minimum_height) or minimum_height < 0.0:
+            raise ValueError("minimum_retreat_height must be finite and non-negative.")
+        desired_height = torch.clamp(
+            target[:, 2, 3] - reference[:, 2, 3],
+            min=0.0,
+        )
+        minimum = torch.minimum(
+            desired_height,
+            torch.full_like(desired_height, minimum_height),
+        )
+        fractions = torch.linspace(
+            1.0,
+            0.0,
+            sample_count,
+            dtype=target.dtype,
+            device=target.device,
+        )
+        heights = (
+            minimum[:, None] + (desired_height - minimum)[:, None] * fractions[None]
+        )
+        candidates: list[tuple[str, torch.Tensor]] = [("requested", target.clone())]
+        for index in range(1, sample_count):
+            candidate = target.clone()
+            candidate[:, 2, 3] = reference[:, 2, 3] + heights[:, index]
+            candidates.append((f"height_{index}", candidate))
+
+        from .frames import arm_base_poses
+
+        left_base, right_base = arm_base_poses(self.env)
+        base = left_base if grounded.arm == "left_arm" else right_base
+        direction = base[:, :2, 3] - reference[:, :2, 3]
+        norm = torch.linalg.vector_norm(direction, dim=1, keepdim=True)
+        direction = torch.where(
+            norm > 1.0e-6,
+            direction / torch.clamp(norm, min=1.0e-6),
+            torch.zeros_like(direction),
+        )
+        distance = float(grounded.cfg.get("retreat_distance", 0.10))
+        if not math.isfinite(distance) or distance < 0.0:
+            raise ValueError("retreat_distance must be finite and non-negative.")
+        for index in range(sample_count):
+            candidate = target.clone()
+            candidate[:, :2, 3] = reference[:, :2, 3] + direction * distance
+            candidate[:, 2, 3] = reference[:, 2, 3] + heights[:, index]
+            candidates.append((f"baseward_{index}", candidate))
+        return candidates
 
     def _planner_trace(
         self,
@@ -473,6 +672,7 @@ class AtomicActionAdapter:
         fallback_attempted: torch.Tensor,
         fallback_success: torch.Tensor,
         fallback_used: torch.Tensor,
+        reachability_search: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build compact per-row evidence for the planner route actually used."""
         exclusions = self._collision_exclusion_masks(grounded, state)
@@ -485,7 +685,7 @@ class AtomicActionAdapter:
             dtype=torch.int64,
             device=self.device,
         )
-        return {
+        trace = {
             "action_class": grounded.action_class,
             "arm": grounded.arm,
             "planner": invocation.motion_policy.planner,
@@ -497,12 +697,21 @@ class AtomicActionAdapter:
             "fallback_attempted": fallback_attempted.detach().clone(),
             "fallback_success": fallback_success.detach().clone(),
             "fallback_used": fallback_used.detach().clone(),
+            "search_budget": {
+                "primary_max_attempts": int(
+                    self.planner_policy.get("curobo", {}).get("max_attempts", 1)
+                ),
+                "fallback_enabled": bool(fallback_allowed),
+            },
             "collision_world_revision": revisions,
             "collision_obstacle_positions": obstacle_positions,
             "collision_exclusions": {
                 uid: mask.detach().clone() for uid, mask in exclusions.items()
             },
         }
+        if reachability_search is not None:
+            trace["reachability_search"] = deepcopy(dict(reachability_search))
+        return trace
 
     def _select_upright_transport_yaw(
         self,

@@ -41,7 +41,7 @@ __all__ = [
     "validate_persisted_contracts",
 ]
 
-CONTRACT_LINKER_VERSION = "action_contract_linker_v1"
+CONTRACT_LINKER_VERSION = "action_contract_linker_v2"
 _INITIAL_PREDICATES = frozenset({"arm_free", "object_free"})
 _REFERENCE_KEYS = frozenset(
     {
@@ -460,6 +460,7 @@ def _link_internal_nodes(
             producers = [
                 earlier_id
                 for earlier_id in node_ids[:later_index]
+                if node_by_id[earlier_id]["contract"]["failure_policy"] != "best_effort"
                 if _adds_atom(
                     node_by_id[earlier_id]["contract"]["effects"], requirement
                 )
@@ -546,6 +547,8 @@ def _summarize_group(
     last_effect: dict[str, dict[str, Any]] = {}
     effect_order: list[str] = []
     for node_id in node_ids:
+        if node_by_id[node_id]["contract"]["failure_policy"] == "best_effort":
+            continue
         for effect in node_by_id[node_id]["contract"]["effects"]:
             key = _atom_key(effect["atom"])
             if key not in last_effect:

@@ -73,6 +73,7 @@ class SceneEntity:
     attributes: Mapping[str, Any] = field(default_factory=dict)
     source_uid: str = ""
 
+
 class SceneInventory:
     """Structural scene index without natural-language matching rules."""
 
@@ -276,10 +277,6 @@ class GroundedTaskBuilder:
             )
             if task_type == "E2":
                 initial_state = {"orientation": "fallen", **dict(initial_state or {})}
-        elif task_type == "target":
-            required_affordances = tuple(
-                set(required_affordances) | {"support_surface"}
-            )
         existing = self.role_by_uid.get(entity.uid)
         if existing is not None:
             requirement = self.requirements[existing]
@@ -347,11 +344,9 @@ def validate_target_compatibility(
 ) -> None:
     """Reject only structural or explicitly declared target contradictions."""
     if task_type == "E1" and relation == "on" and target is not None:
-        if target.affordances and "support_surface" not in target.affordances:
-            raise ValueError(
-                f"E1 target {target.uid!r} has explicit affordances but does "
-                "not support placement."
-            )
+        # Support is a relation between two concrete bodies at a candidate
+        # pose. A positive affordance list is not a closed-world inventory, so
+        # omission of ``support_surface`` cannot prove incompatibility here.
         return
     requires_container = task_type == "E3" or (
         task_type == "E1" and relation == "inside"
@@ -377,8 +372,6 @@ def validate_target_compatibility(
 
 
 def _target_affordances(task_type: str, relation: str) -> tuple[str, ...]:
-    if task_type == "E1" and relation == "on":
-        return ("support_surface",)
     if task_type == "E3" or (task_type == "E1" and relation == "inside"):
         return ("container",)
     return ()

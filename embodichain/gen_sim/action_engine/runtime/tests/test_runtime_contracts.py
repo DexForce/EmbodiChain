@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -31,6 +32,7 @@ import torch
 from embodichain.gen_sim.action_engine.config import (
     RuntimePolicyCfg,
     default_runtime_policy,
+    resolve_agent_runtime_policy,
     runtime_policy_hash,
 )
 from embodichain.gen_sim.action_engine.compiler import (
@@ -50,6 +52,7 @@ from embodichain.gen_sim.action_engine.env import agent_env as env_module
 from embodichain.gen_sim.action_engine.runtime.actions import AtomicActionAdapter
 from embodichain.gen_sim.action_engine.runtime.executor import (
     ProgramExecutor,
+    _EdgeResult,
     _score_arm_candidate,
 )
 from embodichain.gen_sim.action_engine.runtime.frames import (
@@ -142,6 +145,8 @@ class _FakeEntity:
             [[0, 1, 2], [0, 2, 3]],
             dtype=torch.int64,
         )
+        self.lin_vel = torch.zeros(pose.shape[0], 3)
+        self.ang_vel = torch.zeros(pose.shape[0], 3)
 
     def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
         assert to_matrix
@@ -170,6 +175,9 @@ class _FakeSim:
 
     def get_rigid_object_uid_list(self) -> list[str]:
         return list(self.entities)
+
+    def update(self, *, step: int) -> None:
+        del step
 
 
 class _FakeRobot:
@@ -419,6 +427,79 @@ def test_runtime_policy_discards_legacy_support_z_fallbacks() -> None:
     assert "support_max_z_offset" not in policy.predicate_fallbacks
 
 
+def test_runtime_policy_v4_migrates_grasp_direction_count() -> None:
+    snapshot = default_runtime_policy("dual_franka").as_mapping()
+    snapshot["schema_version"] = "action_engine_runtime_policy_v4"
+    snapshot["grasp"].pop("n_deviated_approach_directions")
+    snapshot_hash = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    policy = resolve_agent_runtime_policy(
+        {
+            "robot_profile": "dual_franka",
+            "runtime_policy": snapshot,
+            "runtime_policy_hash": snapshot_hash,
+        }
+    )
+
+    assert policy.schema_version == "action_engine_runtime_policy_v6"
+    assert policy.grasp["n_deviated_approach_directions"] == 4
+
+
+def test_runtime_policy_v5_migrates_support_geometry_thresholds() -> None:
+    snapshot = default_runtime_policy("dual_franka").as_mapping()
+    snapshot["schema_version"] = "action_engine_runtime_policy_v5"
+    snapshot["grounding"]["placement"]["clearance"] = 0.019
+    for key in (
+        "candidate_count",
+        "candidate_offset_fraction",
+        "support_margin",
+        "recovery_attempts",
+    ):
+        snapshot["grounding"]["placement"].pop(key)
+    for key in (
+        "support_stability_samples",
+        "support_stability_interval_steps",
+        "support_linear_velocity_tolerance",
+        "support_angular_velocity_tolerance",
+    ):
+        snapshot["execution"].pop(key)
+    for key in (
+        "support_com_margin",
+        "support_max_vertical_gap",
+        "support_max_penetration",
+        "support_min_overlap_ratio",
+    ):
+        snapshot["predicate_fallbacks"].pop(key)
+    snapshot_hash = hashlib.sha256(
+        json.dumps(
+            snapshot,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    policy = resolve_agent_runtime_policy(
+        {
+            "robot_profile": "dual_franka",
+            "runtime_policy": snapshot,
+            "runtime_policy_hash": snapshot_hash,
+        }
+    )
+
+    assert policy.schema_version == "action_engine_runtime_policy_v6"
+    assert policy.predicate_fallbacks["support_min_overlap_ratio"] == 0.25
+    assert policy.grounding["placement"]["clearance"] == 0.019
+    assert policy.grounding["placement"]["candidate_count"] == 5
+
+
 def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
     tmp_path: Path,
     monkeypatch: Any,
@@ -529,6 +610,87 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
         assert (env_dir / "task_graph.png").read_bytes().startswith(b"\x89PNG")
     assert len(rendered_documents) == 2
     assert not list(episode_dir.rglob("*.tmp"))
+
+
+def test_runtime_recorder_separates_dynamic_recovery_and_replay_phases(
+    tmp_path: Path,
+) -> None:
+    program = load_execution_program(
+        compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+    )
+    recorder = RuntimeRecorder(
+        program,
+        num_envs=1,
+        run_id="phased-recovery",
+        output_root=tmp_path,
+    )
+    primary = program.semantic_steps[0]
+    recovery = replace(
+        primary,
+        id="recovery_e2_hold",
+        parent_step_id=primary.id,
+    )
+    recovery_spec = deepcopy(program.raw["semantic_steps"][0])
+    recovery_spec.update(
+        {
+            "id": recovery.id,
+            "parent_step_id": primary.id,
+            "role": "recovery",
+        }
+    )
+    recorder.register_step(recovery, recovery_spec)
+    active = torch.tensor([True])
+    recorder.edge(
+        "edge_recovery",
+        recovery,
+        assignments=["left_arm"],
+        grounded=[],
+        active=active,
+        failed=torch.tensor([False]),
+        action_steps=4,
+        phase="recovery",
+    )
+    recorder.step(
+        recovery,
+        torch.tensor([True]),
+        observed=torch.zeros((1, 3)),
+        target=None,
+        phase="recovery",
+    )
+    recorder.edge(
+        program.edges[0].id,
+        primary,
+        assignments=["left_arm"],
+        grounded=[],
+        active=active,
+        failed=torch.tensor([False]),
+        action_steps=3,
+        phase="replay",
+    )
+    recorder.step(
+        primary,
+        torch.tensor([True]),
+        observed=torch.zeros((1, 3)),
+        target=None,
+    )
+
+    checkpoints = sorted(
+        (recorder.output_dir / "env_0000" / "checkpoints").glob("*.json")
+    )
+    assert len(checkpoints) == 2
+    recovery_checkpoint = next(
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in checkpoints
+        if "recovery_e2_hold" in path.name
+    )
+    primary_checkpoint = next(
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in checkpoints
+        if path.name.endswith("_hold.json") and "recovery_e2" not in path.name
+    )
+    assert {event["phase"] for event in recovery_checkpoint["events"]} == {"recovery"}
+    assert primary_checkpoint["events"][0]["phase"] == "replay"
+    assert primary_checkpoint["events"][-1]["phase"] == "primary"
 
 
 def test_runtime_recorder_does_not_mask_execution_when_png_rendering_fails(
@@ -1214,6 +1376,460 @@ def test_handover_candidates_avoid_occupied_table_center_and_lift_payload() -> N
     )
 
 
+def test_on_placement_grounding_samples_bounded_live_support_poses() -> None:
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, -0.20, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.20, 0.15, 0.01),
+        ),
+    }
+    env = _FakeEnv(entities)
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "payload",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "support",
+                        "relation": "on",
+                        "orientation_goal": "none",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    step = program.semantic_steps[0]
+    edge = next(
+        item
+        for item in program.edges
+        if item.id in step.edge_ids
+        and item.actions[0]["target_binding"].get("kind") == "semantic_goal"
+        and item.actions[0]["target_binding"].get("phase", "final") != "staging"
+    )
+    grounder = ActionGrounder(program, env, lambda _uid: None)
+
+    candidates = grounder.ground_candidates(
+        edge.actions[0],
+        step,
+        arm="left_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
+
+    assert len(candidates) == 5
+    assert [item.motion_policy["placement_candidate_index"] for item in candidates] == [
+        0,
+        1,
+        2,
+        3,
+        4,
+    ]
+    offsets = [item.motion_policy["placement_xy_offset"][0] for item in candidates]
+    assert len({tuple(float(value) for value in offset) for offset in offsets}) == 5
+    support_lower = torch.tensor([-0.20, -0.15])
+    support_upper = torch.tensor([0.20, 0.15])
+    for item in candidates:
+        center = item.target_object_pose[0, :2, 3]
+        assert torch.all(center >= support_lower)
+        assert torch.all(center <= support_upper)
+
+
+def test_on_placement_candidates_respect_support_geometry_origin() -> None:
+    support_vertices = _rect_vertices(0.10, 0.08, 0.01)
+    support_vertices[:, 0] += 0.25
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, -0.20, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.10, 0.0, 0.75),
+            support_vertices,
+        ),
+    }
+    env = _FakeEnv(entities)
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "payload",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "support",
+                        "relation": "on",
+                        "orientation_goal": "none",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    step = program.semantic_steps[0]
+    edge = next(
+        item
+        for item in program.edges
+        if item.id in step.edge_ids
+        and item.actions[0]["target_binding"].get("kind") == "semantic_goal"
+        and item.actions[0]["target_binding"].get("phase", "final") != "staging"
+    )
+    candidates = ActionGrounder(program, env, lambda _uid: None).ground_candidates(
+        edge.actions[0],
+        step,
+        arm="left_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
+
+    support_world = support_vertices[:, :2] + torch.tensor([0.10, 0.0])
+    lower = support_world.min(dim=0).values + 0.002
+    upper = support_world.max(dim=0).values - 0.002
+    payload_local = entities["payload"]._vertices[:, :2]
+    for candidate in candidates:
+        origin = candidate.target_object_pose[0, :2, 3]
+        assert torch.all(origin + payload_local.min(dim=0).values >= lower)
+        assert torch.all(origin + payload_local.max(dim=0).values <= upper)
+
+
+def test_build_stack_root_compiles_to_generic_table_support() -> None:
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "stack",
+                    "operator": "build_stack",
+                    "objects": ["base", "nested"],
+                    "actor": {"mode": "auto"},
+                    "goal": {
+                        "anchor": "table_center",
+                        "stack_mode": "nested",
+                        "orientation_goal": "none",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+
+    root, child = program.semantic_steps
+    assert root.goal["relation"] == "on"
+    assert root.goal["reference_object"] == "table"
+    assert root.postcondition["reference_object"] == "table"
+    assert child.goal["relation"] == "inside"
+    assert child.goal["reference_object"] == "base"
+
+
+def test_executor_tries_next_placement_pose_after_planning_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, -0.20, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.20, 0.15, 0.01),
+        ),
+    }
+    env = _FakeEnv(entities)
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "payload",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "support",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    edge = next(
+        item
+        for item in executor.program.edges
+        if item.id in step.edge_ids
+        and item.actions[0]["target_binding"].get("kind") == "semantic_goal"
+        and item.actions[0]["target_binding"].get("phase", "final") != "staging"
+    )
+    state = ExecutionState(last_qpos=env.robot.get_qpos())
+
+    def plan(grounded: GroundedAction, _state: ExecutionState) -> ActionOutcome:
+        index = int(grounded.motion_policy["placement_candidate_index"])
+        return ActionOutcome(
+            trajectory=torch.zeros(1, 1, env.robot.dof),
+            success=torch.tensor([index == 1]),
+            next_state=state,
+            grounded=grounded,
+        )
+
+    monkeypatch.setattr(executor.adapter, "plan", plan)
+    grounded, outcome = executor._ground_and_plan_candidates(
+        edge.actions[0],
+        step,
+        arm="left_arm",
+        state=state,
+        active=torch.tensor([True]),
+    )
+
+    assert bool(outcome.success[0])
+    assert grounded.motion_policy["placement_candidate_index"] == 1
+    assert outcome.planner_trace["selected_grounding_candidate"] == 1
+    assert len(outcome.planner_trace["grounding_candidates"]) == 2
+
+
+def test_post_release_candidate_search_skips_the_released_pose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, -0.20, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.20, 0.15, 0.01),
+        ),
+    }
+    env = _FakeEnv(entities)
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "payload",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "support",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    edge = next(
+        item
+        for item in executor.program.edges
+        if item.id in step.edge_ids
+        and item.actions[0]["target_binding"].get("kind") == "semantic_goal"
+        and item.actions[0]["target_binding"].get("phase", "final") != "staging"
+    )
+    state = ExecutionState(last_qpos=env.robot.get_qpos())
+    executor._placement_candidate_history[(step.id, "left_arm")] = {0}
+
+    def plan(grounded: GroundedAction, _state: ExecutionState) -> ActionOutcome:
+        return ActionOutcome(
+            trajectory=torch.zeros(1, 1, env.robot.dof),
+            success=torch.tensor([True]),
+            next_state=state,
+            grounded=grounded,
+        )
+
+    monkeypatch.setattr(executor.adapter, "plan", plan)
+    grounded, outcome = executor._ground_and_plan_candidates(
+        edge.actions[0],
+        step,
+        arm="left_arm",
+        state=state,
+        active=torch.tensor([True]),
+    )
+
+    assert grounded.motion_policy["placement_candidate_index"] == 1
+    assert outcome.planner_trace["grounding_candidates"][0] == {
+        "candidate_index": 0,
+        "status": "previously_released",
+    }
+
+
+def test_unstable_placement_recovery_replays_pick_before_another_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, 0.0, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.10, 0.08, 0.01),
+        ),
+    }
+    env = _FakeEnv(entities)
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "payload",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "support",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    replayed_actions: list[str] = []
+    verification_count = 0
+
+    def ensure_assignment(_step: SemanticStep, failed: torch.Tensor) -> None:
+        executor._assignments[_step.id] = [
+            None if bool(failed[env_id]) else "left_arm"
+            for env_id in range(len(failed))
+        ]
+
+    def execute(
+        edge: ExecutionEdge,
+        _step: SemanticStep,
+        *,
+        failed: torch.Tensor,
+    ) -> _EdgeResult:
+        replayed_actions.append(str(edge.actions[0]["atomic_action_class"]))
+        return _EdgeResult([], failed.clone(), [], executed=~failed)
+
+    def verify(
+        _step: SemanticStep,
+        failed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        nonlocal verification_count
+        verification_count += 1
+        success = torch.tensor([verification_count == 2]) & ~failed
+        return failed | ~success, success, executor._entity_pose("payload")[:, :3, 3]
+
+    monkeypatch.setattr(executor, "_ensure_assignment", ensure_assignment)
+    monkeypatch.setattr(executor, "_execute_edge_with_retries", execute)
+    monkeypatch.setattr(executor, "_verify_step", verify)
+    recorder = RuntimeRecorder(
+        executor.program,
+        num_envs=1,
+        enabled=False,
+    )
+
+    recovery = executor._recover_unstable_placement(
+        step,
+        torch.tensor([True]),
+        recorder=recorder,
+    )
+
+    first_action = str(
+        executor.edges[step.edge_ids[0]].actions[0]["atomic_action_class"]
+    )
+    assert replayed_actions.count(first_action) == 2
+    assert verification_count == 2
+    assert bool(recovery.succeeded[0])
+    assert not bool(recovery.failed[0])
+    assert recovery.failure_events == []
+
+
+def test_unstable_placement_recovery_reports_its_own_planning_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, 0.0, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.10, 0.08, 0.01),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "payload",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "support",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    def fail_assignment(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("no plan")
+
+    monkeypatch.setattr(executor, "_ensure_assignment", fail_assignment)
+
+    recovery = executor._recover_unstable_placement(
+        step,
+        torch.tensor([True]),
+        recorder=RuntimeRecorder(executor.program, num_envs=1, enabled=False),
+    )
+
+    assert bool(recovery.failed[0])
+    assert bool(recovery.covered_failures[0])
+    assert len(recovery.failure_events) == 1
+    event = recovery.failure_events[0]
+    assert event["failure_type"] == "search_exhausted"
+    assert event["phase"] == "recovery"
+    assert event["origin_edge_id"] == step.edge_ids[-1]
+    assert event["blocking_edge_id"] == step.edge_ids[0]
+
+
 def test_handover_height_accounts_for_obstacle_and_tool_envelope() -> None:
     entities = {
         "can": _FakeEntity("can", _pose(0.0, 0.2, 1.03), _box_vertices(0.03)),
@@ -1460,17 +2076,17 @@ def test_handover_retreat_and_home_block_receiver_continuation() -> None:
         if edge.actions[0]["target_binding"].get("operation") == "handover_home"
     )
 
-    assert not executor._is_cleanup_edge(retreat)
-    assert not executor._is_cleanup_edge(home)
+    assert executor._edge_failure_policy(retreat) == "safety_required"
+    assert executor._edge_failure_policy(home) == "best_effort"
 
 
-def test_release_retreat_and_home_are_required_safety_barriers() -> None:
+def test_release_retreat_is_required_and_exact_home_is_best_effort() -> None:
     entities = {
         "can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)),
         "target": _FakeEntity("target", _pose(0.2, 0.0, 0.75), _box_vertices(0.03)),
     }
     program = load_execution_program(
-        compile_task_agent(
+        compile_task_agent_v2(
             _task_agent(
                 {
                     "id": "place",
@@ -1498,8 +2114,194 @@ def test_release_retreat_and_home_are_required_safety_barriers() -> None:
         edge for edge in edges if edge.actions[0]["atomic_action_class"] == "MoveJoints"
     )
 
-    assert not executor._is_cleanup_edge(retreat)
-    assert not executor._is_cleanup_edge(home)
+    assert executor._edge_failure_policy(retreat) == "safety_required"
+    assert executor._edge_failure_policy(home) == "best_effort"
+
+
+def test_best_effort_home_does_not_veto_required_arm_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, -0.2, 0.75), _box_vertices(0.03)),
+        "target": _FakeEntity("target", _pose(0.0, 0.0, 0.75), _box_vertices(0.03)),
+    }
+    graph = compile_task_agent_v2(
+        _task_agent(
+            {
+                "id": "place",
+                "operator": "place_relative",
+                "object": "can",
+                "actor": {"mode": "required", "arm": "left_arm"},
+                "goal": {"reference_object": "target", "relation": "left_of"},
+                "depends_on": [],
+            }
+        )
+    )
+    executor = ProgramExecutor(
+        load_execution_program(graph),
+        _FakeEnv(entities),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    def ground(action: dict[str, Any], *_args: Any, **_kwargs: Any) -> GroundedAction:
+        return GroundedAction(
+            action_class=str(action["atomic_action_class"]),
+            arm="left_arm",
+            control=str(action["control"]),
+            target=SimpleNamespace(xpos=None),
+            cfg={},
+        )
+
+    def plan(grounded: GroundedAction, state: ExecutionState) -> ActionOutcome:
+        return ActionOutcome(
+            trajectory=torch.zeros(1, 1, executor.env.robot.dof),
+            success=torch.tensor([grounded.action_class != "MoveJoints"]),
+            next_state=state,
+            grounded=grounded,
+            planner_trace={"primary_strategy": "motion_gen"},
+        )
+
+    monkeypatch.setattr(executor.grounder, "ground", ground)
+    monkeypatch.setattr(executor, "_with_downstream_targets", lambda *args: args[-1])
+    monkeypatch.setattr(executor.adapter, "plan", plan)
+
+    candidate = executor._candidate(step, "left_arm", torch.tensor([False]))
+
+    assert bool(candidate.feasible[0])
+    assert any("best-effort action degraded" in item for item in candidate.warnings)
+
+
+def test_best_effort_home_exception_does_not_fail_semantic_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = compile_task_agent_v2(
+        _task_agent(
+            {
+                "id": "place",
+                "operator": "place_relative",
+                "object": "can",
+                "actor": {"mode": "required", "arm": "left_arm"},
+                "goal": {"reference_object": "target", "relation": "left_of"},
+                "depends_on": [],
+            }
+        )
+    )
+    executor = ProgramExecutor(
+        load_execution_program(graph),
+        _FakeEnv(),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_ensure_assignment",
+        lambda step, _failed: executor._assignments.setdefault(step.id, ["left_arm"]),
+    )
+
+    def execute(edge: ExecutionEdge, _step: SemanticStep, *, failed: torch.Tensor):
+        if executor._edge_failure_policy(edge) == "best_effort":
+            raise RuntimeError("home search failed")
+        return SimpleNamespace(
+            actions=[],
+            failed=failed.clone(),
+            grounded=[],
+            planner_traces=[],
+            executed=~failed,
+        )
+
+    monkeypatch.setattr(executor, "_execute_edge_with_retries", execute)
+    monkeypatch.setattr(
+        executor,
+        "_verify_step",
+        lambda _step, failed: (failed, ~failed, torch.zeros(1, 3)),
+    )
+
+    result = executor.run()
+
+    assert bool(result.success[0])
+    assert len(result.failure_events) == 1
+    assert result.failure_events[0]["failure_type"] == "search_exhausted"
+    assert result.failure_events[0]["failure_policy"] == "best_effort"
+    assert result.failure_events[0]["fatal"] is False
+    assert result.failure_events[0]["evidence"]["exception"].endswith(
+        "home search failed"
+    )
+
+
+def test_candidate_failure_reports_real_blocking_safety_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, -0.2, 0.75), _box_vertices(0.03)),
+        "target": _FakeEntity("target", _pose(0.0, 0.0, 0.75), _box_vertices(0.03)),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent_v2(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "can",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "target",
+                            "relation": "left_of",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    def ground(action: dict[str, Any], *_args: Any, **_kwargs: Any) -> GroundedAction:
+        return GroundedAction(
+            action_class=str(action["atomic_action_class"]),
+            arm="left_arm",
+            control=str(action["control"]),
+            target=SimpleNamespace(xpos=None),
+            cfg={},
+        )
+
+    def plan(grounded: GroundedAction, state: ExecutionState) -> ActionOutcome:
+        return ActionOutcome(
+            trajectory=torch.zeros(1, 1, executor.env.robot.dof),
+            success=torch.tensor([grounded.action_class != "MoveEndEffector"]),
+            next_state=state,
+            grounded=grounded,
+            planner_trace={"primary_strategy": "motion_gen"},
+        )
+
+    monkeypatch.setattr(executor.grounder, "ground", ground)
+    monkeypatch.setattr(executor, "_with_downstream_targets", lambda *args: args[-1])
+    monkeypatch.setattr(executor.adapter, "plan", plan)
+    candidate = executor._candidate(step, "left_arm", torch.tensor([False]))
+    executor._assignments[step.id] = [None]
+    executor._report_candidates(step, (candidate,))
+    first_edge = executor.edges[step.edge_ids[0]]
+
+    events = executor._failure_events(
+        first_edge,
+        step,
+        torch.tensor([True]),
+        postcondition=False,
+        executed=torch.tensor([False]),
+        fallen_transition=torch.tensor([False]),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["failure_type"] == "search_exhausted"
+    assert event["failure_policy"] == "safety_required"
+    assert event["atomic_action"] == "MoveEndEffector"
+    assert event["blocking_edge_id"] != first_edge.id
+    assert event["planning_stage"] == "candidate_suffix"
+    assert "not a geometric proof" in event["reason"]
 
 
 def test_on_relation_rejects_preserve_orientation_drift() -> None:
@@ -1595,6 +2397,216 @@ def test_inside_relation_accepts_settling_orientation_drift() -> None:
     assert not bool(failed[0])
     assert bool(success[0])
     assert step.id not in executor._orientation_errors
+
+
+@pytest.mark.parametrize(
+    ("orientation_goal", "expected_success"),
+    (("upright", False), ("none", True)),
+)
+def test_on_relation_applies_only_the_requested_orientation_goal(
+    orientation_goal: str,
+    expected_success: bool,
+) -> None:
+    fallen = _pose(0.0, 0.0, 0.79)
+    fallen[:, :3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    entities = {
+        "can": _FakeEntity("can", fallen, _rect_vertices(0.03, 0.03, 0.06)),
+        "notebook": _FakeEntity(
+            "notebook",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.10, 0.08, 0.01),
+        ),
+    }
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "can",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "notebook",
+                            "relation": "on",
+                            "orientation_goal": orientation_goal,
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(entities),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert bool(success[0]) is expected_success
+    assert bool(failed[0]) is not expected_success
+
+
+def test_support_stability_window_rejects_motion_after_initial_contact() -> None:
+    payload = _FakeEntity(
+        "payload",
+        _pose(0.0, 0.0, 0.79),
+        _rect_vertices(0.03, 0.03, 0.03),
+    )
+    support = _FakeEntity(
+        "support",
+        _pose(0.0, 0.0, 0.75),
+        _rect_vertices(0.10, 0.08, 0.01),
+    )
+    env = _FakeEnv({"payload": payload, "support": support})
+    update_count = 0
+
+    def update(*, step: int) -> None:
+        nonlocal update_count
+        del step
+        update_count += 1
+        payload.lin_vel[:, 0] = 0.10
+
+    env.sim.update = update
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "payload",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "support",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        env,
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert update_count == executor.support_stability_samples - 1
+    assert bool(failed[0])
+    assert not bool(success[0])
+
+
+def test_support_stability_reads_real_rigid_object_body_state() -> None:
+    payload = _FakeEntity(
+        "payload",
+        _pose(0.0, 0.0, 0.79),
+        _rect_vertices(0.03, 0.03, 0.03),
+    )
+    del payload.lin_vel
+    del payload.ang_vel
+    payload.body_state = torch.zeros(1, 13)
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "payload", "left_arm")))
+        ),
+        _FakeEnv({"payload": payload}),
+        settle_steps=0,
+        record_runtime=False,
+    )
+
+    assert bool(executor._entity_motion_stable("payload")[0])
+    payload.body_state[:, 7] = 0.10
+    assert not bool(executor._entity_motion_stable("payload")[0])
+
+
+def test_final_support_revalidation_detects_later_chain_damage() -> None:
+    payload = _FakeEntity(
+        "payload",
+        _pose(0.0, 0.0, 0.79),
+        _rect_vertices(0.03, 0.03, 0.03),
+    )
+    support = _FakeEntity(
+        "support",
+        _pose(0.0, 0.0, 0.75),
+        _rect_vertices(0.10, 0.08, 0.01),
+    )
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place",
+                        "operator": "place_relative",
+                        "object": "payload",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "support",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv({"payload": payload, "support": support}),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+    assert not bool(failed[0])
+    assert bool(success[0])
+
+    payload._pose[:, 2, 3] += 0.20
+    failures = executor._revalidate_support_relations()
+
+    assert bool(failures[step.id][0])
+
+
+def test_support_relation_state_rejects_cycles() -> None:
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(
+                _task_agent(
+                    {
+                        "id": "place_b",
+                        "operator": "place_relative",
+                        "object": "b",
+                        "actor": {"mode": "required", "arm": "left_arm"},
+                        "goal": {
+                            "reference_object": "a",
+                            "relation": "on",
+                            "orientation_goal": "none",
+                        },
+                        "depends_on": [],
+                    }
+                )
+            )
+        ),
+        _FakeEnv(
+            {
+                "a": _FakeEntity("a", _pose(0.0, 0.0, 0.75), _box_vertices(0.03)),
+                "b": _FakeEntity("b", _pose(0.0, 0.0, 0.81), _box_vertices(0.03)),
+            }
+        ),
+        settle_steps=0,
+        record_runtime=False,
+    )
+    step_b = executor.program.semantic_steps[0]
+    step_a = replace(step_b, id="prior", object_uid="a")
+    executor._commit_support_relation(step_a, "b", torch.tensor([True]))
+
+    cycle_free = executor._support_cycle_free("b", "a", torch.tensor([True]))
+
+    assert not bool(cycle_free[0])
 
 
 def test_standalone_handover_assigns_its_pickup_candidate(
@@ -2268,11 +3280,12 @@ def test_object_held_predicate_checks_live_gripper_and_tcp_geometry() -> None:
     )
 
 
-def test_object_on_object_depends_only_on_xy_distance() -> None:
+def test_object_supported_by_requires_overlap_and_vertical_contact() -> None:
     support_z = 0.75
+    payload_z = support_z + 0.05 + 0.02 + 0.005
     payload = _FakeEntity(
         "payload",
-        _pose(0.002, -0.002, support_z + 0.0115),
+        _pose(0.002, -0.002, payload_z),
         _box_vertices(0.02),
     )
     support = _FakeEntity(
@@ -2282,21 +3295,81 @@ def test_object_on_object_depends_only_on_xy_distance() -> None:
     )
     env = _FakeEnv({"payload": payload, "support": support})
     predicate = {
-        "type": "object_on_object",
+        "type": "object_supported_by",
         "object": "payload",
         "support": "support",
     }
 
     assert bool(evaluate_predicate(env, predicate)[0])
 
-    payload._pose = _pose(0.002, -0.002, support_z - 1.0)
-    assert bool(evaluate_predicate(env, predicate)[0])
-
-    payload._pose = _pose(0.002, -0.002, support_z + 1.0)
-    assert bool(evaluate_predicate(env, predicate)[0])
-
-    payload._pose = _pose(0.081, 0.0, support_z + 0.0115)
+    payload._pose = _pose(0.002, -0.002, payload_z - 1.0)
     assert not bool(evaluate_predicate(env, predicate)[0])
+
+    payload._pose = _pose(0.002, -0.002, payload_z + 1.0)
+    assert not bool(evaluate_predicate(env, predicate)[0])
+
+    payload._pose = _pose(0.081, 0.0, payload_z)
+    assert not bool(evaluate_predicate(env, predicate)[0])
+
+
+def test_object_supported_by_uses_local_not_mesh_wide_support_height() -> None:
+    support_vertices = torch.tensor(
+        [
+            [-0.10, -0.10, -0.05],
+            [-0.02, -0.02, 0.05],
+            [0.02, -0.02, 0.05],
+            [0.02, 0.02, 0.05],
+            [-0.02, 0.02, 0.05],
+            [0.40, 0.00, 0.40],
+        ],
+        dtype=torch.float32,
+    )
+    payload = _FakeEntity(
+        "payload",
+        _pose(0.0, 0.0, 0.075),
+        _box_vertices(0.02),
+    )
+    support = _FakeEntity("support", _pose(0.0, 0.0, 0.0), support_vertices)
+    env = _FakeEnv({"payload": payload, "support": support})
+
+    supported = evaluate_predicate(
+        env,
+        {
+            "type": "object_supported_by",
+            "object": "payload",
+            "support": "support",
+        },
+    )
+
+    assert bool(supported[0])
+
+
+def test_object_supported_by_uses_live_center_of_mass_projection() -> None:
+    payload = _FakeEntity(
+        "payload",
+        _pose(0.04, 0.0, 0.125),
+        _rect_vertices(0.08, 0.02, 0.02),
+    )
+    payload.body_data = SimpleNamespace(
+        com_pose=torch.tensor([[0.04, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]])
+    )
+    support = _FakeEntity(
+        "support",
+        _pose(0.0, 0.0, 0.05),
+        _rect_vertices(0.05, 0.05, 0.05),
+    )
+    env = _FakeEnv({"payload": payload, "support": support})
+
+    supported = evaluate_predicate(
+        env,
+        {
+            "type": "object_supported_by",
+            "object": "payload",
+            "support": "support",
+        },
+    )
+
+    assert not bool(supported[0])
 
 
 def test_physical_pickup_rebases_a_compliant_grasp_from_live_pose() -> None:
@@ -3027,7 +4100,7 @@ def test_arm_candidate_score_softly_penalizes_cross_zone_motion() -> None:
         "target_pose": target,
         "workspace_center_xy": torch.tensor([[0.0, 0.0]]),
         "workspace_half_width": torch.tensor([0.40]),
-        "robot_lateral_axis": torch.tensor([[0.0, -1.0]]),
+        "world_left_axis": torch.tensor([[0.0, -1.0]]),
         "policy": default_runtime_policy("dual_ur10").arm_selection,
     }
 
@@ -3791,16 +4864,16 @@ def test_orient_object_uses_solver_roots_when_control_groups_share_root() -> Non
     )
 
 
-def test_orient_object_arm_preference_rotates_with_robot_view() -> None:
+def test_orient_object_arm_preference_stays_fixed_in_world_y() -> None:
     entities = {
         "left_object": _FakeEntity(
             "left_object",
-            _pose(0.20, 0.0, 0.8),
+            _pose(0.0, -0.20, 0.8),
             _rect_vertices(0.02, 0.02, 0.08),
         ),
         "right_object": _FakeEntity(
             "right_object",
-            _pose(-0.20, 0.0, 0.8),
+            _pose(0.0, 0.20, 0.8),
             _rect_vertices(0.02, 0.02, 0.08),
         ),
     }

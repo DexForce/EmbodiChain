@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 import logging
 from threading import RLock
@@ -43,7 +44,7 @@ from embodichain.utils import logger as project_logger
 from embodichain.utils.logger import log_info, log_warning
 
 from .actions import AtomicActionAdapter
-from .frames import DIRECTIONAL_RELATIONS, robot_frame_axes
+from .frames import DIRECTIONAL_RELATIONS
 from .grounding import ActionGrounder, LiveArrangementPlan, LivePlacementPlan
 from .models import (
     ActionOutcome,
@@ -69,6 +70,7 @@ class _Candidate:
     plans: dict[str, tuple[GroundedAction, ActionOutcome]]
     score_components: dict[str, torch.Tensor] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
+    blockers: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass
@@ -77,6 +79,23 @@ class _EdgeResult:
     failed: torch.Tensor
     grounded: list[GroundedAction]
     planner_traces: list[dict[str, Any]] = field(default_factory=list)
+    executed: torch.Tensor | None = None
+
+
+@dataclass(frozen=True)
+class _SupportRelation:
+    support_uid: str
+    semantic_step_id: str
+
+
+@dataclass
+class _PlacementRecoveryResult:
+    failed: torch.Tensor
+    succeeded: torch.Tensor
+    observed: torch.Tensor
+    actions: list[torch.Tensor]
+    failure_events: list[dict[str, Any]] = field(default_factory=list)
+    covered_failures: torch.Tensor | None = None
 
 
 def _score_arm_candidate(
@@ -87,7 +106,7 @@ def _score_arm_candidate(
     target_pose: torch.Tensor | None,
     workspace_center_xy: torch.Tensor,
     workspace_half_width: torch.Tensor,
-    robot_lateral_axis: torch.Tensor,
+    world_left_axis: torch.Tensor,
     policy: ArmSelectionPolicyCfg,
 ) -> dict[str, torch.Tensor]:
     """Combine motion length with soft, table-normalized cross-zone costs."""
@@ -98,7 +117,7 @@ def _score_arm_candidate(
         if pose is None:
             return torch.zeros_like(motion_cost)
         lateral = torch.sum(
-            (pose[:, :2, 3] - workspace_center_xy) * robot_lateral_axis,
+            (pose[:, :2, 3] - workspace_center_xy) * world_left_axis,
             dim=1,
         )
         wrong_side_depth = torch.clamp(
@@ -182,6 +201,19 @@ class ProgramExecutor:
             else settle_steps
         )
         self.max_retries_per_action = int(execution["max_retries_per_action"])
+        self.support_stability_samples = int(execution["support_stability_samples"])
+        self.support_stability_interval_steps = int(
+            execution["support_stability_interval_steps"]
+        )
+        self.support_linear_velocity_tolerance = float(
+            execution["support_linear_velocity_tolerance"]
+        )
+        self.support_angular_velocity_tolerance = float(
+            execution["support_angular_velocity_tolerance"]
+        )
+        self.placement_recovery_attempts = int(
+            runtime_policy.grounding["placement"]["recovery_attempts"]
+        )
         self.runtime_graph = (
             RuntimeGraph(
                 program.seed_graph,
@@ -288,6 +320,7 @@ class ProgramExecutor:
         self._candidate_cache: dict[tuple[str, str], _Candidate] = {}
         self._candidate_failures: dict[tuple[str, str], str] = {}
         self._candidate_diagnostics: dict[str, tuple[str, ...]] = {}
+        self._candidate_blockers: dict[str, tuple[dict[str, Any], ...]] = {}
         self._reported_candidates: set[str] = set()
         self._targets: dict[str, torch.Tensor] = {}
         self._target_poses: dict[str, torch.Tensor] = {}
@@ -295,7 +328,8 @@ class ProgramExecutor:
         self._orientation_errors: dict[str, torch.Tensor] = {}
         self._policies: dict[str, dict[str, Any]] = {}
         self._payload_initial: dict[str, dict[str, torch.Tensor]] = {}
-        self._robot_lateral_axis_cache: torch.Tensor | None = None
+        self._support_relations: dict[str, list[_SupportRelation | None]] = {}
+        self._placement_candidate_history: dict[tuple[str, str], set[int]] = {}
         self._transition_count = 0
         self._retry_counts = [0] * int(self.env.num_envs)
 
@@ -359,6 +393,10 @@ class ProgramExecutor:
                 self._consume_transitions(len(batch))
 
                 if len(batch) == 2:
+                    posture_before = {
+                        edge.id: self._object_not_fallen(self.step_by_edge[edge.id])
+                        for edge in batch
+                    }
                     edge_results, _ = self._execute_parallel_pickups(
                         batch,
                         failed=blocked[batch[0].id],
@@ -388,6 +426,13 @@ class ProgramExecutor:
                                 step,
                                 result.failed & ~blocked[edge.id],
                                 postcondition=False,
+                                executed=result.executed,
+                                fallen_transition=self._fallen_transition(
+                                    step,
+                                    posture_before[edge.id],
+                                    result,
+                                ),
+                                planner_traces=result.planner_traces,
                             )
                         )
                     # Both edge records describe the same synchronized command
@@ -401,52 +446,76 @@ class ProgramExecutor:
                     branch_failed = blocked[edge.id]
                     self._ensure_assignment(step, branch_failed)
                     active = ~branch_failed
-                    edge_result = self._execute_edge_with_retries(
-                        edge,
+                    posture_before = self._object_not_fallen(step)
+                    failure_policy = self._edge_failure_policy(edge)
+                    try:
+                        primary_result = self._execute_edge_with_retries(
+                            edge,
+                            step,
+                            failed=branch_failed,
+                        )
+                    except Exception as exc:
+                        if failure_policy != "best_effort":
+                            raise
+                        primary_result = self._edge_exception_result(
+                            edge,
+                            step,
+                            branch_failed,
+                            exc,
+                        )
+                    newly_failed = primary_result.failed & ~branch_failed
+                    fallen_transition = self._fallen_transition(
                         step,
-                        failed=branch_failed,
+                        posture_before,
+                        primary_result,
                     )
-                    attempted_failed = edge_result.failed & ~branch_failed
-                    if not self._is_cleanup_edge(edge):
+                    recorder.edge(
+                        edge.id,
+                        step,
+                        assignments=self._assignments[step.id],
+                        grounded=primary_result.grounded,
+                        active=active,
+                        failed=primary_result.failed,
+                        action_steps=len(primary_result.actions),
+                        planner_traces=getattr(primary_result, "planner_traces", ()),
+                        diagnostics=self._edge_diagnostics(
+                            step,
+                            edge,
+                            primary_result.failed,
+                        ),
+                        phase="primary",
+                    )
+                    edge_result = primary_result
+                    if failure_policy == "task_required":
                         edge_result = self._recover_object_fallen(
                             edge,
                             step,
                             edge_result,
                             inherited_failed=branch_failed,
+                            fallen_transition=fallen_transition,
                             recorder=recorder,
                         )
-                    if self._is_cleanup_edge(edge):
-                        # Cleanup degradation is observable in the record but does
-                        # not invalidate an already achieved semantic relation.
+                    if failure_policy == "best_effort":
+                        # Best-effort parking is observable but cannot invalidate
+                        # an already verified task or safety condition.
                         next_failed = branch_failed
                     else:
                         next_failed = edge_result.failed
-                    recorder.edge(
-                        edge.id,
-                        step,
-                        assignments=self._assignments[step.id],
-                        grounded=edge_result.grounded,
-                        active=active,
-                        failed=edge_result.failed,
-                        action_steps=len(edge_result.actions),
-                        planner_traces=getattr(edge_result, "planner_traces", ()),
-                        diagnostics=self._edge_diagnostics(
-                            step,
-                            edge,
-                            edge_result.failed,
-                        ),
-                    )
                     executed_actions.extend(edge_result.actions)
                     edge_failures[edge.id] = next_failed
-                    if not self._is_cleanup_edge(edge):
-                        failure_events.extend(
-                            self._failure_events(
-                                edge,
-                                step,
-                                attempted_failed,
-                                postcondition=False,
-                            )
+                    failure_events.extend(
+                        self._failure_events(
+                            edge,
+                            step,
+                            newly_failed & edge_result.failed,
+                            postcondition=False,
+                            executed=getattr(primary_result, "executed", None),
+                            fallen_transition=fallen_transition,
+                            planner_traces=getattr(
+                                primary_result, "planner_traces", ()
+                            ),
                         )
+                    )
 
                 for edge in batch:
                     completed.add(edge.id)
@@ -458,12 +527,52 @@ class ProgramExecutor:
                     verified_failed, step_success, observed = self._verify_step(
                         step, prior_failed
                     )
+                    postcondition_failed = verified_failed & ~prior_failed
+                    recovery_covered = torch.zeros_like(verified_failed)
+                    primary_step_recorded = False
+                    if (
+                        self.placement_recovery_attempts
+                        and bool(postcondition_failed.any())
+                        and step.goal.get("relation") in {"on", "on_top", "on_top_of"}
+                    ):
+                        recorder.step(
+                            step,
+                            step_success,
+                            observed=observed,
+                            target=self._targets.get(step.id),
+                            metadata=(
+                                self._step_runtime_metadata(step)
+                                if self.record_runtime
+                                else None
+                            ),
+                            phase="primary",
+                        )
+                        primary_step_recorded = True
+                        recovery = self._recover_unstable_placement(
+                            step,
+                            postcondition_failed,
+                            recorder=recorder,
+                        )
+                        executed_actions.extend(recovery.actions)
+                        failure_events.extend(recovery.failure_events)
+                        recovery_covered = (
+                            torch.zeros_like(verified_failed)
+                            if recovery.covered_failures is None
+                            else recovery.covered_failures
+                        )
+                        verified_failed = (
+                            verified_failed & ~postcondition_failed
+                        ) | recovery.failed
+                        step_success |= recovery.succeeded
+                        observed = recovery.observed
                     failure_events.extend(
                         self._failure_events(
                             edge,
                             step,
-                            verified_failed & ~prior_failed,
+                            verified_failed & ~prior_failed & ~recovery_covered,
                             postcondition=True,
+                            executed=~prior_failed,
+                            fallen_transition=None,
                         )
                     )
                     edge_failures[edge.id] = verified_failed
@@ -472,17 +581,47 @@ class ProgramExecutor:
                     arrangement = self.arrangements.get(step.id)
                     if arrangement is not None:
                         arrangement.mark_completed(step.id, step_success)
-                    recorder.step(
+                    if not primary_step_recorded:
+                        recorder.step(
+                            step,
+                            step_success,
+                            observed=observed,
+                            target=self._targets.get(step.id),
+                            metadata=(
+                                self._step_runtime_metadata(step)
+                                if self.record_runtime
+                                else None
+                            ),
+                        )
+            revalidation_failures = self._revalidate_support_relations()
+            for step_id, lost in revalidation_failures.items():
+                step = self.steps[step_id]
+                edge = self.edges[step.edge_ids[-1]]
+                aggregate_failed |= lost
+                semantic_success[step_id] = semantic_success[step_id] & ~lost
+                edge_failures[edge.id] |= lost
+                failure_events.extend(
+                    self._failure_events(
+                        edge,
                         step,
-                        step_success,
-                        observed=observed,
-                        target=self._targets.get(step.id),
-                        metadata=(
-                            self._step_runtime_metadata(step)
-                            if self.record_runtime
-                            else None
-                        ),
+                        lost,
+                        postcondition=True,
+                        executed=torch.ones_like(lost),
+                        fallen_transition=None,
                     )
+                )
+                recorder.step(
+                    step,
+                    semantic_success[step_id],
+                    observed=self._entity_pose(step.object_uid)[:, :3, 3],
+                    target=self._targets.get(step.id),
+                    metadata=(
+                        self._step_runtime_metadata(step)
+                        if self.record_runtime
+                        else None
+                    ),
+                    phase="final_revalidation",
+                )
             record_dir = recorder.finalize(~aggregate_failed)
         except BaseException as exc:
             error_message = f"{type(exc).__name__}: {exc}"
@@ -536,48 +675,214 @@ class ProgramExecutor:
         failed: torch.Tensor,
         *,
         postcondition: bool,
+        executed: torch.Tensor | None,
+        fallen_transition: torch.Tensor | None,
+        planner_traces: Sequence[Mapping[str, Any]] = (),
     ) -> list[dict[str, Any]]:
         if not bool(failed.any()):
             return []
         action = edge.actions[-1]
         action_name = str(action["atomic_action_class"])
         capability = self.adapter.capabilities.get(action_name)
+        executed_mask = (
+            torch.zeros_like(failed)
+            if executed is None
+            else torch.as_tensor(
+                executed,
+                dtype=torch.bool,
+                device=failed.device,
+            ).reshape(-1)
+        )
+        if executed_mask.shape != failed.shape:
+            raise ValueError("Failure provenance mask must match failed rows.")
+        transitioned = (
+            torch.zeros_like(failed)
+            if fallen_transition is None
+            else torch.as_tensor(
+                fallen_transition,
+                dtype=torch.bool,
+                device=failed.device,
+            ).reshape(-1)
+        )
+        if transitioned.shape != failed.shape:
+            raise ValueError("Fallen-transition mask must match failed rows.")
+        failure_policy = (
+            "task_required" if postcondition else self._edge_failure_policy(edge)
+        )
+        fatal = failure_policy != "best_effort"
         if postcondition:
-            default_type = "postcondition_failed"
-        elif capability.failure_classifier == "grasp":
-            default_type = "grasp_missed"
-        elif capability.state_effect in {"preserve_hold", "transfer_hold"}:
-            default_type = "object_dropped"
+            classified = (("postcondition_failed", failed),)
         else:
-            default_type = "plan_failed"
-        fallen = torch.zeros_like(failed)
-        try:
-            fallen = failed & ~evaluate_predicate(
-                self.env,
-                {"type": "object_not_fallen", "object": step.object_uid},
+            fallen = failed & executed_mask & transitioned
+            planning = failed & ~executed_mask
+            execution = failed & executed_mask & ~fallen
+            if capability.failure_classifier == "grasp":
+                execution_type = "grasp_missed"
+            elif capability.state_effect in {"preserve_hold", "transfer_hold"}:
+                execution_type = "object_dropped"
+            else:
+                execution_type = "plan_failed"
+            classified = (
+                ("object_fallen", fallen),
+                ("search_exhausted", planning),
+                (execution_type, execution),
             )
-        except (TypeError, ValueError):
-            pass
-        result = []
-        for failure_type, mask in (
-            ("object_fallen", fallen),
-            (default_type, failed & ~fallen),
-        ):
+        result: list[dict[str, Any]] = []
+        for failure_type, mask in classified:
             env_ids = torch.nonzero(mask, as_tuple=False).flatten().tolist()
             if not env_ids:
+                continue
+            if failure_type == "search_exhausted":
+                covered: set[int] = set()
+                for blocker in getattr(self, "_candidate_blockers", {}).get(
+                    step.id, ()
+                ):
+                    env_id = int(blocker["env_id"])
+                    if env_id not in env_ids:
+                        continue
+                    assignment = self._assignments.get(step.id, [None] * len(failed))[
+                        env_id
+                    ]
+                    if assignment is not None and blocker.get("arm") != assignment:
+                        continue
+                    blocker_policy = str(blocker.get("failure_policy", failure_policy))
+                    result.append(
+                        {
+                            "node_id": blocker.get("node_id"),
+                            "edge_id": edge.id,
+                            "origin_edge_id": edge.id,
+                            "blocking_edge_id": blocker["blocking_edge_id"],
+                            "task_instance_id": step.id,
+                            "atomic_action": blocker["atomic_action"],
+                            "object_uid": step.object_uid,
+                            "arm": blocker.get("arm"),
+                            "failure_type": "search_exhausted",
+                            "failure_policy": blocker_policy,
+                            "fatal": blocker_policy != "best_effort",
+                            "planning_stage": blocker["planning_stage"],
+                            "search_strategy": blocker["search_strategy"],
+                            "search_budget": deepcopy(blocker["search_budget"]),
+                            "reason": (
+                                "Bounded candidate search exhausted without a "
+                                "valid plan; this is not a geometric proof of "
+                                "unreachability."
+                            ),
+                            "evidence": deepcopy(blocker["evidence"]),
+                            "env_ids": [env_id],
+                        }
+                    )
+                    covered.add(env_id)
+                for env_id in (item for item in env_ids if item not in covered):
+                    trace = next(
+                        (
+                            item
+                            for item in planner_traces
+                            if str(item.get("arm", ""))
+                            == str(self._assignments.get(step.id, [None])[env_id])
+                        ),
+                        planner_traces[0] if planner_traces else {},
+                    )
+                    result.append(
+                        {
+                            "node_id": action.get("seed_node_id"),
+                            "edge_id": edge.id,
+                            "blocking_edge_id": edge.id,
+                            "task_instance_id": step.id,
+                            "atomic_action": action_name,
+                            "arm": self._assignments.get(step.id, [None])[env_id],
+                            "failure_type": "search_exhausted",
+                            "failure_policy": failure_policy,
+                            "fatal": fatal,
+                            "planning_stage": "runtime_planning",
+                            **self._planner_failure_details(trace, env_id),
+                            "reason": (
+                                "Bounded runtime search exhausted without a valid "
+                                "plan; this is not a geometric proof of "
+                                "unreachability."
+                            ),
+                            "env_ids": [env_id],
+                        }
+                    )
                 continue
             result.append(
                 {
                     "node_id": action.get("seed_node_id"),
                     "edge_id": edge.id,
+                    "blocking_edge_id": edge.id,
                     "task_instance_id": step.id,
                     "atomic_action": action_name,
                     "object_uid": step.object_uid,
                     "failure_type": failure_type,
+                    "failure_policy": failure_policy,
+                    "fatal": fatal,
+                    "planning_stage": (
+                        "postcondition" if postcondition else "execution"
+                    ),
                     "env_ids": env_ids,
                 }
             )
         return result
+
+    def _edge_exception_result(
+        self,
+        edge: ExecutionEdge,
+        step: SemanticStep,
+        inherited_failed: torch.Tensor,
+        exc: Exception,
+    ) -> _EdgeResult:
+        """Convert a planning exception into an auditable failed edge result."""
+        action = edge.actions[0]
+        assignments = self._assignments.get(step.id, [None] * int(self.env.num_envs))
+        arm = next((item for item in assignments if item is not None), None)
+        trace = {
+            "action_class": str(action.get("atomic_action_class")),
+            "arm": arm,
+            "primary_strategy": "planner_exception",
+            "primary_success": torch.zeros_like(inherited_failed),
+            "fallback_attempted": torch.zeros_like(inherited_failed),
+            "fallback_success": torch.zeros_like(inherited_failed),
+            "search_budget": self._planner_search_budget(),
+            "exception": f"{type(exc).__name__}: {exc}",
+        }
+        return _EdgeResult(
+            [],
+            torch.ones_like(inherited_failed),
+            [],
+            [trace],
+            torch.zeros_like(inherited_failed),
+        )
+
+    def _object_not_fallen(self, step: SemanticStep) -> torch.Tensor | None:
+        """Return the live posture predicate when the object supports it."""
+        try:
+            return evaluate_predicate(
+                self.env,
+                {"type": "object_not_fallen", "object": step.object_uid},
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def _fallen_transition(
+        self,
+        step: SemanticStep,
+        before: torch.Tensor | None,
+        result: _EdgeResult,
+    ) -> torch.Tensor:
+        """Identify rows where an executed action changed upright to fallen."""
+        result_executed = getattr(result, "executed", None)
+        if before is None or result_executed is None:
+            return torch.zeros_like(result.failed)
+        after = self._object_not_fallen(step)
+        if after is None:
+            return torch.zeros_like(result.failed)
+        executed = torch.as_tensor(
+            result_executed,
+            dtype=torch.bool,
+            device=result.failed.device,
+        ).reshape(-1)
+        return (
+            executed & before.to(result.failed.device) & ~after.to(result.failed.device)
+        )
 
     def _execute_edge_with_retries(
         self,
@@ -597,6 +902,11 @@ class ProgramExecutor:
         aggregate_actions = list(result.actions)
         grounded = list(result.grounded)
         planner_traces = list(getattr(result, "planner_traces", ()))
+        executed = (
+            torch.zeros_like(result.failed)
+            if getattr(result, "executed", None) is None
+            else result.executed.clone()
+        )
         current_failed = result.failed.clone()
         attempted_failure = current_failed & ~failed
         while bool(attempted_failure.any()):
@@ -637,6 +947,8 @@ class ProgramExecutor:
             aggregate_actions.extend(retry_result.actions)
             grounded.extend(retry_result.grounded)
             planner_traces.extend(getattr(retry_result, "planner_traces", ()))
+            if getattr(retry_result, "executed", None) is not None:
+                executed |= retry_result.executed
             succeeded = decision.retry & ~retry_result.failed
             current_failed &= ~succeeded
             attempted_failure = decision.retry & retry_result.failed
@@ -645,6 +957,7 @@ class ProgramExecutor:
             current_failed,
             grounded,
             planner_traces,
+            executed,
         )
 
     def _recover_object_fallen(
@@ -654,6 +967,7 @@ class ProgramExecutor:
         result: _EdgeResult,
         *,
         inherited_failed: torch.Tensor,
+        fallen_transition: torch.Tensor,
         recorder: RuntimeRecorder,
     ) -> _EdgeResult:
         """Run the bounded E2 repair and replay only the failed vector rows."""
@@ -665,13 +979,26 @@ class ProgramExecutor:
         newly_failed = result.failed & ~inherited_failed
         if not bool(newly_failed.any()):
             return result
-        try:
-            fallen = newly_failed & ~evaluate_predicate(
-                self.env,
-                {"type": "object_not_fallen", "object": step.object_uid},
-            )
-        except (TypeError, ValueError):
-            return result
+        executed = (
+            torch.zeros_like(result.failed)
+            if getattr(result, "executed", None) is None
+            else torch.as_tensor(
+                result.executed,
+                dtype=torch.bool,
+                device=result.failed.device,
+            ).reshape(-1)
+        )
+        transition = torch.as_tensor(
+            fallen_transition,
+            dtype=torch.bool,
+            device=result.failed.device,
+        ).reshape(-1)
+        if (
+            executed.shape != result.failed.shape
+            or transition.shape != result.failed.shape
+        ):
+            raise ValueError("Recovery provenance masks must match failed rows.")
+        fallen = newly_failed & executed & transition
         if not bool(fallen.any()):
             return result
 
@@ -700,6 +1027,12 @@ class ProgramExecutor:
                 for item in recovery_program.semantic_steps
                 if item.id == recovery_group_id
             )
+            recovery_spec = next(
+                item
+                for item in recovery_program.raw["semantic_steps"]
+                if str(item["id"]) == recovery_group_id
+            )
+            recorder.register_step(recovery_step, recovery_spec)
             recovery_edges = {
                 item.id: item
                 for item in recovery_program.edges
@@ -714,6 +1047,7 @@ class ProgramExecutor:
                 active=fallen,
                 status="rejected",
                 error=f"{type(exc).__name__}: {exc}",
+                semantic_step_id=step.id,
             )
             return result
 
@@ -723,10 +1057,11 @@ class ProgramExecutor:
             active=fallen,
             status="started",
             recovery_group_id=recovery_group_id,
+            semantic_step_id=step.id,
         )
         aggregate_actions = list(result.actions)
         grounded = list(result.grounded)
-        planner_traces = list(result.planner_traces)
+        planner_traces = list(getattr(result, "planner_traces", ()))
         self._clear_recovery_rows(step, fallen)
 
         # Recovery edges are compiled from the revised graph but execute through
@@ -759,6 +1094,7 @@ class ProgramExecutor:
                     failed=recovery_result.failed,
                     action_steps=len(recovery_result.actions),
                     planner_traces=recovery_result.planner_traces,
+                    phase="recovery",
                 )
                 aggregate_actions.extend(recovery_result.actions)
                 grounded.extend(recovery_result.grounded)
@@ -778,6 +1114,7 @@ class ProgramExecutor:
                     if self.record_runtime
                     else None
                 ),
+                phase="recovery",
             )
         except Exception as exc:
             recorder.recovery(
@@ -787,12 +1124,14 @@ class ProgramExecutor:
                 status="failed",
                 recovery_group_id=recovery_group_id,
                 error=f"{type(exc).__name__}: {exc}",
+                semantic_step_id=step.id,
             )
             return _EdgeResult(
                 aggregate_actions,
                 result.failed,
                 grounded,
                 planner_traces,
+                result.executed,
             )
         finally:
             for recovery_edge_id in installed_edge_ids:
@@ -808,12 +1147,14 @@ class ProgramExecutor:
                 active=fallen,
                 status="failed",
                 recovery_group_id=recovery_group_id,
+                semantic_step_id=step.id,
             )
             return _EdgeResult(
                 aggregate_actions,
                 result.failed,
                 grounded,
                 planner_traces,
+                result.executed,
             )
 
         # Recompute this TaskGroup's assignment for recovered rows, retaining
@@ -839,10 +1180,27 @@ class ProgramExecutor:
             for prefix_edge_id in step.edge_ids:
                 self._consume_transitions(1)
                 prefix_edge = self.edges[prefix_edge_id]
+                replay_active = ~replay_failed
                 prefix_result = self._execute_edge_with_retries(
                     prefix_edge,
                     step,
                     failed=replay_failed,
+                )
+                recorder.edge(
+                    prefix_edge.id,
+                    step,
+                    assignments=self._assignments[step.id],
+                    grounded=prefix_result.grounded,
+                    active=replay_active,
+                    failed=prefix_result.failed,
+                    action_steps=len(prefix_result.actions),
+                    planner_traces=prefix_result.planner_traces,
+                    diagnostics=self._edge_diagnostics(
+                        step,
+                        prefix_edge,
+                        prefix_result.failed,
+                    ),
+                    phase="replay",
                 )
                 aggregate_actions.extend(prefix_result.actions)
                 grounded.extend(prefix_result.grounded)
@@ -858,12 +1216,14 @@ class ProgramExecutor:
                 status="failed",
                 recovery_group_id=recovery_group_id,
                 error=f"{type(exc).__name__}: {exc}",
+                semantic_step_id=step.id,
             )
             return _EdgeResult(
                 aggregate_actions,
                 result.failed,
                 grounded,
                 planner_traces,
+                result.executed,
             )
         final_failed = result.failed.clone()
         final_failed[fallen] = replay_failed[fallen]
@@ -873,12 +1233,14 @@ class ProgramExecutor:
             active=fallen,
             status=("succeeded" if not bool(final_failed[fallen].any()) else "failed"),
             recovery_group_id=recovery_group_id,
+            semantic_step_id=step.id,
         )
         return _EdgeResult(
             aggregate_actions,
             final_failed,
             grounded,
             planner_traces,
+            result.executed,
         )
 
     def _clear_recovery_rows(
@@ -923,6 +1285,173 @@ class ProgramExecutor:
                     delta.apply(state.to_task_state(), mask),
                     last_qpos=self.env.robot.get_qpos().clone(),
                 )
+
+    def _recover_unstable_placement(
+        self,
+        step: SemanticStep,
+        failed: torch.Tensor,
+        *,
+        recorder: RuntimeRecorder,
+    ) -> _PlacementRecoveryResult:
+        """Regrasp after release, then retry unused placement poses only."""
+        pending = failed.clone()
+        recovered = torch.zeros_like(failed)
+        observed = self._entity_pose(step.object_uid)[:, :3, 3]
+        actions: list[torch.Tensor] = []
+        blocking_failures: list[tuple[ExecutionEdge, _EdgeResult, torch.Tensor]] = []
+        terminal_edge = self.edges[step.edge_ids[-1]]
+        failed_node_id = str(
+            terminal_edge.actions[-1].get("seed_node_id", terminal_edge.id)
+        )
+        recorder.recovery(
+            failure_type="placement_unstable",
+            failed_node_id=failed_node_id,
+            active=failed,
+            status="started",
+            semantic_step_id=step.id,
+        )
+        for _attempt in range(self.placement_recovery_attempts):
+            if not bool(pending.any()):
+                break
+            self._consume_transitions(len(step.edge_ids))
+            attempt_active = pending.clone()
+            self._clear_recovery_rows(step, attempt_active)
+            self._assignments.pop(step.id, None)
+            for arm in ("left_arm", "right_arm"):
+                self._candidate_cache.pop((step.id, arm), None)
+                self._candidate_failures.pop((step.id, arm), None)
+            try:
+                self._ensure_assignment(step, ~attempt_active)
+            except Exception as exc:
+                blocking_edge = self.edges[step.edge_ids[0]]
+                blocking_result = self._edge_exception_result(
+                    blocking_edge,
+                    step,
+                    ~attempt_active,
+                    exc,
+                )
+                blocking_failures.append(
+                    (blocking_edge, blocking_result, attempt_active)
+                )
+                recorder.edge(
+                    blocking_edge.id,
+                    step,
+                    assignments=self._assignments.get(
+                        step.id,
+                        [None] * int(self.env.num_envs),
+                    ),
+                    grounded=(),
+                    active=attempt_active,
+                    failed=blocking_result.failed,
+                    action_steps=0,
+                    planner_traces=blocking_result.planner_traces,
+                    diagnostics=self._edge_diagnostics(
+                        step,
+                        blocking_edge,
+                        blocking_result.failed,
+                    ),
+                    phase="recovery",
+                )
+                break
+
+            replay_failed = ~attempt_active
+            for edge_id in step.edge_ids:
+                edge = self.edges[edge_id]
+                edge_active = ~replay_failed
+                try:
+                    result = self._execute_edge_with_retries(
+                        edge,
+                        step,
+                        failed=replay_failed,
+                    )
+                except Exception as exc:
+                    result = self._edge_exception_result(
+                        edge,
+                        step,
+                        replay_failed,
+                        exc,
+                    )
+                actions.extend(result.actions)
+                recorder.edge(
+                    edge.id,
+                    step,
+                    assignments=self._assignments[step.id],
+                    grounded=result.grounded,
+                    active=edge_active,
+                    failed=result.failed,
+                    action_steps=len(result.actions),
+                    planner_traces=result.planner_traces,
+                    diagnostics=self._edge_diagnostics(step, edge, result.failed),
+                    phase="recovery",
+                )
+                newly_failed = edge_active & result.failed
+                if bool(newly_failed.any()):
+                    blocking_failures.append((edge, result, newly_failed))
+                replay_failed = result.failed
+                if not bool((attempt_active & ~replay_failed).any()):
+                    break
+
+            execution_succeeded = attempt_active & ~replay_failed
+            if not bool(execution_succeeded.any()):
+                break
+            verified_failed, verified_success, observed = self._verify_step(
+                step,
+                ~execution_succeeded,
+            )
+            del verified_failed
+            recovered_now = attempt_active & verified_success
+            recovered |= recovered_now
+            recorder.step(
+                step,
+                verified_success,
+                observed=observed,
+                target=self._targets.get(step.id),
+                metadata=(
+                    self._step_runtime_metadata(step) if self.record_runtime else None
+                ),
+                phase="recovery",
+            )
+            action_failed = attempt_active & replay_failed
+            pending &= ~recovered_now
+            if bool(action_failed.any()):
+                break
+
+        final_failed = failed & ~recovered
+        recovery_events: list[dict[str, Any]] = []
+        covered_failures = torch.zeros_like(failed)
+        for blocking_edge, blocking_result, blocking_rows in blocking_failures:
+            event_rows = final_failed & blocking_rows & ~covered_failures
+            if not bool(event_rows.any()):
+                continue
+            events = self._failure_events(
+                blocking_edge,
+                step,
+                event_rows,
+                postcondition=False,
+                executed=blocking_result.executed,
+                fallen_transition=None,
+                planner_traces=blocking_result.planner_traces,
+            )
+            for event in events:
+                event["phase"] = "recovery"
+                event["origin_edge_id"] = terminal_edge.id
+            recovery_events.extend(events)
+            covered_failures |= event_rows
+        recorder.recovery(
+            failure_type="placement_unstable",
+            failed_node_id=failed_node_id,
+            active=failed,
+            status="failed" if bool(final_failed.any()) else "succeeded",
+            semantic_step_id=step.id,
+        )
+        return _PlacementRecoveryResult(
+            failed=final_failed,
+            succeeded=recovered,
+            observed=observed,
+            actions=actions,
+            failure_events=recovery_events,
+            covered_failures=covered_failures,
+        )
 
     def _retry_precondition(
         self,
@@ -983,6 +1512,7 @@ class ProgramExecutor:
         self._candidate_cache.clear()
         self._candidate_failures.clear()
         self._candidate_diagnostics.clear()
+        self._candidate_blockers.clear()
         self._reported_candidates.clear()
         self._targets.clear()
         self._target_poses.clear()
@@ -990,7 +1520,8 @@ class ProgramExecutor:
         self._orientation_errors.clear()
         self._policies.clear()
         self._payload_initial.clear()
-        self._robot_lateral_axis_cache = None
+        self._support_relations.clear()
+        self._placement_candidate_history.clear()
         self._transition_count = 0
         self._retry_counts = [0] * int(self.env.num_envs)
 
@@ -1132,7 +1663,7 @@ class ProgramExecutor:
         step: SemanticStep,
         env_id: int,
     ) -> str | None:
-        """Map a clearly sided in-place object to the robot-view arm slot."""
+        """Map a clearly sided in-place object using the fixed world-Y rule."""
         if step.operator != "orient_object":
             return None
         initial = getattr(self.env, "agent_initial_object_poses", {}).get(
@@ -1146,10 +1677,10 @@ class ProgramExecutor:
         pose = torch.as_tensor(initial, device=self.env.device)
         if pose.ndim == 2:
             pose = pose.unsqueeze(0)
-        center, _, lateral_axis = self._arm_selection_workspace(step)
+        center, _, world_left_axis = self._arm_selection_workspace(step)
         index = min(env_id, pose.shape[0] - 1)
         lateral = float(
-            torch.sum((pose[index, :2, 3] - center[index]) * lateral_axis[index])
+            torch.sum((pose[index, :2, 3] - center[index]) * world_left_axis[index])
         )
         if (
             abs(lateral)
@@ -1374,6 +1905,7 @@ class ProgramExecutor:
                 plans=cached.plans,
                 score_components=cached.score_components,
                 warnings=cached.warnings,
+                blockers=cached.blockers,
             )
         feasible = ~failed.clone() & ~self._resource_conflicts(step, arm)
         motion_cost = torch.zeros(
@@ -1387,6 +1919,7 @@ class ProgramExecutor:
         reference_eef_pose = None
         plans: dict[str, tuple[GroundedAction, ActionOutcome]] = {}
         warnings: list[str] = []
+        blockers: list[dict[str, Any]] = []
         try:
             with _capture_speculative_warnings() as captured:
                 for edge_id in step.edge_ids:
@@ -1408,24 +1941,71 @@ class ProgramExecutor:
                         # actual HandOver is coordinated, however, and must
                         # only be planned from the live post-staging state.
                         break
-                    grounded = self.grounder.ground(
-                        action,
-                        step,
-                        arm=arm,
-                        state=state,
-                        reference_eef_pose=reference_eef_pose,
-                        orientation_reference_pose=self._orientation_references.get(
-                            step.id
-                        ),
-                    )
-                    if capability.state_effect == "hold":
-                        grounded = self._with_downstream_targets(
-                            step, edge_id, arm, state, grounded
+                    failure_policy = self._edge_failure_policy(edge)
+                    try:
+                        if capability.state_effect == "hold":
+                            grounded = self.grounder.ground(
+                                action,
+                                step,
+                                arm=arm,
+                                state=state,
+                                reference_eef_pose=reference_eef_pose,
+                                orientation_reference_pose=self._orientation_references.get(
+                                    step.id
+                                ),
+                            )
+                            grounded = self._with_downstream_targets(
+                                step, edge_id, arm, state, grounded
+                            )
+                            outcome = self.adapter.plan(grounded, state)
+                        else:
+                            grounded, outcome = self._ground_and_plan_candidates(
+                                action,
+                                step,
+                                arm=arm,
+                                state=state,
+                                active=feasible & ~failed,
+                                reference_eef_pose=reference_eef_pose,
+                                orientation_reference_pose=self._orientation_references.get(
+                                    step.id
+                                ),
+                            )
+                    except Exception as exc:
+                        if failure_policy != "best_effort":
+                            blockers.extend(
+                                self._candidate_exception_blockers(
+                                    step,
+                                    edge,
+                                    arm,
+                                    failed,
+                                    exc,
+                                )
+                            )
+                            raise
+                        warnings.append(
+                            f"{arm} best-effort action could not be planned at "
+                            f"{edge_id} ({capability.name}): "
+                            f"{type(exc).__name__}: {exc}"
                         )
-                    outcome = self.adapter.plan(grounded, state)
+                        continue
                     plans[edge_id] = (grounded, outcome)
-                    feasible &= outcome.success
-                    motion_cost += outcome.cost
+                    if failure_policy != "best_effort":
+                        feasible &= outcome.success
+                        motion_cost += outcome.cost
+                        blockers.extend(
+                            self._candidate_outcome_blockers(
+                                step,
+                                edge,
+                                arm,
+                                failed,
+                                outcome,
+                            )
+                        )
+                    elif not bool(outcome.success.all()):
+                        warnings.append(
+                            f"{arm} best-effort action degraded at {edge_id} "
+                            f"({capability.name}); required suffix remains feasible."
+                        )
                     state = outcome.next_state
                     target = outcome.grounded.target_object_pose
                     if isinstance(target, torch.Tensor):
@@ -1462,7 +2042,7 @@ class ProgramExecutor:
             self._candidate_failures[(step.id, arm)] = f"{type(exc).__name__}: {exc}"
             feasible = torch.zeros_like(failed)
             motion_cost[:] = torch.inf
-        center_xy, half_width, lateral_axis = self._arm_selection_workspace(step)
+        center_xy, half_width, world_left_axis = self._arm_selection_workspace(step)
         score_components = _score_arm_candidate(
             arm=arm,
             motion_cost=motion_cost,
@@ -1470,7 +2050,7 @@ class ProgramExecutor:
             target_pose=target_pose,
             workspace_center_xy=center_xy,
             workspace_half_width=half_width,
-            robot_lateral_axis=lateral_axis,
+            world_left_axis=world_left_axis,
             policy=self.runtime_policy.arm_selection,
         )
         cost = score_components["total_cost"]
@@ -1480,6 +2060,7 @@ class ProgramExecutor:
             plans=plans,
             score_components=score_components,
             warnings=tuple(warnings),
+            blockers=tuple(blockers),
         )
         self._candidate_cache[(step.id, arm)] = candidate
         return _Candidate(
@@ -1488,23 +2069,114 @@ class ProgramExecutor:
             plans=plans,
             score_components=score_components,
             warnings=tuple(warnings),
+            blockers=tuple(blockers),
         )
+
+    def _ground_and_plan_candidates(
+        self,
+        action: Mapping[str, Any],
+        step: SemanticStep,
+        *,
+        arm: str,
+        state: ExecutionState,
+        active: torch.Tensor,
+        reference_eef_pose: torch.Tensor | None = None,
+        orientation_reference_pose: torch.Tensor | None = None,
+    ) -> tuple[GroundedAction, ActionOutcome]:
+        """Plan live grounding candidates and retain the best bounded attempt."""
+        groundings = self.grounder.ground_candidates(
+            action,
+            step,
+            arm=arm,
+            state=state,
+            reference_eef_pose=reference_eef_pose,
+            orientation_reference_pose=orientation_reference_pose,
+        )
+        used = self._placement_candidate_history.get((step.id, arm), set())
+        selected: tuple[GroundedAction, ActionOutcome] | None = None
+        selected_rank: tuple[int, float, int] | None = None
+        attempts: list[dict[str, Any]] = []
+        last_error: Exception | None = None
+        for ordinal, grounded in enumerate(groundings):
+            candidate_index = int(
+                grounded.motion_policy.get("placement_candidate_index", ordinal)
+            )
+            is_placement = "placement_candidate_index" in grounded.motion_policy
+            if is_placement and candidate_index in used:
+                attempts.append(
+                    {
+                        "candidate_index": candidate_index,
+                        "status": "previously_released",
+                    }
+                )
+                continue
+            try:
+                outcome = self.adapter.plan(grounded, state)
+            except Exception as exc:
+                last_error = exc
+                attempts.append(
+                    {
+                        "candidate_index": candidate_index,
+                        "status": "planning_error",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                continue
+            failed_count = int((active & ~outcome.success).sum())
+            active_cost = (
+                float(outcome.cost[active].sum()) if bool(active.any()) else 0.0
+            )
+            rank = (failed_count, active_cost, candidate_index)
+            attempts.append(
+                {
+                    "candidate_index": candidate_index,
+                    "status": "planned",
+                    "failed_rows": failed_count,
+                    "cost": active_cost,
+                }
+            )
+            if selected is None or rank < selected_rank:
+                selected = (grounded, outcome)
+                selected_rank = rank
+            if failed_count == 0:
+                break
+        if selected is None:
+            if last_error is not None:
+                raise RuntimeError(
+                    "All grounding candidates raised during planning."
+                ) from last_error
+            raise RuntimeError("No unused grounding candidate remains.")
+        grounded, outcome = selected
+        outcome = replace(
+            outcome,
+            planner_trace={
+                **outcome.planner_trace,
+                "grounding_candidates": attempts,
+                "selected_grounding_candidate": int(
+                    grounded.motion_policy.get("placement_candidate_index", 0)
+                ),
+            },
+        )
+        return grounded, outcome
 
     def _arm_selection_workspace(
         self,
         step: SemanticStep,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return workspace geometry along the robot's live lateral axis."""
-        lateral_axis = self._robot_view_lateral_axis()
+        """Return workspace geometry for the fixed world-Y arm convention."""
+        count = int(self.env.num_envs)
+        world_left_axis = torch.tensor(
+            [0.0, -1.0],
+            dtype=torch.float32,
+            device=self.env.device,
+        ).repeat(count, 1)
         arrangement = self.arrangements.get(step.id)
         if arrangement is not None:
             minimum = arrangement.table_bounds[:, 0, :2]
             maximum = arrangement.table_bounds[:, 1, :2]
-            center = (minimum + maximum) * 0.5
-            half_extents = (maximum - minimum) * 0.5
-            half_width = torch.sum(torch.abs(lateral_axis) * half_extents, dim=1)
-            return center, half_width, lateral_axis
-        count = int(self.env.num_envs)
+            center = torch.zeros_like(minimum)
+            half_width = torch.maximum(minimum[:, 1].abs(), maximum[:, 1].abs())
+            return center, half_width, world_left_axis
         centers = torch.zeros((count, 2), dtype=torch.float32, device=self.env.device)
         half_widths = torch.full(
             (count,),
@@ -1514,7 +2186,7 @@ class ProgramExecutor:
         )
         table = self.env.sim.get_rigid_object("table")
         if table is None or not hasattr(table, "get_vertices"):
-            return centers, half_widths, lateral_axis
+            return centers, half_widths, world_left_axis
         table_pose = self._entity_pose("table")
         for env_id in range(count):
             value = table.get_vertices(env_ids=[env_id], scale=True)
@@ -1535,20 +2207,10 @@ class ProgramExecutor:
             )
             minimum = world[:, :2].min(dim=0).values
             maximum = world[:, :2].max(dim=0).values
-            center = (minimum + maximum) * 0.5
-            lateral = torch.sum((world[:, :2] - center) * lateral_axis[env_id], dim=1)
-            half_width = torch.max(torch.abs(lateral))
+            half_width = torch.max(torch.abs(world[:, 1]))
             if float(half_width) > 1.0e-6:
-                centers[env_id] = center
                 half_widths[env_id] = half_width
-        return centers, half_widths, lateral_axis
-
-    def _robot_view_lateral_axis(self) -> torch.Tensor:
-        """Return the normalized world-space axis pointing right-arm to left-arm."""
-        if self._robot_lateral_axis_cache is not None:
-            return self._robot_lateral_axis_cache
-        _, self._robot_lateral_axis_cache = robot_frame_axes(self.env)
-        return self._robot_lateral_axis_cache
+        return centers, half_widths, world_left_axis
 
     def _report_candidates(
         self,
@@ -1569,6 +2231,13 @@ class ProgramExecutor:
         diagnostics = tuple(dict.fromkeys(diagnostics))
         if diagnostics:
             self._candidate_diagnostics[step.id] = diagnostics
+        blockers = tuple(
+            deepcopy(item)
+            for candidate in candidates
+            for item in getattr(candidate, "blockers", ())
+        )
+        if blockers:
+            self._candidate_blockers[step.id] = blockers
         if warning_count or failures:
             feasible = ", ".join(
                 f"{int(item.feasible.sum())}/{len(item.feasible)}"
@@ -1589,6 +2258,139 @@ class ProgramExecutor:
             for message in prioritized[:3]:
                 log_warning(f"Candidate planning for {step.id}: {message}")
         self._reported_candidates.add(step.id)
+
+    def _candidate_outcome_blockers(
+        self,
+        step: SemanticStep,
+        edge: ExecutionEdge,
+        arm: str,
+        inherited_failed: torch.Tensor,
+        outcome: ActionOutcome,
+    ) -> list[dict[str, Any]]:
+        """Capture the real suffix edge that exhausted bounded planning."""
+        failed = ~outcome.success & ~inherited_failed
+        action = edge.actions[0]
+        return [
+            {
+                "env_id": int(env_id),
+                "node_id": action.get("seed_node_id"),
+                "blocking_edge_id": edge.id,
+                "atomic_action": str(action.get("atomic_action_class")),
+                "arm": arm,
+                "failure_policy": self._edge_failure_policy(edge),
+                "planning_stage": "candidate_suffix",
+                **self._planner_failure_details(outcome.planner_trace, env_id),
+            }
+            for env_id in torch.nonzero(failed, as_tuple=False).flatten().tolist()
+        ]
+
+    def _candidate_exception_blockers(
+        self,
+        step: SemanticStep,
+        edge: ExecutionEdge,
+        arm: str,
+        inherited_failed: torch.Tensor,
+        exc: Exception,
+    ) -> list[dict[str, Any]]:
+        """Record a bounded candidate-planning exception without claiming proof."""
+        del step
+        action = edge.actions[0]
+        budget = self._planner_search_budget()
+        return [
+            {
+                "env_id": int(env_id),
+                "node_id": action.get("seed_node_id"),
+                "blocking_edge_id": edge.id,
+                "atomic_action": str(action.get("atomic_action_class")),
+                "arm": arm,
+                "failure_policy": self._edge_failure_policy(edge),
+                "planning_stage": "candidate_suffix",
+                "search_strategy": "planner_exception",
+                "search_budget": budget,
+                "evidence": {"exception": f"{type(exc).__name__}: {exc}"},
+            }
+            for env_id in torch.nonzero(~inherited_failed, as_tuple=False)
+            .flatten()
+            .tolist()
+        ]
+
+    def _planner_search_budget(self) -> dict[str, Any]:
+        """Return the configured finite search budget used by motion planning."""
+        runtime_policy = getattr(self, "runtime_policy", None)
+        planner = getattr(runtime_policy, "planner", {})
+        curobo = planner.get("curobo", {}) if isinstance(planner, Mapping) else {}
+        return {
+            "primary_max_attempts": int(curobo.get("max_attempts", 1)),
+            "fallback_enabled": bool(planner.get("allow_fallback", False)),
+        }
+
+    def _planner_failure_details(
+        self,
+        trace: Mapping[str, Any],
+        env_id: int,
+    ) -> dict[str, Any]:
+        """Extract compact row-local evidence from one planner trace."""
+        reachability = trace.get("reachability_search")
+        reachability = reachability if isinstance(reachability, Mapping) else {}
+        strategy = str(
+            reachability.get("strategy") or trace.get("primary_strategy") or "unknown"
+        )
+        budget = deepcopy(
+            dict(trace.get("search_budget", self._planner_search_budget()))
+        )
+        attempts = reachability.get("attempts", ())
+        evidence: dict[str, Any] = {
+            "primary_success": bool(
+                self._row_trace_value(trace.get("primary_success", False), env_id)
+            ),
+            "fallback_attempted": bool(
+                self._row_trace_value(trace.get("fallback_attempted", False), env_id)
+            ),
+            "fallback_success": bool(
+                self._row_trace_value(trace.get("fallback_success", False), env_id)
+            ),
+        }
+        if trace.get("exception") is not None:
+            evidence["exception"] = str(trace["exception"])
+        if isinstance(attempts, Sequence) and not isinstance(
+            attempts, (str, bytes, bytearray)
+        ):
+            evidence["reachability_attempts"] = [
+                {
+                    "candidate": str(item.get("candidate", "")),
+                    "target_z": self._row_trace_value(item.get("target_z"), env_id),
+                    "success": bool(
+                        self._row_trace_value(item.get("success", False), env_id)
+                    ),
+                }
+                for item in attempts
+                if isinstance(item, Mapping)
+            ]
+            budget["reachability_candidate_count"] = len(
+                evidence["reachability_attempts"]
+            )
+        return {
+            "search_strategy": strategy,
+            "search_budget": budget,
+            "evidence": evidence,
+        }
+
+    @staticmethod
+    def _row_trace_value(value: Any, env_id: int) -> Any:
+        """Detach one environment row from JSON-like or tensor trace data."""
+        if isinstance(value, torch.Tensor):
+            detached = value.detach().cpu()
+            if detached.ndim == 0:
+                return detached.item()
+            row = detached[min(env_id, detached.shape[0] - 1)]
+            return row.item() if row.ndim == 0 else row.tolist()
+        if isinstance(value, Sequence) and not isinstance(
+            value, (str, bytes, bytearray)
+        ):
+            if not value:
+                return None
+            return deepcopy(value[min(env_id, len(value) - 1)])
+        return deepcopy(value)
 
     def _edge_diagnostics(
         self,
@@ -1796,6 +2598,7 @@ class ProgramExecutor:
             return
         self._object_states[(step.object_uid, arm)] = state
         if capability.state_effect == "hold":
+            self._clear_support_relation(step.object_uid, successful)
             for env_id in torch.nonzero(successful, as_tuple=False).flatten().tolist():
                 owners[env_id] = arm
                 self._arm_owners[arm][env_id] = step.object_uid
@@ -1914,21 +2717,34 @@ class ProgramExecutor:
             else:
                 # Re-ground transport and placement from live simulator state;
                 # only the expensive, immediately executed PickUp is reusable.
-                grounded = self.grounder.ground(
+                grounded, outcome = self._ground_and_plan_candidates(
                     edge.actions[0],
                     step,
                     arm=arm,
                     state=state,
+                    active=masks[arm],
                     orientation_reference_pose=self._orientation_references.get(
                         step.id
                     ),
                 )
-                outcome = self.adapter.plan(grounded, state)
+            grounded = outcome.grounded
             outcomes[arm] = outcome
             grounded_items.append(grounded)
             self._remember_target(step, grounded)
+            placement_index = grounded.motion_policy.get("placement_candidate_index")
+            if placement_index is not None and bool(
+                (masks[arm] & outcome.success).any()
+            ):
+                self._placement_candidate_history.setdefault((step.id, arm), set()).add(
+                    int(placement_index)
+                )
         if not grounded_items:
-            return _EdgeResult([], torch.ones_like(failed), [])
+            return _EdgeResult(
+                [],
+                torch.ones_like(failed),
+                [],
+                executed=torch.zeros_like(failed),
+            )
         trajectory, action_success = self.adapter.combine(outcomes, masks)
         assigned = masks["left_arm"] | masks["right_arm"]
         active = assigned & action_success & ~failed
@@ -2012,6 +2828,7 @@ class ProgramExecutor:
                 for outcome in outcomes.values()
                 if outcome is not None
             ],
+            active,
         )
 
     def _physical_pickup(
@@ -2122,6 +2939,7 @@ class ProgramExecutor:
                 [],
                 failed | (~failed & ~assigned) | receiver_conflict,
                 [],
+                executed=torch.zeros_like(failed),
             )
         state_key = (
             transfer_arm
@@ -2182,6 +3000,8 @@ class ProgramExecutor:
         )
         physical_failed = torch.zeros_like(failed)
         committed_state = outcome.state_after(successful)
+        if capability.state_effect == "coordinated_hold":
+            self._clear_support_relation(step.object_uid, successful)
         if capability.state_effect == "transfer_hold":
             if bool(successful.any()):
                 current_owners = list(
@@ -2268,6 +3088,7 @@ class ProgramExecutor:
             | physical_failed,
             [grounded],
             [outcome.planner_trace],
+            active & outcome.success,
         )
 
     def _rebase_held_state(
@@ -2339,7 +3160,12 @@ class ProgramExecutor:
             device=self.env.device,
         )
         if not bool((assigned & ~failed).any()):
-            return _EdgeResult([], failed | (~failed & ~assigned), [])
+            return _EdgeResult(
+                [],
+                failed | (~failed & ~assigned),
+                [],
+                executed=torch.zeros_like(failed),
+            )
         outcomes: dict[str, ActionOutcome | None] = {
             "left_arm": None,
             "right_arm": None,
@@ -2422,6 +3248,7 @@ class ProgramExecutor:
                 for outcome in outcomes.values()
                 if outcome is not None
             ],
+            active,
         )
 
     def _execute_parallel_pickups(
@@ -2480,7 +3307,15 @@ class ProgramExecutor:
         self._assignments.update(assignments)
 
         base_failed = failed | selection_failed
-        results = {edge.id: _EdgeResult([], base_failed.clone(), []) for edge in edges}
+        results = {
+            edge.id: _EdgeResult(
+                [],
+                base_failed.clone(),
+                [],
+                executed=torch.zeros_like(failed),
+            )
+            for edge in edges
+        }
         for first_arm, second_arm in permutations:
             partition = torch.tensor(
                 [
@@ -2506,11 +3341,14 @@ class ProgramExecutor:
                 step = self.step_by_edge[edge.id]
                 grounded, outcome = candidates[(step.id, arm)].plans[edge.id]
                 outcomes[arm] = outcome
-                results[edge.id].grounded.append(grounded)
+                results[edge.id].grounded.append(outcome.grounded)
                 results[edge.id].planner_traces.append(outcome.planner_trace)
             trajectory, action_success = self.adapter.combine(outcomes, masks)
             active = partition & ~base_failed & action_success
             commands = self.adapter.execute_trajectory(trajectory, active=active)
+            for edge in edges:
+                assert results[edge.id].executed is not None
+                results[edge.id].executed |= active
             for arm, edge in edge_by_arm.items():
                 step = self.step_by_edge[edge.id]
                 outcome = outcomes[arm]
@@ -2657,7 +3495,7 @@ class ProgramExecutor:
             log_info(f"Skipped verification for {step.id}: no active environments.")
             return failed, success, observed
         relation = str(step.goal.get("relation", ""))
-        reference = step.goal.get("reference_object")
+        reference = self._support_reference_uid(step)
         postcondition_type = step.postcondition.get("type")
         if postcondition_type in {"object_held", "handover_complete"}:
             # A planned hover target is not evidence that the object remains
@@ -2730,13 +3568,11 @@ class ProgramExecutor:
                 },
             )
         elif relation in {"on", "on_top", "on_top_of"} and isinstance(reference, str):
-            satisfied = evaluate_predicate(
-                self.env,
-                {
-                    "type": "object_on_object",
-                    "object": step.object_uid,
-                    "support": reference,
-                },
+            satisfied = self._support_stable_for(step, reference, active)
+            satisfied &= self._support_cycle_free(
+                step.object_uid,
+                reference,
+                active,
             )
         elif step.operator == "orient_object":
             position_anchor = str(step.goal.get("position_anchor", "initial_xy"))
@@ -2838,40 +3674,25 @@ class ProgramExecutor:
                     "minimum_distance": float(policy.get("relation_clearance", 0.01)),
                 },
             )
-        if (
-            (
-                postcondition_type == "semantic_goal"
-                or self.arrangements.get(step.id) is not None
-            )
-            and relation != "inside"
-            and step.goal.get("orientation_goal", "preserve") == "preserve"
-        ):
-            orientation_reference = self._orientation_references.get(step.id)
-            if orientation_reference is not None:
-                reference_rotation = orientation_reference[:, :3, :3].to(
-                    device=observed_pose.device,
-                    dtype=observed_pose.dtype,
-                )
-                relative = torch.bmm(
-                    reference_rotation.transpose(1, 2),
-                    observed_pose[:, :3, :3],
-                )
-                cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
-                orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
-                self._orientation_errors[step.id] = orientation_error
-                policy = self._policies.get(step.id, {})
-                satisfied &= orientation_error <= float(
-                    policy.get(
-                        "preserve_orientation_tolerance",
-                        self.runtime_policy.predicate_fallbacks[
-                            "preserve_orientation_tolerance"
-                        ],
-                    )
-                )
+        verifies_placement_orientation = (
+            postcondition_type == "semantic_goal"
+            or self.arrangements.get(step.id) is not None
+        )
+        orientation_goal = str(step.goal.get("orientation_goal", "preserve"))
+        if verifies_placement_orientation and orientation_goal in {
+            "none",
+            "preserve",
+            "upright",
+            "lay_flat",
+            "axis_align",
+        }:
+            satisfied &= self._placement_orientation_satisfied(step, observed_pose)
         if step.goal.get("payloads"):
             satisfied &= self._verify_payloads(step)
         success = active & satisfied
         failed = failed | (active & ~satisfied)
+        if relation in {"on", "on_top", "on_top_of"} and isinstance(reference, str):
+            self._commit_support_relation(step, reference, success)
         log_info(
             f"Verified {step.id}: {int(success.sum())}/{len(success)} envs succeeded."
         )
@@ -2954,26 +3775,253 @@ class ProgramExecutor:
             pose = pose.unsqueeze(0).repeat(int(self.env.num_envs), 1, 1)
         return pose
 
-    def _is_cleanup_edge(self, edge: ExecutionEdge) -> bool:
-        for action in edge.actions:
-            binding = action.get("target_binding", {})
-            if binding.get("kind") == "policy_pose":
-                # A release retreat is a required safety barrier. If it cannot
-                # be planned or verified, do not allow the home motion or a
-                # dependent semantic step to proceed past the nearby object.
-                if binding.get("operation") == "retreat":
-                    return False
-                continue
+    def _entity_motion_stable(self, uid: str) -> torch.Tensor:
+        entity = self.env.sim.get_rigid_object(uid)
+        if entity is None:
+            raise ValueError(f"Unknown rigid object {uid!r}.")
+
+        def velocity(value: Any, name: str) -> torch.Tensor | None:
+            if callable(value):
+                value = value()
+            if value is None:
+                return None
+            tensor = torch.as_tensor(
+                value,
+                dtype=torch.float32,
+                device=self.env.device,
+            )
+            if tensor.ndim == 1:
+                tensor = tensor.unsqueeze(0).repeat(int(self.env.num_envs), 1)
+            if tensor.shape != (int(self.env.num_envs), 3):
+                raise ValueError(
+                    f"Rigid object {uid!r} {name} must have shape "
+                    f"({int(self.env.num_envs)}, 3)."
+                )
+            return tensor
+
+        linear = velocity(getattr(entity, "lin_vel", None), "lin_vel")
+        angular = velocity(getattr(entity, "ang_vel", None), "ang_vel")
+        if linear is None or angular is None:
+            body_state = getattr(entity, "body_state", None)
+            if callable(body_state):
+                body_state = body_state()
+            if body_state is not None:
+                state = torch.as_tensor(
+                    body_state,
+                    dtype=torch.float32,
+                    device=self.env.device,
+                )
+                if state.ndim == 1:
+                    state = state.unsqueeze(0).repeat(int(self.env.num_envs), 1)
+                if state.shape == (int(self.env.num_envs), 13):
+                    linear = state[:, 7:10]
+                    angular = state[:, 10:13]
+        if linear is None or angular is None:
+            body_data = getattr(entity, "body_data", None)
+            if body_data is not None:
+                if linear is None:
+                    linear = velocity(getattr(body_data, "lin_vel", None), "lin_vel")
+                if angular is None:
+                    angular = velocity(getattr(body_data, "ang_vel", None), "ang_vel")
+        if linear is None or angular is None:
+            return torch.zeros(
+                int(self.env.num_envs),
+                dtype=torch.bool,
+                device=self.env.device,
+            )
+        return (
+            torch.linalg.vector_norm(linear, dim=1)
+            <= self.support_linear_velocity_tolerance
+        ) & (
+            torch.linalg.vector_norm(angular, dim=1)
+            <= self.support_angular_velocity_tolerance
+        )
+
+    def _support_stable_for(
+        self,
+        step: SemanticStep,
+        support_uid: str,
+        active: torch.Tensor,
+    ) -> torch.Tensor:
+        """Require the support relation and low motion across a time window."""
+        stable = active.clone()
+        for sample_index in range(self.support_stability_samples):
+            supported = evaluate_predicate(
+                self.env,
+                {
+                    "type": "object_supported_by",
+                    "object": step.object_uid,
+                    "support": support_uid,
+                },
+            )
+            stable &= (
+                supported
+                & self._entity_motion_stable(step.object_uid)
+                & self._entity_motion_stable(support_uid)
+            )
             if (
-                self.adapter.capabilities.get(
-                    str(action.get("atomic_action_class"))
-                ).target_materializer
-                == "joint_state"
-                and binding.get("kind") == "joint_state"
-                and binding.get("source") == "initial"
+                sample_index + 1 < self.support_stability_samples
+                and self.support_stability_interval_steps
+                and bool(active.any())
             ):
-                # Returning home can sweep links back through the released
-                # object's workspace and is therefore part of task safety.
-                return False
-            return False
-        return True
+                self.env.sim.update(step=self.support_stability_interval_steps)
+        return stable
+
+    def _clear_support_relation(self, object_uid: str, mask: torch.Tensor) -> None:
+        relations = self._support_relations.get(object_uid)
+        if relations is None:
+            return
+        for env_id in torch.nonzero(mask, as_tuple=False).flatten().tolist():
+            relations[env_id] = None
+        if not any(relation is not None for relation in relations):
+            self._support_relations.pop(object_uid, None)
+
+    def _support_cycle_free(
+        self,
+        object_uid: str,
+        support_uid: str,
+        active: torch.Tensor,
+    ) -> torch.Tensor:
+        result = active.clone()
+        for env_id in torch.nonzero(active, as_tuple=False).flatten().tolist():
+            current = support_uid
+            visited: set[str] = set()
+            while current and current not in visited:
+                if current == object_uid:
+                    result[env_id] = False
+                    break
+                visited.add(current)
+                relations = self._support_relations.get(current)
+                relation = None if relations is None else relations[env_id]
+                current = "" if relation is None else relation.support_uid
+        return result
+
+    def _commit_support_relation(
+        self,
+        step: SemanticStep,
+        support_uid: str,
+        successful: torch.Tensor,
+    ) -> None:
+        relations = self._support_relations.setdefault(
+            step.object_uid,
+            [None] * int(self.env.num_envs),
+        )
+        relation = _SupportRelation(
+            support_uid=support_uid,
+            semantic_step_id=step.id,
+        )
+        for env_id in torch.nonzero(successful, as_tuple=False).flatten().tolist():
+            relations[env_id] = relation
+
+    def _placement_orientation_satisfied(
+        self,
+        step: SemanticStep,
+        observed_pose: torch.Tensor,
+    ) -> torch.Tensor:
+        goal = str(step.goal.get("orientation_goal", "preserve"))
+        satisfied = torch.ones(
+            int(self.env.num_envs),
+            dtype=torch.bool,
+            device=self.env.device,
+        )
+        if goal == "none" or (
+            goal == "preserve" and step.goal.get("relation") == "inside"
+        ):
+            return satisfied
+        policy = self._policies.get(step.id, {})
+        fallbacks = self.runtime_policy.predicate_fallbacks
+        if goal == "upright":
+            return evaluate_predicate(
+                self.env,
+                {
+                    "type": "object_upright",
+                    "object": step.object_uid,
+                    "local_axis": policy.get("upright_local_axis", "long_axis"),
+                    "max_tilt": float(
+                        policy.get("upright_max_tilt", fallbacks["upright_max_tilt"])
+                    ),
+                },
+            )
+        reference_pose = (
+            self._orientation_references.get(step.id)
+            if goal == "preserve"
+            else self._target_poses.get(step.id)
+        )
+        if reference_pose is None:
+            return satisfied
+        reference_rotation = reference_pose[:, :3, :3].to(
+            device=observed_pose.device,
+            dtype=observed_pose.dtype,
+        )
+        relative = torch.bmm(
+            reference_rotation.transpose(1, 2),
+            observed_pose[:, :3, :3],
+        )
+        cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
+        orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
+        self._orientation_errors[step.id] = orientation_error
+        return orientation_error <= float(
+            policy.get(
+                "preserve_orientation_tolerance",
+                fallbacks["preserve_orientation_tolerance"],
+            )
+        )
+
+    def _revalidate_support_relations(self) -> dict[str, torch.Tensor]:
+        active_by_step: dict[str, torch.Tensor] = {}
+        for relations in self._support_relations.values():
+            for env_id, relation in enumerate(relations):
+                if relation is None:
+                    continue
+                active = active_by_step.setdefault(
+                    relation.semantic_step_id,
+                    torch.zeros(
+                        int(self.env.num_envs),
+                        dtype=torch.bool,
+                        device=self.env.device,
+                    ),
+                )
+                active[env_id] = True
+        failures: dict[str, torch.Tensor] = {}
+        for step_id, active in active_by_step.items():
+            step = self.steps[step_id]
+            support_uid = self._support_reference_uid(step)
+            if support_uid is None:
+                failures[step_id] = active
+                continue
+            observed_pose = self._entity_pose(step.object_uid)
+            valid = self._support_stable_for(step, support_uid, active)
+            valid &= self._placement_orientation_satisfied(step, observed_pose)
+            lost = active & ~valid
+            if bool(lost.any()):
+                failures[step_id] = lost
+        return failures
+
+    @staticmethod
+    def _support_reference_uid(step: SemanticStep) -> str | None:
+        value = step.goal.get("reference_object", step.goal.get("support_object"))
+        if isinstance(value, str) and value:
+            return value
+        if (
+            step.postcondition.get("type") == "stack_layer_supported"
+            and int(step.goal.get("layer_index", -1)) == 0
+        ):
+            return "table"
+        return None
+
+    @staticmethod
+    def _edge_failure_policy(edge: ExecutionEdge) -> str:
+        """Return the persisted node policy for one synchronized edge."""
+        policies = {
+            str(action.get("failure_policy", "task_required"))
+            for action in edge.actions
+        }
+        if not policies <= {"task_required", "safety_required", "best_effort"}:
+            raise ValueError(
+                f"Edge {edge.id!r} contains unknown failure policies {policies}."
+            )
+        if len(policies) != 1:
+            raise ValueError(
+                f"Edge {edge.id!r} mixes incompatible failure policies {policies}."
+            )
+        return next(iter(policies))

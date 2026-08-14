@@ -39,7 +39,7 @@ __all__ = [
 ]
 
 _RETRY_MODES = frozenset({"direct", "recover_then_retry", "non_retryable"})
-ACTION_CONTRACT_VERSION = "action_contract_v1"
+ACTION_CONTRACT_VERSION = "action_contract_v2"
 _PREDICATES = frozenset(
     {
         "arm_free",
@@ -55,6 +55,7 @@ _EFFECT_OPERATIONS = frozenset({"add", "delete"})
 _RESOURCE_ACCESS = frozenset({"shared_read", "exclusive"})
 _RESOURCE_LIFETIMES = frozenset({"action", "until_release"})
 _COMPLETION_MODES = frozenset({"ordinary", "cleanup", "terminal_barrier"})
+_FAILURE_POLICIES = frozenset({"task_required", "safety_required", "best_effort"})
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,7 @@ class ResolvedActionContract:
     effects: tuple[StateEffect, ...] = ()
     claims: tuple[ResourceClaim, ...] = ()
     completion: str = "ordinary"
+    failure_policy: str = "task_required"
     version: str = ACTION_CONTRACT_VERSION
 
     def __post_init__(self) -> None:
@@ -142,6 +144,10 @@ class ResolvedActionContract:
             )
         if self.completion not in _COMPLETION_MODES:
             raise ValueError(f"Unknown Action Contract completion {self.completion!r}.")
+        if self.failure_policy not in _FAILURE_POLICIES:
+            raise ValueError(
+                f"Unknown Action Contract failure policy {self.failure_policy!r}."
+            )
 
     def as_mapping(self) -> dict[str, Any]:
         """Return the stable JSON representation persisted in SeedGraph v3."""
@@ -151,6 +157,7 @@ class ResolvedActionContract:
             "effects": [effect.as_mapping() for effect in self.effects],
             "claims": [claim.as_mapping() for claim in self.claims],
             "completion": self.completion,
+            "failure_policy": self.failure_policy,
         }
 
 
@@ -728,6 +735,7 @@ def _resolve_end_effector_contract(
             effects=(StateEffect("add", StateAtom("arm_clear", arm=arm)),),
             claims=(ResourceClaim(f"arm:{arm}"),),
             completion="cleanup",
+            failure_policy="safety_required",
         )
     return ResolvedActionContract(
         requires=(StateAtom("arm_free", arm=arm),),
@@ -799,6 +807,7 @@ def _resolve_joints_contract(node: Mapping[str, Any]) -> ResolvedActionContract:
             ),
             claims=(ResourceClaim(f"arm:{arm}"),),
             completion="terminal_barrier",
+            failure_policy="best_effort",
         )
     return ResolvedActionContract(
         requires=(StateAtom("arm_free", arm=arm),),

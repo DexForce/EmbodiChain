@@ -231,6 +231,12 @@ def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -
     assert orient["actor"] == {"mode": "required", "arm": "left_arm"}
     assert handover_nodes[0]["actor"] == {"mode": "required", "arm": "right_arm"}
     assert orient_nodes[-1]["contract"]["completion"] == "terminal_barrier"
+    assert orient_nodes[-2]["contract"]["failure_policy"] == "safety_required"
+    assert orient_nodes[-1]["contract"]["failure_policy"] == "best_effort"
+    assert not any(
+        effect["atom"]["predicate"] == "arm_home"
+        for effect in orient["contract"]["exit_effects"]
+    )
     assert any(
         requirement["predicate"] == "object_free"
         for requirement in handover_nodes[0]["contract"]["requires"]

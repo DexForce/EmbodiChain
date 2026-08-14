@@ -132,6 +132,27 @@ class RuntimeRecorder:
             self.program_metadata["runtime_policy"] = deepcopy(dict(runtime_policy))
             self.program_metadata["runtime_policy_hash"] = runtime_policy_hash
 
+    def register_step(
+        self,
+        step: SemanticStep,
+        spec: Mapping[str, Any],
+    ) -> None:
+        """Register a semantic step inserted by a runtime graph revision."""
+        if not self.enabled:
+            return
+        raw = deepcopy(dict(spec))
+        if str(raw.get("id")) != step.id:
+            raise ValueError("Runtime step spec ID must match the semantic step ID.")
+        existing = self.step_specs.get(step.id)
+        if existing is not None:
+            if existing != raw:
+                raise ValueError(
+                    f"Runtime step {step.id!r} was registered with a different spec."
+                )
+            return
+        self.step_specs[step.id] = raw
+        self.step_ordinals[step.id] = max(self.step_ordinals.values(), default=0) + 1
+
     def edge(
         self,
         edge_id: str,
@@ -144,12 +165,16 @@ class RuntimeRecorder:
         action_steps: int,
         planner_traces: Sequence[Mapping[str, Any]] = (),
         diagnostics: Sequence[str] = (),
+        phase: str = "primary",
     ) -> None:
         if not self.enabled:
             return
+        if phase not in {"primary", "recovery", "replay", "final_revalidation"}:
+            raise ValueError(f"Unknown execution phase {phase!r}.")
         for env_id in range(self.num_envs):
             event = {
                 "event": "edge",
+                "phase": phase,
                 "edge_id": edge_id,
                 "semantic_step_id": step.id,
                 "operator": step.operator,
@@ -188,14 +213,18 @@ class RuntimeRecorder:
         observed: torch.Tensor | None,
         target: torch.Tensor | None,
         metadata: Sequence[Mapping[str, Any]] | None = None,
+        phase: str = "primary",
     ) -> None:
         if not self.enabled:
             return
+        if phase not in {"primary", "recovery", "replay", "final_revalidation"}:
+            raise ValueError(f"Unknown execution phase {phase!r}.")
         if metadata is not None and len(metadata) != self.num_envs:
             raise ValueError("Runtime step metadata must match num_envs.")
         for env_id in range(self.num_envs):
             event = {
                 "event": "semantic_step",
+                "phase": phase,
                 "semantic_step_id": step.id,
                 "status": "success" if bool(success[env_id]) else "failed",
                 "observed_position": _jsonable(observed, env_id),
@@ -216,6 +245,7 @@ class RuntimeRecorder:
         status: str,
         recovery_group_id: str | None = None,
         error: str | None = None,
+        semantic_step_id: str | None = None,
     ) -> None:
         """Record one bounded local-recovery phase for the selected rows."""
         if not self.enabled:
@@ -227,6 +257,7 @@ class RuntimeRecorder:
                 continue
             event = {
                 "event": "local_recovery",
+                "phase": "recovery",
                 "failure_type": str(failure_type),
                 "failed_node_id": str(failed_node_id),
                 "recovery_group_id": recovery_group_id,
@@ -234,6 +265,8 @@ class RuntimeRecorder:
                 "error": error,
                 "time_utc": datetime.now(timezone.utc).isoformat(),
             }
+            if semantic_step_id is not None:
+                event["semantic_step_id"] = str(semantic_step_id)
             self.events[env_id].append(event)
 
     def _env_dir(self, env_id: int) -> Path:

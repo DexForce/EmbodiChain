@@ -218,8 +218,8 @@ def _placement_candidate(candidate_id: str = "place") -> dict:
             "reference": "table",
             "quantifier": "one",
             "count": 0,
-            "source_structure": "support_surface",
-            "affordances": ["support_surface"],
+            "source_structure": "physical_entity",
+            "affordances": [],
             "initial_state": {},
             "attributes": {},
         },
@@ -598,6 +598,9 @@ def test_scene_adapter_binds_all_matching_uids(
 
     assert result.binding_report["status"] == "bound"
     assert result.reference_bindings == {"upright.object": ["red_can", "blue_can"]}
+    assert result.candidate_bindings[candidate["candidate_id"]][
+        "reference_bindings"
+    ] == {"upright.object": ["red_can", "blue_can"]}
 
 
 def test_scene_adapter_rejects_step_result_object_matching_same_step_target(

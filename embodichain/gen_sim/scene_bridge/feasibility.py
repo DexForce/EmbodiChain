@@ -148,6 +148,8 @@ class FeasibilityBroker:
                     continue
                 checks.extend(self._entity_checks(request, entity, reference_id))
 
+        checks.extend(self._workspace_checks(steps, bindings, objects))
+
         statuses = Counter(check["status"] for check in checks)
         status = max(
             (check["status"] for check in checks),
@@ -226,6 +228,136 @@ class FeasibilityBroker:
                     "Reachability, collision, and grasp geometry require live planning.",
                 )
             )
+        if (
+            str(request.get("role")) == "target"
+            and str(request.get("source_structure")) == "physical_entity"
+        ):
+            checks.append(
+                _check(
+                    "placement_support",
+                    subject,
+                    "runtime_probe",
+                    "Support depends on the payload, candidate pose, live geometry, "
+                    "and post-release stability.",
+                    evidence={
+                        "runtime_obligations": [
+                            "placement_candidates",
+                            "object_supported_by",
+                            "stable_for",
+                            "final_support_revalidation",
+                        ]
+                    },
+                )
+            )
+        return checks
+
+    def _workspace_checks(
+        self,
+        steps: Mapping[str, Mapping[str, Any]],
+        bindings: Mapping[str, Any],
+        objects: Mapping[str, Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Report world-Y arm-layout risks without claiming static infeasibility."""
+        checks: list[dict[str, Any]] = []
+        object_uids_by_step: dict[str, tuple[str, ...]] = {}
+        phases: list[dict[str, Any]] = []
+        for step_id, step in steps.items():
+            object_uids = _step_selector_uids(
+                step_id,
+                "object",
+                step.get("object"),
+                bindings,
+                object_uids_by_step,
+            )
+            object_uids_by_step[step_id] = object_uids
+            target_uids = _step_selector_uids(
+                step_id,
+                "target",
+                step.get("target"),
+                bindings,
+                object_uids_by_step,
+            )
+            task_type = str(step.get("task_type", ""))
+            required_arm = str(step.get("required_arm", "auto"))
+            if task_type == "E4":
+                required_arm = str(step.get("transfer_arm", "none"))
+            if required_arm in {"left_arm", "right_arm"}:
+                for uid in object_uids:
+                    entity = objects.get(uid)
+                    position = (
+                        entity.get("initial_pose", {}).get("position", ())
+                        if isinstance(entity, Mapping)
+                        and isinstance(entity.get("initial_pose"), Mapping)
+                        else ()
+                    )
+                    if (
+                        not isinstance(position, Sequence)
+                        or isinstance(position, (str, bytes, bytearray))
+                        or len(position) < 2
+                    ):
+                        continue
+                    world_y = float(position[1])
+                    expected_arm = (
+                        "right_arm"
+                        if world_y > 0.0
+                        else ("left_arm" if world_y < 0.0 else "shared")
+                    )
+                    mismatch = expected_arm not in {required_arm, "shared"}
+                    checks.append(
+                        _check(
+                            "arm_layout_risk",
+                            f"{step_id}:{uid}",
+                            "runtime_probe",
+                            (
+                                f"Required {required_arm} is opposite the canonical "
+                                f"world-Y side for {uid!r}; live planning must "
+                                "determine feasibility."
+                                if mismatch
+                                else "World-Y side is compatible with the required "
+                                "arm, but reachability still requires live planning."
+                            ),
+                            evidence={
+                                "required_arm": required_arm,
+                                "expected_arm": expected_arm,
+                                "world_y": world_y,
+                                "world_y_convention": {
+                                    "positive": "right_arm",
+                                    "negative": "left_arm",
+                                },
+                                "mismatch_risk": mismatch,
+                                "geometry_certificate": False,
+                            },
+                        )
+                    )
+
+            phases.extend(
+                _workflow_phases(
+                    step_id,
+                    task_type,
+                    object_uids,
+                    target_uids,
+                    transfer_arm=str(step.get("transfer_arm", "none")),
+                    receive_arm=str(step.get("receive_arm", "none")),
+                )
+            )
+        if phases:
+            checks.append(
+                _check(
+                    "task_workspace",
+                    "task_workflow",
+                    "runtime_probe",
+                    "Scene layout must satisfy pickup, transfer, placement, and "
+                    "safety-clearance phases across the complete task workflow.",
+                    evidence={
+                        "world_y_convention": {
+                            "positive": "right_arm",
+                            "negative": "left_arm",
+                        },
+                        "phases": phases,
+                        "geometry_certificate": False,
+                    },
+                )
+            )
         return checks
 
     @staticmethod
@@ -236,6 +368,45 @@ class FeasibilityBroker:
     ) -> dict[str, Any]:
         expected = str(request.get("source_structure", ""))
         role = str(entity.get("role", ""))
+        if expected == "physical_entity":
+            geometry = entity.get("geometry", {})
+            shape = geometry.get("shape", {}) if isinstance(geometry, Mapping) else {}
+            asset_sha256 = (
+                geometry.get("asset_sha256", "")
+                if isinstance(geometry, Mapping)
+                else ""
+            )
+            physics = entity.get("physics", {})
+            articulation = entity.get("articulation", {})
+            has_physical_geometry = bool(shape) or bool(asset_sha256)
+            has_runtime_body = bool(physics) or bool(articulation)
+            if role in {"camera", "light", "sensor"}:
+                return _check(
+                    "structure",
+                    subject,
+                    "contradicted",
+                    f"Scene entity role {role!r} is not a physical collision body.",
+                    evidence={"physical_geometry": False, "runtime_body": False},
+                )
+            if has_physical_geometry and has_runtime_body:
+                return _check(
+                    "structure",
+                    subject,
+                    "proven",
+                    "Scene entity has physical geometry and a runtime body.",
+                    evidence={"physical_geometry": True, "runtime_body": True},
+                )
+            return _check(
+                "structure",
+                subject,
+                "contradicted",
+                "Scene entity lacks physical geometry or a runtime body required "
+                "for placement.",
+                evidence={
+                    "physical_geometry": has_physical_geometry,
+                    "runtime_body": has_runtime_body,
+                },
+            )
         accepted = {
             "articulation": {"articulation"},
             "rigid_object": {"object", "rigid_object"},
@@ -292,6 +463,74 @@ class FeasibilityBroker:
                 "sources": sorted({str(item.get("source")) for item in evidence}),
             },
         )
+
+
+def _step_selector_uids(
+    step_id: str,
+    role: str,
+    selector: Any,
+    bindings: Mapping[str, Any],
+    object_uids_by_step: Mapping[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    """Resolve direct and prior-step selectors for static workspace advice."""
+    raw = bindings.get(f"{step_id}.{role}", ())
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+        direct = tuple(str(uid) for uid in raw if str(uid))
+        if direct:
+            return direct
+    if not isinstance(selector, Mapping) or selector.get("kind") != "step_result":
+        return ()
+    source_step = str(selector.get("step_id", ""))
+    return tuple(object_uids_by_step.get(source_step, ()))
+
+
+def _workflow_phases(
+    step_id: str,
+    task_type: str,
+    object_uids: Sequence[str],
+    target_uids: Sequence[str],
+    *,
+    transfer_arm: str,
+    receive_arm: str,
+) -> list[dict[str, Any]]:
+    """Describe whole-task layout anchors without inventing geometry bounds."""
+    phases: list[dict[str, Any]] = []
+    if object_uids:
+        phases.append(
+            {
+                "step_id": step_id,
+                "phase": "pickup",
+                "object_uids": list(object_uids),
+            }
+        )
+    if task_type == "E4":
+        phases.append(
+            {
+                "step_id": step_id,
+                "phase": "handover_shared_workspace",
+                "object_uids": list(object_uids),
+                "transfer_arm": transfer_arm,
+                "receive_arm": receive_arm,
+            }
+        )
+    if target_uids:
+        phases.append(
+            {
+                "step_id": step_id,
+                "phase": "target_interaction",
+                "object_uids": list(object_uids),
+                "target_uids": list(target_uids),
+            }
+        )
+    if task_type in {"E1", "E2", "E3", "E4", "E5"}:
+        phases.append(
+            {
+                "step_id": step_id,
+                "phase": "safety_clearance",
+                "object_uids": list(object_uids),
+            }
+        )
+    return phases
 
 
 def _check(

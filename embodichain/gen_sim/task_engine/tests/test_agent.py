@@ -136,6 +136,32 @@ def test_scene_request_and_success_are_deterministic_contract_derivations():
     assert success["terms"] == [{"step_id": "orient", "type": "object_upright"}]
 
 
+def test_on_target_requires_a_physical_entity_not_a_unary_support_label():
+    step = _step(step_id="place", reference="green can")
+    step.update(
+        task_type="E1",
+        target=_selector("scene_ref", reference="red can"),
+        relation="on",
+        orientation_goal="preserve",
+    )
+    draft = {
+        "schema_version": TASK_DRAFT_SCHEMA,
+        "task_id": "stack",
+        "instruction": "把绿罐放到红罐上",
+        "steps": [step],
+    }
+
+    request = derive_scene_request(draft)
+
+    target = next(
+        reference
+        for reference in request["references"]
+        if reference["role"] == "target"
+    )
+    assert target["source_structure"] == "physical_entity"
+    assert target["affordances"] == []
+
+
 def test_lower_task_candidate_expands_success_for_all_binding():
     def interpreter(_instruction, **_kwargs):
         step = _step(reference="all cans")

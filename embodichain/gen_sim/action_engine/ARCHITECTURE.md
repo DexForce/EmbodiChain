@@ -141,13 +141,21 @@ contradictions. A contradicted report publishes an `infeasible` audit result and
 does not invoke graph or bundle generation. Executable preflight remains a
 second authoritative gate before bundle generation.
 
+Scene Bridge also reports world-Y arm-layout mismatch and whole-task pickup,
+handover, target-interaction, and safety-clearance phases as `runtime_probe`
+evidence. Without a geometry certificate these are planning risks, never static
+proof that the scene is infeasible.
+
 ### SeedGraph
 
 Every node directly names an `atomic_action`, scene `object_uid`, symbolic
 `target_binding`, actor, control, dependencies, resources, pre/postconditions,
-motion policy, E type, and `task_instance_id`. `TaskGroup` groups all nodes of
-one E instance with `role=primary|recovery`; it is metadata over the same DAG,
-not a second graph.
+motion policy, E type, `task_instance_id`, and an Action Contract v2
+`failure_policy`. `task_required` and `safety_required` failures invalidate the
+candidate; `best_effort` failures remain observable but do not erase an already
+verified task and safety result. `TaskGroup` groups all nodes of one E instance
+with `role=primary|recovery`; it is metadata over the same DAG, not a second
+graph.
 
 Validation guarantees:
 
@@ -160,7 +168,7 @@ Validation guarantees:
   recursively;
 - hashes use canonical strict JSON and are stable across processes.
 
-The production loader accepts v2 graphs only. A v1 graph, whether supplied as
+The production loader accepts v3 graphs only. An older graph, whether supplied as
 JSON or an in-memory mapping, receives an explicit regeneration error rather
 than an implicit migration.
 
@@ -225,6 +233,25 @@ handover actions are grounded as synchronized execution units. Automatic arm
 selection, collision checks, live arrangement slots, and current predicate
 semantics remain deterministic runtime responsibilities.
 
+Arm-side semantics use one world-frame convention for every robot profile:
+positive world Y maps to `right_arm`, and negative world Y maps to `left_arm`.
+This convention affects selection and risk reporting; live motion planning is
+still authoritative for reachability.
+
+Placement support is a relation, not an entity category. Static adaptation only
+requires an `on` target to be a `physical_entity`; omission of a
+`support_surface` affordance is not a contradiction. Runtime evaluates
+`object_supported_by(payload, support, pose)` from live geometry and center of
+mass, applies the requested `orientation_goal`, and requires low motion across a
+bounded stability window. Successful relations form a per-environment support
+graph that is checked for cycles and revalidated at task completion.
+
+Grounding samples bounded support-relative placement poses. Planning failures
+try the next pose before release; instability after release requires a fresh
+grasp and an unused pose. The recovery keeps the original actor contract, and
+its edges and failure provenance are recorded separately from the primary
+attempt.
+
 ## Mainline Planning Contract
 
 The runtime keeps only an Action Engine-local `ExecutionState` for full-robot
@@ -252,6 +279,10 @@ Generated mesh objects carry V-HACD settings in both the current shape-level
 schema and legacy top-level fields. Before antipodal grasp construction, the
 runtime prepares a checksummed V-HACD payload at the shared collision-checker
 cache path so the unchanged mainline checker does not silently recompute CoACD.
+Grasp generation samples multiple deviated approach directions and filters them
+through the existing gripper collision model. Safety retreat planning searches
+a bounded set of live height and baseward targets instead of treating one exact
+height as a geometric reachability certificate.
 
 ## A/B Evaluation
 
@@ -279,12 +310,17 @@ copy and an ordered revision log. One failed `AtomicAction` can be freshly
 grounded and retried twice, for three total attempts, and only while its live
 precondition remains true.
 
-Failures use the bounded taxonomy `plan_failed`, `grasp_missed`,
-`object_fallen`, `object_dropped`, and `postcondition_failed`. Known recoverable
-states can insert a complete `role=recovery` TaskGroup, such as an E2 upright
-group. After recovery, the selected route replans only the unfinished suffix.
-Offline and online dynamic replanners are explicit, separate modes. Revision,
-recovery-action, transition, and retry budgets bound every loop.
+Failures use the bounded taxonomy `search_exhausted`, `plan_failed`,
+`grasp_missed`, `object_fallen`, `object_dropped`, and
+`postcondition_failed`. `search_exhausted` records the blocking edge, planning
+stage, strategy, finite budget, and observed evidence; it does not claim that a
+target is geometrically unreachable. Known recoverable states can insert a
+complete `role=recovery` TaskGroup, such as an E2 upright group. Recovery keeps
+the failed TaskGroup's actor contract, and primary, recovery, and replay events
+are recorded separately. After recovery, the selected route replans only the
+unfinished suffix. Offline and online dynamic replanners are explicit,
+separate modes. Revision, recovery-action, transition, and retry budgets bound
+every loop.
 
 ## Selection And Fusion
 

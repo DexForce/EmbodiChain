@@ -824,7 +824,7 @@ def test_generation_calls_planner_compiler_and_renderer_once(
     assert agent_config["seed_task_graph"] == "seed_task_graph.json"
     assert len(agent_config["seed_task_graph_hash"]) == 64
     assert agent_config["runtime_policy"]["schema_version"] == (
-        "action_engine_runtime_policy_v4"
+        "action_engine_runtime_policy_v6"
     )
     assert agent_config["runtime_policy"]["planner"]["dynamic_collision"] is True
     assert agent_config["runtime_policy"]["planner"]["static_obstacle_uids"] == [

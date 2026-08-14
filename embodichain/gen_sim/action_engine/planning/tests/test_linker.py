@@ -148,6 +148,14 @@ def test_handover_ownership_flows_through_home_terminal_barrier() -> None:
 
     assert terminal["atomic_action"] == "MoveJoints"
     assert terminal["contract"]["completion"] == "terminal_barrier"
+    assert terminal["contract"]["failure_policy"] == "best_effort"
+    retreat = next(
+        node
+        for node in graph["nodes"]
+        if node["task_instance_id"] == "task_03"
+        and node["atomic_action"] == "MoveEndEffector"
+    )
+    assert retreat["contract"]["failure_policy"] == "safety_required"
     assert terminal_id in receiver_entry["depends_on"]
     assert {
         (effect["op"], effect["atom"]["predicate"], effect["atom"].get("arm"))

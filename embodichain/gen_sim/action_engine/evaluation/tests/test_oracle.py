@@ -29,10 +29,23 @@ class _Object:
     def __init__(self, position: tuple[float, float, float]) -> None:
         self.pose = torch.eye(4).unsqueeze(0)
         self.pose[0, :3, 3] = torch.tensor(position)
+        self.vertices = torch.tensor(
+            [
+                [x, y, z]
+                for x in (-0.05, 0.05)
+                for y in (-0.05, 0.05)
+                for z in (-0.05, 0.05)
+            ],
+            dtype=torch.float32,
+        )
 
     def get_local_pose(self, *, to_matrix: bool) -> torch.Tensor:
         assert to_matrix is True
         return self.pose
+
+    def get_vertices(self, *, env_ids: list[int], scale: bool) -> torch.Tensor:
+        del env_ids, scale
+        return self.vertices
 
 
 class _Sim:

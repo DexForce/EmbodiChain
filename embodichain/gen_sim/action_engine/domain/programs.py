@@ -100,8 +100,10 @@ _ACTION_KEYS = frozenset(
         "target_binding",
         "motion_policy",
         "seed_node_id",
+        "failure_policy",
     }
 )
+_FAILURE_POLICIES = frozenset({"task_required", "safety_required", "best_effort"})
 _TASK_ALLOCATION_GROUP_KEYS = frozenset({"id", "semantic_step_ids", "arm_constraint"})
 _BINDING_REQUIREMENTS = {
     "articulation_goal": frozenset({"object"}),
@@ -134,6 +136,7 @@ _POSTCONDITION_TYPES = frozenset(
         "object_lifted",
         "object_not_fallen",
         "object_on_object",
+        "object_supported_by",
         "object_position_near",
         "object_upright",
         "object_xy_near",
@@ -454,6 +457,13 @@ def _validate_actions(value: Any, edge_context: str) -> list[dict[str, Any]]:
                 action.get("seed_node_id"),
                 f"{context}.seed_node_id",
             )
+        failure_policy = action.get("failure_policy", "task_required")
+        if failure_policy not in _FAILURE_POLICIES:
+            raise ValueError(
+                f"{context}.failure_policy must be one of "
+                f"{sorted(_FAILURE_POLICIES)}."
+            )
+        action["failure_policy"] = str(failure_policy)
         actions.append(action)
     return actions
 

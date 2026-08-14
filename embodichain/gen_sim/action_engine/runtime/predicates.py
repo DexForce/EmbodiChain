@@ -46,6 +46,7 @@ PREDICATE_TYPES = frozenset(
         "object_lifted",
         "object_not_fallen",
         "object_on_object",
+        "object_supported_by",
         "object_position_near",
         "object_relative_position",
         "object_upright",
@@ -89,6 +90,127 @@ def _pose(env: Any, uid: str) -> torch.Tensor:
 
 def _position(env: Any, uid: str) -> torch.Tensor:
     return _pose(env, uid)[:, :3, 3]
+
+
+def _world_vertices(env: Any, uid: str, env_id: int) -> torch.Tensor:
+    entity = env.sim.get_rigid_object(uid)
+    if entity is None:
+        raise ValueError(f"Unknown rigid object {uid!r}.")
+    value = entity.get_vertices(env_ids=[env_id], scale=True)
+    if isinstance(value, (tuple, list)):
+        value = value[0]
+    vertices = torch.as_tensor(value, dtype=torch.float32, device=env.device)
+    if vertices.ndim == 3 and vertices.shape[0] == 1:
+        vertices = vertices[0]
+    if vertices.ndim != 2 or vertices.shape[-1] != 3 or vertices.numel() == 0:
+        raise ValueError(f"Rigid object {uid!r} has invalid mesh vertices.")
+    pose = _pose(env, uid)[env_id]
+    return vertices @ pose[:3, :3].transpose(0, 1) + pose[:3, 3]
+
+
+def _projected_center_of_mass(
+    env: Any,
+    uid: str,
+    env_id: int,
+    world_vertices: torch.Tensor,
+) -> torch.Tensor:
+    """Return the live COM projection, with a geometry-center fallback."""
+    entity = env.sim.get_rigid_object(uid)
+    body_data = None if entity is None else getattr(entity, "body_data", None)
+    com_pose = None if body_data is None else getattr(body_data, "com_pose", None)
+    if callable(com_pose):
+        com_pose = com_pose()
+    if com_pose is not None:
+        local_com = torch.as_tensor(
+            com_pose,
+            dtype=torch.float32,
+            device=env.device,
+        )
+        if local_com.ndim == 1:
+            local_com = local_com.unsqueeze(0).repeat(int(env.num_envs), 1)
+        if local_com.ndim == 2 and local_com.shape[0] == int(env.num_envs):
+            pose = _pose(env, uid)[env_id]
+            return (pose[:3, :3] @ local_com[env_id, :3] + pose[:3, 3])[:2]
+    return (
+        world_vertices[:, :2].min(dim=0).values
+        + world_vertices[:, :2].max(dim=0).values
+    ) * 0.5
+
+
+def _object_supported_by(
+    env: Any,
+    spec: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+) -> torch.Tensor:
+    """Evaluate one-frame geometric support without advancing simulation."""
+    object_uid = _object(spec)
+    support_uid = str(
+        spec.get(
+            "support",
+            spec.get("reference_object", spec.get("reference", "")),
+        )
+    )
+    if not support_uid:
+        raise ValueError("Support predicate requires a support object uid.")
+    margin = float(spec.get("com_margin", defaults["support_com_margin"]))
+    max_gap = float(spec.get("max_vertical_gap", defaults["support_max_vertical_gap"]))
+    max_penetration = float(
+        spec.get("max_penetration", defaults["support_max_penetration"])
+    )
+    min_overlap = float(
+        spec.get("min_overlap_ratio", defaults["support_min_overlap_ratio"])
+    )
+    result = _constant(env, False)
+    for env_id in range(int(env.num_envs)):
+        moved = _world_vertices(env, object_uid, env_id)
+        support = _world_vertices(env, support_uid, env_id)
+        moved_lower = moved[:, :2].min(dim=0).values
+        moved_upper = moved[:, :2].max(dim=0).values
+        support_lower = support[:, :2].min(dim=0).values
+        support_upper = support[:, :2].max(dim=0).values
+        overlap_extent = torch.clamp(
+            torch.minimum(moved_upper, support_upper)
+            - torch.maximum(moved_lower, support_lower),
+            min=0.0,
+        )
+        moved_extent = torch.clamp(moved_upper - moved_lower, min=1e-6)
+        overlap_ratio = torch.prod(overlap_extent) / torch.prod(moved_extent)
+        projected_center = _projected_center_of_mass(
+            env,
+            object_uid,
+            env_id,
+            moved,
+        )
+        center_supported = torch.all(
+            projected_center >= support_lower + margin
+        ) & torch.all(projected_center <= support_upper - margin)
+        local_mask = torch.all(
+            (support[:, :2] >= moved_lower - margin)
+            & (support[:, :2] <= moved_upper + margin),
+            dim=1,
+        )
+        if bool(local_mask.any()):
+            local_support_height = support[local_mask, 2].max()
+        else:
+            # Sparse meshes may have no vertex exactly under a small payload.
+            # Nearest vertices are a local fallback; using the mesh-wide peak
+            # would confuse a remote protrusion with the candidate support pose.
+            distances = torch.linalg.vector_norm(
+                support[:, :2] - projected_center,
+                dim=1,
+            )
+            count = min(8, int(support.shape[0]))
+            local_support_height = support[
+                torch.topk(distances, count, largest=False).indices, 2
+            ].max()
+        vertical_gap = moved[:, 2].min() - local_support_height
+        result[env_id] = bool(
+            center_supported
+            and overlap_ratio >= min_overlap
+            and vertical_gap >= -max_penetration
+            and vertical_gap <= max_gap
+        )
+    return result
 
 
 def _objects(spec: Mapping[str, Any]) -> list[str]:
@@ -447,19 +569,8 @@ def evaluate_predicate(
             & (z >= float(spec.get("min_z_offset", defaults["container_min_z_offset"])))
             & (z <= float(spec.get("max_z_offset", defaults["container_max_z_offset"])))
         )
-    if kind in {"object_on_object", "on"}:
-        position = _position(env, _object(spec))
-        support = _position(
-            env,
-            str(
-                spec.get(
-                    "support",
-                    spec.get("reference_object", spec.get("reference")),
-                )
-            ),
-        )
-        xy = torch.linalg.vector_norm(position[:, :2] - support[:, :2], dim=-1)
-        return xy <= float(spec.get("xy_radius", defaults["support_xy_radius"]))
+    if kind in {"object_supported_by", "object_on_object", "on"}:
+        return _object_supported_by(env, spec, defaults)
     if kind == "object_not_fallen":
         axis = _pose(env, _object(spec))[:, :3, 2]
         cosine = axis[:, 2].clamp(-1.0, 1.0)
@@ -612,7 +723,7 @@ def evaluate_predicate(
         reference = spec.get("support_object", spec.get("reference_object"))
         translated = {
             "type": (
-                "object_in_container" if relation == "inside" else "object_on_object"
+                "object_in_container" if relation == "inside" else "object_supported_by"
             ),
             "object": _object(spec),
             ("container" if relation == "inside" else "support"): reference,

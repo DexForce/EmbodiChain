@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import shutil
@@ -59,6 +59,7 @@ from .contracts import (
     RoleBindings,
     canonical_hash,
     validate_grounded_task_plan,
+    validate_binding_report,
     validate_role_bindings,
 )
 from .scene_adapter import SceneAdaptation, SceneAdapter
@@ -220,6 +221,19 @@ class CollaborationCoordinator:
                 feasibility_report is not None
                 and feasibility_report["status"] == "contradicted"
             ):
+                adaptation, selected, raw_role_bindings, feasibility_report = (
+                    self._fallback_feasible_candidate(
+                        candidate_set,
+                        adaptation,
+                        selected,
+                        raw_role_bindings,
+                        feasibility_report,
+                    )
+                )
+            if (
+                feasibility_report is not None
+                and feasibility_report["status"] == "contradicted"
+            ):
                 write_collaboration_artifacts(
                     staging_dir,
                     candidate_set=candidate_set,
@@ -330,6 +344,69 @@ class CollaborationCoordinator:
                 ),
                 feasibility_report=deepcopy(feasibility_report),
             )
+
+    def _fallback_feasible_candidate(
+        self,
+        candidate_set: Mapping[str, Any],
+        adaptation: SceneAdaptation,
+        selected: TaskCandidate,
+        role_bindings: RoleBindings,
+        report: FeasibilityReport,
+    ) -> tuple[
+        SceneAdaptation,
+        TaskCandidate,
+        RoleBindings,
+        FeasibilityReport | None,
+    ]:
+        """Try other resolved semantic candidates after a static contradiction."""
+        candidates = {
+            str(candidate["candidate_id"]): candidate
+            for candidate in candidate_set.get("candidates", ())
+            if isinstance(candidate, Mapping) and candidate.get("candidate_id")
+        }
+        selected_id = str(selected["candidate_id"])
+        for audit in adaptation.binding_report["candidates"]:
+            candidate_id = str(audit["candidate_id"])
+            if candidate_id == selected_id or audit["status"] != "resolved":
+                continue
+            candidate = candidates.get(candidate_id)
+            alternative_bindings = adaptation.candidate_bindings.get(candidate_id)
+            if candidate is None or alternative_bindings is None:
+                continue
+            alternative_report = self._assess_feasibility(
+                candidate,
+                alternative_bindings,
+                adaptation,
+            )
+            if (
+                alternative_report is not None
+                and alternative_report["status"] == "contradicted"
+            ):
+                continue
+            binding_report = validate_binding_report(
+                {
+                    **deepcopy(adaptation.binding_report),
+                    "selected_candidate_id": candidate_id,
+                    "selection_reason": (
+                        "Selected the next resolved candidate after static "
+                        f"feasibility contradicted {selected_id}."
+                    ),
+                }
+            )
+            chosen = deepcopy(candidate)
+            updated = replace(
+                adaptation,
+                selected_candidate=chosen,
+                role_bindings=deepcopy(alternative_bindings),
+                binding_report=binding_report,
+            )
+            return (
+                updated,
+                chosen,
+                deepcopy(alternative_bindings),
+                alternative_report,
+            )
+        return adaptation, selected, role_bindings, report
 
     def _assess_feasibility(
         self,

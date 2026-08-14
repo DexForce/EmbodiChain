@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -135,6 +135,7 @@ class SceneAdaptation:
     source_config_path: Path
     scene_package: ScenePackageRef | None = None
     static_scene_manifest: StaticSceneManifest | None = None
+    candidate_bindings: dict[str, RoleBindings] = field(default_factory=dict)
 
     @property
     def selected_candidate_id(self) -> str | None:
@@ -251,24 +252,23 @@ class SceneAdapter:
             ),
             None,
         )
-        role_bindings: RoleBindings | None = None
-        if selected is not None:
-            role_bindings = validate_role_bindings(
+        candidate_bindings = {
+            candidate_id: validate_role_bindings(
                 {
                     "schema_version": ROLE_BINDINGS_SCHEMA,
                     "task_id": task_id,
-                    "candidate_id": selected_id,
+                    "candidate_id": candidate_id,
                     "reference_bindings": {
-                        key: list(value)
-                        for key, value in sorted(
-                            bindings_by_candidate[selected_id].items()
-                        )
+                        key: list(value) for key, value in sorted(raw_bindings.items())
                     },
                     # Canonical TaskSpec roles are assigned during lowering by
                     # GroundedTaskBuilder; reference bindings are authoritative.
                     "role_bindings": {},
                 }
             )
+            for candidate_id, raw_bindings in bindings_by_candidate.items()
+        }
+        role_bindings = None if selected_id is None else candidate_bindings[selected_id]
         return SceneAdaptation(
             scene_manifest=manifest,
             role_bindings=role_bindings,
@@ -278,6 +278,7 @@ class SceneAdapter:
             source_config_path=prepared.source_config_path,
             scene_package=package_ref,
             static_scene_manifest=static_manifest,
+            candidate_bindings=candidate_bindings,
         )
 
     def _resolve_source(

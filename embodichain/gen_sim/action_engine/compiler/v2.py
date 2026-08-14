@@ -258,6 +258,7 @@ def seed_graph_to_execution_program(
                         "target_binding": deepcopy(node["target_binding"]),
                         "motion_policy": node["motion_policy"],
                         "seed_node_id": node["id"],
+                        "failure_policy": node["contract"]["failure_policy"],
                     }
                     for node in unit_nodes
                 ],

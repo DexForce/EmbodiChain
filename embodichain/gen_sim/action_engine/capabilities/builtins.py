@@ -232,16 +232,18 @@ def _expand_build_stack(step: Mapping[str, Any]) -> list[dict[str, Any]]:
     expanded: list[dict[str, Any]] = []
     for layer_index, object_uid in enumerate(objects):
         reference = objects[layer_index - 1] if layer_index else anchor
+        support_reference = "table" if reference == "table_center" else reference
         child_goal: dict[str, Any] = {
-            "relation": "inside" if stack_mode == "nested" else "on",
+            "relation": (
+                "inside" if stack_mode == "nested" and layer_index > 0 else "on"
+            ),
+            "reference_object": support_reference,
             "reference_state": "live",
             "layer_index": layer_index,
             "stack_mode": stack_mode,
             "orientation_goal": orientation_goal,
             "orientation_axis": orientation_axis,
         }
-        if reference != "table_center":
-            child_goal["reference_object"] = reference
         expanded.append(
             _execution_step(
                 step,
@@ -252,11 +254,7 @@ def _expand_build_stack(step: Mapping[str, Any]) -> list[dict[str, Any]]:
                 postcondition={
                     "type": "stack_layer_supported",
                     "layer_index": layer_index,
-                    **(
-                        {"reference_object": reference}
-                        if reference != "table_center"
-                        else {}
-                    ),
+                    "reference_object": support_reference,
                 },
             )
         )
@@ -972,7 +970,7 @@ def _orientation(
     orientation_goal = str(goal.get("orientation_goal", "preserve"))
     orientation_axis = str(goal.get("orientation_axis", "none"))
     allowed_goals = (
-        {"preserve", "upright", "lay_flat", "axis_align"}
+        {"none", "preserve", "upright", "lay_flat", "axis_align"}
         if allow_change
         else {"preserve"}
     )

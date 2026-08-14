@@ -42,8 +42,10 @@ __all__ = [
 ]
 
 ACTION_ENGINE_DEFAULTS_SCHEMA: Final = "action_engine_defaults_v1"
-RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v4"
-_PREVIOUS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v3"
+RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v6"
+_PREVIOUS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v5"
+_PRE_GRASP_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v4"
+_PRE_PLANNER_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v3"
 _LEGACY_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v1"
 _DEFAULTS_PATH = Path(__file__).with_name("defaults.yaml")
 _ARM_SELECTION_KEYS = (
@@ -72,7 +74,13 @@ _GROUNDING_KEYS = {
         "row_search_step",
         "row_search_radius",
     },
-    "placement": {"clearance"},
+    "placement": {
+        "clearance",
+        "candidate_count",
+        "candidate_offset_fraction",
+        "support_margin",
+        "recovery_attempts",
+    },
     "coordinated_grasp": {"inset_fraction", "minimum_inset"},
     "handover": {
         "retreat_height",
@@ -94,6 +102,7 @@ _GRASP_KEYS = {
     "finger_length",
     "point_sample_dense",
     "max_deviation_angle",
+    "n_deviated_approach_directions",
     "viser_port",
     "max_decomposition_hulls",
     "force_grasp_reannotate",
@@ -138,6 +147,10 @@ _PREDICATE_KEYS = {
     "container_min_z_offset",
     "container_max_z_offset",
     "support_xy_radius",
+    "support_com_margin",
+    "support_max_vertical_gap",
+    "support_max_penetration",
+    "support_min_overlap_ratio",
     "not_fallen_max_tilt",
     "upright_max_tilt",
     "axis_tolerance",
@@ -249,6 +262,7 @@ class RuntimePolicyCfg:
             "max_retries_per_action",
             "max_graph_revisions",
             "max_recovery_actions",
+            "support_stability_interval_steps",
         ):
             if int(self.execution.get(name, -1)) < 0:
                 raise ValueError(f"execution.{name} must be non-negative.")
@@ -260,9 +274,21 @@ class RuntimePolicyCfg:
                 "max_retries_per_action",
                 "max_graph_revisions",
                 "max_recovery_actions",
+                "support_stability_samples",
+                "support_stability_interval_steps",
+                "support_linear_velocity_tolerance",
+                "support_angular_velocity_tolerance",
             },
             "execution",
         )
+        if int(self.execution["support_stability_samples"]) <= 0:
+            raise ValueError("execution.support_stability_samples must be positive.")
+        for name in (
+            "support_linear_velocity_tolerance",
+            "support_angular_velocity_tolerance",
+        ):
+            if float(self.execution[name]) < 0.0:
+                raise ValueError(f"execution.{name} must be non-negative.")
         _validate_planner(self.planner)
         _require_keys(self.grounding, set(_GROUNDING_KEYS), "grounding")
         for name, keys in _GROUNDING_KEYS.items():
@@ -270,6 +296,19 @@ class RuntimePolicyCfg:
             if not isinstance(section, Mapping):
                 raise ValueError(f"grounding.{name} must be a mapping.")
             _require_keys(section, keys, f"grounding.{name}")
+        placement = self.grounding["placement"]
+        if not 1 <= int(placement["candidate_count"]) <= 9:
+            raise ValueError("grounding.placement.candidate_count must be in [1, 9].")
+        if int(placement["recovery_attempts"]) < 0:
+            raise ValueError(
+                "grounding.placement.recovery_attempts must be non-negative."
+            )
+        if not 0.0 <= float(placement["candidate_offset_fraction"]) <= 1.0:
+            raise ValueError(
+                "grounding.placement.candidate_offset_fraction must be in [0, 1]."
+            )
+        if float(placement["support_margin"]) < 0.0:
+            raise ValueError("grounding.placement.support_margin must be non-negative.")
         _require_keys(self.grasp, _GRASP_KEYS, "grasp")
         _require_keys(
             self.motion_defaults,
@@ -293,6 +332,13 @@ class RuntimePolicyCfg:
             self.grasp.get("min_open_length", 0.0)
         ):
             raise ValueError("grasp.max_open_length must exceed min_open_length.")
+        direction_count = self.grasp.get("n_deviated_approach_directions")
+        if (
+            isinstance(direction_count, bool)
+            or not isinstance(direction_count, int)
+            or not 1 <= direction_count <= 16
+        ):
+            raise ValueError("grasp.n_deviated_approach_directions must be in [1, 16].")
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> RuntimePolicyCfg:
@@ -590,6 +636,73 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         policy.arm_selection = ArmSelectionPolicyCfg.from_mapping(merged)
         return policy
     if snapshot.get("schema_version") == _PREVIOUS_RUNTIME_POLICY_SCHEMA:
+        defaults = default_runtime_policy(
+            str(agent_config.get("robot_profile", "dual_ur10"))
+        )
+        migrated = deepcopy(dict(snapshot))
+        migrated["schema_version"] = RUNTIME_POLICY_SCHEMA
+        migrated_execution = deepcopy(dict(migrated.get("execution", {})))
+        for key in (
+            "support_stability_samples",
+            "support_stability_interval_steps",
+            "support_linear_velocity_tolerance",
+            "support_angular_velocity_tolerance",
+        ):
+            migrated_execution[key] = defaults.execution[key]
+        migrated["execution"] = migrated_execution
+        migrated_grounding = deepcopy(dict(migrated.get("grounding", {})))
+        migrated_placement = deepcopy(dict(migrated_grounding.get("placement", {})))
+        for key, value in defaults.grounding["placement"].items():
+            migrated_placement.setdefault(key, value)
+        migrated_grounding["placement"] = migrated_placement
+        migrated["grounding"] = migrated_grounding
+        migrated_predicates = deepcopy(dict(migrated.get("predicate_fallbacks", {})))
+        for key in (
+            "support_com_margin",
+            "support_max_vertical_gap",
+            "support_max_penetration",
+            "support_min_overlap_ratio",
+        ):
+            migrated_predicates[key] = defaults.predicate_fallbacks[key]
+        migrated["predicate_fallbacks"] = migrated_predicates
+        return RuntimePolicyCfg.from_mapping(migrated)
+    if snapshot.get("schema_version") == _PRE_GRASP_RUNTIME_POLICY_SCHEMA:
+        defaults = default_runtime_policy(
+            str(agent_config.get("robot_profile", "dual_ur10"))
+        )
+        migrated = deepcopy(dict(snapshot))
+        migrated["schema_version"] = RUNTIME_POLICY_SCHEMA
+        migrated_grasp = deepcopy(dict(migrated.get("grasp", {})))
+        migrated_grasp["n_deviated_approach_directions"] = defaults.grasp[
+            "n_deviated_approach_directions"
+        ]
+        migrated["grasp"] = migrated_grasp
+        migrated_execution = deepcopy(dict(migrated.get("execution", {})))
+        for key in (
+            "support_stability_samples",
+            "support_stability_interval_steps",
+            "support_linear_velocity_tolerance",
+            "support_angular_velocity_tolerance",
+        ):
+            migrated_execution[key] = defaults.execution[key]
+        migrated["execution"] = migrated_execution
+        migrated_grounding = deepcopy(dict(migrated.get("grounding", {})))
+        migrated_placement = deepcopy(dict(migrated_grounding.get("placement", {})))
+        for key, value in defaults.grounding["placement"].items():
+            migrated_placement.setdefault(key, value)
+        migrated_grounding["placement"] = migrated_placement
+        migrated["grounding"] = migrated_grounding
+        migrated_predicates = deepcopy(dict(migrated.get("predicate_fallbacks", {})))
+        for key in (
+            "support_com_margin",
+            "support_max_vertical_gap",
+            "support_max_penetration",
+            "support_min_overlap_ratio",
+        ):
+            migrated_predicates[key] = defaults.predicate_fallbacks[key]
+        migrated["predicate_fallbacks"] = migrated_predicates
+        return RuntimePolicyCfg.from_mapping(migrated)
+    if snapshot.get("schema_version") == _PRE_PLANNER_RUNTIME_POLICY_SCHEMA:
         expected_fields = {
             "schema_version",
             "execution",
@@ -608,6 +721,35 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         migrated = deepcopy(dict(snapshot))
         migrated["schema_version"] = RUNTIME_POLICY_SCHEMA
         migrated["planner"] = deepcopy(defaults.planner)
+        migrated_execution = deepcopy(dict(migrated.get("execution", {})))
+        for key in (
+            "support_stability_samples",
+            "support_stability_interval_steps",
+            "support_linear_velocity_tolerance",
+            "support_angular_velocity_tolerance",
+        ):
+            migrated_execution[key] = defaults.execution[key]
+        migrated["execution"] = migrated_execution
+        migrated_grounding = deepcopy(dict(migrated.get("grounding", {})))
+        migrated_placement = deepcopy(dict(migrated_grounding.get("placement", {})))
+        for key, value in defaults.grounding["placement"].items():
+            migrated_placement.setdefault(key, value)
+        migrated_grounding["placement"] = migrated_placement
+        migrated["grounding"] = migrated_grounding
+        migrated_grasp = deepcopy(dict(migrated["grasp"]))
+        migrated_grasp["n_deviated_approach_directions"] = defaults.grasp[
+            "n_deviated_approach_directions"
+        ]
+        migrated["grasp"] = migrated_grasp
+        migrated_predicates = deepcopy(dict(migrated["predicate_fallbacks"]))
+        for key in (
+            "support_com_margin",
+            "support_max_vertical_gap",
+            "support_max_penetration",
+            "support_min_overlap_ratio",
+        ):
+            migrated_predicates[key] = defaults.predicate_fallbacks[key]
+        migrated["predicate_fallbacks"] = migrated_predicates
         return RuntimePolicyCfg.from_mapping(migrated)
     policy = RuntimePolicyCfg.from_mapping(snapshot)
     return policy
