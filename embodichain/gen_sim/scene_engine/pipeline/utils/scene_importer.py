@@ -265,6 +265,16 @@ class SceneExportImporter:
         center_xy = entry.get("center_xy")
         if center_xy is not None:
             center_xy = self._vector2(center_xy, field_name=f"{uid}.center_xy")
+        support_surface_z = entry.get("support_surface_z")
+        if support_surface_z is not None:
+            support_surface_z = float(support_surface_z)
+        support_contour_xy = self._points2(
+            entry.get("support_contour_xy"), field_name=f"{uid}.support_contour_xy"
+        )
+        support_optimization_rect_xy = self._points2(
+            entry.get("support_optimization_rect_xy"),
+            field_name=f"{uid}.support_optimization_rect_xy",
+        )
 
         pos_y_up = _Z_UP_TO_Y_UP_ROTATION @ np.asarray(pos_z_up, dtype=float)
         rotation_z_up = Rotation.from_euler("XYZ", rot_z_up, degrees=True).as_matrix()
@@ -284,6 +294,9 @@ class SceneExportImporter:
             pos=pos_y_up.tolist(),
             scale=scale,
             center_xy=center_xy,
+            support_surface_z=support_surface_z,
+            support_contour_xy=support_contour_xy,
+            support_optimization_rect_xy=support_optimization_rect_xy,
             physics=ObjectPhysics(
                 body_type=str(entry.get("body_type", "dynamic")),  # type: ignore[arg-type]
                 attrs=self._physics_attrs(entry.get("attrs", {"mass": 1.0})),
@@ -344,6 +357,20 @@ class SceneExportImporter:
         if not np.all(np.isfinite(vector)):
             raise ValueError(f"Scene config field {field_name!r} must be finite.")
         return vector
+
+    @classmethod
+    def _points2(cls, value: object, *, field_name: str) -> list[list[float]] | None:
+        """Validate an optional list of XY points from the scene export."""
+        if value is None:
+            return None
+        if not isinstance(value, list) or len(value) < 3:
+            raise ValueError(
+                f"Scene config field {field_name!r} must contain 3 points."
+            )
+        return [
+            cls._vector2(point, field_name=f"{field_name}[{index}]")
+            for index, point in enumerate(value)
+        ]
 
     @staticmethod
     def _physics_attrs(value: object) -> dict[str, float | int]:
