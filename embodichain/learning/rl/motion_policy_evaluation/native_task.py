@@ -139,6 +139,7 @@ class EmbodiChainTaskEnvironment:
         self._episode_return = 0.0
         self._episode_length = 0
         self._episodes: list[dict[str, float | int | bool | str]] = []
+        self._reported_metrics: dict[str, float] = {}
         self._closed = False
         self._previous_no_auto_reset = getattr(
             self._base_env,
@@ -233,6 +234,7 @@ class EmbodiChainTaskEnvironment:
         self._frame = self._make_frame(observation, task_state)
         reason = _termination_reason(info, terminated_value, truncated_value)
         metrics = _step_metrics(info, reward_value)
+        self._reported_metrics.update(metrics)
         if reason is not None:
             success = _info_bool(info, "success")
             self._episodes.append(
@@ -255,20 +257,29 @@ class EmbodiChainTaskEnvironment:
         )
 
     def metrics(self) -> dict[str, float]:
-        """Aggregate completed task episodes."""
-        if not self._episodes:
-            return {}
-        return {
-            "eval/avg_reward": float(
-                np.mean([float(episode["reward"]) for episode in self._episodes])
-            ),
-            "eval/avg_length": float(
-                np.mean([float(episode["length"]) for episode in self._episodes])
-            ),
-            "eval/success_rate": float(
-                np.mean([bool(episode["success"]) for episode in self._episodes])
-            ),
-        }
+        """Return task metrics and completed episode aggregates."""
+        result = dict(self._reported_metrics)
+        if self._episodes:
+            result.update(
+                {
+                    "eval/avg_reward": float(
+                        np.mean(
+                            [float(episode["reward"]) for episode in self._episodes]
+                        )
+                    ),
+                    "eval/avg_length": float(
+                        np.mean(
+                            [float(episode["length"]) for episode in self._episodes]
+                        )
+                    ),
+                    "eval/success_rate": float(
+                        np.mean(
+                            [bool(episode["success"]) for episode in self._episodes]
+                        )
+                    ),
+                }
+            )
+        return result
 
     def wait_for_reset_or_close(self) -> str:
         """Keep a paused Viewer responsive until it is closed."""
@@ -349,25 +360,32 @@ def evaluate_native_task(
     except Exception:
         runtime.env.close()
         raise
-    adapter = EmbodiChainTaskPolicyAdapter(runtime.policy, runtime.device, num_envs=1)
-    if duration is not None:
-        control_steps = math.ceil(
-            duration / environment.policy_context.policy_dt - 1e-12
+    adapter = None
+    evaluator = None
+    try:
+        adapter = EmbodiChainTaskPolicyAdapter(
+            runtime.policy,
+            runtime.device,
+            num_envs=1,
         )
-    total_steps = 0
-    reason = "viewer closed" if viewer else "episode target reached"
-    options = RunOptions(
-        headless=not viewer,
-        termination_behavior=(
-            "continue" if termination_behavior == "auto_reset" else "pause"
-        ),
-    )
-    with create_motion_policy_evaluator(
-        options=options,
-        adapter=adapter,
-        environment=environment,
-        title=f"{runtime.env_id} - EmbodiChain",
-    ) as evaluator:
+        if duration is not None:
+            control_steps = math.ceil(
+                duration / environment.policy_context.policy_dt - 1e-12
+            )
+        total_steps = 0
+        reason = "viewer closed" if viewer else "episode target reached"
+        options = RunOptions(
+            headless=not viewer,
+            termination_behavior=(
+                "continue" if termination_behavior == "auto_reset" else "pause"
+            ),
+        )
+        evaluator = create_motion_policy_evaluator(
+            options=options,
+            adapter=adapter,
+            environment=environment,
+            title=f"{runtime.env_id} - EmbodiChain",
+        )
         evaluator.reset()
         while True:
             if control_steps is not None and total_steps >= control_steps:
@@ -394,6 +412,13 @@ def evaluate_native_task(
         metrics = environment.metrics()
         context = environment.policy_context
         backend = environment.physics_backend
+    finally:
+        if evaluator is None:
+            if adapter is not None:
+                adapter.close()
+            environment.close()
+        else:
+            evaluator.close()
 
     simulation_steps = total_steps * context.sim_steps_per_control
     return NativeTaskEvaluationResult(

@@ -52,6 +52,26 @@ def test_run_uses_manifest_profile_and_latest_checkpoint(tmp_path):
     assert resolved.selected_checkpoint == "latest"
 
 
+def test_original_task_overrides_manifest_profile(tmp_path):
+    run = tmp_path / "run"
+    checkpoint = run / "checkpoints" / "policy.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"checkpoint")
+    train = tmp_path / "train.yaml"
+    train.write_text("trainer: {}\n", encoding="utf-8")
+    write_run_manifest(
+        run,
+        train_config=train,
+        latest_checkpoint=checkpoint,
+        motion_profile="example-motion",
+    )
+
+    resolved = _resolve_input(parse_args((str(run), "--original-task")))
+
+    assert resolved.profile is None
+    assert resolved.configs["train"] == run / "configs" / "train.yaml"
+
+
 def test_viewer_defaults_to_hybrid_without_a_time_limit():
     args = parse_args(
         (

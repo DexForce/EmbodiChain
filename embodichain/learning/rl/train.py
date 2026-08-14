@@ -606,15 +606,15 @@ def train_from_config(
         if distributed and torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
 
-        if rank == 0:
-            _write_motion_run_manifest(
-                run_base,
-                config_path,
-                trainer_cfg,
-                trainer.get_summary(),
-                gym_config=gym_config_path,
-            )
-            logger.log_info("Training finished")
+    if rank == 0:
+        _write_motion_run_manifest(
+            run_base,
+            config_path,
+            trainer_cfg,
+            trainer.get_summary(),
+            gym_config=gym_config_path,
+        )
+        logger.log_info("Training finished")
 
 
 def _write_motion_run_manifest(

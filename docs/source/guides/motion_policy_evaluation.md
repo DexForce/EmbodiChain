@@ -54,6 +54,10 @@ best checkpoint and falls back to `latest` when the manifest value is `null`.
 to another checkpoint in the run is also accepted. The resolved checkpoint is
 recorded in `evaluation.json`.
 
+When the manifest declares a `motion_profile`, the CLI uses that Profile by
+default. Add `--original-task` to recreate the EmbodiChain Environment recorded
+by the training configurations instead.
+
 Open the Viewer for a training run:
 
 ```bash
@@ -354,6 +358,7 @@ task Environment interface, Adapter API, task resources, and Python API.
 | Scenario | Command |
 |---|---|
 | New training run | `embodichain eval-motion-policy <run> --checkpoint best --viewer` |
+| Original task when a Profile is configured | `embodichain eval-motion-policy <run> --original-task --viewer` |
 | Existing `.pt` | `embodichain eval-motion-policy --checkpoint <pt> --config <train> --viewer` |
 | Headless smoke test | `embodichain eval-motion-policy <run> --control-steps 20` |
 | External ANYmal-C `.pt` | `python examples/learning/motion_policy_evaluation/eval_policy.py --viewer` |

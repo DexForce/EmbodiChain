@@ -69,7 +69,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="Open a DexSim Viewer for an EmbodiChain policy checkpoint.",
     )
     parser.add_argument("run", nargs="?", help="EmbodiChain training run directory.")
-    parser.add_argument("--profile", help="Registered Motion Profile name.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--profile", help="Registered Motion Profile name.")
+    mode.add_argument(
+        "--original-task",
+        action="store_true",
+        help="Use the original EmbodiChain task instead of the manifest Profile.",
+    )
     parser.add_argument(
         "--checkpoint",
         help="Checkpoint path, or best/latest when RUN is supplied.",
@@ -179,7 +185,9 @@ def _resolve_input(args: argparse.Namespace) -> MotionInput:
                 if candidate.is_absolute()
                 else (manifest.root / candidate).resolve()
             )
-        profile = args.profile or manifest.motion_profile
+        profile = (
+            None if args.original_task else args.profile or manifest.motion_profile
+        )
         return MotionInput(
             checkpoint=checkpoint,
             profile=profile,

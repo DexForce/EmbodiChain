@@ -84,7 +84,10 @@ class Environment:
             torch.tensor([1.25]),
             torch.tensor([done]),
             torch.tensor([False]),
-            {"success": torch.tensor([done])},
+            {
+                "success": torch.tensor([done]),
+                "metrics": {"task_progress": torch.tensor([float(self.episode_step)])},
+            },
         )
 
     def close(self):
@@ -207,6 +210,8 @@ def test_native_task_runs_original_action_conversion_once_per_step():
     assert len(result.episodes) == 2
     assert result.metrics == pytest.approx(
         {
+            "reward": 1.25,
+            "task_progress": 2.0,
             "eval/avg_reward": 2.5,
             "eval/avg_length": 2.0,
             "eval/success_rate": 1.0,
@@ -262,6 +267,68 @@ def test_native_task_closes_simulator_without_exiting_process():
     assert result.reason == "control steps reached"
     assert env.closed == 1
     assert env.exit_process_values == [False]
+
+
+def test_native_task_closes_resources_when_evaluator_creation_fails(monkeypatch):
+    env = Environment()
+    policy = Policy()
+    runtime = PolicyRuntime(
+        env=env,
+        policy=policy,
+        device=torch.device("cpu"),
+        env_id="ExampleTask",
+    )
+
+    def fail_evaluator_creation(**_kwargs):
+        raise RuntimeError("evaluator setup failed")
+
+    monkeypatch.setattr(
+        "embodichain.learning.rl.motion_policy_evaluation.native_task.create_motion_policy_evaluator",
+        fail_evaluator_creation,
+    )
+
+    with pytest.raises(RuntimeError, match="evaluator setup failed"):
+        evaluate_native_task(
+            runtime,
+            seed=1,
+            viewer=False,
+            episodes=1,
+            control_steps=None,
+            duration=None,
+        )
+
+    assert env.closed == 1
+    assert policy.training is True
+
+
+def test_native_task_closes_environment_when_adapter_creation_fails(monkeypatch):
+    env = Environment()
+    runtime = PolicyRuntime(
+        env=env,
+        policy=Policy(),
+        device=torch.device("cpu"),
+        env_id="ExampleTask",
+    )
+
+    def fail_adapter_creation(*_args, **_kwargs):
+        raise RuntimeError("adapter setup failed")
+
+    monkeypatch.setattr(
+        "embodichain.learning.rl.motion_policy_evaluation.native_task.EmbodiChainTaskPolicyAdapter",
+        fail_adapter_creation,
+    )
+
+    with pytest.raises(RuntimeError, match="adapter setup failed"):
+        evaluate_native_task(
+            runtime,
+            seed=1,
+            viewer=False,
+            episodes=1,
+            control_steps=None,
+            duration=None,
+        )
+
+    assert env.closed == 1
 
 
 def test_native_task_pause_waits_for_viewer_close_after_termination():
