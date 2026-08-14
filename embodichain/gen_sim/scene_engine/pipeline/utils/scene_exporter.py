@@ -56,6 +56,7 @@ class SceneExporter:
         self.export_root = self.output_root / "scene_export"
         self.scene_config_path: Path | None = None
         self.scene_graph_path: Path | None = None
+        self.scene_json_path: Path | None = None
 
     def export(self) -> Path:
         """Write a scene-only config and copy SimReady GLBs into ``mesh_assets``.
@@ -119,6 +120,17 @@ class SceneExporter:
             encoding="utf-8",
         )
         log_info(f"Exported scene graph: {self.scene_graph_path}")
+        self.scene_json_path = self.export_root / "scene.json"
+        self.scene_json_path.write_text(
+            json.dumps(self.scene.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        log_info(f"Exported scene JSON: {self.scene_json_path}")
+        # Remove only assets absent from the completed scene export.
+        self._remove_stale_mesh_assets(
+            mesh_assets_root=mesh_assets_root,
+            object_ids=set(object_ids),
+        )
         return self.scene_config_path
 
     @staticmethod
@@ -148,8 +160,27 @@ class SceneExporter:
             )
         destination_glb_path = mesh_assets_root / object_id / f"{object_id}.glb"
         destination_glb_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_glb_path, destination_glb_path)
+        # Imported assets already live at their export destination.
+        if not destination_glb_path.is_file() or not source_glb_path.samefile(
+            destination_glb_path
+        ):
+            shutil.copy2(source_glb_path, destination_glb_path)
         return destination_glb_path.relative_to(mesh_assets_root.parent).as_posix()
+
+    @staticmethod
+    def _remove_stale_mesh_assets(
+        *,
+        mesh_assets_root: Path,
+        object_ids: set[str],
+    ) -> None:
+        """Remove copied asset directories that no longer belong to the scene."""
+        for asset_root in mesh_assets_root.iterdir():
+            if asset_root.name in object_ids:
+                continue
+            if asset_root.is_dir():
+                shutil.rmtree(asset_root)
+            else:
+                asset_root.unlink()
 
     @staticmethod
     def _scene_object_config(
@@ -179,6 +210,8 @@ class SceneExporter:
 
         return {
             "uid": scene_object.id,
+            "category": scene_object.category,
+            "name": scene_object.name,
             "description": scene_object.description,
             "shape": {
                 "shape_type": "Mesh",

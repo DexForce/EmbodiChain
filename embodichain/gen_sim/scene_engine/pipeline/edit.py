@@ -33,11 +33,17 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
     SceneExportImporter,
 )
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+    SceneExporter,
+)
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_understanding import (
     understand_scene_edit,
 )
 from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation import (
     prepare_scene_edit_assets,
+)
+from embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_layout_generation import (
+    edit_layout,
 )
 from embodichain.utils.logger import log_info
 
@@ -95,20 +101,25 @@ def edit_scene(
         image_segmentation_client.close()
     log_info("Completed Objects Preparation")
 
-    # 3. Layout Editing
-    log_info("Starting Layout Editing")
-    # scene = edit_layout(
-    #     scene=scene,
-    #     edit_plan=edit_plan,
-    #     scene_graph=updated_scene_graph,
-    #     output_root=output_root,
-    # )
-    log_info("Completed Layout Editing")
+    # 3. Layout Generation
+    log_info("Starting Layout Generation")
+    post_edit_scene = edit_layout(
+        scene=scene,
+        scene_edit_plan=scene_edit_plan,
+        updated_scene_graph=updated_scene_graph,
+        added_assets=added_assets,
+        output_root=resolved_output_root,
+    )
+    log_info("Completed Layout Generation")
 
     # 4. Scene Export
-    # Re export the scene to the same output format,
-    # and delete some temporary files or folders.
     log_info("Starting Scene Export")
+    scene_exporter = SceneExporter(
+        scene=post_edit_scene,
+        scene_graph=updated_scene_graph,
+        output_root=resolved_output_root,
+    )
+    scene_exporter.export()
     log_info("Completed Scene Export")
 
     return None

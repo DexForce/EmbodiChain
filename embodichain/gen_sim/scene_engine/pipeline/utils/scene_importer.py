@@ -286,8 +286,16 @@ class SceneExportImporter:
         return SceneObject(
             id=uid,
             kind=kind,  # type: ignore[arg-type]
-            category=uid,
-            name=uid,
+            category=self._semantic_text(
+                entry.get("category"),
+                field_name=f"{uid}.category",
+                default=uid,
+            ),
+            name=self._semantic_text(
+                entry.get("name"),
+                field_name=f"{uid}.name",
+                default=uid,
+            ),
             description=str(entry.get("description") or uid),
             simready_glb_path=str(glb_path),
             rot=rot_y_up.tolist(),
@@ -345,6 +353,20 @@ class SceneExportImporter:
         if not np.all(np.isfinite(vector)):
             raise ValueError(f"Scene config field {field_name!r} must be finite.")
         return vector
+
+    @staticmethod
+    def _semantic_text(
+        value: object,
+        *,
+        field_name: str,
+        default: str,
+    ) -> str:
+        """Read one non-empty semantic label with a legacy-export fallback."""
+        if value is None:
+            return default
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Scene config field {field_name!r} must be non-empty.")
+        return value
 
     @staticmethod
     def _vector2(value: object, *, field_name: str) -> list[float]:
