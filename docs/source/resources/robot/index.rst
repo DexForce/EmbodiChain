@@ -10,4 +10,5 @@ Supported Robots
    UR Family <ur_robot.md>
    Dexforce W1 <dexforce_w1.md>
    CobotMagic <cobotmagic.md>
+   Marvin <marvin.md>
    Dual-Arm Composition <dual_arm.md>

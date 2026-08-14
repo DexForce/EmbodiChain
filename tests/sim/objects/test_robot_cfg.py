@@ -520,6 +520,147 @@ def test_cobotmagic_pk_dof_matches_control_parts():
 
 
 # --------------------------------------------------------------------------- #
+# MarvinCfg -- dual 7-DOF arms
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def marvin_urdf_path(tmp_path):
+    """Create a mesh-free dual-arm URDF for Marvin config/PK tests."""
+    links = ['<link name="base_link"/>']
+    joints = []
+    for side, side_code in (("left", "L"), ("right", "R")):
+        parent = f"{side}_arm_base"
+        links.append(f'<link name="{parent}"/>')
+        joints.append(
+            f'<joint name="BASE_TO_{side.upper()}_ARM" type="fixed">'
+            f'<parent link="base_link"/><child link="{parent}"/></joint>'
+        )
+        joint_stems = (
+            "SHOULDER_PITCH",
+            "SHOULDER_ROLL",
+            "ELBOW_PITCH",
+            "ELBOW_YAW",
+            "WRIST_PITCH",
+            "WRIST_YAW",
+            "WRIST_ROLL",
+        )
+        for joint_index, joint_stem in enumerate(joint_stems, start=1):
+            child = f"{side}_link_{joint_index}"
+            links.append(f'<link name="{child}"/>')
+            joints.append(
+                f'<joint name="{joint_stem}_{side_code}_J{joint_index}" '
+                f'type="revolute"><parent link="{parent}"/>'
+                f'<child link="{child}"/><axis xyz="0 0 1"/>'
+                f'<limit lower="-1" upper="1" effort="1" velocity="1"/>'
+                f"</joint>"
+            )
+            parent = child
+        end_link = f"{side}_ee"
+        links.append(f'<link name="{end_link}"/>')
+        joints.append(
+            f'<joint name="{side.upper()}_EE" type="fixed">'
+            f'<parent link="{parent}"/><child link="{end_link}"/></joint>'
+        )
+        hand_base = f"{side}_hand_base_link"
+        links.append(f'<link name="{hand_base}"/>')
+        joints.append(
+            f'<joint name="{side.upper()}_EE_TO_HAND" type="fixed">'
+            f'<parent link="{end_link}"/><child link="{hand_base}"/></joint>'
+        )
+        active_finger = f"{side.upper()}_HAND_FINGER_1"
+        for finger_index in (1, 2):
+            finger_link = f"{side}_hand_finger_{finger_index}_link"
+            finger_joint = f"{side.upper()}_HAND_FINGER_{finger_index}"
+            mimic = (
+                ""
+                if finger_index == 1
+                else f'<mimic joint="{active_finger}" multiplier="1" offset="0"/>'
+            )
+            links.append(f'<link name="{finger_link}"/>')
+            joints.append(
+                f'<joint name="{finger_joint}" type="prismatic">'
+                f'<parent link="{hand_base}"/><child link="{finger_link}"/>'
+                f'<axis xyz="1 0 0"/>'
+                f'<limit lower="0" upper="0.05" effort="30" velocity="0.1"/>'
+                f"{mimic}</joint>"
+            )
+
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text('<robot name="marvin">' + "".join(links + joints) + "</robot>")
+    return str(urdf_path)
+
+
+def test_marvin_from_dict_and_roundtrip(marvin_urdf_path):
+    from embodichain.lab.sim.robots import MarvinCfg
+    from embodichain.lab.sim.solvers import PytorchSolverCfg
+
+    cfg = MarvinCfg.from_dict({"urdf_path": marvin_urdf_path})
+
+    assert cfg.uid == "Marvin"
+    assert set(cfg.control_parts) == {
+        "left_arm",
+        "left_eef",
+        "right_arm",
+        "right_eef",
+    }
+    assert all(len(cfg.control_parts[part]) == 7 for part in ("left_arm", "right_arm"))
+    assert all(len(cfg.control_parts[part]) == 2 for part in ("left_eef", "right_eef"))
+    assert all(
+        isinstance(solver_cfg, PytorchSolverCfg)
+        for solver_cfg in cfg.solver_cfg.values()
+    )
+
+    roundtrip = MarvinCfg.from_dict(cfg.to_dict())
+    assert roundtrip.control_parts == cfg.control_parts
+    assert roundtrip.urdf_path == marvin_urdf_path
+
+
+def test_marvin_drive_limits_match_supplied_urdf(marvin_urdf_path):
+    from embodichain.lab.sim.robots import MarvinCfg
+
+    cfg = MarvinCfg.from_dict({"urdf_path": marvin_urdf_path})
+    expected_efforts = [108.0, 108.0, 66.0, 66.0, 18.0, 18.0, 18.0]
+
+    for part in ("left_arm", "right_arm"):
+        joint_names = cfg.control_parts[part]
+        assert [cfg.drive_pros.max_effort[name] for name in joint_names] == (
+            expected_efforts
+        )
+        assert all(cfg.drive_pros.max_velocity[name] == 3.1416 for name in joint_names)
+
+
+def test_marvin_eef_drive_properties_match_urdf_and_provisional_defaults(
+    marvin_urdf_path,
+):
+    from embodichain.lab.sim.robots import MarvinCfg
+
+    cfg = MarvinCfg.from_dict({"urdf_path": marvin_urdf_path})
+
+    for part in ("left_eef", "right_eef"):
+        active_joint, mimic_joint = cfg.control_parts[part]
+        assert cfg.drive_pros.max_effort[active_joint] == 30.0
+        assert cfg.drive_pros.max_effort[mimic_joint] == 0.0
+        for joint_name in (active_joint, mimic_joint):
+            assert cfg.drive_pros.stiffness[joint_name] == 1e3
+            assert cfg.drive_pros.damping[joint_name] == 8.0
+            assert cfg.drive_pros.max_velocity[joint_name] == 0.1
+            assert cfg.drive_pros.friction[joint_name] == 0.2
+
+
+def test_marvin_pk_dof_matches_control_parts(marvin_urdf_path):
+    pytest.importorskip("pytorch_kinematics")
+    from embodichain.lab.sim.robots import MarvinCfg
+
+    cfg = MarvinCfg.from_dict({"urdf_path": marvin_urdf_path})
+    chains = cfg.build_pk_serial_chain()
+    for part, chain in chains.items():
+        assert _dof_of_pk_chain(chain) == len(
+            cfg.control_parts[part]
+        ), f"{part}: PK chain DOF drifted from control_parts"
+
+
+# --------------------------------------------------------------------------- #
 # URRobotCfg -- UR family (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e)
 # --------------------------------------------------------------------------- #
 
