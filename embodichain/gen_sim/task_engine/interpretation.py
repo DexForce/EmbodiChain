@@ -298,12 +298,13 @@ def interpret_instruction_draft(
 def _normalize_instruction_intent_fields(
     value: Mapping[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Canonicalize inapplicable fields and action-defined semantic defaults.
+    """Canonicalize defaults and uniquely constrained cross-step continuity.
 
     The strict public validator deliberately remains unchanged.  This pass is
     confined to the LLM boundary, where weak JSON-mode providers sometimes
     copy a meaningful value into an inapplicable slot such as E4.required_arm.
-    Required scene facts are never inferred here and still fail closed.
+    Required scene facts and ambiguous arm assignments are never inferred here
+    and still fail closed.
     """
     result = deepcopy(dict(value))
     raw_steps = result.get("steps")
@@ -360,7 +361,118 @@ def _normalize_instruction_intent_fields(
                     "reason": "e5_hold_defaults_to_lift",
                 }
             )
+    _normalize_handover_arm_continuity(raw_steps, changes)
     return result, changes
+
+
+def _normalize_handover_arm_continuity(
+    steps: Sequence[Any],
+    changes: list[dict[str, Any]],
+) -> None:
+    """Repair a same-arm E4 only when adjacent ownership fixes both roles."""
+    by_id: dict[str, Mapping[str, Any]] = {}
+    for step in steps:
+        if not isinstance(step, dict) or set(step) != _STEP_KEYS:
+            return
+        step_id = step.get("id")
+        if not isinstance(step_id, str) or not step_id or step_id in by_id:
+            return
+        by_id[step_id] = step
+
+    explicit_arms = {"left_arm", "right_arm"}
+    for index, step in enumerate(steps):
+        assert isinstance(step, dict)
+        transfer = step.get("transfer_arm")
+        receive = step.get("receive_arm")
+        if (
+            step.get("task_type") != "E4"
+            or transfer not in explicit_arms
+            or transfer != receive
+        ):
+            continue
+
+        object_key = _object_lineage_key(step, by_id)
+        upstream_arm: str | None = None
+        for producer in reversed(steps[:index]):
+            assert isinstance(producer, Mapping)
+            if object_key is None or _object_lineage_key(producer, by_id) != object_key:
+                continue
+            candidate = (
+                producer.get("receive_arm")
+                if producer.get("task_type") == "E4"
+                else producer.get("required_arm")
+            )
+            if candidate in explicit_arms:
+                upstream_arm = str(candidate)
+            break
+
+        downstream_arm: str | None = None
+        for consumer in steps[index + 1 :]:
+            assert isinstance(consumer, Mapping)
+            if object_key is None or _object_lineage_key(consumer, by_id) != object_key:
+                continue
+            candidate = (
+                consumer.get("transfer_arm")
+                if consumer.get("task_type") == "E4"
+                else consumer.get("required_arm")
+            )
+            if candidate in explicit_arms:
+                downstream_arm = str(candidate)
+            break
+
+        desired_transfer = upstream_arm or str(transfer)
+        desired_receive = downstream_arm or str(receive)
+        if desired_transfer == desired_receive:
+            continue
+        for field, desired in (
+            ("transfer_arm", desired_transfer),
+            ("receive_arm", desired_receive),
+        ):
+            if step[field] == desired:
+                continue
+            previous = step[field]
+            step[field] = desired
+            changes.append(
+                {
+                    "path": f"steps[{index}].{field}",
+                    "from": previous,
+                    "to": desired,
+                    "reason": "handover_arm_continuity",
+                }
+            )
+
+
+def _object_lineage_key(
+    step: Mapping[str, Any],
+    by_id: Mapping[str, Mapping[str, Any]],
+    seen: frozenset[str] = frozenset(),
+) -> tuple[str, str, int] | None:
+    """Resolve exact scene references through step_result chains."""
+    selector = step.get("object")
+    if not isinstance(selector, Mapping):
+        return None
+    kind = selector.get("kind")
+    if kind == "scene_ref":
+        reference = selector.get("reference")
+        count = selector.get("count")
+        if not isinstance(reference, str) or not reference.strip():
+            return None
+        if isinstance(count, bool) or not isinstance(count, int):
+            return None
+        return (
+            reference.strip().casefold(),
+            str(selector.get("quantifier", "")),
+            count,
+        )
+    if kind != "step_result":
+        return None
+    producer_id = selector.get("step_id")
+    if not isinstance(producer_id, str) or producer_id in seen:
+        return None
+    producer = by_id.get(producer_id)
+    if producer is None:
+        return None
+    return _object_lineage_key(producer, by_id, seen | {producer_id})
 
 
 def _empty_selector() -> dict[str, Any]:

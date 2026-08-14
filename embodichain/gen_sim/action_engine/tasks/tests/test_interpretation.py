@@ -939,6 +939,110 @@ def test_interpreter_normalizes_registry_inapplicable_e4_required_arm() -> None:
     ]
 
 
+@pytest.mark.parametrize("use_step_result", [True, False])
+def test_interpreter_resolves_same_arm_handover_from_adjacent_ownership(
+    use_step_result: bool,
+) -> None:
+    handover_object = (
+        _selector("step_result", step_id="orient_sprite")
+        if use_step_result
+        else _selector("scene_ref", reference="雪碧")
+    )
+    place_object = (
+        _selector("step_result", step_id="handover_sprite")
+        if use_step_result
+        else _selector("scene_ref", reference="雪碧")
+    )
+    intent = {
+        "steps": [
+            _step(
+                "orient_coke",
+                "E2",
+                _selector("scene_ref", reference="可乐"),
+                required_arm="right_arm",
+            ),
+            _step(
+                "orient_sprite",
+                "E2",
+                _selector("scene_ref", reference="雪碧"),
+                required_arm="left_arm",
+            ),
+            _step(
+                "handover_sprite",
+                "E4",
+                handover_object,
+                required_arm="none",
+                transfer_arm="left_arm",
+                receive_arm="left_arm",
+                depends_on=["orient_sprite"],
+            ),
+            _step(
+                "place_sprite",
+                "E1",
+                place_object,
+                target=_selector("step_result", step_id="orient_coke"),
+                relation="on",
+                required_arm="right_arm",
+                depends_on=["orient_coke", "handover_sprite"],
+            ),
+        ]
+    }
+
+    with pytest.raises(ValueError, match="transfer and receive arms must differ"):
+        validate_instruction_intent(intent)
+
+    result = task_interpretation_module.interpret_instruction_draft(
+        "用右臂把可乐摆正，同时用左臂把雪碧扶正，然后左臂把雪碧递给左臂，"
+        "然后右臂把雪碧放到可乐上。",
+        model="test-model",
+        caller=lambda **_kwargs: deepcopy(intent),
+    )
+
+    handover = result.intent["steps"][2]
+    assert (handover["transfer_arm"], handover["receive_arm"]) == (
+        "left_arm",
+        "right_arm",
+    )
+    assert result.attempts == 1
+    assert result.normalizations == (
+        {
+            "path": "steps[2].receive_arm",
+            "from": "left_arm",
+            "to": "right_arm",
+            "reason": "handover_arm_continuity",
+        },
+    )
+
+
+def test_interpreter_does_not_guess_an_unconstrained_same_arm_handover() -> None:
+    intent = {
+        "steps": [
+            _step(
+                "handover",
+                "E4",
+                _selector("scene_ref", reference="雪碧"),
+                transfer_arm="left_arm",
+                receive_arm="left_arm",
+            )
+        ]
+    }
+    calls = 0
+
+    def caller(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return deepcopy(intent)
+
+    with pytest.raises(ValueError, match="after one repair.*arms must differ"):
+        task_interpretation_module.interpret_instruction_draft(
+            "左臂把雪碧递给左臂。",
+            model="test-model",
+            caller=caller,
+        )
+
+    assert calls == 2
+
+
 def test_invalid_step_result_gets_repair_with_selector_rules() -> None:
     """A malformed cross-step selector should reach the structured repair call."""
     invalid_intent = _handover_intent()
