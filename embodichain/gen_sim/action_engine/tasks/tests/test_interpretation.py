@@ -939,20 +939,7 @@ def test_interpreter_normalizes_registry_inapplicable_e4_required_arm() -> None:
     ]
 
 
-@pytest.mark.parametrize("use_step_result", [True, False])
-def test_interpreter_resolves_same_arm_handover_from_adjacent_ownership(
-    use_step_result: bool,
-) -> None:
-    handover_object = (
-        _selector("step_result", step_id="orient_sprite")
-        if use_step_result
-        else _selector("scene_ref", reference="雪碧")
-    )
-    place_object = (
-        _selector("step_result", step_id="handover_sprite")
-        if use_step_result
-        else _selector("scene_ref", reference="雪碧")
-    )
+def test_interpreter_resolves_same_arm_handover_from_step_result_ownership() -> None:
     intent = {
         "steps": [
             _step(
@@ -970,7 +957,7 @@ def test_interpreter_resolves_same_arm_handover_from_adjacent_ownership(
             _step(
                 "handover_sprite",
                 "E4",
-                handover_object,
+                _selector("step_result", step_id="orient_sprite"),
                 required_arm="none",
                 transfer_arm="left_arm",
                 receive_arm="left_arm",
@@ -979,7 +966,7 @@ def test_interpreter_resolves_same_arm_handover_from_adjacent_ownership(
             _step(
                 "place_sprite",
                 "E1",
-                place_object,
+                _selector("step_result", step_id="handover_sprite"),
                 target=_selector("step_result", step_id="orient_coke"),
                 relation="on",
                 required_arm="right_arm",
@@ -1012,6 +999,107 @@ def test_interpreter_resolves_same_arm_handover_from_adjacent_ownership(
             "reason": "handover_arm_continuity",
         },
     )
+
+
+def test_interpreter_repairs_direct_reference_handover_from_later_arm_semantics() -> (
+    None
+):
+    invalid_intent = {
+        "steps": [
+            _step(
+                "orient_sprite",
+                "E2",
+                _selector("scene_ref", reference="雪碧"),
+                required_arm="left_arm",
+            ),
+            _step(
+                "handover_sprite",
+                "E4",
+                _selector("scene_ref", reference="雪碧"),
+                required_arm="none",
+                transfer_arm="left_arm",
+                receive_arm="left_arm",
+                depends_on=["orient_sprite"],
+            ),
+            _step(
+                "place_sprite",
+                "E1",
+                _selector("scene_ref", reference="雪碧"),
+                target=_selector("scene_ref", reference="可乐"),
+                relation="on",
+                required_arm="right_arm",
+                depends_on=["handover_sprite"],
+            ),
+        ]
+    }
+    repaired_intent = deepcopy(invalid_intent)
+    repaired_intent["steps"][1]["receive_arm"] = "right_arm"
+    prompts: list[str] = []
+
+    def caller(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return deepcopy(invalid_intent if len(prompts) == 1 else repaired_intent)
+
+    result = task_interpretation_module.interpret_instruction_draft(
+        "用左臂把雪碧扶正，然后左臂把雪碧递给左臂，最后右臂把雪碧放到可乐上。",
+        model="test-model",
+        caller=caller,
+    )
+
+    handover = result.intent["steps"][1]
+    assert (handover["transfer_arm"], handover["receive_arm"]) == (
+        "left_arm",
+        "right_arm",
+    )
+    assert result.attempts == 2
+    assert result.normalizations == ()
+    assert "Same-arm handover repair rule" in prompts[1]
+
+
+def test_interpreter_does_not_merge_repeated_scene_reference_identity() -> None:
+    intent = {
+        "steps": [
+            _step(
+                "orient_first_can",
+                "E2",
+                _selector("scene_ref", reference="罐头"),
+                required_arm="left_arm",
+            ),
+            _step(
+                "handover_second_can",
+                "E4",
+                _selector("scene_ref", reference="罐头"),
+                required_arm="none",
+                transfer_arm="left_arm",
+                receive_arm="left_arm",
+                depends_on=["orient_first_can"],
+            ),
+            _step(
+                "place_first_can",
+                "E1",
+                _selector("scene_ref", reference="罐头"),
+                target=_selector("scene_ref", reference="托盘"),
+                relation="on",
+                required_arm="right_arm",
+                depends_on=["handover_second_can"],
+            ),
+        ]
+    }
+    calls = 0
+
+    def caller(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return deepcopy(intent)
+
+    with pytest.raises(ValueError, match="after one repair.*arms must differ"):
+        task_interpretation_module.interpret_instruction_draft(
+            "扶正一个罐头，然后交接另一个罐头，最后放置前一个罐头。",
+            model="test-model",
+            caller=caller,
+        )
+
+    assert calls == 2
 
 
 def test_interpreter_does_not_guess_an_unconstrained_same_arm_handover() -> None:
@@ -1487,7 +1575,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
 
 
 def test_instruction_prompt_contains_a_complete_shape_example() -> None:
-    prompt = interpretation_module._instruction_prompt("扶正紫色易拉罐。")
+    prompt = interpretation_module._instruction_prompt("关闭示例开关。")
     selector_rules = interpretation_module._instruction_selector_rules()
     assert '"target_setting": 0' in prompt
     assert '"depends_on": []' in prompt
@@ -1495,6 +1583,8 @@ def test_instruction_prompt_contains_a_complete_shape_example() -> None:
     assert "step_result" in prompt
     assert "open scene_ref.reference" in prompt
     assert "Do not classify it or emit a scene UID" in prompt
+    assert "示例物体甲" in prompt
+    assert "紫色易拉罐" not in prompt
     assert "step_result" in selector_rules
     assert "step_id" in selector_rules
     assert "reference" in selector_rules

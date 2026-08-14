@@ -174,8 +174,19 @@ def cli() -> int | None:
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     episodes = int(gym_config.get("max_episodes", _DEFAULT_MAX_EPISODES))
+    runtime_arguments = {
+        "agent_config": str(Path(args.agent_config).expanduser().resolve()),
+        "base_seed": args.seed,
+        "gym_config": str(Path(args.gym_config).expanduser().resolve()),
+        "max_episodes": episodes,
+        "planning_mode": planning_mode,
+        "regenerate": bool(args.regenerate),
+        "runtime_backend": str(args.runtime_backend),
+        "task_name": str(args.task_name),
+    }
     any_failed = False
     episode_index = 0
+    episode_seed = None
     seed_graph = getattr(execution_program, "seed_graph", None)
     env = None
     try:
@@ -223,6 +234,8 @@ def cli() -> int | None:
                     grounded_plan=grounded_plan,
                     run_id=run_id,
                     episode_index=episode_index,
+                    episode_seed=episode_seed,
+                    runtime_arguments=runtime_arguments,
                 )
                 log_info(
                     "Execution report: "
@@ -245,6 +258,8 @@ def cli() -> int | None:
                 environment_count=_runtime_environment_count(env),
                 run_id=run_id,
                 episode_index=episode_index,
+                episode_seed=episode_seed,
+                runtime_arguments=runtime_arguments,
             )
             from embodichain.gen_sim.action_engine.runtime import (
                 write_execution_report,

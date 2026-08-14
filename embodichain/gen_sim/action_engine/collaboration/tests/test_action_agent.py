@@ -123,6 +123,11 @@ def test_execution_report_is_strictly_json_serializable(tmp_path: Path) -> None:
         SimpleNamespace(num_envs=2),
         known_uids=set(bindings.values()),
         run_id="json-test",
+        episode_seed=17,
+        runtime_arguments={
+            "planning_mode": "offline",
+            "runtime_backend": "independent",
+        },
     )
     payload = report.as_mapping()
 
@@ -130,6 +135,19 @@ def test_execution_report_is_strictly_json_serializable(tmp_path: Path) -> None:
     assert payload["environments"][0]["semantic_success"] == {"task_01": True}
     assert payload["environments"][1]["semantic_success"] == {"task_01": False}
     assert [item["retry_count"] for item in payload["environments"]] == [0, 1]
+    assert payload["schema_version"] == "action_engine_execution_report_v2"
+    assert payload["provenance"]["episode_seed"] == 17
+    assert payload["provenance"]["embodichain_version"]
+    assert payload["provenance"]["python_version"]
+    assert (
+        payload["provenance"]["git_commit"] is None
+        or len(payload["provenance"]["git_commit"]) >= 40
+    )
+    assert payload["provenance"]["git_dirty"] in {True, False, None}
+    assert payload["provenance"]["runtime_arguments"] == {
+        "planning_mode": "offline",
+        "runtime_backend": "independent",
+    }
     assert "actions" not in payload
     json.dumps(payload, allow_nan=False)
     assert (

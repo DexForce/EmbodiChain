@@ -44,7 +44,7 @@ from embodichain.utils import logger as project_logger
 from embodichain.utils.logger import log_info, log_warning
 
 from .actions import AtomicActionAdapter
-from .frames import DIRECTIONAL_RELATIONS
+from .frames import DIRECTIONAL_RELATIONS, robot_frame_axes
 from .grounding import ActionGrounder, LiveArrangementPlan, LivePlacementPlan
 from .models import (
     ActionOutcome,
@@ -106,7 +106,7 @@ def _score_arm_candidate(
     target_pose: torch.Tensor | None,
     workspace_center_xy: torch.Tensor,
     workspace_half_width: torch.Tensor,
-    world_left_axis: torch.Tensor,
+    robot_lateral_axis: torch.Tensor,
     policy: ArmSelectionPolicyCfg,
 ) -> dict[str, torch.Tensor]:
     """Combine motion length with soft, table-normalized cross-zone costs."""
@@ -117,7 +117,7 @@ def _score_arm_candidate(
         if pose is None:
             return torch.zeros_like(motion_cost)
         lateral = torch.sum(
-            (pose[:, :2, 3] - workspace_center_xy) * world_left_axis,
+            (pose[:, :2, 3] - workspace_center_xy) * robot_lateral_axis,
             dim=1,
         )
         wrong_side_depth = torch.clamp(
@@ -331,6 +331,7 @@ class ProgramExecutor:
         self._payload_initial: dict[str, dict[str, torch.Tensor]] = {}
         self._support_relations: dict[str, list[_SupportRelation | None]] = {}
         self._placement_candidate_history: dict[tuple[str, str], set[int]] = {}
+        self._robot_lateral_axis_cache: torch.Tensor | None = None
         self._transition_count = 0
         self._retry_counts = [0] * int(self.env.num_envs)
 
@@ -1576,6 +1577,7 @@ class ProgramExecutor:
         self._payload_initial.clear()
         self._support_relations.clear()
         self._placement_candidate_history.clear()
+        self._robot_lateral_axis_cache = None
         self._transition_count = 0
         self._retry_counts = [0] * int(self.env.num_envs)
 
@@ -1717,7 +1719,7 @@ class ProgramExecutor:
         step: SemanticStep,
         env_id: int,
     ) -> str | None:
-        """Map a clearly sided in-place object using the fixed world-Y rule."""
+        """Map a clearly sided in-place object to the robot-view arm slot."""
         if step.operator != "orient_object":
             return None
         initial = getattr(self.env, "agent_initial_object_poses", {}).get(
@@ -1731,10 +1733,10 @@ class ProgramExecutor:
         pose = torch.as_tensor(initial, device=self.env.device)
         if pose.ndim == 2:
             pose = pose.unsqueeze(0)
-        center, _, world_left_axis = self._arm_selection_workspace(step)
+        center, _, lateral_axis = self._arm_selection_workspace(step)
         index = min(env_id, pose.shape[0] - 1)
         lateral = float(
-            torch.sum((pose[index, :2, 3] - center[index]) * world_left_axis[index])
+            torch.sum((pose[index, :2, 3] - center[index]) * lateral_axis[index])
         )
         if (
             abs(lateral)
@@ -2096,7 +2098,7 @@ class ProgramExecutor:
             self._candidate_failures[(step.id, arm)] = f"{type(exc).__name__}: {exc}"
             feasible = torch.zeros_like(failed)
             motion_cost[:] = torch.inf
-        center_xy, half_width, world_left_axis = self._arm_selection_workspace(step)
+        center_xy, half_width, lateral_axis = self._arm_selection_workspace(step)
         score_components = _score_arm_candidate(
             arm=arm,
             motion_cost=motion_cost,
@@ -2104,7 +2106,7 @@ class ProgramExecutor:
             target_pose=target_pose,
             workspace_center_xy=center_xy,
             workspace_half_width=half_width,
-            world_left_axis=world_left_axis,
+            robot_lateral_axis=lateral_axis,
             policy=self.runtime_policy.arm_selection,
         )
         cost = score_components["total_cost"]
@@ -2217,20 +2219,17 @@ class ProgramExecutor:
         self,
         step: SemanticStep,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return workspace geometry for the fixed world-Y arm convention."""
-        count = int(self.env.num_envs)
-        world_left_axis = torch.tensor(
-            [0.0, -1.0],
-            dtype=torch.float32,
-            device=self.env.device,
-        ).repeat(count, 1)
+        """Return workspace geometry along the robot's live lateral axis."""
+        lateral_axis = self._robot_view_lateral_axis()
         arrangement = self.arrangements.get(step.id)
         if arrangement is not None:
             minimum = arrangement.table_bounds[:, 0, :2]
             maximum = arrangement.table_bounds[:, 1, :2]
-            center = torch.zeros_like(minimum)
-            half_width = torch.maximum(minimum[:, 1].abs(), maximum[:, 1].abs())
-            return center, half_width, world_left_axis
+            center = (minimum + maximum) * 0.5
+            half_extents = (maximum - minimum) * 0.5
+            half_width = torch.sum(torch.abs(lateral_axis) * half_extents, dim=1)
+            return center, half_width, lateral_axis
+        count = int(self.env.num_envs)
         centers = torch.zeros((count, 2), dtype=torch.float32, device=self.env.device)
         half_widths = torch.full(
             (count,),
@@ -2240,7 +2239,7 @@ class ProgramExecutor:
         )
         table = self.env.sim.get_rigid_object("table")
         if table is None or not hasattr(table, "get_vertices"):
-            return centers, half_widths, world_left_axis
+            return centers, half_widths, lateral_axis
         table_pose = self._entity_pose("table")
         for env_id in range(count):
             value = table.get_vertices(env_ids=[env_id], scale=True)
@@ -2261,10 +2260,20 @@ class ProgramExecutor:
             )
             minimum = world[:, :2].min(dim=0).values
             maximum = world[:, :2].max(dim=0).values
-            half_width = torch.max(torch.abs(world[:, 1]))
+            center = (minimum + maximum) * 0.5
+            lateral = torch.sum((world[:, :2] - center) * lateral_axis[env_id], dim=1)
+            half_width = torch.max(torch.abs(lateral))
             if float(half_width) > 1.0e-6:
+                centers[env_id] = center
                 half_widths[env_id] = half_width
-        return centers, half_widths, world_left_axis
+        return centers, half_widths, lateral_axis
+
+    def _robot_view_lateral_axis(self) -> torch.Tensor:
+        """Return the normalized world-space axis pointing right-arm to left-arm."""
+        if self._robot_lateral_axis_cache is not None:
+            return self._robot_lateral_axis_cache
+        _, self._robot_lateral_axis_cache = robot_frame_axes(self.env)
+        return self._robot_lateral_axis_cache
 
     def _report_candidates(
         self,

@@ -343,7 +343,7 @@ def test_physical_object_can_be_a_runtime_support_without_support_affordance(
     [
         ("on", "red_can", "physical_entity", "proven"),
         ("on", "table", "physical_entity", "proven"),
-        ("on", "cabinet", "physical_entity", "proven"),
+        ("on", "cabinet", "physical_entity", "contradicted"),
         ("inside", "red_can", "rigid_object", "proven"),
         ("inside", "table", "rigid_object", "contradicted"),
         ("inside", "cabinet", "rigid_object", "contradicted"),
@@ -457,7 +457,7 @@ def test_unknown_structure_contract_is_not_a_scene_contradiction(
     assert not any("future_spatial_capability" in item for item in report["blockers"])
 
 
-def test_required_arm_world_y_mismatch_is_risk_not_static_blocker(
+def test_required_arm_side_requires_the_live_robot_frame(
     tmp_path: Path,
 ) -> None:
     manifest = SceneEngineV1Adapter().adapt_prepared_scene(
@@ -478,12 +478,14 @@ def test_required_arm_world_y_mismatch_is_risk_not_static_blocker(
         task_actions={"E2": ("PickUp", "MoveHeldObject", "Place")},
     )
 
-    mismatch = next(
+    probe = next(
         check for check in report["checks"] if check["kind"] == "arm_layout_risk"
     )
-    assert mismatch["status"] == "runtime_probe"
-    assert mismatch["evidence"]["mismatch_risk"] is True
-    assert mismatch["evidence"]["geometry_certificate"] is False
+    assert probe["status"] == "runtime_probe"
+    assert probe["evidence"]["arm_side_frame"] == "live_robot"
+    assert probe["evidence"]["mismatch_risk"] is None
+    assert "expected_arm" not in probe["evidence"]
+    assert probe["evidence"]["geometry_certificate"] is False
     assert report["blockers"] == []
 
 

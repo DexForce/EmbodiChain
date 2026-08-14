@@ -4175,7 +4175,7 @@ def test_arm_candidate_score_softly_penalizes_cross_zone_motion() -> None:
         "target_pose": target,
         "workspace_center_xy": torch.tensor([[0.0, 0.0]]),
         "workspace_half_width": torch.tensor([0.40]),
-        "world_left_axis": torch.tensor([[0.0, -1.0]]),
+        "robot_lateral_axis": torch.tensor([[0.0, -1.0]]),
         "policy": default_runtime_policy("dual_ur10").arm_selection,
     }
 
@@ -4919,7 +4919,7 @@ def test_orient_object_uses_solver_roots_when_control_groups_share_root() -> Non
                     },
                     "depends_on": [],
                 }
-                for uid in entities
+                for uid in ("left_object", "right_object")
             ]
         )
     )
@@ -4939,23 +4939,28 @@ def test_orient_object_uses_solver_roots_when_control_groups_share_root() -> Non
     )
 
 
-def test_orient_object_arm_preference_stays_fixed_in_world_y() -> None:
+def test_orient_object_arm_preference_follows_translated_robot_and_table() -> None:
     entities = {
+        "table": _FakeEntity(
+            "table",
+            _pose(1.50, -0.70, 0.70),
+            _rect_vertices(0.50, 0.40, 0.02),
+        ),
         "left_object": _FakeEntity(
             "left_object",
-            _pose(0.0, -0.20, 0.8),
+            _pose(1.70, -0.70, 0.80),
             _rect_vertices(0.02, 0.02, 0.08),
         ),
         "right_object": _FakeEntity(
             "right_object",
-            _pose(0.0, 0.20, 0.8),
+            _pose(1.30, -0.70, 0.80),
             _rect_vertices(0.02, 0.02, 0.08),
         ),
     }
     env = _FakeEnv(entities)
     env.robot.get_link_pose = lambda *, link_name, to_matrix: _pose(
-        0.3 if link_name == "physical_left_base" else -0.3,
-        0.0,
+        1.80 if link_name == "physical_left_base" else 1.20,
+        -0.70,
         0.0,
     )
     env.agent_initial_object_poses = {
@@ -4975,7 +4980,7 @@ def test_orient_object_arm_preference_stays_fixed_in_world_y() -> None:
                     },
                     "depends_on": [],
                 }
-                for uid in entities
+                for uid in ("left_object", "right_object")
             ]
         )
     )
@@ -4983,6 +4988,11 @@ def test_orient_object_arm_preference_stays_fixed_in_world_y() -> None:
         load_execution_program(execution), env, record_runtime=False
     )
 
+    center, _, lateral = executor._arm_selection_workspace(
+        executor.steps["left_object"]
+    )
+    torch.testing.assert_close(center, torch.tensor([[1.50, -0.70]]))
+    torch.testing.assert_close(lateral, torch.tensor([[1.0, 0.0]]))
     assert executor._preferred_in_place_arm(executor.steps["left_object"], 0) == (
         "left_arm"
     )

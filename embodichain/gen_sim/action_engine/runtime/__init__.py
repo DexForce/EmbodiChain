@@ -33,6 +33,7 @@ from .models import ExecutionProgram, ExecutionReport, ExecutionResult
 from .reporting import (
     EXECUTION_REPORT_FILENAME,
     EXECUTION_REPORT_SCHEMA,
+    build_execution_provenance,
     validate_execution_report,
     write_execution_report,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "RetryDecision",
     "RecoveryDirective",
     "RuntimeGraph",
+    "build_execution_provenance",
     "build_upright_recovery",
     "classify_failure",
     "evaluate_predicate",

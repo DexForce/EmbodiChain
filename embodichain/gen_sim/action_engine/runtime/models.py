@@ -249,6 +249,7 @@ class ExecutionReport:
     status: str
     run_id: str
     episode_id: str
+    provenance: dict[str, Any]
     environments: tuple[dict[str, Any], ...] = ()
     action_count: int = 0
     retry_count: int = 0
@@ -258,7 +259,7 @@ class ExecutionReport:
     graph_revisions: tuple[dict[str, Any], ...] = ()
     record_dir: str | None = None
     error: str | None = None
-    schema_version: str = "action_engine_execution_report_v1"
+    schema_version: str = "action_engine_execution_report_v2"
 
     def as_mapping(self) -> dict[str, Any]:
         """Return a detached mapping suitable for strict JSON serialization."""
@@ -270,6 +271,7 @@ class ExecutionReport:
             "status": self.status,
             "run_id": self.run_id,
             "episode_id": self.episode_id,
+            "provenance": deepcopy(self.provenance),
             "environments": deepcopy(list(self.environments)),
             "action_count": self.action_count,
             "retry_count": self.retry_count,

@@ -49,7 +49,10 @@ from embodichain.gen_sim.action_engine.protocol import (
     AGENT_CONFIG_FILENAME,
     FAST_GYM_CONFIG_FILENAME,
 )
-from embodichain.gen_sim.action_engine.runtime import ExecutionReport
+from embodichain.gen_sim.action_engine.runtime import (
+    ExecutionReport,
+    build_execution_provenance,
+)
 
 
 def _candidate_set() -> dict:
@@ -394,6 +397,7 @@ def test_run_bundle_publishes_rejected_preflight_report(
         status="rejected",
         run_id="preflight",
         episode_id="0",
+        provenance=build_execution_provenance(),
         environments=(
             {
                 "env_id": "0",

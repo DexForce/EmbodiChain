@@ -105,8 +105,8 @@ runtime:
         max_attempts: 5
         collision_activation_distance: 0.01
 
-    # Arm allocation follows the canonical world frame: +Y is right-arm space
-    # and -Y is left-arm space. Robot profiles must preserve this convention.
+    # Crossing is measured along the live right-to-left arm-base axis so the
+    # same-side preference follows translated and rotated robot workspaces.
     arm_selection:
       crossing_deadband_ratio: 0.08
       pickup_crossing_weight: 1.0

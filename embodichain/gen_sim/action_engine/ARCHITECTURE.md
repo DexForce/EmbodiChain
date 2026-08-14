@@ -15,7 +15,9 @@ three narrow owners:
 3. `ActionAgent` lowers the selected `GroundedTaskPlan` to the existing
    `action_engine_seed_graph_v3`, performs executable capability preflight,
    runs it through `ProgramExecutor`, and emits a tensor-free
-   `ExecutionReport`.
+   `ExecutionReport`. Report v2 records the episode seed, package and Python
+   versions, Git commit/dirty state when available, and structured runtime
+   arguments alongside the existing plan and graph hashes.
 
 The public CLI is `embodichain gen-sim-task import-scene|prepare|run`. This
 layer does not modify Scene Engine and continues to publish all legacy bundle
@@ -141,10 +143,10 @@ contradictions. A contradicted report publishes an `infeasible` audit result and
 does not invoke graph or bundle generation. Executable preflight remains a
 second authoritative gate before bundle generation.
 
-Scene Bridge also reports world-Y arm-layout mismatch and whole-task pickup,
-handover, target-interaction, and safety-clearance phases as `runtime_probe`
-evidence. Without a geometry certificate these are planning risks, never static
-proof that the scene is infeasible.
+Scene Bridge reports arm-layout and whole-task pickup, handover,
+target-interaction, and safety-clearance phases as `runtime_probe` evidence.
+Arm-side compatibility is not claimed without live arm-base poses and workspace
+geometry.
 
 ### SeedGraph
 
@@ -233,14 +235,14 @@ handover actions are grounded as synchronized execution units. Automatic arm
 selection, collision checks, live arrangement slots, and current predicate
 semantics remain deterministic runtime responsibilities.
 
-Arm-side semantics use one world-frame convention for every robot profile:
-positive world Y maps to `right_arm`, and negative world Y maps to `left_arm`.
-This convention affects selection and risk reporting; live motion planning is
-still authoritative for reachability.
+Arm allocation uses the live right-to-left arm-base axis and the live table
+center. The preference therefore follows translated and rotated robot
+workspaces; live motion planning remains authoritative for reachability.
 
-Placement support is a relation, not an entity category. Static adaptation only
-requires an `on` target to be a `physical_entity`; omission of a
-`support_surface` affordance is not a contradiction. Runtime evaluates
+Placement support is a relation, not an entity category. Static adaptation
+accepts rigid `physical_entity` targets without requiring a `support_surface`
+affordance. Articulations require a link-level runtime target interface and are
+rejected until that interface is available. Runtime evaluates
 `object_supported_by(payload, support, pose)` from live geometry and center of
 mass, applies the requested `orientation_goal`, and requires low motion across a
 bounded stability window. Successful relations form a per-environment support

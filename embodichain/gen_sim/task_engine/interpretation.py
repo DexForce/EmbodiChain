@@ -446,24 +446,17 @@ def _object_lineage_key(
     step: Mapping[str, Any],
     by_id: Mapping[str, Mapping[str, Any]],
     seen: frozenset[str] = frozenset(),
-) -> tuple[str, str, int] | None:
-    """Resolve exact scene references through step_result chains."""
+) -> tuple[str, str] | None:
+    """Resolve object identity only through explicit step-result lineage."""
     selector = step.get("object")
     if not isinstance(selector, Mapping):
         return None
     kind = selector.get("kind")
     if kind == "scene_ref":
-        reference = selector.get("reference")
-        count = selector.get("count")
-        if not isinstance(reference, str) or not reference.strip():
+        step_id = step.get("id")
+        if not isinstance(step_id, str) or not step_id:
             return None
-        if isinstance(count, bool) or not isinstance(count, int):
-            return None
-        return (
-            reference.strip().casefold(),
-            str(selector.get("quantifier", "")),
-            count,
-        )
+        return ("step_result", step_id)
     if kind != "step_result":
         return None
     producer_id = selector.get("step_id")
@@ -730,7 +723,10 @@ def _instruction_prompt(instruction: str) -> str:
     return (
         "Convert the user's explicit L1-L3 instruction into typed E1-E9 task "
         "intent. Understand synonyms, ellipsis, and pronouns such as it/其, but "
-        "do not invent missing objects. Use step_result for cross-step pronouns. "
+        "do not invent missing objects. Use step_result for cross-step pronouns "
+        "and explicit references to the result of an earlier manipulation. Keep "
+        "an independently selected repeated noun as scene_ref; identical text "
+        "alone does not prove object identity. "
         "Object directions are robot-relative; arm names are robot body sides. "
         "Preserve each concrete object or target phrase from the instruction as "
         "an open scene_ref.reference. Do not classify it or emit a scene UID. "
@@ -772,7 +768,7 @@ def _instruction_shape_example() -> dict[str, Any]:
     selector = {
         "kind": "scene_ref",
         "step_id": "",
-        "reference": "紫色易拉罐",
+        "reference": "示例物体甲",
         "quantifier": "one",
         "count": 0,
     }
@@ -820,9 +816,11 @@ def _instruction_selector_rules() -> str:
         "- kind=none: step_id and reference are empty strings; "
         "quantifier='one'; count=0.\n"
         "- kind=scene_ref: step_id is empty and reference preserves the concrete "
-        "object phrase from the user's instruction.\n"
+        "object phrase from the user's instruction. Repeated scene_ref text does "
+        "not establish cross-step identity.\n"
         "- kind=step_result: use it only for a pronoun that means exactly one "
-        "object from an earlier instruction step. Set step_id to that prior "
+        "object, or an explicit continuation of the result of an earlier "
+        "instruction step. Set step_id to that prior "
         "step ID and set reference='', quantifier='one', count=0. Do not copy "
         "the prior object's phrase into this selector. Replace step_1 in this "
         f"complete shape with the actual prior step ID: {json.dumps(step_result, sort_keys=True)}\n"
@@ -833,14 +831,23 @@ def _instruction_selector_rules() -> str:
 
 def _instruction_repair_guidance(error: Exception) -> str:
     """Add narrow semantic guidance for errors weak JSON-mode models repeat."""
+    if "E4 transfer and receive arms must differ" in str(error):
+        return (
+            "\nSame-arm handover repair rule: transfer_arm and receive_arm must "
+            "name different arms. Preserve the explicitly stated transfer arm. "
+            "When a later clause clearly continues with the handed object using "
+            "the other arm, use that arm as receive_arm. Resolve coreference from "
+            "the instruction semantics; identical scene_ref text alone does not "
+            "prove that two independently selected objects are the same.\n"
+        )
     if not isinstance(error, _MissingRequiredTargetError):
         return ""
     return (
         "\nMissing-target repair rule: for a non-line E1 placement, object is "
         "the item being moved and target is the explicit reference object "
         "after the spatial relation in the original instruction. For example, "
-        "in 'place it to the left of the orange can', object is the earlier "
-        "step_result for 'it', while target selects the orange can; target "
+        "in 'place it to the left of the striped pedestal', object is the earlier "
+        "step_result for 'it', while target selects the striped pedestal; target "
         "must not use kind=none. Use target kind=step_result only when the "
         "reference object itself is exactly the result of a prior step.\n"
     )

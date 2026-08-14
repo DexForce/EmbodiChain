@@ -47,6 +47,7 @@ from embodichain.gen_sim.action_engine.runtime import (
     ExecutionReport,
     ExecutionResult,
     ProgramExecutor,
+    build_execution_provenance,
     load_execution_program,
     validate_execution_report,
     write_execution_report,
@@ -131,6 +132,8 @@ class ActionAgent:
         known_uids: Collection[str] | None = None,
         run_id: str | None = None,
         episode_index: int = 0,
+        episode_seed: int | None = None,
+        runtime_arguments: Mapping[str, Any] | None = None,
         executor_kwargs: Mapping[str, Any] | None = None,
     ) -> ExecutionReport:
         """Preflight and execute a graph, converting all outcomes to a report."""
@@ -138,6 +141,10 @@ class ActionAgent:
         plan_hash = _plan_hash(grounded_plan)
         graph_hash = _action_graph_hash(action_graph)
         effective_run_id = run_id or _new_run_id()
+        provenance = build_execution_provenance(
+            episode_seed=episode_seed,
+            runtime_arguments=runtime_arguments,
+        )
         effective_manifest = scene_manifest
         if effective_manifest is None and grounded_plan is not None:
             value = grounded_plan.get("scene_manifest")
@@ -159,6 +166,7 @@ class ActionAgent:
                 status="rejected",
                 run_id=effective_run_id,
                 episode_index=episode_index,
+                provenance=provenance,
                 error=_error_message(exc),
             )
 
@@ -179,6 +187,7 @@ class ActionAgent:
                 status="aborted",
                 run_id=effective_run_id,
                 episode_index=episode_index,
+                provenance=provenance,
                 error=_error_message(exc),
             )
         if not isinstance(result, ExecutionResult):
@@ -190,6 +199,7 @@ class ActionAgent:
                 status="aborted",
                 run_id=effective_run_id,
                 episode_index=episode_index,
+                provenance=provenance,
                 error="TypeError: ProgramExecutor.run must return ExecutionResult.",
             )
         try:
@@ -199,6 +209,8 @@ class ActionAgent:
                 grounded_plan=grounded_plan,
                 run_id=effective_run_id,
                 episode_index=episode_index,
+                episode_seed=episode_seed,
+                runtime_arguments=runtime_arguments,
             )
         except (TypeError, ValueError, OverflowError) as exc:
             return self._empty_report(
@@ -209,6 +221,7 @@ class ActionAgent:
                 status="aborted",
                 run_id=effective_run_id,
                 episode_index=episode_index,
+                provenance=provenance,
                 error=_error_message(exc),
             )
 
@@ -219,6 +232,8 @@ class ActionAgent:
         *,
         run_id: str | None = None,
         episode_index: int = 0,
+        episode_seed: int | None = None,
+        runtime_arguments: Mapping[str, Any] | None = None,
         executor_kwargs: Mapping[str, Any] | None = None,
     ) -> ExecutionReport:
         """Compile and execute one GroundedTaskPlan through the full pipeline."""
@@ -234,6 +249,10 @@ class ActionAgent:
                 status="rejected",
                 run_id=effective_run_id,
                 episode_index=episode_index,
+                provenance=build_execution_provenance(
+                    episode_seed=episode_seed,
+                    runtime_arguments=runtime_arguments,
+                ),
                 error=_error_message(exc),
             )
         return self.execute(
@@ -242,6 +261,8 @@ class ActionAgent:
             grounded_plan=grounded_plan,
             run_id=effective_run_id,
             episode_index=episode_index,
+            episode_seed=episode_seed,
+            runtime_arguments=runtime_arguments,
             executor_kwargs=executor_kwargs,
         )
 
@@ -253,6 +274,8 @@ class ActionAgent:
         grounded_plan: Mapping[str, Any] | None = None,
         run_id: str | None = None,
         episode_index: int = 0,
+        episode_seed: int | None = None,
+        runtime_arguments: Mapping[str, Any] | None = None,
     ) -> ExecutionReport:
         """Convert a result already executed by the legacy runner to a report."""
         if not isinstance(result, ExecutionResult):
@@ -264,6 +287,10 @@ class ActionAgent:
             graph_hash=_action_graph_hash(action_graph),
             run_id=run_id or _new_run_id(),
             episode_index=episode_index,
+            provenance=build_execution_provenance(
+                episode_seed=episode_seed,
+                runtime_arguments=runtime_arguments,
+            ),
         )
 
     def rejection_report(
@@ -275,6 +302,8 @@ class ActionAgent:
         environment_count: int = 1,
         run_id: str | None = None,
         episode_index: int = 0,
+        episode_seed: int | None = None,
+        runtime_arguments: Mapping[str, Any] | None = None,
     ) -> ExecutionReport:
         """Build a zero-action report for a preflight rejection."""
         message = error if isinstance(error, str) else _error_message(error)
@@ -286,6 +315,10 @@ class ActionAgent:
             status="rejected",
             run_id=run_id or _new_run_id(),
             episode_index=episode_index,
+            provenance=build_execution_provenance(
+                episode_seed=episode_seed,
+                runtime_arguments=runtime_arguments,
+            ),
             error=str(message),
         )
 
@@ -298,6 +331,8 @@ class ActionAgent:
         environment_count: int = 1,
         run_id: str | None = None,
         episode_index: int = 0,
+        episode_seed: int | None = None,
+        runtime_arguments: Mapping[str, Any] | None = None,
     ) -> ExecutionReport:
         """Build a zero-action report for an unexpected runtime exception."""
         message = error if isinstance(error, str) else _error_message(error)
@@ -309,6 +344,10 @@ class ActionAgent:
             status="aborted",
             run_id=run_id or _new_run_id(),
             episode_index=episode_index,
+            provenance=build_execution_provenance(
+                episode_seed=episode_seed,
+                runtime_arguments=runtime_arguments,
+            ),
             error=str(message),
         )
 
@@ -321,6 +360,7 @@ class ActionAgent:
         graph_hash: str,
         run_id: str,
         episode_index: int,
+        provenance: Mapping[str, Any],
     ) -> ExecutionReport:
         success = _bool_vector(result.success)
         semantics = {
@@ -356,6 +396,7 @@ class ActionAgent:
             status="succeeded" if all(success) else "failed",
             run_id=run_id,
             episode_id=str(episode_index),
+            provenance=deepcopy(dict(provenance)),
             environments=environments,
             action_count=action_count,
             retry_count=int(result.retry_count),
@@ -380,6 +421,7 @@ class ActionAgent:
         status: str,
         run_id: str,
         episode_index: int,
+        provenance: Mapping[str, Any],
         error: str,
     ) -> ExecutionReport:
         count = _environment_count(env)
@@ -390,6 +432,7 @@ class ActionAgent:
             status=status,
             run_id=run_id,
             episode_id=str(episode_index),
+            provenance=deepcopy(dict(provenance)),
             environments=tuple(
                 {
                     "env_id": str(env_id),

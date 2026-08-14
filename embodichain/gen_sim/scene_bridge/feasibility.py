@@ -258,7 +258,7 @@ class FeasibilityBroker:
         bindings: Mapping[str, Any],
         objects: Mapping[str, Mapping[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Report world-Y arm-layout risks without claiming static infeasibility."""
+        """Defer arm-side compatibility to the live robot frame."""
         checks: list[dict[str, Any]] = []
         object_uids_by_step: dict[str, tuple[str, ...]] = {}
         phases: list[dict[str, Any]] = []
@@ -297,35 +297,21 @@ class FeasibilityBroker:
                         or len(position) < 2
                     ):
                         continue
-                    world_y = float(position[1])
-                    expected_arm = (
-                        "right_arm"
-                        if world_y > 0.0
-                        else ("left_arm" if world_y < 0.0 else "shared")
-                    )
-                    mismatch = expected_arm not in {required_arm, "shared"}
                     checks.append(
                         _check(
                             "arm_layout_risk",
                             f"{step_id}:{uid}",
                             "runtime_probe",
-                            (
-                                f"Required {required_arm} is opposite the canonical "
-                                f"world-Y side for {uid!r}; live planning must "
-                                "determine feasibility."
-                                if mismatch
-                                else "World-Y side is compatible with the required "
-                                "arm, but reachability still requires live planning."
-                            ),
+                            "Arm-side compatibility requires live left/right arm-base "
+                            "poses and workspace geometry.",
                             evidence={
                                 "required_arm": required_arm,
-                                "expected_arm": expected_arm,
-                                "world_y": world_y,
-                                "world_y_convention": {
-                                    "positive": "right_arm",
-                                    "negative": "left_arm",
-                                },
-                                "mismatch_risk": mismatch,
+                                "object_world_position": [
+                                    float(position[0]),
+                                    float(position[1]),
+                                ],
+                                "arm_side_frame": "live_robot",
+                                "mismatch_risk": None,
                                 "geometry_certificate": False,
                             },
                         )
@@ -350,10 +336,7 @@ class FeasibilityBroker:
                     "Scene layout must satisfy pickup, transfer, placement, and "
                     "safety-clearance phases across the complete task workflow.",
                     evidence={
-                        "world_y_convention": {
-                            "positive": "right_arm",
-                            "negative": "left_arm",
-                        },
+                        "arm_side_frame": "live_robot",
                         "phases": phases,
                         "geometry_certificate": False,
                     },
@@ -447,6 +430,20 @@ class FeasibilityBroker:
                     "contradicted",
                     f"Scene entity role {role!r} is not a physical collision body.",
                     evidence={"physical_geometry": False, "runtime_body": False},
+                )
+            if role == "articulation" or bool(articulation):
+                return _check(
+                    "structure",
+                    subject,
+                    "contradicted",
+                    "Placement on an articulation requires a link-level target "
+                    "interface that the current runtime does not provide.",
+                    evidence={
+                        "physical_geometry": has_physical_geometry,
+                        "runtime_body": bool(articulation),
+                        "runtime_entity_kind": "articulation",
+                        "runtime_target_interface": False,
+                    },
                 )
             if has_physical_geometry and has_runtime_body:
                 return _check(
