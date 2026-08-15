@@ -20,11 +20,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PIL import Image, ImageDraw
 import pytest
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understanding
+from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
+    render_asset_mask_id_overlay,
+)
 
 
 def _response(*, asset_name: str = "cup") -> str:
@@ -94,7 +98,44 @@ def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> Non
     assert [asset.id for asset in scene.assets] == ["cup_001"]
 
 
-def test_initial_scene_graph_places_every_asset_on_table() -> None:
+def test_asset_mask_id_overlay_excludes_the_table_mask(tmp_path: Path) -> None:
+    image_path = tmp_path / "scene.png"
+    table_mask_path = tmp_path / "table_mask.png"
+    asset_mask_path = tmp_path / "bottle_mask.png"
+    output_path = tmp_path / "asset_masks_with_ids.png"
+    image_size = (512, 512)
+    Image.new("RGB", image_size, "black").save(image_path)
+
+    table_mask = Image.new("L", image_size, 0)
+    ImageDraw.Draw(table_mask).rectangle((10, 10, 100, 100), fill=255)
+    table_mask.save(table_mask_path)
+    asset_mask = Image.new("L", image_size, 0)
+    ImageDraw.Draw(asset_mask).rectangle((380, 180, 450, 360), fill=255)
+    asset_mask.save(asset_mask_path)
+
+    rendered_path = render_asset_mask_id_overlay(
+        image_path=image_path,
+        asset_masks=[("bottle_001", asset_mask_path)],
+        output_path=output_path,
+    )
+
+    with Image.open(rendered_path) as overlay:
+        assert overlay.getpixel((10, 10)) == (0, 0, 0)
+        assert overlay.getpixel((377, 180)) != (0, 0, 0)
+
+
+def test_initial_scene_graph_places_every_asset_on_table(tmp_path: Path) -> None:
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps(
+                {
+                    "orientation_states": [
+                        {"object_id": "table", "orientation_state": None},
+                        {"object_id": "cup_001", "orientation_state": "lying"},
+                    ]
+                }
+            )
+
     scene = Scene(
         objects=[
             SceneObject(
@@ -114,8 +155,12 @@ def test_initial_scene_graph_places_every_asset_on_table() -> None:
         ],
     )
 
+    overlay_path = tmp_path / "asset_masks_with_ids.png"
+    overlay_path.write_bytes(b"png")
     scene_graph = scene_understanding._initialize_scene_graph_from_segmented_scene(
-        scene
+        scene,
+        asset_mask_id_overlay_path=overlay_path,
+        vlm_client=VLM(),  # type: ignore[arg-type]
     )
 
     assert scene_graph.to_dict() == {
@@ -125,13 +170,134 @@ def test_initial_scene_graph_places_every_asset_on_table() -> None:
                 "parent_id": None,
                 "parent_relation": None,
                 "table_region": None,
+                "orientation_state": None,
             },
             {
                 "object_id": "cup_001",
                 "parent_id": "table",
                 "parent_relation": "on",
                 "table_region": None,
+                "orientation_state": None,
             },
         ],
         "relations": [],
+    }
+
+
+def test_scene_graph_initialization_uses_container_orientation_states(
+    tmp_path: Path,
+) -> None:
+    class VLM:
+        def complete(self, **_: object) -> str:
+            return json.dumps(
+                {
+                    "orientation_states": [
+                        {"object_id": "table", "orientation_state": None},
+                        {
+                            "object_id": "bottle_001",
+                            "orientation_state": "standing",
+                        },
+                        {"object_id": "book_001", "orientation_state": "lying"},
+                    ]
+                }
+            )
+
+    overlay_path = tmp_path / "asset_masks_with_ids.png"
+    overlay_path.write_bytes(b"png")
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="wooden table",
+                description="A wooden table.",
+            ),
+            SceneObject(
+                id="bottle_001",
+                kind="asset",
+                category="bottle",
+                name="blue bottle",
+                description="A blue bottle.",
+            ),
+            SceneObject(
+                id="book_001",
+                kind="asset",
+                category="book",
+                name="red book",
+                description="A red book.",
+            ),
+        ]
+    )
+
+    scene_graph = scene_understanding._initialize_scene_graph_from_segmented_scene(
+        scene,
+        asset_mask_id_overlay_path=overlay_path,
+        vlm_client=VLM(),  # type: ignore[arg-type]
+    )
+
+    assert scene_graph.node_by_id()["bottle_001"].orientation_state == "standing"
+    assert scene_graph.node_by_id()["book_001"].orientation_state is None
+
+
+def test_scene_graph_initialization_requires_asset_mask_id_overlay(
+    tmp_path: Path,
+) -> None:
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="wooden table",
+                description="A wooden table.",
+            )
+        ]
+    )
+
+    with pytest.raises(FileNotFoundError, match="Image input not found"):
+        scene_understanding._initialize_scene_graph_from_segmented_scene(
+            scene,
+            asset_mask_id_overlay_path=tmp_path / "missing.png",
+            vlm_client=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_scene_graph_initialization_info_lists_existing_object_ids() -> None:
+    scene = Scene(
+        objects=[
+            SceneObject(
+                id="table",
+                kind="table",
+                category="table",
+                name="wooden table",
+                description="A wooden table.",
+            ),
+            SceneObject(
+                id="bottle_001",
+                kind="asset",
+                category="bottle",
+                name="blue bottle",
+                description="A blue bottle.",
+                center_xy=[0.2, -0.1],
+            ),
+            SceneObject(
+                id="book_001",
+                kind="asset",
+                category="book",
+                name="red book",
+                description="A red book.",
+                center_xy=[-0.1, 0.2],
+            ),
+        ]
+    )
+
+    simplified_scene_info = (
+        scene_understanding._simplify_scene_info_for_graph_initialization(
+            scene=scene
+        )
+    )
+
+    assert simplified_scene_info == {
+        "existing_object_ids": ["table", "bottle_001", "book_001"],
     }

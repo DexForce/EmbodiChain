@@ -54,16 +54,23 @@ SupportRelationType = Literal["on"]
 # A PlanarRelation with B, then A and B must have the same parent node.
 PlanarRelationType = Literal["left_of", "right_of", "in_front_of", "behind"]
 SceneConstraintType = SupportRelationType | PlanarRelationType
+OrientationState = Literal["standing", "lying"]
 
 
 @dataclass
 class SceneGraphNode:
-    """One object node in the edit-time scene hierarchy."""
+    """One object node in the edit-time scene hierarchy.
+
+    ``orientation_state`` is an image-derived placement semantic, rather than
+    an edge to the node itself or an exact three-dimensional transform.
+    """
 
     object_id: str
     parent_id: str | None
     parent_relation: SupportRelationType | None = None
     table_region: TableRegion | None = None
+    # Preserves image-observed placement semantics for later pose refinement.
+    orientation_state: OrientationState | None = None
 
     def __post_init__(self) -> None:
         """Validate local node fields before graph-level checks."""
@@ -71,12 +78,16 @@ class SceneGraphNode:
             raise ValueError("object_id must be non-empty.")
         if self.table_region not in {None, *TABLE_REGIONS}:
             raise ValueError("table_region is invalid.")
+        if self.orientation_state not in {None, "standing", "lying"}:
+            raise ValueError("orientation_state is invalid.")
         # If the node is the table.
         if self.object_id == TABLE_OBJECT_ID:
             if self.parent_id is not None:
                 raise ValueError("table must not have a parent.")
             if self.parent_relation is not None:
                 raise ValueError("table must not have a parent relation.")
+            if self.orientation_state is not None:
+                raise ValueError("table must not have an orientation state.")
         # If the node is not the table.
         elif self.parent_id is None:
             raise ValueError("non-table nodes must have a parent.")
@@ -90,6 +101,7 @@ class SceneGraphNode:
             "parent_id": self.parent_id,
             "parent_relation": self.parent_relation,
             "table_region": self.table_region,
+            "orientation_state": self.orientation_state,
         }
 
 
