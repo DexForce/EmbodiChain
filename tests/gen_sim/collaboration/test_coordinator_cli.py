@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import argparse
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -700,10 +701,63 @@ def test_prepare_prints_the_next_run_command(
         "-m",
         "embodichain.gen_sim.collaboration",
     ]
-    assert command[-2:] == [
+    assert command[-4:] == [
         "--bundle",
         str(output_dir.resolve()),
+        "--filter_dataset_saving",
+        "--headless",
     ]
+
+
+def test_prepare_can_run_the_bound_bundle_immediately(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_dir = tmp_path / "bundle"
+    result = SimpleNamespace(
+        status="bound",
+        bound=True,
+        selected_candidate_id="candidate_01",
+        output_dir=output_dir,
+        collaboration_artifacts=SimpleNamespace(
+            grounded_task_plan=output_dir / "grounded_task_plan.json",
+            preparation_failure=output_dir / "preparation_failure.json",
+        ),
+    )
+
+    class FakeCoordinator:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def prepare(self, *_args, **_kwargs):
+            return result
+
+    run_args: list[argparse.Namespace] = []
+    monkeypatch.setattr(cli, "ScenePackageStore", lambda *_args: object())
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(cli, "CollaborationCoordinator", FakeCoordinator)
+    monkeypatch.setattr(cli, "_run", lambda args: run_args.append(args) or 0)
+
+    assert (
+        cli.main(
+            [
+                "prepare",
+                "--task-id",
+                "task",
+                "--instruction",
+                "place the carrot",
+                "--scene",
+                str(tmp_path / "scene"),
+                "--output",
+                str(output_dir),
+                "--run-after-prepare",
+            ]
+        )
+        == 0
+    )
+    assert len(run_args) == 1
+    assert run_args[0].bundle == output_dir
+    assert run_args[0].run_args == ["--filter_dataset_saving", "--headless"]
 
 
 def test_run_bundle_publishes_rejected_preflight_report(

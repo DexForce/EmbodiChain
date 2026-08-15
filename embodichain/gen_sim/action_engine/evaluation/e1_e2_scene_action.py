@@ -21,7 +21,7 @@ checks that Scene Engine v1 output adapts successfully, required capabilities
 are executable, and E1/E2 compile to action graphs containing pickup,
 held-object motion, and placement.
 
-Run: python -m scripts.benchmark.gen_sim.e1_e2_scene_action --iterations 100
+Run this module with ``--iterations 100`` for the default benchmark.
 """
 
 from __future__ import annotations

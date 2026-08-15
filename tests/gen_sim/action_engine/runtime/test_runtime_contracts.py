@@ -48,7 +48,7 @@ from embodichain.gen_sim.action_engine.domain import (
     motion_policy,
     validate_execution_program,
 )
-from embodichain.gen_sim.action_engine.env import agent_env as env_module
+from embodichain.gen_sim.action_engine.environment import agent_env as env_module
 from embodichain.gen_sim.action_engine.runtime.actions import AtomicActionAdapter
 from embodichain.gen_sim.action_engine.runtime.executor import (
     ProgramExecutor,

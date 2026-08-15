@@ -547,47 +547,6 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
     assert placed_task.get_held_object("arm") is None
 
 
-def test_place_limits_cartesian_keyframes_to_motion_sample_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    interpolation_shapes: list[tuple[int, int]] = []
-
-    def strict_interpolation(
-        trajectory: torch.Tensor,
-        interp_num: int,
-        device: torch.device,
-    ) -> torch.Tensor:
-        interpolation_shapes.append((trajectory.shape[1], interp_num))
-        assert interp_num >= trajectory.shape[1]
-        indices = torch.linspace(0, trajectory.shape[1] - 1, interp_num, device=device)
-        return trajectory[:, indices.round().to(torch.long)]
-
-    monkeypatch.setattr(
-        "embodichain.lab.sim.planners.motion_generator.interpolate_with_distance",
-        strict_interpolation,
-    )
-    held = _held()
-    task = TaskState(
-        batch_size=NUM_ENVS,
-        device="cpu",
-        held_objects={"arm": held},
-    )
-    generator = _motion_generator()
-    action = _bind_action(
-        generator,
-        Place(default_options=PlaceOptions(cartesian_waypoint_count=4)),
-    )
-
-    plan = _plan_action(
-        action,
-        _invocation("place", PlaceGoal(torch.eye(4)), sample_count=15),
-        _context(task),
-    )
-
-    assert plan.plan_success.all()
-    assert interpolation_shapes == [(5, 6), (4, 4)]
-
-
 def test_move_held_object_requires_projected_attachment() -> None:
     generator = _motion_generator()
     action = _bind_action(generator, MoveHeldObject())

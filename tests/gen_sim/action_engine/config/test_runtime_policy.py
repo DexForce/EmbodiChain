@@ -30,6 +30,7 @@ from embodichain.gen_sim.action_engine.config import (
     resolve_agent_runtime_policy,
     runtime_policy_hash,
 )
+from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
 
 
 def test_default_runtime_policy_preserves_current_arm_selection_behavior() -> None:
@@ -98,6 +99,19 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         [-0.05],
         [0.05],
     ]
+
+
+def test_place_defaults_fit_the_mainline_motion_sample_budget() -> None:
+    place = default_runtime_policy("dual_ur10").motion_defaults["Place"]
+    sample_count = int(place["sample_interval"])
+    hand_steps = PlaceOptions().hand_interp_steps
+    motion_steps = sample_count - hand_steps
+    down_steps = int(round(motion_steps) * 0.6)
+    back_steps = motion_steps - down_steps
+    cartesian_count = int(place["cartesian_waypoint_count"])
+
+    assert 1 + 2 * cartesian_count <= down_steps
+    assert 1 + cartesian_count <= back_steps
 
 
 def test_default_runtime_policy_returns_detached_profile_snapshots() -> None:

@@ -24,10 +24,6 @@ import torch
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
 )
-from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOverOptions
-from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
-    MoveHeldObjectOptions,
-)
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import (
     PickUpOptions,
     _upright_yaw_pose_variants,
@@ -58,8 +54,3 @@ def test_upright_yaw_pose_variants_preserve_translation() -> None:
 def test_upright_yaw_samples_must_be_positive() -> None:
     with pytest.raises(ValueError, match="upright_yaw_samples"):
         PickUpOptions(upright_yaw_samples=0)
-
-
-def test_orientation_compatibility_options_preserve_mainline_defaults() -> None:
-    assert HandOverOptions().preserve_current_object_orientation is True
-    assert MoveHeldObjectOptions().allow_automatic_transport_rotation is True

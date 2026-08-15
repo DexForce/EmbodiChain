@@ -63,9 +63,6 @@ class MoveHeldObjectOptions(ActionOptions):
     pick_rotate_upright: float | None = None
     """Optional rotation in radians used by the legacy upright transport mode."""
 
-    allow_automatic_transport_rotation: bool = True
-    """Whether transport may replace the requested end-effector rotation."""
-
     def __post_init__(self) -> None:
         if self.obj_upright_direction is not None:
             if (
@@ -155,10 +152,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
-        if (
-            options.pick_rotate_upright is None
-            and options.allow_automatic_transport_rotation
-        ):
+        if options.pick_rotate_upright is None:
             self._apply_automatic_transport_rotation(move_eef_xpos, end_arm_xpos)
 
         result = self.motion_generator.generate(

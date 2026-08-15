@@ -58,9 +58,6 @@ class HandOverOptions(ActionOptions):
     """Object pose the receiving arm delivers the object to, shape ``(4, 4)``
     or ``(n_envs, 4, 4)``. Must be set by the caller."""
 
-    preserve_current_object_orientation: bool = True
-    """Whether to replace requested handover rotations with the live orientation."""
-
     receive_approach_direction: torch.Tensor = torch.tensor(
         [0.0, 0.0, -1.0], dtype=torch.float32
     )
@@ -244,10 +241,10 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_approach_direction
             / torch.linalg.vector_norm(receive_approach_direction)
         )
-        if options.preserve_current_object_orientation:
-            current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
-            middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
-            final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
+        # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
+        current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
+        middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
+        final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
         # 2.1 - EEF target that keeps the object at the handover pose.
         transfer_middle_eef = torch.bmm(middle_object_pose, transfer_object_to_eef)

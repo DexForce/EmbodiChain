@@ -206,12 +206,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             to_matrix=True,
         )
         down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
-        down_xpos = self._translation_keyframes(
-            start_xpos,
-            down_xpos,
-            options,
-            max_keyframes=n_down - 1,
-        )
+        down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
 
         down_result = self.motion_generator.generate(
             build_pose_plan_states(down_xpos),
@@ -228,10 +223,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         reach_arm_qpos = down_arm[:, -1, :]
 
         back_xpos = self._translation_keyframes(
-            place_xpos[:, -1],
-            retract_xpos.unsqueeze(1),
-            options,
-            max_keyframes=n_back - 1,
+            place_xpos[:, -1], retract_xpos.unsqueeze(1), options
         )
         back_result = self.motion_generator.generate(
             build_pose_plan_states(back_xpos),
@@ -385,19 +377,9 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         start_xpos: torch.Tensor,
         target_xpos: torch.Tensor,
         options: PlaceOptions,
-        *,
-        max_keyframes: int | None = None,
     ) -> torch.Tensor:
         """Interpolate translations while holding each segment's target rotation."""
         count = options.cartesian_waypoint_count
-        if max_keyframes is not None:
-            segment_count = target_xpos.shape[1]
-            if max_keyframes < segment_count:
-                raise ValueError(
-                    "Place motion sample budget cannot preserve all target poses. "
-                    "Increase sample_count or decrease hand_interp_steps."
-                )
-            count = min(count, max_keyframes // segment_count)
         if count == 1:
             return target_xpos
 

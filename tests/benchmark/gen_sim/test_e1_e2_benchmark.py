@@ -18,7 +18,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.benchmark.gen_sim.e1_e2_scene_action import run_benchmark
+from embodichain.gen_sim.action_engine.evaluation.e1_e2_scene_action import (
+    run_benchmark,
+)
 
 
 def test_e1_e2_contract_benchmark_is_reproducibly_executable(tmp_path: Path) -> None:

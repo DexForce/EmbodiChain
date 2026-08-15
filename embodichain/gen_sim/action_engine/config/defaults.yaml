@@ -196,7 +196,7 @@ runtime:
         sample_interval: 15
         lift_height: 0.0
         post_hold_steps: 0
-        cartesian_waypoint_count: 4
+        cartesian_waypoint_count: 2
       MoveEndEffector:
         sample_interval: 20
         retreat_height: 0.30

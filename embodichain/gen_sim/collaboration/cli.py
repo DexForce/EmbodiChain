@@ -51,6 +51,7 @@ _ROBOT_PROFILES = (
     "franka",
     "dual_franka",
 )
+_PREPARED_RUN_ARGS = ("--filter_dataset_saving", "--headless")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--randomize-scene", action="store_true")
     prepare_parser.add_argument("--randomize-table-material", action="store_true")
     prepare_parser.add_argument("--overwrite", action="store_true")
+    prepare_parser.add_argument(
+        "--run-after-prepare",
+        "--run_after_prepare",
+        action="store_true",
+        help="Run the bound bundle immediately after preparation succeeds.",
+    )
     _add_scene_policy_arguments(prepare_parser)
 
     run_parser = subparsers.add_parser(
@@ -208,7 +215,16 @@ def _prepare(args: argparse.Namespace) -> int:
             ),
         }
     )
-    return 0 if result.bound else 2
+    if not result.bound:
+        return 2
+    if args.run_after_prepare:
+        return _run(
+            argparse.Namespace(
+                bundle=result.output_dir,
+                run_args=list(_PREPARED_RUN_ARGS),
+            )
+        )
+    return 0
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -326,6 +342,7 @@ def _bundle_run_command(bundle: str | Path) -> str:
             "run",
             "--bundle",
             str(Path(bundle).expanduser().resolve()),
+            *_PREPARED_RUN_ARGS,
         ]
     )
 

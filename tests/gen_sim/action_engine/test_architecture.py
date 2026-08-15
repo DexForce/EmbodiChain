@@ -89,9 +89,7 @@ def test_planner_exposes_exactly_the_first_phase_skill_catalog() -> None:
 
 
 def test_acceptance_manifest_covers_twenty_supported_tasks() -> None:
-    manifest_path = (
-        _PACKAGE_ROOT.parents[2] / "texts" / "action_engine" / "acceptance_tasks.json"
-    )
+    manifest_path = Path(__file__).with_name("acceptance_tasks.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     tasks = manifest["tasks"]
     names = [task["task_name"] for task in tasks]

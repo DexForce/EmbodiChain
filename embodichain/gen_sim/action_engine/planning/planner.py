@@ -33,13 +33,12 @@ from embodichain.gen_sim.action_engine.domain import (
     validate_task_agent,
 )
 
+from .task_planner_prompt import TASK_PLANNER_PROMPT
+
 __all__ = ["plan_task"]
 
 LLMCaller = Callable[..., Mapping[str, Any]]
 
-_PROMPT_PATH = (
-    Path(__file__).resolve().parents[4] / "texts" / "action_engine" / "task_planner.txt"
-)
 _GEN_CONFIG_PATH = (
     Path(__file__).resolve().parents[2]
     / "simready_pipeline"
@@ -487,14 +486,8 @@ def _render_prompt(
     task_description: str,
     scene_objects: Sequence[Mapping[str, Any]],
 ) -> str:
-    try:
-        template_text = _PROMPT_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(
-            f"Action Engine planner prompt not found: {_PROMPT_PATH}"
-        ) from exc
     capabilities = build_default_registry()
-    return Template(template_text).substitute(
+    return Template(TASK_PLANNER_PROMPT).substitute(
         task_name=task_name,
         task_description=task_description,
         scene_objects=json.dumps(

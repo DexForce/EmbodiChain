@@ -1079,11 +1079,13 @@ class AtomicActionAdapter:
         capability: AtomicCapability,
     ) -> Any:
         policy = self._config_policy(action)
-        if (
-            capability.target_materializer == "semantic_held_object"
-            and int(action.cfg.get("upright_yaw_samples", 1)) > 1
-        ):
-            policy["allow_automatic_transport_rotation"] = False
+        config_type = capability.config_type
+        if capability.target_materializer == "semantic_held_object":
+            from .atomic_compat import ExactTargetMoveHeldObjectOptions
+
+            config_type = ExactTargetMoveHeldObjectOptions
+            if int(action.cfg.get("upright_yaw_samples", 1)) > 1:
+                policy["allow_automatic_transport_rotation"] = False
         approach_mode = policy.pop("approach_direction_mode", None)
         if approach_mode == "handover_transfer":
             from .frames import robot_frame_axes
@@ -1100,9 +1102,7 @@ class AtomicActionAdapter:
                 policy[name] = torch.as_tensor(
                     policy[name], dtype=torch.float32, device=self.device
                 )
-        return capability.config_type(
-            **_supported_kwargs(capability.config_type, policy)
-        )
+        return config_type(**_supported_kwargs(config_type, policy))
 
     def _build_coordinated_pickment_config(
         self,
@@ -1154,7 +1154,6 @@ class AtomicActionAdapter:
                 # Delivery is represented by a following MoveHeldObject node.
                 # Keep the receiver fixed while the source retreats here.
                 "final_object_pose": middle,
-                "preserve_current_object_orientation": False,
                 "receive_approach_direction": _diagonal_approach_direction(
                     transfer_outward
                 ),
@@ -1323,10 +1322,14 @@ class AtomicActionAdapter:
 
     def _engine(self) -> AtomicActionEngine:
         if self._atomic_engine is None:
-            self._atomic_engine = AtomicActionEngine(
+            from .atomic_compat import ExactTargetMoveHeldObject
+
+            engine = AtomicActionEngine(
                 self._generator(),
                 control_profiles=self._control_profiles(),
             )
+            engine.register(ExactTargetMoveHeldObject(), replace=True)
+            self._atomic_engine = engine
         return self._atomic_engine
 
     def _generator(self) -> MotionGenerator:
