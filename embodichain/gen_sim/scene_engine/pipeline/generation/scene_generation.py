@@ -529,9 +529,7 @@ def _scene_graph_based_calibration(
         calibrated_assets_layout.append(
             transform_matrix_to_layout_object(
                 asset_id,
-                z_up_to_y_up_matrix
-                @ z_up_asset_to_table_matrix
-                @ y_up_to_z_up_matrix,
+                z_up_to_y_up_matrix @ z_up_asset_to_table_matrix @ y_up_to_z_up_matrix,
             )
         )
     return calibrated_assets_layout
