@@ -22,6 +22,7 @@ import ast
 import json
 from pathlib import Path
 
+import embodichain.gen_sim.action_engine as action_engine_package
 from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
     build_default_registry,
@@ -37,7 +38,7 @@ from embodichain.gen_sim.action_engine.protocol import (
     TASK_SPEC_SCHEMA,
 )
 
-_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+_PACKAGE_ROOT = Path(action_engine_package.__file__).resolve().parent
 _LEGACY_PACKAGE = "embodichain.gen_sim.action_agent_pipeline"
 
 

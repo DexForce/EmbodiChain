@@ -55,6 +55,10 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         "max_retries_per_action": 2,
         "max_graph_revisions": 8,
         "max_recovery_actions": 12,
+        "support_stability_samples": 3,
+        "support_stability_interval_steps": 5,
+        "support_linear_velocity_tolerance": pytest.approx(0.02),
+        "support_angular_velocity_tolerance": pytest.approx(0.2),
     }
     assert runtime.planner == {
         "backend": "curobo",
@@ -212,7 +216,7 @@ def test_v3_policy_snapshot_is_migrated_with_default_planner_policy() -> None:
         }
     )
 
-    assert resolved.schema_version == "action_engine_runtime_policy_v4"
+    assert resolved.schema_version == "action_engine_runtime_policy_v6"
     assert resolved.planner == expected.planner
 
 

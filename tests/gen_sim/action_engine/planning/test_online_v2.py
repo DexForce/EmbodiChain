@@ -267,19 +267,24 @@ def test_visual_task_predicates_are_limited_to_the_current_task() -> None:
     def caller(**kwargs):
         captured.update(kwargs)
         return {
-            "entities": [],
-            "relations": [],
-            "task_predicates": [
-                {"type": "mouth_completed", "confidence": 0.9}
+            "entities": [
+                {
+                    "uid": uid,
+                    "camera_uid": "front",
+                    "bbox": [0.1, 0.2, 0.3, 0.4],
+                    "confidence": 0.9,
+                }
             ],
+            "relations": [],
+            "task_predicates": [{"type": "mouth_completed", "confidence": 0.9}],
             "confidence": 0.9,
         }
 
     facts = analyze_visual_scene(observation, task, caller=caller)
 
-    predicate_type = captured["schema"]["properties"]["task_predicates"][
-        "items"
-    ]["properties"]["type"]
+    predicate_type = captured["schema"]["properties"]["task_predicates"]["items"][
+        "properties"
+    ]["type"]
     assert predicate_type["enum"] == ["mouth_completed"]
     assert facts["task_predicates"][0]["type"] == "mouth_completed"
 

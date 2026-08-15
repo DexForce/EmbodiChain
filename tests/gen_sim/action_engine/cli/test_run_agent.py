@@ -124,7 +124,7 @@ class _MemoryAwareFakeWorker:
         self.closed = True
 
 
-def test_ab_serializes_gpu_workers_after_startup_oom() -> None:
+def test_ab_serializes_workers_after_startup_oom() -> None:
     _MemoryAwareFakeWorker.instances = []
     branches, snapshots = _prepare_ab_branches(
         {"offline": _worker_config("offline"), "online": _worker_config("online")},

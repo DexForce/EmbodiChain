@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+import embodichain.gen_sim.action_engine.tasks as action_engine_tasks
 from embodichain.gen_sim.action_engine.tasks import (
     instantiate_seed_graph,
     interpret_and_ground_task_spec,
@@ -237,7 +238,7 @@ def test_two_noncanonical_llm_responses_fail_without_grounding_or_rule_fallback(
 
 
 def test_llm_interpretation_modules_do_not_import_the_deterministic_adapter() -> None:
-    tasks_dir = Path(__file__).resolve().parents[1]
+    tasks_dir = Path(action_engine_tasks.__file__).resolve().parent
     offenders: dict[str, list[str]] = {}
     for filename in ("interpretation.py", "grounding.py"):
         path = tasks_dir / filename

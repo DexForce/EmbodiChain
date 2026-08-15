@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import embodichain.gen_sim as gen_sim_package
 from embodichain import __main__ as root_cli
 from embodichain.gen_sim.action_engine.agent import ActionAgent
 from embodichain.gen_sim.action_engine.collaboration.action_agent import (
@@ -32,7 +33,7 @@ from embodichain.gen_sim.action_engine.collaboration.task_agent import (
 from embodichain.gen_sim.collaboration.scene_adapter import SceneAdapter
 from embodichain.gen_sim.task_engine import TaskAgent
 
-_GEN_SIM_ROOT = Path(__file__).resolve().parents[2]
+_GEN_SIM_ROOT = Path(gen_sim_package.__file__).resolve().parent
 
 
 def test_task_engine_has_no_action_scene_or_collaboration_imports() -> None:
