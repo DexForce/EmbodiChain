@@ -142,7 +142,9 @@ def test_asset_mask_id_label_font_fits_the_mask_bbox() -> None:
         minimum_padding=2,
     )
 
-    assert label_bounds[2] - label_bounds[0] <= round((mask_bbox[2] - mask_bbox[0]) * 0.9)
+    assert label_bounds[2] - label_bounds[0] <= round(
+        (mask_bbox[2] - mask_bbox[0]) * 0.9
+    )
 
 
 def test_initial_scene_graph_places_every_asset_on_table(tmp_path: Path) -> None:
@@ -314,9 +316,7 @@ def test_scene_graph_initialization_info_lists_existing_object_ids() -> None:
     )
 
     simplified_scene_info = (
-        scene_understanding._simplify_scene_info_for_graph_initialization(
-            scene=scene
-        )
+        scene_understanding._simplify_scene_info_for_graph_initialization(scene=scene)
     )
 
     assert simplified_scene_info == {
