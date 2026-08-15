@@ -41,6 +41,7 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     MaskCandidate,
     build_mask_candidates,
+    render_asset_mask_id_overlay,
     render_image_without_masks,
     render_numbered_mask_candidates,
     save_binary_mask,
@@ -147,6 +148,24 @@ Examples:
 Return JSON only, with exactly one key: assignments. It must be null or an
 array of asset_id and mask_index objects. Do not include Markdown or any other
 text."""
+_ORIENTATION_STATE_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
+Each visible asset has an outline and an ID label. Determine whether each listed
+object is standing, lying, or unknown in the image.
+
+Use "standing" only when an upright container, such as a bottle, can, jar,
+flask, or thermos, is resting vertically on its base. Use "lying" only when
+such a container rests on its side. Use null for the table, every other object
+type, or any uncertain case.
+
+Return JSON only, with exactly this schema. Include every supplied object ID
+exactly once and do not add IDs:
+{
+  "orientation_states": [
+    {"object_id": "bottle_001", "orientation_state": "standing"},
+    {"object_id": "table", "orientation_state": null}
+  ]
+}"""
+_UPRIGHT_CONTAINER_ID_TOKENS = frozenset({"bottle", "can", "jar", "flask", "thermos"})
 
 
 def understand_scene(
@@ -174,7 +193,8 @@ def understand_scene(
         json_max_attempts=json_max_attempts,
     )
 
-    _segment_scene(
+    # Receive the validated whole-scene mask, for VLM output the scene graph.
+    asset_mask_id_overlay_path = _segment_scene(
         image_path=resolved_image_path,
         stage_output_root=stage_output_root,
         scene=scene,
@@ -185,7 +205,11 @@ def understand_scene(
     # Use the segmented image to initialize the scene graph
     # with the help of the VLM client.
     # But at here, we do with the simplest way (hard code).
-    scene_graph = _initialize_scene_graph_from_segmented_scene(scene)
+    scene_graph = _initialize_scene_graph_from_segmented_scene(
+        scene,
+        asset_mask_id_overlay_path=asset_mask_id_overlay_path,
+        vlm_client=vlm_client,
+    )
 
     # Write the Updated scene JSON for debugging.
     (stage_output_root / "scene.json").write_text(
@@ -199,22 +223,129 @@ def understand_scene(
     return scene, scene_graph
 
 
-def _initialize_scene_graph_from_segmented_scene(scene: Scene) -> SceneGraph:
+def _initialize_scene_graph_from_segmented_scene(
+    scene: Scene,
+    *,
+    asset_mask_id_overlay_path: str | Path,
+    vlm_client: OpenAICompatibleVLM,
+) -> SceneGraph:
     """Build the initial graph assuming every segmented asset rests on the table."""
+    # Get simplified scene info for VLM.
+    scene_info = _simplify_scene_info_for_graph_initialization(scene=scene)
+    resolved_asset_mask_id_overlay_path = _validate_image_path(
+        asset_mask_id_overlay_path
+    )
     if scene.table is None:
         raise ValueError("Cannot initialize a scene graph without a table.")
+    orientation_states_by_id = _query_orientation_states(
+        scene_info=scene_info,
+        asset_mask_id_overlay_path=resolved_asset_mask_id_overlay_path,
+        vlm_client=vlm_client,
+    )
     return SceneGraph(
         nodes=[
             SceneGraphNode(object_id=TABLE_OBJECT_ID, parent_id=None),
             *[
-                SceneGraphNode(
+                SceneGraphNode(  # semi-hard code.
                     object_id=asset.id,
                     parent_id=TABLE_OBJECT_ID,
                     parent_relation="on",
+                    orientation_state=(
+                        orientation_states_by_id[asset.id]
+                        if _is_upright_container_id(asset.id)
+                        else None
+                    ),
                 )
                 for asset in scene.assets
             ],
         ],
+    )
+
+
+def _simplify_scene_info_for_graph_initialization(
+    *,
+    scene: Scene,
+) -> dict[str, object]:
+    """Return the object metadata needed to initialize an image-based graph."""
+    return {
+        "existing_object_ids": [scene_object.id for scene_object in scene.objects],
+    }
+
+
+def _query_orientation_states(
+    *,
+    scene_info: dict[str, object],
+    asset_mask_id_overlay_path: Path,
+    vlm_client: OpenAICompatibleVLM,
+) -> dict[str, str | None]:
+    """Return validated image-observed orientation states keyed by object ID."""
+    response_text = vlm_client.complete(
+        image_path=asset_mask_id_overlay_path,
+        system_prompt=_ORIENTATION_STATE_SYSTEM_PROMPT,
+        user_prompt=json.dumps(scene_info, ensure_ascii=False),
+    )
+    return _parse_orientation_states_response(
+        response_text=response_text,
+        existing_object_ids=scene_info["existing_object_ids"],
+    )
+
+
+def _parse_orientation_states_response(
+    *,
+    response_text: str,
+    existing_object_ids: object,
+) -> dict[str, str | None]:
+    """Parse a complete VLM orientation-state response for known object IDs."""
+    if not isinstance(existing_object_ids, list) or not all(
+        isinstance(object_id, str) for object_id in existing_object_ids
+    ):
+        raise ValueError("Scene graph initialization requires string object IDs.")
+    json_text = _strip_json_code_fence(response_text)
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"VLM response is not valid JSON: {exc.msg}") from exc
+    if not isinstance(payload, dict) or set(payload) != {"orientation_states"}:
+        raise ValueError("VLM JSON must contain exactly the key: orientation_states.")
+    states_value = payload["orientation_states"]
+    if not isinstance(states_value, list):
+        raise ValueError("VLM JSON key orientation_states must be an array.")
+
+    orientation_states_by_id: dict[str, str | None] = {}
+    for index, state_value in enumerate(states_value):
+        if not isinstance(state_value, dict) or set(state_value) != {
+            "object_id",
+            "orientation_state",
+        }:
+            raise ValueError(
+                "VLM JSON orientation_states["
+                f"{index}] must contain exactly object_id and orientation_state."
+            )
+        object_id = state_value["object_id"]
+        orientation_state = state_value["orientation_state"]
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError(
+                f"VLM JSON orientation_states[{index}].object_id is invalid."
+            )
+        if orientation_state not in {None, "standing", "lying"}:
+            raise ValueError(
+                f"VLM JSON orientation_states[{index}].orientation_state is invalid."
+            )
+        if object_id in orientation_states_by_id:
+            raise ValueError(f"VLM JSON repeats orientation state for {object_id!r}.")
+        orientation_states_by_id[object_id] = orientation_state
+
+    if set(orientation_states_by_id) != set(existing_object_ids):
+        raise ValueError(
+            "VLM JSON orientation states must match all existing object IDs."
+        )
+    return orientation_states_by_id
+
+
+def _is_upright_container_id(object_id: str) -> bool:
+    """Return whether an object ID identifies a standardized upright container."""
+    return bool(
+        set(re.findall(r"[a-z0-9]+", object_id.lower())) & _UPRIGHT_CONTAINER_ID_TOKENS
     )
 
 
@@ -386,8 +517,8 @@ def _segment_scene(
     scene: Scene,
     vlm_client: OpenAICompatibleVLM,
     image_segmentation_client: ImageSegmentationClient,
-) -> None:
-    """Add validated table and asset mask paths to a semantic scene."""
+) -> Path:
+    """Add validated masks and return an asset-only ID overlay image."""
     debug_output_root = (
         Path(stage_output_root) / "debug"
     )  # Keeps the mask debug images.
@@ -428,6 +559,16 @@ def _segment_scene(
         scene=scene,
         vlm_client=vlm_client,
         image_segmentation_client=image_segmentation_client,
+    )
+    asset_masks: list[tuple[str, str]] = []
+    for asset in scene.assets:
+        if asset.mask_path is None:
+            raise ValueError(f"Asset {asset.id!r} has no validated mask path.")
+        asset_masks.append((asset.id, asset.mask_path))
+    return render_asset_mask_id_overlay(
+        image_path=image_path,
+        asset_masks=asset_masks,
+        output_path=Path(masks_output_root) / "asset_masks_with_ids.png",
     )
 
 

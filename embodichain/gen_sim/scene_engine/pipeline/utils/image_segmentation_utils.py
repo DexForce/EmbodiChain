@@ -306,6 +306,67 @@ def render_numbered_mask_candidates(
     return resolved_output_path
 
 
+def render_asset_mask_id_overlay(
+    *,
+    image_path: str | Path,
+    asset_masks: list[tuple[str, str | Path]],
+    output_path: str | Path,
+) -> Path:
+    """Overlay outlined asset masks and stable asset IDs on a scene image.
+
+    The table mask is intentionally omitted so its large contour does not
+    obscure the asset labels or their visual context in the source image.
+    """
+    asset_ids = [asset_id for asset_id, _ in asset_masks]
+    if any(not asset_id for asset_id in asset_ids):
+        raise ValueError("Every asset mask must have a non-empty asset id.")
+    if len(asset_ids) != len(set(asset_ids)):
+        raise ValueError("Asset mask ids must be unique.")
+
+    image = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    colors = (
+        (239, 83, 80, 255),
+        (66, 165, 245, 255),
+        (102, 187, 106, 255),
+        (255, 202, 40, 255),
+        (171, 71, 188, 255),
+        (38, 198, 218, 255),
+    )
+    decoded_masks: list[tuple[str, Image.Image]] = []
+    for index, (asset_id, mask_path) in enumerate(asset_masks):
+        mask = Image.open(mask_path).convert("L")
+        _require_image_size(mask, image.size)
+        decoded_masks.append((asset_id, mask))
+        color_layer = Image.new("RGBA", image.size, colors[index % len(colors)])
+        transparent_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        overlay.alpha_composite(
+            Image.composite(
+                color_layer,
+                transparent_layer,
+                _mask_outer_outline(mask, image.size),
+            )
+        )
+
+    draw = ImageDraw.Draw(overlay)
+    font = _load_label_font(image.size)
+    for asset_id, mask in decoded_masks:
+        bbox = mask.getbbox()
+        if bbox is None:
+            raise ValueError(f"Asset mask {asset_id!r} is empty.")
+        _draw_number_label(
+            draw=draw,
+            label=asset_id,
+            center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+            font=font,
+        )
+
+    resolved_output_path = Path(output_path).expanduser().resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.alpha_composite(image, overlay).convert("RGB").save(resolved_output_path)
+    return resolved_output_path
+
+
 def _require_image_size(mask: Image.Image, image_size: tuple[int, int]) -> None:
     if mask.size != image_size:
         raise ValueError(
