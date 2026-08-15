@@ -694,7 +694,13 @@ def test_prepare_prints_the_next_run_command(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["run_command"] == cli._bundle_run_command(output_dir)
-    assert shlex.split(payload["run_command"])[-2:] == [
+    command = shlex.split(payload["run_command"])
+    assert command[:3] == [
+        "python",
+        "-m",
+        "embodichain.gen_sim.collaboration",
+    ]
+    assert command[-2:] == [
         "--bundle",
         str(output_dir.resolve()),
     ]

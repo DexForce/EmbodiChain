@@ -19,7 +19,8 @@ three narrow owners:
    versions, Git commit/dirty state when available, and structured runtime
    arguments alongside the existing plan and graph hashes.
 
-The public CLI is `embodichain gen-sim-task import-scene|prepare|run`. This
+The public CLI is
+`python -m embodichain.gen_sim.collaboration import-scene|prepare|run`. This
 layer does not modify Scene Engine and continues to publish all legacy bundle
 artifacts for existing runners.
 

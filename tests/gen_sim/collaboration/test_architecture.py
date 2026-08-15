@@ -22,7 +22,6 @@ import ast
 from pathlib import Path
 
 import embodichain.gen_sim as gen_sim_package
-from embodichain import __main__ as root_cli
 from embodichain.gen_sim.action_engine.agent import ActionAgent
 from embodichain.gen_sim.action_engine.collaboration.action_agent import (
     ActionAgent as LegacyActionAgent,
@@ -31,6 +30,8 @@ from embodichain.gen_sim.action_engine.collaboration.task_agent import (
     TaskAgent as LegacyTaskAgent,
 )
 from embodichain.gen_sim.collaboration.scene_adapter import SceneAdapter
+from embodichain.gen_sim.collaboration import __main__ as collaboration_main
+from embodichain.gen_sim.collaboration import cli as collaboration_cli
 from embodichain.gen_sim.task_engine import TaskAgent
 
 _GEN_SIM_ROOT = Path(gen_sim_package.__file__).resolve().parent
@@ -73,6 +74,5 @@ def test_legacy_collaboration_agent_imports_preserve_class_identity() -> None:
     assert LegacyActionAgent is ActionAgent
 
 
-def test_root_cli_dispatches_to_top_level_collaboration() -> None:
-    command = next(item for item in root_cli.COMMANDS if item.name == "gen-sim-task")
-    assert command.target == "embodichain.gen_sim.collaboration.cli:main"
+def test_collaboration_owns_its_module_entry_point() -> None:
+    assert collaboration_main.main is collaboration_cli.main

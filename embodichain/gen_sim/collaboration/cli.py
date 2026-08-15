@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Unified ``gen-sim-task`` CLI for collaboration preparation and execution."""
+"""CLI for collaboration preparation and execution."""
 
 from __future__ import annotations
 
@@ -54,9 +54,9 @@ _ROBOT_PROFILES = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the nested ``embodichain gen-sim-task`` parser."""
+    """Build the Gen Sim collaboration parser."""
     parser = argparse.ArgumentParser(
-        prog="embodichain gen-sim-task",
+        prog="python -m embodichain.gen_sim.collaboration",
         description="Prepare and run a three-agent collaboration task.",
     )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
@@ -322,8 +322,7 @@ def _bundle_run_command(bundle: str | Path) -> str:
         [
             "python",
             "-m",
-            "embodichain",
-            "gen-sim-task",
+            "embodichain.gen_sim.collaboration",
             "run",
             "--bundle",
             str(Path(bundle).expanduser().resolve()),
