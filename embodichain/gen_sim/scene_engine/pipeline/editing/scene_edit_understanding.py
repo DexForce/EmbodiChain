@@ -194,6 +194,7 @@ def _build_updated_scene_graph(
                 parent_id=node.parent_id,
                 parent_relation=node.parent_relation,
                 table_region=node.table_region,
+                orientation_state=node.orientation_state,
             )
             for node in scene_graph.nodes
         ],

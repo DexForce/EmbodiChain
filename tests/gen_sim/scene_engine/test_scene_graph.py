@@ -34,6 +34,7 @@ def test_scene_graph_accepts_layered_on_relations() -> None:
                 parent_id="table",
                 parent_relation="on",
                 table_region="center",
+                orientation_state="standing",
             ),
             SceneGraphNode(
                 object_id="cup",
@@ -284,6 +285,7 @@ def test_scene_graph_to_dict_serializes_graph_state() -> None:
                 parent_id="table",
                 parent_relation="on",
                 table_region="center",
+                orientation_state="standing",
             ),
         ],
     )
@@ -297,12 +299,14 @@ def test_scene_graph_to_dict_serializes_graph_state() -> None:
                 "parent_id": None,
                 "parent_relation": None,
                 "table_region": None,
+                "orientation_state": None,
             },
             {
                 "object_id": "plate",
                 "parent_id": "table",
                 "parent_relation": "on",
                 "table_region": "center",
+                "orientation_state": "standing",
             },
         ],
         "relations": [],

@@ -175,12 +175,14 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
                 "parent_id": None,
                 "parent_relation": None,
                 "table_region": None,
+                "orientation_state": None,
             },
             {
                 "object_id": "cup",
                 "parent_id": "table",
                 "parent_relation": "on",
                 "table_region": None,
+                "orientation_state": None,
             },
         ],
         "relations": [],
@@ -193,6 +195,32 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert imported_scene.assets[0].category == "asset"
     assert imported_scene.assets[0].name == "cup"
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
+
+
+def test_scene_graph_importer_restores_node_orientation_state() -> None:
+    imported_graph = SceneExportImporter._scene_graph_from_data(
+        {
+            "nodes": [
+                {
+                    "object_id": "table",
+                    "parent_id": None,
+                    "parent_relation": None,
+                    "table_region": None,
+                    "orientation_state": None,
+                },
+                {
+                    "object_id": "bottle_001",
+                    "parent_id": "table",
+                    "parent_relation": "on",
+                    "table_region": None,
+                    "orientation_state": "standing",
+                },
+            ],
+            "relations": [],
+        }
+    )
+
+    assert imported_graph.node_by_id()["bottle_001"].orientation_state == "standing"
 
 
 def test_scene_export_overwrites_an_existing_scene_export(tmp_path: Path) -> None:
