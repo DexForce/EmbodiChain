@@ -18,3 +18,5 @@ from .antipodal_sampler import *
 from .collision_checker import *
 from .gripper_collision_checker import *
 from .antipodal_generator import *
+from .profiles import *
+from .candidate_provider import *

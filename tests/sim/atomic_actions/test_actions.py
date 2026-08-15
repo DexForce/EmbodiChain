@@ -163,6 +163,7 @@ def _robot() -> Mock:
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
     robot.compute_ik.side_effect = compute_ik
+    robot.compute_batch_ik.side_effect = compute_ik
     robot.compute_fk.side_effect = compute_fk
     return robot
 
@@ -333,7 +334,7 @@ def _dual_motion_generator() -> MotionGenerator:
         seed = joint_seed if joint_seed is not None else qpos_seed
         assert seed is not None
         offset = 0.1 if name == "left_arm" else 0.2
-        return torch.ones(seed.shape[0], dtype=torch.bool), seed + offset
+        return torch.ones(seed.shape[:-1], dtype=torch.bool), seed + offset
 
     def compute_fk(
         qpos: torch.Tensor | None = None,
@@ -346,6 +347,7 @@ def _dual_motion_generator() -> MotionGenerator:
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
     robot.compute_ik.side_effect = compute_ik
+    robot.compute_batch_ik.side_effect = compute_ik
     robot.compute_fk.side_effect = compute_fk
 
     generator = object.__new__(MotionGenerator)
@@ -1100,6 +1102,73 @@ def test_coordinated_pick_returns_full_dof_plan_and_projected_relation() -> None
         "move",
         "hold",
     ]
+
+
+def test_coordinated_pick_skips_lower_cost_grasp_without_feasible_ik() -> None:
+    generator = _dual_motion_generator()
+    default_compute_ik = generator.robot.compute_ik.side_effect
+
+    def reject_distant_pose(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor | None = None,
+        qpos_seed: torch.Tensor | None = None,
+        **kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        success, qpos = default_compute_ik(
+            pose=pose,
+            name=name,
+            joint_seed=joint_seed,
+            qpos_seed=qpos_seed,
+            **kwargs,
+        )
+        return success & (pose[..., 0, 3] < 50.0), qpos
+
+    generator.robot.compute_batch_ik.side_effect = reject_distant_pose
+    generator.robot.compute_ik.side_effect = reject_distant_pose
+    action = _bind_action(
+        generator,
+        CoordinatedPickment(
+            default_options=CoordinatedPickmentOptions(
+                hand_interp_steps=4,
+                hold_steps=2,
+                object_motion_keyframes=3,
+            ),
+        ),
+    )
+    affordance = AntipodalAffordance()
+
+    def sample_candidates(obj_poses: torch.Tensor, **_kwargs: object) -> list[dict]:
+        poses = torch.eye(4, dtype=torch.float32).repeat(2, 1, 1)
+        poses[0, 0, 3] = 100.0
+        arm = {
+            "is_success": True,
+            "grasp_poses": poses,
+            "open_lengths": torch.zeros(2),
+            "total_cost": torch.tensor([0.0, 1.0]),
+        }
+        return [{"left": arm, "right": arm} for _ in range(obj_poses.shape[0])]
+
+    affordance.get_dual_arm_valid_grasp_poses = Mock(side_effect=sample_candidates)
+    invocation = ActionInvocation(
+        skill_id="coordinated_pickment",
+        goal=CoordinatedPickGoal(
+            semantics=ObjectSemantics(
+                affordance=affordance,
+                geometry={},
+                label="tray",
+            ),
+            object_target_pose=torch.eye(4),
+            object_initial_pose=torch.eye(4),
+        ),
+        binding=_dual_binding("left", "right"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+
+    plan = _plan_action(action, invocation, _dual_context())
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert generator.robot.compute_batch_ik.call_count == 8
 
 
 def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:

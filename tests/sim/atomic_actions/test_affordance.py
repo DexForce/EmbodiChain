@@ -57,6 +57,18 @@ class TestAntipodalAffordance:
         aff = AntipodalAffordance()
         assert not hasattr(aff, "geometry")
 
+    def test_candidate_provider_is_the_preferred_generator_source(self):
+        generator = Mock()
+        provider = Mock()
+        provider.generator = generator
+        provider.diagnostics = {"raw_pair_count": 12}
+        aff = AntipodalAffordance(candidate_provider=provider)
+
+        aff._init_generator()
+
+        assert aff._generator is generator
+        assert aff.grasp_diagnostics == {"raw_pair_count": 12}
+
     def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
         aff = AntipodalAffordance()
         generator = Mock()

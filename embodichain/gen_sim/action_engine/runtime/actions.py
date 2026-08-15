@@ -60,9 +60,9 @@ from embodichain.lab.sim.planners import (
     ToppraPlannerCfg,
 )
 from embodichain.toolkits.graspkit.pg_grasp import (
-    AntipodalSamplerCfg,
-    GraspGeneratorCfg,
-    GripperCollisionCfg,
+    AntipodalGraspPolicy,
+    GraspCandidateProvider,
+    ParallelJawEefProfile,
 )
 from embodichain.utils.logger import log_info
 
@@ -153,6 +153,7 @@ class AtomicActionAdapter:
         env: Any,
         *,
         grasp_policy: Mapping[str, Any] | None = None,
+        end_effector_profile: ParallelJawEefProfile | Mapping[str, Any] | None = None,
         planner_policy: Mapping[str, Any] | None = None,
         capability_registry: Any | None = None,
         scene_provider: SceneProvider | None = None,
@@ -162,12 +163,25 @@ class AtomicActionAdapter:
         self.device = env.device
         if grasp_policy is None:
             profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
-            grasp_policy = default_runtime_policy(profile).grasp
+            runtime_policy = default_runtime_policy(profile)
+            grasp_policy = runtime_policy.grasp
+            if end_effector_profile is None:
+                end_effector_profile = runtime_policy.end_effector_profile
             grasp_policy = {
                 **grasp_policy,
                 **(getattr(env, "agent_grasp_runtime_defaults", {}) or {}),
             }
         self.grasp_policy = deepcopy(dict(grasp_policy))
+        if end_effector_profile is None:
+            profile = str(getattr(env, "agent_robot_profile", "dual_ur10"))
+            end_effector_profile = default_runtime_policy(
+                profile
+            ).end_effector_profile
+        self.end_effector_profile = (
+            end_effector_profile
+            if isinstance(end_effector_profile, ParallelJawEefProfile)
+            else ParallelJawEefProfile.from_mapping(end_effector_profile)
+        )
         self.planner_policy = deepcopy(_DEFAULT_PLANNER_POLICY)
         if planner_policy is not None:
             self._merge_planner_policy(self.planner_policy, planner_policy)
@@ -185,10 +199,21 @@ class AtomicActionAdapter:
         self._motion_generator: MotionGenerator | None = None
         self._atomic_engine: AtomicActionEngine | None = None
         self._semantics: dict[str, ObjectSemantics] = {}
+        self._grasp_attempt_id = 0
         self._scene_time = 0.0
         if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
             raise TypeError("scene_provider must implement SceneProvider.")
         self.scene_provider = scene_provider or self._build_scene_provider()
+
+    def set_grasp_attempt_id(self, attempt_id: int) -> None:
+        """Select the reproducible grasp-search schedule for the next plan."""
+        if (
+            isinstance(attempt_id, bool)
+            or not isinstance(attempt_id, int)
+            or attempt_id < 0
+        ):
+            raise ValueError("attempt_id must be a non-negative integer.")
+        self._grasp_attempt_id = attempt_id
 
     @staticmethod
     def _merge_planner_policy(
@@ -219,6 +244,25 @@ class AtomicActionAdapter:
         """
         capability = self.capabilities.require_executable(grounded.action_class)
         state = state or self.initial_state()
+        if grounded.action_class == "CoordinatedPickment":
+            policy = {**grounded.cfg, "grasp_attempt_id": self._grasp_attempt_id}
+            base_middle_ratio = float(policy.get("middle_empty_ratio", 0.4))
+            retry_step = float(policy.get("middle_empty_ratio_retry_step", 0.0))
+            policy["middle_empty_ratio"] = min(
+                1.0,
+                base_middle_ratio + retry_step * self._grasp_attempt_id,
+            )
+            base_lift_height = float(policy.get("lift_height", 0.0))
+            lift_retry_step = float(policy.get("lift_height_retry_step", 0.0))
+            policy["lift_height"] = max(
+                0.0,
+                base_lift_height - lift_retry_step * self._grasp_attempt_id,
+            )
+            grounded = replace(
+                grounded,
+                cfg=policy,
+                motion_policy={**grounded.motion_policy, **policy},
+            )
         grounded = self._select_upright_transport_yaw(grounded, state)
         context = self._planning_context(state, grounded)
         invocation = self._invocation(grounded, capability)
@@ -280,27 +324,29 @@ class AtomicActionAdapter:
             raise ValueError(f"Object {uid!r} has invalid mesh triangles.")
 
         grasp_options = self.grasp_policy
-        sampler = AntipodalSamplerCfg(
+        sampling_policy = AntipodalGraspPolicy(
             n_sample=int(grasp_options["antipodal_n_sample"]),
             max_angle=float(grasp_options["antipodal_max_angle"]),
-            max_length=float(grasp_options["max_open_length"]),
-            min_length=float(grasp_options["min_open_length"]),
-        )
-        generator = GraspGeneratorCfg(
-            viser_port=int(grasp_options["viser_port"]),
-            antipodal_sampler_cfg=sampler,
+            min_contact_span=float(grasp_options["min_contact_span"]),
+            max_contact_span=(
+                None
+                if grasp_options["max_contact_span"] is None
+                else float(grasp_options["max_contact_span"])
+            ),
             max_deviation_angle=float(grasp_options["max_deviation_angle"]),
             n_deviated_approach_directions=int(
                 grasp_options["n_deviated_approach_directions"]
             ),
+            n_top_grasps=int(grasp_options["n_top_grasps"]),
+            viser_port=int(grasp_options["viser_port"]),
+            max_decomposition_hulls=int(
+                grasp_options["max_decomposition_hulls"]
+            ),
+            filter_support_collision=bool(
+                grasp_options["filter_support_collision"]
+            ),
         )
         max_hulls = int(grasp_options["max_decomposition_hulls"])
-        collision = GripperCollisionCfg(
-            max_open_length=float(grasp_options["max_open_length"]),
-            finger_length=float(grasp_options["finger_length"]),
-            point_sample_dense=float(grasp_options["point_sample_dense"]),
-            max_decomposition_hulls=max_hulls,
-        )
         cache_result = ensure_vhacd_grasp_collision_cache(
             mesh_vertices=vertices,
             mesh_triangles=triangles,
@@ -317,9 +363,15 @@ class AtomicActionAdapter:
                 object_label=uid,
                 mesh_vertices=vertices,
                 mesh_triangles=triangles,
-                generator_cfg=generator,
-                gripper_collision_cfg=collision,
-                force_reannotate=bool(grasp_options["force_grasp_reannotate"]),
+                candidate_provider=GraspCandidateProvider(
+                    mesh_vertices=vertices,
+                    mesh_triangles=triangles,
+                    eef_profile=self.end_effector_profile,
+                    sampling_policy=sampling_policy,
+                    force_reannotate=bool(
+                        grasp_options["force_grasp_reannotate"]
+                    ),
+                ),
             ),
         )
         self._semantics[uid] = semantics
@@ -478,6 +530,7 @@ class AtomicActionAdapter:
                 fallback_success=fallback_success,
                 fallback_used=use_fallback,
                 reachability_search=reachability_search,
+                atomic_diagnostics=plan.diagnostics.metadata,
             ),
         )
 
@@ -673,6 +726,7 @@ class AtomicActionAdapter:
         fallback_success: torch.Tensor,
         fallback_used: torch.Tensor,
         reachability_search: Mapping[str, Any] | None = None,
+        atomic_diagnostics: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build compact per-row evidence for the planner route actually used."""
         exclusions = self._collision_exclusion_masks(grounded, state)
@@ -711,6 +765,8 @@ class AtomicActionAdapter:
         }
         if reachability_search is not None:
             trace["reachability_search"] = deepcopy(dict(reachability_search))
+        if atomic_diagnostics:
+            trace["atomic_diagnostics"] = deepcopy(dict(atomic_diagnostics))
         return trace
 
     def _select_upright_transport_yaw(

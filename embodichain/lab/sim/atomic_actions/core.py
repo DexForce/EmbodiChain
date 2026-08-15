@@ -539,6 +539,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
         *,
         message: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> ActionPlan:
         """Build a failed empty plan without changing task state.
 
@@ -546,6 +547,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request: Resolved invocation that failed to plan.
             context: Planning input used for the attempt.
             message: Optional diagnostic message.
+            metadata: Optional structured evidence from the failed planning stage.
 
         Returns:
             Failed action plan with an empty trajectory.
@@ -566,6 +568,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
                 messages=(() if message is None else (message,)),
+                metadata={} if metadata is None else metadata,
             ),
         )
 

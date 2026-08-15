@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import torch
 import open3d as o3d
 import numpy as np
@@ -81,6 +82,10 @@ class GripperCollisionCfg:
     uncertainties in the gripper pose or object geometry, and can be set based on the specific requirements of the application.
     """
 
+    contact_penetration_tolerance: float = 0.0
+    """Allowed object-proxy penetration at intentional finger contacts. This
+    tolerance does not apply to support-plane collision checks."""
+
 
 class GripperCollisionChecker:
     def __init__(
@@ -97,7 +102,13 @@ class GripperCollisionChecker:
         self.obj_mesh_verts = object_mesh_verts
         self.device = object_mesh_verts.device
         self.cfg = cfg
+        self._last_query_diagnostics: dict[str, int | bool] = {}
         self._init_pc_template()
+
+    @property
+    def last_query_diagnostics(self) -> dict[str, int | bool]:
+        """Return candidate-level collision counts from the latest query."""
+        return deepcopy(self._last_query_diagnostics)
 
     def _init_pc_template(self):
         self.root_template = box_surface_grid(
@@ -169,6 +180,7 @@ class GripperCollisionChecker:
         open_lengths: torch.Tensor,
         collision_threshold: float = 0.0,
         is_filter_ground_collision: bool = True,
+        support_plane_height: float | torch.Tensor | None = None,
         is_visual: bool = False,
     ) -> torch.Tensor:
         """query the collision status of the gripper with the object.
@@ -181,6 +193,9 @@ class GripperCollisionChecker:
             grasp_poses (torch.Tensor): [B, 4, 4] of float. The homogeneous transformation matrices of the gripper root frame for B grasp poses.
             open_lengths (torch.Tensor): [B, ] of float. The opening lengths of the gripper fingers for B grasp poses.
             collision_threshold (float, optional): Collision distance threshold. Defaults to 0.0.
+            support_plane_height: Optional world-Z support plane. When omitted,
+                the object's current lowest vertex is used as a pickup-time
+                support-plane approximation.
             is_visual (bool, optional): whether to visualize collision result. Defaults to False.
 
         Returns:
@@ -192,15 +207,44 @@ class GripperCollisionChecker:
         inv_obj_poses = inv_obj_pose[None, :, :].repeat(grasp_poses.shape[0], 1, 1)
         grasp_relative_pose = torch.bmm(inv_obj_poses, grasp_poses)
         gripper_pc_obj = self._get_gripper_pc(grasp_relative_pose, open_lengths)
+        object_collision_threshold = (
+            float(collision_threshold)
+            - float(self.cfg.contact_penetration_tolerance)
+        )
         is_obj_gripper_collided, obj_gripper_dis = self._checker.query_batch_points(
-            gripper_pc_obj, collision_threshold=collision_threshold, is_visual=is_visual
+            gripper_pc_obj,
+            collision_threshold=object_collision_threshold,
+            is_visual=is_visual,
         )
 
+        object_collision = is_obj_gripper_collided.any(dim=1)
+        support_collision = torch.zeros_like(object_collision)
         if is_filter_ground_collision:
             gripper_pc_world = self._get_gripper_pc(grasp_poses, open_lengths)
-            ground_height = self.get_ground_height(obj_pose)
-            gripper_ground_dis = gripper_pc_world[:, :, 2] - ground_height
-            is_gripper_ground_collided = gripper_ground_dis < collision_threshold
+            if support_plane_height is None:
+                plane_height = torch.as_tensor(
+                    self.get_ground_height(obj_pose),
+                    dtype=gripper_pc_world.dtype,
+                    device=gripper_pc_world.device,
+                ).repeat(gripper_pc_world.shape[0])
+            else:
+                plane_height = torch.as_tensor(
+                    support_plane_height,
+                    dtype=gripper_pc_world.dtype,
+                    device=gripper_pc_world.device,
+                ).flatten()
+                if plane_height.numel() == 1:
+                    plane_height = plane_height.repeat(gripper_pc_world.shape[0])
+                if plane_height.shape != (gripper_pc_world.shape[0],):
+                    raise ValueError(
+                        "support_plane_height must be scalar or contain one value "
+                        "per grasp pose."
+                    )
+            gripper_ground_dis = gripper_pc_world[:, :, 2] - plane_height[:, None]
+            is_gripper_ground_collided = gripper_ground_dis < float(
+                collision_threshold
+            )
+            support_collision = is_gripper_ground_collided.any(dim=1)
 
             is_gripper_collided = torch.logical_or(
                 is_obj_gripper_collided, is_gripper_ground_collided
@@ -209,6 +253,15 @@ class GripperCollisionChecker:
         else:
             is_gripper_collided = is_obj_gripper_collided
             gripper_dis = obj_gripper_dis
+
+        candidate_collision = is_gripper_collided.any(dim=1)
+        self._last_query_diagnostics = {
+            "candidate_count": int(grasp_poses.shape[0]),
+            "object_collision_count": int(object_collision.sum().item()),
+            "support_collision_count": int(support_collision.sum().item()),
+            "combined_collision_count": int(candidate_collision.sum().item()),
+            "support_filter_enabled": bool(is_filter_ground_collision),
+        }
 
         if is_visual:
             n_batch = grasp_poses.shape[0]
@@ -235,7 +288,7 @@ class GripperCollisionChecker:
                     mesh_show_back_face=True,
                 )
 
-        return is_obj_gripper_collided.any(dim=1), obj_gripper_dis.min(dim=1).values
+        return candidate_collision, gripper_dis.min(dim=1).values
 
 
 def box_surface_grid(

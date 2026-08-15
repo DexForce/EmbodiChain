@@ -27,6 +27,10 @@ from pathlib import Path
 from typing import Any, Final
 
 from embodichain.gen_sim.action_engine.domain.motion import MOTION_MODIFIER_MODES
+from embodichain.toolkits.graspkit.pg_grasp.profiles import (
+    ParallelJawEefProfile,
+    get_parallel_jaw_eef_profile,
+)
 from embodichain.utils import configclass
 from embodichain.utils.utility import load_config
 
@@ -42,7 +46,8 @@ __all__ = [
 ]
 
 ACTION_ENGINE_DEFAULTS_SCHEMA: Final = "action_engine_defaults_v1"
-RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v6"
+RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v7"
+_PRE_EEF_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v6"
 _PREVIOUS_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v5"
 _PRE_GRASP_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v4"
 _PRE_PLANNER_RUNTIME_POLICY_SCHEMA: Final = "action_engine_runtime_policy_v3"
@@ -97,14 +102,14 @@ _GROUNDING_KEYS = {
 _GRASP_KEYS = {
     "antipodal_n_sample",
     "antipodal_max_angle",
-    "max_open_length",
-    "min_open_length",
-    "finger_length",
-    "point_sample_dense",
+    "min_contact_span",
+    "max_contact_span",
     "max_deviation_angle",
     "n_deviated_approach_directions",
+    "n_top_grasps",
     "viser_port",
     "max_decomposition_hulls",
+    "filter_support_collision",
     "force_grasp_reannotate",
 }
 _PLANNER_KEYS = {
@@ -224,6 +229,9 @@ class RuntimePolicyCfg:
     """Effective runtime policy persisted in generated agent artifacts."""
 
     schema_version: str = RUNTIME_POLICY_SCHEMA
+    end_effector_profile: ParallelJawEefProfile = get_parallel_jaw_eef_profile(
+        "robotiq_arg2f_140"
+    )
     arm_selection: ArmSelectionPolicyCfg = ArmSelectionPolicyCfg()
     execution: dict[str, Any] = {}
     planner: dict[str, Any] = {}
@@ -240,6 +248,10 @@ class RuntimePolicyCfg:
             )
         if not isinstance(self.arm_selection, ArmSelectionPolicyCfg):
             raise TypeError("arm_selection must be an ArmSelectionPolicyCfg.")
+        if not isinstance(self.end_effector_profile, ParallelJawEefProfile):
+            raise TypeError(
+                "end_effector_profile must be a ParallelJawEefProfile."
+            )
         for name in (
             "execution",
             "planner",
@@ -326,12 +338,17 @@ class RuntimePolicyCfg:
             _PREDICATE_KEYS,
             "predicate_fallbacks",
         )
-        if float(self.grasp.get("min_open_length", -1.0)) < 0.0:
-            raise ValueError("grasp.min_open_length must be non-negative.")
-        if float(self.grasp.get("max_open_length", 0.0)) <= float(
-            self.grasp.get("min_open_length", 0.0)
-        ):
-            raise ValueError("grasp.max_open_length must exceed min_open_length.")
+        minimum_span = float(self.grasp.get("min_contact_span", -1.0))
+        if minimum_span < 0.0:
+            raise ValueError("grasp.min_contact_span must be non-negative.")
+        maximum_span = self.grasp.get("max_contact_span")
+        if maximum_span is not None and float(maximum_span) <= minimum_span:
+            raise ValueError(
+                "grasp.max_contact_span must exceed min_contact_span."
+            )
+        for name in ("filter_support_collision", "force_grasp_reannotate"):
+            if not isinstance(self.grasp.get(name), bool):
+                raise ValueError(f"grasp.{name} must be a boolean.")
         direction_count = self.grasp.get("n_deviated_approach_directions")
         if (
             isinstance(direction_count, bool)
@@ -345,6 +362,7 @@ class RuntimePolicyCfg:
         """Parse one fully resolved policy snapshot."""
         fields = {
             "schema_version",
+            "end_effector_profile",
             "execution",
             "planner",
             "arm_selection",
@@ -364,7 +382,11 @@ class RuntimePolicyCfg:
         sections = {
             name: value.get(name)
             for name in fields
-            if name not in {"schema_version", "arm_selection"}
+            if name not in {
+                "schema_version",
+                "arm_selection",
+                "end_effector_profile",
+            }
         }
         if not all(isinstance(section, Mapping) for section in sections.values()):
             raise ValueError("Runtime policy sections must be mappings.")
@@ -376,6 +398,9 @@ class RuntimePolicyCfg:
             predicate_fallbacks.pop(key, None)
         return cls(
             schema_version=RUNTIME_POLICY_SCHEMA,
+            end_effector_profile=ParallelJawEefProfile.from_mapping(
+                value.get("end_effector_profile", {})
+            ),
             arm_selection=ArmSelectionPolicyCfg.from_mapping(arm_selection),
             **resolved_sections,
         )
@@ -384,6 +409,7 @@ class RuntimePolicyCfg:
         """Return the canonical artifact snapshot."""
         return {
             "schema_version": self.schema_version,
+            "end_effector_profile": self.end_effector_profile.as_mapping(),
             "execution": deepcopy(self.execution),
             "planner": deepcopy(self.planner),
             "arm_selection": self.arm_selection.as_mapping(),
@@ -407,10 +433,20 @@ def default_runtime_policy(robot_profile: str) -> RuntimePolicyCfg:
     override = profiles.get(str(robot_profile))
     if not isinstance(override, Mapping):
         raise ValueError(f"Unknown runtime robot profile {robot_profile!r}.")
-    resolved = _deep_merge(common, override)
+    profile_override = deepcopy(dict(override))
+    eef_profile_id = profile_override.pop("end_effector_profile_id", None)
+    if not isinstance(eef_profile_id, str) or not eef_profile_id:
+        raise ValueError(
+            f"Runtime robot profile {robot_profile!r} requires an "
+            "end_effector_profile_id."
+        )
+    resolved = _deep_merge(common, profile_override)
     return RuntimePolicyCfg.from_mapping(
         {
             "schema_version": RUNTIME_POLICY_SCHEMA,
+            "end_effector_profile": get_parallel_jaw_eef_profile(
+                eef_profile_id
+            ).as_mapping(),
             **resolved,
         }
     )
@@ -605,12 +641,19 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
     """Resolve a generated snapshot or fall back for a legacy v1 artifact."""
     snapshot = agent_config.get("runtime_policy")
     expected_hash = agent_config.get("runtime_policy_hash")
+    bound_eef_profile_id = agent_config.get("end_effector_profile_id")
+    if bound_eef_profile_id is not None and (
+        not isinstance(bound_eef_profile_id, str) or not bound_eef_profile_id.strip()
+    ):
+        raise ValueError("end_effector_profile_id must be a non-empty string.")
     if snapshot is None:
         if expected_hash is not None:
             raise ValueError("runtime_policy_hash requires a runtime_policy snapshot.")
-        return default_runtime_policy(
+        policy = default_runtime_policy(
             str(agent_config.get("robot_profile", "dual_ur10"))
         )
+        _validate_eef_binding(policy, bound_eef_profile_id)
+        return policy
     if not isinstance(snapshot, Mapping):
         raise ValueError("agent_config.runtime_policy must be a mapping.")
     if not isinstance(expected_hash, str) or not expected_hash:
@@ -621,6 +664,14 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         raise ValueError(
             "agent_config runtime policy hash does not match its snapshot."
         )
+    snapshot_eef = snapshot.get("end_effector_profile")
+    if bound_eef_profile_id is not None and isinstance(snapshot_eef, Mapping):
+        snapshot_profile_id = snapshot_eef.get("profile_id")
+        if snapshot_profile_id != bound_eef_profile_id:
+            raise ValueError(
+                "agent_config end-effector binding does not match its runtime "
+                "policy snapshot."
+            )
     if snapshot.get("schema_version") == _LEGACY_RUNTIME_POLICY_SCHEMA:
         if set(snapshot) != {"schema_version", "arm_selection"} or not isinstance(
             snapshot.get("arm_selection"), Mapping
@@ -635,6 +686,11 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         )
         policy.arm_selection = ArmSelectionPolicyCfg.from_mapping(merged)
         return policy
+    if snapshot.get("schema_version") == _PRE_EEF_RUNTIME_POLICY_SCHEMA:
+        defaults = default_runtime_policy(
+            str(agent_config.get("robot_profile", "dual_ur10"))
+        )
+        return _migrate_pre_eef_policy(snapshot, defaults)
     if snapshot.get("schema_version") == _PREVIOUS_RUNTIME_POLICY_SCHEMA:
         defaults = default_runtime_policy(
             str(agent_config.get("robot_profile", "dual_ur10"))
@@ -665,7 +721,7 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         ):
             migrated_predicates[key] = defaults.predicate_fallbacks[key]
         migrated["predicate_fallbacks"] = migrated_predicates
-        return RuntimePolicyCfg.from_mapping(migrated)
+        return _migrate_pre_eef_policy(migrated, defaults)
     if snapshot.get("schema_version") == _PRE_GRASP_RUNTIME_POLICY_SCHEMA:
         defaults = default_runtime_policy(
             str(agent_config.get("robot_profile", "dual_ur10"))
@@ -701,7 +757,7 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         ):
             migrated_predicates[key] = defaults.predicate_fallbacks[key]
         migrated["predicate_fallbacks"] = migrated_predicates
-        return RuntimePolicyCfg.from_mapping(migrated)
+        return _migrate_pre_eef_policy(migrated, defaults)
     if snapshot.get("schema_version") == _PRE_PLANNER_RUNTIME_POLICY_SCHEMA:
         expected_fields = {
             "schema_version",
@@ -713,7 +769,10 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
             "motion_modifiers",
             "predicate_fallbacks",
         }
-        if set(snapshot) != expected_fields:
+        if set(snapshot) not in (
+            expected_fields,
+            expected_fields | {"end_effector_profile"},
+        ):
             raise ValueError("Previous runtime policy snapshot is malformed.")
         defaults = default_runtime_policy(
             str(agent_config.get("robot_profile", "dual_ur10"))
@@ -750,9 +809,65 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
         ):
             migrated_predicates[key] = defaults.predicate_fallbacks[key]
         migrated["predicate_fallbacks"] = migrated_predicates
-        return RuntimePolicyCfg.from_mapping(migrated)
+        return _migrate_pre_eef_policy(migrated, defaults)
     policy = RuntimePolicyCfg.from_mapping(snapshot)
     return policy
+
+
+def _migrate_pre_eef_policy(
+    snapshot: Mapping[str, Any],
+    defaults: RuntimePolicyCfg,
+) -> RuntimePolicyCfg:
+    """Upgrade v3-v6 grasp fields into separated EEF and sampling policy."""
+    migrated = deepcopy(dict(snapshot))
+    legacy_grasp = deepcopy(dict(migrated.get("grasp", {})))
+    grasp = deepcopy(defaults.grasp)
+    field_map = {
+        "antipodal_n_sample": "antipodal_n_sample",
+        "antipodal_max_angle": "antipodal_max_angle",
+        "max_deviation_angle": "max_deviation_angle",
+        "n_deviated_approach_directions": "n_deviated_approach_directions",
+        "viser_port": "viser_port",
+        "max_decomposition_hulls": "max_decomposition_hulls",
+        "force_grasp_reannotate": "force_grasp_reannotate",
+    }
+    for old_name, new_name in field_map.items():
+        if old_name in legacy_grasp:
+            grasp[new_name] = deepcopy(legacy_grasp[old_name])
+    if "min_open_length" in legacy_grasp:
+        grasp["min_contact_span"] = float(legacy_grasp["min_open_length"])
+    if "max_open_length" in legacy_grasp:
+        grasp["max_contact_span"] = float(legacy_grasp["max_open_length"])
+
+    eef_profile = defaults.end_effector_profile.as_mapping()
+    if "max_open_length" in legacy_grasp:
+        eef_profile["jaw_opening_max"] = float(legacy_grasp["max_open_length"])
+    collision = eef_profile["collision_proxy"]
+    if "finger_length" in legacy_grasp:
+        collision["finger_length"] = float(legacy_grasp["finger_length"])
+    if "point_sample_dense" in legacy_grasp:
+        collision["point_sample_dense"] = float(
+            legacy_grasp["point_sample_dense"]
+        )
+
+    migrated["schema_version"] = RUNTIME_POLICY_SCHEMA
+    migrated["end_effector_profile"] = eef_profile
+    migrated["grasp"] = grasp
+    return RuntimePolicyCfg.from_mapping(migrated)
+
+
+def _validate_eef_binding(
+    policy: RuntimePolicyCfg,
+    bound_profile_id: Any,
+) -> None:
+    if (
+        bound_profile_id is not None
+        and policy.end_effector_profile.profile_id != bound_profile_id
+    ):
+        raise ValueError(
+            "agent_config end-effector binding does not match the resolved "
+            "runtime policy."
+        )
 
 
 def _mapping_hash(value: Mapping[str, Any]) -> str:

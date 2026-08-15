@@ -45,7 +45,11 @@ from embodichain.gen_sim.task_engine import (
     TaskCandidateSet,
     validate_task_candidate,
 )
-from embodichain.gen_sim.scene_bridge import FeasibilityBroker, FeasibilityReport
+from embodichain.gen_sim.scene_bridge import (
+    FeasibilityBroker,
+    FeasibilityReport,
+    validate_feasibility_report,
+)
 
 from .artifacts import (
     ArtifactTransaction,
@@ -77,6 +81,33 @@ __all__ = [
 
 BundleGenerator = Callable[..., GeneratedConfigPaths]
 _PREPARATION_FAILURE_SCHEMA = "action_engine_preparation_failure_v1"
+
+
+def _append_probe_checks(
+    report: FeasibilityReport | None,
+    checks: Sequence[Mapping[str, Any]],
+) -> FeasibilityReport | None:
+    """Attach capability-probe evidence without changing scene contradiction semantics."""
+    if report is None or not checks:
+        return report
+    updated = deepcopy(report)
+    updated["checks"].extend(deepcopy(dict(check)) for check in checks)
+    summary = {status: 0 for status in updated["summary"]}
+    for check in updated["checks"]:
+        summary[str(check["status"])] += 1
+    updated["summary"] = summary
+    statuses = {str(check["status"]) for check in updated["checks"]}
+    if "contradicted" in statuses:
+        updated["status"] = "contradicted"
+    elif statuses <= {"proven"}:
+        updated["status"] = "proven"
+    elif "unknown" in statuses:
+        updated["status"] = "unknown"
+    elif "runtime_probe" in statuses:
+        updated["status"] = "runtime_probe"
+    else:
+        updated["status"] = "unknown"
+    return validate_feasibility_report(updated)
 
 
 def lower_task_candidate(
@@ -476,6 +507,26 @@ class CollaborationCoordinator:
                         action_graph,
                         scene_manifest=adaptation.scene_manifest,
                     )
+                probe = getattr(self.action_agent, "probe_grasp_policy", None)
+                if callable(probe) and adaptation.static_scene_manifest is not None:
+                    probe_checks = probe(
+                        action_graph,
+                        adaptation.static_scene_manifest,
+                        robot_profile=robot_profile,
+                    )
+                    report = _append_probe_checks(report, probe_checks)
+                    unsatisfied = [
+                        check
+                        for check in probe_checks
+                        if check.get("evidence", {}).get("outcome")
+                        == "grasp_policy_unsatisfied"
+                    ]
+                    if unsatisfied:
+                        raise ValueError(
+                            "grasp_policy_unsatisfied: current finite EEF/grasp "
+                            "policy found no complete dual-arm candidate set; "
+                            f"diagnostics={unsatisfied[0]['evidence'].get('diagnostics', {})}"
+                        )
             except (TypeError, ValueError, OSError) as error:
                 failures.append(
                     _candidate_failure(

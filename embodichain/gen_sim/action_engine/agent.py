@@ -122,6 +122,22 @@ class ActionAgent:
             require_executable=True,
         )
 
+    def probe_grasp_policy(
+        self,
+        action_graph: Mapping[str, Any],
+        static_scene_manifest: Mapping[str, Any],
+        *,
+        robot_profile: str,
+    ) -> list[dict[str, Any]]:
+        """Run the optional finite-policy grasp probe used during Prepare."""
+        from .grasp_probe import probe_coordinated_grasp_policy
+
+        return probe_coordinated_grasp_policy(
+            action_graph,
+            static_scene_manifest,
+            robot_profile=robot_profile,
+        )
+
     def execute(
         self,
         action_graph: Mapping[str, Any] | str | Path,

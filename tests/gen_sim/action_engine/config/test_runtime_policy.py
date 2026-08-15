@@ -230,7 +230,7 @@ def test_v3_policy_snapshot_is_migrated_with_default_planner_policy() -> None:
         }
     )
 
-    assert resolved.schema_version == "action_engine_runtime_policy_v6"
+    assert resolved.schema_version == "action_engine_runtime_policy_v7"
     assert resolved.planner == expected.planner
 
 

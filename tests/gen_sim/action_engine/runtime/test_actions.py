@@ -147,8 +147,15 @@ def test_semantics_prewarms_vhacd_cache_before_affordance(
 
     def fake_affordance(**kwargs: Any) -> Affordance:
         events.append("affordance")
-        observed["generator_cfg"] = kwargs["generator_cfg"]
-        observed["gripper_collision_cfg"] = kwargs["gripper_collision_cfg"]
+        provider = kwargs["candidate_provider"]
+        observed["generator_cfg"] = provider.sampling_policy.generator_config(
+            provider.eef_profile
+        )
+        observed["gripper_collision_cfg"] = provider.eef_profile.collision_config(
+            max_decomposition_hulls=(
+                provider.sampling_policy.max_decomposition_hulls
+            )
+        )
         return Affordance()
 
     monkeypatch.setattr(

@@ -142,6 +142,7 @@ def build_agent_config(
         "schema_version": ACTION_ENGINE_CONFIG_SCHEMA,
         "task_name": task_name,
         "robot_profile": profile,
+        "end_effector_profile_id": runtime_policy.end_effector_profile.profile_id,
         "planning_mode": planning_mode,
         "task_spec": TASK_SPEC_FILENAME,
         "scene_requirements": SCENE_REQUIREMENTS_FILENAME,
@@ -244,6 +245,9 @@ def build_fast_gym_config(
     extensions = {
         "action_engine": engine_extension,
         "agent_robot_profile": profile,
+        "agent_end_effector_profile_id": profile_config[
+            "end_effector_profile_id"
+        ],
         "agent_arm_slots": deepcopy(_ARM_SLOTS),
         "agent_static_obstacle_uids": background_uids,
         "agent_dynamic_obstacle_uids": rigid_uids,
@@ -423,6 +427,7 @@ def _profile(profile_id: str) -> dict[str, Any]:
         "aliases",
         "template",
         "robot_family",
+        "end_effector_profile_id",
         "tabletop_clearance",
         "arm_component_z",
         "gripper_open_state",
@@ -431,6 +436,15 @@ def _profile(profile_id: str) -> dict[str, Any]:
     missing = sorted(required - set(profile))
     if missing:
         raise ValueError(f"Robot profile {profile_id!r} is missing fields: {missing}.")
+    policy_eef_id = default_runtime_policy(
+        profile_id
+    ).end_effector_profile.profile_id
+    if profile["end_effector_profile_id"] != policy_eef_id:
+        raise ValueError(
+            f"Robot profile {profile_id!r} binds end effector "
+            f"{profile['end_effector_profile_id']!r}, but runtime defaults bind "
+            f"{policy_eef_id!r}."
+        )
     return profile
 
 

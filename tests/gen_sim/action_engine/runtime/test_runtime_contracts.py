@@ -448,7 +448,7 @@ def test_runtime_policy_v4_migrates_grasp_direction_count() -> None:
         }
     )
 
-    assert policy.schema_version == "action_engine_runtime_policy_v6"
+    assert policy.schema_version == "action_engine_runtime_policy_v7"
     assert policy.grasp["n_deviated_approach_directions"] == 4
 
 
@@ -494,7 +494,7 @@ def test_runtime_policy_v5_migrates_support_geometry_thresholds() -> None:
         }
     )
 
-    assert policy.schema_version == "action_engine_runtime_policy_v6"
+    assert policy.schema_version == "action_engine_runtime_policy_v7"
     assert policy.predicate_fallbacks["support_min_overlap_ratio"] == 0.25
     assert policy.grounding["placement"]["clearance"] == 0.019
     assert policy.grounding["placement"]["candidate_count"] == 5
