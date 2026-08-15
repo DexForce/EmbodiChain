@@ -26,6 +26,7 @@ import pytest
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.generation import scene_understanding
+from embodichain.gen_sim.scene_engine.pipeline.utils import image_segmentation_utils
 from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils import (
     render_asset_mask_id_overlay,
 )
@@ -122,6 +123,26 @@ def test_asset_mask_id_overlay_excludes_the_table_mask(tmp_path: Path) -> None:
     with Image.open(rendered_path) as overlay:
         assert overlay.getpixel((10, 10)) == (0, 0, 0)
         assert overlay.getpixel((377, 180)) != (0, 0, 0)
+
+
+def test_asset_mask_id_label_font_fits_the_mask_bbox() -> None:
+    image_size = (512, 512)
+    mask_bbox = (380, 180, 450, 360)
+    label = "bottle_001"
+    font = image_segmentation_utils._load_asset_id_label_font(
+        image_size=image_size,
+        mask_bbox=mask_bbox,
+        label=label,
+    )
+    label_bounds = image_segmentation_utils._number_label_bounds(
+        draw=ImageDraw.Draw(Image.new("RGBA", image_size)),
+        label=label,
+        center=(0.0, 0.0),
+        font=font,
+        minimum_padding=2,
+    )
+
+    assert label_bounds[2] - label_bounds[0] <= round((mask_bbox[2] - mask_bbox[0]) * 0.9)
 
 
 def test_initial_scene_graph_places_every_asset_on_table(tmp_path: Path) -> None:
