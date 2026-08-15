@@ -157,7 +157,9 @@ def _fork_join_program() -> dict[str, object]:
                 "target": "v_join",
                 "semantic_step_id": "s_right",
                 "actions": [_action("MoveHeldObject", "right_arm", "right_object")],
-                "depends_on": ["e_right_pick"],
+                # Cross-branch dependency not implied by state continuity, so
+                # the renderer must draw a visible dashed dependency arrow.
+                "depends_on": ["e_right_pick", "e_left_pick"],
                 "resources": ["arm:right_arm"],
             },
             {
@@ -250,7 +252,7 @@ def test_fork_join_layout_uses_actor_lanes_and_dependency_links() -> None:
     assert image.width > image.height
     assert _contains_color(image, "#168A78")
     assert _contains_color(image, "#D97706")
-    assert _contains_color(image, "#3973B7")
+    assert _contains_color(image, "#8A94A0")
 
 
 def test_parallel_single_phase_edges_are_rendered_as_a_multigraph() -> None:

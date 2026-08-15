@@ -29,6 +29,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
+from math import hypot
 from typing import Any
 
 import matplotlib
@@ -36,6 +37,7 @@ import matplotlib
 # Select the non-interactive backend before importing any canvas primitives.
 matplotlib.use("Agg", force=True)
 
+from matplotlib import patheffects
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.font_manager import FontProperties, fontManager
 from matplotlib.figure import Figure
@@ -74,7 +76,15 @@ _LEFT = "#168A78"
 _RIGHT = "#D97706"
 _AUTO = "#59636D"
 _COORDINATED = "#7652A5"
-_DEPENDENCY = "#3973B7"
+_DEPENDENCY = "#8A94A0"
+
+# The figures are designed at this display width in inches; every type size
+# below is chosen to stay readable when the PNG is shown at exactly this size.
+_TARGET_WIDTH = 8.0
+_DPI = 300
+_LEVEL_STEP = 1.15
+_NODE_RADIUS = 0.16
+_SPECIAL_NODE_RADIUS = 0.20
 _SUCCESS = "#25834B"
 _FAILED = "#C43E3E"
 _SKIPPED = "#8B949C"
@@ -323,14 +333,14 @@ def _render_chain(data: _GraphData) -> bytes:
     nodes = [str(data.program["start"])]
     nodes.extend(str(edge["target"]) for edge in edges)
 
-    slots_per_row = 5
+    slots_per_row = 4
     row_count = (len(nodes) + slots_per_row - 1) // slots_per_row
-    width = 16.0
-    height = max(4.8, 2.6 + row_count * 2.1)
+    width = _TARGET_WIDTH
+    height = max(3.4, 2.0 + row_count * 1.55)
     figure, axis = _new_figure(width, height)
     try:
         _draw_header(axis, data, width)
-        left, right, first_y = 1.0, width - 1.0, 2.15
+        left, right, first_y = 0.7, width - 0.7, 2.05
         spacing = (right - left) / (slots_per_row - 1)
         positions: dict[str, tuple[float, float]] = {}
         for index, node_id in enumerate(nodes):
@@ -338,7 +348,7 @@ def _render_chain(data: _GraphData) -> bytes:
             visual_column = column if row % 2 == 0 else slots_per_row - 1 - column
             positions[node_id] = (
                 left + visual_column * spacing,
-                first_y + row * 2.05,
+                first_y + row * 1.55,
             )
 
         for edge in edges:
@@ -346,27 +356,20 @@ def _render_chain(data: _GraphData) -> bytes:
             target = positions[str(edge["target"])]
             lane = _edge_lane(edge, data)
             color = _edge_color(str(edge["id"]), lane, data.runtime)
-            midpoint = _midpoint(source, target)
-            vertical = abs(source[0] - target[0]) < 0.1
+            label_position, label_align = _edge_label_position(source, target, width)
             _draw_labeled_edge(
                 axis,
                 source,
                 target,
                 color=color,
                 label=_edge_label(edge, data),
-                label_position=(
-                    (midpoint[0] - 1.48, midpoint[1])
-                    if vertical
-                    else (midpoint[0], midpoint[1] - 0.38)
-                ),
-                font_size=5.4,
+                label_position=label_position,
+                label_align=label_align,
             )
 
         for index, node_id in enumerate(nodes):
             _draw_state_node(
                 axis,
-                node_id,
-                data.node_by_id[node_id],
                 positions[node_id],
                 start=node_id == str(data.program["start"]),
                 goal=node_id == str(data.program["goal"]),
@@ -375,6 +378,7 @@ def _render_chain(data: _GraphData) -> bytes:
                 index=index,
             )
 
+        _draw_legend(axis, width, height - 0.28)
         return _figure_png_bytes(figure)
     finally:
         figure.clear()
@@ -384,29 +388,23 @@ def _render_dag(data: _GraphData) -> bytes:
     """Render forks and joins against persistent actor swimlanes."""
     levels = _dag_levels(data.graph)
     maximum_level = max(levels.values(), default=0)
-    width = 15.6
-    height = max(6.0, 3.5 + maximum_level * 2.15)
+    width = _TARGET_WIDTH
+    height = max(5.2, 2.15 + maximum_level * _LEVEL_STEP + 1.35)
     figure, axis = _new_figure(width, height)
     try:
         _draw_header(axis, data, width)
-        lane_centers = {"left": 2.6, "auto": 7.8, "right": 13.0}
-        _draw_swimlanes(axis, width, height, lane_centers)
+        boundaries, lane_centers = _lane_geometry(width)
+        _draw_swimlanes(axis, height, boundaries, lane_centers)
         positions = _dag_positions(data, levels, lane_centers)
 
-        # Dependency arrows are drawn first and remain visibly distinct from
-        # physical state transitions through color and dash pattern.
-        edge_midpoints = {
-            edge_id: _midpoint(
-                positions[str(edge["source"])],
-                positions[str(edge["target"])],
-            )
-            for edge_id, edge in data.edge_by_id.items()
-        }
-        for prerequisite_id, dependent_id in _dependency_pairs(data):
+        # Dependency arrows are drawn first and stay visually subordinate to
+        # physical state transitions; only constraints not already implied by
+        # the state topology are shown.
+        for source_id, target_id in _visible_dependencies(data):
             _draw_dependency_arrow(
                 axis,
-                edge_midpoints[prerequisite_id],
-                edge_midpoints[dependent_id],
+                positions[source_id],
+                positions[target_id],
             )
 
         pair_groups: defaultdict[tuple[str, str], list[str]] = defaultdict(list)
@@ -419,32 +417,28 @@ def _render_dag(data: _GraphData) -> bytes:
             source_id = str(edge["source"])
             target_id = str(edge["target"])
             lane = _edge_lane(edge, data)
-            midpoint = _midpoint(positions[source_id], positions[target_id])
-            direction = -1.0 if midpoint[0] < 7.8 else 1.0
-            if abs(positions[source_id][0] - positions[target_id][0]) < 0.4:
-                direction = 1.0
             parallel_ids = pair_groups[(source_id, target_id)]
             parallel_index = parallel_ids.index(edge_id)
             curvature = (parallel_index - (len(parallel_ids) - 1) / 2.0) * 0.20
+            label_position, label_align = _edge_label_position(
+                positions[source_id],
+                positions[target_id],
+                width,
+            )
             _draw_labeled_edge(
                 axis,
                 positions[source_id],
                 positions[target_id],
                 color=_edge_color(edge_id, lane, data.runtime),
                 label=_edge_label(edge, data),
-                label_position=(
-                    midpoint[0] + 0.52 * direction + curvature * 3.4,
-                    midpoint[1] - 0.08,
-                ),
-                font_size=5.15,
+                label_position=label_position,
+                label_align=label_align,
                 curvature=curvature,
             )
 
         for index, node_id in enumerate(nx.topological_sort(data.graph)):
             _draw_state_node(
                 axis,
-                str(node_id),
-                data.node_by_id[str(node_id)],
                 positions[str(node_id)],
                 start=str(node_id) == str(data.program["start"]),
                 goal=str(node_id) == str(data.program["goal"]),
@@ -453,9 +447,67 @@ def _render_dag(data: _GraphData) -> bytes:
                 index=index,
             )
 
+        _draw_legend(axis, width, height - 0.28)
         return _figure_png_bytes(figure)
     finally:
         figure.clear()
+
+
+def _lane_geometry(
+    width: float,
+) -> tuple[dict[str, tuple[float, float]], dict[str, float]]:
+    """Even thirds for lane boundaries with derived actor centers."""
+    margin = 0.35
+    area = width - 2 * margin
+    first = margin + area / 3.0
+    second = margin + 2 * area / 3.0
+    boundaries = {
+        "left": (margin, first),
+        "auto": (first, second),
+        "right": (second, width - margin),
+    }
+    centers = {lane: (left + right) / 2.0 for lane, (left, right) in boundaries.items()}
+    return boundaries, centers
+
+
+def _edge_label_position(
+    source: tuple[float, float],
+    target: tuple[float, float],
+    width: float,
+) -> tuple[tuple[float, float], str]:
+    """Place halo labels beside arrows instead of boxing them on the edge."""
+    midpoint = _midpoint(source, target)
+    dx = target[0] - source[0]
+    dy = target[1] - source[1]
+    if abs(dx) < 0.3:
+        # Keep vertical-arrow labels inside the canvas: right side on the left
+        # half of the figure, left side on the right half.
+        if midpoint[0] > width / 2.0:
+            return (midpoint[0] - 0.14, midpoint[1]), "right"
+        return (midpoint[0] + 0.14, midpoint[1]), "left"
+    length = hypot(dx, dy) or 1.0
+    normal_x, normal_y = dy / length, -dx / length
+    if normal_x < 0:
+        normal_x, normal_y = -normal_x, -normal_y
+    if abs(normal_x) < 0.2 and normal_y > 0:
+        # Horizontal arrows keep their label above the line in both directions.
+        normal_x, normal_y = -normal_x, -normal_y
+    return (
+        (midpoint[0] + normal_x * 0.16, midpoint[1] + normal_y * 0.16),
+        "center",
+    )
+
+
+def _visible_dependencies(data: _GraphData) -> list[tuple[str, str]]:
+    """Node anchors for dependencies not implied by state continuity."""
+    result: list[tuple[str, str]] = []
+    for prerequisite_id, dependent_id in _dependency_pairs(data):
+        source = str(data.edge_by_id[prerequisite_id]["target"])
+        target = str(data.edge_by_id[dependent_id]["source"])
+        if source == target or nx.has_path(data.graph, source, target):
+            continue
+        result.append((source, target))
+    return result
 
 
 def _dag_levels(graph: nx.MultiDiGraph) -> dict[str, int]:
@@ -510,10 +562,10 @@ def _dag_positions(
         # Small symmetric offsets prevent same-level nodes from hiding each
         # other while keeping every node visibly inside its actor lane.
         offsets = [
-            (index - (len(ordered) - 1) / 2.0) * 0.72 for index in range(len(ordered))
+            (index - (len(ordered) - 1) / 2.0) * 0.55 for index in range(len(ordered))
         ]
         for node_id, offset in zip(ordered, offsets, strict=True):
-            result[node_id] = (center + offset, 2.35 + level * 2.15)
+            result[node_id] = (center + offset, 2.15 + level * _LEVEL_STEP)
     return result
 
 
@@ -596,118 +648,55 @@ def _edge_color(
 
 
 def _edge_label(edge: Mapping[str, Any], data: _GraphData) -> str:
+    """One-line semantic phrase; execution details live in the JSON artifacts."""
     edge_id = str(edge["id"])
     step = data.step_by_id[str(edge["semantic_step_id"])]
-    lane = _edge_lane(edge, data)
-    badge = {
-        "left": "L",
-        "right": "R",
-        "coordinated": "LR",
-        "auto": "A",
-    }[lane]
     status = data.runtime.edge_status.get(edge_id) or data.runtime.step_status.get(
         str(step["id"])
     )
     status_badge = f" [{_STATUS_BADGES.get(status, status.upper())}]" if status else ""
-    action_names = [
-        str(action.get("atomic_action_class", "action"))
-        for action in edge.get("actions", [])
-    ]
-    action_text = " + ".join(action_names[:2])
-    if len(action_names) > 2:
-        action_text += f" +{len(action_names) - 2}"
-    action = edge["actions"][0]
-    binding = _binding_summary(action.get("target_binding", {}))
-    policy = _motion_summary(action.get("motion_policy"))
-    semantic = f"{step['operator']} : {step['object']}"
-    return "\n".join(
-        (
-            _clip(f"{edge_id} [{badge}]{status_badge}", 34),
-            _clip(f"{action_text} | {semantic}", 42),
-            _clip(f"{binding} | {policy}", 42),
-        )
-    )
-
-
-def _motion_summary(value: Any) -> str:
-    if not isinstance(value, Mapping):
-        return "base"
-    modifiers = value.get("modifiers", ())
-    if not isinstance(modifiers, (list, tuple)) or not modifiers:
-        return "base"
-    labels = [
-        f"{modifier.get('type')}:{modifier.get('mode')}"
-        for modifier in modifiers
-        if isinstance(modifier, Mapping)
-    ]
-    return _clip(" + ".join(labels) or "base", 28)
-
-
-def _binding_summary(value: Any) -> str:
-    if not isinstance(value, Mapping):
-        return "symbolic target"
-    kind = str(value.get("kind", "target"))
-    details: list[str] = []
-    for key in (
-        "object",
-        "reference_object",
-        "support_object",
-        "relation",
-        "phase",
-        "slot",
-        "layer",
-    ):
-        if key in value:
-            details.append(f"{key}={value[key]}")
-        if len(details) == 2:
-            break
-    return f"{kind} ({', '.join(details)})" if details else kind
+    return _clip(f"{step['operator']}: {step['object']}", 40) + status_badge
 
 
 def _draw_header(axis: Any, data: _GraphData, width: float) -> None:
     status = data.runtime.graph_status
     status_text = f"  [{status.upper()}]" if status else ""
     axis.text(
-        0.55,
-        0.45,
+        0.4,
+        0.42,
         _clip(f"ACTION ENGINE / {data.program['task']}{status_text}", 84),
         ha="left",
         va="center",
         color=_INK,
-        fontproperties=_font(13.0, "bold"),
+        fontproperties=_font(10.0, "bold"),
         zorder=20,
     )
     axis.text(
-        0.55,
-        0.90,
+        0.4,
+        0.80,
         _clip(str(data.program["goal_description"]), 115),
         ha="left",
         va="top",
         color=_MUTED,
-        fontproperties=_font(7.6),
+        fontproperties=_font(7.0),
         linespacing=1.25,
         zorder=20,
     )
     axis.plot(
-        [0.55, width - 0.55],
-        [1.35, 1.35],
+        [0.4, width - 0.4],
+        [1.28, 1.28],
         color=_BORDER,
-        linewidth=0.8,
+        linewidth=0.7,
         zorder=19,
     )
 
 
 def _draw_swimlanes(
     axis: Any,
-    width: float,
     height: float,
+    boundaries: Mapping[str, tuple[float, float]],
     centers: Mapping[str, float],
 ) -> None:
-    boundaries = {
-        "left": (0.55, 5.15),
-        "auto": (5.25, 10.35),
-        "right": (10.45, width - 0.55),
-    }
     for lane in ("left", "auto", "right"):
         left, right = boundaries[lane]
         axis.add_patch(
@@ -718,7 +707,7 @@ def _draw_swimlanes(
                 boxstyle="round,pad=0.0,rounding_size=0.05",
                 facecolor=_LANE_BACKGROUNDS[lane],
                 edgecolor=_BORDER,
-                linewidth=0.7,
+                linewidth=0.6,
                 zorder=-10,
             )
         )
@@ -726,18 +715,56 @@ def _draw_swimlanes(
             [left, right],
             [1.50, 1.50],
             color=_LANE_COLORS[lane],
-            linewidth=2.3,
+            linewidth=1.1,
             zorder=-9,
         )
         axis.text(
             centers[lane],
-            1.76,
+            1.74,
             _LANE_LABELS[lane],
             ha="center",
             va="center",
             color=_LANE_COLORS[lane],
-            fontproperties=_font(7.0, "bold"),
+            fontproperties=_font(6.8, "bold"),
             zorder=10,
+        )
+
+
+def _draw_legend(axis: Any, width: float, y: float) -> None:
+    """Single-row edge-type legend; START/GOAL labels are self-explanatory."""
+    entries = (
+        ("left", "left action", False),
+        ("right", "right action", False),
+        ("coordinated", "coordinated", False),
+        ("auto", "auto / world", False),
+        ("dependency", "dependency", True),
+    )
+    slot = 1.32
+    start = (width - slot * len(entries)) / 2.0
+    for index, (key, label, dashed) in enumerate(entries):
+        x = start + index * slot
+        color = _DEPENDENCY if dashed else _LANE_COLORS[key]
+        axis.add_patch(
+            FancyArrowPatch(
+                (x, y),
+                (x + 0.3, y),
+                arrowstyle="-|>",
+                mutation_scale=7,
+                color=color,
+                linewidth=1.0,
+                linestyle=(0, (3.0, 2.6)) if dashed else "-",
+                zorder=20,
+            )
+        )
+        axis.text(
+            x + 0.38,
+            y,
+            label,
+            ha="left",
+            va="center",
+            color=_MUTED,
+            fontproperties=_font(6.2),
+            zorder=20,
         )
 
 
@@ -749,20 +776,20 @@ def _draw_labeled_edge(
     color: str,
     label: str,
     label_position: tuple[float, float],
-    font_size: float,
+    label_align: str = "center",
     curvature: float = 0.0,
 ) -> None:
-    """Draw one solid state transition and its compact symbolic label."""
+    """Draw one solid state transition and its halo-backed one-line label."""
     axis.add_patch(
         FancyArrowPatch(
             source,
             target,
             arrowstyle="-|>",
-            mutation_scale=11,
+            mutation_scale=9,
             color=color,
-            linewidth=1.7,
-            shrinkA=17,
-            shrinkB=17,
+            linewidth=1.15,
+            shrinkA=12,
+            shrinkB=12,
             connectionstyle=f"arc3,rad={curvature}",
             zorder=3,
         )
@@ -770,18 +797,11 @@ def _draw_labeled_edge(
     axis.text(
         *label_position,
         label,
-        ha="center",
+        ha=label_align,
         va="center",
         color=_INK,
-        fontproperties=_font(font_size),
-        linespacing=1.12,
-        bbox={
-            "boxstyle": "round,pad=0.22",
-            "facecolor": "#FFFFFF",
-            "edgecolor": color,
-            "linewidth": 0.55,
-            "alpha": 0.96,
-        },
+        fontproperties=_font(6.5),
+        path_effects=[patheffects.withStroke(linewidth=1.7, foreground=_BACKGROUND)],
         zorder=8,
     )
 
@@ -798,34 +818,21 @@ def _draw_dependency_arrow(
             source,
             target,
             arrowstyle="-|>",
-            mutation_scale=8,
+            mutation_scale=7,
             color=_DEPENDENCY,
-            linewidth=1.25,
-            linestyle=(0, (2.2, 2.2)),
-            shrinkA=5,
-            shrinkB=5,
-            connectionstyle="arc3,rad=-0.17",
-            alpha=0.95,
+            linewidth=0.9,
+            linestyle=(0, (3.0, 2.6)),
+            shrinkA=12,
+            shrinkB=12,
+            connectionstyle="arc3,rad=-0.2",
+            alpha=0.9,
             zorder=1,
         )
-    )
-    midpoint = _midpoint(source, target)
-    axis.text(
-        midpoint[0],
-        midpoint[1] + 0.22,
-        "DEP",
-        ha="center",
-        va="center",
-        color=_DEPENDENCY,
-        fontproperties=_font(4.8, "bold"),
-        zorder=2,
     )
 
 
 def _draw_state_node(
     axis: Any,
-    node_id: str,
-    node: Mapping[str, Any],
     center: tuple[float, float],
     *,
     start: bool,
@@ -836,14 +843,14 @@ def _draw_state_node(
 ) -> None:
     fill = "#DDEFEA" if start else ("#E7F2DD" if goal else "#FFFFFF")
     edge = _SUCCESS if goal else (_LEFT if start else _INK)
-    radius = 0.29 if (start or goal or fork or join) else 0.24
+    radius = _SPECIAL_NODE_RADIUS if (start or goal or fork or join) else _NODE_RADIUS
     axis.add_patch(
         Circle(
             center,
             radius=radius,
             facecolor=fill,
             edgecolor=edge,
-            linewidth=1.6,
+            linewidth=1.1,
             zorder=12,
         )
     )
@@ -854,7 +861,7 @@ def _draw_state_node(
         ha="center",
         va="center",
         color=_INK,
-        fontproperties=_font(6.2, "bold"),
+        fontproperties=_font(6.5, "bold"),
         zorder=13,
     )
     role = (
@@ -862,22 +869,21 @@ def _draw_state_node(
         if start
         else ("GOAL" if goal else ("FORK" if fork else "JOIN" if join else ""))
     )
-    semantic = _clip(str(node.get("semantic", node_id)), 27)
-    axis.text(
-        center[0],
-        center[1] + 0.43,
-        "\n".join(part for part in (role, semantic) if part),
-        ha="center",
-        va="top",
-        color=edge if role else _MUTED,
-        fontproperties=_font(5.3, "bold" if role else "normal"),
-        linespacing=1.08,
-        zorder=13,
-    )
+    if role:
+        axis.text(
+            center[0],
+            center[1] + radius + 0.12,
+            role,
+            ha="center",
+            va="top",
+            color=edge,
+            fontproperties=_font(6.0, "bold"),
+            zorder=13,
+        )
 
 
 def _new_figure(width: float, height: float) -> tuple[Figure, Any]:
-    figure = Figure(figsize=(width, height), dpi=150, facecolor=_BACKGROUND)
+    figure = Figure(figsize=(width, height), dpi=_DPI, facecolor=_BACKGROUND)
     axis = figure.subplots()
     axis.set_facecolor(_BACKGROUND)
     axis.set_axis_off()
