@@ -349,16 +349,21 @@ def render_asset_mask_id_overlay(
         )
 
     draw = ImageDraw.Draw(overlay)
-    font = _load_label_font(image.size)
     for asset_id, mask in decoded_masks:
         bbox = mask.getbbox()
         if bbox is None:
             raise ValueError(f"Asset mask {asset_id!r} is empty.")
+        font = _load_asset_id_label_font(
+            image_size=image.size,
+            mask_bbox=bbox,
+            label=asset_id,
+        )
         _draw_number_label(
             draw=draw,
             label=asset_id,
             center=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
             font=font,
+            minimum_padding=2,
         )
 
     resolved_output_path = Path(output_path).expanduser().resolve()
@@ -504,6 +509,47 @@ def _union_parent(parents: list[int], first_index: int, second_index: int) -> No
 
 def _load_label_font(image_size: tuple[int, int]) -> ImageFont.ImageFont:
     font_size = max(16, round(min(image_size) / 32))
+    return _load_label_font_at_size(font_size)
+
+
+def _load_asset_id_label_font(
+    *,
+    image_size: tuple[int, int],
+    mask_bbox: tuple[int, int, int, int],
+    label: str,
+) -> ImageFont.ImageFont:
+    """Choose an ID-label font constrained by both image and mask dimensions."""
+    # The image sets the readable upper bound; the individual mask then caps it.
+    image_font_size = min(32, max(8, round(min(image_size) / 48)))
+    mask_width = mask_bbox[2] - mask_bbox[0]
+    mask_height = mask_bbox[3] - mask_bbox[1]
+    maximum_label_width = max(24, round(mask_width * 0.9))
+    maximum_label_height = max(16, round(mask_height * 0.75))
+    # Measure the complete text-and-background rectangle, not glyphs alone.
+    probe_draw = ImageDraw.Draw(Image.new("RGBA", image_size))
+    smallest_font = _load_label_font_at_size(6)
+    for font_size in range(image_font_size, 5, -1):
+        font = _load_label_font_at_size(font_size)
+        label_bounds = _number_label_bounds(
+            draw=probe_draw,
+            label=label,
+            center=(0.0, 0.0),
+            font=font,
+            minimum_padding=2,
+        )
+        if (
+            label_bounds[2] - label_bounds[0] <= maximum_label_width
+            and label_bounds[3] - label_bounds[1] <= maximum_label_height
+        ):
+            return font
+        smallest_font = font
+    return smallest_font
+
+
+def _load_label_font_at_size(font_size: int) -> ImageFont.ImageFont:
+    """Load the shared bold label font at one validated pixel size."""
+    if font_size < 1:
+        raise ValueError("Label font size must be positive.")
     try:
         return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
     except OSError:
@@ -516,10 +562,15 @@ def _draw_number_label(
     label: str,
     center: tuple[float, float],
     font: ImageFont.ImageFont,
+    minimum_padding: int = 4,
 ) -> None:
     """Draw a numbered label with red background and white text at the given center position."""
     label_bounds = _number_label_bounds(
-        draw=draw, label=label, center=center, font=font
+        draw=draw,
+        label=label,
+        center=center,
+        font=font,
+        minimum_padding=minimum_padding,
     )
     label_box = draw.textbbox((0, 0), label, font=font)
     label_width = label_box[2] - label_box[0]
@@ -541,12 +592,15 @@ def _number_label_bounds(
     label: str,
     center: tuple[float, float],
     font: ImageFont.ImageFont,
+    minimum_padding: int = 4,
 ) -> tuple[int, int, int, int]:
     """Return the red label rectangle bounds for a label centre."""
     label_box = draw.textbbox((0, 0), label, font=font)
     label_width = label_box[2] - label_box[0]
     label_height = label_box[3] - label_box[1]
-    padding = max(4, round(max(label_width, label_height) / 4))
+    if minimum_padding < 0:
+        raise ValueError("Label minimum padding must be non-negative.")
+    padding = max(minimum_padding, round(max(label_width, label_height) / 4))
     x = center[0] - label_width / 2
     y = center[1] - label_height / 2
     return (
