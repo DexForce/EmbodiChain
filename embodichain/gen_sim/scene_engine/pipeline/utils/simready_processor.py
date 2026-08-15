@@ -32,6 +32,18 @@ from embodichain.gen_sim.scene_engine.core.scene_object import (
     ObjectPhysics,
     SceneObject,
 )
+from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
+    OpenAICompatibleVLM,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
+    query_vlm_object_rotation_and_target_size,
+    compute_uniform_xy_scale_for_target,
+    render_object_front_top_views,
+    rotate_glb_about_x_axis,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
+    TableSupportSurfaceDetector,
+)
 from embodichain.utils.logger import log_info
 
 _TABLE_PHYSICS_ATTRS = {
@@ -53,16 +65,19 @@ _FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and exp
 
 
 @dataclass(frozen=True)
-class SimReadySceneProcessorConfig:
+class SimReadyProcessorConfig:
     """Object-category policy for SimReady mesh canonicalization."""
+
+    use_vlm_scale: bool = False  # Use the VLM-selected asset scale.
+    use_vlm_rotation: bool = False  # Use the VLM-selected asset rotation.
 
     upright_container_id_tokens: frozenset[str] = frozenset(
         {"bottle", "can", "jar", "flask", "thermos"}
     )  # Object-id tokens that enable upright-container standardization.
 
 
-class SimReadySceneProcessor:
-    """Create SimReady GLBs and layouts for one table and its scene assets."""
+class SimReadyProcessor:
+    """Create SimReady GLBs and layouts for scene objects."""
 
     def __init__(
         self,
@@ -71,7 +86,9 @@ class SimReadySceneProcessor:
         coarse_layout_by_id: dict[str, dict[str, object]],
         coarse_geometry_root: str | Path,
         simready_geometry_root: str | Path,
-        config: SimReadySceneProcessorConfig | None = None,
+        debug_output_root: str | Path | None = None,
+        config: SimReadyProcessorConfig | None = None,
+        vlm_client: OpenAICompatibleVLM | None = None,
     ) -> None:
         self.scene = scene
         self.coarse_layout_by_id = coarse_layout_by_id
@@ -79,11 +96,22 @@ class SimReadySceneProcessor:
         self.simready_geometry_root = (
             Path(simready_geometry_root).expanduser().resolve()
         )
+        # Save rendered debug images.
+        self.debug_output_root = (
+            Path(debug_output_root).expanduser().resolve()
+            if debug_output_root is not None
+            else None
+        )
         self.simready_table_layout: dict[str, object] | None = None
         self.simready_assets_layout: list[dict[str, object]] | None = None
-        self.config = config if config is not None else SimReadySceneProcessorConfig()
+        self.config = config if config is not None else SimReadyProcessorConfig()
+        self.vlm_client = vlm_client
         if not self.config.upright_container_id_tokens:
             raise ValueError("upright_container_id_tokens must not be empty.")
+        if (
+            self.config.use_vlm_scale or self.config.use_vlm_rotation
+        ) and vlm_client is None:
+            raise ValueError("vlm_client is required when VLM transforms are enabled.")
 
     def process_table(self) -> dict[str, object]:
         """Process the required scene table and return its SimReady layout."""
@@ -104,7 +132,13 @@ class SimReadySceneProcessor:
         self.simready_assets_layout = processed_assets
         return self.simready_assets_layout
 
-    def _process_object(self, scene_object: SceneObject) -> dict[str, object]:
+    def _process_object(
+        self,
+        scene_object: SceneObject,
+        *,
+        scale: object | None = None,
+        rot: object | None = None,
+    ) -> dict[str, object]:
         """Canonicalize one coarse object and write its SimReady GLB."""
         object_id = scene_object.id
         object_role = scene_object.kind
@@ -113,12 +147,18 @@ class SimReadySceneProcessor:
         coarse_layout = self.coarse_layout_by_id.get(object_id)
         if coarse_layout is None:
             raise ValueError(f"Coarse layout does not contain object {object_id!r}.")
+        prepared_glb_path, vlm_scale = self._prepare_vlm_rotated_glb(scene_object)
+        selected_scale = scale
+        if selected_scale is None:
+            selected_scale = vlm_scale or coarse_layout.get("scale")
         simready_mesh, simready_transform = self._canonicalize_object_mesh(
-            coarse_glb_path=self.coarse_geometry_root / f"{object_id}.glb",
+            coarse_glb_path=prepared_glb_path,
             object_id=object_id,
-            rot=coarse_layout.get("rot"),
+            # An enabled external rotation replaces the coarse-layout rotation.
+            rot=coarse_layout.get("rot") if rot is None else rot,
             pos=coarse_layout.get("pos"),
-            scale=coarse_layout.get("scale"),
+            # An enabled VLM scale replaces the coarse-layout scale.
+            scale=selected_scale,
         )
         output_path = self.simready_geometry_root / f"{object_id}.glb"
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,8 +169,95 @@ class SimReadySceneProcessor:
             )
         scene_object.simready_glb_path = str(output_path)
         scene_object.physics = self._fixed_physics_for_kind(object_role)
+        # For table. (currently the id is fixed into table)
+        if object_role == "table":
+            # Detect and persist all reusable tabletop support geometry at SimReady time.
+            support_detector = TableSupportSurfaceDetector(
+                table_world_mesh=self._z_up_table_mesh(simready_mesh),
+                debug_output_root=self.debug_output_root,
+            )
+            support_region = support_detector.detect()
+            scene_object.support_surface_z = support_region.top_z
+            scene_object.support_contour_xy = [
+                [float(x), float(y)]
+                for x, y in support_region.support_polygon.exterior.coords[:-1]
+            ]
+            scene_object.support_optimization_rect_xy = [
+                [float(x), float(y)]
+                for x, y in support_region.optimization_rectangle.exterior.coords[:-1]
+            ]
+            if self.debug_output_root is not None:
+                # Keep the 3D selected surface and 2D contour diagnostics beside SimReady output.
+                support_detector.save_support_surface_debug_images()
         log_info(f"Created SimReady {object_role}: {object_id!r}.")
         return {"id": object_id, **simready_transform}
+
+    @staticmethod
+    def _z_up_table_mesh(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+        """Convert one canonical y-up GLB mesh into the detector's z-up frame."""
+        y_up_to_z_up = np.eye(4)
+        y_up_to_z_up[:3, :3] = Rotation.from_euler("x", 90.0, degrees=True).as_matrix()
+        z_up_mesh = mesh.copy()
+        z_up_mesh.apply_transform(y_up_to_z_up)
+        return z_up_mesh
+
+    def _prepare_vlm_rotated_glb(
+        self, scene_object: SceneObject
+    ) -> tuple[Path, list[float] | None]:
+        """Render, query, and optionally bake the VLM-selected x-axis rotation."""
+        coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
+        if not (self.config.use_vlm_scale or self.config.use_vlm_rotation):
+            return coarse_path, None
+        decision = self._vlm_transform_for_object(
+            scene_object,
+            use_scale=self.config.use_vlm_scale,
+            use_rotation=self.config.use_vlm_rotation,
+        )
+        rotate_about_x = bool(decision["rotate_about_x"])
+        vlm_scale = compute_uniform_xy_scale_for_target(
+            glb_path=coarse_path,
+            target_xy_size_cm=decision["target_xy_size_cm"],
+            rotate_about_x=rotate_about_x,
+        )
+        rotated_path = rotate_glb_about_x_axis(
+            input_path=coarse_path,
+            output_path=self.simready_geometry_root
+            / "vlm_rotated"
+            / f"{scene_object.id}.glb",
+            rotate=rotate_about_x,
+        )
+        # The scale flag controls whether this VLM-derived isotropic scale is used.
+        # Apply the same factor on x, y, and z to preserve the asset's proportions.
+        return (
+            rotated_path,
+            [vlm_scale, vlm_scale, vlm_scale] if self.config.use_vlm_scale else None,
+        )
+
+    def _vlm_transform_for_object(
+        self,
+        scene_object: SceneObject,
+        *,
+        use_scale: bool,
+        use_rotation: bool,
+    ) -> dict[str, object]:
+        """Render the object and return the validated VLM pose decision."""
+        del use_scale, use_rotation
+        assert self.vlm_client is not None
+        coarse_path = self.coarse_geometry_root / f"{scene_object.id}.glb"
+        needed_layout = "This asset needs to be place on the table that will not move a lot after simulation."
+        debug_root = self.simready_geometry_root.parent / "debug"
+        rendered_path = render_object_front_top_views(
+            glb_path=coarse_path,
+            output_path=debug_root / "vlm_views" / f"{scene_object.id}.png",
+        )
+        # Both semantic questions are always answered in one multimodal call.
+        return query_vlm_object_rotation_and_target_size(
+            scene_object_description=scene_object.description,
+            needed_layout=needed_layout,
+            rendered_views_path=rendered_path,
+            vlm_client=self.vlm_client,
+            debug_output_path=debug_root / "vlm_outputs" / f"{scene_object.id}.json",
+        )
 
     @staticmethod
     def _fixed_physics_for_kind(kind: str) -> ObjectPhysics:
@@ -317,8 +444,8 @@ class SimReadySceneProcessor:
         lower_points = standardized_points[
             standardized_points[:, 2] < axis_min + axis_range * 0.2
         ]
-        upper_volume = SimReadySceneProcessor._convex_hull_volume(upper_points)
-        lower_volume = SimReadySceneProcessor._convex_hull_volume(lower_points)
+        upper_volume = SimReadyProcessor._convex_hull_volume(upper_points)
+        lower_volume = SimReadyProcessor._convex_hull_volume(lower_points)
 
         # Bottles usually have a smaller top (neck) than bottom; flip if necessary.
         if upper_volume > lower_volume:
