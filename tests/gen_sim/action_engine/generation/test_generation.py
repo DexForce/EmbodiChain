@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 import sys
@@ -26,9 +27,6 @@ from types import ModuleType
 import numpy as np
 import pytest
 
-from embodichain.gen_sim.action_engine.domain import (
-    TASK_AGENT_SCHEMA,
-)
 from embodichain.gen_sim.action_engine.protocol import (
     SCENE_REQUIREMENTS_SCHEMA,
     TASK_SPEC_SCHEMA,
@@ -49,6 +47,7 @@ from embodichain.gen_sim.action_engine.generation.config_builder import (
 )
 from embodichain.gen_sim.action_engine.generation.generator import (
     _add_ab_camera_requirements,
+    _scene_requirements_from_bindings,
     _task_spec_role_bindings,
     generate_action_engine_config,
 )
@@ -57,7 +56,7 @@ from embodichain.gen_sim.action_engine.generation.source_scene import (
     resolve_gym_config_path,
     resolve_source_scene,
 )
-from embodichain.gen_sim.action_engine.planning import plan_task
+from embodichain.gen_sim.action_engine.tasks import GroundedTaskSpec
 
 
 @pytest.fixture
@@ -753,25 +752,43 @@ def test_artifact_writer_creates_ab_branch_directory(tmp_path: Path) -> None:
     assert json.loads(paths.seed_task_graph.read_text(encoding="utf-8")) == payload
 
 
-def test_generation_calls_planner_compiler_and_renderer_once(
+def test_generation_calls_interpreter_recipe_and_renderer_once(
     gym_export: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from embodichain.gen_sim.action_engine import compiler, tasks
+    from embodichain.gen_sim.action_engine import tasks
     from embodichain.gen_sim.action_engine.generation import generator
 
     planner_call: dict[str, object] = {}
+    recipe_calls: list[tuple[object, object]] = []
     rendered: dict[str, object] = {}
     published: dict[str, object] = {}
 
-    real_plan = tasks.plan_grounded_task_spec
-
-    def fake_plan_task_spec(**kwargs):
+    def fake_interpret_and_ground(**kwargs):
         planner_call.update(kwargs)
-        return real_plan(**kwargs)
+        task_spec = _existing_v2_task_spec(str(kwargs["task_name"]))
+        task_spec["instruction"] = str(kwargs["task_description"])
+        bindings = {"object_01": "interact_can"}
+        requirements = _scene_requirements_from_bindings(
+            str(kwargs["task_name"]),
+            kwargs["scene_objects"],
+            bindings,
+        )
+        return GroundedTaskSpec(task_spec, requirements, bindings)
 
-    monkeypatch.setattr(tasks, "plan_grounded_task_spec", fake_plan_task_spec)
+    monkeypatch.setattr(
+        tasks,
+        "interpret_and_ground_task_spec",
+        fake_interpret_and_ground,
+    )
+    real_recipe = tasks.instantiate_seed_graph
+
+    def capture_recipe(task_spec, role_bindings):
+        recipe_calls.append((task_spec, role_bindings))
+        return real_recipe(task_spec, role_bindings)
+
+    monkeypatch.setattr(tasks, "instantiate_seed_graph", capture_recipe)
     renderer_module = ModuleType(
         "embodichain.gen_sim.action_engine.graph_visualization"
     )
@@ -789,7 +806,6 @@ def test_generation_calls_planner_compiler_and_renderer_once(
         return real_writer(*args, **kwargs)
 
     monkeypatch.setattr(generator, "write_generation_artifacts", capture_writer)
-    assert callable(compiler.compile_task_agent)
     output_dir = tmp_path / "configs"
     paths = generate_action_engine_config(
         gym_export,
@@ -797,12 +813,12 @@ def test_generation_calls_planner_compiler_and_renderer_once(
         task_name="line_task",
         task_description="扶正红色易拉罐。",
         robot_profile="franka",
-        instruction_parser="deterministic",
     )
 
     assert planner_call["task_name"] == "line_task"
     assert planner_call["task_description"] == "扶正红色易拉罐。"
     assert planner_call["robot_profile"] == "franka"
+    assert len(recipe_calls) == 1
     planner_objects = planner_call["scene_objects"]
     assert isinstance(planner_objects, list)
     assert {obj["uid"] for obj in planner_objects} == {"table", "interact_can"}
@@ -1009,7 +1025,7 @@ def test_task_factory_style_sidecar_binds_roles_without_text_llm(
     assert task_artifact["metadata"]["role_bindings"] == {"object_01": "interact_can"}
 
 
-def test_task_spec_input_rejects_natural_language_and_task_agent_conflicts(
+def test_task_spec_input_rejects_natural_language_conflict(
     gym_export: Path,
     tmp_path: Path,
 ) -> None:
@@ -1020,15 +1036,6 @@ def test_task_spec_input_rejects_natural_language_and_task_agent_conflicts(
             tmp_path / "conflict-description",
             task_name="direct_task",
             task_description="do something",
-            task_spec=task,
-            robot_profile="ur10",
-        )
-    with pytest.raises(ValueError, match="task_spec cannot be combined"):
-        generate_action_engine_config(
-            gym_export,
-            tmp_path / "conflict-agent",
-            task_name="direct_task",
-            task_agent={"schema_version": TASK_AGENT_SCHEMA},
             task_spec=task,
             robot_profile="ur10",
         )
@@ -1153,9 +1160,8 @@ def test_ab_generation_writes_shared_and_offline_branch_artifacts(
         gym_export,
         output_dir,
         task_name="ab_task",
-        task_description="扶正红色易拉罐。",
+        task_spec=_existing_v2_task_spec("ab_task"),
         robot_profile="ur10",
-        instruction_parser="deterministic",
         planning_mode="ab",
         vlm_model="mimo-vlm",
     )
@@ -1193,6 +1199,8 @@ def test_invalid_explicit_task_fails_before_output_asset_materialization(
     from embodichain.gen_sim.action_engine.generation import generator
 
     normalized = False
+    recipe_called = False
+    writer_called = False
 
     def reject_task(**_kwargs):
         raise ValueError("object selector is ambiguous")
@@ -1202,8 +1210,20 @@ def test_invalid_explicit_task_fails_before_output_asset_materialization(
         normalized = True
         raise AssertionError("normalization must not run after planning failure")
 
-    monkeypatch.setattr(tasks, "plan_grounded_task_spec", reject_task)
+    def unexpected_recipe(*_args, **_kwargs):
+        nonlocal recipe_called
+        recipe_called = True
+        raise AssertionError("recipe must not run after interpretation failure")
+
+    def unexpected_writer(*_args, **_kwargs):
+        nonlocal writer_called
+        writer_called = True
+        raise AssertionError("writer must not run after interpretation failure")
+
+    monkeypatch.setattr(tasks, "interpret_and_ground_task_spec", reject_task)
+    monkeypatch.setattr(tasks, "instantiate_seed_graph", unexpected_recipe)
     monkeypatch.setattr(generator, "normalize_scene_assets", record_normalization)
+    monkeypatch.setattr(generator, "write_generation_artifacts", unexpected_writer)
     output_dir = tmp_path / "invalid"
 
     with pytest.raises(ValueError, match="ambiguous"):
@@ -1213,10 +1233,11 @@ def test_invalid_explicit_task_fails_before_output_asset_materialization(
             task_name="invalid_task",
             task_description="扶正黄色瓶子。",
             robot_profile="franka",
-            instruction_parser="deterministic",
         )
 
     assert normalized is False
+    assert recipe_called is False
+    assert writer_called is False
     assert not output_dir.exists()
 
 
@@ -1303,10 +1324,11 @@ def test_generation_cli_defaults_to_mature_robot_without_scene_randomization() -
     assert args.robot_profile == "ur10"
     assert args.randomize_scene is False
     assert args.planning_mode == "offline"
-    assert args.instruction_parser == "llm"
+    assert not hasattr(args, "instruction_parser")
+    assert not hasattr(args, "task_agent")
 
 
-def test_generation_cli_accepts_ab_models_and_deterministic_compatibility() -> None:
+def test_generation_cli_accepts_ab_models() -> None:
     args = build_parser().parse_args(
         [
             "--gym_project",
@@ -1319,8 +1341,6 @@ def test_generation_cli_accepts_ab_models_and_deterministic_compatibility() -> N
             "递给另一只手。",
             "--planning-mode",
             "ab",
-            "--instruction-parser",
-            "deterministic",
             "--llm-model",
             "text-model",
             "--vlm-model",
@@ -1329,7 +1349,6 @@ def test_generation_cli_accepts_ab_models_and_deterministic_compatibility() -> N
     )
 
     assert args.planning_mode == "ab"
-    assert args.instruction_parser == "deterministic"
     assert args.llm_model == "text-model"
     assert args.vlm_model == "vision-model"
 
@@ -1387,53 +1406,33 @@ def test_generation_cli_reports_seed_png_path(
     )
 
 
-def test_removed_task4_line_fallback_reports_the_supported_adapter() -> None:
-    can_uids = [
-        "interact_pepsi_can",
-        "interact_fanta_can",
-        "interact_coca_cola_can",
-        "interact_sprite_can",
-        "interact_yellow_soda_can",
+@pytest.mark.parametrize(
+    "removed_args",
+    [
+        ["--instruction-parser", "llm"],
+        ["--instruction_parser", "llm"],
+        ["--task-agent", "task-agent.json"],
+        ["--task_agent", "task-agent.json"],
+    ],
+)
+def test_generation_cli_rejects_removed_arguments(removed_args: list[str]) -> None:
+    base_args = [
+        "--gym-project",
+        "gym_export",
+        "--output-dir",
+        "configs/task",
+        "--task-name",
+        "task",
+        "--task-description",
+        "Upright the can.",
     ]
-    scene_objects = [
-        {
-            "uid": "table",
-            "runtime_uid": "table",
-            "role": "background",
-            "description": "A table.",
-        },
-        *[
-            {
-                "uid": uid,
-                "runtime_uid": uid,
-                "role": "rigid_object",
-                "description": "A soda can.",
-            }
-            for uid in can_uids
-        ],
-    ]
-    with pytest.raises(ValueError, match="deterministic instruction parser"):
-        plan_task(
-            task_name="task4_2",
-            task_description="将罐头摆成一排",
-            scene_objects=scene_objects,
-            deterministic_fallback=True,
-        )
+
+    with pytest.raises(SystemExit, match="2"):
+        build_parser().parse_args([*base_args, *removed_args])
 
 
-def _task_agent() -> dict:
-    return {
-        "schema_version": TASK_AGENT_SCHEMA,
-        "task": "line_task",
-        "goal": "Arrange the can.",
-        "semantic_steps": [
-            {
-                "id": "s1",
-                "operator": "hold_hover",
-                "object": "interact_can",
-                "actor": {"mode": "auto"},
-                "goal": {},
-                "depends_on": [],
-            }
-        ],
-    }
+def test_removed_python_parameters_are_absent() -> None:
+    parameters = inspect.signature(generate_action_engine_config).parameters
+
+    assert "instruction_parser" not in parameters
+    assert "task_agent" not in parameters

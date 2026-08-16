@@ -27,8 +27,8 @@ from embodichain.gen_sim.action_engine.capabilities import (
 )
 from embodichain.gen_sim.action_engine.tasks import (
     TaskFactory,
+    ground_instruction_draft,
     instantiate_seed_graph,
-    plan_grounded_task_spec,
     validate_scene_handoff,
 )
 from embodichain.gen_sim.action_engine.runtime.motion_policy import (
@@ -67,6 +67,67 @@ def _scene(requirements: dict, *, with_camera: bool = True) -> dict:
         ),
         "satisfied_spatial_constraints": requirements["spatial_constraints"],
     }
+
+
+def _selector(
+    kind: str = "none",
+    *,
+    reference: str = "",
+    step_id: str = "",
+    quantifier: str = "one",
+) -> dict:
+    return {
+        "kind": kind,
+        "step_id": step_id,
+        "reference": reference,
+        "quantifier": quantifier,
+        "count": 0,
+    }
+
+
+def _intent_step(
+    step_id: str,
+    task_type: str,
+    object_selector: dict,
+    **updates,
+) -> dict:
+    step = {
+        "id": step_id,
+        "task_type": task_type,
+        "object": object_selector,
+        "target": _selector(),
+        "relation": "none",
+        "required_arm": "auto",
+        "transfer_arm": "none",
+        "receive_arm": "none",
+        "orientation_goal": "upright" if task_type == "E2" else "none",
+        "target_state": "none",
+        "target_setting": 0,
+        "layout": "none",
+        "axis": "none",
+        "direction": "none",
+        "terminal_behavior": "none",
+        "depends_on": [],
+    }
+    step.update(updates)
+    return step
+
+
+def _ground_draft(
+    task_id: str,
+    instruction: str,
+    scene_objects: list[dict],
+    steps: list[dict],
+    bindings: dict[str, list[str]],
+):
+    return ground_instruction_draft(
+        task_id,
+        instruction,
+        {"steps": steps},
+        scene_objects,
+        robot_profile="ur10",
+        reference_bindings=bindings,
+    )
 
 
 def test_fixed_seed_batch_of_one_thousand_is_reproducible_and_valid() -> None:
@@ -353,7 +414,7 @@ def test_handover_to_place_uses_receiver_hold_without_repickup() -> None:
     assert placement_nodes[0]["depends_on"] == [handover["node_ids"][-1]]
 
 
-def test_explicit_planner_grounds_handover_then_receiver_placement() -> None:
+def test_structured_draft_grounds_handover_then_receiver_placement() -> None:
     scene = [
         {
             "runtime_uid": "table",
@@ -375,11 +436,31 @@ def test_explicit_planner_grounds_handover_then_receiver_placement() -> None:
         },
     ]
 
-    planned = plan_grounded_task_spec(
+    planned = _ground_draft(
         "handover_then_place",
         "用左臂把左侧的黄色易拉罐交接到右臂上，然后放到右边紫色易拉罐右边",
         scene,
-        robot_profile="ur10",
+        [
+            _intent_step(
+                "handover",
+                "E4",
+                _selector("scene_ref", reference="黄色易拉罐"),
+                transfer_arm="left_arm",
+                receive_arm="right_arm",
+            ),
+            _intent_step(
+                "place",
+                "E1",
+                _selector("step_result", step_id="handover"),
+                target=_selector("scene_ref", reference="紫色易拉罐"),
+                relation="right_of",
+                required_arm="right_arm",
+            ),
+        ],
+        {
+            "handover.object": ["interact_yellow_can"],
+            "place.target": ["interact_purple_can"],
+        },
     )
     graph = instantiate_seed_graph(planned.task_spec, planned.role_bindings)
 
@@ -423,12 +504,47 @@ def test_seed_graph_adds_missing_same_object_e2_handover_dependency() -> None:
             "init_pos": [0.0, 0.2, 0.7],
         },
     ]
-    planned = plan_grounded_task_spec(
+    planned = _ground_draft(
         "missing_same_object_edge",
         "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
         "然后左臂将其放到橘色易拉罐的左边",
         scene,
-        robot_profile="ur10",
+        [
+            _intent_step(
+                "orient_purple",
+                "E2",
+                _selector("scene_ref", reference="紫色易拉罐"),
+                required_arm="right_arm",
+            ),
+            _intent_step(
+                "orient_orange",
+                "E2",
+                _selector("scene_ref", reference="橘色易拉罐"),
+                required_arm="left_arm",
+                depends_on=["orient_purple"],
+            ),
+            _intent_step(
+                "handover_purple",
+                "E4",
+                _selector("step_result", step_id="orient_purple"),
+                transfer_arm="right_arm",
+                receive_arm="left_arm",
+                depends_on=["orient_orange"],
+            ),
+            _intent_step(
+                "place_purple",
+                "E1",
+                _selector("step_result", step_id="handover_purple"),
+                target=_selector("scene_ref", reference="橘色易拉罐"),
+                relation="left_of",
+                required_arm="left_arm",
+            ),
+        ],
+        {
+            "orient_purple.object": ["purple_can"],
+            "orient_orange.object": ["orange_can"],
+            "place_purple.target": ["orange_can"],
+        },
     )
     underconstrained = deepcopy(planned.task_spec)
     underconstrained["task_instances"][2]["depends_on"] = ["task_02"]
@@ -457,32 +573,7 @@ def test_seed_graph_adds_missing_same_object_e2_handover_dependency() -> None:
     assert staging["depends_on"] == [pickup["id"]]
 
 
-def test_explicit_planner_rejects_missing_color_without_guessing() -> None:
-    scene = [
-        {
-            "runtime_uid": "interact_orange_can",
-            "role": "rigid_object",
-            "description": "An orange soda can.",
-            "init_pos": [0.0, -0.25, 0.75],
-        },
-        {
-            "runtime_uid": "interact_purple_can",
-            "role": "rigid_object",
-            "description": "A purple soda can.",
-            "init_pos": [0.0, 0.25, 0.75],
-        },
-    ]
-
-    with pytest.raises(ValueError, match="did not match.*available candidates"):
-        plan_grounded_task_spec(
-            "handover_then_place",
-            "用左臂把左侧的黄色易拉罐交接到右臂上，然后放到右边紫色易拉罐右边",
-            scene,
-            robot_profile="ur10",
-        )
-
-
-def test_explicit_planner_treats_table_as_support_in_generic_line_task() -> None:
+def test_structured_draft_treats_table_as_support_in_generic_line_task() -> None:
     scene = [
         {
             "runtime_uid": "table",
@@ -504,11 +595,23 @@ def test_explicit_planner_treats_table_as_support_in_generic_line_task() -> None
         },
     ]
 
-    planned = plan_grounded_task_spec(
+    planned = _ground_draft(
         "arrange_line",
         "把桌面上的东西摆成一排",
         scene,
-        robot_profile="ur10",
+        [
+            _intent_step(
+                "line",
+                "E1",
+                _selector(
+                    "scene_ref",
+                    reference="桌面上的东西",
+                    quantifier="all",
+                ),
+                layout="line",
+            )
+        ],
+        {"line.object": ["interact_red_can", "interact_blue_cup"]},
     )
     graph = instantiate_seed_graph(planned.task_spec, planned.role_bindings)
 

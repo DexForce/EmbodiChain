@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from .assembly import GroundedTaskSpec
 from .factory import BatchGenerationResult, TaskFactory, task_capability_catalog
 from .interpretation import (
     GroundingCaller,
@@ -30,7 +31,6 @@ from .interpretation import (
     interpret_and_ground_task_spec,
     validate_instruction_intent,
 )
-from .planning import GroundedTaskSpec, plan_grounded_task_spec
 from .recipes import instantiate_seed_graph
 from .scene import SceneHandoff, validate_scene_handoff
 
@@ -48,7 +48,6 @@ __all__ = [
     "instantiate_seed_graph",
     "interpret_instruction_draft",
     "interpret_and_ground_task_spec",
-    "plan_grounded_task_spec",
     "task_capability_catalog",
     "validate_instruction_intent",
     "validate_scene_handoff",

@@ -111,7 +111,6 @@ def plan_task(
     task_name: str = "task",
     model: str | None = None,
     llm_caller: LLMCaller | None = None,
-    deterministic_fallback: bool = False,
 ) -> dict[str, Any]:
     """Plan a natural-language task as route-free semantic steps.
 
@@ -128,21 +127,12 @@ def plan_task(
         llm_caller: Optional injected callable accepting ``prompt=`` and
             ``model=`` keyword arguments. It must return a mapping whose only
             top-level key is ``semantic_steps``.
-        deterministic_fallback: Removed compatibility flag. Use the explicitly
-            selected ``tasks.deterministic`` instruction parser instead.
-
     Returns:
         A validated ``action_engine_task_agent_v1`` mapping.
     """
     task_name = _nonempty(task_name, "task_name")
     task_description = _nonempty(task_description, "task_description")
     scene = _normalize_scene_objects(scene_objects)
-
-    if deterministic_fallback:
-        raise ValueError(
-            "plan_task no longer provides a keyword fallback; select the "
-            "deterministic instruction parser explicitly."
-        )
 
     prompt = _render_prompt(
         task_name=task_name,

@@ -67,9 +67,9 @@ removed after downstream callers migrate to the owning packages above.
    verifies semantic postconditions from live state.
 
 There is no persisted semantic task graph between `TaskSpec` and `SeedGraph`.
-The mature five-task compiler remains only as an input migration adapter for
-regenerating current tasks; it publishes a v2 graph and never publishes
-`task_agent.json`.
+The standalone TaskAgent v1 planner and compiler remain available to their
+existing callers, but the generation pipeline neither accepts nor publishes
+TaskAgent v1 JSON.
 
 ## Protocols
 
@@ -96,15 +96,19 @@ references plus a coordinate-free semantic inventory and may return only
 existing scene UIDs, status, and confidence. Local validation enforces complete
 request coverage, candidate roles, cardinality, confidence, and non-self
 targets; unresolved or ambiguous references fail instead of being guessed.
-The optional `deterministic` instruction parser is an explicitly selected,
-finite-vocabulary offline compatibility adapter. It is not imported by either
-LLM stage and is never used as an implicit fallback.
+Each structured model stage gets at most one bounded repair attempt after an
+invalid response. If repair still fails, or the model call itself fails,
+generation stops before recipe expansion and artifact publication. It never
+switches to keyword or rule-based instruction parsing.
 
-The older public `planning.plan_task` adapter still accepts an LLM-produced
-`TaskAgent`, but it does not reinterpret the instruction after that structured
-output exists. Axis, orientation, and arm-allocation fields come only from the
-validated model result. Its former keyword fallback is rejected; callers that
-need the bounded offline parser must select `tasks.deterministic` explicitly.
+The older public `planning.plan_task` adapter still produces a standalone
+`TaskAgent` from structured LLM output, but it does not reinterpret the
+instruction after that output exists. Axis, orientation, and arm-allocation
+fields come only from the validated model result. It has no keyword fallback.
+
+Generator callers without a configured LLM must provide a validated `TaskSpec`
+with explicit role bindings (or a matching `SceneRequirements` sidecar). This
+path is fully offline and never imports or calls an LLM client.
 
 ### SceneRequirements
 

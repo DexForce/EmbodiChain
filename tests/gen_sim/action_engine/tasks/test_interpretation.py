@@ -27,7 +27,6 @@ from embodichain.gen_sim.action_engine.tasks import (
     INSTRUCTION_INTENT_SCHEMA,
     instantiate_seed_graph,
     interpret_and_ground_task_spec,
-    plan_grounded_task_spec,
     validate_instruction_intent,
 )
 
@@ -268,6 +267,15 @@ def _two_object_handover_intent_with_missing_place_target():
             ),
         ]
     }
+
+
+def _two_object_handover_intent():
+    intent = _two_object_handover_intent_with_missing_place_target()
+    intent["steps"][3]["target"] = _selector(
+        "scene_ref",
+        reference="橘色易拉罐",
+    )
+    return intent
 
 
 def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
@@ -511,16 +519,6 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
             )
         ]
     }
-    deterministic = plan_grounded_task_spec(
-        task_name="dual_tray_deterministic",
-        task_description="用双臂把桌上的盘子移动到左边香蕉的后面",
-        scene_objects=scene,
-        robot_profile="franka",
-    )
-    deterministic_instance = deterministic.task_spec["task_instances"][0]
-    assert deterministic_instance["task_type"] == "E5"
-    assert deterministic_instance["params"]["relation"] == "behind"
-
     grounded = interpret_and_ground_task_spec(
         "dual_tray",
         "用双臂把桌上的盘子移动到左边香蕉的后面",
@@ -790,17 +788,6 @@ def test_e5_pick_and_hold_defaults_missing_direction_to_up() -> None:
             "reason": "e5_hold_defaults_to_lift",
         }
     ]
-
-    deterministic = plan_grounded_task_spec(
-        task_name="lift_tray_deterministic",
-        task_description="用双臂把桌上的木盘端起来",
-        scene_objects=scene,
-        robot_profile="franka",
-    )
-    deterministic_instance = deterministic.task_spec["task_instances"][0]
-    assert deterministic_instance["params"]["direction"] == "up"
-    assert deterministic_instance["params"]["terminal_behavior"] == "hold"
-
 
 @pytest.mark.parametrize(
     ("scene_update", "error"),
@@ -1762,12 +1749,21 @@ def test_scene_export_exact_uids_ground_pick_and_place() -> None:
 
 
 def test_multi_object_handover_keeps_both_order_and_holder_dependencies() -> None:
-    grounded = plan_grounded_task_spec(
+    intent = _two_object_handover_intent()
+    grounded = interpret_and_ground_task_spec(
         "multi_object_handover",
         "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
         "然后右臂撤回，然后左臂将其放到橘色易拉罐的左边",
         _scene(),
         robot_profile="ur10",
+        caller=lambda **_kwargs: deepcopy(intent),
+        grounding_caller=_grounding_caller(
+            **{
+                "orient_purple.object": "purple_can",
+                "orient_orange.object": "orange_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
 
     instances = grounded.task_spec["task_instances"]
@@ -1863,12 +1859,21 @@ def test_single_arm_e1_propagates_direct_payload_into_goal_and_contracts() -> No
 
 
 def test_seed_graph_repairs_missing_e2_handover_lifecycle_edge() -> None:
-    grounded = plan_grounded_task_spec(
+    intent = _two_object_handover_intent()
+    grounded = interpret_and_ground_task_spec(
         "missing_lifecycle_edge",
         "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
         "然后左臂将其放到橘色易拉罐的左边",
         _scene(),
         robot_profile="ur10",
+        caller=lambda **_kwargs: deepcopy(intent),
+        grounding_caller=_grounding_caller(
+            **{
+                "orient_purple.object": "purple_can",
+                "orient_orange.object": "orange_can",
+                "place.target": "orange_can",
+            }
+        ),
     )
     underconstrained = deepcopy(grounded.task_spec)
     underconstrained["task_instances"][2]["depends_on"] = ["task_02"]

@@ -14,11 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Acceptance tests for the LLM/deterministic language boundary."""
+"""Acceptance tests for the structured-LLM language boundary."""
 
 from __future__ import annotations
 
-import ast
 from copy import deepcopy
 from pathlib import Path
 
@@ -237,75 +236,58 @@ def test_two_noncanonical_llm_responses_fail_without_grounding_or_rule_fallback(
     assert grounding_called is False
 
 
-def test_llm_interpretation_modules_do_not_import_the_deterministic_adapter() -> None:
+def test_legacy_instruction_parser_modules_and_api_are_absent() -> None:
     tasks_dir = Path(action_engine_tasks.__file__).resolve().parent
+
+    assert not (tasks_dir / "deterministic.py").exists()
+    assert not (tasks_dir / "planning.py").exists()
+    assert not hasattr(action_engine_tasks, "plan_grounded_task_spec")
+
+
+def test_production_sources_do_not_reference_legacy_instruction_parser() -> None:
+    action_engine_dir = Path(action_engine_tasks.__file__).resolve().parent.parent
+    forbidden = (
+        "tasks.deterministic",
+        "tasks.planning",
+        "plan_grounded_task_spec",
+        "instruction_parser",
+        "deterministic_fallback",
+    )
     offenders: dict[str, list[str]] = {}
-    for filename in ("interpretation.py", "grounding.py"):
-        path = tasks_dir / filename
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        imported = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[
-                -1
-            ] in {"planning", "deterministic"}:
-                imported.append(node.module)
-        if imported:
-            offenders[filename] = sorted(set(imported))
+    for path in action_engine_dir.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        matches = [term for term in forbidden if term in source]
+        if matches:
+            offenders[str(path.relative_to(action_engine_dir))] = matches
+
     assert offenders == {}
 
 
-def test_default_llm_path_does_not_call_the_deterministic_planner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import embodichain.gen_sim.action_engine.tasks as tasks_module
-    import embodichain.gen_sim.action_engine.tasks.deterministic as deterministic
-    import embodichain.gen_sim.action_engine.tasks.planning as planning
+def test_llm_caller_exception_propagates_without_scene_grounding() -> None:
+    expected = RuntimeError("model unavailable")
+    grounding_called = False
 
-    def reject_deterministic(*_args, **_kwargs):
-        raise AssertionError("the default LLM path used the deterministic adapter")
+    def fail_model(**_kwargs):
+        raise expected
 
-    monkeypatch.setattr(
-        tasks_module,
-        "plan_grounded_task_spec",
-        reject_deterministic,
-    )
-    monkeypatch.setattr(
-        deterministic,
-        "plan_grounded_task_spec",
-        reject_deterministic,
-    )
-    monkeypatch.setattr(
-        planning,
-        "plan_grounded_task_spec",
-        reject_deterministic,
-    )
-    intent = {
-        "steps": [
-            _step(
-                "relocate_fixture",
-                "E1",
-                "半透明构件",
-                target=_selector("scene_ref", reference="落物台"),
-                relation="on",
-            )
-        ]
-    }
+    def unexpected_grounding(**_kwargs):
+        nonlocal grounding_called
+        grounding_called = True
+        raise AssertionError("failed interpretation must not reach grounding")
 
-    grounded = interpret_and_ground_task_spec(
-        "no_deterministic_fallback",
-        "请把半透明构件安顿在落物台上。",
-        _open_scene(),
-        robot_profile="franka",
-        model="test-model",
-        caller=lambda **_kwargs: deepcopy(intent),
-        grounding_caller=_grounding_caller(
-            _binding("relocate_fixture.object", "aerogel_fixture_7"),
-            _binding("relocate_fixture.target", "work_surface"),
-        ),
-    )
+    with pytest.raises(RuntimeError) as caught:
+        interpret_and_ground_task_spec(
+            "model_failure",
+            "请把半透明构件安顿在落物台上。",
+            _open_scene(),
+            robot_profile="franka",
+            model="test-model",
+            caller=fail_model,
+            grounding_caller=unexpected_grounding,
+        )
 
-    assert grounded.task_spec["metadata"]["instruction_call_count"] == 1
-    assert grounded.task_spec["metadata"]["scene_grounding_call_count"] == 1
+    assert caught.value is expected
+    assert grounding_called is False
 
 
 def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() -> None:

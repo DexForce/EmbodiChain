@@ -35,7 +35,6 @@ from embodichain.gen_sim.action_engine.protocol import (
     SCENE_REQUIREMENTS_FILENAME,
     SCENE_REQUIREMENTS_SCHEMA,
     TASK_SPEC_FILENAME,
-    TASK_SPEC_SCHEMA,
 )
 
 from .artifacts import artifact_paths, write_generation_artifacts
@@ -62,7 +61,6 @@ def generate_action_engine_config(
     *,
     task_name: str,
     task_description: str | None = None,
-    task_agent: Mapping[str, Any] | str | Path | None = None,
     task_spec: Mapping[str, Any] | str | Path | None = None,
     robot_profile: str = str(_TASK_DEFAULTS["default_robot_profile"]),
     llm_model: str | None = None,
@@ -75,32 +73,26 @@ def generate_action_engine_config(
     randomize_scene: bool = False,
     randomize_table_material: bool = False,
     planning_mode: str = "offline",
-    instruction_parser: str = "llm",
     vlm_model: str | None = None,
 ) -> GeneratedConfigPaths:
     """Generate the complete Action Engine input bundle.
 
-    Existing semantic planners remain accepted input adapters.  Callers may
-    also provide an already grounded v2 TaskSpec; that path never invokes a
-    text model and publishes the same canonical TaskSpec, SceneRequirements,
-    and SeedGraph artifacts.
+    Natural-language input is interpreted and grounded by the structured LLM
+    path. Callers may instead provide an already grounded v2 TaskSpec; that
+    path never invokes a text model.
     """
     task_name = str(task_name).strip()
     task_description = "" if task_description is None else str(task_description).strip()
     if not task_name:
         raise ValueError("task_name must be a non-empty string.")
-    if task_spec is not None and (task_description or task_agent is not None):
+    if task_spec is not None and task_description:
+        raise ValueError("task_spec cannot be combined with task_description.")
+    if task_spec is None and not task_description:
         raise ValueError(
-            "task_spec cannot be combined with task_description or task_agent."
-        )
-    if not task_description and task_agent is None and task_spec is None:
-        raise ValueError(
-            "task_description is required when task_agent is not supplied."
+            "task_description is required when task_spec is not supplied."
         )
     if planning_mode not in {"offline", "ab"}:
         raise ValueError("planning_mode must be 'offline' or 'ab'.")
-    if instruction_parser not in {"llm", "deterministic"}:
-        raise ValueError("instruction_parser must be 'llm' or 'deterministic'.")
     _raise_if_outputs_exist(
         output_dir,
         overwrite=overwrite,
@@ -124,12 +116,10 @@ def generate_action_engine_config(
         validate_seed_graph,
         validate_scene_requirements,
         validate_task_spec,
-        validate_task_agent,
     )
     from embodichain.gen_sim.action_engine.tasks import (
         interpret_and_ground_task_spec,
         instantiate_seed_graph,
-        plan_grounded_task_spec,
     )
 
     known_objects = [str(item["runtime_uid"]) for item in scene.planner_objects]
@@ -170,22 +160,14 @@ def generate_action_engine_config(
             scene_requirements = supplied_requirements
             _validate_requirement_roles(scene_requirements, role_bindings)
         compiled = instantiate_seed_graph(task_spec, role_bindings)
-    elif task_agent is None:
-        if instruction_parser == "llm":
-            planned = interpret_and_ground_task_spec(
-                task_name=task_name,
-                task_description=task_description,
-                scene_objects=[deepcopy(obj) for obj in scene.planner_objects],
-                robot_profile=robot_profile,
-                model=llm_model,
-            )
-        else:
-            planned = plan_grounded_task_spec(
-                task_name=task_name,
-                task_description=task_description,
-                scene_objects=[deepcopy(obj) for obj in scene.planner_objects],
-                robot_profile=robot_profile,
-            )
+    else:
+        planned = interpret_and_ground_task_spec(
+            task_name=task_name,
+            task_description=task_description,
+            scene_objects=[deepcopy(obj) for obj in scene.planner_objects],
+            robot_profile=robot_profile,
+            model=llm_model,
+        )
         task_spec = _validated_mapping(
             planned.task_spec,
             validator=validate_task_spec,
@@ -203,29 +185,6 @@ def generate_action_engine_config(
         compiled = instantiate_seed_graph(
             task_spec,
             planned.role_bindings,
-        )
-    else:
-        from embodichain.gen_sim.action_engine.compiler import compile_task_agent_v2
-
-        planned = _read_task_agent(task_agent)
-        if not task_description:
-            task_description = str(planned.get("goal", "")).strip()
-        legacy_task_agent = _validated_mapping(
-            planned,
-            validator=lambda value: validate_task_agent(
-                value,
-                known_objects=known_objects,
-            ),
-            label="Task Agent",
-        )
-        _require_matching_task(legacy_task_agent, task_name, label="Task Agent")
-        compiled = compile_task_agent_v2(
-            legacy_task_agent,
-            known_objects=known_objects,
-        )
-        task_spec = validate_task_spec(_task_spec_from_graph(compiled))
-        scene_requirements = validate_scene_requirements(
-            _scene_requirements_from_scene(task_name, scene.planner_objects)
         )
     if planning_mode == "ab":
         scene_requirements = _add_ab_camera_requirements(scene_requirements)
@@ -311,15 +270,6 @@ def generate_action_engine_config(
         overwrite=overwrite,
         planning_mode=planning_mode,
     )
-
-
-def _read_task_agent(
-    source: Mapping[str, Any] | str | Path,
-) -> dict[str, Any]:
-    if isinstance(source, Mapping):
-        return deepcopy(dict(source))
-    path = Path(source).expanduser().resolve()
-    return _read_json_mapping(path, label="Task Agent")
 
 
 def _read_task_spec(
@@ -769,19 +719,6 @@ def _validated_mapping(
     return deepcopy(dict(validated))
 
 
-def _require_matching_task(
-    program: Mapping[str, Any],
-    task_name: str,
-    *,
-    label: str,
-) -> None:
-    if program.get("task") != task_name:
-        raise ValueError(
-            f"{label} task {program.get('task')!r} does not match "
-            f"requested task_name {task_name!r}."
-        )
-
-
 def _validate_agent_config(config: Mapping[str, Any]) -> None:
     if config.get("schema_version") != ACTION_ENGINE_CONFIG_SCHEMA:
         raise ValueError("Agent config has an unexpected schema_version.")
@@ -850,38 +787,6 @@ def _raise_if_outputs_exist(
             f"Generated artifacts already exist in {paths.gym_config.parent}: "
             f"{names}. Pass --overwrite to replace them."
         )
-
-
-def _task_spec_from_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
-    instances = []
-    role_bindings = {}
-    for group in graph["task_groups"]:
-        uid = str(group["object_uid"])
-        role_bindings[uid] = uid
-        params = {"object_role": uid, **deepcopy(dict(group.get("goal", {})))}
-        instances.append(
-            {
-                "id": str(group["id"]),
-                "task_type": str(group["task_type"]),
-                "params": params,
-                "depends_on": list(group.get("depends_on", [])),
-                "role": str(group.get("role", "primary")),
-            }
-        )
-    return {
-        "schema_version": TASK_SPEC_SCHEMA,
-        "task_id": str(graph["task_id"]),
-        "level": str(graph["level"]),
-        "instruction": str(graph["instruction"]),
-        "reasoning_type": str(graph["reasoning_type"]),
-        "task_instances": instances,
-        "success": deepcopy(dict(graph["success"])),
-        "oracle": {"reference_seed_graph": deepcopy(dict(graph))},
-        "metadata": {
-            "source": "migrated_current_task",
-            "role_bindings": role_bindings,
-        },
-    }
 
 
 def _scene_requirements_from_scene(

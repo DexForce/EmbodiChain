@@ -74,18 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--task_description",
         "--task-description",
-        help="Natural-language goal passed to the Task Agent planner.",
+        help="Natural-language goal passed to structured LLM interpretation.",
     )
     parser.add_argument(
         "--task_file",
         "--task-file",
         help="Optional UTF-8 file containing the natural-language goal.",
-    )
-    parser.add_argument(
-        "--task-agent",
-        "--task_agent",
-        dest="task_agent",
-        help="Optional Task Agent v1 JSON; bypasses natural-language planning.",
     )
     parser.add_argument(
         "--task-spec",
@@ -121,16 +115,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("offline", "ab"),
         default="offline",
         help="Generate one offline bundle or an offline/online A/B bundle.",
-    )
-    parser.add_argument(
-        "--instruction-parser",
-        "--instruction_parser",
-        choices=("llm", "deterministic"),
-        default="llm",
-        help=(
-            "Interpret free language with the structured two-stage LLM path, "
-            "or explicitly use the limited offline legacy rule adapter."
-        ),
     )
     parser.add_argument(
         "--source_scene_z_rotation_degrees",
@@ -197,7 +181,6 @@ def cli() -> None:
         args.output_dir,
         task_name=args.task_name,
         task_description=task_description,
-        task_agent=args.task_agent,
         task_spec=args.task_spec,
         robot_profile=args.robot_profile,
         llm_model=args.llm_model,
@@ -210,7 +193,6 @@ def cli() -> None:
         randomize_scene=args.randomize_scene,
         randomize_table_material=args.randomize_table_material,
         planning_mode=args.planning_mode,
-        instruction_parser=args.instruction_parser,
         vlm_model=args.vlm_model,
     )
 
@@ -233,16 +215,10 @@ def cli() -> None:
 def _resolve_task_description(args: argparse.Namespace) -> str:
     task_spec = getattr(args, "task_spec", None)
     if task_spec:
-        if args.task_agent or args.task_description or args.task_file:
-            raise ValueError(
-                "--task-spec cannot be combined with --task-agent, "
-                "--task_description, or --task_file."
-            )
-        return ""
-    if args.task_agent:
         if args.task_description or args.task_file:
             raise ValueError(
-                "--task-agent cannot be combined with a natural-language task."
+                "--task-spec cannot be combined with --task_description or "
+                "--task_file."
             )
         return ""
     if args.task_description and args.task_file:

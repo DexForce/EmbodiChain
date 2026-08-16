@@ -141,9 +141,6 @@ class GroundedTaskBuilder:
         self.task_id = task_id
         self.instruction = instruction
         self.inventory = inventory
-        # ``index`` is retained as a short-lived compatibility alias for the
-        # isolated deterministic adapter. It exposes structural data only.
-        self.index = inventory
         self.planner = planner
         self.instances: list[dict[str, Any]] = []
         self.role_by_uid: dict[str, str] = {}

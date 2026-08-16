@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -386,14 +387,8 @@ def test_planner_does_not_expose_internal_operator_contracts() -> None:
         )
 
 
-def test_legacy_deterministic_fallback_is_rejected() -> None:
-    with pytest.raises(ValueError, match="deterministic instruction parser"):
-        plan_task(
-            task_name="task4_2",
-            task_description="将罐头摆成一排",
-            scene_objects=_scene(),
-            deterministic_fallback=True,
-        )
+def test_plan_task_has_no_rule_fallback_parameter() -> None:
+    assert "deterministic_fallback" not in inspect.signature(plan_task).parameters
 
 
 def test_arrange_line_preserves_structured_orientation_output() -> None:
