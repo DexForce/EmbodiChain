@@ -35,6 +35,12 @@ from embodichain.gen_sim.action_engine.config import (
     default_runtime_policy,
     runtime_policy_hash,
 )
+from embodichain.gen_sim.action_engine.domain import normalize_placement_relation
+from embodichain.gen_sim.action_engine.orientation import (
+    AlignAxisConstraint,
+    MatchRotationConstraint,
+    compile_orientation_constraint,
+)
 from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
     SceneProvider,
@@ -536,7 +542,11 @@ class ProgramExecutor:
                     if (
                         self.placement_recovery_attempts
                         and bool(postcondition_failed.any())
-                        and step.goal.get("relation") in {"on", "on_top", "on_top_of"}
+                        and step.operator == "place_relative"
+                        and normalize_placement_relation(
+                            step.goal.get("relation", "on")
+                        )
+                        == "on"
                     ):
                         recorder.step(
                             step,
@@ -3466,7 +3476,7 @@ class ProgramExecutor:
     def _capture_orientation_reference(self, step: SemanticStep) -> None:
         """Freeze preserve orientation before speculative pickup can disturb it."""
         if (
-            step.goal.get("orientation_goal", "preserve") == "preserve"
+            compile_orientation_constraint(step.goal).requires_reference
             and step.id not in self._orientation_references
         ):
             predecessor_references = [
@@ -3563,7 +3573,11 @@ class ProgramExecutor:
             success = torch.zeros_like(failed)
             log_info(f"Skipped verification for {step.id}: no active environments.")
             return failed, success, observed
-        relation = str(step.goal.get("relation", ""))
+        relation = (
+            normalize_placement_relation(step.goal.get("relation", "on"))
+            if step.operator == "place_relative"
+            else str(step.goal.get("relation", ""))
+        )
         reference = self._support_reference_uid(step)
         postcondition_type = step.postcondition.get("type")
         if postcondition_type in {"object_held", "handover_complete"}:
@@ -3575,34 +3589,7 @@ class ProgramExecutor:
                 held_owners=self._object_owners,
                 held_states=self._object_states,
             )
-            if (
-                postcondition_type == "handover_complete"
-                and step.goal.get("orientation_goal", "preserve") == "preserve"
-            ):
-                orientation_reference = self._orientation_references.get(step.id)
-                if orientation_reference is not None:
-                    reference_rotation = orientation_reference[:, :3, :3].to(
-                        device=observed_pose.device,
-                        dtype=observed_pose.dtype,
-                    )
-                    relative = torch.bmm(
-                        reference_rotation.transpose(1, 2),
-                        observed_pose[:, :3, :3],
-                    )
-                    cosine = (
-                        relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0
-                    ) * 0.5
-                    orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
-                    self._orientation_errors[step.id] = orientation_error
-                    policy = self._policies.get(step.id, {})
-                    satisfied &= orientation_error <= float(
-                        policy.get(
-                            "preserve_orientation_tolerance",
-                            self.runtime_policy.predicate_fallbacks[
-                                "preserve_orientation_tolerance"
-                            ],
-                        )
-                    )
+            satisfied &= self._placement_orientation_satisfied(step, observed_pose)
         elif postcondition_type in {
             "held_by_both_grippers",
             "object_held_by_both_grippers",
@@ -3724,6 +3711,14 @@ class ProgramExecutor:
                 satisfied = (delta[:, arrangement.axis_index] <= axis_tolerance) & (
                     delta[:, arrangement.perpendicular_index] <= perpendicular_tolerance
                 )
+            elif relation in DIRECTIONAL_RELATIONS:
+                # Left/right/front/behind constrain the support plane. The
+                # grounded release height is a transport target and may differ
+                # from the stable height after the object settles.
+                satisfied = (
+                    torch.linalg.vector_norm(observed[:, :2] - target[:, :2], dim=-1)
+                    <= tolerance
+                )
             else:
                 satisfied = (
                     torch.linalg.vector_norm(observed - target, dim=-1) <= tolerance
@@ -3743,18 +3738,13 @@ class ProgramExecutor:
                     "minimum_distance": float(policy.get("relation_clearance", 0.01)),
                 },
             )
-        verifies_placement_orientation = (
+        verifies_placement_orientation = bool(
+            compile_orientation_constraint(step.goal).terms
+        ) and (
             postcondition_type == "semantic_goal"
             or self.arrangements.get(step.id) is not None
         )
-        orientation_goal = str(step.goal.get("orientation_goal", "preserve"))
-        if verifies_placement_orientation and orientation_goal in {
-            "none",
-            "preserve",
-            "upright",
-            "lay_flat",
-            "axis_align",
-        }:
+        if verifies_placement_orientation:
             satisfied &= self._placement_orientation_satisfied(step, observed_pose)
         if step.goal.get("payloads"):
             satisfied &= self._verify_payloads(step)
@@ -3987,54 +3977,75 @@ class ProgramExecutor:
         step: SemanticStep,
         observed_pose: torch.Tensor,
     ) -> torch.Tensor:
-        goal = str(step.goal.get("orientation_goal", "preserve"))
+        constraint = compile_orientation_constraint(step.goal)
         satisfied = torch.ones(
             int(self.env.num_envs),
             dtype=torch.bool,
             device=self.env.device,
         )
-        if goal == "none" or (
-            goal == "preserve" and step.goal.get("relation") == "inside"
+        if not constraint.terms or (
+            step.goal.get("orientation_goal") == "preserve"
+            and step.goal.get("relation") == "inside"
         ):
             return satisfied
         policy = self._policies.get(step.id, {})
         fallbacks = self.runtime_policy.predicate_fallbacks
-        if goal == "upright":
-            return evaluate_predicate(
-                self.env,
-                {
-                    "type": "object_upright",
-                    "object": step.object_uid,
-                    "local_axis": policy.get("upright_local_axis", "long_axis"),
-                    "max_tilt": float(
-                        policy.get("upright_max_tilt", fallbacks["upright_max_tilt"])
-                    ),
-                },
+        errors = []
+        for term in constraint.terms:
+            if isinstance(term, AlignAxisConstraint):
+                if term.target_axis != "world_up":
+                    raise ValueError(
+                        f"Unsupported orientation target axis {term.target_axis!r}."
+                    )
+                satisfied &= evaluate_predicate(
+                    self.env,
+                    {
+                        "type": "object_upright",
+                        "object": step.object_uid,
+                        "local_axis": term.local_axis,
+                        "directed": term.directed,
+                        "max_tilt": float(
+                            term.tolerance
+                            if term.tolerance is not None
+                            else policy.get(
+                                "upright_max_tilt", fallbacks["upright_max_tilt"]
+                            )
+                        ),
+                    },
+                )
+                continue
+            if not isinstance(term, MatchRotationConstraint):
+                raise TypeError(f"Unsupported orientation term {type(term)!r}.")
+            reference_pose = (
+                self._orientation_references.get(step.id)
+                if term.reference == "step_start"
+                else self._target_poses.get(step.id)
             )
-        reference_pose = (
-            self._orientation_references.get(step.id)
-            if goal == "preserve"
-            else self._target_poses.get(step.id)
-        )
-        if reference_pose is None:
-            return satisfied
-        reference_rotation = reference_pose[:, :3, :3].to(
-            device=observed_pose.device,
-            dtype=observed_pose.dtype,
-        )
-        relative = torch.bmm(
-            reference_rotation.transpose(1, 2),
-            observed_pose[:, :3, :3],
-        )
-        cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
-        orientation_error = torch.acos(cosine.clamp(-1.0, 1.0))
-        self._orientation_errors[step.id] = orientation_error
-        return orientation_error <= float(
-            policy.get(
-                "preserve_orientation_tolerance",
-                fallbacks["preserve_orientation_tolerance"],
+            if reference_pose is None:
+                satisfied &= False
+                continue
+            reference_rotation = reference_pose[:, :3, :3].to(
+                device=observed_pose.device,
+                dtype=observed_pose.dtype,
             )
-        )
+            relative = torch.bmm(
+                reference_rotation.transpose(1, 2),
+                observed_pose[:, :3, :3],
+            )
+            cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(dim=-1) - 1.0) * 0.5
+            error = torch.acos(cosine.clamp(-1.0, 1.0))
+            errors.append(error)
+            satisfied &= error <= float(
+                term.tolerance
+                if term.tolerance is not None
+                else policy.get(
+                    "preserve_orientation_tolerance",
+                    fallbacks["preserve_orientation_tolerance"],
+                )
+            )
+        if errors:
+            self._orientation_errors[step.id] = torch.stack(errors).amax(dim=0)
+        return satisfied
 
     def _revalidate_support_relations(self) -> dict[str, torch.Tensor]:
         active_by_step: dict[str, torch.Tensor] = {}

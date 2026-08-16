@@ -24,6 +24,7 @@ from embodichain.gen_sim.action_engine.domain import (
     TASK_TYPES,
     TERMINAL_BEHAVIORS,
     TRANSPORT_DIRECTIONS,
+    normalize_placement_relation,
     task_contract,
     task_success_type,
 )
@@ -56,3 +57,15 @@ def test_symbolic_transport_values_are_language_neutral_protocol_enums() -> None
     assert {"on", "inside", "behind", "left_of"} <= RELATIONS
     assert {"none", "up", "left", "world_y"} <= TRANSPORT_DIRECTIONS
     assert TERMINAL_BEHAVIORS == {"none", "hold", "place"}
+
+
+@pytest.mark.parametrize("relation", ["above", "on_top", "on_top_of"])
+def test_released_hover_and_legacy_support_relations_normalize_to_on(
+    relation: str,
+) -> None:
+    assert normalize_placement_relation(relation) == "on"
+
+
+def test_placement_relation_normalization_rejects_non_spatial_semantics() -> None:
+    with pytest.raises(ValueError, match="Unsupported placement relation"):
+        normalize_placement_relation("visual_slot")

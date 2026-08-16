@@ -43,9 +43,29 @@ __all__ = [
     "TaskContract",
     "task_contract",
     "task_success_type",
+    "normalize_placement_relation",
 ]
 
-PLACEMENT_RELATIONS = RELATIONS - {"none", "above"}
+PLACEMENT_RELATIONS = RELATIONS - {"none"}
+_SUPPORTED_PLACEMENT_ALIASES = frozenset({"above", "on_top", "on_top_of"})
+
+
+def normalize_placement_relation(value: Any) -> str:
+    """Lower task-language relations to physically executable release goals.
+
+    A released object cannot remain freely hovering. Task-language ``above``
+    therefore lowers to the supported ``on`` relation for placement operators;
+    non-placement operators such as pouring retain their distinct ``above``
+    semantics.
+    """
+    relation = str(value)
+    if (
+        relation not in PLACEMENT_RELATIONS
+        and relation not in _SUPPORTED_PLACEMENT_ALIASES
+    ):
+        raise ValueError(f"Unsupported placement relation {relation!r}.")
+    return "on" if relation in _SUPPORTED_PLACEMENT_ALIASES else relation
+
 
 _CORE_ACTIONS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {

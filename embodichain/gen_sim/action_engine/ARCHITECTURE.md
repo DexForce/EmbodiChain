@@ -249,6 +249,25 @@ mass, applies the requested `orientation_goal`, and requires low motion across a
 bounded stability window. Successful relations form a per-environment support
 graph that is checked for cycles and revalidated at task completion.
 
+Orientation is compiled into hard `align_axis` or `match_rotation` terms plus a
+separate minimum-rotation planning preference. An omitted orientation request
+adds no hard acceptance term; `preserve` remains an explicit full-rotation
+contract for persisted bundles, while `upright` constrains only the requested
+local axis and declares whether that axis is directed. Grounding and runtime
+verification consume the same compiled contract so reachability search cannot
+silently relax a required terminal orientation. With no hard term, a live
+upright state may still select upright-preserving yaw candidates as a planning
+preference; this follows current state and automatically stops after that state
+is invalidated rather than becoming a sticky success requirement.
+
+Grasp generation keeps support-plane collision filtering as its strict first
+pass. If diagnostics show that this heuristic alone exhausted otherwise
+object-collision-free candidates, Action Engine retries without the heuristic;
+the relaxed candidates still pass through the live robot and scene collision
+planner before execution. This avoids treating a local support-plane proxy as
+a proof of scene-level infeasibility, including for objects already held above
+the support surface.
+
 Grounding samples bounded support-relative placement poses. Planning failures
 try the next pose before release; instability after release requires a fresh
 grasp and an unused pose. The recovery keeps the original actor contract, and

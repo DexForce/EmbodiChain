@@ -1031,7 +1031,11 @@ def _handover_held_state(
 
 def test_handover_grounding_uses_center_exchange_and_diagonal_receive() -> None:
     entities = {
-        "can": _FakeEntity("can", _pose(0.0, 0.2, 1.2), _box_vertices(0.03)),
+        "can": _FakeEntity(
+            "can",
+            _pose(0.0, 0.2, 1.2),
+            _rect_vertices(0.03, 0.03, 0.10),
+        ),
         "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
     }
     env = _FakeEnv(entities)
@@ -1097,7 +1101,7 @@ def test_handover_grounding_uses_center_exchange_and_diagonal_receive() -> None:
     torch.testing.assert_close(cfg.middle_object_pose, cfg.final_object_pose)
     assert cfg.receive_approach_direction[1] < 0.0
     assert cfg.receive_approach_direction[2] < 0.0
-    assert staging.motion_policy["upright_yaw_samples"] >= 8
+    assert staging.motion_policy["upright_yaw_samples"] == 8
 
 
 def test_handover_rejects_receiver_motion_during_internal_final_phase() -> None:
@@ -1183,9 +1187,11 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
         "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
     }
     env = _FakeEnv(entities)
+    task = deepcopy(_handover_then_place_task())
+    task["task_instances"][1]["params"]["orientation_goal"] = "upright"
     program = load_execution_program(
         instantiate_seed_graph(
-            _handover_then_place_task(),
+            task,
             {"can": "can", "target": "target"},
         )
     )
@@ -1272,6 +1278,51 @@ def test_handover_continuation_uses_stable_upright_policies() -> None:
     ]
     assert grounded_retreat.motion_policy["collision_safety"] == "required"
     assert grounded_home.motion_policy["collision_safety"] == "required"
+
+
+def test_preserve_handover_continuation_does_not_enable_yaw_search() -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)),
+        "target": _FakeEntity("target", _pose(0.2, 0.0, 0.75), _box_vertices(0.03)),
+        "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
+    }
+    env = _FakeEnv(entities)
+    task = deepcopy(_handover_then_place_task())
+    task["task_instances"][1]["params"]["orientation_goal"] = "preserve"
+    program = load_execution_program(
+        instantiate_seed_graph(task, {"can": "can", "target": "target"})
+    )
+    step = next(
+        candidate
+        for candidate in program.semantic_steps
+        if candidate.operator == "place_relative"
+    )
+    state = _held_state(env, entities["can"], arm="right_arm")
+    held = state.get_held_object("physical_right_arm")
+    assert held is not None
+    grounder = ActionGrounder(program, env, lambda _uid: held.semantics)
+    final = next(
+        edge
+        for edge in program.edges
+        if edge.id in step.edge_ids
+        and edge.actions[0]["target_binding"].get("phase") == "final"
+    )
+    reference = _pose(0.0, 0.0, 0.90)
+
+    grounded = grounder.ground(
+        final.actions[0],
+        step,
+        arm="right_arm",
+        state=state,
+        orientation_reference_pose=reference,
+    )
+
+    assert "upright_yaw_samples" not in grounded.cfg
+    assert grounded.target_object_pose is not None
+    torch.testing.assert_close(
+        grounded.target_object_pose[:, :3, :3],
+        reference[:, :3, :3],
+    )
 
 
 def test_dual_franka_handover_uses_explicit_exchange_clearance() -> None:
@@ -2002,6 +2053,86 @@ def test_directional_verification_rejects_grounded_target_on_wrong_side() -> Non
 
     assert bool(failed[0])
     assert not bool(success[0])
+
+
+def test_directional_verification_accepts_support_height_settling() -> None:
+    entities = {
+        "can": _FakeEntity("can", _pose(0.0, -0.12, 0.75), _box_vertices(0.03)),
+        "target": _FakeEntity("target", _pose(0.0, 0.0, 0.75), _box_vertices(0.03)),
+    }
+    env = _FakeEnv(entities)
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "can",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "target",
+                        "relation": "left_of",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    executor = ProgramExecutor(program, env, settle_steps=0, record_runtime=False)
+    step = program.semantic_steps[0]
+    step.goal["relation_frame"] = "robot"
+    executor._targets[step.id] = torch.tensor([[0.0, -0.12, 0.90]])
+    executor._policies[step.id] = {
+        "postcondition_tolerance": 0.08,
+        "relation_clearance": 0.01,
+    }
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert not bool(failed[0])
+    assert bool(success[0])
+
+
+def test_legacy_released_above_relation_verifies_as_physical_support() -> None:
+    entities = {
+        "payload": _FakeEntity(
+            "payload",
+            _pose(0.0, 0.0, 0.79),
+            _rect_vertices(0.03, 0.03, 0.03),
+        ),
+        "support": _FakeEntity(
+            "support",
+            _pose(0.0, 0.0, 0.75),
+            _rect_vertices(0.10, 0.08, 0.01),
+        ),
+    }
+    env = _FakeEnv(entities)
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "place",
+                    "operator": "place_relative",
+                    "object": "payload",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {
+                        "reference_object": "support",
+                        "relation": "on",
+                    },
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    executor = ProgramExecutor(program, env, settle_steps=0, record_runtime=False)
+    step = program.semantic_steps[0]
+    step.goal["relation"] = "above"
+    executor._targets[step.id] = torch.tensor([[0.0, 0.0, 1.0]])
+
+    failed, success, _ = executor._verify_step(step, torch.tensor([False]))
+
+    assert not bool(failed[0])
+    assert bool(success[0])
 
 
 def test_handover_retreat_clears_exchange_toward_transfer_workspace() -> None:
@@ -4873,6 +5004,17 @@ def test_long_axis_upright_is_undirected_but_explicit_axis_is_not() -> None:
                 "type": "object_upright",
                 "object": "can",
                 "local_axis": "long_axis",
+            },
+        )[0]
+    )
+    assert not bool(
+        evaluate_predicate(
+            env,
+            {
+                "type": "object_upright",
+                "object": "can",
+                "local_axis": "long_axis",
+                "directed": True,
             },
         )[0]
     )

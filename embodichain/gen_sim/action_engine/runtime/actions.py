@@ -31,6 +31,9 @@ from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
 )
 from embodichain.gen_sim.action_engine.config import default_runtime_policy
+from embodichain.gen_sim.action_engine.grasp_candidates import (
+    build_grasp_candidate_provider,
+)
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
@@ -61,7 +64,6 @@ from embodichain.lab.sim.planners import (
 )
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPolicy,
-    GraspCandidateProvider,
     ParallelJawEefProfile,
 )
 from embodichain.utils.logger import log_info
@@ -363,7 +365,7 @@ class AtomicActionAdapter:
                 object_label=uid,
                 mesh_vertices=vertices,
                 mesh_triangles=triangles,
-                candidate_provider=GraspCandidateProvider(
+                candidate_provider=build_grasp_candidate_provider(
                     mesh_vertices=vertices,
                     mesh_triangles=triangles,
                     eef_profile=self.end_effector_profile,

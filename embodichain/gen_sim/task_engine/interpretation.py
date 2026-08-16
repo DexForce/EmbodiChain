@@ -50,7 +50,7 @@ TASK_TYPES = frozenset(TASK_CONTRACTS)
 
 _RELATIONS = RELATIONS
 _ARMS = frozenset({"none", "auto", "left_arm", "right_arm"})
-_ORIENTATIONS = frozenset({"preserve", "upright"})
+_ORIENTATIONS = frozenset({"none", "preserve", "upright"})
 _TARGET_STATES = frozenset({"none", "open", "closed", "activated"})
 _LAYOUTS = frozenset({"none", "line"})
 _AXES = frozenset({"none", "world_x", "world_y"})
@@ -88,7 +88,7 @@ _INTENT_FIELD_DEFAULTS: dict[str, Any] = {
     "required_arm": "none",
     "transfer_arm": "none",
     "receive_arm": "none",
-    "orientation_goal": "preserve",
+    "orientation_goal": "none",
     "target_state": "none",
     "target_setting": 0,
     "layout": "none",
@@ -651,7 +651,7 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
     orientation_goal = str(step["orientation_goal"])
     if task_type == "E2" and orientation_goal != "upright":
         raise ValueError(f"{context} E2 orientation_goal must be upright.")
-    if task_type not in {"E1", "E2", "E4"} and orientation_goal != "preserve":
+    if task_type not in {"E1", "E2", "E4"} and orientation_goal != "none":
         raise ValueError(
             f"{context} orientation_goal is only valid for E1, E2, and E4."
         )
@@ -741,6 +741,9 @@ def _instruction_prompt(instruction: str) -> str:
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
         "step_id, reference, quantifier, count.\n\n"
+        "Use orientation_goal=none unless the instruction explicitly requests "
+        "upright orientation or preserving the original orientation. Spatial "
+        "placement and handover alone do not imply preserve. "
         f"Instruction:\n{instruction}\n\n"
         f"E1-E9 catalog:\n{json.dumps(_intent_capability_catalog(), ensure_ascii=False, sort_keys=True)}\n\n"
         "Shape-only complete JSON example (do not copy its step count or values; "

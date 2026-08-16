@@ -283,6 +283,15 @@ def _payload_goal(params: Mapping[str, Any], object_uid: str) -> list[dict[str, 
     return [{"object": value, "slot": "center"} for value in payloads]
 
 
+def _orientation_extensions(params: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy optional compiled-orientation fields from one task instance."""
+    return {
+        key: deepcopy(params[key])
+        for key in ("orientation_constraint", "orientation_directed")
+        if key in params
+    }
+
+
 def _recipe(
     group_id: str,
     task_type: str,
@@ -308,8 +317,9 @@ def _recipe(
                 "order_direction": str(params.get("order_direction", "given")),
                 "order_constraint": str(params.get("order_constraint", "free")),
                 "participation": str(params.get("participation", "auto")),
-                "orientation_goal": str(params.get("orientation_goal", "preserve")),
+                "orientation_goal": str(params.get("orientation_goal", "none")),
                 "orientation_axis": str(params.get("orientation_axis", "none")),
+                **_orientation_extensions(params),
                 "nominal_slot_index": int(params["nominal_slot_index"]),
                 "slot_constraint": str(
                     params.get("slot_constraint", "free_reassignable")
@@ -344,8 +354,9 @@ def _recipe(
             "reference_state": "live",
             "relation": relation,
             "relation_frame": str(params.get("relation_frame", "world")),
-            "orientation_goal": str(params.get("orientation_goal", "preserve")),
+            "orientation_goal": str(params.get("orientation_goal", "none")),
             "orientation_axis": str(params.get("orientation_axis", "none")),
+            **_orientation_extensions(params),
             "slot": str(params.get("slot", "auto")),
         }
         if "visual_constraint" in params:
@@ -388,6 +399,7 @@ def _recipe(
             "position_anchor": "initial_xy",
             "support_object": str(params.get("support_role", "table")),
             "upright_local_axis": str(params.get("upright_local_axis", "long_axis")),
+            **_orientation_extensions(params),
         }
         if terminal_behavior == "hold":
             goal["terminal_behavior"] = "hold"
@@ -564,8 +576,9 @@ def _recipe(
             "handover",
             {
                 "relation": "handover",
-                "orientation_goal": str(params.get("orientation_goal", "preserve")),
+                "orientation_goal": str(params.get("orientation_goal", "none")),
                 "orientation_axis": "none",
+                **_orientation_extensions(params),
                 "transfer_arm": transfer,
                 "receive_arm": receive,
             },
@@ -581,8 +594,9 @@ def _recipe(
         goal = {
             "direction": direction,
             "terminal_behavior": terminal_behavior,
-            "orientation_goal": "preserve",
+            "orientation_goal": str(params.get("orientation_goal", "none")),
             "orientation_axis": "none",
+            **_orientation_extensions(params),
             "relation_frame": str(params.get("relation_frame", "robot")),
         }
         target = params.get("target_role")

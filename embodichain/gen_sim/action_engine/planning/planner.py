@@ -32,6 +32,9 @@ from embodichain.gen_sim.action_engine.domain import (
     TASK_AGENT_SCHEMA,
     validate_task_agent,
 )
+from embodichain.gen_sim.action_engine.orientation import (
+    compile_orientation_constraint,
+)
 
 from .task_planner_prompt import TASK_PLANNER_PROMPT
 
@@ -430,7 +433,9 @@ def _is_default_hold_goal(hold: Mapping[str, Any]) -> bool:
     """Return whether removing a preparatory hover loses no requested state."""
     goal = hold["goal"]
     if set(goal) - {
+        "orientation_constraint",
         "orientation_axis",
+        "orientation_directed",
         "orientation_goal",
         "reference_object",
         "reference_state",
@@ -438,7 +443,7 @@ def _is_default_hold_goal(hold: Mapping[str, Any]) -> bool:
         return False
     return (
         goal.get("orientation_axis", "none") == "none"
-        and goal.get("orientation_goal", "preserve") == "preserve"
+        and not compile_orientation_constraint(goal).terms
         and goal.get("reference_state", "initial") == "initial"
         and goal.get("reference_object", "self") in ("self", hold.get("object"))
     )

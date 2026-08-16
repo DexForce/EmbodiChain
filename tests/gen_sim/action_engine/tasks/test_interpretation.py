@@ -88,7 +88,7 @@ def _step(step_id: str, task_type: str, object_selector: dict, **values):
         "required_arm": "auto",
         "transfer_arm": "none",
         "receive_arm": "none",
-        "orientation_goal": "upright" if task_type == "E2" else "preserve",
+        "orientation_goal": "upright" if task_type == "E2" else "none",
         "target_state": "none",
         "target_setting": 0,
         "layout": "none",
@@ -542,7 +542,7 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
     assert graph["task_groups"][0]["goal"] == {
         "direction": "none",
         "terminal_behavior": "hold",
-        "orientation_goal": "preserve",
+        "orientation_goal": "none",
         "orientation_axis": "none",
         "relation_frame": "robot",
         "reference_object": "banana_left",

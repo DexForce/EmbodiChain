@@ -371,7 +371,7 @@ class TaskFactory:
                 {
                     "transfer_arm": "left_arm",
                     "receive_arm": "right_arm",
-                    "orientation_goal": rng.choice(("upright", "preserve")),
+                    "orientation_goal": "none",
                 }
             )
         elif task_type == "E5":

@@ -304,7 +304,7 @@ def _plan_line(builder: _TaskBuilder, instruction: str) -> None:
                     "order_by": "explicit",
                     "order_direction": "given",
                     "order_constraint": "free",
-                    "orientation_goal": "preserve",
+                    "orientation_goal": "none",
                     "orientation_axis": "none",
                     "nominal_slot_index": slot,
                     "slot_constraint": "free_reassignable",
@@ -476,7 +476,7 @@ def _plan_handover(builder: _TaskBuilder, clause: str) -> None:
             "orientation_goal": (
                 "upright"
                 if _contains_any(clause.lower(), ("竖直", "直立", "upright"))
-                else "preserve"
+                else "none"
             ),
         },
     )
@@ -556,7 +556,7 @@ def _plan_implicit_binary(builder: _TaskBuilder, clause: str) -> None:
         params={
             "relation": relation,
             "relation_frame": "robot",
-            "orientation_goal": "preserve",
+            "orientation_goal": "none",
             "orientation_axis": "none",
         },
     )
@@ -703,7 +703,7 @@ def _plan_binary(builder: _TaskBuilder, clause: str, task_type: str) -> None:
     params: dict[str, Any] = {
         "relation": relation,
         "relation_frame": "robot",
-        "orientation_goal": "preserve",
+        "orientation_goal": "none",
         "orientation_axis": "none",
     }
     required_arm = _required_arm(clause)

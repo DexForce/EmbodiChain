@@ -31,6 +31,13 @@ from embodichain.gen_sim.action_engine.config import (
     RuntimePolicyCfg,
     default_runtime_policy,
 )
+from embodichain.gen_sim.action_engine.domain import normalize_placement_relation
+from embodichain.gen_sim.action_engine.orientation import (
+    AlignAxisConstraint,
+    MatchRotationConstraint,
+    OrientationConstraint,
+    compile_orientation_constraint,
+)
 from embodichain.lab.sim.atomic_actions import (
     CoordinatedPickGoal,
     CoordinatedPlacementGoal,
@@ -281,7 +288,7 @@ class LiveArrangementPlan:
             half_extent = (
                 vertices.max(dim=0).values - vertices.min(dim=0).values
             ) * 0.5
-            if step.goal.get("orientation_goal", "preserve") == "preserve":
+            if step.goal.get("orientation_goal", "none") in {"none", "preserve"}:
                 rotation = _live_pose(self.env, step.object_uid)[env_id, :3, :3]
                 rotated = vertices @ rotation.transpose(0, 1)
                 radii.append(torch.linalg.vector_norm(rotated[:, :2], dim=-1).max())
@@ -660,12 +667,29 @@ class ActionGrounder:
         if not isinstance(binding, Mapping):
             raise ValueError("target_binding must be a mapping.")
         kind = str(binding.get("kind", ""))
+        orientation = compile_orientation_constraint(step.goal)
+        is_handover_continuation = self._is_handover_continuation(step)
+        uses_handover_staging = (
+            kind == "handover_staging"
+            and capability.target_materializer == "semantic_held_object"
+        )
+        use_upright_yaw_search = (
+            is_handover_continuation or uses_handover_staging
+        ) and self._uses_upright_yaw_search(
+            step,
+            orientation,
+        )
         extra_modifiers: tuple[tuple[str, str], ...] = ()
-        if self._is_handover_continuation(step) and capability.target_materializer in {
-            "semantic_held_object",
-            "current_held_pose",
-            "eef_pose",
-        }:
+        if (
+            is_handover_continuation
+            and use_upright_yaw_search
+            and capability.target_materializer
+            in {
+                "semantic_held_object",
+                "current_held_pose",
+                "eef_pose",
+            }
+        ):
             extra_modifiers = (("orientation", "upright"),)
         policy = self.policy(action, extra_modifiers=extra_modifiers)
         if kind == "joint_state":
@@ -684,10 +708,7 @@ class ActionGrounder:
                 # collision-aware planner cannot find a route, do not silently
                 # replace it with collision-unaware joint interpolation.
                 policy["collision_safety"] = "required"
-        if (
-            kind == "handover_staging"
-            and capability.target_materializer == "semantic_held_object"
-        ):
+        if uses_handover_staging and use_upright_yaw_search:
             # Handover consumes the live payload pose immediately after this
             # move.  Use the existing upright-yaw feasibility search instead
             # of the generic transport orientation heuristic, which can tilt
@@ -979,10 +1000,15 @@ class ActionGrounder:
                 ),
             )
         placement_support_uid = self._placement_support_uid(step)
+        placement_relation = (
+            normalize_placement_relation(step.goal.get("relation", "on"))
+            if step.operator == "place_relative"
+            else str(step.goal.get("relation", "none"))
+        )
         is_on_placement = (
             binding.get("kind") == "semantic_goal"
             and binding.get("phase", "final") != "staging"
-            and step.goal.get("relation") in {"on", "on_top", "on_top_of"}
+            and placement_relation in {"on", "on_top", "on_top_of"}
             and placement_support_uid is not None
         )
         if is_on_placement:
@@ -1668,7 +1694,11 @@ class ActionGrounder:
         # Operators without a relational goal (for example press or a
         # direction-only coordinated transport) must preserve the live origin
         # instead of being silently projected onto a synthetic table support.
-        relation = str(step.goal.get("relation", "none"))
+        relation = (
+            normalize_placement_relation(step.goal.get("relation", "on"))
+            if step.operator == "place_relative"
+            else str(step.goal.get("relation", "none"))
+        )
         distance = float(self._policy_value(policy, "relation_distance"))
         relation_frame = str(step.goal.get("relation_frame", "world"))
         forward_distance = distance
@@ -1900,8 +1930,43 @@ class ActionGrounder:
         direction[axis_index] = 1.0
         return direction
 
+    def _uses_upright_yaw_search(
+        self,
+        step: SemanticStep,
+        constraint: OrientationConstraint,
+    ) -> bool:
+        """Preserve a live upright state as a planning preference.
+
+        Explicit full-frame matching cannot admit yaw search. With no hard
+        orientation terms, yaw search is enabled only when the live object's
+        long axis is already upright, so a preceding upright operation remains
+        stable without turning that state into a sticky acceptance constraint.
+        """
+        if constraint.allows_upright_yaw_search:
+            return True
+        if (
+            constraint.terms
+            or constraint.planning_preference != "minimize_rotation_from_current"
+        ):
+            return False
+        entity = _object(self.env, step.object_uid)
+        vertices = _local_vertices(entity, self.env, 0)
+        extents = vertices.max(dim=0).values - vertices.min(dim=0).values
+        axis_index = int(torch.argmax(extents).item())
+        pose = _live_pose(self.env, step.object_uid)
+        cosine = pose[:, 2, axis_index].abs().clamp(0.0, 1.0)
+        tolerance = float(self.runtime_policy.predicate_fallbacks["upright_max_tilt"])
+        return bool(torch.all(torch.arccos(cosine) <= tolerance).item())
+
     @staticmethod
     def _upright_local_axis(step: SemanticStep) -> str:
+        align_terms = tuple(
+            term
+            for term in compile_orientation_constraint(step.goal).terms
+            if isinstance(term, AlignAxisConstraint)
+        )
+        if align_terms:
+            return align_terms[0].local_axis
         axis = str(step.goal.get("upright_local_axis", "auto"))
         return "long_axis" if axis == "auto" else axis
 
@@ -1912,14 +1977,29 @@ class ActionGrounder:
         *,
         orientation_reference_pose: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        goal = str(step.goal.get("orientation_goal", "preserve"))
-        if goal == "none":
+        constraint = compile_orientation_constraint(step.goal)
+        if not constraint.terms:
             return object_pose[:, :3, :3].clone()
-        if goal == "preserve":
+        if (
+            len(constraint.terms) == 1
+            and isinstance(constraint.terms[0], MatchRotationConstraint)
+            and constraint.terms[0].reference == "step_start"
+        ):
             if orientation_reference_pose is not None:
                 reference = _batched_pose(orientation_reference_pose, self.env)
                 return reference[:, :3, :3].clone()
             return object_pose[:, :3, :3].clone()
+        goal = str(step.goal.get("orientation_goal", "none"))
+        align_term = next(
+            (
+                term
+                for term in constraint.terms
+                if isinstance(term, AlignAxisConstraint)
+            ),
+            None,
+        )
+        if align_term is not None:
+            goal = "upright"
         if goal not in {"upright", "lay_flat", "axis_align"}:
             raise ValueError(f"Unsupported orientation_goal {goal!r}.")
 
@@ -1933,7 +2013,11 @@ class ActionGrounder:
                 descending=True,
             ).tolist()
             if goal == "upright":
-                upright_axis = self._upright_local_axis(step)
+                upright_axis = (
+                    align_term.local_axis
+                    if align_term is not None
+                    else self._upright_local_axis(step)
+                )
                 vertical_axis = (
                     int(longest_to_shortest[0])
                     if upright_axis == "long_axis"

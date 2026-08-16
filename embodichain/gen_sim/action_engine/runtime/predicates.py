@@ -587,7 +587,13 @@ def evaluate_predicate(
         )
         axis = _pose(env, uid)[:, :3, axis_index]
         cosine = axis[:, 2].clamp(-1.0, 1.0)
-        if str(local_axis).lower() in {"long", "long_axis", "longest"}:
+        directed = spec.get(
+            "directed",
+            str(local_axis).lower() not in {"long", "long_axis", "longest"},
+        )
+        if not isinstance(directed, bool):
+            raise ValueError("object_upright directed must be a boolean.")
+        if not directed:
             cosine = cosine.abs()
         return torch.arccos(cosine) <= float(
             spec.get("max_tilt", defaults["upright_max_tilt"])

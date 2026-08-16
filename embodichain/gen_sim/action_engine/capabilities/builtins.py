@@ -29,6 +29,10 @@ from embodichain.gen_sim.action_engine.domain.task_contracts import (
     PLACEMENT_RELATIONS,
     TERMINAL_BEHAVIORS,
     TRANSPORT_DIRECTIONS,
+    normalize_placement_relation,
+)
+from embodichain.gen_sim.action_engine.orientation import (
+    compile_orientation_constraint,
 )
 
 from .registry import (
@@ -134,6 +138,8 @@ def _expand_arrange_line(step: Mapping[str, Any]) -> list[dict[str, Any]]:
             "order_constraint",
             "order_direction",
             "orientation_axis",
+            "orientation_constraint",
+            "orientation_directed",
             "orientation_goal",
             "participation",
         },
@@ -173,6 +179,7 @@ def _expand_arrange_line(step: Mapping[str, Any]) -> list[dict[str, Any]]:
         "participation": participation,
         "orientation_goal": orientation_goal,
         "orientation_axis": orientation_axis,
+        **_orientation_extensions(goal),
     }
     actor = _single_arm_actor(step)
     expanded: list[dict[str, Any]] = []
@@ -216,6 +223,8 @@ def _expand_build_stack(step: Mapping[str, Any]) -> list[dict[str, Any]]:
         allowed={
             "anchor",
             "orientation_axis",
+            "orientation_constraint",
+            "orientation_directed",
             "orientation_goal",
             "stack_mode",
         },
@@ -243,6 +252,7 @@ def _expand_build_stack(step: Mapping[str, Any]) -> list[dict[str, Any]]:
             "stack_mode": stack_mode,
             "orientation_goal": orientation_goal,
             "orientation_axis": orientation_axis,
+            **_orientation_extensions(goal),
         }
         expanded.append(
             _execution_step(
@@ -267,6 +277,8 @@ def _expand_place_relative(step: Mapping[str, Any]) -> list[dict[str, Any]]:
         step,
         allowed={
             "orientation_axis",
+            "orientation_constraint",
+            "orientation_directed",
             "orientation_goal",
             "orientation_reference_object",
             "payloads",
@@ -278,15 +290,14 @@ def _expand_place_relative(step: Mapping[str, Any]) -> list[dict[str, Any]]:
     )
     orientation_goal, orientation_axis = _orientation(goal, "place_relative")
     reference = _required_string(goal, "reference_object", "place_relative")
-    relation = str(goal.get("relation", "on"))
-    if relation not in PLACEMENT_RELATIONS:
-        raise ValueError(f"place_relative relation {relation!r} is unsupported.")
+    relation = normalize_placement_relation(goal.get("relation", "on"))
     normalized_goal = {
         "reference_object": reference,
         "reference_state": str(goal.get("reference_state", "live")),
         "relation": relation,
         "orientation_goal": orientation_goal,
         "orientation_axis": orientation_axis,
+        **_orientation_extensions(goal),
         "slot": str(goal.get("slot", "auto")),
     }
     if normalized_goal["reference_state"] not in {"initial", "live"}:
@@ -325,6 +336,8 @@ def _expand_hold_hover(step: Mapping[str, Any]) -> list[dict[str, Any]]:
         step,
         allowed={
             "orientation_axis",
+            "orientation_constraint",
+            "orientation_directed",
             "orientation_goal",
             "reference_object",
             "reference_state",
@@ -347,6 +360,7 @@ def _expand_hold_hover(step: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "reference_state": str(goal.get("reference_state", "initial")),
                 "orientation_goal": orientation_goal,
                 "orientation_axis": orientation_axis,
+                **_orientation_extensions(goal),
             },
             postcondition={"type": "object_held", "object": object_uid},
         )
@@ -365,6 +379,8 @@ def _expand_orient_object(step: Mapping[str, Any]) -> list[dict[str, Any]]:
         step,
         allowed={
             "orientation_axis",
+            "orientation_constraint",
+            "orientation_directed",
             "orientation_goal",
             "position_anchor",
             "support_object",
@@ -372,7 +388,7 @@ def _expand_orient_object(step: Mapping[str, Any]) -> list[dict[str, Any]]:
         },
     )
     orientation_goal, orientation_axis = _orientation(goal, "orient_object")
-    if orientation_goal == "preserve":
+    if orientation_goal not in {"upright", "lay_flat", "axis_align"}:
         raise ValueError(
             "orient_object requires upright, lay_flat, or axis_align orientation."
         )
@@ -399,6 +415,7 @@ def _expand_orient_object(step: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "reference_state": "live",
                 "orientation_goal": orientation_goal,
                 "orientation_axis": orientation_axis,
+                **_orientation_extensions(goal),
                 "position_anchor": position_anchor,
                 "support_object": support_object,
                 "upright_local_axis": upright_local_axis,
@@ -421,6 +438,8 @@ def _expand_coordinated_transport(
         allowed={
             "direction",
             "orientation_axis",
+            "orientation_constraint",
+            "orientation_directed",
             "orientation_goal",
             "payloads",
             "reference_object",
@@ -452,6 +471,7 @@ def _expand_coordinated_transport(
         "terminal_behavior": terminal_behavior,
         "orientation_goal": orientation_goal,
         "orientation_axis": orientation_axis,
+        **_orientation_extensions(goal),
     }
     normalized_payloads = _normalize_payloads(
         goal.get("payloads", []),
@@ -967,7 +987,8 @@ def _orientation(
     *,
     allow_change: bool = True,
 ) -> tuple[str, str]:
-    orientation_goal = str(goal.get("orientation_goal", "preserve"))
+    default_goal = "none" if allow_change else "preserve"
+    orientation_goal = str(goal.get("orientation_goal", default_goal))
     orientation_axis = str(goal.get("orientation_axis", "none"))
     allowed_goals = (
         {"none", "preserve", "upright", "lay_flat", "axis_align"}
@@ -984,4 +1005,14 @@ def _orientation(
         )
     if orientation_goal == "axis_align" and orientation_axis == "none":
         raise ValueError(f"{operator} axis_align requires an orientation_axis.")
+    compile_orientation_constraint(goal)
     return orientation_goal, orientation_axis
+
+
+def _orientation_extensions(goal: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy optional composable fields after operator-level validation."""
+    return {
+        key: deepcopy(goal[key])
+        for key in ("orientation_constraint", "orientation_directed")
+        if key in goal
+    }

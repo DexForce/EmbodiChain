@@ -90,7 +90,7 @@ Built-in operator shapes:
    - goal fields: anchor="table_center"; axis="world_x"|"world_y"|
      "table_long_axis"; order_constraint="free"|"ordered";
      order_by="explicit"|"size"|"color"; order_direction="given"|
-     "ascending"|"descending"; orientation_goal="preserve"|"upright"|
+     "ascending"|"descending"; orientation_goal="none"|"preserve"|"upright"|
      "lay_flat"|"axis_align"; orientation_axis="none"|"x"|"y"|
      "long_axis"|"short_axis".
    - In the rotated robot view, world_y is the horizontal left-to-right axis
@@ -101,9 +101,10 @@ Built-in operator shapes:
      table's long axis; never infer it from a generic line request.
    - Use order_constraint="free" when the user wants a line but does not care
      which object occupies each slot.
-   - A line layout does not imply an orientation change. Use
-     orientation_goal="preserve" and orientation_axis="none" unless the task
-     explicitly asks to make objects upright, lay them flat, or align an axis.
+   - A line layout does not imply an orientation acceptance requirement. Use
+     orientation_goal="none" and orientation_axis="none" unless the task
+     explicitly asks to preserve orientation, make objects upright, lay them
+     flat, or align an axis.
 
 2. build_stack
    - objects: bottom-to-top movable object order.

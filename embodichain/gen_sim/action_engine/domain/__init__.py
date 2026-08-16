@@ -38,6 +38,7 @@ from .task_contracts import (
     TERMINAL_BEHAVIORS,
     TRANSPORT_DIRECTIONS,
     TaskContract,
+    normalize_placement_relation,
     task_contract,
     task_success_type,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "TaskContract",
     "execution_program_hash",
     "motion_policy",
+    "normalize_placement_relation",
     "public_task_spec",
     "requested_visual_task_predicates",
     "seed_graph_hash",
