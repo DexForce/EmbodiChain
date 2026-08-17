@@ -248,7 +248,33 @@ class MicrowaveOven(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "MicrowaveOven.zip"),
-            "5c90aa6911b445811fc81d704d461057",
+            "5c90aa6911b445811fc81d704d461057",        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+class PlasticTray(EmbodiChainDataset):
+    """get_data_path("PlasticTray/plastic_tray.glb")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "PlasticTray.zip"),
+            "66f1f8a507052f9e33be5433fa2a2667",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class WaterBasin(EmbodiChainDataset):
+    """get_data_path("WaterBasin/water_basin.glb")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "WaterBasin.zip"),
+            "9ae41630f6f52dccd7b95ab21b6ba989",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

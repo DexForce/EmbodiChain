@@ -44,6 +44,7 @@ GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
 )
 GRASP_ANNOTATOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+VERSION_TAG = "v0.0.1"
 
 
 __all__ = ["GraspGenerator", "GraspGeneratorCfg"]
@@ -419,7 +420,7 @@ class GraspGenerator:
         face_bytes = triangles.to("cpu").numpy().tobytes()
         md5_hash = hashlib.md5(vert_bytes + face_bytes).hexdigest()
         cache_path = os.path.join(
-            GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{md5_hash}.npy"
+            GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{VERSION_TAG}_{md5_hash}.npy"
         )
         return cache_path
 
