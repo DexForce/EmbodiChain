@@ -35,6 +35,7 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim import SimulationManager
+from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
@@ -80,8 +81,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 PICKMENT_ASSET_ROOT = "CoordinatedPlacementAndPickment"
 GRIPPER_TCP_Z = 0.121
-SUPPORT_SURFACE_Z = 0.65
-SUPPORT_SURFACE_SIZE = (0.60, 0.60, 0.02)
+SUPPORT_SURFACE_Z = 0.55
+SUPPORT_SURFACE_SIZE = (0.7, 1.20, 0.02)
 SUPPORT_SURFACE_CENTER = (
     0.0,
     0.0,
@@ -133,6 +134,28 @@ OBJECT_PRESETS = {
         target_world_yaw_deg=0.0,
         hand_close_qpos=0.026,
     ),
+    "water_basin": PickmentObjectPreset(
+        label="water_basin",
+        mesh_path=get_data_path("WaterBasin/water_basin.glb"),
+        init_xy=(0.0, 0.02),
+        init_rot=(0.0, 0.0, 0.0),
+        surface_clearance=0.008,
+        body_scale=(1.0, 1.0, 1.0),
+        target_translation=(-0.12, -0.03, 0.12),
+        target_world_yaw_deg=0.0,
+        hand_close_qpos=0.026,
+    ),
+    "plastic_tray": PickmentObjectPreset(
+        label="plastic_tray",
+        mesh_path=get_data_path("PlasticTray/plastic_tray.glb"),
+        init_xy=(-0.02, 0.02),
+        init_rot=(0.0, 0.0, 90.0),
+        surface_clearance=0.008,
+        body_scale=(1.0, 1.0, 1.0),
+        target_translation=(-0.12, -0.03, 0.12),
+        target_world_yaw_deg=0.0,
+        hand_close_qpos=0.026,
+    ),
 }
 PICKMENT_SAMPLE_INTERVAL = 96
 PICKMENT_OBJECT_MOTION_KEYFRAMES = 6
@@ -160,7 +183,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--object",
         choices=sorted(OBJECT_PRESETS),
-        default="pencil",
+        default="plastic_tray",
         help="Object mesh to grasp in the coordinated pickment demo.",
     )
     return parser.parse_args()
@@ -355,6 +378,7 @@ def run_coordinated_pickment_demo(
         obj,
         label=preset.label,
         n_sample=args.n_sample,
+        # n_sample = 1000,
         force_reannotate=args.force_reannotate,
     )
     left_to_right_arm_direction = compute_left_to_right_arm_direction(robot, sim.device)
@@ -377,6 +401,7 @@ def run_coordinated_pickment_demo(
         hold_steps=PICKMENT_HOLD_STEPS,
         object_motion_keyframes=PICKMENT_OBJECT_MOTION_KEYFRAMES,
         left_to_right_arm_direction=left_to_right_arm_direction,
+        middle_empty_ratio=0.7,
     )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
