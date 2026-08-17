@@ -168,7 +168,8 @@ def test_anymal_c_profile_builds_and_runs_torchscript(tmp_path, monkeypatch):
             resource_root=tmp_path,
         )
     )
-    parse_policy_spec(profile.policy_spec)
+    spec = parse_policy_spec(profile.policy_spec)
+    assert spec.environment.entrypoint is None
     config = profile.policy_spec["policy"]["adapter"]["config"]
     adapter = AnymalCVelocityAdapter(
         AdapterRequest(

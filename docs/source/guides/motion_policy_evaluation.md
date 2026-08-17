@@ -87,8 +87,8 @@ embodichain eval-motion-policy outputs/<experiment>_<timestamp> \
 ```
 
 The Viewer runs until its window closes when neither `--control-steps` nor
-`--duration` is set. A Headless run uses an exact integer number of control
-steps:
+`--duration` is set. Press `R` to start or stop Viewer recording. A Headless
+run uses an exact integer number of control steps:
 
 ```bash
 embodichain eval-motion-policy outputs/<experiment>_<timestamp> \
@@ -336,7 +336,13 @@ such as `--device`, `--sim-device`, `--control-steps`, and `--scene-config` are
 forwarded to EmbodiChain.
 
 Use W/S to adjust `vx`, A/D to adjust `vy`, Q/E to adjust `yaw`, M to zero all
-three commands, and R to reset the task.
+three commands, Backspace to reset the task and camera framing, and T to switch
+between tracking and free view. The Viewer follows the robot root in the ground
+plane. Hold the left mouse button to adjust the orbit angle and use the mouse
+wheel to adjust the viewing distance. Right-button panning is locked while
+tracking is active. The tracking target continues following the robot during an
+orbit drag. Switching back to tracking centers the camera on the current robot
+position.
 
 The external Policy data path is:
 

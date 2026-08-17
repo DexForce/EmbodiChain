@@ -61,7 +61,14 @@ Viewer controls:
 | A / D | Increase / decrease `vy` |
 | Q / E | Increase / decrease `yaw` |
 | M | Set all three commands to zero |
-| R | Reset the robot and Policy history |
+| Backspace | Reset the robot, Policy history, and camera framing |
+| T | Switch between tracking and free view |
+
+The camera follows the robot root in the ground plane. Hold the left mouse
+button to change the orbit angle and use the mouse wheel to change the viewing
+distance. Right-button panning is locked while tracking is active. Tracking
+continues while the orbit angle is being adjusted. Switching back to tracking
+centers the camera on the current robot position.
 
 The terminal prints the path to `evaluation.json` when the Viewer closes. Run a
 Headless smoke test with:
