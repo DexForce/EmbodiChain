@@ -99,7 +99,7 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
 
     def _find_symmetric_nearest_xpos(
         self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ):
+    ) -> torch.Tensor:
         """Find the nearest symmetric pose to the reference pose."""
         symmetric_xpos = target_xpos.clone()
         symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
@@ -110,7 +110,8 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         angle_b = get_relative_rotation(
             reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
         )
-        target_xpos = torch.where(angle_a < angle_b, target_xpos, symmetric_xpos)
+        choose_target = (angle_a < angle_b)[..., None, None]
+        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
         return target_xpos
 
     def _plan(
