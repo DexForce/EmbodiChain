@@ -33,6 +33,7 @@ from .affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
+    PressButtonAffordance,
     TurnAffordance,
 )
 from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
@@ -99,6 +100,9 @@ from .primitives import (
     PlaceGoal,
     PlaceOptions,
     Press,
+    PressButton,
+    PressButtonGoal,
+    PressButtonOptions,
     PressGoal,
     PressOptions,
     TurnKnob,
@@ -212,6 +216,10 @@ __all__ = [
     "PlanningContext",
     "PoseGoalValue",
     "Press",
+    "PressButton",
+    "PressButtonAffordance",
+    "PressButtonGoal",
+    "PressButtonOptions",
     "PressGoal",
     "PressOptions",
     "TurnKnob",

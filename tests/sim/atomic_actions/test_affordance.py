@@ -27,6 +27,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
+    PressButtonAffordance,
     TurnAffordance,
 )
 
@@ -210,6 +211,54 @@ class TestTurnAffordance:
 
         with pytest.raises(ValueError, match="parallel"):
             affordance.get_grasp_pose()
+
+
+class TestPressButtonAffordance:
+    def test_builds_press_pose_on_upstream_mesh_surface(self):
+        vertices = torch.tensor(
+            [
+                [-2.0, -1.0, -1.0],
+                [-2.0, 1.0, 1.0],
+                [2.0, -1.0, 1.0],
+                [2.0, 1.0, -1.0],
+            ]
+        )
+        triangles = torch.tensor([[0, 1, 2], [1, 2, 3]])
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (vertices, triangles)
+        articulation.get_link_pose.return_value = link_pose
+        affordance = PressButtonAffordance(
+            articulation=articulation,
+            link_name="button",
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        press_pose = affordance.get_press_pose()
+
+        expected_surface = link_pose[:, :3, 3] + torch.tensor([-2.0, 0.0, 0.0])
+        assert torch.allclose(press_pose[:, :3, 3], expected_surface)
+        assert torch.allclose(
+            press_pose[:, :3, 2],
+            torch.tensor([1.0, 0.0, 0.0]).expand(2, -1),
+        )
+        articulation.get_link_vert_face.assert_called_once_with("button")
+        articulation.get_link_pose.assert_called_once_with("button", to_matrix=True)
+
+    def test_rejects_zero_press_axis(self):
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (
+            torch.ones(3, 3),
+            torch.tensor([[0, 1, 2]]),
+        )
+
+        with pytest.raises(ValueError, match="press_axis must be non-zero"):
+            PressButtonAffordance(
+                articulation=articulation,
+                link_name="button",
+                press_axis=torch.zeros(3),
+            )
 
 
 class TestInteractionPoints:

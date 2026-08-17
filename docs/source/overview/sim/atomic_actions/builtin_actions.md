@@ -5,7 +5,7 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships ten built-in action implementations with stable skill IDs;
+EmbodiChain ships eleven built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
@@ -104,6 +104,13 @@ The animations below are the focused simulator demos under
 <img src="../../../_static/atomic_actions/press.gif" alt="Press demo" width="480" style="max-width: 100%;" />
 :::
 
+:::{grid-item-card} `PressButton`
+:link: builtin-press-button
+:link-type: ref
+
+`press_button` · close, approach, press, and retract
+:::
+
 :::{grid-item-card} `CoordinatedPickment`
 :link: builtin-coordinated-pickment
 :link-type: ref
@@ -143,6 +150,7 @@ The animations below are the focused simulator demos under
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
+| `press_button` | `PressButtonGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressButtonAffordance` | none |
 | `turn_knob` | `TurnKnobGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TurnAffordance` | none |
 | `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
@@ -446,6 +454,34 @@ symbolic effect in the current action; applications that require force/contact
 confirmation should verify it externally.
 
 **Example:** `scripts/tutorials/atomic_action/press.py`
+
+(builtin-press-button)=
+
+## `PressButton`
+
+Plans **close hand -> approach button -> press along axis -> return to the
+approach pose** for one articulation link. The goal requires a
+`PressButtonAffordance` constructed with an `Articulation`, `link_name`, and
+link-frame `press_axis`. The affordance obtains the link-local mesh and live
+link pose from the articulation.
+
+The contact position is centered on the mesh face opposite the press direction.
+The end-effector z-axis follows the world-transformed press axis, so the
+approach pose lies on negative z and the pressed pose lies on positive z.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `press_button` |
+| Goal | `PressButtonGoal(semantics=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Motion | close, approach, press along the link-frame axis, retract to approach |
+| Effect | none |
+
+`PressButtonOptions` controls hand-close interpolation, approach distance, and
+press distance. The bound end-effector profile must provide `grasp`; the action
+keeps the gripper closed for all arm-motion segments.
+
+**Example:** `scripts/tutorials/atomic_action/press_button.py`
 
 (builtin-turn-knob)=
 

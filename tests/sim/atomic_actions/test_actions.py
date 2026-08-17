@@ -64,6 +64,10 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     PlanningContext,
     Press,
+    PressButton,
+    PressButtonAffordance,
+    PressButtonGoal,
+    PressButtonOptions,
     PressGoal,
     PressOptions,
     RobotObservation,
@@ -415,6 +419,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
     assert Press.GoalType is PressGoal
+    assert PressButton.GoalType is PressButtonGoal
     assert TurnKnob.GoalType is TurnKnobGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
@@ -428,6 +433,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
         MoveHeldObjectOptions(),
         PlaceOptions(),
         PressOptions(),
+        PressButtonOptions(),
         TurnKnobOptions(),
         CoordinatedPickmentOptions(),
         CoordinatedPlacementOptions(),
@@ -989,6 +995,178 @@ def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
         - grasp_pose[:, :3, 2] * TurnKnobOptions().pre_grasp_distance
     )
     assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
+
+
+def test_press_button_plans_close_approach_press_and_retract() -> None:
+    articulation = Mock(spec=Articulation)
+    vertices = torch.tensor(
+        [
+            [-0.01, -0.01, -0.01],
+            [-0.01, 0.01, 0.01],
+            [0.01, -0.01, 0.01],
+            [0.01, 0.01, -0.01],
+        ]
+    )
+    articulation.get_link_vert_face.return_value = (
+        vertices,
+        torch.zeros(4, 3, dtype=torch.long),
+    )
+    articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    affordance = PressButtonAffordance(
+        articulation=articulation,
+        link_name="button",
+        press_axis=torch.tensor([1.0, 0.0, 0.0]),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="button",
+        entity=articulation,
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, PressButton())
+    options = PressButtonOptions(
+        hand_interp_steps=3,
+        approach_distance=0.1,
+        press_distance=0.02,
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press_button",
+            goal=PressButtonGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == [
+        "close",
+        "approach",
+        "press",
+        "retract",
+    ]
+    assert torch.all(
+        plan.trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    articulation.get_link_pose.assert_called_with("button", to_matrix=True)
+    contact_pose = affordance.get_press_pose(torch.eye(4).repeat(NUM_ENVS, 1, 1))
+    expected_approach = (
+        contact_pose[:, :3, 3] - contact_pose[:, :3, 2] * options.approach_distance
+    )
+    expected_pressed = (
+        contact_pose[:, :3, 3] + contact_pose[:, :3, 2] * options.press_distance
+    )
+    planned_targets = [
+        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
+    ]
+    assert torch.allclose(planned_targets[0][:, :3, 3], expected_approach)
+    assert torch.allclose(planned_targets[1][:, :3, 3], expected_pressed)
+    assert torch.allclose(planned_targets[2][:, :3, 3], expected_approach)
+
+
+def test_press_button_preserves_failed_environment_at_observed_qpos() -> None:
+    articulation = Mock(spec=Articulation)
+    articulation.get_link_vert_face.return_value = (
+        torch.tensor(
+            [
+                [-0.01, -0.01, -0.01],
+                [-0.01, 0.01, 0.01],
+                [0.01, -0.01, 0.01],
+                [0.01, 0.01, -0.01],
+            ]
+        ),
+        torch.zeros(4, 3, dtype=torch.long),
+    )
+    articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    semantics = ObjectSemantics(
+        affordance=PressButtonAffordance(
+            articulation=articulation,
+            link_name="button",
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+        ),
+        geometry={},
+        label="button",
+        entity=articulation,
+    )
+    generator = _motion_generator()
+
+    def partial_ik(
+        pose: torch.Tensor | None = None,
+        name: str | None = None,
+        joint_seed: torch.Tensor | None = None,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert joint_seed is not None
+        return torch.tensor([True, False]), torch.ones_like(joint_seed)
+
+    generator.robot.compute_ik.side_effect = partial_ik
+    action = _bind_action(generator, PressButton())
+    context = _context()
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="press_button",
+            goal=PressButtonGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=18),
+            skill_options=PressButtonOptions(hand_interp_steps=3),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert not torch.allclose(plan.trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        plan.trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(18, -1),
+    )
+
+
+def test_press_button_rejects_non_button_affordance() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.zeros(8, 3),
+            mesh_triangles=torch.zeros(4, 3, dtype=torch.long),
+        ),
+        geometry={},
+        label="mesh-button",
+    )
+    action = _bind_action(_motion_generator(), PressButton())
+
+    with pytest.raises(ValueError, match="PressButtonAffordance"):
+        _plan_action(
+            action,
+            _invocation("press_button", PressButtonGoal(semantics)),
+            _context(),
+        )
+
+
+def test_press_button_requires_primary_arm_and_end_effector_bindings() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="button",
+    )
+    action = _bind_action(_motion_generator(), PressButton())
+    invocation = ActionInvocation(
+        skill_id="press_button",
+        goal=PressButtonGoal(semantics),
+        binding=ActionBinding(manipulators={"primary": "arm"}),
+    )
+
+    with pytest.raises(KeyError, match="No end effector is bound to role 'primary'"):
+        action.resolve_request(invocation)
+
+
+def test_press_axis_belongs_to_button_affordance_not_action_options() -> None:
+    assert "press_axis" not in PressButtonOptions.__dataclass_fields__
 
 
 def test_turn_knob_rejects_non_turn_affordance() -> None:

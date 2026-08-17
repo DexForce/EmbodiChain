@@ -348,6 +348,120 @@ class TurnAffordance(Affordance):
 
 
 @dataclass
+class PressButtonAffordance(Affordance):
+    """Geometry and pressing semantics for one articulation-link button."""
+
+    articulation: Articulation | None = None
+    """Articulation whose link supplies the button mesh and live pose."""
+
+    link_name: str = ""
+    """Articulation link passed to ``get_link_vert_face``/``get_link_pose``."""
+
+    press_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 0.0, 1.0])
+    )
+    """Press direction expressed in the articulation-link frame."""
+
+    mesh_vertices: torch.Tensor = field(init=False, repr=False)
+    """Link-local mesh vertices returned by ``get_link_vert_face``."""
+
+    mesh_triangles: torch.Tensor = field(init=False, repr=False)
+    """Link-local mesh triangles returned by ``get_link_vert_face``."""
+
+    def __post_init__(self) -> None:
+        articulation = self.articulation
+        if articulation is None:
+            raise ValueError("PressButtonAffordance.articulation must be provided.")
+        if not isinstance(self.link_name, str) or not self.link_name.strip():
+            raise ValueError(
+                "PressButtonAffordance.link_name must be a non-empty string."
+            )
+        if (
+            not isinstance(self.press_axis, torch.Tensor)
+            or self.press_axis.shape != (3,)
+            or not torch.isfinite(self.press_axis).all()
+        ):
+            raise ValueError(
+                "PressButtonAffordance.press_axis must be a finite (3,) tensor."
+            )
+        if torch.linalg.vector_norm(self.press_axis) <= 1.0e-6:
+            raise ValueError("PressButtonAffordance.press_axis must be non-zero.")
+        self.press_axis = self.press_axis.clone()
+        vertices, triangles = articulation.get_link_vert_face(self.link_name)
+        self.mesh_vertices = torch.as_tensor(vertices)
+        self.mesh_triangles = torch.as_tensor(triangles)
+        if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
+            raise ValueError(
+                "PressButtonAffordance mesh vertices must have shape (N, 3)."
+            )
+        if self.mesh_vertices.shape[0] == 0:
+            raise ValueError("PressButtonAffordance requires a non-empty link mesh.")
+
+    def get_link_pose(self) -> torch.Tensor:
+        """Return the current batched world pose of the configured link."""
+        articulation = self.articulation
+        if articulation is None:
+            raise RuntimeError("PressButtonAffordance has no articulation.")
+        return articulation.get_link_pose(self.link_name, to_matrix=True)
+
+    def get_press_pose(self, link_pose: torch.Tensor | None = None) -> torch.Tensor:
+        """Construct a press pose at the button surface opposite the press axis.
+
+        The end-effector z-axis follows :attr:`press_axis` in world space. The
+        position is the center of the mesh's upstream face, so advancing along
+        the z-axis moves into the button instead of first targeting its volume
+        center.
+
+        Args:
+            link_pose: Optional current world pose of the button link with
+                shape ``(B, 4, 4)``.
+
+        Returns:
+            Batched world-frame press poses with shape ``(B, 4, 4)``.
+
+        Raises:
+            ValueError: If the world press axis is parallel to world up.
+        """
+        link_pose = self.get_link_pose() if link_pose is None else link_pose
+        if link_pose.dim() != 3 or link_pose.shape[1:] != (4, 4):
+            raise ValueError("Articulation link pose must have shape (B, 4, 4).")
+        link_pose = link_pose.to(dtype=torch.float32)
+        device = link_pose.device
+        vertices = self.mesh_vertices.to(device=device, dtype=torch.float32)
+        center = vertices.mean(dim=0)
+        press_axis = self.press_axis.to(device=device, dtype=torch.float32)
+        press_axis = press_axis / torch.linalg.vector_norm(press_axis)
+
+        center_projection = torch.dot(center, press_axis)
+        surface_projection = torch.min(torch.matmul(vertices, press_axis))
+        surface_center = center + press_axis * (surface_projection - center_projection)
+
+        z_axis = torch.matmul(link_pose[:, :3, :3], press_axis)
+        z_axis = torch.nn.functional.normalize(z_axis, dim=1)
+        y_axis = torch.tensor(
+            [0.0, 0.0, 1.0], dtype=torch.float32, device=device
+        ).expand_as(z_axis)
+        x_axis = torch.linalg.cross(y_axis, z_axis, dim=1)
+        if torch.any(torch.linalg.vector_norm(x_axis, dim=1) <= 1.0e-6):
+            raise ValueError(
+                "PressButtonAffordance press axis must not be parallel to world "
+                "(0, 0, 1)."
+            )
+        x_axis = torch.nn.functional.normalize(x_axis, dim=1)
+
+        press_pose = torch.eye(4, dtype=torch.float32, device=device).repeat(
+            link_pose.shape[0], 1, 1
+        )
+        press_pose[:, :3, 0] = x_axis
+        press_pose[:, :3, 1] = y_axis
+        press_pose[:, :3, 2] = z_axis
+        press_pose[:, :3, 3] = (
+            torch.matmul(link_pose[:, :3, :3], surface_center) + link_pose[:, :3, 3]
+        )
+        return press_pose
+
+
+@dataclass
 class InteractionPoints(Affordance):
     """Batch of 3D interaction points on an object surface."""
 
@@ -436,6 +550,7 @@ class AssembleAffordance(Affordance):
 __all__ = [
     "Affordance",
     "AntipodalAffordance",
+    "PressButtonAffordance",
     "TurnAffordance",
     "InteractionPoints",
     "AssembleAffordance",
