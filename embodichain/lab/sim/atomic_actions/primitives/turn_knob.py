@@ -24,7 +24,11 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+    pose_inv,
+    get_relative_rotation,
+)
 
 from ._helpers import arm_qpos_from_state
 from ..affordance import TurnAffordance
@@ -93,6 +97,22 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
+    def _find_symmetric_nearest_xpos(
+        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
+    ):
+        """Find the nearest symmetric pose to the reference pose."""
+        symmetric_xpos = target_xpos.clone()
+        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
+        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
+        angle_a = get_relative_rotation(
+            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
+        )
+        angle_b = get_relative_rotation(
+            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
+        )
+        target_xpos = torch.where(angle_a < angle_b, target_xpos, symmetric_xpos)
+        return target_xpos
+
     def _plan(
         self,
         request: ResolvedActionRequest[TurnKnobGoal, TurnKnobOptions],
@@ -131,7 +151,12 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         grasp_xpos = affordance.get_grasp_pose(link_pose).to(
             device=self.device, dtype=torch.float32
         )
-
+        grasp_xpos = self._find_symmetric_nearest_xpos(
+            grasp_xpos,
+            reference_xpos=self.robot.compute_fk(
+                qpos=start_arm_qpos, name=manipulator.name, to_matrix=True
+            ),
+        )
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos,
             -grasp_xpos[:, :3, 2] * options.pre_grasp_distance,

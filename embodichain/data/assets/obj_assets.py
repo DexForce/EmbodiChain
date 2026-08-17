@@ -248,11 +248,13 @@ class MicrowaveOven(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "MicrowaveOven.zip"),
-            "5c90aa6911b445811fc81d704d461057",        )
+            "5672da2d5a888a12469d6277636646b0",
+        )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
 
 class PlasticTray(EmbodiChainDataset):
     """get_data_path("PlasticTray/plastic_tray.glb")"""

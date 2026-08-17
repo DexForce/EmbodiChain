@@ -56,7 +56,6 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-# MICROWAVE_ASSET = "MicrowaveOven/microwave_oven.urdf"
 MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
 KNOB_LINK_NAME = "cap_1"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
@@ -158,12 +157,6 @@ def main() -> None:
             )
         },
     )
-    if not args.no_vis_eef_axis:
-        draw_axis_marker(
-            sim,
-            "microwave_power_knob_axis",
-            microwave.get_link_pose(KNOB_LINK_NAME, to_matrix=True),
-        )
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
