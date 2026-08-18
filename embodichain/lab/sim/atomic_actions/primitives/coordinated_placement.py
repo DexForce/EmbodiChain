@@ -25,24 +25,31 @@ import torch
 
 from embodichain.utils import logger
 
-from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
-from ..state import HeldObjectState, PlanningContext
-from ..trajectory_ops import (
-    interpolate_hand_qpos,
-    translate_pose_world,
+from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
+from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND, OPEN_COMMAND
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
 )
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
     repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    interpolate_hand_qpos,
+    translate_pose_world,
 )
 
 

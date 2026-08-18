@@ -26,25 +26,31 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
-from ..affordance import AntipodalAffordance
-from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction, ObjectSemantics
-from ..effects import StateDelta
-from ..goals import (
+from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
+from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND, OPEN_COMMAND
+from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
     ObjectActionGoal,
     PoseGoalValue,
     resolve_pose_goal,
     validate_pose_goal,
 )
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
-from ..state import HeldObjectState, PlanningContext
-from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     repeat_qpos,
     resolve_batched_pose,
+)
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    interpolate_joint_trajectory,
+    translate_pose_world,
 )
 
 

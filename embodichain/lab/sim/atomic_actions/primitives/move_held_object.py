@@ -25,14 +25,24 @@ import torch
 
 from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
 
-from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..control import GRASP_COMMAND
-from ..core import AtomicAction
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..state import PlanningContext
-from ..trajectory_ops import build_pose_plan_states
+from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
 
 
 @dataclass(frozen=True, slots=True, eq=False)

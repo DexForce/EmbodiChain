@@ -25,16 +25,26 @@ import torch
 
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
-from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..affordance import AssembleAffordance
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..state import PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.affordance import AssembleAffordance
+from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND, OPEN_COMMAND
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
