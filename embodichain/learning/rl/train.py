@@ -20,6 +20,7 @@ import argparse
 import os
 import time
 from collections.abc import Sequence
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +29,7 @@ import wandb
 from torch.utils.tensorboard import SummaryWriter
 
 from embodichain.learning.rl.models import get_registered_policy_names
-from embodichain.learning.rl.motion_policy_evaluation.manifest import (
+from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
 )
 from embodichain.learning.rl.algo import (
@@ -40,9 +41,8 @@ from embodichain.learning.rl.differentiable_trainer import (
     DifferentiableTrainer,
     DifferentiableTrainerCfg,
 )
-from embodichain.learning.rl.env import build_learning_env
 from embodichain.learning.rl.runtime import (
-    build_gym_environment,
+    _build_learning_environment,
     build_gym_policy_runtime,
     build_learning_policy_runtime,
 )
@@ -50,6 +50,7 @@ from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils.trainer import Trainer
 from embodichain.utils import logger
 from embodichain.lab.gym.utils.registration import (
+    build_env,
     discover_task_packages,
     execute_init_hooks,
 )
@@ -123,7 +124,7 @@ def _event_params(
     run_base: str | Path,
     phase: str,
 ) -> dict:
-    """Resolve event parameters that belong to one training run."""
+    """Place default camera recordings under the current training run."""
     params = dict(event_info.get("params", {}))
     function_name = str(event_info.get("func", "")).rsplit(".", 1)[-1]
     if function_name in _CAMERA_RECORDERS:
@@ -180,16 +181,10 @@ def _train_learning_env(
     enable_eval = bool(trainer_cfg.get("enable_eval", False))
     eval_env = None
     if enable_eval:
-        env_block = trainer_cfg["learning_env"]
-        if isinstance(env_block, str):
-            env_cfg = {}
-        else:
-            env_cfg = dict(env_block.get("cfg", {}))
-        eval_env = build_learning_env(
-            env_name,
+        _eval_name, eval_env = _build_learning_environment(
+            cfg_data,
             num_envs=int(trainer_cfg.get("num_eval_envs", 16)),
             device=device,
-            **env_cfg,
         )
 
     algorithm = build_algo(
@@ -276,13 +271,6 @@ def _train_learning_env(
         trainer.train(total_timesteps)
         trainer.save_checkpoint()
         summary = trainer.get_summary()
-        _write_motion_run_manifest(
-            run_base,
-            config_path,
-            trainer_cfg,
-            summary,
-        )
-        return summary
     finally:
         writer.close()
         if use_wandb:
@@ -290,6 +278,8 @@ def _train_learning_env(
         env.close()
         if eval_env is not None:
             eval_env.close()
+    _write_policy_run_manifest(run_base, config_path, summary)
+    return summary
 
 
 def train_from_config(
@@ -477,16 +467,11 @@ def train_from_config(
     eval_env = None
     num_eval_envs = trainer_cfg.get("num_eval_envs", 4)
     if enable_eval and rank == 0:
-        eval_runtime = build_gym_environment(
-            cfg_data,
-            simulation_device=device,
-            num_envs=int(num_eval_envs),
-            headless=True,
-            renderer=renderer,
-            gpu_id=gpu_id,
-            config_dir=Path(config_path).expanduser().resolve().parent,
-        )
-        eval_env = eval_runtime.env
+        eval_gym_env_cfg = deepcopy(gym_env_cfg)
+        eval_gym_env_cfg.num_envs = int(num_eval_envs)
+        eval_gym_env_cfg.sim_cfg.headless = True
+        eval_gym_env_cfg.profiler = None
+        eval_env = build_env(gym_config_data["id"], base_env_cfg=eval_gym_env_cfg)
         logger.log_info(
             f"Evaluation environment created (num_envs={num_eval_envs}, headless=True)"
         )
@@ -589,6 +574,7 @@ def train_from_config(
             f"Total steps: {total_steps} (iterations≈{iterations}, world_size={world_size})"
         )
 
+    summary = None
     try:
         trainer.train(total_steps)
     except KeyboardInterrupt:
@@ -596,6 +582,8 @@ def train_from_config(
             logger.log_info("Training interrupted by user")
     finally:
         trainer.save_checkpoint()
+        if rank == 0:
+            summary = trainer.get_summary()
         if writer is not None:
             writer.close()
         if use_wandb and rank == 0:
@@ -622,26 +610,25 @@ def train_from_config(
         if distributed and torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
 
-    if rank == 0:
-        _write_motion_run_manifest(
+    if summary is not None:
+        _write_policy_run_manifest(
             run_base,
             config_path,
-            trainer_cfg,
-            trainer.get_summary(),
+            summary,
             gym_config=gym_config_path,
         )
+    if rank == 0:
         logger.log_info("Training finished")
 
 
-def _write_motion_run_manifest(
+def _write_policy_run_manifest(
     run_base: str | Path,
     config_path: str | Path,
-    trainer_cfg: dict,
     summary: dict,
     *,
     gym_config: str | Path | None = None,
 ) -> Path:
-    """Write the final checkpoint and config index for motion evaluation."""
+    """Write the checkpoint and configuration index for policy evaluation."""
     latest = summary.get("latest_checkpoint_path")
     if latest is None:
         raise RuntimeError("Training finished without a checkpoint")
@@ -651,7 +638,6 @@ def _write_motion_run_manifest(
         gym_config=gym_config,
         latest_checkpoint=latest,
         best_checkpoint=summary.get("best_checkpoint_path"),
-        motion_profile=trainer_cfg.get("motion_profile"),
     )
 
 

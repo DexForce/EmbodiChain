@@ -18,12 +18,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
 
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg, get_manager_modules
@@ -37,24 +35,14 @@ from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_obser
 from embodichain.utils.utility import load_config
 
 __all__ = [
-    "GymEnvironmentRuntime",
-    "GymPolicyFactory",
     "PolicyRuntime",
-    "build_gym_environment",
     "build_gym_policy_runtime",
-    "build_learning_environment",
     "build_learning_policy_runtime",
-    "resolve_config_reference",
-    "resolve_torch_device",
-    "seed_policy_runtime",
 ]
-
-GymPolicyFactory = Callable[[int, int, torch.device], torch.nn.Module]
-"""Build an evaluation Policy after the task dimensions are known."""
 
 
 @dataclass(frozen=True)
-class GymEnvironmentRuntime:
+class _GymEnvironmentRuntime:
     """A simulator task reconstructed from one training configuration."""
 
     env: Any
@@ -76,46 +64,12 @@ class PolicyRuntime:
     gym_config: dict[str, Any] | None = None
     gym_config_path: Path | None = None
 
-
-def resolve_torch_device(value: str | torch.device) -> torch.device:
-    """Validate and activate one CPU or CUDA device."""
-    if not isinstance(value, (str, torch.device)):
-        raise TypeError("device must be a string or torch.device")
-    try:
-        device = torch.device(value)
-    except RuntimeError as error:
-        raise ValueError(f"Failed to parse device {value!r}: {error}") from error
-
-    if device.type == "cuda":
-        if not torch.cuda.is_available():
-            raise ValueError(
-                "CUDA was requested but torch.cuda.is_available() is False."
-            )
-        index = device.index
-        if index is None:
-            index = torch.cuda.current_device()
-        if index < 0 or index >= torch.cuda.device_count():
-            raise ValueError(
-                f"CUDA device index {index} is out of range "
-                f"(available devices: {torch.cuda.device_count()})."
-            )
-        torch.cuda.set_device(index)
-        return torch.device(f"cuda:{index}")
-    if device.type != "cpu":
-        raise ValueError(f"Unsupported device type: {device.type}")
-    return torch.device("cpu")
+    def close(self) -> None:
+        """Close the Environment without terminating the current process."""
+        _close_environment(self.env)
 
 
-def seed_policy_runtime(seed: int, device: torch.device) -> None:
-    """Seed NumPy and PyTorch for one Policy runtime."""
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    if device.type == "cuda":
-        torch.cuda.manual_seed_all(seed)
-
-
-def resolve_config_reference(
+def _resolve_config_reference(
     value: str | Path,
     *,
     base_dir: str | Path | None = None,
@@ -131,7 +85,7 @@ def resolve_config_reference(
     return path
 
 
-def build_learning_environment(
+def _build_learning_environment(
     config: dict[str, Any],
     *,
     device: torch.device,
@@ -141,15 +95,15 @@ def build_learning_environment(
     env_block = config["trainer"]["learning_env"]
     if isinstance(env_block, str):
         env_name = env_block
-        env_cfg: dict[str, Any] = {}
+        env_config: dict[str, Any] = {}
     else:
         env_name = env_block["name"]
-        env_cfg = dict(env_block.get("cfg", {}))
+        env_config = dict(env_block.get("cfg", {}))
     return str(env_name), build_learning_env(
-        env_name,
+        str(env_name),
         num_envs=num_envs,
         device=device,
-        **env_cfg,
+        **env_config,
     )
 
 
@@ -160,45 +114,20 @@ def build_learning_policy_runtime(
     num_envs: int,
 ) -> PolicyRuntime:
     """Build a lightweight Environment and its configured Policy."""
-    env_name, env = build_learning_environment(
+    env_name, env = _build_learning_environment(
         config,
-        num_envs=num_envs,
         device=device,
+        num_envs=num_envs,
     )
     try:
-        observation_dim = int(env.single_observation_space.shape[-1])
-        action_dim = int(env.single_action_space.shape[-1])
-        policy_block = config["policy"]
-        actor_cfg = policy_block.get("actor")
-        critic_cfg = policy_block.get("critic")
-        actor = (
-            build_mlp_from_cfg(actor_cfg, observation_dim, action_dim)
-            if actor_cfg is not None
-            else None
-        )
-        critic = (
-            build_mlp_from_cfg(critic_cfg, observation_dim, 1)
-            if critic_cfg is not None
-            else None
-        )
-        policy = build_policy(
-            policy_block,
-            env.single_observation_space,
-            env.single_action_space,
-            device,
-            actor=actor,
-            critic=critic,
-        )
-        if "initial_log_std" in policy_block and hasattr(policy, "log_std"):
-            with torch.no_grad():
-                policy.log_std.fill_(float(policy_block["initial_log_std"]))
+        policy = _build_learning_policy(config["policy"], env, device)
     except Exception:
         env.close()
         raise
     return PolicyRuntime(env, policy, device, env_name)
 
 
-def build_gym_environment(
+def _build_gym_environment(
     config: dict[str, Any],
     *,
     simulation_device: torch.device,
@@ -208,10 +137,10 @@ def build_gym_environment(
     gpu_id: int,
     config_dir: str | Path | None = None,
     profiler: EnvProfilerCfg | None = None,
-) -> GymEnvironmentRuntime:
+) -> _GymEnvironmentRuntime:
     """Build the simulator Environment declared by a training config."""
     trainer_cfg = config["trainer"]
-    gym_config_path = resolve_config_reference(
+    gym_config_path = _resolve_config_reference(
         trainer_cfg["gym_config"],
         base_dir=config_dir,
     )
@@ -231,7 +160,7 @@ def build_gym_environment(
     )
     env_cfg.profiler = profiler
     env = build_env(gym_config["id"], base_env_cfg=env_cfg)
-    return GymEnvironmentRuntime(
+    return _GymEnvironmentRuntime(
         env=env,
         env_id=str(gym_config["id"]),
         env_cfg=env_cfg,
@@ -250,11 +179,10 @@ def build_gym_policy_runtime(
     gpu_id: int,
     config_dir: str | Path | None = None,
     profiler: EnvProfilerCfg | None = None,
-    policy_factory: GymPolicyFactory | None = None,
     simulation_device: torch.device | None = None,
 ) -> PolicyRuntime:
     """Build a simulator task and the Policy declared by its training config."""
-    task = build_gym_environment(
+    task = _build_gym_environment(
         config,
         simulation_device=simulation_device or device,
         num_envs=num_envs,
@@ -275,20 +203,15 @@ def build_gym_policy_runtime(
             if action_manager is not None
             else len(env.get_wrapper_attr("active_joint_ids"))
         )
-        if policy_factory is None:
-            policy = _build_gym_policy(
-                config["policy"],
-                env=env,
-                device=device,
-                observation_dim=observation_dim,
-                action_dim=environment_action_dim,
-            )
-        else:
-            policy = policy_factory(observation_dim, environment_action_dim, device)
-            if not isinstance(policy, torch.nn.Module):
-                raise TypeError("policy_factory must return a torch.nn.Module.")
+        policy = _build_gym_policy(
+            config["policy"],
+            env=env,
+            device=device,
+            observation_dim=observation_dim,
+            action_dim=environment_action_dim,
+        )
     except Exception:
-        env.close()
+        _close_environment(env)
         raise
     return PolicyRuntime(
         env=env,
@@ -348,3 +271,42 @@ def _build_gym_policy(
         env.action_space,
         device,
     )
+
+
+def _build_learning_policy(
+    policy_block: dict[str, Any],
+    env: Any,
+    device: torch.device,
+) -> torch.nn.Module:
+    observation_dim = int(env.single_observation_space.shape[-1])
+    action_dim = int(env.single_action_space.shape[-1])
+    actor_cfg = policy_block.get("actor")
+    critic_cfg = policy_block.get("critic")
+    policy = build_policy(
+        policy_block,
+        env.single_observation_space,
+        env.single_action_space,
+        device,
+        actor=(
+            build_mlp_from_cfg(actor_cfg, observation_dim, action_dim)
+            if actor_cfg is not None
+            else None
+        ),
+        critic=(
+            build_mlp_from_cfg(critic_cfg, observation_dim, 1)
+            if critic_cfg is not None
+            else None
+        ),
+    )
+    if "initial_log_std" in policy_block and hasattr(policy, "log_std"):
+        with torch.no_grad():
+            policy.log_std.fill_(float(policy_block["initial_log_std"]))
+    return policy
+
+
+def _close_environment(env: Any) -> None:
+    target = getattr(env, "unwrapped", env)
+    if getattr(target, "sim", None) is not None:
+        target.close(exit_process=False)
+    else:
+        env.close()

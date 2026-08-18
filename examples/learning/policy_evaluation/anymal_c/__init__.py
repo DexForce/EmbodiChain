@@ -14,17 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Register the ANYmal-C velocity Motion Profile."""
+
 from __future__ import annotations
 
-import torch
+from embodichain.learning.rl.policy_evaluation import register_motion_profile
 
-from embodichain.learning.rl.motion_policy_evaluation import load_policy_state_dict
+from .profile import PROFILE_ID, build_profile
+
+__all__ = ["register"]
 
 
-def test_load_policy_state_dict_returns_embodichain_policy_weights(tmp_path):
-    checkpoint = tmp_path / "policy.pt"
-    torch.save({"policy": {"actor.weight": torch.ones(2, 3)}}, checkpoint)
-
-    state = load_policy_state_dict(checkpoint)
-
-    assert torch.equal(state["actor.weight"], torch.ones(2, 3))
+def register() -> None:
+    """Register the ANYmal-C velocity Profile for the example process."""
+    register_motion_profile(PROFILE_ID, build_profile)

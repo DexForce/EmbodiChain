@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Write one timestamped motion-policy evaluation report."""
+"""Write timestamped policy evaluation reports."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def write_evaluation_report(
     output = Path(parent).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    directory = output / f"{stamp}-motion-policy"
+    directory = output / f"{stamp}-policy"
     directory.mkdir()
     report = {
         "schema_version": 1,

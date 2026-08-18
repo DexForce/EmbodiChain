@@ -14,24 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run an EmbodiChain Motion Profile through DexSim Motion Policy Kit."""
+"""Run an external Policy Profile through DexSim Motion Policy Kit."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
 from dexsim.kit.motion_policy import (
-    MotionPolicyEvaluator,
-    PolicyAdapter,
     PolicySpec,
     ResolvedPolicy,
     ResourceResolver,
     RunOptions,
-    create_motion_policy_evaluator,
     load_scene_config,
     parse_policy_spec,
     policy_spec_to_dict,
@@ -39,14 +35,11 @@ from dexsim.kit.motion_policy import (
     run_motion_policy,
     scene_config_to_dict,
 )
-from dexsim.kit.motion_policy.environment import PolicyEnvironment
-from dexsim.kit.motion_policy.evaluator import InputProvider
 
 from .profile import MotionProfile
 
 __all__ = [
     "MotionEvaluationResult",
-    "create_motion_profile_evaluator",
     "evaluate_motion_profile",
 ]
 
@@ -61,22 +54,6 @@ class MotionEvaluationResult:
     episodes: tuple[Mapping[str, Any], ...]
     summary: Mapping[str, Any]
     viewer: bool
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "policy_spec", MappingProxyType(dict(self.policy_spec))
-        )
-        object.__setattr__(
-            self,
-            "scene_config",
-            MappingProxyType(dict(self.scene_config)),
-        )
-        object.__setattr__(
-            self,
-            "episodes",
-            tuple(MappingProxyType(dict(value)) for value in self.episodes),
-        )
-        object.__setattr__(self, "summary", MappingProxyType(dict(self.summary)))
 
 
 def evaluate_motion_profile(
@@ -95,8 +72,6 @@ def evaluate_motion_profile(
     termination_behavior: str | None = None,
     cache_dir: str | Path | None = None,
     offline: bool = False,
-    input_provider: InputProvider | None = None,
-    environment: PolicyEnvironment | None = None,
 ) -> MotionEvaluationResult:
     """Resolve one Motion Profile and run its visual evaluation.
 
@@ -115,8 +90,6 @@ def evaluate_motion_profile(
         termination_behavior: Policy termination handling override.
         cache_dir: Motion Policy Kit resource cache.
         offline: Use resources already available in the cache.
-        input_provider: Build per-frame task inputs for the Adapter.
-        environment: Prebuilt task environment owned by the Evaluator.
 
     Returns:
         Normalized inputs, episode results, and aggregate metrics.
@@ -125,8 +98,6 @@ def evaluate_motion_profile(
         raise ValueError("episodes must be positive")
     if viewer and episodes != 1:
         raise ValueError("Viewer evaluation supports one episode")
-    if environment is not None and episodes != 1:
-        raise ValueError("A prebuilt environment supports one episode")
     parsed, resolved = _resolve_profile(profile, cache_dir, offline)
     resolved_scene = load_scene_config(scene_config)
     options = RunOptions(
@@ -147,8 +118,6 @@ def evaluate_motion_profile(
             run_motion_policy(
                 resolved,
                 options,
-                environment=environment,
-                input_provider=input_provider,
             ),
         )
         for index in range(episodes)
@@ -160,37 +129,6 @@ def evaluate_motion_profile(
         episodes=results,
         summary=_summary(results),
         viewer=viewer,
-    )
-
-
-def create_motion_profile_evaluator(
-    profile: MotionProfile,
-    options: RunOptions | None = None,
-    *,
-    cache_dir: str | Path | None = None,
-    offline: bool = False,
-    adapter: PolicyAdapter | None = None,
-    environment: PolicyEnvironment | None = None,
-) -> MotionPolicyEvaluator:
-    """Create a DexSim Evaluator for an EmbodiChain Motion Profile.
-
-    Args:
-        profile: Provider-built profile containing the DexSim Policy Spec.
-        options: DexSim evaluation options.
-        cache_dir: Motion Policy Kit resource cache.
-        offline: Use resources already available in the cache.
-        adapter: Prebuilt policy adapter owned by the returned Evaluator.
-        environment: Prebuilt task environment owned by the returned Evaluator.
-
-    Returns:
-        Configured evaluator ready for ``reset()``, ``step()``, or ``run()``.
-    """
-    _parsed, resolved = _resolve_profile(profile, cache_dir, offline)
-    return create_motion_policy_evaluator(
-        resolved,
-        options,
-        adapter=adapter,
-        environment=environment,
     )
 
 

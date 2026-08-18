@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Fetch the pinned public policy and robot assets for the ANYmal-C example."""
+"""Prepare the pinned public policy and assets for the ANYmal-C example."""
 
 from __future__ import annotations
 
@@ -34,18 +34,14 @@ POLICY_LICENSE_RELATIVE_PATH = Path("anybotics_anymal_c/rl_policies/LICENSE")
 ROBOT_LICENSE_RELATIVE_PATH = Path("anybotics_anymal_c/LICENSE")
 ROBOT_RELATIVE_PATH = Path("anybotics_anymal_c/urdf/anymal.urdf")
 MESH_RELATIVE_PATH = Path("anybotics_anymal_c/meshes/base.dae")
-MODEL_SHA256 = "00765c1c07e497be3825672b05f9cefff9238f2df72fb0bcb5ac9541155b945f"
-POLICY_CONFIG_SHA256 = (
-    "b5a463ac418c7f40ebe494c7bcf0d8031f021db70a0625dbcc28a718de8ee817"
-)
-POLICY_LICENSE_SHA256 = (
-    "59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b"
-)
-ROBOT_LICENSE_SHA256 = (
-    "cef384faae108293b03b5e16a00bc3db8212d44575f69df6296438a3f901700b"
-)
-ROBOT_SHA256 = "d6bd20292cdd4873ffdeeb6f8ca3f96c4a0096565d78d8b6204f6edf0d19fb83"
-MESH_SHA256 = "785bea9b33831f8c741fc0ca070162e73cbf560ea9b03c53abf8978be877fc48"
+SHA256 = {
+    MODEL_RELATIVE_PATH: "00765c1c07e497be3825672b05f9cefff9238f2df72fb0bcb5ac9541155b945f",
+    POLICY_CONFIG_RELATIVE_PATH: "b5a463ac418c7f40ebe494c7bcf0d8031f021db70a0625dbcc28a718de8ee817",
+    POLICY_LICENSE_RELATIVE_PATH: "59899c6091b540582ed617e8eeaac4919dc985ccfc35459ee9752b699be5205b",
+    ROBOT_LICENSE_RELATIVE_PATH: "cef384faae108293b03b5e16a00bc3db8212d44575f69df6296438a3f901700b",
+    ROBOT_RELATIVE_PATH: "d6bd20292cdd4873ffdeeb6f8ca3f96c4a0096565d78d8b6204f6edf0d19fb83",
+    MESH_RELATIVE_PATH: "785bea9b33831f8c741fc0ca070162e73cbf560ea9b03c53abf8978be877fc48",
+}
 
 
 def prepare_resources(output: Path) -> tuple[Path, Path]:
@@ -75,21 +71,8 @@ def prepare_resources(output: Path) -> tuple[Path, Path]:
     )
 
     checkpoint = checkout / MODEL_RELATIVE_PATH
-    policy_config = checkout / POLICY_CONFIG_RELATIVE_PATH
-    policy_license = checkout / POLICY_LICENSE_RELATIVE_PATH
-    robot_license = checkout / ROBOT_LICENSE_RELATIVE_PATH
-    robot = checkout / ROBOT_RELATIVE_PATH
-    mesh = checkout / MESH_RELATIVE_PATH
-    if not checkpoint.is_file():
-        raise FileNotFoundError(f"Downloaded checkpoint does not exist: {checkpoint}")
-    if not robot.is_file():
-        raise FileNotFoundError(f"Downloaded robot asset does not exist: {robot}")
-    _verify_sha256(checkpoint, MODEL_SHA256)
-    _verify_sha256(policy_config, POLICY_CONFIG_SHA256)
-    _verify_sha256(policy_license, POLICY_LICENSE_SHA256)
-    _verify_sha256(robot_license, ROBOT_LICENSE_SHA256)
-    _verify_sha256(robot, ROBOT_SHA256)
-    _verify_sha256(mesh, MESH_SHA256)
+    for relative, digest in SHA256.items():
+        _verify_sha256(checkout / relative, digest)
     _status("Resource verification completed")
     return checkpoint, checkout
 
@@ -151,31 +134,18 @@ def _prepare_checkout(
         )
 
     if checkout.exists():
-        actual_revision = _git_output(checkout, "rev-parse", "HEAD")
-        if actual_revision == revision:
+        remote_url = _git_output(checkout, "remote", "get-url", "origin")
+        if remote_url != url:
+            raise RuntimeError(
+                f"Resource checkout uses an unexpected remote: {remote_url}"
+            )
+        if _git_output(checkout, "rev-parse", "HEAD") == revision:
             tracked_changes = _git_output(
-                checkout,
-                "status",
-                "--porcelain",
-                "--untracked-files=no",
+                checkout, "status", "--porcelain", "--untracked-files=no"
             )
             if tracked_changes == "":
                 _status(f"Using cached revision {revision[:8]} from {checkout}")
                 return
-            _status(f"Repairing interrupted checkout in {checkout}")
-        elif actual_revision is not None:
-            raise RuntimeError(
-                f"Existing checkout uses revision {actual_revision}; "
-                "choose another --output"
-            )
-        else:
-            _status(f"Resuming interrupted checkout in {checkout}")
-
-        remote_url = _git_output(checkout, "remote", "get-url", "origin")
-        if remote_url != url:
-            raise RuntimeError(
-                f"Incomplete checkout uses an unexpected remote: {remote_url}"
-            )
     else:
         checkout.parent.mkdir(parents=True, exist_ok=True)
         checkout.mkdir()
@@ -185,21 +155,17 @@ def _prepare_checkout(
     _git(checkout, "sparse-checkout", "init", "--no-cone")
     _git(checkout, "sparse-checkout", "set", *includes)
 
-    fetched_revision = _git_output(checkout, "rev-parse", "FETCH_HEAD")
-    if fetched_revision != revision:
-        _status(f"Fetching revision {revision[:8]} from {url}")
-        _git(
-            checkout,
-            "fetch",
-            "--progress",
-            "--filter=blob:none",
-            "--depth",
-            "1",
-            "origin",
-            revision,
-        )
-    else:
-        _status(f"Using previously fetched revision {revision[:8]}")
+    _status(f"Fetching revision {revision[:8]} from {url}")
+    _git(
+        checkout,
+        "fetch",
+        "--progress",
+        "--filter=blob:none",
+        "--depth",
+        "1",
+        "origin",
+        revision,
+    )
 
     _status(f"Checking out required files in {checkout}")
     _git(

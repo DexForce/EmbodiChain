@@ -14,6 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for EmbodiChain motion-policy evaluation."""
+"""External Policy Profiles for ``embodichain eval-policy``."""
 
 from __future__ import annotations
+
+from .profile import (
+    MotionProfile,
+    MotionProfileRequest,
+    build_motion_profile,
+    register_motion_profile,
+)
+
+__all__ = [
+    "MotionProfile",
+    "MotionProfileRequest",
+    "build_motion_profile",
+    "register_motion_profile",
+]

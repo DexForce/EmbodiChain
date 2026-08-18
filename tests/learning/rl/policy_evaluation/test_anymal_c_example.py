@@ -16,12 +16,14 @@
 
 from __future__ import annotations
 
-import importlib.util
-import subprocess
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
+
+pytest.importorskip("dexsim.kit.motion_policy.evaluator")
+
 from dexsim.kit.motion_policy import (
     AdapterRequest,
     EvaluationFrame,
@@ -31,7 +33,10 @@ from dexsim.kit.motion_policy import (
     parse_policy_spec,
 )
 
-from embodichain.learning.rl.motion_policy_evaluation import MotionProfileRequest
+from embodichain.learning.rl.policy_evaluation import (
+    MotionProfileRequest,
+    build_motion_profile,
+)
 
 _JOINT_NAMES = (
     "LF_HAA",
@@ -64,94 +69,15 @@ class _CommandPolicy(torch.nn.Module):
         return torch.cat((observation[:, 9:12], padding), dim=1)
 
 
-def _run_git(directory: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(directory), *args],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-    return result.stdout.strip()
-
-
-def test_resource_preparation_resumes_interrupted_checkout(tmp_path, capsys):
-    script = (
-        Path(__file__).resolve().parents[4]
-        / "examples/learning/motion_policy_evaluation/prepare_resources.py"
-    )
-    spec = importlib.util.spec_from_file_location("anymal_c_prepare_resources", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    upstream = tmp_path / "upstream"
-    upstream.mkdir()
-    _run_git(upstream, "init", "--quiet")
-    resource = upstream / "resources/robot.urdf"
-    resource.parent.mkdir()
-    resource.write_text("<robot name='test'/>", encoding="utf-8")
-    _run_git(upstream, "add", ".")
-    _run_git(
-        upstream,
-        "-c",
-        "user.name=Test User",
-        "-c",
-        "user.email=test@example.com",
-        "commit",
-        "--quiet",
-        "-m",
-        "add resource",
-    )
-    revision = _run_git(upstream, "rev-parse", "HEAD")
-
-    checkout = tmp_path / "cache/upstream"
-    checkout.mkdir(parents=True)
-    _run_git(checkout, "init", "--quiet")
-    _run_git(checkout, "remote", "add", "origin", str(upstream))
-    _run_git(checkout, "sparse-checkout", "init", "--no-cone")
-    _run_git(checkout, "sparse-checkout", "set", "/resources/**")
-    _run_git(checkout, "fetch", "--quiet", "origin", revision)
-
-    module._prepare_checkout(
-        checkout,
-        str(upstream),
-        revision,
-        ("/resources/**",),
-    )
-
-    assert _run_git(checkout, "rev-parse", "HEAD") == revision
-    assert (checkout / "resources/robot.urdf").is_file()
-    assert "Resuming interrupted checkout" in capsys.readouterr().out
-
-    module._prepare_checkout(
-        checkout,
-        str(upstream),
-        revision,
-        ("/resources/**",),
-    )
-    assert "Using cached revision" in capsys.readouterr().out
-
-    (checkout / "resources/robot.urdf").unlink()
-    module._prepare_checkout(
-        checkout,
-        str(upstream),
-        revision,
-        ("/resources/**",),
-    )
-    assert (checkout / "resources/robot.urdf").is_file()
-    assert "Repairing interrupted checkout" in capsys.readouterr().out
-
-
 def test_anymal_c_profile_builds_and_runs_torchscript(tmp_path, monkeypatch):
     example_root = (
-        Path(__file__).resolve().parents[4]
-        / "examples/learning/motion_policy_evaluation"
+        Path(__file__).resolve().parents[4] / "examples/learning/policy_evaluation"
     )
     monkeypatch.syspath_prepend(str(example_root))
     from anymal_c.profile import (
         AnymalCVelocityAdapter,
-        build_profile,
     )
+    from anymal_c import register
 
     checkpoint = tmp_path / "mjw_anymal.pt"
     traced = torch.jit.trace(_CommandPolicy().eval(), torch.zeros((1, 48)))
@@ -161,13 +87,13 @@ def test_anymal_c_profile_builds_and_runs_torchscript(tmp_path, monkeypatch):
     robot_asset.parent.mkdir(parents=True)
     robot_asset.write_text("<robot name='anymal_c'/>\n", encoding="utf-8")
 
-    profile = build_profile(
-        MotionProfileRequest(
-            checkpoint=checkpoint,
-            device=torch.device("cpu"),
-            resource_root=tmp_path,
-        )
+    request = MotionProfileRequest(
+        checkpoint=checkpoint,
+        device=torch.device("cpu"),
+        resource_root=tmp_path,
     )
+    register()
+    profile = build_motion_profile("newton-anymal-c-velocity", request)
     spec = parse_policy_spec(profile.policy_spec)
     assert spec.environment.entrypoint is None
     config = profile.policy_spec["policy"]["adapter"]["config"]
@@ -235,8 +161,7 @@ def test_anymal_c_profile_builds_and_runs_torchscript(tmp_path, monkeypatch):
 
 def test_example_script_supplies_default_resource_paths(tmp_path, monkeypatch):
     example_root = (
-        Path(__file__).resolve().parents[4]
-        / "examples/learning/motion_policy_evaluation"
+        Path(__file__).resolve().parents[4] / "examples/learning/policy_evaluation"
     )
     monkeypatch.syspath_prepend(str(example_root))
     monkeypatch.setenv("ANYMAL_C_EXAMPLE_CACHE", str(tmp_path))

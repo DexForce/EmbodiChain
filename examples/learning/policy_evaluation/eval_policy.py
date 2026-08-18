@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the public ANYmal-C checkpoint directly from the example directory."""
+"""Evaluate the public ANYmal-C checkpoint from the example directory."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def example_arguments(argv: list[str]) -> list[str]:
     """Add the example Profile, checkpoint, and resource paths.
 
     Args:
-        argv: Evaluation options accepted by ``eval-motion-policy``.
+        argv: Evaluation options accepted by ``eval-policy``.
 
     Returns:
         Arguments ready for the EmbodiChain evaluation CLI.
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.path.insert(0, str(REPOSITORY_ROOT))
 
     from anymal_c import register
-    from embodichain.learning.rl.motion_policy_evaluation.cli import cli
+    from embodichain.learning.rl.policy_evaluation.cli import cli
 
     register()
     cli(example_arguments(sys.argv[1:] if argv is None else argv))

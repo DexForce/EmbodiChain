@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""ANYmal-C velocity Profile for Newton's public TorchScript policy."""
+"""ANYmal-C velocity Profile for a public TorchScript policy."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from dexsim.kit.motion_policy import (
     require_finite,
 )
 
-from embodichain.learning.rl.motion_policy_evaluation import (
+from embodichain.learning.rl.policy_evaluation import (
     MotionProfile,
     MotionProfileRequest,
 )
@@ -73,8 +73,6 @@ def build_profile(request: MotionProfileRequest) -> MotionProfile:
     Returns:
         A Motion Profile ready for DexSim Motion Policy Kit.
     """
-    if request.checkpoint.suffix.lower() != ".pt":
-        raise ValueError("The ANYmal-C example requires a TorchScript .pt file")
     if request.resource_root is None:
         raise ValueError(
             "The ANYmal-C example requires --resource-root from prepare_resources.py"
@@ -88,7 +86,6 @@ def build_profile(request: MotionProfileRequest) -> MotionProfile:
 
     return MotionProfile(
         profile_id=PROFILE_ID,
-        checkpoint=request.checkpoint,
         policy_spec={
             "schema_version": 1,
             "kind": "policy",
@@ -173,8 +170,6 @@ class AnymalCVelocityAdapter:
         config = dict(request.config)
         self.device = torch.device(str(config["inference_device"]))
         self.joint_names = tuple(config["joint_names"])
-        if self.joint_names != _JOINT_NAMES:
-            raise ValueError("ANYmal-C joint order is incompatible")
         self.checkpoint = request.models["actor"]
         self.previous_action = np.zeros(12, dtype=np.float32)
         self.joints: JointMap | None = None
@@ -182,10 +177,11 @@ class AnymalCVelocityAdapter:
 
     def setup(self, context: PolicyContext) -> None:
         """Load the model and bind the runtime joint order."""
-        if context.robot is None:
+        robot = context.robot
+        if robot is None:
             raise RuntimeError("ANYmal-C robot description is required")
         self.joints = JointMap.from_joint_names(
-            context.robot.joint_names,
+            robot.joint_names,
             self.joint_names,
         )
         self.model = torch.jit.load(
@@ -206,17 +202,10 @@ class AnymalCVelocityAdapter:
 
     def infer(self, frame: EvaluationFrame) -> PolicyOutput:
         """Build one 48-D observation and return 12 joint targets."""
-        if frame.robot_state is None:
-            raise RuntimeError("ANYmal-C robot state is required")
         observation = self._build_observation(frame)
         tensor = torch.from_numpy(observation).to(self.device).unsqueeze(0)
         with torch.inference_mode():
             output = self._model()(tensor)
-        if not isinstance(output, torch.Tensor) or tuple(output.shape) != (1, 12):
-            shape = (
-                None if not isinstance(output, torch.Tensor) else tuple(output.shape)
-            )
-            raise ValueError(f"ANYmal-C policy output must be (1, 12), got {shape}")
         action = require_finite(
             "ANYmal-C action",
             output[0].detach().cpu().numpy(),
@@ -264,10 +253,6 @@ class AnymalCVelocityAdapter:
             ),
             dtype=np.float32,
         )
-        if observation.shape != (48,):
-            raise ValueError(
-                f"ANYmal-C observation must have shape (48,), got {observation.shape}"
-            )
         return require_finite("ANYmal-C observation", observation)
 
     def _joints(self) -> JointMap:
@@ -283,8 +268,6 @@ class AnymalCVelocityAdapter:
 
 def _fall_reason(root_pose: np.ndarray) -> str | None:
     pose = np.asarray(root_pose, dtype=np.float64)
-    if pose.shape != (4, 4) or not np.all(np.isfinite(pose)):
-        raise ValueError("ANYmal-C root pose must be a finite 4x4 matrix")
     height = float(pose[2, 3])
     tilt = math.acos(float(np.clip(pose[2, 2], -1.0, 1.0)))
     reasons = []

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Connect an EmbodiChain RL task to DexSim Motion Policy Evaluator."""
+"""Connect an EmbodiChain task Viewer to Motion Policy Evaluator."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import torch
 
 from dexsim.kit.motion_policy import (
@@ -45,37 +44,34 @@ from embodichain.learning.rl.runtime import PolicyRuntime
 __all__ = [
     "EmbodiChainTaskEnvironment",
     "EmbodiChainTaskPolicyAdapter",
-    "NativeTaskEvaluationResult",
-    "evaluate_native_task",
+    "NativeViewerResult",
+    "evaluate_native_viewer",
 ]
 
 _MISSING = object()
 
 
 @dataclass(frozen=True)
-class NativeTaskEvaluationResult:
-    """Result of evaluating one Policy in its original EmbodiChain task."""
+class NativeViewerResult:
+    """Result of visualizing one Policy in its EmbodiChain task."""
 
     task_id: str
     reason: str
     simulation_time: float
     simulation_steps: int
     control_steps: int
-    physics_backend: str
     effective_duration: float
     requested_duration: float | None
     episodes: tuple[Mapping[str, float | int | bool | str], ...]
     metrics: Mapping[str, float]
-    viewer: bool
 
 
 class EmbodiChainTaskPolicyAdapter:
     """Run an EmbodiChain Policy from the task observation in each frame."""
 
-    def __init__(self, policy: torch.nn.Module, device: torch.device, num_envs: int):
+    def __init__(self, policy: torch.nn.Module, device: torch.device):
         self.policy = policy
         self.device = device
-        self.num_envs = num_envs
         self._previous_training = policy.training
 
     def setup(self, context: PolicyContext) -> None:
@@ -97,7 +93,7 @@ class EmbodiChainTaskPolicyAdapter:
             self.policy,
             frame.observation,
             device=self.device,
-            num_envs=self.num_envs,
+            num_envs=1,
         )
         return PolicyOutput(action=action)
 
@@ -118,22 +114,19 @@ class EmbodiChainTaskEnvironment:
         env: Any,
         *,
         seed: int,
-        viewer: bool,
     ) -> None:
         if int(env.num_envs) != 1:
             raise ValueError("Visual task evaluation requires num_envs=1")
         self.env = env
         self._base_env = getattr(env, "unwrapped", env)
-        self._viewer = viewer
-        if viewer:
-            world = self._world()
-            if world is None or not world.is_window_initialized():
-                raise ValueError(
-                    "Viewer evaluation requires an EmbodiChain simulator task "
-                    "with an initialized window"
-                )
+        world = self._world()
+        if world is None or not world.is_window_initialized():
+            raise ValueError(
+                "Viewer evaluation requires an initialized simulator window"
+            )
         self._seed = seed
         self._first_reset = True
+        self._reset_key_down = False
         self._control_step = 0
         self._frame: EvaluationFrame | None = None
         self._episode_return = 0.0
@@ -162,8 +155,6 @@ class EmbodiChainTaskEnvironment:
     @property
     def viewer_is_open(self) -> bool:
         """Return whether the original task Viewer remains open."""
-        if not self._viewer:
-            return False
         world = self._world()
         return bool(world is not None and world.is_window_initialized())
 
@@ -177,15 +168,11 @@ class EmbodiChainTaskEnvironment:
     @property
     def episodes(self) -> tuple[Mapping[str, float | int | bool | str], ...]:
         """Return completed episode summaries."""
-        return tuple(dict(episode) for episode in self._episodes)
+        return tuple(self._episodes)
 
     def open_viewer(self, title: str) -> None:
         """Apply the evaluation title to the task Viewer."""
-        if not self._viewer:
-            return
-        world = self._world()
-        if world is not None and world.is_window_initialized():
-            world.get_windows().set_window_title(title)
+        self._world().get_windows().set_window_title(title)
 
     def reset(self) -> EvaluationFrame:
         """Run the task's original reset and return its observation."""
@@ -200,8 +187,6 @@ class EmbodiChainTaskEnvironment:
 
     def poll(self) -> str | None:
         """Report when the native Viewer is closed or Escape is pressed."""
-        if not self._viewer:
-            return None
         world = self._world()
         if world is None or not world.is_window_initialized():
             return "viewer closed"
@@ -210,6 +195,11 @@ class EmbodiChainTaskEnvironment:
         native = world.get_windows().native()
         if native.key_state(InputKey.SCANCODE_ESCAPE):
             return "viewer closed"
+        reset_down = bool(native.key_state(InputKey.SCANCODE_BACKSPACE))
+        reset_pressed = reset_down and not self._reset_key_down
+        self._reset_key_down = reset_down
+        if reset_pressed:
+            return "manual reset"
         return None
 
     def step(self, action: object) -> EnvironmentStep:
@@ -246,10 +236,9 @@ class EmbodiChainTaskEnvironment:
                     "success": success,
                 }
             )
-        if self._viewer:
-            remaining = self._policy_context.policy_dt - (time.perf_counter() - started)
-            if remaining > 0.0:
-                time.sleep(remaining)
+        remaining = self._policy_context.policy_dt - (time.perf_counter() - started)
+        if remaining > 0.0:
+            time.sleep(remaining)
         return EnvironmentStep(
             frame=self._frame,
             termination_reason=reason,
@@ -260,23 +249,21 @@ class EmbodiChainTaskEnvironment:
         """Return task metrics and completed episode aggregates."""
         result = dict(self._reported_metrics)
         if self._episodes:
+            count = len(self._episodes)
             result.update(
                 {
-                    "eval/avg_reward": float(
-                        np.mean(
-                            [float(episode["reward"]) for episode in self._episodes]
-                        )
-                    ),
-                    "eval/avg_length": float(
-                        np.mean(
-                            [float(episode["length"]) for episode in self._episodes]
-                        )
-                    ),
-                    "eval/success_rate": float(
-                        np.mean(
-                            [bool(episode["success"]) for episode in self._episodes]
-                        )
-                    ),
+                    "eval/avg_reward": sum(
+                        float(episode["reward"]) for episode in self._episodes
+                    )
+                    / count,
+                    "eval/avg_length": sum(
+                        float(episode["length"]) for episode in self._episodes
+                    )
+                    / count,
+                    "eval/success_rate": sum(
+                        bool(episode["success"]) for episode in self._episodes
+                    )
+                    / count,
                 }
             )
         return result
@@ -333,17 +320,16 @@ class EmbodiChainTaskEnvironment:
         return None if sim is None else sim.get_world()
 
 
-def evaluate_native_task(
+def evaluate_native_viewer(
     runtime: PolicyRuntime,
     *,
     seed: int,
-    viewer: bool,
     episodes: int | None,
     control_steps: int | None,
     duration: float | None,
     termination_behavior: str = "auto_reset",
-) -> NativeTaskEvaluationResult:
-    """Evaluate an EmbodiChain Policy in the task used for training."""
+) -> NativeViewerResult:
+    """Visualize an EmbodiChain Policy in the task used for training."""
     if episodes is not None and episodes <= 0:
         raise ValueError("episodes must be positive")
     if control_steps is not None and control_steps <= 0:
@@ -355,31 +341,26 @@ def evaluate_native_task(
     if termination_behavior == "continue":
         raise ValueError("Native task evaluation supports pause or auto_reset")
 
+    environment = None
+    adapter = None
+    evaluator = None
     try:
         environment = EmbodiChainTaskEnvironment(
             runtime.env,
             seed=seed,
-            viewer=viewer,
         )
-    except Exception:
-        runtime.env.close()
-        raise
-    adapter = None
-    evaluator = None
-    try:
         adapter = EmbodiChainTaskPolicyAdapter(
             runtime.policy,
             runtime.device,
-            num_envs=1,
         )
         if duration is not None:
             control_steps = math.ceil(
                 duration / environment.policy_context.policy_dt - 1e-12
             )
         total_steps = 0
-        reason = "viewer closed" if viewer else "episode target reached"
+        reason = "viewer closed"
         options = RunOptions(
-            headless=not viewer,
+            headless=False,
             termination_behavior=(
                 "continue" if termination_behavior == "auto_reset" else "pause"
             ),
@@ -415,28 +396,27 @@ def evaluate_native_task(
         episode_results = environment.episodes
         metrics = environment.metrics()
         context = environment.policy_context
-        backend = environment.physics_backend
     finally:
-        if evaluator is None:
+        if evaluator is not None:
+            evaluator.close()
+        elif environment is not None:
             if adapter is not None:
                 adapter.close()
             environment.close()
         else:
-            evaluator.close()
+            runtime.close()
 
     simulation_steps = total_steps * context.sim_steps_per_control
-    return NativeTaskEvaluationResult(
+    return NativeViewerResult(
         task_id=runtime.env_id,
         reason=reason,
         simulation_time=simulation_steps * context.physics_dt,
         simulation_steps=simulation_steps,
         control_steps=total_steps,
-        physics_backend=backend,
         effective_duration=total_steps * context.policy_dt,
         requested_duration=duration,
         episodes=episode_results,
         metrics=metrics,
-        viewer=viewer,
     )
 
 
@@ -491,20 +471,10 @@ def _step_metrics(info: object, reward: float) -> dict[str, float]:
 
 
 def _policy_context_from_env(env: Any) -> PolicyContext:
-    """Read timing from a simulator task or lightweight learning task."""
-    if hasattr(env, "physics_dt") and hasattr(env, "step_dt"):
-        return PolicyContext(
-            robot=None,
-            physics_dt=float(env.physics_dt),
-            sim_steps_per_control=int(env.cfg.sim_steps_per_control),
-            policy_dt=float(env.step_dt),
-        )
-    if not hasattr(env, "dt"):
-        raise ValueError("Lightweight task evaluation requires an env.dt value")
-    policy_dt = float(env.dt)
+    """Read timing from the simulator task."""
     return PolicyContext(
         robot=None,
-        physics_dt=policy_dt,
-        sim_steps_per_control=1,
-        policy_dt=policy_dt,
+        physics_dt=float(env.physics_dt),
+        sim_steps_per_control=int(env.cfg.sim_steps_per_control),
+        policy_dt=float(env.step_dt),
     )

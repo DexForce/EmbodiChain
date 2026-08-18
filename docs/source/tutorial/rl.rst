@@ -82,7 +82,7 @@ APG and PPO. Launch either config with the same CLI:
    embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
 
 Configuration Sections
-----------------------
+---------------------
 
 Runtime Settings
 ^^^^^^^^^^^^^^^^
@@ -134,7 +134,7 @@ Example:
    }
 
 Policy Configuration
-^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
 
 The ``policy`` section defines the neural network policy:
 
@@ -265,24 +265,21 @@ All outputs are written to ``./outputs/<exp_name>_<timestamp>/``:
 - **logs/**: TensorBoard logs
 - **checkpoints/**: Model checkpoints
 - **configs/**: Training config and referenced gym config snapshots
-- **videos/**: Training and evaluation recordings grouped by phase
-- **evaluations/**: Timestamped visual evaluation reports
-- **run-manifest.json**: training configs and best/latest checkpoint index used by ``eval-motion-policy``
+- **evaluations/**: Timestamped policy evaluation reports
+- **run-manifest.json**: Training configs and best/latest checkpoint index used by ``eval-policy``
 
-A simulator training run can be opened directly in its original task Environment:
+A training run can be evaluated Headless or opened in its simulator task:
 
 .. code-block:: bash
 
-   embodichain eval-motion-policy outputs/<exp_name>_<timestamp> --viewer
+   embodichain eval-policy outputs/<exp_name>_<timestamp>
+   embodichain eval-policy outputs/<exp_name>_<timestamp> --viewer
 
-An external Policy project can record its Motion Profile ID in
-``trainer.motion_profile``.
-
-See :doc:`../guides/motion_policy_evaluation` for EmbodiChain ``.pt`` training
+See :doc:`../guides/policy_evaluation` for EmbodiChain ``.pt`` training
 runs and the external Motion Profile example.
 
 Training Process
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 The training process follows this sequence:
 
@@ -342,7 +339,7 @@ Available Algorithms
 - **GRPO**: Group Relative Policy Optimization (no Critic, step-wise returns, masked group normalization). Use ``actor_only`` policy. Set ``kl_coef=0`` for from-scratch training (CartPole, dense reward); ``kl_coef=0.02`` for VLA/LLM fine-tuning.
 
 Adding a New Algorithm
-----------------------
+---------------------
 
 To add a new algorithm:
 
@@ -480,4 +477,4 @@ See Also
 - :doc:`basic_env` — Creating basic Gymnasium environments
 - :doc:`modular_env` — Advanced modular environments with managers
 - :doc:`/resources/task/index` — List of available RL task environments
-- :doc:`/guides/motion_policy_evaluation` — Visual evaluation of EmbodiChain ``.pt`` checkpoints and external Motion Profiles
+- :doc:`/guides/policy_evaluation` — Headless and Viewer evaluation of EmbodiChain ``.pt`` checkpoints and external Motion Profiles

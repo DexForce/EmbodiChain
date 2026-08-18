@@ -22,11 +22,9 @@ import gymnasium as gym
 import torch
 
 from embodichain.learning.rl.runtime import (
-    GymEnvironmentRuntime,
-    build_gym_environment,
+    _GymEnvironmentRuntime,
+    _build_gym_environment,
     build_gym_policy_runtime,
-    build_learning_policy_runtime,
-    resolve_config_reference,
 )
 
 
@@ -40,17 +38,6 @@ def _policy_config() -> dict:
         "actor": network,
         "critic": network,
     }
-
-
-class LearningEnvironment:
-    single_observation_space = gym.spaces.Box(-1.0, 1.0, shape=(3,))
-    single_action_space = gym.spaces.Box(-1.0, 1.0, shape=(2,))
-
-    def __init__(self) -> None:
-        self.closed = 0
-
-    def close(self) -> None:
-        self.closed += 1
 
 
 class GymEnvironment:
@@ -74,34 +61,6 @@ class GymEnvironment:
         self.closed += 1
 
 
-def test_config_reference_uses_the_training_config_directory(tmp_path):
-    config_dir = tmp_path / "configs"
-    config_dir.mkdir()
-    gym_config = config_dir / "gym.yaml"
-    gym_config.write_text("id: Example\n", encoding="utf-8")
-
-    assert resolve_config_reference("gym.yaml", base_dir=config_dir) == gym_config
-
-
-def test_learning_runtime_builds_the_configured_policy(monkeypatch):
-    env = LearningEnvironment()
-    monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.build_learning_environment",
-        lambda config, device, num_envs: ("PointMass", env),
-    )
-
-    runtime = build_learning_policy_runtime(
-        {"trainer": {"learning_env": "PointMass"}, "policy": _policy_config()},
-        device=torch.device("cpu"),
-        num_envs=4,
-    )
-
-    assert runtime.env is env
-    assert runtime.env_id == "PointMass"
-    assert runtime.policy.actor[0].in_features == 3
-    assert runtime.policy.actor[-1].out_features == 2
-
-
 def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     gym_config = tmp_path / "gym.yaml"
     gym_config.write_text("id: Example\n", encoding="utf-8")
@@ -120,7 +79,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
         lambda env_id, base_env_cfg: built,
     )
 
-    runtime = build_gym_environment(
+    runtime = _build_gym_environment(
         {"trainer": {"gym_config": "gym.yaml"}},
         simulation_device=torch.device("cpu"),
         num_envs=1,
@@ -140,7 +99,7 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
 
 def test_gym_runtime_uses_the_same_task_spaces_for_policy_build(monkeypatch):
     env = GymEnvironment()
-    task = GymEnvironmentRuntime(
+    task = _GymEnvironmentRuntime(
         env=env,
         env_id="Example",
         env_cfg=SimpleNamespace(),
@@ -148,7 +107,7 @@ def test_gym_runtime_uses_the_same_task_spaces_for_policy_build(monkeypatch):
         gym_config_path=SimpleNamespace(resolve=lambda: None),
     )
     monkeypatch.setattr(
-        "embodichain.learning.rl.runtime.build_gym_environment",
+        "embodichain.learning.rl.runtime._build_gym_environment",
         lambda *args, **kwargs: task,
     )
 

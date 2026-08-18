@@ -16,7 +16,7 @@ target processing.
 ## Directory layout
 
 ```text
-motion_policy_evaluation/
+policy_evaluation/
 ├── README.md
 ├── prepare_resources.py
 ├── eval_policy.py              # Register the local Profile and run the example
@@ -47,8 +47,8 @@ prints the model, asset, checkout, and digest verification progress. Re-running
 the command continues an existing Git checkout after an interrupted download.
 
 ```bash
-python examples/learning/motion_policy_evaluation/prepare_resources.py
-python examples/learning/motion_policy_evaluation/eval_policy.py \
+python examples/learning/policy_evaluation/prepare_resources.py
+python examples/learning/policy_evaluation/eval_policy.py \
   --viewer \
   --renderer hybrid
 ```
@@ -74,7 +74,7 @@ The terminal prints the path to `evaluation.json` when the Viewer closes. Run a
 Headless smoke test with:
 
 ```bash
-python examples/learning/motion_policy_evaluation/eval_policy.py \
+python examples/learning/policy_evaluation/eval_policy.py \
   --device cpu \
   --sim-device cpu \
   --control-steps 20
@@ -86,18 +86,18 @@ current process. Run the script directly from the repository root. To use
 another cache directory:
 
 ```bash
-python examples/learning/motion_policy_evaluation/prepare_resources.py \
+python examples/learning/policy_evaluation/prepare_resources.py \
   --output /tmp/anymal_c_velocity
 
 ANYMAL_C_EXAMPLE_CACHE=/tmp/anymal_c_velocity \
-  python examples/learning/motion_policy_evaluation/eval_policy.py --viewer
+  python examples/learning/policy_evaluation/eval_policy.py --viewer
 ```
 
 ## Execution pipeline
 
 ```mermaid
 flowchart LR
-    CLI[eval-motion-policy] --> Profile[build_profile]
+    CLI[eval-policy] --> Profile[build_profile]
     Profile --> Spec[Policy Spec<br/>assets, control parameters, frequency]
     Spec --> Setup[Adapter.setup<br/>load TorchScript and joint mapping]
     Setup --> State[read RobotState]

@@ -14,14 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Motion Profile providers for task-specific model and control semantics."""
+"""External Policy Profile registration and construction."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
 import torch
@@ -30,7 +29,6 @@ __all__ = [
     "MotionProfile",
     "MotionProfileRequest",
     "build_motion_profile",
-    "get_motion_profile_names",
     "register_motion_profile",
 ]
 
@@ -64,7 +62,7 @@ class MotionProfileRequest:
             else Path(self.resource_root).expanduser().resolve()
         )
         object.__setattr__(self, "checkpoint", checkpoint)
-        object.__setattr__(self, "configs", MappingProxyType(configs))
+        object.__setattr__(self, "configs", configs)
         object.__setattr__(self, "resource_root", root)
 
 
@@ -73,27 +71,14 @@ class MotionProfile:
     """DexSim Policy Spec and report metadata built by one provider."""
 
     profile_id: str
-    checkpoint: Path
     policy_spec: Mapping[str, Any]
     provider_version: int = 1
     provenance: Mapping[str, Any] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        checkpoint = Path(self.checkpoint).expanduser().resolve()
-        if not checkpoint.is_file():
-            raise FileNotFoundError(f"Motion checkpoint does not exist: {checkpoint}")
-        object.__setattr__(self, "checkpoint", checkpoint)
-        object.__setattr__(
-            self,
-            "policy_spec",
-            MappingProxyType(dict(self.policy_spec)),
-        )
-        object.__setattr__(
-            self,
-            "provenance",
-            MappingProxyType(dict(self.provenance)),
-        )
+        object.__setattr__(self, "policy_spec", dict(self.policy_spec))
+        object.__setattr__(self, "provenance", dict(self.provenance))
         object.__setattr__(self, "warnings", tuple(self.warnings))
 
 
@@ -113,11 +98,6 @@ def register_motion_profile(name: str, provider: MotionProfileProvider) -> None:
     if name in _PROVIDERS:
         raise ValueError(f"Motion profile is already registered: {name}")
     _PROVIDERS[name] = provider
-
-
-def get_motion_profile_names() -> tuple[str, ...]:
-    """Return the registered profile names."""
-    return tuple(sorted(_PROVIDERS))
 
 
 def build_motion_profile(

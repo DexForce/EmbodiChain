@@ -13,5 +13,5 @@ Practical guides for common tasks in EmbodiChain.
    add_robot
    preview_asset
    run_env
-   motion_policy_evaluation
+   policy_evaluation
    cli
