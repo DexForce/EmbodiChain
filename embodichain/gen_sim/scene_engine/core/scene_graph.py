@@ -193,6 +193,7 @@ class SceneGraph:
         *,
         deleted_object_ids: set[str],
         added_object_ids: list[str],
+        added_orientation_states_by_id: dict[str, OrientationState | None],
         on_parent_updates: list[tuple[str, str, TableRegion | None]],
         planar_relation_updates: list[tuple[str, PlanarRelationType, str]],
     ) -> None:
@@ -226,6 +227,8 @@ class SceneGraph:
             raise ValueError(
                 f"Duplicate scene graph nodes: {sorted(duplicate_object_ids)}"
             )
+        if set(added_orientation_states_by_id) != set(added_object_ids):
+            raise ValueError("Added orientation states must match added node ids.")
 
         # New nodes default to the table; later updates replace that parent when needed.
         self.nodes.extend(
@@ -233,6 +236,7 @@ class SceneGraph:
                 object_id=object_id,
                 parent_id=TABLE_OBJECT_ID,
                 parent_relation="on",
+                orientation_state=added_orientation_states_by_id[object_id],
             )
             for object_id in added_object_ids
         )
