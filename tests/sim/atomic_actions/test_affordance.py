@@ -470,23 +470,23 @@ class TestAssembleAffordance:
         assert torch.allclose(result[0], base_pose @ self._rel_pose())
 
     def test_get_assemble_object_pose_broadcasts_across_envs(self):
-        n_envs = 3
+        num_envs = 3
         aff = AssembleAffordance(assemble_to_base_pose=self._rel_pose())
-        base_pose = torch.eye(4).unsqueeze(0).repeat(n_envs, 1, 1)
-        base_pose[:, 0, 3] = torch.arange(n_envs, dtype=torch.float32)
+        base_pose = torch.eye(4).unsqueeze(0).repeat(num_envs, 1, 1)
+        base_pose[:, 0, 3] = torch.arange(num_envs, dtype=torch.float32)
         result = aff.get_assemble_object_pose(base_pose)
-        assert result.shape == (n_envs, 4, 4)
+        assert result.shape == (num_envs, 4, 4)
         expected = torch.bmm(
-            base_pose, self._rel_pose().unsqueeze(0).repeat(n_envs, 1, 1)
+            base_pose, self._rel_pose().unsqueeze(0).repeat(num_envs, 1, 1)
         )
         assert torch.allclose(result, expected)
 
     def test_get_assemble_object_pose_broadcasts_batched_relative_pose(self):
-        n_envs = 2
-        rel = self._rel_pose().unsqueeze(0).repeat(n_envs, 1, 1)
+        num_envs = 2
+        rel = self._rel_pose().unsqueeze(0).repeat(num_envs, 1, 1)
         aff = AssembleAffordance(assemble_to_base_pose=rel)
-        base_pose = torch.eye(4).unsqueeze(0).repeat(n_envs, 1, 1)
+        base_pose = torch.eye(4).unsqueeze(0).repeat(num_envs, 1, 1)
         base_pose[:, 2, 3] = 0.5
         result = aff.get_assemble_object_pose(base_pose)
-        assert result.shape == (n_envs, 4, 4)
+        assert result.shape == (num_envs, 4, 4)
         assert torch.allclose(result, torch.bmm(base_pose, rel))

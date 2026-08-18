@@ -81,9 +81,8 @@ sends commands returned by an execution session and supplies new observations.
 ``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
 It is the framework-owned template method called by the engine, not an
 additional application execution entry point. Atomic-action authors implement
-the protected ``_plan()`` hook instead. Similarly,
-``engine.plan_action()`` is reserved for extensions and isolated tests that
-need to plan an unregistered instance.
+the protected ``_plan()`` hook instead. Register custom action instances with
+``engine.register()`` before using the same public planning entry points.
 
 Runnable examples
 -----------------
@@ -394,8 +393,8 @@ only once. The durable state is ``tick.pending_effect`` (an
 Adding an action
 ----------------
 
-Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-define typed runtime options when needed, implement the protected
+Define an action-owned frozen goal dataclass. Then define typed runtime options
+when needed, implement the protected
 ``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
 override the inherited public ``plan()`` method because it binds the latest
 collision scene first.
@@ -413,7 +412,6 @@ A minimal implementation looks like:
 
    @dataclass(frozen=True, slots=True)
    class PushGoal:
-       goal_kind: ClassVar[str] = "push"
        contact_pose: torch.Tensor
 
    @dataclass(frozen=True, slots=True)

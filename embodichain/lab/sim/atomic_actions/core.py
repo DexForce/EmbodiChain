@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -208,7 +209,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         if self._planning_services is None:
             raise RuntimeError(
                 f"Atomic action {self.skill_id!r} is not bound to an "
-                "AtomicActionEngine. Register it or call engine.plan_action()."
+                "AtomicActionEngine. Register it with engine.register()."
             )
         return self._planning_services
 
@@ -227,6 +228,16 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         """Return the concrete runtime device associated with the engine."""
         return self.planning_services.device
 
+    @cached_property
+    def num_envs(self) -> int:
+        """Number of environments owned by the bound robot."""
+        return int(self.robot.get_qpos().shape[0])
+
+    @cached_property
+    def robot_dof(self) -> int:
+        """Number of full-robot degrees of freedom."""
+        return int(self.robot.dof)
+
     def _bind(self, services: ActionPlanningServices) -> None:
         """Bind engine-owned planning services exactly once."""
         if self._planning_services is services:
@@ -237,14 +248,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 "AtomicActionEngine."
             )
         self._planning_services = services
-        try:
-            self._on_bind()
-        except Exception:
-            self._planning_services = None
-            raise
-
-    def _on_bind(self) -> None:
-        """Initialize implementation state that depends on engine resources."""
 
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
@@ -457,10 +460,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         Returns:
             Side-effect-free action plan.
         """
-        self.require_goal(request)
         success_mask = normalize_success_mask(
             success,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             name="Planning success",
         )

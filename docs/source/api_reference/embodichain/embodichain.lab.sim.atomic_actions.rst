@@ -7,7 +7,6 @@ embodichain.lab.sim.atomic_actions
 
    .. autosummary::
 
-      ActionGoal
       ActionBinding
       ResolvedActionBinding
       ResolvedControlPart
@@ -234,7 +233,4 @@ Semantic objects and helpers
    :members:
 
 .. autoclass:: HeldObjectState
-   :members:
-
-.. autoclass:: CoordinatedHeldObjectState
    :members:

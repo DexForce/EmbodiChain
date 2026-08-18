@@ -659,7 +659,7 @@ class AssembleAffordance(Affordance):
         default_factory=lambda: torch.eye(4, dtype=torch.float32)
     )
     """Pose of the assemble object relative to the base object frame, shape
-    ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+    ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     def get_assemble_object_pose(self, base_pose: torch.Tensor) -> torch.Tensor:
         """Return the assemble-object target pose for a given base-object pose.
@@ -667,22 +667,22 @@ class AssembleAffordance(Affordance):
         The assemble object is placed at ``base_pose @ assemble_to_base_pose``.
 
         Args:
-            base_pose: Base-object pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)``.
+            base_pose: Base-object pose with shape ``(4, 4)`` or ``(num_envs, 4, 4)``.
 
         Returns:
-            Assemble-object target pose with shape ``(n_envs, 4, 4)``.
+            Assemble-object target pose with shape ``(num_envs, 4, 4)``.
         """
         base_pose = base_pose.to(dtype=torch.float32)
         if base_pose.dim() == 2:
             base_pose = base_pose.unsqueeze(0)
-        n_envs = base_pose.shape[0]
+        num_envs = base_pose.shape[0]
         rel = self.assemble_to_base_pose.to(
             device=base_pose.device, dtype=torch.float32
         )
         if rel.dim() == 2:
-            rel = rel.unsqueeze(0).repeat(n_envs, 1, 1)
+            rel = rel.unsqueeze(0).repeat(num_envs, 1, 1)
         elif rel.shape[0] == 1:
-            rel = rel.repeat(n_envs, 1, 1)
+            rel = rel.repeat(num_envs, 1, 1)
         return torch.bmm(base_pose, rel)
 
 

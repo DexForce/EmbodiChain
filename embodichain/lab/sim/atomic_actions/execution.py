@@ -220,7 +220,7 @@ class ExecutionSession:
         engine._validate_context(context)
         self._engine = engine
         self._requests: tuple[ResolvedActionRequest, ...] = tuple(
-            engine.resolve(invocation) for invocation in invocations
+            engine._resolve(invocation) for invocation in invocations
         )
         self._task_state = context.task
         self._context = context
@@ -305,8 +305,8 @@ class ExecutionSession:
                 f"{invocation.revision}."
             )
 
-        replacement = self._engine.resolve(invocation)
-        replacement_plan = self._engine.plan_request(replacement, self._context)
+        replacement = self._engine._resolve(invocation)
+        replacement_plan = self._engine._plan_request(replacement, self._context)
         requests = list(self._requests)
         requests[self._invocation_index] = replacement
         self._requests = tuple(requests)
@@ -470,7 +470,7 @@ class ExecutionSession:
     ) -> None:
         """Plan the current invocation from the latest observation."""
         request = self._requests[self._invocation_index]
-        plan = self._engine.plan_request(request, context)
+        plan = self._engine._plan_request(request, context)
         self._install_plan(plan, context, event_kind)
 
     def _install_plan(
