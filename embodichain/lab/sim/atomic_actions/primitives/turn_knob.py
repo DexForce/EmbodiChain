@@ -30,16 +30,19 @@ from embodichain.utils.math import (
     get_relative_rotation,
 )
 
-from ._helpers import arm_qpos_from_state
-from ..affordance import TurnAffordance
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction, ObjectSemantics
-from ..effects import StateDelta
-from ..goals import ObjectActionGoal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..state import PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.affordance import TurnAffordance
+from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND, OPEN_COMMAND
+from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import ObjectActionGoal
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
     translate_pose_world,
@@ -94,7 +97,7 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
 
     def _on_bind(self) -> None:
         """Resolve dimensions owned by the engine's robot."""
-        self.n_envs = self.robot.get_qpos().shape[0]
+        self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
     def _find_symmetric_nearest_xpos(
@@ -130,13 +133,13 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
         hand_open_qpos = end_effector.joint_positions(
             OPEN_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
         hand_grasp_qpos = end_effector.joint_positions(
             GRASP_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
@@ -144,10 +147,10 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         link_pose = affordance.get_link_pose().to(
             device=self.device, dtype=torch.float32
         )
-        if link_pose.shape != (self.n_envs, 4, 4):
+        if link_pose.shape != (self.num_envs, 4, 4):
             raise ValueError(
                 "Knob target pose must have shape "
-                f"({self.n_envs}, 4, 4), got {tuple(link_pose.shape)}."
+                f"({self.num_envs}, 4, 4), got {tuple(link_pose.shape)}."
             )
         grasp_xpos = affordance.get_grasp_pose(link_pose).to(
             device=self.device, dtype=torch.float32
@@ -225,7 +228,7 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         )
         lengths = tuple(part.shape[1] for part in parts)
         full = torch.empty(
-            (self.n_envs, sum(lengths), self.robot_dof),
+            (self.num_envs, sum(lengths), self.robot_dof),
             dtype=context.robot.qpos.dtype,
             device=self.device,
         )
