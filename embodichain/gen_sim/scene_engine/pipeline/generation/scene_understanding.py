@@ -50,12 +50,6 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.image_segmentation_utils im
 
 _SUPPORTED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 _CATEGORY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-_LOCATION_WORD_PATTERN = re.compile(
-    r"\b(?:left|right|front|back|center|middle|top|bottom|upper|lower|"
-    r"foreground|background|near|next|beside|behind|between|on|in|inside|"
-    r"under|above|below|against)\b",
-    flags=re.IGNORECASE,
-)
 _SYSTEM_PROMPT = """You inspect one tabletop-scene image.
 Identify the main table and every visible, physically distinct object that should
 be segmented and later generated as an independent 3D asset.
@@ -82,6 +76,9 @@ Rules:
 8. For assets, description contains only visible category, material, color,
    texture, shape, and structural details. Do not mention location, the table,
    or any relationship to another object.
+   Structural direction words are allowed when they describe the object itself:
+   "bottle with a black cap on top" is valid, while "bottle on the left of the
+   table" is not.
 
 Return JSON only: no Markdown, comments, or prose outside this exact schema:
 {
@@ -493,17 +490,6 @@ def _parse_scene_object_fields(
         raise ValueError(
             f"VLM JSON key {field_name}.category must be a lower-case snake_case "
             "class name."
-        )
-    # Check whether the name and description contain location or relationship words.
-    if _LOCATION_WORD_PATTERN.search(fields["name"]):
-        raise ValueError(
-            f"VLM JSON key {field_name}.name must not contain location or "
-            "relationship words."
-        )
-    if _LOCATION_WORD_PATTERN.search(fields["description"]):
-        raise ValueError(
-            f"VLM JSON key {field_name}.description must not contain location or "
-            "relationship words."
         )
     return fields
 
