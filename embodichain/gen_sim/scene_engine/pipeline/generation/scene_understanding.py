@@ -150,22 +150,21 @@ array of asset_id and mask_index objects. Do not include Markdown or any other
 text."""
 _ORIENTATION_STATE_SYSTEM_PROMPT = """You inspect an outlined tabletop-scene image.
 Each visible asset has an outline and an ID label. Determine whether each listed
-object is standing, lying, or unknown in the image.
+asset is standing, lying, or unknown in the image.
 
-Use "standing" only when an upright container, such as a bottle, can, jar,
-flask, or thermos, is resting vertically on its base. Use "lying" only when
-such a container rests on its side. Use null for the table, every other object
-type, or any uncertain case.
+Use a non-null state only for an elongated object with a clear primary long axis.
+Use "standing" when its primary axis is approximately vertical to the tabletop.
+Use "lying" when its primary axis is approximately parallel to the tabletop.
+Use null for every object without a clear primary long axis or when uncertain.
 
-Return JSON only, with exactly this schema. Include every supplied object ID
-exactly once and do not add IDs:
+Return JSON only, with exactly this schema. Include every supplied asset ID
+exactly once. Never include the table or any ID that was not supplied:
 {
   "orientation_states": [
     {"object_id": "bottle_001", "orientation_state": "standing"},
-    {"object_id": "table", "orientation_state": null}
+    {"object_id": "book_001", "orientation_state": null}
   ]
 }"""
-_UPRIGHT_CONTAINER_ID_TOKENS = frozenset({"bottle", "can", "jar", "flask", "thermos"})
 
 
 def understand_scene(
@@ -209,6 +208,7 @@ def understand_scene(
         scene,
         asset_mask_id_overlay_path=asset_mask_id_overlay_path,
         vlm_client=vlm_client,
+        json_max_attempts=json_max_attempts,
     )
 
     # Write the Updated scene JSON for debugging.
@@ -228,6 +228,7 @@ def _initialize_scene_graph_from_segmented_scene(
     *,
     asset_mask_id_overlay_path: str | Path,
     vlm_client: OpenAICompatibleVLM,
+    json_max_attempts: int = 3,
 ) -> SceneGraph:
     """Build the initial graph assuming every segmented asset rests on the table."""
     # Get simplified scene info for VLM.
@@ -241,20 +242,17 @@ def _initialize_scene_graph_from_segmented_scene(
         scene_info=scene_info,
         asset_mask_id_overlay_path=resolved_asset_mask_id_overlay_path,
         vlm_client=vlm_client,
+        json_max_attempts=json_max_attempts,
     )
     return SceneGraph(
         nodes=[
             SceneGraphNode(object_id=TABLE_OBJECT_ID, parent_id=None),
             *[
-                SceneGraphNode(  # semi-hard code.
+                SceneGraphNode(
                     object_id=asset.id,
                     parent_id=TABLE_OBJECT_ID,
-                    parent_relation="on",
-                    orientation_state=(
-                        orientation_states_by_id[asset.id]
-                        if _is_upright_container_id(asset.id)
-                        else None
-                    ),
+                    parent_relation="on",  # semi-hard-code.
+                    orientation_state=orientation_states_by_id[asset.id],
                 )
                 for asset in scene.assets
             ],
@@ -268,7 +266,7 @@ def _simplify_scene_info_for_graph_initialization(
 ) -> dict[str, object]:
     """Return the object metadata needed to initialize an image-based graph."""
     return {
-        "existing_object_ids": [scene_object.id for scene_object in scene.objects],
+        "asset_ids": [asset.id for asset in scene.assets],
     }
 
 
@@ -277,29 +275,42 @@ def _query_orientation_states(
     scene_info: dict[str, object],
     asset_mask_id_overlay_path: Path,
     vlm_client: OpenAICompatibleVLM,
+    json_max_attempts: int,
 ) -> dict[str, str | None]:
-    """Return validated image-observed orientation states keyed by object ID."""
-    response_text = vlm_client.complete(
-        image_path=asset_mask_id_overlay_path,
-        system_prompt=_ORIENTATION_STATE_SYSTEM_PROMPT,
-        user_prompt=json.dumps(scene_info, ensure_ascii=False),
-    )
-    return _parse_orientation_states_response(
-        response_text=response_text,
-        existing_object_ids=scene_info["existing_object_ids"],
-    )
+    """Return validated image-observed orientation states keyed by asset ID."""
+    if json_max_attempts < 1:
+        raise ValueError("json_max_attempts must be at least 1.")
+    last_validation_error: ValueError | None = None
+    for _ in range(json_max_attempts):
+        response_text = vlm_client.complete(
+            image_path=asset_mask_id_overlay_path,
+            system_prompt=_ORIENTATION_STATE_SYSTEM_PROMPT,
+            user_prompt=json.dumps(scene_info, ensure_ascii=False),
+        )
+        try:
+            return _parse_orientation_states_response(
+                response_text=response_text,
+                asset_ids=scene_info["asset_ids"],
+            )
+        except ValueError as exc:
+            last_validation_error = exc
+    assert last_validation_error is not None
+    raise ValueError(
+        "VLM returned invalid orientation-state JSON after "
+        f"{json_max_attempts} attempts: {last_validation_error}"
+    ) from last_validation_error
 
 
 def _parse_orientation_states_response(
     *,
     response_text: str,
-    existing_object_ids: object,
+    asset_ids: object,
 ) -> dict[str, str | None]:
-    """Parse a complete VLM orientation-state response for known object IDs."""
-    if not isinstance(existing_object_ids, list) or not all(
-        isinstance(object_id, str) for object_id in existing_object_ids
+    """Parse a complete VLM orientation-state response for known asset IDs."""
+    if not isinstance(asset_ids, list) or not all(
+        isinstance(object_id, str) for object_id in asset_ids
     ):
-        raise ValueError("Scene graph initialization requires string object IDs.")
+        raise ValueError("Scene graph initialization requires string asset IDs.")
     json_text = _strip_json_code_fence(response_text)
     try:
         payload = json.loads(json_text)
@@ -335,18 +346,11 @@ def _parse_orientation_states_response(
             raise ValueError(f"VLM JSON repeats orientation state for {object_id!r}.")
         orientation_states_by_id[object_id] = orientation_state
 
-    if set(orientation_states_by_id) != set(existing_object_ids):
+    if set(orientation_states_by_id) != set(asset_ids):
         raise ValueError(
-            "VLM JSON orientation states must match all existing object IDs."
+            "VLM JSON orientation states must match all supplied asset IDs."
         )
     return orientation_states_by_id
-
-
-def _is_upright_container_id(object_id: str) -> bool:
-    """Return whether an object ID identifies a standardized upright container."""
-    return bool(
-        set(re.findall(r"[a-z0-9]+", object_id.lower())) & _UPRIGHT_CONTAINER_ID_TOKENS
-    )
 
 
 def _analyze_image_objects(
