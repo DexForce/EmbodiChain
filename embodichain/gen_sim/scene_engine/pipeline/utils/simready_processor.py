@@ -19,11 +19,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 import numpy as np
 import open3d as o3d
-from scipy.spatial import ConvexHull, QhullError
 from scipy.spatial.transform import Rotation
 import trimesh
 
@@ -66,14 +64,12 @@ _FIXED_MAX_CONVEX_HULL_NUM = 16  # Shared VHACD hull budget for settling and exp
 
 @dataclass(frozen=True)
 class SimReadyProcessorConfig:
-    """Object-category policy for SimReady mesh canonicalization."""
+    """SceneGraph-conditioned policy for SimReady mesh canonicalization."""
 
     use_vlm_scale: bool = False  # Use the VLM-selected asset scale.
     use_vlm_rotation: bool = False  # Use the VLM-selected asset rotation.
 
-    upright_container_id_tokens: frozenset[str] = frozenset(
-        {"bottle", "can", "jar", "flask", "thermos"}
-    )  # Object-id tokens that enable upright-container standardization.
+    long_axis_object_ids: frozenset[str] = frozenset()
 
 
 class SimReadyProcessor:
@@ -106,8 +102,6 @@ class SimReadyProcessor:
         self.simready_assets_layout: list[dict[str, object]] | None = None
         self.config = config if config is not None else SimReadyProcessorConfig()
         self.vlm_client = vlm_client
-        if not self.config.upright_container_id_tokens:
-            raise ValueError("upright_container_id_tokens must not be empty.")
         if (
             self.config.use_vlm_scale or self.config.use_vlm_rotation
         ) and vlm_client is None:
@@ -312,8 +306,6 @@ class SimReadyProcessor:
         )
         if np.any(coarse_scale <= 0):
             raise ValueError("Coarse object scale values must be positive.")
-        # We need the object id to determine whether it is a bottle-like object.
-        # If it does, then we will do a special standardization. (Hard code)
         if not isinstance(object_id, str) or not object_id:
             raise ValueError("Scene object id must be a non-empty string.")
 
@@ -324,15 +316,15 @@ class SimReadyProcessor:
         y_up_to_z_up_transform[:3, :3] = y_up_to_z_up_matrix
         mesh.apply_transform(y_up_to_z_up_transform)
 
-        # Standardize upright containers in temporary z-up coordinates before the
-        # shared center, scale, and bottom-center preprocessing.
-        # This is to ensure the action agent can pick up the bottle or can-like objects.
-        bottle_alignment_matrix = np.eye(3)
-        if self._is_upright_container_id(object_id):
-            bottle_alignment_matrix = self._standardize_bottle_z_up(mesh)
-            bottle_alignment_transform = np.eye(4)
-            bottle_alignment_transform[:3, :3] = bottle_alignment_matrix
-            mesh.apply_transform(bottle_alignment_transform)
+        # Standardize graph-marked elongated assets before shared mesh processing.
+        # This makes local z their primary axis, so later scene-graph calibration
+        # can reliably recover the image-observed standing or lying orientation.
+        long_axis_alignment_matrix = np.eye(3)
+        if self._requires_long_axis_standardization(object_id):
+            long_axis_alignment_matrix = self._standardize_long_axis_z_up(mesh)
+            long_axis_alignment_transform = np.eye(4)
+            long_axis_alignment_transform[:3, :3] = long_axis_alignment_matrix
+            mesh.apply_transform(long_axis_alignment_transform)
 
         # First make the object's AABB center at the origin.
         original_aabb_center = mesh.bounds.mean(axis=0)
@@ -343,11 +335,11 @@ class SimReadyProcessor:
         scale_transform[:3, :3] = (
             # Actually there's no need to do so, for the scale factor is all equal
             # in x, y, z axes.
-            bottle_alignment_matrix
+            long_axis_alignment_matrix
             @ y_up_to_z_up_matrix
             @ np.diag(coarse_scale)
             @ y_up_to_z_up_matrix.T
-            @ bottle_alignment_matrix.T
+            @ long_axis_alignment_matrix.T
         )
         mesh.apply_transform(scale_transform)
 
@@ -367,16 +359,16 @@ class SimReadyProcessor:
         z_up_to_y_up_transform[:3, :3] = y_up_to_z_up_matrix.T
         mesh.apply_transform(z_up_to_y_up_transform)
 
-        # Compensate the bottle's local rotation so that its coarse world pose does
-        # not change.
-        local_bottle_rotation = Rotation.from_matrix(
-            y_up_to_z_up_matrix.T @ bottle_alignment_matrix @ y_up_to_z_up_matrix
+        # Compensate the local canonicalization so its coarse world pose does not
+        # change until layout refinement applies the image-observed correction.
+        local_long_axis_rotation = Rotation.from_matrix(
+            y_up_to_z_up_matrix.T @ long_axis_alignment_matrix @ y_up_to_z_up_matrix
         )
         coarse_rotation_matrix = Rotation.from_euler(
             "xyz", coarse_rot, degrees=True
         ).as_matrix()
         rotation = Rotation.from_matrix(
-            coarse_rotation_matrix @ local_bottle_rotation.inv().as_matrix()
+            coarse_rotation_matrix @ local_long_axis_rotation.inv().as_matrix()
         )
         # Update the pos.
         position_offset = y_up_to_z_up_matrix.T @ (
@@ -388,24 +380,18 @@ class SimReadyProcessor:
             "scale": [1.0, 1.0, 1.0],
         }
 
-    def _is_upright_container_id(self, object_id: str) -> bool:
-        """Return whether object-id tokens indicate a bottle-like container."""
-        # Example: soda_can_0
-        # tokens: {"soda", "can", "0"}
-        # upright_container_id_tokens: {"bottle", "can", "jar"}
-        # So this returns True because "can" is in the configured token set.
-        tokens = set(re.findall(r"[a-z0-9]+", object_id.lower()))
-        return bool(tokens & self.config.upright_container_id_tokens)
+    def _requires_long_axis_standardization(self, object_id: str) -> bool:
+        """Return whether graph semantics identified one asset with a long axis."""
+        return object_id in self.config.long_axis_object_ids
 
     @staticmethod
-    def _standardize_bottle_z_up(mesh: trimesh.Trimesh) -> np.ndarray:
-        """Return a proper rotation that maps a bottle-like mesh's long axis to z-up.
-
-        Thanks to chenjian for this idea!
+    def _standardize_long_axis_z_up(mesh: trimesh.Trimesh) -> np.ndarray:
+        """Return a proper rotation that maps a mesh's primary axis to z-up.
+        Thanks to chanjian's idea.
         """
         if len(mesh.vertices) < 4 or len(mesh.faces) < 4:
             raise ValueError(
-                "Bottle standardization requires a non-degenerate triangle mesh."
+                "Long-axis standardization requires a non-degenerate triangle mesh."
             )
         open3d_mesh = o3d.geometry.TriangleMesh(
             vertices=o3d.utility.Vector3dVector(mesh.vertices),
@@ -419,7 +405,7 @@ class SimReadyProcessor:
         # non-finite values.
         if sampled_points.shape[0] < 4 or not np.all(np.isfinite(sampled_points)):
             raise ValueError(
-                "Bottle standardization could not sample valid mesh points."
+                "Long-axis standardization could not sample valid mesh points."
             )
 
         centered_points = sampled_points - sampled_points.mean(axis=0)
@@ -428,46 +414,12 @@ class SimReadyProcessor:
         if np.linalg.det(principal_axes) < 0:
             principal_axes[2, :] *= -1  # in case the SVD returns a reflection.
 
-        bottle_rotation = Rotation.from_euler(
+        long_axis_rotation = Rotation.from_euler(
             "y", 90.0, degrees=True
         ).as_matrix()  # 3x3 matrix
         # The first PCA axis is the longest axis; rotate it onto the temporary z axis.
-        bottle_rotation = bottle_rotation @ principal_axes
-        standardized_points = (bottle_rotation @ centered_points.T).T
-
-        axis_min = standardized_points[:, 2].min()
-        axis_max = standardized_points[:, 2].max()
-        axis_range = axis_max - axis_min
-        upper_points = standardized_points[
-            standardized_points[:, 2] > axis_min + axis_range * 0.8
-        ]
-        lower_points = standardized_points[
-            standardized_points[:, 2] < axis_min + axis_range * 0.2
-        ]
-        upper_volume = SimReadyProcessor._convex_hull_volume(upper_points)
-        lower_volume = SimReadyProcessor._convex_hull_volume(lower_points)
-
-        # Bottles usually have a smaller top (neck) than bottom; flip if necessary.
-        if upper_volume > lower_volume:
-            bottle_rotation = (
-                Rotation.from_euler("x", 180.0, degrees=True).as_matrix()
-                @ bottle_rotation
-            )
-        return bottle_rotation
-
-    @staticmethod
-    def _convex_hull_volume(points: np.ndarray) -> float:
-        """Return the volume of a non-degenerate point set's convex hull."""
-        if points.shape[0] < 4:
-            raise ValueError(
-                "Bottle standardization needs at least four points per end."
-            )
-        try:
-            return float(ConvexHull(points).volume)
-        except QhullError as exc:
-            raise ValueError(
-                "Bottle standardization found a degenerate end volume."
-            ) from exc
+        long_axis_rotation = long_axis_rotation @ principal_axes
+        return long_axis_rotation
 
     @staticmethod
     def _three_floats(value: object, *, field_name: str) -> list[float]:

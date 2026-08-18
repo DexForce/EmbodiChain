@@ -119,6 +119,11 @@ def generate_scene_and_refine(
         config=SimReadyProcessorConfig(
             use_vlm_scale=False,
             use_vlm_rotation=False,
+            long_axis_object_ids=frozenset(
+                node.object_id
+                for node in scene_graph.nodes
+                if node.orientation_state is not None
+            ),
         ),
         vlm_client=vlm_client,
     )

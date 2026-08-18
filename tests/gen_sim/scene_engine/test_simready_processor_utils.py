@@ -21,9 +21,31 @@ from pathlib import Path
 import pytest
 import trimesh
 
+from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
+    SimReadyProcessor,
+    SimReadyProcessorConfig,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
     compute_uniform_xy_scale_for_target,
 )
+
+
+def test_simready_long_axis_standardization_uses_graph_selected_ids(
+    tmp_path: Path,
+) -> None:
+    processor = SimReadyProcessor(
+        scene=Scene(),
+        coarse_layout_by_id={},
+        coarse_geometry_root=tmp_path / "coarse",
+        simready_geometry_root=tmp_path / "simready",
+        config=SimReadyProcessorConfig(
+            long_axis_object_ids=frozenset({"rolling_pin_001"}),
+        ),
+    )
+
+    assert processor._requires_long_axis_standardization("rolling_pin_001")
+    assert not processor._requires_long_axis_standardization("bottle_001")
 
 
 def test_uniform_scale_uses_the_z_up_tabletop_footprint(tmp_path: Path) -> None:
