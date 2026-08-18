@@ -290,9 +290,7 @@ class AssembleAffordance(Affordance):
             or base_pose.shape[0] == 0
             or base_pose.shape[-2:] != (4, 4)
         ):
-            raise ValueError(
-                "base_pose must have shape (4, 4) or (num_envs, 4, 4)."
-            )
+            raise ValueError("base_pose must have shape (4, 4) or (num_envs, 4, 4).")
         num_envs = base_pose.shape[0]
         if not isinstance(self.assemble_to_base_pose, torch.Tensor):
             raise TypeError("assemble_to_base_pose must be a torch.Tensor.")

@@ -146,6 +146,7 @@ def test_action_binding_is_role_based_and_immutable() -> None:
     with pytest.raises(KeyError, match="destination"):
         binding.manipulator("destination")
 
+
 @pytest.mark.parametrize("entity_id", ["", "   ", 7])
 def test_object_semantics_rejects_invalid_entity_id(entity_id: object) -> None:
     with pytest.raises(ValueError, match="entity_id"):
