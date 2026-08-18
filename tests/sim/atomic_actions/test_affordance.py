@@ -28,6 +28,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AssembleAffordance,
     InteractionPoints,
     PressButtonAffordance,
+    PullPushAffordance,
     TurnAffordance,
 )
 
@@ -211,6 +212,89 @@ class TestTurnAffordance:
 
         with pytest.raises(ValueError, match="parallel"):
             affordance.get_grasp_pose()
+
+
+class TestPullPushAffordance:
+    def test_uses_articulation_antipodal_sampling_with_batched_directions(self):
+        vertices = torch.tensor(
+            [
+                [-1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ]
+        )
+        triangles = torch.tensor([[0, 1, 2]])
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (vertices, triangles)
+        articulation.get_link_pose.return_value = link_pose
+        affordance = PullPushAffordance(
+            articulation=articulation,
+            link_name="handle",
+            translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+        )
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        first_grasp = torch.eye(4)
+        first_grasp[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+        second_grasp = torch.eye(4)
+        second_grasp[:3, 3] = torch.tensor([4.0, 5.0, 6.0])
+        generator.get_grasp_poses.side_effect = (
+            (True, first_grasp, 0.03),
+            (True, second_grasp, 0.04),
+        )
+        affordance._generator = generator
+        approach_directions = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0]])
+
+        success, grasp_poses, open_lengths = affordance.get_best_grasp_poses(
+            link_pose,
+            approach_direction=approach_directions,
+        )
+
+        assert isinstance(affordance, AntipodalAffordance)
+        assert affordance.is_articulation
+        assert success.tolist() == [True, True]
+        assert torch.allclose(grasp_poses, torch.stack([first_grasp, second_grasp]))
+        assert torch.allclose(open_lengths, torch.tensor([0.03, 0.04]))
+        articulation.get_link_vert_face.assert_called_once_with("handle")
+        assert torch.equal(
+            generator.get_grasp_poses.call_args_list[0].args[1],
+            approach_directions[0],
+        )
+        assert torch.equal(
+            generator.get_grasp_poses.call_args_list[1].args[1],
+            approach_directions[1],
+        )
+
+    def test_requires_articulation_backed_antipodal_geometry(self):
+        with pytest.raises(ValueError, match="requires articulation and link_name"):
+            PullPushAffordance(
+                mesh_vertices=torch.zeros(3, 3),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+            )
+
+    @pytest.mark.parametrize(
+        "translation_axis",
+        (
+            torch.zeros(3),
+            torch.tensor([float("nan"), 0.0, 0.0]),
+            torch.zeros(2),
+        ),
+    )
+    def test_rejects_invalid_translation_axis(self, translation_axis):
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (
+            torch.ones(3, 3),
+            torch.tensor([[0, 1, 2]]),
+        )
+
+        with pytest.raises(ValueError, match="translation_axis"):
+            PullPushAffordance(
+                articulation=articulation,
+                link_name="handle",
+                translation_axis=translation_axis,
+            )
 
 
 class TestPressButtonAffordance:

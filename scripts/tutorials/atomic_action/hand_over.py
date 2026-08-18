@@ -221,9 +221,6 @@ def run_handover_demo(
         pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
         lift_height=PICKUP_LIFT_HEIGHT,
         hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
-        approach_direction=torch.as_tensor(
-            [0.0, -707106781, -707106781], dtype=torch.float32
-        ),
     )
     # Step 2 - hand the object from the left arm to the right arm.
     handover_options = HandOverOptions(

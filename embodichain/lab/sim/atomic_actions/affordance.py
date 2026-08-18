@@ -220,15 +220,41 @@ class AntipodalAffordance(Affordance):
             [0, 0, -1], dtype=torch.float32
         ),
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the best antipodal grasp for each object pose.
+
+        Args:
+            obj_poses: Batched object poses with shape ``(B, 4, 4)``.
+            approach_direction: One shared ``(3,)`` world-frame direction or
+                per-object directions with shape ``(B, 3)``.
+
+        Returns:
+            A success mask, best grasp poses, and gripper opening lengths with
+            batch dimension ``B``.
+
+        Raises:
+            ValueError: If ``approach_direction`` has an incompatible shape.
+        """
         if self._generator is None:
             self._init_generator()
         approach_direction = self._resolve_approach_direction(approach_direction)
+        if approach_direction.shape == (3,):
+            approach_directions = approach_direction.unsqueeze(0).expand(
+                obj_poses.shape[0], -1
+            )
+        elif approach_direction.shape == (obj_poses.shape[0], 3):
+            approach_directions = approach_direction
+        else:
+            raise ValueError(
+                "approach_direction must have shape (3,) or "
+                f"({obj_poses.shape[0]}, 3), got "
+                f"{tuple(approach_direction.shape)}."
+            )
         grasp_xpos_list: list[torch.Tensor] = []
         is_success_list: list[bool] = []
         open_length_list: list[float] = []
         for i, obj_pose in enumerate(obj_poses):
             is_success, grasp_xpos, open_length = self._generator.get_grasp_poses(
-                obj_pose, approach_direction
+                obj_pose, approach_directions[i]
             )
             if is_success:
                 grasp_xpos_list.append(grasp_xpos.unsqueeze(0))
@@ -345,6 +371,38 @@ class TurnAffordance(Affordance):
             torch.matmul(link_pose[:, :3, :3], center) + link_pose[:, :3, 3]
         )
         return grasp_pose
+
+
+@dataclass
+class PullPushAffordance(AntipodalAffordance):
+    """Antipodal grasp and translation semantics for one articulation link.
+
+    The positive translation-axis direction denotes approaching and pushing
+    the articulated part closed. Pulling moves in the opposite direction.
+    Geometry is resolved through the articulation-backed form of
+    :class:`AntipodalAffordance`.
+    """
+
+    translation_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
+    )
+    """Approach and push/close direction in the articulation-link frame."""
+
+    def __post_init__(self) -> None:
+        AntipodalAffordance.__post_init__(self)
+        if not self.is_articulation:
+            raise ValueError("PullPushAffordance requires articulation and link_name.")
+        if (
+            not isinstance(self.translation_axis, torch.Tensor)
+            or self.translation_axis.shape != (3,)
+            or not torch.isfinite(self.translation_axis).all()
+        ):
+            raise ValueError(
+                "PullPushAffordance.translation_axis must be a finite (3,) tensor."
+            )
+        if torch.linalg.vector_norm(self.translation_axis) <= 1.0e-6:
+            raise ValueError("PullPushAffordance.translation_axis must be non-zero.")
+        self.translation_axis = self.translation_axis.clone()
 
 
 @dataclass
@@ -550,6 +608,7 @@ class AssembleAffordance(Affordance):
 __all__ = [
     "Affordance",
     "AntipodalAffordance",
+    "PullPushAffordance",
     "PressButtonAffordance",
     "TurnAffordance",
     "InteractionPoints",

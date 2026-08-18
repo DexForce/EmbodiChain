@@ -31,6 +31,8 @@ full-robot timed trajectory and uncommitted expected effects.
       PressOptions
       PressButton
       PressButtonOptions
+      PullPushArticulatedPart
+      PullPushArticulatedPartOptions
       TurnKnob
       TurnKnobOptions
       CoordinatedPickment
@@ -52,6 +54,7 @@ full-robot timed trajectory and uncommitted expected effects.
       AssembleGoal
       PressGoal
       PressButtonGoal
+      PullPushArticulatedPartGoal
       TurnKnobGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
@@ -110,6 +113,14 @@ PressButton
 -----------
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.press_button
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+PullPushArticulatedPart
+-----------------------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.pull_push_articulated_part
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict

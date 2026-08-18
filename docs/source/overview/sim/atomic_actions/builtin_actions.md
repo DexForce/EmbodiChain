@@ -151,6 +151,7 @@ The animations below are the focused simulator demos under
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
 | `press_button` | `PressButtonGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressButtonAffordance` | none |
+| `pull_push_articulated_part` | `PullPushArticulatedPartGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `PullPushAffordance` | none |
 | `turn_knob` | `TurnKnobGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TurnAffordance` | none |
 | `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
@@ -482,6 +483,41 @@ press distance. The bound end-effector profile must provide `grasp`; the action
 keeps the gripper closed for all arm-motion segments.
 
 **Example:** `scripts/tutorials/atomic_action/press_button.py`
+
+(builtin-pull-push-articulated-part)=
+
+## `PullPushArticulatedPart`
+
+Plans a grasped linear interaction for one articulation link. The goal requires
+a `PullPushAffordance` constructed with an `Articulation`, `link_name`, and
+link-frame `translation_axis`. The positive axis direction means approach and
+push/close; pull/open uses its negative direction. `PullPushAffordance` inherits
+`AntipodalAffordance`, resolves mesh geometry from the articulation link, and
+selects a grasp with `get_best_grasp_poses()` at planning time. The grasp
+approach direction is the link-frame translation axis transformed by the
+current link rotation.
+
+With `is_pull=True`, the sequence is **approach -> reach -> close -> pull ->
+open**. With `is_pull=False`, it is **approach -> reach -> close -> push -> open
+-> return**, where `return` moves the open gripper back to the original approach
+pose.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `pull_push_articulated_part` |
+| Goal | `PullPushArticulatedPartGoal(semantics=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Motion | pull: approach, reach, close, pull, open; push adds return to approach |
+| Effect | none |
+
+`PullPushArticulatedPartOptions` controls `is_pull`, hand close/open
+interpolation, approach distance, and translation distance. The link-frame
+translation axis belongs to `PullPushAffordance`; the bound end-effector profile
+must provide `open` and `grasp`.
+
+**Example:** `scripts/tutorials/atomic_action/pull_push_articulated_part.py`
+plans and replays a pull first, then replans a push from the drawer's measured
+post-pull link pose.
 
 (builtin-turn-knob)=
 

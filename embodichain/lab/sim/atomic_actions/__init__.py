@@ -34,6 +34,7 @@ from .affordance import (
     AssembleAffordance,
     InteractionPoints,
     PressButtonAffordance,
+    PullPushAffordance,
     TurnAffordance,
 )
 from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
@@ -105,6 +106,9 @@ from .primitives import (
     PressButtonOptions,
     PressGoal,
     PressOptions,
+    PullPushArticulatedPart,
+    PullPushArticulatedPartGoal,
+    PullPushArticulatedPartOptions,
     TurnKnob,
     TurnKnobGoal,
     TurnKnobOptions,
@@ -222,6 +226,10 @@ __all__ = [
     "PressButtonOptions",
     "PressGoal",
     "PressOptions",
+    "PullPushAffordance",
+    "PullPushArticulatedPart",
+    "PullPushArticulatedPartGoal",
+    "PullPushArticulatedPartOptions",
     "TurnKnob",
     "TurnKnobGoal",
     "TurnKnobOptions",

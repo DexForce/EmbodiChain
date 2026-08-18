@@ -64,13 +64,12 @@ DEFAULT_AXIS_SIZE = 0.003
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
-GRIPPER_TCP_Z = 0.18
 GRIPPER_MAX_OPEN_WIDTH = 0.100
 GRIPPER_MIN_OPEN_WIDTH = 0.003
 GRIPPER_FINGER_LENGTH = 0.10
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
-DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
+DEFAULT_GRIPPER_CLOSE_QPOS = 0.035
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 TOP_DOWN_EEF_ROTATION = (
     (-0.0539, -0.9985, -0.0022),
@@ -226,6 +225,7 @@ def add_ur5_gripper_robot(
     sim: SimulationManager,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    tcp_z: float = 0.18,
 ) -> Robot:
     """Add the standard UR5 plus PGI gripper tutorial robot.
 
@@ -237,7 +237,11 @@ def add_ur5_gripper_robot(
         The added robot instance.
     """
     return sim.add_robot(
-        cfg=create_ur5_gripper_robot_cfg(init_pos=init_pos, init_qpos=init_qpos)
+        cfg=create_ur5_gripper_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            tcp_z=tcp_z,
+        )
     )
 
 
@@ -754,6 +758,7 @@ def clone_local_pose_from_first_env(entity) -> torch.Tensor:
 def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    tcp_z: float = 0.18,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -814,7 +819,7 @@ def create_ur5_gripper_robot_cfg(
                     "tcp": [
                         [1.0, 0.0, 0.0, 0.0],
                         [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
+                        [0.0, 0.0, 1.0, tcp_z],
                         [0.0, 0.0, 0.0, 1.0],
                     ]
                 }

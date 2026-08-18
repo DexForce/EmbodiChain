@@ -70,6 +70,10 @@ from embodichain.lab.sim.atomic_actions import (
     PressButtonOptions,
     PressGoal,
     PressOptions,
+    PullPushAffordance,
+    PullPushArticulatedPart,
+    PullPushArticulatedPartGoal,
+    PullPushArticulatedPartOptions,
     RobotObservation,
     SceneEntityPose,
     SceneSnapshot,
@@ -420,6 +424,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
     assert Press.GoalType is PressGoal
     assert PressButton.GoalType is PressButtonGoal
+    assert PullPushArticulatedPart.GoalType is PullPushArticulatedPartGoal
     assert TurnKnob.GoalType is TurnKnobGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
@@ -434,6 +439,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
         PlaceOptions(),
         PressOptions(),
         PressButtonOptions(),
+        PullPushArticulatedPartOptions(),
         TurnKnobOptions(),
         CoordinatedPickmentOptions(),
         CoordinatedPlacementOptions(),
@@ -997,6 +1003,187 @@ def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
     assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
 
 
+@pytest.mark.parametrize(
+    ("is_pull", "expected_segments", "translation_sign"),
+    (
+        (True, ["approach", "reach", "close", "pull", "open"], -1.0),
+        (
+            False,
+            ["approach", "reach", "close", "push", "open", "return"],
+            1.0,
+        ),
+    ),
+)
+def test_pull_push_articulated_part_plans_expected_segments(
+    is_pull: bool,
+    expected_segments: list[str],
+    translation_sign: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    articulation = Mock(spec=Articulation)
+    articulation.get_link_vert_face.return_value = (
+        torch.tensor(
+            [
+                [-0.1, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ]
+        ),
+        torch.tensor([[0, 1, 2]]),
+    )
+    link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    articulation.get_link_pose.return_value = link_pose
+    affordance = PullPushAffordance(
+        articulation=articulation,
+        link_name="handle",
+        translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    grasp_calls: list[tuple[torch.Tensor, torch.Tensor]] = []
+
+    def sample_grasp(
+        self: PullPushAffordance,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        grasp_calls.append((obj_poses, approach_direction))
+        return (
+            torch.ones(NUM_ENVS, dtype=torch.bool),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.full((NUM_ENVS,), 0.03),
+        )
+
+    monkeypatch.setattr(
+        PullPushAffordance,
+        "get_best_grasp_poses",
+        sample_grasp,
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="drawer_handle",
+        entity=articulation,
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, PullPushArticulatedPart())
+    options = PullPushArticulatedPartOptions(
+        is_pull=is_pull,
+        hand_interp_steps=3,
+        approach_distance=0.1,
+        translation_distance=0.15,
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pull_push_articulated_part",
+            goal=PullPushArticulatedPartGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 24, ROBOT_DOF)
+    assert [segment.name for segment in plan.segments] == expected_segments
+    assert torch.all(
+        plan.trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
+    )
+    assert torch.all(
+        plan.trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
+    )
+    articulation.get_link_pose.assert_called_with("handle", to_matrix=True)
+    assert len(grasp_calls) == 1
+    assert torch.equal(grasp_calls[0][0], link_pose)
+    assert torch.allclose(
+        grasp_calls[0][1],
+        torch.tensor([0.0, -1.0, 0.0]).expand(NUM_ENVS, -1),
+    )
+    planned_targets = [
+        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
+    ]
+    expected_axis = torch.tensor([0.0, -1.0, 0.0])
+    assert torch.allclose(
+        planned_targets[0][:, :3, 3],
+        -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
+    )
+    assert torch.allclose(
+        planned_targets[1][:, :3, 3],
+        torch.zeros(NUM_ENVS, 3),
+    )
+    assert torch.allclose(
+        planned_targets[2][:, :3, 3],
+        expected_axis.expand(NUM_ENVS, -1)
+        * (translation_sign * options.translation_distance),
+    )
+    if not is_pull:
+        assert torch.allclose(
+            planned_targets[3][:, :3, 3],
+            -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
+        )
+
+
+def test_pull_push_articulated_part_holds_failed_environment() -> None:
+    articulation = Mock(spec=Articulation)
+    articulation.get_link_vert_face.return_value = (
+        torch.zeros(3, 3),
+        torch.tensor([[0, 1, 2]]),
+    )
+    articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    affordance = PullPushAffordance(
+        articulation=articulation,
+        link_name="handle",
+        translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+    )
+    affordance.get_best_grasp_poses = Mock(
+        return_value=(
+            torch.tensor([True, False]),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.full((NUM_ENVS,), 0.03),
+        )
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="drawer_handle",
+        entity=articulation,
+    )
+    generator = _motion_generator()
+
+    def successful_ik(
+        pose: torch.Tensor | None = None,
+        name: str | None = None,
+        joint_seed: torch.Tensor | None = None,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert joint_seed is not None
+        return torch.ones(NUM_ENVS, dtype=torch.bool), torch.ones_like(joint_seed)
+
+    generator.robot.compute_ik.side_effect = successful_ik
+    action = _bind_action(generator, PullPushArticulatedPart())
+    context = _context()
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pull_push_articulated_part",
+            goal=PullPushArticulatedPartGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=18),
+            skill_options=PullPushArticulatedPartOptions(hand_interp_steps=3),
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert not torch.allclose(plan.trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        plan.trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(18, -1),
+    )
+
+
 def test_press_button_plans_close_approach_press_and_retract() -> None:
     articulation = Mock(spec=Articulation)
     vertices = torch.tensor(
@@ -1191,6 +1378,49 @@ def test_turn_knob_rejects_non_turn_affordance() -> None:
 def test_turn_axis_belongs_to_affordance_not_action_options() -> None:
     assert "turn_axis" not in TurnKnobOptions.__dataclass_fields__
     assert "approach_direction" not in TurnKnobOptions.__dataclass_fields__
+
+
+def test_pull_push_articulated_part_rejects_non_pull_push_affordance() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(
+            mesh_vertices=torch.zeros(8, 3),
+            mesh_triangles=torch.zeros(4, 3, dtype=torch.long),
+        ),
+        geometry={},
+        label="mesh-handle",
+    )
+    action = _bind_action(_motion_generator(), PullPushArticulatedPart())
+
+    with pytest.raises(ValueError, match="PullPushAffordance"):
+        _plan_action(
+            action,
+            _invocation(
+                "pull_push_articulated_part",
+                PullPushArticulatedPartGoal(semantics),
+            ),
+            _context(),
+        )
+
+
+def test_pull_push_articulated_part_requires_primary_end_effector() -> None:
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="drawer_handle",
+    )
+    action = _bind_action(_motion_generator(), PullPushArticulatedPart())
+    invocation = ActionInvocation(
+        skill_id="pull_push_articulated_part",
+        goal=PullPushArticulatedPartGoal(semantics),
+        binding=ActionBinding(manipulators={"primary": "arm"}),
+    )
+
+    with pytest.raises(KeyError, match="No end effector is bound to role 'primary'"):
+        action.resolve_request(invocation)
+
+
+def test_pull_push_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "translation_axis" not in PullPushArticulatedPartOptions.__dataclass_fields__
 
 
 def test_handover_does_not_mutate_cached_final_pose() -> None:
