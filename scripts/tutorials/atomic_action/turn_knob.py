@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate TurnKnob on a microwave articulation."""
+"""Demonstrate TurnKnob on an articulation link or rigid knob."""
 
 from __future__ import annotations
 
@@ -40,17 +40,20 @@ from embodichain.lab.sim.atomic_actions import (
     TurnKnobGoal,
     TurnKnobOptions,
 )
-from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
-from embodichain.lab.sim.objects import Articulation, Robot
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    JointDrivePropertiesCfg,
+    RigidObjectCfg,
+)
+from embodichain.lab.sim.objects import Articulation, RigidObject
+from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
-    draw_axis_marker,
     get_hand_open_close_qpos,
-    make_eef_pose_at,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -63,15 +66,22 @@ MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
 TURN_SAMPLE_INTERVAL = 140
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+RIGID_KNOB_POSITION = (-0.7, -0.00, 0.70)
+RIGID_KNOB_SIZE = (0.05, 0.05, 0.05)
 
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the TurnKnob tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate TurnKnob on a microwave power knob.",
+        "Demonstrate TurnKnob on an articulation-link or rigid knob.",
         features=("visualize_axes",),
     )
     parser.add_argument("--turn_angle", type=float, default=-0.7853981634)
+    parser.add_argument(
+        "--rigid_object",
+        action="store_true",
+        help="Use a standalone rigid knob instead of the microwave link.",
+    )
     return parser.parse_args()
 
 
@@ -93,60 +103,54 @@ def create_microwave(sim) -> Articulation:
     return microwave
 
 
-def create_knob_semantics(microwave: Articulation) -> ObjectSemantics:
-    """Create turn semantics for the microwave power knob."""
-    return ObjectSemantics(
-        label="microwave_power_knob",
-        geometry={},
-        entity=microwave,
-        affordance=TurnAffordance(
-            articulation=microwave,
-            link_name=KNOB_LINK_NAME,
-            turn_axis=torch.tensor([0.0, 0.0, -1.0], device=microwave.device),
-        ),
-    )
-
-
-def initialize_robot_near_knob(
-    robot: Robot,
-    microwave: Articulation,
-    hand_open: torch.Tensor,
-) -> None:
-    """Place the open gripper near the knob; values are intentionally coarse."""
-    knob_position = microwave.get_link_pose(KNOB_LINK_NAME, to_matrix=True)[:, :3, 3]
-    start_position = knob_position.clone()
-    start_position[:, 1] += 0.25
-    start_position[:, 2] += 0.05
-    success, arm_qpos = robot.compute_ik(
-        pose=make_eef_pose_at(robot, start_position),
-        joint_seed=robot.get_qpos(name="arm"),
-        name="arm",
-    )
-    if not torch.all(success):
-        logger.log_warning(
-            "The coarse microwave pre-turn pose is not reachable; keeping the "
-            "robot's configured initial arm pose."
+def create_rigid_knob(sim) -> RigidObject:
+    """Create the standalone static rigid knob used by the optional demo."""
+    knob = sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="rigid_knob",
+            shape=CubeCfg(size=list(RIGID_KNOB_SIZE)),
+            body_type="static",
+            init_pos=RIGID_KNOB_POSITION,
         )
-        arm_qpos = robot.get_qpos(name="arm")
-    hand_qpos = hand_open.unsqueeze(0).expand(robot.get_qpos().shape[0], -1)
-    for target in (False, True):
-        robot.set_qpos(arm_qpos, name="arm", target=target)
-        robot.set_qpos(hand_qpos, name="hand", target=target)
-    robot.clear_dynamics()
+    )
+    sim.update(step=10)
+    return knob
+
+
+def create_knob_semantics(target: Articulation | RigidObject) -> ObjectSemantics:
+    """Create turn semantics for an articulation-link or rigid knob."""
+    if isinstance(target, Articulation):
+        affordance = TurnAffordance(
+            articulation=target,
+            link_name=KNOB_LINK_NAME,
+            turn_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
+        )
+        label = "microwave_power_knob"
+    else:
+        affordance = TurnAffordance(
+            rigid_object=target,
+            turn_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
+        )
+        label = "rigid_knob"
+    return ObjectSemantics(
+        label=label,
+        geometry={},
+        entity=target,
+        affordance=affordance,
+    )
 
 
 def main() -> None:
-    """Plan and replay the microwave power-knob TurnKnob trajectory."""
+    """Plan and replay TurnKnob for the selected target object type."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
-    microwave = create_microwave(sim)
+    target = create_rigid_knob(sim) if args.rigid_object else create_microwave(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
-    # initialize_robot_near_knob(robot, microwave, hand_open)
     motion_gen = create_toppra_motion_generator(robot)
-    semantics = create_knob_semantics(microwave)
+    semantics = create_knob_semantics(target)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -160,7 +164,7 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Inspect the microwave, then press Enter to plan TurnKnob...",
+        "Inspect the knob target, then press Enter to plan TurnKnob...",
     )
 
     compiled = engine.compile(
@@ -192,7 +196,11 @@ def main() -> None:
         robot,
         compiled.trajectory,
         args,
-        video_prefix="turn_microwave_knob_auto_play",
+        video_prefix=(
+            "turn_rigid_knob_auto_play"
+            if args.rigid_object
+            else "turn_microwave_knob_auto_play"
+        ),
         hold_steps=POST_TRAJECTORY_STEPS,
     )
     if wait_for_user:

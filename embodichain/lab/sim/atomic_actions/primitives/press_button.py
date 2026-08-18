@@ -43,7 +43,7 @@ from ..trajectory_ops import (
 
 @dataclass(frozen=True, slots=True, eq=False)
 class PressButtonGoal(ObjectActionGoal):
-    """Articulation-link button described by a press affordance."""
+    """Articulation-link or rigid button described by a press affordance."""
 
     goal_kind: ClassVar[str] = "press_button"
 
@@ -56,10 +56,13 @@ class PressButtonOptions(ActionOptions):
     """Number of waypoints used to close the hand."""
 
     approach_distance: float = 0.1
-    """Distance from the button surface opposite the press direction."""
+    """Distance from the press position opposite the press direction."""
 
     press_distance: float = 0.05
     """Distance traveled into the button along its press axis."""
+
+    press_position: tuple[float, float, float] | None = None
+    """Optional local-frame position overriding the affordance press position."""
 
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
@@ -72,6 +75,15 @@ class PressButtonOptions(ActionOptions):
             raise ValueError("press_distance must be finite.")
         if self.press_distance <= 0.0:
             raise ValueError("press_distance must be positive.")
+        if self.press_position is not None:
+            position = torch.as_tensor(self.press_position, dtype=torch.float32)
+            if position.shape != (3,) or not torch.isfinite(position).all():
+                raise ValueError("press_position must be a finite (x, y, z) tuple.")
+            object.__setattr__(
+                self,
+                "press_position",
+                tuple(float(component) for component in position),
+            )
 
 
 class PressButton(AtomicAction[PressButtonGoal, PressButtonOptions]):
@@ -135,12 +147,13 @@ class PressButton(AtomicAction[PressButtonGoal, PressButtonOptions]):
         )
         if link_pose.shape != (self.n_envs, 4, 4):
             raise ValueError(
-                "Articulation link pose must have shape "
+                "Button target pose must have shape "
                 f"({self.n_envs}, 4, 4), got {tuple(link_pose.shape)}."
             )
-        contact_xpos = affordance.get_press_pose(link_pose).to(
-            device=self.device, dtype=torch.float32
-        )
+        contact_xpos = affordance.get_press_pose(
+            link_pose,
+            press_position=options.press_position,
+        ).to(device=self.device, dtype=torch.float32)
         contact_xpos = self._find_symmetric_nearest_xpos(
             contact_xpos,
             reference_xpos=self.robot.compute_fk(
