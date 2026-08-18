@@ -27,25 +27,61 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
     SimReadyProcessorConfig,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor_utils import (
+    DEFAULT_NEEDED_LAYOUT,
+    LYING_NEEDED_LAYOUT,
+    STANDING_NEEDED_LAYOUT,
     compute_uniform_xy_scale_for_target,
+    query_vlm_object_rotation_and_target_size,
 )
 
 
-def test_simready_long_axis_standardization_uses_graph_selected_ids(
+def test_simready_pose_layout_uses_graph_orientation_states(
     tmp_path: Path,
 ) -> None:
+    class VLM:
+        def complete(self, **_: object) -> str:
+            raise AssertionError("This selection test must not call the VLM.")
+
     processor = SimReadyProcessor(
         scene=Scene(),
         coarse_layout_by_id={},
         coarse_geometry_root=tmp_path / "coarse",
         simready_geometry_root=tmp_path / "simready",
         config=SimReadyProcessorConfig(
-            long_axis_object_ids=frozenset({"rolling_pin_001"}),
+            orientation_states_by_id={"bottle_001": "standing", "fork_001": "lying"},
         ),
+        vlm_client=VLM(),  # type: ignore[arg-type]
     )
 
-    assert processor._requires_long_axis_standardization("rolling_pin_001")
-    assert not processor._requires_long_axis_standardization("bottle_001")
+    assert processor._orientation_state_for_object("bottle_001") == "standing"
+    assert processor._orientation_state_for_object("fork_001") == "lying"
+    assert processor._orientation_state_for_object("knife_001") is None
+    assert processor._needed_layout_for_object("bottle_001") == STANDING_NEEDED_LAYOUT
+    assert processor._needed_layout_for_object("fork_001") == LYING_NEEDED_LAYOUT
+    assert processor._needed_layout_for_object("knife_001") == DEFAULT_NEEDED_LAYOUT
+
+
+def test_vlm_transform_query_retries_an_empty_response(tmp_path: Path) -> None:
+    class VLM:
+        def __init__(self) -> None:
+            self.responses = [
+                "",
+                '{"rotate_about_x": false, "target_xy_size_cm": [8.0, 8.0]}',
+            ]
+
+        def complete(self, **_: object) -> str:
+            return self.responses.pop(0)
+
+    vlm_client = VLM()
+    decision = query_vlm_object_rotation_and_target_size(
+        scene_object_description="small blue bottle",
+        needed_layout=STANDING_NEEDED_LAYOUT,
+        rendered_views_path=tmp_path / "views.png",
+        vlm_client=vlm_client,  # type: ignore[arg-type]
+    )
+
+    assert decision == {"rotate_about_x": False, "target_xy_size_cm": [8.0, 8.0]}
+    assert vlm_client.responses == []
 
 
 def test_uniform_scale_uses_the_z_up_tabletop_footprint(tmp_path: Path) -> None:

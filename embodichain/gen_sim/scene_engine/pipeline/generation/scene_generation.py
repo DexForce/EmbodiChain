@@ -109,21 +109,24 @@ def generate_scene_and_refine(
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
+    # Coarse poses already preserve lying and unconstrained assets; only standing
+    # assets need a VLM semantic-axis correction before later z-up calibration.
+    standing_orientation_states_by_id = {
+        node.object_id: node.orientation_state
+        for node in scene_graph.nodes
+        if node.orientation_state == "standing"
+    }
     simready_processor = SimReadyProcessor(
         scene=scene,
         coarse_layout_by_id=coarse_layout_by_id,
         coarse_geometry_root=coarse_geometry_output_root,
         simready_geometry_root=simready_geometry_output_root,
         debug_output_root=debug_output_root,
-        # Image-to-scene uses the geometry service's coarse scale directly.
+        # Keep the geometry-server scale and only correct unstable standing poses.
         config=SimReadyProcessorConfig(
             use_vlm_scale=False,
             use_vlm_rotation=False,
-            long_axis_object_ids=frozenset(
-                node.object_id
-                for node in scene_graph.nodes
-                if node.orientation_state is not None
-            ),
+            orientation_states_by_id=standing_orientation_states_by_id,
         ),
         vlm_client=vlm_client,
     )
@@ -498,6 +501,7 @@ def _scene_graph_based_calibration(
         node = nodes_by_id.get(asset_id)
         if node is None:
             raise ValueError(f"Scene graph does not contain asset {asset_id!r}.")
+        # Only correct the standing assets.
         if node.orientation_state != "standing":
             calibrated_assets_layout.append(asset_layout)
             continue
