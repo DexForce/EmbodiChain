@@ -27,8 +27,6 @@ full-robot timed trajectory and uncommitted expected effects.
       MoveHeldObjectOptions
       Place
       PlaceOptions
-      Press
-      PressOptions
       PressButton
       PressButtonOptions
       PullPushArticulatedPart
@@ -52,7 +50,6 @@ full-robot timed trajectory and uncommitted expected effects.
       HeldObjectPoseGoal
       PlaceGoal
       AssembleGoal
-      PressGoal
       PressButtonGoal
       PullPushArticulatedPartGoal
       TurnKnobGoal
@@ -97,14 +94,6 @@ Place
 -----
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.place
-   :members:
-   :show-inheritance:
-   :exclude-members: __init__, copy, replace, to_dict
-
-Press
------
-
-.. automodule:: embodichain.lab.sim.atomic_actions.primitives.press
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict

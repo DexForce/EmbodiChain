@@ -31,7 +31,7 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.common import BatchEntity
-    from embodichain.lab.sim.objects import Articulation
+    from embodichain.lab.sim.objects import Articulation, RigidObject
 
 
 @dataclass
@@ -279,31 +279,47 @@ class AntipodalAffordance(Affordance):
 
 @dataclass
 class TurnAffordance(Affordance):
-    """Geometry and rotation semantics for one articulation link knob."""
+    """Geometry and rotation semantics for an articulation link or rigid knob."""
 
     articulation: Articulation | None = None
-    """Articulation whose link supplies the knob mesh and live pose."""
+    """Optional articulation whose link supplies the knob mesh and live pose."""
 
-    link_name: str = ""
-    """Articulation link passed to ``get_link_vert_face``/``get_link_pose``."""
+    rigid_object: RigidObject | None = None
+    """Optional rigid object that supplies the knob mesh and live pose."""
+
+    link_name: str | None = None
+    """Link used when :attr:`articulation` is configured."""
 
     turn_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
     )
-    """Knob rotation axis expressed in the articulation-link frame."""
+    """Knob rotation axis expressed in the target object's local frame."""
 
     mesh_vertices: torch.Tensor = field(init=False, repr=False)
-    """Link-local mesh vertices returned by ``get_link_vert_face``."""
+    """Target-local mesh vertices used to compute the grasp position."""
 
     mesh_triangles: torch.Tensor = field(init=False, repr=False)
-    """Link-local mesh triangles returned by ``get_link_vert_face``."""
+    """Target-local mesh triangles supplied by the configured object."""
 
     def __post_init__(self) -> None:
         articulation = self.articulation
-        if articulation is None:
-            raise ValueError("TurnAffordance.articulation must be provided.")
-        if not isinstance(self.link_name, str) or not self.link_name.strip():
-            raise ValueError("TurnAffordance.link_name must be a non-empty string.")
+        rigid_object = self.rigid_object
+        if (articulation is None) == (rigid_object is None):
+            raise ValueError(
+                "TurnAffordance requires exactly one of articulation or "
+                "rigid_object."
+            )
+        if articulation is not None and (
+            not isinstance(self.link_name, str) or not self.link_name.strip()
+        ):
+            raise ValueError(
+                "TurnAffordance.link_name must be a non-empty string for an "
+                "articulation."
+            )
+        if rigid_object is not None and self.link_name is not None:
+            raise ValueError(
+                "TurnAffordance.link_name is only valid with an articulation."
+            )
         if (
             not isinstance(self.turn_axis, torch.Tensor)
             or self.turn_axis.shape != (3,)
@@ -313,20 +329,27 @@ class TurnAffordance(Affordance):
         if torch.linalg.vector_norm(self.turn_axis) <= 1.0e-6:
             raise ValueError("TurnAffordance.turn_axis must be non-zero.")
         self.turn_axis = self.turn_axis.clone()
-        vertices, triangles = articulation.get_link_vert_face(self.link_name)
+        if articulation is not None:
+            vertices, triangles = articulation.get_link_vert_face(self.link_name)
+        else:
+            vertices = rigid_object.get_vertices(env_ids=[0], scale=True)[0]
+            triangles = rigid_object.get_triangles(env_ids=[0])[0]
         self.mesh_vertices = torch.as_tensor(vertices)
         self.mesh_triangles = torch.as_tensor(triangles)
         if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
             raise ValueError("TurnAffordance mesh vertices must have shape (N, 3).")
         if self.mesh_vertices.shape[0] == 0:
-            raise ValueError("TurnAffordance requires a non-empty link mesh.")
+            raise ValueError("TurnAffordance requires a non-empty target mesh.")
 
     def get_link_pose(self) -> torch.Tensor:
-        """Return the current batched world pose of the configured link."""
+        """Return the current batched world pose of the configured target."""
         articulation = self.articulation
-        if articulation is None:
-            raise RuntimeError("TurnAffordance has no articulation.")
-        return articulation.get_link_pose(self.link_name, to_matrix=True)
+        if articulation is not None:
+            return articulation.get_link_pose(self.link_name, to_matrix=True)
+        rigid_object = self.rigid_object
+        if rigid_object is None:
+            raise RuntimeError("TurnAffordance has no target object.")
+        return rigid_object.get_local_pose(to_matrix=True)
 
     def get_grasp_pose(self, link_pose: torch.Tensor | None = None) -> torch.Tensor:
         """Construct the deterministic grasp pose at the link mesh center.
@@ -342,7 +365,7 @@ class TurnAffordance(Affordance):
         """
         link_pose = self.get_link_pose() if link_pose is None else link_pose
         if link_pose.dim() != 3 or link_pose.shape[1:] != (4, 4):
-            raise ValueError("Articulation link pose must have shape (B, 4, 4).")
+            raise ValueError("Target pose must have shape (B, 4, 4).")
         link_pose = link_pose.to(dtype=torch.float32)
         device = link_pose.device
         center = self.mesh_vertices.to(device=device, dtype=torch.float32).mean(dim=0)
@@ -407,32 +430,49 @@ class PullPushAffordance(AntipodalAffordance):
 
 @dataclass
 class PressButtonAffordance(Affordance):
-    """Geometry and pressing semantics for one articulation-link button."""
+    """Geometry and pressing semantics for an articulation or rigid button."""
 
     articulation: Articulation | None = None
-    """Articulation whose link supplies the button mesh and live pose."""
+    """Optional articulation whose link supplies the button mesh and live pose."""
 
-    link_name: str = ""
-    """Articulation link passed to ``get_link_vert_face``/``get_link_pose``."""
+    rigid_object: RigidObject | None = None
+    """Optional rigid object that supplies the button mesh and live pose."""
+
+    link_name: str | None = None
+    """Link used when :attr:`articulation` is configured."""
 
     press_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 0.0, 1.0])
     )
-    """Press direction expressed in the articulation-link frame."""
+    """Press direction expressed in the target object's local frame."""
+
+    press_position: tuple[float, float, float] | None = None
+    """Optional exact local-frame press position; vertex center if omitted."""
 
     mesh_vertices: torch.Tensor = field(init=False, repr=False)
-    """Link-local mesh vertices returned by ``get_link_vert_face``."""
+    """Target-local mesh vertices used to compute the press position."""
 
     mesh_triangles: torch.Tensor = field(init=False, repr=False)
-    """Link-local mesh triangles returned by ``get_link_vert_face``."""
+    """Target-local mesh triangles supplied by the configured object."""
 
     def __post_init__(self) -> None:
         articulation = self.articulation
-        if articulation is None:
-            raise ValueError("PressButtonAffordance.articulation must be provided.")
-        if not isinstance(self.link_name, str) or not self.link_name.strip():
+        rigid_object = self.rigid_object
+        if (articulation is None) == (rigid_object is None):
             raise ValueError(
-                "PressButtonAffordance.link_name must be a non-empty string."
+                "PressButtonAffordance requires exactly one of articulation or "
+                "rigid_object."
+            )
+        if articulation is not None and (
+            not isinstance(self.link_name, str) or not self.link_name.strip()
+        ):
+            raise ValueError(
+                "PressButtonAffordance.link_name must be a non-empty string for "
+                "an articulation."
+            )
+        if rigid_object is not None and self.link_name is not None:
+            raise ValueError(
+                "PressButtonAffordance.link_name is only valid with an articulation."
             )
         if (
             not isinstance(self.press_axis, torch.Tensor)
@@ -445,7 +485,15 @@ class PressButtonAffordance(Affordance):
         if torch.linalg.vector_norm(self.press_axis) <= 1.0e-6:
             raise ValueError("PressButtonAffordance.press_axis must be non-zero.")
         self.press_axis = self.press_axis.clone()
-        vertices, triangles = articulation.get_link_vert_face(self.link_name)
+        self.press_position = self._validate_press_position(
+            self.press_position,
+            field_name="PressButtonAffordance.press_position",
+        )
+        if articulation is not None:
+            vertices, triangles = articulation.get_link_vert_face(self.link_name)
+        else:
+            vertices = rigid_object.get_vertices(env_ids=[0], scale=True)[0]
+            triangles = rigid_object.get_triangles(env_ids=[0])[0]
         self.mesh_vertices = torch.as_tensor(vertices)
         self.mesh_triangles = torch.as_tensor(triangles)
         if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
@@ -453,26 +501,35 @@ class PressButtonAffordance(Affordance):
                 "PressButtonAffordance mesh vertices must have shape (N, 3)."
             )
         if self.mesh_vertices.shape[0] == 0:
-            raise ValueError("PressButtonAffordance requires a non-empty link mesh.")
+            raise ValueError("PressButtonAffordance requires a non-empty target mesh.")
 
     def get_link_pose(self) -> torch.Tensor:
-        """Return the current batched world pose of the configured link."""
+        """Return the current batched world pose of the configured target."""
         articulation = self.articulation
-        if articulation is None:
-            raise RuntimeError("PressButtonAffordance has no articulation.")
-        return articulation.get_link_pose(self.link_name, to_matrix=True)
+        if articulation is not None:
+            return articulation.get_link_pose(self.link_name, to_matrix=True)
+        rigid_object = self.rigid_object
+        if rigid_object is None:
+            raise RuntimeError("PressButtonAffordance has no target object.")
+        return rigid_object.get_local_pose(to_matrix=True)
 
-    def get_press_pose(self, link_pose: torch.Tensor | None = None) -> torch.Tensor:
-        """Construct a press pose at the button surface opposite the press axis.
+    def get_press_pose(
+        self,
+        link_pose: torch.Tensor | None = None,
+        press_position: tuple[float, float, float] | None = None,
+    ) -> torch.Tensor:
+        """Construct a press pose at the configured or default button center.
 
         The end-effector z-axis follows :attr:`press_axis` in world space. The
-        position is the center of the mesh's upstream face, so advancing along
-        the z-axis moves into the button instead of first targeting its volume
-        center.
+        position uses a configured target-local point or the mean of all mesh
+        vertices when no point is configured.
 
         Args:
             link_pose: Optional current world pose of the button link with
                 shape ``(B, 4, 4)``.
+            press_position: Optional per-call exact local-frame press position.
+                It overrides :attr:`press_position`. When both are ``None``,
+                the mesh vertex center is used.
 
         Returns:
             Batched world-frame press poses with shape ``(B, 4, 4)``.
@@ -482,17 +539,26 @@ class PressButtonAffordance(Affordance):
         """
         link_pose = self.get_link_pose() if link_pose is None else link_pose
         if link_pose.dim() != 3 or link_pose.shape[1:] != (4, 4):
-            raise ValueError("Articulation link pose must have shape (B, 4, 4).")
+            raise ValueError("Target pose must have shape (B, 4, 4).")
         link_pose = link_pose.to(dtype=torch.float32)
         device = link_pose.device
         vertices = self.mesh_vertices.to(device=device, dtype=torch.float32)
-        center = vertices.mean(dim=0)
         press_axis = self.press_axis.to(device=device, dtype=torch.float32)
         press_axis = press_axis / torch.linalg.vector_norm(press_axis)
-
-        center_projection = torch.dot(center, press_axis)
-        surface_projection = torch.min(torch.matmul(vertices, press_axis))
-        surface_center = center + press_axis * (surface_projection - center_projection)
+        configured_position = self._validate_press_position(
+            press_position,
+            field_name="press_position",
+        )
+        if configured_position is None:
+            configured_position = self.press_position
+        if configured_position is None:
+            local_press_position = vertices.mean(dim=0)
+        else:
+            local_press_position = torch.tensor(
+                configured_position,
+                dtype=torch.float32,
+                device=device,
+            )
 
         z_axis = torch.matmul(link_pose[:, :3, :3], press_axis)
         z_axis = torch.nn.functional.normalize(z_axis, dim=1)
@@ -514,9 +580,24 @@ class PressButtonAffordance(Affordance):
         press_pose[:, :3, 1] = y_axis
         press_pose[:, :3, 2] = z_axis
         press_pose[:, :3, 3] = (
-            torch.matmul(link_pose[:, :3, :3], surface_center) + link_pose[:, :3, 3]
+            torch.matmul(link_pose[:, :3, :3], local_press_position)
+            + link_pose[:, :3, 3]
         )
         return press_pose
+
+    @staticmethod
+    def _validate_press_position(
+        value: tuple[float, float, float] | None,
+        *,
+        field_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Validate and normalize an optional local-frame press position."""
+        if value is None:
+            return None
+        position = torch.as_tensor(value, dtype=torch.float32)
+        if position.shape != (3,) or not torch.isfinite(position).all():
+            raise ValueError(f"{field_name} must be a finite (x, y, z) tuple.")
+        return tuple(float(component) for component in position)
 
 
 @dataclass

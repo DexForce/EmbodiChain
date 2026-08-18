@@ -63,13 +63,10 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceGoal,
     PlaceOptions,
     PlanningContext,
-    Press,
     PressButton,
     PressButtonAffordance,
     PressButtonGoal,
     PressButtonOptions,
-    PressGoal,
-    PressOptions,
     PullPushAffordance,
     PullPushArticulatedPart,
     PullPushArticulatedPartGoal,
@@ -89,7 +86,7 @@ from embodichain.lab.sim.planners import (
     PlanOptions,
     PlanResult,
 )
-from embodichain.lab.sim.objects import Articulation
+from embodichain.lab.sim.objects import Articulation, RigidObject
 
 NUM_ENVS = 2
 ARM_DOF = 6
@@ -422,7 +419,6 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert PickUp.GoalType is GraspGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
-    assert Press.GoalType is PressGoal
     assert PressButton.GoalType is PressButtonGoal
     assert PullPushArticulatedPart.GoalType is PullPushArticulatedPartGoal
     assert TurnKnob.GoalType is TurnKnobGoal
@@ -437,7 +433,6 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
         PickUpOptions(),
         MoveHeldObjectOptions(),
         PlaceOptions(),
-        PressOptions(),
         PressButtonOptions(),
         PullPushArticulatedPartOptions(),
         TurnKnobOptions(),
@@ -586,21 +581,6 @@ def test_move_held_object_requires_projected_attachment() -> None:
     )
     plan = _plan_action(action, invocation, _context(task))
     assert plan.plan_success.all()
-    assert plan.expected_effects.is_empty
-
-
-def test_press_uses_invocation_sample_budget() -> None:
-    generator = _motion_generator()
-    action = _bind_action(generator, Press())
-
-    plan = _plan_action(
-        action,
-        _invocation("press", PressGoal(torch.eye(4)), sample_count=12),
-        _context(),
-    )
-
-    assert plan.plan_success.tolist() == [True, True]
-    assert plan.trajectory.waypoint_count == 12
     assert plan.expected_effects.is_empty
 
 
@@ -917,33 +897,6 @@ def test_pick_uses_binding_control_part_as_effect_resource() -> None:
     assert projected.get_held_object("arm") is None
 
 
-def test_press_closes_hand_without_changing_projected_attachment() -> None:
-    held = _held()
-    task = TaskState(
-        batch_size=NUM_ENVS,
-        device="cpu",
-        held_objects={"arm": held},
-    )
-    generator = _motion_generator()
-    action = _bind_action(
-        generator,
-        Press(default_options=PressOptions(hand_interp_steps=4)),
-    )
-
-    plan = _plan_action(
-        action,
-        _invocation("press", PressGoal(torch.eye(4)), sample_count=12),
-        _context(task),
-    )
-    projected = plan.expected_effects.apply(task, plan.plan_success)
-
-    assert torch.all(plan.trajectory.positions[:, -1, ARM_DOF:] == 1.0)
-    projected_held = projected.get_held_object("arm")
-    assert projected_held is not None
-    assert projected_held.semantics is held.semantics
-    assert torch.equal(projected_held.object_to_eef, held.object_to_eef)
-
-
 def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
     articulation = Mock(spec=Articulation)
     articulation.get_link_vert_face.return_value = (
@@ -1001,6 +954,37 @@ def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
         - grasp_pose[:, :3, 2] * TurnKnobOptions().pre_grasp_distance
     )
     assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
+
+
+def test_turn_knob_plans_from_rigid_object() -> None:
+    rigid_object = Mock(spec=RigidObject)
+    rigid_object.get_vertices.return_value = torch.zeros(1, 8, 3)
+    rigid_object.get_triangles.return_value = torch.zeros(1, 4, 3, dtype=torch.long)
+    rigid_object.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    semantics = ObjectSemantics(
+        affordance=TurnAffordance(
+            rigid_object=rigid_object,
+            turn_axis=torch.tensor([0.0, 1.0, 0.0]),
+        ),
+        geometry={},
+        label="rigid-knob",
+        entity=rigid_object,
+    )
+
+    plan = _plan_action(
+        _bind_action(_motion_generator(), TurnKnob()),
+        ActionInvocation(
+            skill_id="turn_knob",
+            goal=TurnKnobGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=TurnKnobOptions(hand_interp_steps=3),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    rigid_object.get_local_pose.assert_called_with(to_matrix=True)
 
 
 @pytest.mark.parametrize(
@@ -1257,6 +1241,48 @@ def test_press_button_plans_close_approach_press_and_retract() -> None:
     assert torch.allclose(planned_targets[2][:, :3, 3], expected_approach)
 
 
+def test_press_button_plans_from_rigid_object_with_option_position() -> None:
+    rigid_object = Mock(spec=RigidObject)
+    rigid_object.get_vertices.return_value = torch.zeros(1, 8, 3)
+    rigid_object.get_triangles.return_value = torch.zeros(1, 4, 3, dtype=torch.long)
+    rigid_object.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    affordance = PressButtonAffordance(
+        rigid_object=rigid_object,
+        press_axis=torch.tensor([1.0, 0.0, 0.0]),
+        press_position=(0.5, 0.5, 0.5),
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="rigid-button",
+        entity=rigid_object,
+    )
+    generator = _motion_generator()
+
+    plan = _plan_action(
+        _bind_action(generator, PressButton()),
+        ActionInvocation(
+            skill_id="press_button",
+            goal=PressButtonGoal(semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=PressButtonOptions(
+                hand_interp_steps=3,
+                press_position=(0.1, 0.2, 0.3),
+            ),
+        ),
+        _context(),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    planned_approach = generator.robot.compute_ik.call_args_list[0].kwargs["pose"]
+    assert torch.allclose(
+        planned_approach[:, :3, 3],
+        torch.tensor([0.0, 0.2, 0.3]).expand(NUM_ENVS, -1),
+    )
+    rigid_object.get_local_pose.assert_called_with(to_matrix=True)
+
+
 def test_press_button_preserves_failed_environment_at_observed_qpos() -> None:
     articulation = Mock(spec=Articulation)
     articulation.get_link_vert_face.return_value = (
@@ -1354,6 +1380,17 @@ def test_press_button_requires_primary_arm_and_end_effector_bindings() -> None:
 
 def test_press_axis_belongs_to_button_affordance_not_action_options() -> None:
     assert "press_axis" not in PressButtonOptions.__dataclass_fields__
+
+
+@pytest.mark.parametrize(
+    "press_position",
+    ((0.0, 1.0), (0.0, 1.0, float("nan"))),
+)
+def test_press_button_options_reject_invalid_press_position(
+    press_position: tuple[float, ...],
+) -> None:
+    with pytest.raises(ValueError, match="press_position"):
+        PressButtonOptions(press_position=press_position)  # type: ignore[arg-type]
 
 
 def test_turn_knob_rejects_non_turn_affordance() -> None:

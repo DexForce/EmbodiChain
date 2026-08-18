@@ -68,7 +68,6 @@ embodichain.lab.sim.atomic_actions
       HeldObjectPoseGoal
       PlaceGoal
       AssembleGoal
-      PressGoal
       PressButtonGoal
       PressButtonOptions
       PressButtonAffordance
@@ -82,7 +81,6 @@ embodichain.lab.sim.atomic_actions
       PickUp
       MoveHeldObject
       Place
-      Press
       PressButton
       PullPushArticulatedPart
       CoordinatedPickment

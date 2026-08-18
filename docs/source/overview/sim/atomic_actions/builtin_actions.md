@@ -95,15 +95,6 @@ The animations below are the focused simulator demos under
 <img src="../../../_static/atomic_actions/assemble.gif" alt="Assembly demo" width="480" style="max-width: 100%;" />
 :::
 
-:::{grid-item-card} `Press`
-:link: builtin-press
-:link-type: ref
-
-`press` · close, contact, and return
-
-<img src="../../../_static/atomic_actions/press.gif" alt="Press demo" width="480" style="max-width: 100%;" />
-:::
-
 :::{grid-item-card} `PressButton`
 :link: builtin-press-button
 :link-type: ref
@@ -149,7 +140,6 @@ The animations below are the focused simulator demos under
 | `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
-| `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
 | `press_button` | `PressButtonGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressButtonAffordance` | none |
 | `pull_push_articulated_part` | `PullPushArticulatedPartGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `PullPushAffordance` | none |
 | `turn_knob` | `TurnKnobGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TurnAffordance` | none |
@@ -208,7 +198,6 @@ entity as a recovery dependency.
 | `MoveEndEffector.xpos` | yes | yes |
 | `MoveHeldObject.object_target_pose` | yes | yes |
 | `Place.xpos` | yes | yes |
-| `Press.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
 | `PickUp.grasp_xpos` | yes | yes |
@@ -431,56 +420,34 @@ required before the newer pose is resolved.
 
 **Example:** `scripts/tutorials/atomic_action/assemble.py`
 
-(builtin-press)=
-
-## `Press`
-
-Plans **close hand -> move to contact pose -> return to the observed starting
-arm qpos**. It is intended for button-like or contact interactions where the
-arm should retreat along its planned path after reaching the target.
-
-| Contract | Value |
-|---|---|
-| Skill ID | `press` |
-| Goal | `PressGoal(xpos=...)` |
-| Binding | manipulator + end effector role `primary` |
-| Motion | close, press, joint-space return |
-| Effect | none; existing attachment state is unchanged |
-| Dynamic target | explicit pose or `SceneEntityPose` |
-
-The bound end-effector profile must provide `grasp`, while
-`PressOptions.hand_interp_steps` controls the close interpolation. The arm and
-hand control parts come from `ActionBinding`. Contact detection is not itself a
-symbolic effect in the current action; applications that require force/contact
-confirmation should verify it externally.
-
-**Example:** `scripts/tutorials/atomic_action/press.py`
-
 (builtin-press-button)=
 
 ## `PressButton`
 
 Plans **close hand -> approach button -> press along axis -> return to the
-approach pose** for one articulation link. The goal requires a
-`PressButtonAffordance` constructed with an `Articulation`, `link_name`, and
-link-frame `press_axis`. The affordance obtains the link-local mesh and live
-link pose from the articulation.
+approach pose** for an articulation link or a rigid object. Configure
+`PressButtonAffordance` with either `articulation + link_name` or
+`rigid_object`, plus a target-local `press_axis`. The affordance obtains mesh
+geometry and the live target pose from the selected source.
 
-The contact position is centered on the mesh face opposite the press direction.
-The end-effector z-axis follows the world-transformed press axis, so the
-approach pose lies on negative z and the pressed pose lies on positive z.
+By default, the contact position is the mean of the target's mesh vertices. The
+end-effector z-axis follows the world-transformed press axis, so the approach
+pose lies on negative z and the pressed pose lies on positive z.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `press_button` |
 | Goal | `PressButtonGoal(semantics=...)` |
 | Binding | manipulator + end effector role `primary` |
-| Motion | close, approach, press along the link-frame axis, retract to approach |
+| Motion | close, approach, press along the target-local axis, retract to approach |
 | Effect | none |
 
-`PressButtonOptions` controls hand-close interpolation, approach distance, and
-press distance. The bound end-effector profile must provide `grasp`; the action
-keeps the gripper closed for all arm-motion segments.
+`PressButtonOptions` controls hand-close interpolation, approach distance,
+press distance, and an optional target-local `press_position`. An options-level
+position overrides `PressButtonAffordance.press_position`; if both are `None`,
+the action uses the mesh vertex center. The bound
+end-effector profile must provide `grasp`; the action keeps the gripper closed
+for all arm-motion segments.
 
 **Example:** `scripts/tutorials/atomic_action/press_button.py`
 
@@ -523,13 +490,13 @@ post-pull link pose.
 
 ## `TurnKnob`
 
-Plans **approach -> reach -> close -> turn -> open -> retract** for one
-articulation link. The goal requires a `TurnAffordance` constructed with an
-`Articulation`, `link_name`, and link-frame `turn_axis`. The affordance obtains
-link-local geometry through `get_link_vert_face()` and the current world pose
-through `get_link_pose()`.
+Plans **approach -> reach -> close -> turn -> open -> retract** for an
+articulation link or a rigid object. Configure `TurnAffordance` with either
+`articulation + link_name` or `rigid_object`, plus a target-local `turn_axis`.
+The affordance reads link geometry/pose for articulations and object
+geometry/pose for rigid objects.
 
-The grasp position is the world-space transform of the link mesh's mean vertex
+The grasp position is the world-space transform of the target mesh's mean vertex
 position. Its rotation z-axis follows the world-transformed turn axis, its
 y-axis is fixed to world `(0, 0, 1)`, and its x-axis completes the right-handed
 frame. No antipodal grasp sampling is performed.
@@ -539,12 +506,12 @@ frame. No antipodal grasp sampling is performed.
 | Skill ID | `turn_knob` |
 | Goal | `TurnKnobGoal(semantics=...)` |
 | Binding | manipulator + end effector role `primary` |
-| Motion | approach, reach, close, rotate about the link-frame axis, open, retract |
+| Motion | approach, reach, close, rotate about the target-local axis, open, retract |
 | Effect | none |
 
 `TurnKnobOptions` controls the pre-grasp distance, close/open interpolation,
 Cartesian turn keyframes, and turn angle. The pre-grasp pose is offset along
-the grasp pose's negative z-axis; the link-frame turn axis belongs to
+the grasp pose's negative z-axis; the target-local turn axis belongs to
 `TurnAffordance`.
 
 **Example:** `scripts/tutorials/atomic_action/turn_knob.py`

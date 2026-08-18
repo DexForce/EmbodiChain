@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate PressButton on a microwave start button."""
+"""Demonstrate PressButton on an articulation link or rigid button."""
 
 from __future__ import annotations
 
@@ -40,15 +40,19 @@ from embodichain.lab.sim.atomic_actions import (
     PressButtonGoal,
     PressButtonOptions,
 )
-from embodichain.lab.sim.cfg import ArticulationCfg, JointDrivePropertiesCfg
-from embodichain.lab.sim.objects import Articulation
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    JointDrivePropertiesCfg,
+    RigidObjectCfg,
+)
+from embodichain.lab.sim.objects import Articulation, RigidObject
+from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
-    draw_axis_marker,
     get_hand_open_close_qpos,
     prepare_tutorial_scene,
     replay_trajectory,
@@ -62,15 +66,30 @@ MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
 PRESS_SAMPLE_INTERVAL = 140
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+RIGID_BUTTON_POSITION = (-0.7, -0.00, 0.70)
+RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
 
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the PressButton tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate PressButton on a microwave start button.",
+        "Demonstrate PressButton on an articulation-link or rigid button.",
         features=("visualize_axes",),
     )
     parser.add_argument("--press_distance", type=float, default=0.03)
+    parser.add_argument(
+        "--press_position",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("X", "Y", "Z"),
+        help="Optional target-local press position overriding the affordance.",
+    )
+    parser.add_argument(
+        "--rigid_object",
+        action="store_true",
+        help="Use a standalone rigid button instead of the microwave link.",
+    )
     return parser.parse_args()
 
 
@@ -93,33 +112,58 @@ def create_microwave(sim) -> Articulation:
     return microwave
 
 
-def create_button_semantics(microwave: Articulation) -> ObjectSemantics:
-    """Create press semantics for the microwave start button."""
-    return ObjectSemantics(
-        label="microwave_start_button",
-        geometry={},
-        entity=microwave,
-        affordance=PressButtonAffordance(
-            articulation=microwave,
+def create_rigid_button(sim) -> RigidObject:
+    """Create the standalone static rigid button used by the optional demo."""
+    button = sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="rigid_button",
+            shape=CubeCfg(size=list(RIGID_BUTTON_SIZE)),
+            body_type="static",
+            init_pos=RIGID_BUTTON_POSITION,
+        )
+    )
+    sim.update(step=10)
+    return button
+
+
+def create_button_semantics(
+    target: Articulation | RigidObject,
+) -> ObjectSemantics:
+    """Create press semantics for an articulation-link or rigid button."""
+    if isinstance(target, Articulation):
+        affordance = PressButtonAffordance(
+            articulation=target,
             link_name=BUTTON_LINK_NAME,
             # button_cap's local -z direction matches the prismatic joint's
             # inward press direction in this asset.
-            press_axis=torch.tensor([0.0, 0.0, -1.0], device=microwave.device),
-        ),
+            press_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
+        )
+        label = "microwave_start_button"
+    else:
+        affordance = PressButtonAffordance(
+            rigid_object=target,
+            press_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
+        )
+        label = "rigid_button"
+    return ObjectSemantics(
+        label=label,
+        geometry={},
+        entity=target,
+        affordance=affordance,
     )
 
 
 def main() -> None:
-    """Plan and replay the microwave start-button PressButton trajectory."""
+    """Plan and replay PressButton for the selected target object type."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
-    microwave = create_microwave(sim)
+    target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
     motion_gen = create_toppra_motion_generator(robot)
-    semantics = create_button_semantics(microwave)
+    semantics = create_button_semantics(target)
     affordance = semantics.affordance
     assert isinstance(affordance, PressButtonAffordance)
 
@@ -135,7 +179,7 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Inspect the microwave, then press Enter to plan PressButton...",
+        "Inspect the button target, then press Enter to plan PressButton...",
     )
 
     compiled = engine.compile(
@@ -152,6 +196,11 @@ def main() -> None:
                     hand_interp_steps=HAND_INTERP_STEPS,
                     approach_distance=0.12,
                     press_distance=args.press_distance,
+                    press_position=(
+                        None
+                        if args.press_position is None
+                        else tuple(args.press_position)
+                    ),
                 ),
             ),
         )
@@ -167,7 +216,11 @@ def main() -> None:
         robot,
         compiled.trajectory,
         args,
-        video_prefix="press_microwave_button_auto_play",
+        video_prefix=(
+            "press_rigid_button_auto_play"
+            if args.rigid_object
+            else "press_microwave_button_auto_play"
+        ),
         hold_steps=POST_TRAJECTORY_STEPS,
     )
     if wait_for_user:

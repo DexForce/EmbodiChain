@@ -213,6 +213,26 @@ class TestTurnAffordance:
         with pytest.raises(ValueError, match="parallel"):
             affordance.get_grasp_pose()
 
+    def test_reads_geometry_and_pose_from_rigid_object(self):
+        vertices = torch.tensor([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        triangles = torch.tensor([[0, 1, 2]])
+        object_pose = torch.eye(4).repeat(2, 1, 1)
+        rigid_object = Mock()
+        rigid_object.get_vertices.return_value = vertices.unsqueeze(0)
+        rigid_object.get_triangles.return_value = triangles.unsqueeze(0)
+        rigid_object.get_local_pose.return_value = object_pose
+
+        affordance = TurnAffordance(
+            rigid_object=rigid_object,
+            turn_axis=torch.tensor([1.0, 0.0, 0.0]),
+        )
+
+        assert torch.equal(affordance.mesh_vertices, vertices)
+        assert affordance.get_link_pose() is object_pose
+        rigid_object.get_vertices.assert_called_once_with(env_ids=[0], scale=True)
+        rigid_object.get_triangles.assert_called_once_with(env_ids=[0])
+        rigid_object.get_local_pose.assert_called_once_with(to_matrix=True)
+
 
 class TestPullPushAffordance:
     def test_uses_articulation_antipodal_sampling_with_batched_directions(self):
@@ -298,7 +318,7 @@ class TestPullPushAffordance:
 
 
 class TestPressButtonAffordance:
-    def test_builds_press_pose_on_upstream_mesh_surface(self):
+    def test_builds_press_pose_at_mesh_vertex_center(self):
         vertices = torch.tensor(
             [
                 [-2.0, -1.0, -1.0],
@@ -321,8 +341,8 @@ class TestPressButtonAffordance:
 
         press_pose = affordance.get_press_pose()
 
-        expected_surface = link_pose[:, :3, 3] + torch.tensor([-2.0, 0.0, 0.0])
-        assert torch.allclose(press_pose[:, :3, 3], expected_surface)
+        expected_center = link_pose[:, :3, 3] + vertices.mean(dim=0)
+        assert torch.allclose(press_pose[:, :3, 3], expected_center)
         assert torch.allclose(
             press_pose[:, :3, 2],
             torch.tensor([1.0, 0.0, 0.0]).expand(2, -1),
@@ -343,6 +363,54 @@ class TestPressButtonAffordance:
                 link_name="button",
                 press_axis=torch.zeros(3),
             )
+
+    def test_uses_rigid_object_and_configured_press_position(self):
+        vertices = torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]])
+        triangles = torch.tensor([[0, 1, 2]])
+        object_pose = torch.eye(4).repeat(2, 1, 1)
+        object_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        rigid_object = Mock()
+        rigid_object.get_vertices.return_value = vertices.unsqueeze(0)
+        rigid_object.get_triangles.return_value = triangles.unsqueeze(0)
+        rigid_object.get_local_pose.return_value = object_pose
+        affordance = PressButtonAffordance(
+            rigid_object=rigid_object,
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.25, -0.5, 0.75),
+        )
+
+        press_pose = affordance.get_press_pose()
+
+        assert torch.allclose(
+            press_pose[:, :3, 3],
+            object_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+        rigid_object.get_vertices.assert_called_once_with(env_ids=[0], scale=True)
+        rigid_object.get_triangles.assert_called_once_with(env_ids=[0])
+        rigid_object.get_local_pose.assert_called_once_with(to_matrix=True)
+
+    def test_per_call_press_position_overrides_affordance_position(self):
+        articulation = Mock()
+        articulation.get_link_vert_face.return_value = (
+            torch.ones(3, 3),
+            torch.tensor([[0, 1, 2]]),
+        )
+        affordance = PressButtonAffordance(
+            articulation=articulation,
+            link_name="button",
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(1.0, 1.0, 1.0),
+        )
+
+        press_pose = affordance.get_press_pose(
+            torch.eye(4).unsqueeze(0),
+            press_position=(0.1, 0.2, 0.3),
+        )
+
+        assert torch.allclose(
+            press_pose[0, :3, 3],
+            torch.tensor([0.1, 0.2, 0.3]),
+        )
 
 
 class TestInteractionPoints:

@@ -96,7 +96,8 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``move_held_object.py``
 * ``place.py``
 * ``assemble.py``
-* ``press.py``
+* ``press_button.py``
+* ``turn_knob.py``
 * ``coordinated_pickment.py``
 * ``coordinated_placement.py``
 * ``hand_over.py``

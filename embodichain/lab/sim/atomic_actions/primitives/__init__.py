@@ -43,7 +43,6 @@ from .move_held_object import (
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
-from .press import Press, PressGoal, PressOptions
 from .press_button import PressButton, PressButtonGoal, PressButtonOptions
 from .pull_push_articulated_part import (
     PullPushArticulatedPart,
@@ -58,7 +57,6 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     PickUp,
     MoveHeldObject,
     Place,
-    Press,
     PressButton,
     PullPushArticulatedPart,
     TurnKnob,
@@ -94,12 +92,9 @@ __all__ = [
     "Place",
     "PlaceGoal",
     "PlaceOptions",
-    "Press",
     "PressButton",
     "PressButtonGoal",
     "PressButtonOptions",
-    "PressGoal",
-    "PressOptions",
     "PullPushArticulatedPart",
     "PullPushArticulatedPartGoal",
     "PullPushArticulatedPartOptions",

@@ -48,7 +48,7 @@ from ..trajectory_ops import (
 
 @dataclass(frozen=True, slots=True, eq=False)
 class TurnKnobGoal(ObjectActionGoal):
-    """Articulation-link knob described by a turn affordance."""
+    """Articulation-link or rigid knob described by a turn affordance."""
 
     goal_kind: ClassVar[str] = "turn_knob"
 
@@ -146,7 +146,7 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         )
         if link_pose.shape != (self.n_envs, 4, 4):
             raise ValueError(
-                "Articulation link pose must have shape "
+                "Knob target pose must have shape "
                 f"({self.n_envs}, 4, 4), got {tuple(link_pose.shape)}."
             )
         grasp_xpos = affordance.get_grasp_pose(link_pose).to(
