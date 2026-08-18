@@ -187,13 +187,11 @@ the non-`torch` variants:
 ```bash
 # CUDA 12.x
 uv pip install \
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  ${PIP_EXTRA_ARGS}
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 # CUDA 13.x
 uv pip install \
-  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  ${PIP_EXTRA_ARGS}
+  "nvidia-curobo[cu13] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 ```
 
 For a fresh environment that also needs cuRobo to select and install PyTorch,
@@ -204,9 +202,7 @@ requirements work with `pip`; replace `uv pip install` with `pip install`.
 
 ```bash
 uv pip install \
-  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
-  --extra-index-url http://pyp.open3dv.site:2345/simple/ \
-  --trusted-host pyp.open3dv.site
+  "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0"
 
 python -c "import curobo; print(curobo.__version__)"
 pytest --pyargs curobo.tests
