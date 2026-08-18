@@ -174,9 +174,11 @@ def main() -> None:
     press_position[2] += 0.5 * BLOCK_SIZE[2] + PRESS_SURFACE_OFFSET
     move_position = press_position.clone()
     move_position[2] += PRESS_CLEARANCE - PRESS_SURFACE_OFFSET
-    n_envs = robot.get_qpos().shape[0]
-    move_target = broadcast_pose_batch(make_top_down_eef_pose(move_position), n_envs)
-    press_target = broadcast_pose_batch(make_top_down_eef_pose(press_position), n_envs)
+    num_envs = robot.get_qpos().shape[0]
+    move_target = broadcast_pose_batch(make_top_down_eef_pose(move_position), num_envs)
+    press_target = broadcast_pose_batch(
+        make_top_down_eef_pose(press_position), num_envs
+    )
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "press_target_axis", press_target)
     wait_for_user = prepare_tutorial_scene(

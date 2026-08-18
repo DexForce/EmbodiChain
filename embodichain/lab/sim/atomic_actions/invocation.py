@@ -27,10 +27,9 @@ from embodichain.lab.sim.common import BatchEntity
 
 from .bindings import ActionBinding, ResolvedActionBinding
 from .control import ActionControlOverrides
-from .goals import ActionGoal
 from .policies import MotionPolicy, RecoveryPolicy
 
-GoalT = TypeVar("GoalT", bound=ActionGoal)
+GoalT = TypeVar("GoalT")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -46,7 +45,7 @@ class ActionOptions:
 OptionsT = TypeVar("OptionsT", bound=ActionOptions)
 
 
-def _goal_snapshot_memo(goal: ActionGoal) -> dict[int, object]:
+def _goal_snapshot_memo(goal: object) -> dict[int, object]:
     """Return deepcopy memo entries for live goal references and runtime caches."""
     memo: dict[int, object] = {}
     visited: set[int] = set()
@@ -121,12 +120,6 @@ class ActionInvocation(Generic[GoalT, OptionsT]):
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id.strip():
             raise ValueError("skill_id must be a non-empty string.")
-        goal_kind = getattr(type(self.goal), "goal_kind", None)
-        if not isinstance(goal_kind, str) or not goal_kind:
-            raise TypeError(
-                "goal must implement the ActionGoal protocol with a non-empty "
-                "goal_kind class variable."
-            )
         if not isinstance(self.binding, ActionBinding):
             raise TypeError("binding must be an ActionBinding.")
         if not isinstance(self.motion_policy, MotionPolicy):

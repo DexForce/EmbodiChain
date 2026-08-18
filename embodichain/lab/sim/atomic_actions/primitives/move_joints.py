@@ -38,8 +38,6 @@ from ..trajectory_ops import (
 class JointPositionGoal:
     """Explicit or named joint-space goal for a bound robot resource."""
 
-    goal_kind: ClassVar[str] = "joint_position"
-
     target: torch.Tensor | str
     """Joint qpos/waypoints or a named control-part profile command."""
 
@@ -56,8 +54,8 @@ class JointPositionGoal:
         if self.target.dim() not in (1, 2, 3) or self.target.shape[-1] == 0:
             raise ValueError(
                 "Tensor target must have shape (control_dof,), "
-                "(n_envs, control_dof), "
-                "or (n_envs, n_waypoint, control_dof), "
+                "(num_envs, control_dof), "
+                "or (num_envs, n_waypoint, control_dof), "
                 f"got {tuple(self.target.shape)}."
             )
 
@@ -76,19 +74,13 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
 
-    def __init__(
-        self,
-        default_options: MoveJointsOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
     def _plan(
         self,
         request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
-        goal = self.require_goal(request)
+        goal = request.goal
         manipulator = request.binding.manipulator("primary")
         control_part = manipulator.name
         joint_ids = list(manipulator.joint_ids)
@@ -99,7 +91,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
                 request=request,
                 context=context,
             ),
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             joint_dof=joint_dof,
             control_part=control_part,
             device=self.device,
@@ -138,7 +130,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             return goal.target
         return request.binding.manipulator("primary").joint_positions(
             goal.target,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )

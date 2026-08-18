@@ -80,13 +80,13 @@ def main() -> None:
             make_top_down_eef_pose(torch.tensor([0.45, 0.10, 0.30], device=sim.device)),
         ]
     )
-    n_envs = robot.get_qpos().shape[0]
+    num_envs = robot.get_qpos().shape[0]
     if not args.no_vis_eef_axis:
         for name, pose in zip(("target", "side"), poses, strict=True):
             draw_axis_marker(
                 sim,
                 f"move_end_effector_{name}_axis",
-                broadcast_pose_batch(pose, num_envs=n_envs),
+                broadcast_pose_batch(pose, num_envs=num_envs),
             )
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the robot, then press Enter to plan MoveEndEffector..."
@@ -96,7 +96,9 @@ def main() -> None:
         (
             ActionInvocation(
                 skill_id="move_end_effector",
-                goal=EndEffectorPoseGoal(broadcast_waypoint_pose_batch(poses, n_envs)),
+                goal=EndEffectorPoseGoal(
+                    broadcast_waypoint_pose_batch(poses, num_envs)
+                ),
                 binding=ActionBinding(manipulators={"primary": "arm"}),
                 motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
             ),

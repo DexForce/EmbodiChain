@@ -39,8 +39,6 @@ from ..trajectory_ops import (
 class EndEffectorPoseGoal:
     """End-effector pose goal with optional batched intermediate waypoints."""
 
-    goal_kind: ClassVar[str] = "end_effector_pose"
-
     xpos: PoseGoalValue
     """Homogeneous pose with shape ``(4,4)``, ``(B,4,4)`` or ``(B,N,4,4)``."""
 
@@ -61,25 +59,19 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(
-        self,
-        default_options: MoveEndEffectorOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
     def _plan(
         self,
         request: ResolvedActionRequest[EndEffectorPoseGoal, MoveEndEffectorOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
-        goal = self.require_goal(request)
+        goal = request.goal
         manipulator = request.binding.manipulator("primary")
         control_part = manipulator.name
         joint_ids = list(manipulator.joint_ids)
         move_xpos = resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
         )
         start_qpos = context.robot.qpos[:, joint_ids]
