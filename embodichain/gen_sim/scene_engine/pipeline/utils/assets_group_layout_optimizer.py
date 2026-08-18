@@ -120,24 +120,20 @@ class AssetsSupportLayoutOptimizer:
         base_aabbs = np.stack([aabbs_by_id[asset_id] for asset_id in asset_ids])
         offsets = np.zeros((len(asset_ids), 2), dtype=float)
         if not self._all_contained(safe_support, base_aabbs, offsets):
-            log_warning(
-                "AABB overlap optimization requires all input AABBs to be inside "
-                "the support region."
-            )
-            raise ValueError(
-                "Overlap optimization requires AABBs already inside support; "
-                "run AssetsGroupSupportClamp first."
-            )
+            # Independently project each AABB into the rectangular optimization region.
+            offsets = self._project_aabbs_inside_rectangle(safe_support, base_aabbs)
         initial_overlaps = self._overlaps(base_aabbs, offsets)
+        projected_asset_count = int(np.count_nonzero(np.any(offsets != 0.0, axis=1)))
         log_info(
             "Support-constrained AABB overlap optimization started: "
             f"assets={len(asset_ids)}, initial_overlaps={len(initial_overlaps)}, "
+            f"initial_projections={projected_asset_count}, "
             f"boundary_margin={self.config.margin_m:.4f} m, "
             f"aabb_clearance={self.config.aabb_clearance_m:.4f} m, "
             f"max_rounds={self.config.max_rounds}."
         )
         if not initial_overlaps:  # Return directly if there are no overlaps to resolve.
-            log_info("AABB overlap optimization succeeded without movement.")
+            log_info("AABB overlap optimization succeeded without pair separation.")
             self.refined_assets_layout = self._apply_offsets_to_y_up_layouts(
                 asset_ids=asset_ids,
                 offsets=offsets,
@@ -212,6 +208,50 @@ class AssetsSupportLayoutOptimizer:
             "Asset AABB overlap cannot be resolved while keeping all assets "
             "inside the detected table support region."
         )
+
+    @staticmethod
+    def _project_aabbs_inside_rectangle(
+        support: Polygon | MultiPolygon,
+        base_aabbs: np.ndarray,
+    ) -> np.ndarray:
+        """Return minimum per-AABB offsets that place AABBs in a rectangle."""
+        if not isinstance(support, Polygon) or support.interiors:
+            raise ValueError(
+                "Initial AABB projection requires an axis-aligned rectangular "
+                "support region."
+            )
+        minimum_x, minimum_y, maximum_x, maximum_y = support.bounds
+        rectangle = Polygon(
+            [
+                (minimum_x, minimum_y),
+                (maximum_x, minimum_y),
+                (maximum_x, maximum_y),
+                (minimum_x, maximum_y),
+            ]
+        )
+        if not support.equals(rectangle):
+            raise ValueError(
+                "Initial AABB projection requires an axis-aligned rectangular "
+                "support region."
+            )
+
+        aabb_minimums, aabb_maximums = base_aabbs.min(axis=1), base_aabbs.max(axis=1)
+        half_extents = (aabb_maximums - aabb_minimums) / 2.0
+        support_minimum = np.array([minimum_x, minimum_y], dtype=float)
+        support_maximum = np.array([maximum_x, maximum_y], dtype=float)
+        valid_center_minimums = support_minimum + half_extents
+        valid_center_maximums = support_maximum - half_extents
+        if np.any(valid_center_minimums > valid_center_maximums + 1e-9):
+            raise ValueError(
+                "An asset AABB is larger than the rectangular support region."
+            )
+
+        centers = (aabb_minimums + aabb_maximums) / 2.0
+        # A center must stay inset from each boundary by its AABB half extent.
+        projected_centers = np.clip(
+            centers, valid_center_minimums, valid_center_maximums
+        )
+        return projected_centers - centers
 
     def _apply_offsets_to_y_up_layouts(
         self, *, asset_ids: list[str], offsets: np.ndarray

@@ -166,6 +166,41 @@ def test_layout_optimizer_resolves_a_simple_pair_overlap() -> None:
     assert not optimizer._overlaps(base_aabbs, refined_offsets)
 
 
+def test_layout_optimizer_projects_out_of_bounds_aabb_into_rectangle() -> None:
+    support = Polygon([(0, 0), (3, 0), (3, 3), (0, 3)])
+    layout = _layout("cup", 0.0, 1.5)
+    aabb = _aabb(-0.5, 1.0, 0.5, 2.0)
+    optimizer = AssetsSupportLayoutOptimizer(
+        support_region=support,
+        assets_aabb_2d_z_up_world_corners_by_id={"cup": aabb},
+        assets_layout=[layout],
+    )
+
+    refined = optimizer.optimize()
+
+    offset = np.array(
+        [
+            refined[0]["pos"][0] - layout["pos"][0],  # type: ignore[index]
+            layout["pos"][2] - refined[0]["pos"][2],  # type: ignore[index]
+        ]
+    )
+    assert offset[0] == pytest.approx(0.5)
+    assert optimizer._all_contained(support, np.stack([aabb]), np.stack([offset]))
+
+
+def test_layout_optimizer_rejects_aabb_larger_than_rectangle() -> None:
+    optimizer = AssetsSupportLayoutOptimizer(
+        support_region=Polygon([(0, 0), (2, 0), (2, 2), (0, 2)]),
+        assets_aabb_2d_z_up_world_corners_by_id={
+            "large": _aabb(-0.5, 0.5, 2.5, 1.5)
+        },
+        assets_layout=[_layout("large", 1.0, 1.0)],
+    )
+
+    with pytest.raises(ValueError, match="larger than the rectangular support"):
+        optimizer.optimize()
+
+
 def test_layout_optimizer_rejects_unresolvable_overlap() -> None:
     optimizer = AssetsSupportLayoutOptimizer(
         support_region=Polygon([(0, 0), (2, 0), (2, 2), (0, 2)]),
