@@ -245,7 +245,11 @@ indices. Built-ins use the binding as the only source for participating arm and
 hand names; attachment state and `StateDelta` keys use the bound manipulator.
 `TaskState.held_objects` is the sole attachment map. A multi-manipulator grasp
 stores one `HeldObjectState` per manipulator with the same `ObjectSemantics`
-instance, so coordinated outputs are directly consumable by later skills.
+instance. `TaskState.held_object_mask()` exposes active rows, while
+`exclusive_held_object_mask()` excludes rows where another manipulator holds
+the same semantic object or live entity. Single-arm transport, release, and
+handover operations only succeed on exclusive rows; coordinated placement
+likewise requires two distinct, exclusively held objects.
 
 Embodiment-specific joint commands do not belong to Action options. Register
 them once by actual control-part name:

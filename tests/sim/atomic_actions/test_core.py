@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -46,18 +47,34 @@ from embodichain.lab.sim.atomic_actions.goals import (
     collect_scene_dependencies,
     resolve_pose_goal,
 )
+from embodichain.lab.sim.common import BatchEntity
 
 
-def _semantics(label: str = "object") -> ObjectSemantics:
-    return ObjectSemantics(affordance=Affordance(), geometry={}, label=label)
+def _semantics(
+    label: str = "object",
+    *,
+    entity: BatchEntity | None = None,
+) -> ObjectSemantics:
+    return ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label=label,
+        entity=entity,
+    )
 
 
-def _held(batch_size: int = 2) -> HeldObjectState:
+def _held(
+    batch_size: int = 2,
+    *,
+    semantics: ObjectSemantics | None = None,
+    env_mask: torch.Tensor | None = None,
+) -> HeldObjectState:
     pose = torch.eye(4).repeat(batch_size, 1, 1)
     return HeldObjectState(
-        semantics=_semantics(),
+        semantics=semantics or _semantics(),
         object_to_eef=pose,
         grasp_xpos=pose,
+        env_mask=env_mask,
     )
 
 
@@ -153,6 +170,39 @@ def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
     assert left is not None and left.env_mask.tolist() == [False, True]
     assert right is not None and right.env_mask.tolist() == [True, False]
     assert state.get_held_object("right_arm") is None
+
+
+def test_task_state_reports_per_environment_exclusive_holds() -> None:
+    entity = Mock(spec=BatchEntity)
+    shared = _semantics("shared", entity=entity)
+    same_entity = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="same-entity-alias",
+        entity=entity,
+    )
+    independent = _semantics("shared")
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(semantics=shared),
+            "right_arm": _held(
+                semantics=same_entity,
+                env_mask=torch.tensor([True, False]),
+            ),
+            "third_arm": _held(
+                semantics=independent,
+                env_mask=torch.tensor([False, True]),
+            ),
+        },
+    )
+
+    assert state.held_object_mask("left_arm").tolist() == [True, True]
+    assert state.exclusive_held_object_mask("left_arm").tolist() == [False, True]
+    assert state.exclusive_held_object_mask("right_arm").tolist() == [False, False]
+    assert state.exclusive_held_object_mask("third_arm").tolist() == [False, True]
+    assert state.held_object_mask("missing").tolist() == [False, False]
 
 
 def test_robot_observation_owns_input_tensors() -> None:

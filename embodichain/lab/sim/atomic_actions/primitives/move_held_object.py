@@ -110,6 +110,13 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
                 "MoveHeldObject requires an object held by control part "
                 f"{control_part!r} - run PickUp first."
             )
+        eligible = context.task.exclusive_held_object_mask(control_part)
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is not exclusive to the control part.",
+            )
         object_target_pose = resolve_object_target(
             resolve_pose_goal(
                 target.object_target_pose,
@@ -149,7 +156,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        success = result.success
+        success = result.success & eligible
         arm_traj = result.positions
 
         full = torch.empty(

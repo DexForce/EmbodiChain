@@ -644,6 +644,9 @@ execution.
 `TaskState.held_objects` uses one `HeldObjectState` per bound manipulator.
 Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
 there is no parallel coordinated-attachment representation to synchronize.
+Consumers query per-environment active and exclusive-hold masks from that one
+map. A single-arm transport, release, or handover row fails safely while a
+second manipulator still holds the same semantic object or live entity.
 
 At the terminal waypoint, an `ExecutionSession` requests an external
 per-environment verification mask before committing a non-empty effect:

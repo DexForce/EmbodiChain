@@ -28,6 +28,16 @@ if TYPE_CHECKING:
     from .core import ObjectSemantics
 
 
+def _same_physical_object(
+    first: ObjectSemantics,
+    second: ObjectSemantics,
+) -> bool:
+    """Return whether two semantic records identify one physical object."""
+    if first is second:
+        return True
+    return first.entity is not None and first.entity is second.entity
+
+
 def _resolve_runtime_device(device: torch.device | str) -> torch.device:
     """Resolve an indexless CUDA device to the active concrete GPU index."""
     resolved = torch.device(device)
@@ -216,6 +226,53 @@ class TaskState:
     def get_held_object(self, resource: str) -> HeldObjectState | None:
         """Return the object held by ``resource``, if any."""
         return self.held_objects.get(resource)
+
+    def held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where ``resource`` holds an object.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``. Missing resources
+            produce an all-false mask.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return torch.zeros(
+                self.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        assert held.env_mask is not None
+        return held.env_mask.clone()
+
+    def exclusive_held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where only ``resource`` holds its object.
+
+        Object identity is established by the exact semantic record or by a
+        shared non-null simulation entity. Labels and structural equality are
+        deliberately ignored because distinct physical objects may look alike.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return self.held_object_mask(resource)
+
+        exclusive = self.held_object_mask(resource)
+        for other_resource, other in self.held_objects.items():
+            if other_resource == resource:
+                continue
+            if not _same_physical_object(held.semantics, other.semantics):
+                continue
+            assert other.env_mask is not None
+            exclusive &= ~other.env_mask
+        return exclusive
 
 
 @dataclass(frozen=True, slots=True, eq=False)

@@ -165,7 +165,20 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             dtype=context.robot.qpos.dtype,
         )
         state = context
+        held_mask = context.task.held_object_mask(control_part)
+        exclusive_mask = context.task.exclusive_held_object_mask(control_part)
+        eligible = (
+            exclusive_mask
+            if isinstance(target, AssembleGoal)
+            else ~held_mask | exclusive_mask
+        )
         place_xpos = self._resolve_place_xpos(target, state, control_part)
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is shared with another control part.",
+            )
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
 
@@ -221,7 +234,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         assert back_result.positions is not None
         back_success = back_result.success
         back_arm = back_result.positions
-        success = down_success & back_success
+        success = down_success & back_success & eligible
 
         hand_open_path = interpolate_hand_qpos(
             hand_grasp_qpos, hand_open_qpos, n_waypoints=n_open

@@ -209,6 +209,18 @@ class CoordinatedPlacement(
             placing_held_object,
             support_held_object,
         ) = self._resolve_target(target, state, resources, options)
+        eligible = context.task.exclusive_held_object_mask(
+            resources.placing_arm.name
+        ) & context.task.exclusive_held_object_mask(resources.support_arm.name)
+        if not eligible.any():
+            logger.log_warning(
+                "CoordinatedPlacement requires two exclusively held objects."
+            )
+            return self.failed_plan(
+                request,
+                context,
+                message="Placing and support objects must be held exclusively.",
+            )
         placing_start_qpos, support_start_qpos = self._resolve_start_qpos(
             state, resources
         )
@@ -225,11 +237,7 @@ class CoordinatedPlacement(
             ),
         )
 
-        success_mask = torch.ones(
-            self.num_envs,
-            dtype=torch.bool,
-            device=self.device,
-        )
+        success_mask = eligible.clone()
         segment_success, placing_approach_traj = plan_named_arm_trajectory(
             self.motion_generator,
             resources.placing_arm.name,

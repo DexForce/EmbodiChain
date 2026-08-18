@@ -216,9 +216,24 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 "Coordinated dual-arm planning is not supported by the cuRobo backend."
             )
         state = context
-        semantics = target.semantics
-        transfer_object_to_eef = self._resolve_transfer_object_to_eef(
+        transfer_held_object = self._resolve_transfer_held_object(
             state, resources.transfer_arm.name
+        )
+        self._validate_requested_object(
+            target.semantics, transfer_held_object.semantics
+        )
+        semantics = transfer_held_object.semantics
+        eligible = context.task.exclusive_held_object_mask(resources.transfer_arm.name)
+        if not eligible.any():
+            logger.log_warning("HandOver requires an exclusively held source object.")
+            return self.failed_plan(
+                request,
+                context,
+                message="Source object must be held exclusively.",
+            )
+        transfer_object_to_eef = self._resolve_matrix(
+            transfer_held_object.object_to_eef,
+            "held_object.object_to_eef",
         )
         assert options.middle_object_pose is not None
         assert options.final_object_pose is not None
@@ -236,7 +251,9 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             / torch.linalg.vector_norm(receive_approach_direction)
         )
         # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
-        current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
+        if semantics.entity is None:
+            raise ValueError("HandOver requires the held object to have an entity.")
+        current_object_pose = semantics.entity.get_local_pose(to_matrix=True)
         middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
         final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
@@ -256,6 +273,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             device=self.device,
             name="Receiving-grasp success",
         )
+        success_mask &= eligible
         if not success_mask.any():
             logger.log_warning("HandOver failed to resolve a receiving grasp pose.")
             return self.failed_plan(request, context, message="No receiving grasp.")
@@ -510,18 +528,34 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             name=name,
         )
 
-    def _resolve_transfer_object_to_eef(
+    def _resolve_transfer_held_object(
         self,
         state: PlanningContext,
         transfer_control_part: str,
-    ) -> torch.Tensor:
+    ) -> HeldObjectState:
         held = state.get_held_object(transfer_control_part)
         if held is None:
             raise ValueError(
                 "HandOver requires an object held by transfer control part "
                 f"{transfer_control_part!r} (run PickUp first)."
             )
-        return self._resolve_matrix(held.object_to_eef, "held_object.object_to_eef")
+        return held
+
+    @staticmethod
+    def _validate_requested_object(
+        requested: ObjectSemantics,
+        held: ObjectSemantics,
+    ) -> None:
+        """Reject a request that names a different grounded object."""
+        if (
+            requested.entity is not None
+            and held.entity is not None
+            and requested.entity is not held.entity
+        ):
+            raise ValueError(
+                "HandOver goal semantics must identify the object held by the "
+                "source control part."
+            )
 
     def _resolve_receive_grasp(
         self,
