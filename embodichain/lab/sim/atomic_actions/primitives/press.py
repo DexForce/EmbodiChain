@@ -30,14 +30,9 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
-    DisjointSlotEndpoints,
-    GRASP_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from ..state import PlanningContext
 from ..trajectory_ops import (
@@ -46,6 +41,7 @@ from ..trajectory_ops import (
     interpolate_hand_qpos,
     resolve_pose_target,
 )
+from ._binding_contracts import make_manipulation_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -81,27 +77,15 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                CARTESIAN_POSE_CAPABILITY,
-                                JOINT_POSITION_CAPABILITY,
-                            }
-                        ),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={GRASP_COMMAND: JointPositionCommand},
-                        route=ActionBindingRoute("end_effector", "primary"),
-                    ),
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        JOINT_POSITION_CAPABILITY,
+                    }
                 ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
             ),
         ),
     )
