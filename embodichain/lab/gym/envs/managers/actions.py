@@ -284,7 +284,7 @@ class EefPoseTerm(ActionTerm):
             raise ValueError(
                 f"EEF pose action must be 6D or 7D, got {scaled.shape[-1]}D"
             )
-        # Batch IK: robot.compute_ik supports (n_envs, 4, 4) pose and (n_envs, dof) seed
+        # Batch IK: robot.compute_ik supports (num_envs, 4, 4) pose and (num_envs, dof) seed
         ret, qpos_ik = self._env.robot.compute_ik(
             pose=target_pose,
             joint_seed=current_qpos,

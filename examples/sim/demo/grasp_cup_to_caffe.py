@@ -257,7 +257,7 @@ def create_trajectory(
         caffe (Robot): The caffe object.
 
     Returns:
-        torch.Tensor: Interpolated trajectory of shape [n_envs, n_waypoint, dof].
+        torch.Tensor: Interpolated trajectory of shape [num_envs, n_waypoint, dof].
     """
     right_arm_ids = robot.get_joint_ids("right_arm")
     hand_open_qpos = torch.tensor(
@@ -274,7 +274,7 @@ def create_trajectory(
     cup_position = cup.get_local_pose(to_matrix=True)[:, :3, 3]
 
     # grasp cup waypoint generation
-    rest_right_qpos = robot.get_qpos()[:, right_arm_ids]  # [n_envs, dof]
+    rest_right_qpos = robot.get_qpos()[:, right_arm_ids]  # [num_envs, dof]
     right_arm_xpos = robot.compute_fk(
         qpos=rest_right_qpos, name="right_arm", to_matrix=True
     )
@@ -324,7 +324,7 @@ def create_trajectory(
         pose=place_down_pose, joint_seed=place_up_qpos, name="right_arm"
     )
 
-    n_envs = sim.num_envs
+    num_envs = sim.num_envs
 
     # combine hand and arm trajectory
     arm_trajectory = torch.cat(
@@ -344,21 +344,21 @@ def create_trajectory(
     )
     hand_trajectory = torch.cat(
         [
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
         ],
         dim=1,
     )
     all_trajectory = torch.cat([arm_trajectory, hand_trajectory], dim=-1)
-    # trajetory with shape [n_envs, n_waypoint, dof]
+    # trajetory with shape [num_envs, n_waypoint, dof]
     interp_trajectory = interpolate_with_distance(
         trajectory=all_trajectory, interp_num=150, device=sim.device
     )
@@ -377,7 +377,7 @@ def run_simulation(
         cup (RigidObject): The cup object.
         caffe (Robot): The caffe object.
     """
-    # [n_envs, n_waypoint, dof]
+    # [num_envs, n_waypoint, dof]
     interp_trajectory = create_trajectory(sim, robot, cup, caffe)
 
     right_arm_ids = robot.get_joint_ids("right_arm")

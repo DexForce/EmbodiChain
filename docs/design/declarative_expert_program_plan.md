@@ -191,10 +191,11 @@ callers.
 
 #### Core/advanced layer
 
-The current `ActionGoal`, `ActionInvocation`, `ActionBinding`, policies,
-`PlanningContext`, `ActionPlan`, `ExecutionSession`, `ExecutionRunner`, and
-provider protocols remain available for framework authors and unusual
-integrations. They are no longer prerequisites for ordinary task authoring.
+The current action-owned goal dataclasses, `ActionInvocation`, `ActionBinding`,
+policies, `PlanningContext`, `ActionPlan`, `ExecutionSession`,
+`ExecutionRunner`, and provider protocols remain available for framework
+authors and unusual integrations. They are no longer prerequisites for
+ordinary task authoring.
 
 ### 6.2 Proposed package ownership
 

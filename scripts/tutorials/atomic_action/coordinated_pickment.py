@@ -372,7 +372,7 @@ def run_coordinated_pickment_demo(
     object_pose_batch = clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
     object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
-    n_envs = object_pose_batch.shape[0]
+    num_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
     object_semantics = create_antipodal_semantics(
         obj,
@@ -424,12 +424,12 @@ def run_coordinated_pickment_demo(
     )
     log_scene_targets(preset.label, object_pose, target_pose)
     if not args.no_vis_eef_axis:
-        draw_pickment_target_axes(sim, target_pose, num_envs=n_envs)
+        draw_pickment_target_axes(sim, target_pose, num_envs=num_envs)
 
     pickment_target = CoordinatedPickGoal(
         semantics=object_semantics,
-        object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
-        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
+        object_target_pose=broadcast_pose_batch(target_pose, num_envs=num_envs),
+        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=num_envs),
     )
 
     wait_for_user = prepare_tutorial_scene(

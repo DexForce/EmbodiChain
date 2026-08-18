@@ -42,9 +42,6 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
     ResolvedActionRequest,
-    register_action,
-    get_registered_actions,
-    unregister_action,
 )
 
 
@@ -129,16 +126,6 @@ def _invocation(
     )
 
 
-def test_global_registry_uses_stable_skill_id() -> None:
-    unregister_action("stub")
-    register_action(StubAction)
-    try:
-        assert get_registered_actions()["stub"] is StubAction
-        register_action(StubAction)
-    finally:
-        unregister_action("stub")
-
-
 def test_action_subclass_cannot_override_framework_plan() -> None:
     with pytest.raises(TypeError, match="must implement _plan"):
 
@@ -192,7 +179,7 @@ def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
         skill_options=options,
     )
 
-    request = engine.resolve(invocation)
+    request = engine.actions["press"].resolve_request(invocation)
 
     assert request.skill_options.hand_interp_steps == 7
     assert request.skill_options is not options
@@ -313,11 +300,13 @@ def test_engine_resolves_invocation_control_override_into_request() -> None:
         revision=2,
     )
 
-    request = engine.resolve(invocation)
+    request = engine.actions["stub"].resolve_request(invocation)
 
     assert request.revision == 2
     assert torch.allclose(
-        request.binding.manipulator().joint_positions("ready", n_envs=2, device="cpu"),
+        request.binding.manipulator().joint_positions(
+            "ready", num_envs=2, device="cpu"
+        ),
         torch.full((2, 3), 0.4),
     )
 
@@ -343,27 +332,20 @@ def test_engine_motion_generator_is_read_only() -> None:
         engine.motion_generator = Mock()  # type: ignore[misc]
 
 
-def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
-    engine = _engine()
-    action = StubAction()
-
-    plan = engine.plan_action(
-        action,
-        _invocation(torch.ones(2, 3)),
-        engine.initial_context(),
-    )
-
-    assert plan.plan_success.tolist() == [True, True]
-    assert action.is_bound
-    assert engine.actions == {}
-
-
 def test_action_cannot_be_rebound_to_another_engine() -> None:
     action = StubAction()
     _engine().register(action)
 
     with pytest.raises(ValueError, match="another AtomicActionEngine"):
         _engine().register(action)
+
+
+def test_bound_action_exposes_num_envs_property() -> None:
+    engine = _engine(batch_size=3)
+    action = StubAction()
+    engine.register(action)
+
+    assert action.num_envs == 3
 
 
 def test_unbound_action_rejects_direct_planning() -> None:

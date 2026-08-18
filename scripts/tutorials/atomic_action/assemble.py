@@ -269,12 +269,12 @@ def run_assemble_demo(
     cube_pose = cube.get_local_pose(to_matrix=True)
     assemble_object_target_pose = cube_pose[0] @ assemble_to_base
 
-    n_envs = robot.get_qpos().shape[0]
+    num_envs = robot.get_qpos().shape[0]
     if not args.no_vis_eef_axis:
         draw_axis_marker(
             sim,
             "assemble_target_axis",
-            broadcast_pose_batch(assemble_object_target_pose, n_envs),
+            broadcast_pose_batch(assemble_object_target_pose, num_envs),
         )
 
     # Step 1 - the left arm picks the soda can up by its top part.

@@ -775,7 +775,7 @@ class Robot(Articulation):
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, num_joints).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (num_envs, num_joints).
             name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
             link_names (List[str] | None): The names of the links to compute the FK for. If None, all links are used.
             end_link_name (str | None): The name of the end link to compute the FK for. If None, the default end link is used.
@@ -784,7 +784,7 @@ class Robot(Articulation):
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (n_envs, 7) or (n_envs, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward kinematics result with shape (num_envs, 7) or (num_envs, 4, 4) if `to_matrix` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -848,15 +848,15 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (n_envs, 7) or (n_envs, 4, 4).
-            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, dof).
+            pose (torch.Tensor): The end effector pose of the robot, (num_envs, 7) or (num_envs, 4, 4).
+            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, dof).
                 If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
             return_all_solutions (bool): Whether to return all IK solutions or just the best one. Defaults to False.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor] | None: The success Tensor with shape (n_envs, ) and qpos Tensor with shape (n_envs, max_results, dof), or None if solver not found.
+            Tuple[torch.Tensor, torch.Tensor] | None: The success Tensor with shape (num_envs, ) and qpos Tensor with shape (num_envs, max_results, dof), or None if solver not found.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -926,13 +926,13 @@ class Robot(Articulation):
         The output pose will be in the local arena frame.
 
         Args:
-            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (n_envs, n_batch, num_joints).
+            qpos (torch.Tensor | np.ndarray | None): Joint positions of the robot, (num_envs, n_batch, num_joints).
             name (str | None): The name of the control part to compute the FK for. If None, the default part is used.
             env_ids (Sequence[int] | None): The environment ids to compute the FK for. If None, all environments are used.
             to_matrix (bool): If True, returns the transformation in the form of a 4x4 matrix.
 
         Returns:
-            torch.Tensor: The forward kinematics result with shape (n_envs, batch, 7) or (n_envs, batch, 4, 4) if `to_matrix` is True.
+            torch.Tensor: The forward kinematics result with shape (num_envs, batch, 7) or (num_envs, batch, 4, 4) if `to_matrix` is True.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
         if not self._solvers:
@@ -992,15 +992,15 @@ class Robot(Articulation):
         The input pose should be in the local arena frame.
 
         Args:
-            pose (torch.Tensor): The end effector pose of the robot, (n_envs, n_batch, 7) or (n_envs, n_batch, 4, 4).
-            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (n_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
+            pose (torch.Tensor): The end effector pose of the robot, (num_envs, n_batch, 7) or (num_envs, n_batch, 4, 4).
+            joint_seed (torch.Tensor | None): The joint positions to use as a seed for the IK computation, (num_envs, n_batch, dof). If None, the zero joint positions will be used as the seed.
             name (str | None): The name of the control part to compute the IK for. If None, the default part is used.
             env_ids (Sequence[int] | None): Environment indices to apply the positions. Defaults to all environments.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]:
-                Success Tensor with shape (n_envs, n_batch)
-                Qpos Tensor with shape (n_envs, n_batch, dof).
+                Success Tensor with shape (num_envs, n_batch)
+                Qpos Tensor with shape (num_envs, n_batch, dof).
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
@@ -1042,7 +1042,7 @@ class Robot(Articulation):
             )
 
         if pose.shape[-1] == 7 and pose.dim() == 3:
-            # Convert pose from (n_envs, n_batch, 7) to (n_envs * n_batch, 4, 4)
+            # Convert pose from (num_envs, n_batch, 7) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 7)
             pos = pose_batch[:, :3]
             quat = pose_batch[:, 3:]
@@ -1055,7 +1055,7 @@ class Robot(Articulation):
             pose_batch[:, :3, :3] = rot
             pose_batch[:, :3, 3] = pos
         else:
-            # Convert pose from (n_envs, n_batch, 4, 4) to (n_envs * n_batch, 4, 4)
+            # Convert pose from (num_envs, n_batch, 4, 4) to (num_envs * n_batch, 4, 4)
             pose_batch = pose.reshape(-1, 4, 4)
 
         # get xpos from link root

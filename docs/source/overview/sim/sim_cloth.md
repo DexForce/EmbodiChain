@@ -135,9 +135,9 @@ For cloth objects, the state is represented by the positions and velocities of i
 
 | Method | Return Shape | Description |
 | :--- | :--- | :--- |
-| `get_current_vertex_position()` | `(n_envs, n_vert, 3)` | Current positions of mesh vertices. |
-| `get_current_vertex_velocity()` | `(n_envs, n_vert, 3)` | Current positions of  mesh vertices. |
-| `get_rest_vertex_position()` | `(n_envs, n_vert, 3` | Rest (initial) positions of collision vertices. |
+| `get_current_vertex_position()` | `(num_envs, n_vert, 3)` | Current positions of mesh vertices. |
+| `get_current_vertex_velocity()` | `(num_envs, n_vert, 3)` | Current positions of  mesh vertices. |
+| `get_rest_vertex_position()` | `(num_envs, n_vert, 3` | Rest (initial) positions of collision vertices. |
 
 > Note: N is the number of environments/instances, V_col is the number of collision vertices, and V_sim is the number of simulation vertices.
 

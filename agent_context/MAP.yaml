@@ -455,6 +455,7 @@ topics:
       - dynamic obstacle
       - StateDelta
       - held_objects
+      - HeldObjectState
       - ActionBinding
       - SceneEntityPose
       - dynamic goal
@@ -474,7 +475,7 @@ topics:
       - trajectory_ops
       - build_pose_plan_states
       - build_joint_plan_states
-      - register_action
+      - engine.register
       - BUILTIN_ACTION_TYPES
       - load_builtins
       - engine.plan

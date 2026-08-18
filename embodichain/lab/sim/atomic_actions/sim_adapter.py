@@ -411,24 +411,7 @@ class SimulationExecutionAdapter:
         Returns:
             Accepted acknowledgement or a rejected diagnostic.
         """
-        self._validate_timeout(timeout)
-        try:
-            self._validate_command(command)
-            self.robot.set_qpos(
-                command.positions,
-                env_ids=self._robot_env_indices,
-            )
-            if command.velocities is not None:
-                self.robot.set_qvel(
-                    command.velocities,
-                    env_ids=self._robot_env_indices,
-                )
-            return CommandAcknowledgement.accepted_ack()
-        except Exception as exc:
-            return CommandAcknowledgement(
-                CommandAckStatus.REJECTED,
-                f"{type(exc).__name__}: {exc}",
-            )
+        return self._write_command(command, timeout=timeout)
 
     def hold(
         self,
@@ -446,6 +429,15 @@ class SimulationExecutionAdapter:
         Returns:
             Accepted acknowledgement or a rejected diagnostic.
         """
+        return self._write_command(command, timeout=timeout)
+
+    def _write_command(
+        self,
+        command: JointCommand,
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
+        """Validate and synchronously write a full-robot joint command."""
         self._validate_timeout(timeout)
         try:
             self._validate_command(command)

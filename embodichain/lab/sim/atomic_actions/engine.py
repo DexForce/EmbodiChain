@@ -36,49 +36,6 @@ if TYPE_CHECKING:
     from .execution import ExecutionSession
 
 
-_global_extension_registry: dict[str, type[AtomicAction]] = {}
-
-
-def register_action(action_class: type[AtomicAction]) -> None:
-    """Register an extension action type for process-wide discovery.
-
-    This catalog does not bind the type to an engine or automatically load it.
-    Built-in types live in ``BUILTIN_ACTION_TYPES`` and are loaded separately
-    by each :class:`AtomicActionEngine`.
-
-    Args:
-        action_class: Concrete :class:`AtomicAction` subclass.
-
-    Raises:
-        TypeError: If ``action_class`` is not an AtomicAction subclass.
-        ValueError: If another class already owns the same skill identifier.
-    """
-    if not isinstance(action_class, type) or not issubclass(action_class, AtomicAction):
-        raise TypeError("action_class must be an AtomicAction subclass.")
-    descriptor = action_class.descriptor()
-    existing = _global_extension_registry.get(descriptor.skill_id)
-    if existing is not None and existing is not action_class:
-        raise ValueError(
-            f"Skill id {descriptor.skill_id!r} is already registered by "
-            f"{existing.__name__}."
-        )
-    _global_extension_registry[descriptor.skill_id] = action_class
-
-
-def unregister_action(skill_id: str) -> None:
-    """Remove a globally discoverable extension action type if present.
-
-    Args:
-        skill_id: Stable registered skill identifier.
-    """
-    _global_extension_registry.pop(skill_id, None)
-
-
-def get_registered_actions() -> dict[str, type[AtomicAction]]:
-    """Return a copy of the process-wide extension action-type registry."""
-    return dict(_global_extension_registry)
-
-
 class AtomicActionEngine:
     """Own planning resources and coordinate side-effect-free atomic actions."""
 
@@ -169,41 +126,7 @@ class AtomicActionEngine:
         for action_type in BUILTIN_ACTION_TYPES:
             self.register(action_type())
 
-    def plan_action(
-        self,
-        action: AtomicAction,
-        invocation: ActionInvocation,
-        context: PlanningContext,
-    ) -> ActionPlan:
-        """Plan with a configured action using this engine's resources.
-
-        Unlike :meth:`plan`, the supplied action does not need to be in the
-        skill registry. This is an advanced extension and testing escape hatch;
-        built-in parameter variants should use ``ActionInvocation.skill_options``
-        with the engine's registered implementation.
-
-        Args:
-            action: Configured action implementation to invoke.
-            invocation: Grounded request matching the action's skill identifier.
-            context: Latest measured planning state.
-
-        Returns:
-            Validated side-effect-free action plan.
-
-        Raises:
-            TypeError: If ``action`` is not an :class:`AtomicAction`.
-            ValueError: If the action, invocation, context, or plan is invalid.
-        """
-        if not isinstance(action, AtomicAction):
-            raise TypeError("action must be an AtomicAction instance.")
-        self._validate_context(context)
-        action._bind(self._planning_services)
-        request = action.resolve_request(invocation)
-        plan = action.plan(request, context)
-        self._validate_plan(plan, context, request)
-        return plan
-
-    def resolve(
+    def _resolve(
         self,
         invocation: ActionInvocation,
     ) -> ResolvedActionRequest:
@@ -229,7 +152,7 @@ class AtomicActionEngine:
             )
         return action.resolve_request(invocation)
 
-    def plan_request(
+    def _plan_request(
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
@@ -241,7 +164,7 @@ class AtomicActionEngine:
         calls this method for every replan.
 
         Args:
-            request: Immutable request previously returned by :meth:`resolve`.
+            request: Immutable request previously returned by :meth:`_resolve`.
             context: Optional latest planning state; captured when omitted.
 
         Returns:
@@ -278,8 +201,8 @@ class AtomicActionEngine:
             KeyError: If the invocation references an unregistered skill.
         """
         current = self.initial_context() if context is None else context
-        request = self.resolve(invocation)
-        return self.plan_request(request, current)
+        request = self._resolve(invocation)
+        return self._plan_request(request, current)
 
     def initial_context(
         self,
@@ -454,9 +377,4 @@ class AtomicActionEngine:
             )
 
 
-__all__ = [
-    "AtomicActionEngine",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
-]
+__all__ = ["AtomicActionEngine"]

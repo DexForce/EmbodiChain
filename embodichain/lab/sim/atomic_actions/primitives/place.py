@@ -23,7 +23,6 @@ from typing import ClassVar, Literal
 
 import torch
 
-from embodichain.utils import logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
@@ -49,13 +48,11 @@ TcpSymmetry = Literal["none", "z_roll_180"]
 class PlaceGoal:
     """End-effector release-pose target used by :class:`Place`."""
 
-    goal_kind: ClassVar[str] = "place_pose"
-
     xpos: PoseGoalValue
     """Target end-effector release pose.
 
-    Accepts ``(4, 4)``, ``(n_envs, 4, 4)``, or
-    ``(n_envs, n_waypoint, 4, 4)``.
+    Accepts ``(4, 4)``, ``(num_envs, 4, 4)``, or
+    ``(num_envs, n_waypoint, 4, 4)``.
     """
 
     tcp_symmetry: TcpSymmetry = "none"
@@ -85,8 +82,6 @@ class AssembleGoal:
     transform (``object_to_eef``) is read from :class:`PlanningContext`
     for the place control part, which a prior :class:`PickUp` populates.
     """
-
-    goal_kind: ClassVar[str] = "assemble"
 
     affordance: AssembleAffordance
     """Assembly affordance anchoring the assemble object to the base object."""
@@ -121,8 +116,8 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     """Lower the held object to a place pose, open the gripper, retract.
 
     The :class:`PlaceGoal` may carry either a single waypoint
-    ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
-    trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
+    ``(num_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
+    trajectory ``(num_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
     approach segment visits every waypoint in order; approaching from above the
     first waypoint, descending through each waypoint, then opening the gripper
     at the final waypoint and retracting to above the last waypoint. Starting
@@ -143,24 +138,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(
-        self,
-        default_options: PlaceOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
-
     def _plan(
         self,
         request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan approach, release, and retract without committing detachment."""
-        target = self.require_goal(request)
+        target = request.goal
         options = request.skill_options
         binding = request.binding
         manipulator = binding.manipulator()
@@ -170,18 +154,31 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         hand_joint_ids = list(end_effector.joint_ids)
         hand_open_qpos = end_effector.joint_positions(
             OPEN_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
         hand_grasp_qpos = end_effector.joint_positions(
             GRASP_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
         state = context
+        held_mask = context.task.held_object_mask(control_part)
+        exclusive_mask = context.task.exclusive_held_object_mask(control_part)
+        eligible = (
+            exclusive_mask
+            if isinstance(target, AssembleGoal)
+            else ~held_mask | exclusive_mask
+        )
         place_xpos = self._resolve_place_xpos(target, state, control_part)
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is shared with another control part.",
+            )
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
 
@@ -237,7 +234,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         assert back_result.positions is not None
         back_success = back_result.success
         back_arm = back_result.positions
-        success = down_success & back_success
+        success = down_success & back_success & eligible
 
         hand_open_path = interpolate_hand_qpos(
             hand_grasp_qpos, hand_open_qpos, n_waypoints=n_open
@@ -248,7 +245,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         n_down_actual = down_arm.shape[1]
         n_back_actual = back_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_down_actual + n_open + n_back_actual, self.robot_dof),
+            (self.num_envs, n_down_actual + n_open + n_back_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
@@ -262,18 +259,12 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         full[:, n_down_actual + n_open :, arm_joint_ids] = back_arm
         full[:, n_down_actual + n_open :, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
-        coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if control_part in key
-        }
         return self.build_plan(
             request,
             context,
             success=success,
             trajectory=full,
-            expected_effects=StateDelta(
-                held_object_updates={control_part: None},
-                coordinated_held_object_updates=coordinated_updates,
-            ),
+            expected_effects=StateDelta(held_object_updates={control_part: None}),
             segment_lengths={
                 "approach": n_down_actual,
                 "release": n_open,
@@ -294,13 +285,13 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             state: World state carrying the held-object transform.
 
         Returns:
-            Place EEF poses with shape ``(n_envs, 4, 4)`` or
-            ``(n_envs, n_waypoint, 4, 4)``.
+            Place EEF poses with shape ``(num_envs, 4, 4)`` or
+            ``(num_envs, n_waypoint, 4, 4)``.
         """
         if isinstance(target, PlaceGoal):
             return resolve_pose_target(
                 resolve_pose_goal(target.xpos, state, name="xpos"),
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
             )
         return self._resolve_assemble_place_xpos(target, state, control_part)
@@ -322,24 +313,22 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             state: World state carrying the held-object transform.
 
         Returns:
-            Place EEF poses with shape ``(n_envs, 4, 4)``.
+            Place EEF poses with shape ``(num_envs, 4, 4)``.
 
         Raises:
             ValueError: If no held object or no base object entity is available.
         """
         held = state.get_held_object(control_part)
         if held is None:
-            logger.log_error(
+            raise ValueError(
                 "Place with AssembleGoal requires an object held by control "
-                f"part {control_part!r} (run PickUp first).",
-                ValueError,
+                f"part {control_part!r} (run PickUp first)."
             )
         affordance = target.affordance
         if affordance.base_object_entity is None:
-            logger.log_error(
+            raise ValueError(
                 "AssembleAffordance.base_object_entity must be set to assemble "
-                "onto a base object.",
-                ValueError,
+                "onto a base object."
             )
         base_pose = affordance.base_object_entity.get_local_pose(to_matrix=True).to(
             device=self.device, dtype=torch.float32
@@ -347,7 +336,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         assemble_object_pose = affordance.get_assemble_object_pose(base_pose)
         object_to_eef = resolve_object_target(
             held.object_to_eef,
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             name="object_to_eef",
         )
@@ -424,10 +413,10 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         rotation_error = quat_error_magnitude(
             first_waypoint_quat.reshape(-1, 4),
             start_quat.reshape(-1, 4),
-        ).reshape(self.n_envs, 2)
+        ).reshape(self.num_envs, 2)
         best_variant_idx = rotation_error.argmin(dim=1)
 
-        env_idx = torch.arange(self.n_envs, device=self.device)[:, None]
+        env_idx = torch.arange(self.num_envs, device=self.device)[:, None]
         waypoint_idx = torch.arange(place_xpos.shape[1], device=self.device)[None, :]
         return place_variants[
             env_idx,

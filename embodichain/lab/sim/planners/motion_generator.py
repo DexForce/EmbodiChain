@@ -486,7 +486,7 @@ class MotionGenerator:
             )
             step_success = normalize_success_mask(
                 step_success,
-                n_envs=batch_size,
+                num_envs=batch_size,
                 device=device,
                 name=f"IK success for target state {index}",
             )
@@ -550,7 +550,7 @@ class MotionGenerator:
 
         success = normalize_success_mask(
             result.success,
-            n_envs=batch_size,
+            num_envs=batch_size,
             device=device,
             name="MotionGenerator PlanResult.success",
         )

@@ -58,7 +58,6 @@ class TimedTrajectory:
     accelerations: torch.Tensor | None
     dt: torch.Tensor
     """Per-waypoint arrival intervals; the first sample normally has zero dt."""
-    duration: torch.Tensor
     env_ids: torch.Tensor
 
     def __post_init__(self) -> None:
@@ -88,21 +87,6 @@ class TimedTrajectory:
             raise ValueError("dt must share the positions device.")
         if not torch.isfinite(self.dt).all() or (self.dt < 0).any():
             raise ValueError("dt must contain finite non-negative values.")
-        if not isinstance(self.duration, torch.Tensor) or self.duration.shape != (
-            batch_size,
-        ):
-            raise ValueError(f"duration must have shape ({batch_size},).")
-        if self.duration.device != self.positions.device:
-            raise ValueError("duration must share the positions device.")
-        if not torch.isfinite(self.duration).all() or (self.duration < 0).any():
-            raise ValueError("duration must contain finite non-negative values.")
-        if not torch.allclose(
-            self.duration,
-            self.dt.sum(dim=1),
-            rtol=1e-4,
-            atol=1e-6,
-        ):
-            raise ValueError("duration must equal the sum of dt for each environment.")
         if not isinstance(self.env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor.")
         if self.env_ids.dtype != torch.long or self.env_ids.shape != (batch_size,):
@@ -126,6 +110,11 @@ class TimedTrajectory:
         """Number of full-robot command columns."""
         return int(self.positions.shape[2])
 
+    @property
+    def duration(self) -> torch.Tensor:
+        """Per-environment trajectory duration derived from waypoint intervals."""
+        return self.dt.sum(dim=1)
+
     def snapshot(self) -> TimedTrajectory:
         """Return an independently owned copy of this trajectory.
 
@@ -140,7 +129,6 @@ class TimedTrajectory:
                 None if self.accelerations is None else self.accelerations.clone()
             ),
             dt=self.dt.clone(),
-            duration=self.duration.clone(),
             env_ids=self.env_ids.clone(),
         )
 
@@ -213,7 +201,6 @@ class TimedTrajectory:
             velocities=velocities,
             accelerations=accelerations,
             dt=dt,
-            duration=computed_duration,
             env_ids=env_ids,
         )
 
@@ -235,7 +222,6 @@ class TimedTrajectory:
             velocities=None,
             accelerations=None,
             dt=torch.empty((batch_size, 0), dtype=torch.float32, device=resolved),
-            duration=torch.zeros(batch_size, dtype=torch.float32, device=resolved),
             env_ids=env_ids,
         )
 
@@ -280,7 +266,6 @@ class TimedTrajectory:
             velocities=mask_derivative(self.velocities),
             accelerations=mask_derivative(self.accelerations),
             dt=self.dt,
-            duration=self.duration,
             env_ids=self.env_ids,
         )
 
@@ -332,7 +317,6 @@ class TimedTrajectory:
             velocities=concatenate_optional("velocities"),
             accelerations=concatenate_optional("accelerations"),
             dt=dt,
-            duration=dt.sum(dim=1),
             env_ids=first.env_ids,
         )
 

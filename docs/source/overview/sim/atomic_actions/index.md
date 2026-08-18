@@ -165,7 +165,7 @@ from leaking into an Action Agent schema.
 
 | Contract | Contains | Does not contain |
 |---|---|---|
-| `ActionGoal` | Action-specific desired outcome, such as an EEF pose or object pose | Arm names, planner instances, recovery counters |
+| Action-owned goal dataclass | Action-specific desired outcome, such as an EEF pose or object pose | Arm names, planner instances, recovery counters |
 | `ActionBinding` | Semantic-role mappings to keys from the engine robot's `control_parts`, such as `primary -> left_arm` and `primary -> left_hand` | Link/TCP names, arbitrary scene objects, motion settings, or task geometry |
 | `ActionOptions` / built-in `*Options` | Frozen invocation-varying skill behavior: segment counts, offsets, grasp-selection rules | Robot resource names, hand qpos, planner backend |
 | `ControlPartCommandProfile` | Embodiment-specific semantic commands such as `open`, `grasp`, and `ready`, keyed by actual control-part name | Action roles, task goals, recovery state |
@@ -179,9 +179,11 @@ from leaking into an Action Agent schema.
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
 
-Goals follow the structural `ActionGoal` protocol: each action owns one or more
-frozen dataclasses with a stable `goal_kind`. There is no shared `ActionTarget`
-base class and no closed union that must change whenever a skill is added.
+Each action owns one or more frozen goal dataclasses and declares the accepted
+type through `AtomicAction.GoalType`. The action validates that type when the
+engine resolves an invocation. There is no marker protocol, shared
+`ActionTarget` base class, or closed union that must change whenever a skill is
+added.
 
 ### Semantic resource binding
 
@@ -355,10 +357,9 @@ custom_engine.register(MyAction())
 engine.register(CustomPickUp(), replace=True)
 ```
 
-The module-level `register_action()` catalog is only for process-wide extension
-type discovery. It does not mutate existing engines or join their default
-built-in set; instantiate a discovered extension and pass it to
-`engine.register()` explicitly.
+Registration is deliberately engine-local. Construct an extension and pass it
+to `engine.register()` explicitly; there is no separate process-wide catalog
+whose contents can drift from the actions installed in an engine.
 
 ### Implementation and advanced APIs
 
@@ -370,7 +371,6 @@ resolving an invocation; skill implementations provide `_plan()`:
 |---|---|---|
 | `AtomicAction.plan(request, context)` | `AtomicActionEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
 | `AtomicAction._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedActionRequest` and returns an `ActionPlan` |
-| `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
 | `session.revise_current(invocation)` | Runtime orchestrator or Action Agent | Replaces the active logical call with a newer revision and replans from the latest observed context |
 | `runner.step(effect_success=...)` | Non-blocking controller integration | Observes and dispatches only when the next timed command is due |
 | `runner.run_until_blocked(...)` | Simple blocking application or tutorial | Advances the injected clock until terminal or external effect verification is required |
@@ -641,6 +641,13 @@ environment row. Pick, place, handover, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
 
+`TaskState.held_objects` uses one `HeldObjectState` per bound manipulator.
+Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
+there is no parallel coordinated-attachment representation to synchronize.
+Consumers query per-environment active and exclusive-hold masks from that one
+map. A single-arm transport, release, or handover row fails safely while a
+second manipulator still holds the same semantic object or live entity.
+
 At the terminal waypoint, an `ExecutionSession` requests an external
 per-environment verification mask before committing a non-empty effect:
 
@@ -688,7 +695,7 @@ decision without mutating an in-flight request implicitly.
 
 A new primitive should:
 
-1. define a frozen, action-owned goal dataclass with a stable `goal_kind`;
+1. define a frozen, action-owned goal dataclass;
 2. define a frozen `ActionOptions` subclass only for behavior that can vary per
    invocation;
 3. declare `skill_id`, `GoalType`, `OptionsType`, required semantic roles, and

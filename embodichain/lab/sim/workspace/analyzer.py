@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import time
 import torch
 import numpy as np
@@ -962,7 +964,7 @@ class WorkspaceAnalyzer:
         for batch_start in pbar:
             batch_end = min(batch_start + batch_size, num_samples)
 
-            # Reshape to (n_envs=1, batch_size, num_joints) for compute_batch_fk
+            # Reshape to (num_envs=1, batch_size, num_joints) for compute_batch_fk
             qpos_batch = joint_configs[batch_start:batch_end].unsqueeze(0)
 
             try:

@@ -368,7 +368,7 @@ def make_eef_pose_at(robot: Robot, position: torch.Tensor) -> torch.Tensor:
 
     Args:
         robot: Robot whose current arm pose supplies the orientation.
-        position: Position tensor with shape ``(3,)`` or ``(n_envs, 3)``.
+        position: Position tensor with shape ``(3,)`` or ``(num_envs, 3)``.
 
     Returns:
         A single or batched homogeneous pose matching ``position``.
@@ -509,7 +509,7 @@ def replay_trajectory(
         sim: Simulation manager to step and record.
         robot: Robot receiving full-DOF trajectory positions.
         trajectory: Timed full-robot trajectory, or a legacy position tensor
-            with shape ``(n_envs, n_steps, dof)``.
+            with shape ``(num_envs, n_steps, dof)``.
         args: Parsed tutorial arguments controlling auto-play recording.
         video_prefix: Output video filename prefix.
         hold_steps: Number of final-pose simulation updates after the trajectory.
@@ -682,14 +682,14 @@ def draw_axis_marker(
 ) -> None:
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
     arena_offsets = sim.arena_offsets
-    n_envs = arena_offsets.shape[0]
+    num_envs = arena_offsets.shape[0]
 
     # Normalize a single (4, 4) pose to (1, 4, 4) so it is not mistaken for a
     # per-environment batch when num_envs happens to equal 4.
     if xpos.dim() == 2:
         xpos = xpos.unsqueeze(0)
 
-    if n_envs == xpos.shape[0]:
+    if num_envs == xpos.shape[0]:
         # add arena offsets to xpos
         draw_xpos = xpos.clone()
         draw_xpos[:, :3, 3] += arena_offsets
