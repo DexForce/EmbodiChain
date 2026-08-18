@@ -40,10 +40,12 @@ from app_processes import get_request_session_id
 from app_workflows import (
     cleanup_workflow_session,
     format_status,
+    preview_editable_scene,
     preview_saved_scene,
     refresh_saved_scenes,
     reset_scene_engine,
     run_action_engine_from_current,
+    run_scene_edit,
     run_scene_engine,
     stop_action_engine,
     ui_snapshot,
@@ -113,8 +115,8 @@ def build_app() -> gr.Blocks:
         with gr.Column(visible=False) as scene_engine_panel:
             gr.Markdown(
                 "## Scene engine\n"
-                "Upload one image to generate a Scene Engine export. "
-                "The resulting Viser page is shown below."
+                "Generate a Scene Engine export from an image, or select an "
+                "existing export to preview and edit with text."
             )
             with gr.Row():
                 with gr.Column(scale=1):
@@ -128,6 +130,25 @@ def build_app() -> gr.Blocks:
                     with gr.Row():
                         scene_run = gr.Button("Generate scene", variant="primary")
                         scene_reset = gr.Button("Reset Scene Engine", variant="stop")
+                    gr.Markdown("### Edit a generated scene")
+                    scene_scene_list = gr.Dropdown(
+                        choices=[],
+                        value=None,
+                        label="Generated scenes",
+                        info="Select the exact scene to preview and modify.",
+                    )
+                    scene_scene_refresh = gr.Button("Refresh scenes")
+                    scene_scene_status = gr.Markdown(
+                        "**Selected scene:** refresh the list and choose a scene."
+                    )
+                    scene_edit_prompt = gr.Textbox(
+                        label="Scene edit instruction",
+                        placeholder=(
+                            "e.g. Add a red cup to the front-center of the tabletop"
+                        ),
+                        lines=3,
+                    )
+                    scene_edit = gr.Button("Edit selected scene", variant="primary")
                 with gr.Column(scale=2):
                     scene_progress = gr.Slider(
                         0,
@@ -144,7 +165,7 @@ def build_app() -> gr.Blocks:
                     )
                     scene_preview = gr.HTML(
                         "<div style='padding: 1rem; color: #6b7280;'>"
-                        "The Viser preview will appear here after generation."
+                        "Select a generated scene or generate a new one to preview it."
                         "</div>"
                     )
 
@@ -235,19 +256,57 @@ def build_app() -> gr.Blocks:
             queue=False,
         )
 
-        scene_run.click(
+        scene_engine_button.click(
+            refresh_saved_scenes,
+            inputs=[scene_scene_list],
+            outputs=[scene_scene_list, scene_scene_status],
+            queue=False,
+        )
+
+        scene_generate_event = scene_run.click(
             run_scene_engine,
             inputs=[scene_image],
             outputs=[scene_progress, scene_status, scene_output, scene_preview],
+        )
+        scene_generate_event.then(
+            refresh_saved_scenes,
+            inputs=[scene_scene_list],
+            outputs=[scene_scene_list, scene_scene_status],
+            queue=False,
+        )
+        scene_scene_refresh.click(
+            refresh_saved_scenes,
+            inputs=[scene_scene_list],
+            outputs=[scene_scene_list, scene_scene_status],
+            queue=False,
+        )
+        scene_scene_list.change(
+            preview_editable_scene,
+            inputs=[scene_scene_list],
+            outputs=[scene_preview, scene_scene_status, scene_output],
+        )
+        scene_edit_event = scene_edit.click(
+            run_scene_edit,
+            inputs=[scene_scene_list, scene_edit_prompt],
+            outputs=[scene_progress, scene_status, scene_output, scene_preview],
+        )
+        scene_edit_event.then(
+            refresh_saved_scenes,
+            inputs=[scene_scene_list],
+            outputs=[scene_scene_list, scene_scene_status],
+            queue=False,
         )
         scene_reset.click(
             reset_scene_engine,
             outputs=[
                 scene_image,
+                scene_edit_prompt,
+                scene_scene_list,
                 scene_progress,
                 scene_status,
                 scene_output,
                 scene_preview,
+                scene_scene_status,
             ],
             queue=False,
         )

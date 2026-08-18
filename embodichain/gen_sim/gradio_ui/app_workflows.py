@@ -70,10 +70,12 @@ from app_state import (
 __all__ = [
     "cleanup_workflow_session",
     "format_status",
+    "preview_editable_scene",
     "preview_saved_scene",
     "refresh_saved_scenes",
     "reset_scene_engine",
     "run_action_engine_from_current",
+    "run_scene_edit",
     "run_scene_engine",
     "stop_action_engine",
     "ui_snapshot",
@@ -91,6 +93,11 @@ _ACTION_IDLE_PREVIEW = (
     "Select a generated scene to preview it."
     "</div>"
 )
+_SCENE_IDLE_PREVIEW = (
+    "<div style='padding: 1rem; color: #6b7280;'>"
+    "Select a generated scene or generate a new one to preview it."
+    "</div>"
+)
 
 
 def _drain_output_queue(output_queue: queue.Queue[str]) -> list[str]:
@@ -106,6 +113,9 @@ def _scene_engine_phase_from_log(line: str, current_key: str) -> str:
     """Map Scene Engine stage names to the shared progress UI."""
     text = line.lower()
     mapping = (
+        ("edit understanding", "edit_understanding"),
+        ("objects preparation", "edit_asset_preparation"),
+        ("layout generation", "edit_layout"),
         ("scene understanding", "scene_intake"),
         ("scene segmentation", "relations"),
         ("coarse layout", "asset_generation"),
@@ -259,7 +269,7 @@ def saved_scene_choices() -> list[tuple[str, str]]:
 
 
 def refresh_saved_scenes(selected_scene: str | None = None):
-    """Refresh the Action-engine scene list without selecting a scene implicitly."""
+    """Refresh a generated-scene list without selecting a scene implicitly."""
     choices = saved_scene_choices()
     values = {value for _label, value in choices}
     value = selected_scene if selected_scene in values else None
@@ -269,6 +279,95 @@ def refresh_saved_scenes(selected_scene: str | None = None):
         else "**Scene list:** no complete generated scenes found."
     )
     return gr.update(choices=choices, value=value), status
+
+
+def preview_editable_scene(
+    scene_name: str | None,
+    request: gr.Request,
+) -> tuple[str, str, str]:
+    """Preview one saved scene in the Scene panel before editing it.
+
+    Args:
+        scene_name: Hash-named generated scene selected in the Scene panel.
+        request: Gradio request carrying the owning session hash.
+
+    Returns:
+        Preview iframe HTML, selection status, and selected output directory.
+    """
+    session_id = get_request_session_id(request)
+    if not scene_name:
+        with runtime_lock:
+            runtime = runtime_registry.get(session_id)
+            if not runtime.scene_engine_is_running:
+                _scene_runs.reset(session_id, force=True)
+        return _SCENE_IDLE_PREVIEW, "**Selected scene:** none.", ""
+
+    try:
+        scene_root = _saved_scene_root(scene_name)
+    except (ValueError, FileNotFoundError) as exc:
+        return _SCENE_IDLE_PREVIEW, f"**Scene preview error:** {exc}", ""
+
+    with runtime_lock:
+        runtime = runtime_registry.get(session_id)
+        if runtime.scene_engine_is_running:
+            return (
+                _SCENE_IDLE_PREVIEW,
+                "**Scene preview:** Scene Engine is still running.",
+                scene_root.as_posix(),
+            )
+        token = _scene_runs.begin(session_id)
+
+    with _preview_start_lock:
+        port = _select_available_port(SCENE_ENGINE_VISER_PORT)
+        preview_command = [
+            sys.executable,
+            COMMANDS["scene_engine"]["preview_script"],
+            "--output_root",
+            str(scene_root),
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            str(port),
+        ]
+        try:
+            preview_process = start_pipeline(preview_command)
+        except Exception as exc:
+            return (
+                _SCENE_IDLE_PREVIEW,
+                f"**Scene preview error:** {exc}",
+                scene_root.as_posix(),
+            )
+
+        if not _scene_runs.attach(session_id, token, preview_process):
+            terminate_process_group(preview_process)
+            return (
+                _SCENE_IDLE_PREVIEW,
+                "**Scene preview:** request was superseded.",
+                scene_root.as_posix(),
+            )
+        if not _wait_for_viser(port, preview_process):
+            terminate_process_group(preview_process)
+            _scene_runs.finish(session_id, token, preview_process)
+            return (
+                _SCENE_IDLE_PREVIEW,
+                "**Scene preview error:** Viser did not start.",
+                scene_root.as_posix(),
+            )
+
+    if not _scene_runs.is_active(session_id, token, preview_process):
+        terminate_process_group(preview_process)
+        return (
+            _SCENE_IDLE_PREVIEW,
+            "**Scene preview:** request was superseded.",
+            scene_root.as_posix(),
+        )
+
+    return (
+        _viser_iframe(port, scene_name),
+        f"**Selected scene:** `{scene_name}` is ready to edit.",
+        scene_root.as_posix(),
+    )
 
 
 def preview_saved_scene(
@@ -340,15 +439,15 @@ def preview_saved_scene(
 
 def reset_scene_engine(
     request: gr.Request,
-) -> tuple[None, int, str, str, str]:
+) -> tuple[None, str, object, int, str, str, str, str]:
     """Reset only the requesting session's Scene Engine state and processes.
 
     Args:
         request: Gradio request carrying the owning session hash.
 
     Returns:
-        Reset values for the Scene Engine input, progress, status, output, and
-        preview widgets.
+        Reset values for the Scene Engine generation, editing, selection,
+        progress, status, output, and preview widgets.
     """
     session_id = get_request_session_id(request)
     with runtime_lock:
@@ -373,12 +472,13 @@ def reset_scene_engine(
     )
     return (
         None,
+        "",
+        gr.update(value=None),
         PHASES["idle"].progress,
         format_status(message),
         "",
-        "<div style='padding: 1rem; color: #6b7280;'>"
-        "The Viser preview will appear here after generation."
-        "</div>",
+        _SCENE_IDLE_PREVIEW,
+        "**Selected scene:** none.",
     )
 
 
@@ -585,6 +685,230 @@ def run_scene_engine(
         runtime.scene_engine_is_running = False
         set_runtime_phase_locked(runtime, "complete")
         runtime.status = "Scene generated successfully. Viser preview is ready."
+        runtime.last_error = None
+    yield _scene_engine_updates(runtime, output_root, preview_html)
+
+
+def _build_scene_edit_command(scene_root: Path, edit_prompt: str) -> list[str]:
+    """Build the Scene Engine CLI command for editing one saved export."""
+    normalized_prompt = edit_prompt.strip()
+    if not normalized_prompt:
+        raise ValueError("Enter an edit instruction first.")
+    return [
+        sys.executable,
+        "-m",
+        COMMANDS["scene_engine"]["module"],
+        *COMMANDS["scene_engine"]["base_args"],
+        "--output_root",
+        str(scene_root),
+        "--edit_prompt",
+        normalized_prompt,
+    ]
+
+
+def run_scene_edit(
+    scene_name: str | None,
+    edit_prompt: str | None,
+    request: gr.Request,
+) -> Iterator[tuple[int, str, str | None, str]]:
+    """Apply one text edit to the selected saved scene and restart its preview.
+
+    Args:
+        scene_name: Hash-named generated scene selected in the Scene panel.
+        edit_prompt: Natural-language edit instruction for the selected scene.
+        request: Gradio request carrying the owning session hash.
+
+    Yields:
+        Progress, status, output directory, and Viser preview updates.
+    """
+    session_id = get_request_session_id(request)
+    output_root: Path | None = None
+    preview_html = ""
+    try:
+        if not scene_name:
+            raise ValueError("Select a generated scene to edit first.")
+        output_root = _saved_scene_root(scene_name)
+        command = _build_scene_edit_command(output_root, edit_prompt or "")
+        input_error: str | None = None
+    except (ValueError, FileNotFoundError) as exc:
+        command = []
+        input_error = str(exc)
+
+    with runtime_lock:
+        runtime = runtime_registry.get(session_id)
+        if runtime.is_busy:
+            runtime.status = "Another engine is already running in this session."
+            runtime.last_error = runtime.status
+            failure = runtime.status
+        elif input_error is not None:
+            runtime.status = f"Edit input error: {input_error}"
+            runtime.last_error = input_error
+            set_runtime_phase_locked(runtime, "failed")
+            failure = runtime.status
+        else:
+            token = _scene_runs.begin(session_id)
+            runtime.is_busy = True
+            runtime.scene_engine_is_running = True
+            set_runtime_phase_locked(runtime, "received")
+            runtime.status = f"Preparing to edit Scene Engine output {scene_name}."
+            runtime.last_error = None
+            runtime.log_lines.clear()
+            failure = None
+
+    if failure is not None:
+        progress, status, output, _preview = _scene_engine_updates(
+            runtime,
+            output_root,
+            preview_html,
+        )
+        yield progress, status, output, gr.update()
+        return
+
+    assert output_root is not None
+    scene_engine_log = output_root / "scene_engine.log"
+    command_log_line = "$ " + " ".join(command)
+    with scene_engine_log.open("a", encoding="utf-8") as log_file:
+        log_file.write(command_log_line + "\n")
+    with runtime_lock:
+        runtime.log_lines.append(command_log_line)
+    yield _scene_engine_updates(runtime, output_root, preview_html)
+
+    try:
+        process = start_pipeline(command)
+    except Exception as exc:
+        with runtime_lock:
+            if not _scene_runs.is_active(session_id, token):
+                return
+            runtime.is_busy = False
+            runtime.scene_engine_is_running = False
+            set_runtime_phase_locked(runtime, "failed")
+            runtime.status = f"Scene Engine edit start failed: {exc}"
+            runtime.last_error = str(exc)
+        yield _scene_engine_updates(runtime, output_root, preview_html)
+        return
+
+    if not _scene_runs.attach(session_id, token, process):
+        terminate_process_group(process)
+        return
+    output_queue: queue.Queue[str] = queue.Queue()
+    reader = threading.Thread(
+        target=read_process_output,
+        args=(process, output_queue, scene_engine_log),
+        daemon=True,
+    )
+    with runtime_lock:
+        if not _scene_runs.is_active(session_id, token, process):
+            terminate_process_group(process)
+            return
+        set_runtime_phase_locked(runtime, "started")
+        runtime.status = "Scene Engine edit started."
+    reader.start()
+
+    while process.poll() is None:
+        drained = _drain_output_queue(output_queue)
+        with runtime_lock:
+            if not _scene_runs.is_active(session_id, token, process):
+                return
+            for line in drained:
+                runtime.log_lines.append(line)
+                set_runtime_phase_locked(
+                    runtime,
+                    _scene_engine_phase_from_log(line, runtime.phase_key),
+                )
+            runtime.status = PHASES[runtime.phase_key].label + "."
+        yield _scene_engine_updates(runtime, output_root, preview_html)
+        time.sleep(0.5)
+
+    reader.join(timeout=1.0)
+    with runtime_lock:
+        if not _scene_runs.is_active(session_id, token, process):
+            return
+        for line in _drain_output_queue(output_queue):
+            runtime.log_lines.append(line)
+            set_runtime_phase_locked(
+                runtime,
+                _scene_engine_phase_from_log(line, runtime.phase_key),
+            )
+    _scene_runs.finish(session_id, token, process)
+
+    scene_export = output_root / "scene_export" / "scene_config.json"
+    if process.returncode != 0 or not scene_export.is_file():
+        detail = (
+            f"Scene Engine edit exited with code {process.returncode}."
+            if process.returncode != 0
+            else f"Scene Engine edit did not create {scene_export}."
+        )
+        with runtime_lock:
+            if not _scene_runs.is_active(session_id, token):
+                return
+            runtime.is_busy = False
+            runtime.scene_engine_is_running = False
+            set_runtime_phase_locked(runtime, "failed")
+            runtime.status = detail
+            runtime.last_error = detail
+        yield _scene_engine_updates(runtime, output_root, preview_html)
+        return
+
+    with runtime_lock:
+        if not _scene_runs.is_active(session_id, token):
+            return
+        set_runtime_phase_locked(runtime, "gym_export")
+        runtime.status = "Scene edit exported. Starting Viser preview..."
+    yield _scene_engine_updates(runtime, output_root, preview_html)
+
+    preview_error: str | None = None
+    with _preview_start_lock:
+        port = _select_available_port(SCENE_ENGINE_VISER_PORT)
+        preview_command = [
+            sys.executable,
+            COMMANDS["scene_engine"]["preview_script"],
+            "--output_root",
+            str(output_root),
+            "--viser",
+            "--viser-host",
+            "0.0.0.0",
+            "--viser-port",
+            str(port),
+        ]
+        try:
+            preview_process = start_pipeline(preview_command)
+        except Exception as exc:
+            preview_error = f"Viser preview start failed: {exc}"
+        else:
+            if not _scene_runs.attach(session_id, token, preview_process):
+                terminate_process_group(preview_process)
+                return
+            with runtime_lock:
+                runtime.log_lines.append("$ " + " ".join(preview_command))
+                set_runtime_phase_locked(runtime, "preview")
+                runtime.status = "Starting Viser preview..."
+
+            if not _wait_for_viser(port, preview_process):
+                terminate_process_group(preview_process)
+                _scene_runs.finish(session_id, token, preview_process)
+                preview_error = "Viser preview did not start."
+
+    if preview_error is not None:
+        with runtime_lock:
+            if not _scene_runs.is_active(session_id, token):
+                return
+            runtime.is_busy = False
+            runtime.scene_engine_is_running = False
+            set_runtime_phase_locked(runtime, "failed")
+            runtime.status = preview_error
+            runtime.last_error = preview_error
+        yield _scene_engine_updates(runtime, output_root, preview_html)
+        return
+
+    preview_html = _viser_iframe(port, scene_name)
+    with runtime_lock:
+        if not _scene_runs.is_active(session_id, token, preview_process):
+            terminate_process_group(preview_process)
+            return
+        runtime.is_busy = False
+        runtime.scene_engine_is_running = False
+        set_runtime_phase_locked(runtime, "complete")
+        runtime.status = "Scene edited successfully. Viser preview is ready."
         runtime.last_error = None
     yield _scene_engine_updates(runtime, output_root, preview_html)
 

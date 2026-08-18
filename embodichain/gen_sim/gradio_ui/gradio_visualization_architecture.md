@@ -72,7 +72,7 @@ conda run -n embodichain python gradio_app.py
 | --- | --- | --- | --- | --- |
 | Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
 | Asset engine / Articulation | 文字、可选参考图 | URDF articulation 的 Viser、zip 下载 | `.gen_sim/articraft/` | 否 |
-| Scene engine | 一张图片 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
+| Scene engine | 一张图片，或已保存场景 + 文本编辑指令 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
 因此，Scene engine 是独立的图像条件场景生成器；它不会提升、复制或转换输出到 `gym_project/current`。Action engine 只消费已有的 `current` Gym 场景。界面中的 “Scene engine” 文案表达的是所需场景类型，并不意味着独立 Scene Engine 输出已自动连到 Action engine。
@@ -134,9 +134,9 @@ description + optional image
 
 `Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，终止该会话的 Articraft/Codex 命令进程组，并关闭该会话启动的 Viser。
 
-## 独立 Scene engine 和 Viser
+## 独立 Scene engine、文本编辑和 Viser
 
-Scene engine 只接收图像。上传图像会先进行 EXIF 归正并转为 RGB PNG，以 PNG 字节的 SHA-256 前 16 位作为目录名；相同图像会复用同一目录：
+Scene engine 可以从图像生成新场景，也可以从已保存场景列表中选择确切的导出进行预览和文本编辑。上传图像会先进行 EXIF 归正并转为 RGB PNG，以 PNG 字节的 SHA-256 前 16 位作为目录名；相同图像会复用同一目录：
 
 ```text
 image
@@ -149,9 +149,23 @@ image
   → Gradio iframe
 ```
 
+编辑流程与 Action engine 的已保存场景预览使用相同的显式选择模型：进入 Scene engine 或点击 `Refresh scenes` 后扫描 `.gen_sim/scenes/`，用户选择一个场景后才启动其 Viser。点击 `Edit selected scene` 时，必须同时提供选中场景和非空文本指令，应用执行：
+
+```text
+selected scene + edit prompt
+  → 停止本会话该场景的旧 Viser
+  → python -m embodichain scene-engine
+       --output_root <selected-scene-dir>
+       --edit_prompt <instruction>
+  → 覆盖更新 scene_export
+  → 重新启动选中场景的 Viser
+```
+
+场景下拉框的 value 是 hash 目录名，服务端会再次验证路径必须直接位于 `GEN_SIM_SCENE_ROOT` 下，且必须包含 `embodichain.scene-export/v1` 格式的完整导出。编辑完成后保持原 hash 目录和下拉框选择，但更新列表标签中的 `scene_id`。
+
 当 `scene_export/scene_config.json` 存在且生成进程返回成功时，应用才启动 Viser。iframe 使用 Gradio 页面当前的协议和主机名转向 Viser 端口，因此从其他设备访问时，浏览器必须能访问该端口。每个会话优先使用 `SCENE_ENGINE_VISER_PORT`，占用时选择其他可用端口；同会话的新 Scene Engine 任务会终止该会话旧的 Scene Viser，不会终止其他会话的预览。输出目录会显示在 UI 中，便于检查 hash 命名的场景导出。
 
-`Reset Scene Engine` 会清空当前会话的图像、进度、输出目录和 iframe，并终止该会话当前生成命令与 Scene Viser 的进程组；registry 运行 token 会使已经失效的生成器停止回写界面。
+`Reset Scene Engine` 会清空当前会话的图像、编辑文本、场景选择、进度、输出目录和 iframe，并终止该会话当前生成/编辑命令与 Scene Viser 的进程组；registry 运行 token 会使已经失效的生成器停止回写界面。
 
 ## Action engine：Gym 场景契约
 
@@ -245,5 +259,5 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 
 1. SimReady 上传简单网格后能显示输入预览；执行后显示 SimReady 输出或明确错误。
 2. Articulation 环境检查能报告 checkout、Conda 和 Codex 状态；成功生成后有 zip、记录目录和 Viser 或明确的预览错误。
-3. Scene engine 从图像生成 `scene_export/scene_config.json`，并以 `8080` 为首选端口显示 Viser；它不应改写 `gym_project/current`。
+3. Scene engine 从图像生成 `scene_export/scene_config.json`，也能选择已保存场景预览并通过文本修改；编辑后应重启该场景的 Viser，且不改写 `gym_project/current`。
 4. Action engine 在没有 `current` Gym/action 配置或缺少 CLI 时给出预检错误。
