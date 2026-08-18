@@ -58,11 +58,18 @@ def normalize_success_mask(
 
     Raises:
         TypeError: If ``success`` is neither boolean nor binary integer data.
-        ValueError: If a tensor does not match the required batch shape.
+        ValueError: If a tensor does not match the required batch shape or a
+            CUDA device is requested while CUDA is unavailable.
     """
     resolved_device = torch.device(device)
-    if resolved_device.type == "cuda" and resolved_device.index is None:
-        resolved_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    if resolved_device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "CUDA device requested for success-mask normalization, but "
+                "torch.cuda.is_available() is False."
+            )
+        if resolved_device.index is None:
+            resolved_device = torch.device(f"cuda:{torch.cuda.current_device()}")
     if isinstance(success, bool):
         return torch.full(
             (num_envs,), success, dtype=torch.bool, device=resolved_device

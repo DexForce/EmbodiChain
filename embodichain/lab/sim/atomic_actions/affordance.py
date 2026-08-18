@@ -240,17 +240,18 @@ class InteractionPoints(Affordance):
 class AssembleAffordance(Affordance):
     """Affordance describing how an assemble object fits onto a base object.
 
-    The base object anchors the assembly: its world pose is read at planning
-    time from :attr:`base_object_entity` so the target tracks a moved base. The
-    assemble object is the part that is picked up and placed; its target pose is
-    ``base_pose @ assemble_to_base_pose``.
+    The affordance stores the relative assembly relation. Canonical planning
+    supplies the base object's snapshot pose through ``AssembleGoal.base_pose``;
+    :attr:`base_object_entity` is retained only as a deprecated direct-core
+    fallback when that goal field is omitted. The assemble object's target pose
+    is ``base_pose @ assemble_to_base_pose``.
     """
 
     base_object_label: str = ""
     """Label of the base object the assemble object is placed onto."""
 
     base_object_entity: BatchEntity | None = None
-    """Simulation entity for the base object; its pose anchors the assembly."""
+    """Legacy live base entity used only when ``AssembleGoal.base_pose`` is absent."""
 
     assemble_object_label: str = ""
     """Label of the assemble object that is picked up and placed."""
@@ -274,18 +275,41 @@ class AssembleAffordance(Affordance):
 
         Returns:
             Assemble-object target pose with shape ``(num_envs, 4, 4)``.
+
+        Raises:
+            TypeError: If either pose value is not a tensor.
+            ValueError: If either pose has an unsupported shape or batch size.
         """
+        if not isinstance(base_pose, torch.Tensor):
+            raise TypeError("base_pose must be a torch.Tensor.")
         base_pose = base_pose.to(dtype=torch.float32)
-        if base_pose.dim() == 2:
+        if base_pose.shape == (4, 4):
             base_pose = base_pose.unsqueeze(0)
+        elif (
+            base_pose.dim() != 3
+            or base_pose.shape[0] == 0
+            or base_pose.shape[-2:] != (4, 4)
+        ):
+            raise ValueError("base_pose must have shape (4, 4) or (num_envs, 4, 4).")
         num_envs = base_pose.shape[0]
+        if not isinstance(self.assemble_to_base_pose, torch.Tensor):
+            raise TypeError("assemble_to_base_pose must be a torch.Tensor.")
         rel = self.assemble_to_base_pose.to(
             device=base_pose.device, dtype=torch.float32
         )
-        if rel.dim() == 2:
+        if rel.shape == (4, 4):
             rel = rel.unsqueeze(0).repeat(num_envs, 1, 1)
+        elif rel.dim() != 3 or rel.shape[-2:] != (4, 4) or rel.shape[0] == 0:
+            raise ValueError(
+                "assemble_to_base_pose must have shape (4, 4), (1, 4, 4), "
+                "or (num_envs, 4, 4)."
+            )
         elif rel.shape[0] == 1:
             rel = rel.repeat(num_envs, 1, 1)
+        elif rel.shape[0] != num_envs:
+            raise ValueError(
+                "assemble_to_base_pose batch size must match base_pose batch size."
+            )
         return torch.bmm(base_pose, rel)
 
 

@@ -27,11 +27,22 @@ from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
 from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction, ObjectSemantics
+from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
+from ..core import AtomicAction, ObjectSemantics, _same_object_identity
 from ..effects import StateDelta
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
+from ..requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointResourceSlots,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from ..state import HeldObjectState, PlanningContext
 from ..trajectory_ops import (
     interpolate_hand_qpos,
@@ -141,7 +152,65 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     OptionsType: ClassVar[type] = HandOverOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="source",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset(
+                            {
+                                CARTESIAN_POSE_CAPABILITY,
+                                FORWARD_KINEMATICS_CAPABILITY,
+                            }
+                        ),
+                        route=ActionBindingRoute("manipulator", "source"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={
+                            OPEN_COMMAND: JointPositionCommand,
+                            GRASP_COMMAND: JointPositionCommand,
+                        },
+                        route=ActionBindingRoute("end_effector", "source"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+            SkillResourceSlot(
+                slot_id="destination",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                        route=ActionBindingRoute("manipulator", "destination"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={
+                            OPEN_COMMAND: JointPositionCommand,
+                            GRASP_COMMAND: JointPositionCommand,
+                        },
+                        route=ActionBindingRoute("end_effector", "destination"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+        constraints=(DisjointResourceSlots(("source", "destination")),),
+    )
     _repeat_qpos = staticmethod(repeat_qpos)
+
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[GraspGoal, HandOverOptions],
+    ) -> tuple[str, ...]:
+        """Return no goal-pose dependency because handover ignores grasp_xpos."""
+        del request
+        return ()
 
     def _resolve_resources(
         self,
@@ -235,6 +304,10 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             transfer_held_object.object_to_eef,
             "held_object.object_to_eef",
         )
+        transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
+            state,
+            resources,
+        )
         assert options.middle_object_pose is not None
         assert options.final_object_pose is not None
         middle_object_pose = self._resolve_matrix(
@@ -250,10 +323,17 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_approach_direction
             / torch.linalg.vector_norm(receive_approach_direction)
         )
-        # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
-        if semantics.entity is None:
-            raise ValueError("HandOver requires the held object to have an entity.")
-        current_object_pose = semantics.entity.get_local_pose(to_matrix=True)
+        # Keep the requested object orientation consistent with the verified
+        # attachment and the transferring arm's current measured pose.
+        transfer_current_eef = self.robot.compute_fk(
+            qpos=transfer_start_qpos,
+            name=resources.transfer_arm.name,
+            to_matrix=True,
+        )
+        current_object_pose = torch.bmm(
+            transfer_current_eef,
+            pose_inv(transfer_object_to_eef),
+        )
         middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
         final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
@@ -297,9 +377,6 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             ),
         )
 
-        transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
-            state, resources
-        )
         segments = self._compute_segment_lengths(
             request.motion_policy.sample_count, options
         )
@@ -547,11 +624,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         held: ObjectSemantics,
     ) -> None:
         """Reject a request that names a different grounded object."""
-        if (
-            requested.entity is not None
-            and held.entity is not None
-            and requested.entity is not held.entity
-        ):
+        if not _same_object_identity(requested, held):
             raise ValueError(
                 "HandOver goal semantics must identify the object held by the "
                 "source control part."

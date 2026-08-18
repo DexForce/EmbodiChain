@@ -28,17 +28,28 @@ from embodichain.utils.math import matrix_from_quat, pose_inv, quat_from_matrix
 
 from ..affordance import AntipodalAffordance
 from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
+from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction, ObjectSemantics
 from ..effects import StateDelta
 from ..goals import (
     ObjectActionGoal,
     PoseGoalValue,
+    _resolve_object_pose,
     resolve_pose_goal,
     validate_pose_goal,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
+from ..requirements import (
+    ActionBindingRoute,
+    DisjointResourceSlots,
+    DisjointSlotEndpoints,
+    GRASP_CAPABILITY,
+    INVERSE_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from ..state import HeldObjectState, PlanningContext
 from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
 from ._helpers import (
@@ -62,7 +73,11 @@ class CoordinatedPickGoal(ObjectActionGoal):
     """Target pose for the shared object, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     object_initial_pose: PoseGoalValue | None = None
-    """Optional initial object pose. Defaults to ``semantics.entity`` pose."""
+    """Optional initial object pose.
+
+    When omitted, the pose is grounded through the semantic object's stable
+    scene identity, with its live entity retained only as a legacy fallback.
+    """
 
     def __post_init__(self) -> None:
         ObjectActionGoal.__post_init__(self)
@@ -327,6 +342,32 @@ class CoordinatedPickment(
     OptionsType: ClassVar[type] = CoordinatedPickmentOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("left", "right")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("left", "right")
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=tuple(
+            SkillResourceSlot(
+                slot_id=role,
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
+                        route=ActionBindingRoute("manipulator", role),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={
+                            OPEN_COMMAND: JointPositionCommand,
+                            GRASP_COMMAND: JointPositionCommand,
+                        },
+                        route=ActionBindingRoute("end_effector", role),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            )
+            for role in ("left", "right")
+        ),
+        constraints=(DisjointResourceSlots(("left", "right")),),
+    )
 
     _assemble_segment = _DualArmHelpers._assemble_segment
     _expand_qpos = _DualArmHelpers._expand_qpos
@@ -337,6 +378,22 @@ class CoordinatedPickment(
     _repeat_qpos = staticmethod(repeat_qpos)
     _resolve_dual_arm_start = _DualArmHelpers._resolve_dual_arm_start
     _resolve_pose = _DualArmHelpers._resolve_pose
+
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[
+            CoordinatedPickGoal,
+            CoordinatedPickmentOptions,
+        ],
+    ) -> tuple[str, ...]:
+        """Track the semantic object only when it supplies the initial pose."""
+        dependencies = set(super()._scene_dependencies(request))
+        target = request.goal
+        if target.object_initial_pose is None:
+            entity_id = target.semantics.entity_id
+            if entity_id is not None:
+                dependencies.add(entity_id)
+        return tuple(sorted(dependencies))
 
     def _resolve_resources(
         self,
@@ -403,13 +460,12 @@ class CoordinatedPickment(
                 ),
                 "object_initial_pose",
             )
-        if target.semantics.entity is None:
-            raise ValueError(
-                "CoordinatedPickGoal requires object_initial_pose when "
-                "semantics.entity is not provided."
-            )
         return self._resolve_pose(
-            target.semantics.entity.get_local_pose(to_matrix=True),
+            _resolve_object_pose(
+                target.semantics,
+                context,
+                name="object_initial_pose",
+            ),
             "object_initial_pose",
         )
 
