@@ -89,9 +89,15 @@ different planning GPU. A CPU value is rejected because cuRobo itself has no
 CPU backend.
 
 The robot configuration must be a cuRobo V2 robot profile with collision
-spheres and self-collision data; the adapter generates this from the robot's
-URDF automatically. A plain URDF alone is not sufficient for collision planning
-without that sphere-fitting step.
+spheres; the adapter generates this from the robot's URDF automatically. A plain
+URDF alone is not sufficient for robot-to-world collision planning without that
+sphere-fitting step.
+
+:::{warning}
+cuRobo self-collision checking is temporarily disabled in this backend.
+Robot-to-world collision checking remains enabled, but planned trajectories
+are not currently rejected when two robot links collide with each other.
+:::
 
 The adapter automatically rebases simulator-world Cartesian goals and dynamic
 obstacle poses through the live simulator control-part base, so parallel arena
@@ -134,21 +140,55 @@ that use only one move type retain one planner backend; using both incurs a
 second one-time warmup and its graph-resident memory, but still no subprocess or
 second CUDA context.
 
-The collision world is always auto-generated from live `RigidObject` meshes via
-`CuroboWorldCfg.rigid_objects`: the adapter reads each object's mesh
-(`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and writes a
-cached cuRobo scene YAML on the first plan, using
-`CuroboWorldCfg.obstacle_representation` (`"sphere"` by default for fast
-collision queries; use `"cuboid"` for a local-frame AABB placed as an OBB via
-the object pose, or `"mesh"` for the exact triangle mesh).
+The collision world is auto-generated from live `RigidObject` **physical
+collision shapes** via `RigidObject.get_collision_shapes()`. It does not use
+`get_vertices()` / `get_triangles()`, which expose combined visual meshes and may
+differ from the geometry used by DexSim physics.
+
+`CuroboWorldCfg.representation="auto"` is the default. The policy preserves
+boxes as cuboids, spheres and capsules as analytic primitives, and convex
+collision shapes as meshes. Triangle meshes remain meshes up to
+`mesh_triangle_threshold`; above that threshold they become voxel ESDF when the
+estimated dense allocation fits `max_voxel_count`. Pose-dynamic meshes use twice
+the threshold before voxelization, while static cached meshes favor ESDF sooner
+for repeated collision queries. SDF descriptors fall back to
+their canonical collision mesh because the current DexSim Python binding does
+not expose reusable SDF grid data. Unsupported descriptors raise an explicit
+error instead of silently falling back to visual geometry.
+
+Forced voxel mode and per-object overrides remain available:
+
+```python
+world_cfg = CuroboWorldCfg(
+    rigid_objects=[room_scan, precision_fixture],
+    representation="auto",
+    overrides={
+        "room_scan": "voxel",
+        "precision_fixture": "mesh",
+    },
+)
+```
+
+`voxel_size` and `voxel_padding` configure generated ESDF layers. `plane_dims`
+bounds an infinite DexSim plane as a thin cuRobo cuboid. Compound and ACD bodies
+produce stable names such as `fixture__shape_0`; callers still use the owning
+`RigidObject` UID in `dynamic_obstacle_names` and
+`CuroboPlanOptions.dynamic_obstacle_poses`, and the adapter fans each update out
+through the sub-shapes' local poses.
+
+> **DexSim binding requirement:** Correct compound/USD offsets require
+> `RigidBody.get_shape_geometry()` to copy each physical shape's local pose into
+> `ShapeGeometry.local_pose`. Reusing a DexSim SDF as a voxel grid additionally
+> requires grid metadata/data that the current Python API does not expose. Until
+> those upstream bindings are available, verify compound offsets explicitly;
+> SDF descriptors use their canonical collision mesh when one is exposed and
+> otherwise raise an actionable error.
+
 Generated poses are authored in the cuRobo base/world frame, so this is exact
 when the robot base sits at the simulator world origin. For obstacles that move
-or live in an offset base frame, also declare their names in
+or live in an offset base frame, declare their object UIDs in
 `CuroboWorldCfg.dynamic_obstacle_names` and update poses at plan time through
-`CuroboPlanOptions.dynamic_obstacle_poses` (provision
-`CuroboWorldCfg.collision_cache` before planning). Dynamic updates require the
-`"cuboid"` or `"mesh"` representation because sphere fitting expands one object
-into multiple independently named obstacles.
+`CuroboPlanOptions.dynamic_obstacle_poses`.
 
 ### Shared and per-environment collision worlds
 
@@ -172,14 +212,13 @@ differ, the adapter rejects the update and instructs the caller to enable
 
 With `multi_env=True`, cuRobo allocates one collision world per batch row and
 EmbodiChain sends row `i` of each dynamic obstacle pose to world `i`. The
-auto-generated YAML still reads the static scene from env 0 and clones that
+auto-generated collision cache still reads the static scene from env 0 and clones that
 scene for every row; setting `multi_env=True` does not by itself discover each
 environment's distinct initial object poses. Any object whose robot-relative
 pose differs by environment must also:
 
-1. Use `obstacle_representation="cuboid"` or `"mesh"`.
-2. Be listed in `CuroboWorldCfg.dynamic_obstacle_names`.
-3. Have its current `(B, 4, 4)` simulator-world poses passed through
+1. Be listed in `CuroboWorldCfg.dynamic_obstacle_names`.
+2. Have its current `(B, 4, 4)` simulator-world poses passed through
    `CuroboPlanOptions.dynamic_obstacle_poses` when planning.
 
 For example:
@@ -187,7 +226,6 @@ For example:
 ```python
 world_cfg = CuroboWorldCfg(
     rigid_objects=[block],
-    obstacle_representation="cuboid",
     dynamic_obstacle_names=["block"],
     multi_env=True,
 )
@@ -225,11 +263,18 @@ robot's URDF and solver, so nothing robot-specific needs to be hardcoded:
 The generated YAML is cached on disk (default `$XDG_CACHE_HOME/embodichain_curobo`
 or `~/.cache/embodichain_curobo`) keyed by the URDF path, URDF content, control
 part, tool frame, and fit parameters, so editing the URDF or changing the fit
-settings regenerates automatically and subsequent inits reuse the cache. Tune the
-fit with `CuroboPlannerCfg.auto_gen` (`fit_type="voxel"` by default for fast
-first-generation; `"morphit"` for best quality; `force=True` to bypass the cache).
-The default `sphere_density=0.1` keeps the per-link sphere count low (~80 for a
-Panda) so planning stays fast; raise it for tighter collision coverage.
+settings regenerates automatically and subsequent inits reuse the cache. Sphere
+fitting always uses DexSim's `SphereFitType.MORPHIT`, with at most 2 convex hulls
+per robot link and 16 per voxelized obstacle shape. The default
+`sphere_density=0.1` keeps the
+per-link sphere count low (~80 for a Panda) so planning stays fast; raise it for
+tighter collision coverage, or set `force=True` to bypass the cache.
+
+For an Open3D overlay of the robot collision spheres and sampled world collision
+representations read back from those caches, call
+`planner.visualize_robot_collision_models(control_part)`. Robot sphere centers are
+transformed by the simulator's live link poses. The interactive cuRobo example
+calls this once after planner initialization; close the Open3D window to continue.
 
 ## Generate a motion
 
@@ -309,9 +354,9 @@ python examples/sim/planners/curobo_planner.py --headless --sim-device cpu
 ~~~
 
 The demo exports the DexSim `demo_block` into the cuRobo collision world via
-`CuroboWorldCfg.rigid_objects` (the robot and world YAMLs are both
-auto-generated), prints the result status and trajectory shape, then replays the
-returned full-DoF trajectory. CUDA graph capture is enabled by default with the
+`CuroboWorldCfg.rigid_objects` (the robot YAML and mixed collision-world cache are
+auto-generated), prints the result status and trajectory shape, then replays
+the returned full-DoF trajectory. CUDA graph capture is enabled by default with the
 renderer-compatible `"thread_local"` mode; pass `--no-cuda-graph` to disable it.
 Headless runs
 automatically record this fixed offscreen camera view to an MP4. Set an explicit

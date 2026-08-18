@@ -22,6 +22,7 @@ bodies.
     Light
     LightCfg
     RigidObject
+    CollisionShapeDesc
     RigidBodyData
     RigidObjectCfg
     RigidObjectGroup
@@ -66,6 +67,9 @@ Rigid Object
     :members:
     :inherited-members:
     :show-inheritance:
+
+.. autoclass:: CollisionShapeDesc
+    :members:
 
 .. autoclass:: RigidBodyData
     :members:

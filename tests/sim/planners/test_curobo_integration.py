@@ -84,14 +84,12 @@ def _make_sim_robot(num_envs: int = 1):
 
 
 @pytest.mark.slow
-def test_curobo_v2_plans_around_a_static_cuboid():
+def test_curobo_v2_plans_around_a_static_voxel_obstacle():
     sim, robot, block = _make_sim_robot()
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
-            world=CuroboWorldCfg(
-                rigid_objects=[block], obstacle_representation="cuboid"
-            ),
+            world=CuroboWorldCfg(rigid_objects=[block]),
             # Skipping optional non-graph warmup keeps fresh CI runs practical.
             warmup_iterations=0,
         )
@@ -136,18 +134,13 @@ def test_curobo_v2_plans_around_a_static_cuboid():
 
 
 @pytest.mark.slow
-def test_curobo_v2_plans_around_rigid_object_mesh_world():
-    """Auto-generate the collision world from a live RigidObject mesh and plan.
-
-    Uses the ``mesh`` representation (exact triangle mesh) to exercise the full
-    mesh -> cuRobo world-YAML path end-to-end, complementing the default
-    ``cuboid`` path in :func:`test_curobo_v2_plans_around_a_static_cuboid`.
-    """
+def test_curobo_v2_plans_around_rigid_object_voxel_world():
+    """Exercise mesh -> VisACD convex hulls -> voxel ESDF planning end to end."""
     sim, robot, block = _make_sim_robot()
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
-            world=CuroboWorldCfg(rigid_objects=[block], obstacle_representation="mesh"),
+            world=CuroboWorldCfg(rigid_objects=[block]),
             warmup_iterations=0,
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
@@ -191,9 +184,7 @@ def test_curobo_v2_plans_a_joint_space_move():
     try:
         cfg = CuroboPlannerCfg(
             robot_uid=ROBOT_UID,
-            world=CuroboWorldCfg(
-                rigid_objects=[block], obstacle_representation="cuboid"
-            ),
+            world=CuroboWorldCfg(rigid_objects=[block]),
             warmup_iterations=0,
         )
         mg = MotionGenerator(MotionGenCfg(planner_cfg=cfg))
@@ -232,7 +223,6 @@ def test_curobo_v2_multi_env_worlds_are_independent():
             robot_uid=ROBOT_UID,
             world=CuroboWorldCfg(
                 rigid_objects=[block],
-                obstacle_representation="cuboid",
                 dynamic_obstacle_names=["demo_block"],
                 multi_env=True,
             ),

@@ -17,7 +17,8 @@
 """cuRobo V2 collision-aware planning through the atomic-action interface.
 
 The demo creates one or more copies of the selected robot and a kinematic
-cuboid represented in both DexSim and cuRobo. With multiple environments, each
+DexSim cuboid converted through VisACD into a cuRobo ESDF voxel obstacle. With
+multiple environments, each
 obstacle receives a small reproducible XY/yaw perturbation and cuRobo allocates
 an independent collision world for each environment. The demo then executes a
 batched ``MoveEndEffector`` action through :class:`AtomicActionEngine`, replays
@@ -458,11 +459,23 @@ def _build_scene(
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
     target_xpos = _resolve_batched_target(target_xpos, robot.num_instances)
-    if robot_type == "w1":
-        # Keep the W1-specific IK diagnostic batched so it remains useful when
-        # checking solver and cuRobo reachability across multiple environments.
-        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
-        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
+    # if robot_type == "w1":
+    # Keep the W1-specific IK diagnostic batched so it remains useful when
+    # checking solver and cuRobo reachability across multiple environments.
+    # import ipdb; ipdb.set_trace()
+    init_qpos = torch.tensor(
+        robot.cfg.init_qpos, dtype=torch.float32, device=robot.device
+    )
+    arm_init_qpos = (
+        init_qpos[robot.get_joint_ids(control_part)]
+        .unsqueeze(0)
+        .expand(num_envs, -1)
+        .clone()
+    )
+    is_success, ik_qpos = robot.compute_ik(
+        pose=target_xpos, name=control_part, joint_seed=arm_init_qpos
+    )
+    print(f"robot target xpos ik success: {is_success}, ik_qpos: {ik_qpos}")
 
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
@@ -711,6 +724,9 @@ def main() -> None:
             seed=args.seed,
         )
         use_independent_worlds = args.num_envs > 1
+        visualize_robot_collision_models = (
+            not args.headless and not use_independent_worlds
+        )
         if use_independent_worlds:
             for name, poses in obstacle_poses.items():
                 yaw_deg = torch.rad2deg(torch.atan2(poses[:, 1, 0], poses[:, 0, 0]))
@@ -734,7 +750,6 @@ def main() -> None:
                     robot_uid=robot.uid,
                     world=CuroboWorldCfg(
                         rigid_objects=obstacles,
-                        obstacle_representation="cuboid",
                         dynamic_obstacle_names=(
                             [obstacle.uid for obstacle in obstacles]
                             if use_independent_worlds
@@ -748,6 +763,11 @@ def main() -> None:
                 )
             )
         )
+        if visualize_robot_collision_models:
+            # This overlays the exact cached robot spheres and obstacle ESDF
+            # surface used by cuRobo in the DexSim window. Press Enter in the
+            # terminal to remove the overlay and continue planner creation.
+            motion_generator.planner.visualize_robot_collision_models(control_part)
         engine = AtomicActionEngine(motion_generator)
         binding = ActionBinding(manipulators={"primary": control_part})
         motion_policy = MotionPolicy(
