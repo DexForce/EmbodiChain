@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import copy
 import os
 from dataclasses import replace
 
@@ -26,12 +25,10 @@ from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
 from embodichain.lab.sim.spawn.descriptors import (
-    DeferredArticulationOverrides,
     _compile_dexsim_collision,
     _compile_newton_collision,
     _compile_rigid_physics,
     _compile_visual_material,
-    _copy_value,
     _pose_from_cfg,
     _required_uid,
     _vector3,
@@ -90,11 +87,7 @@ def articulation_desc_from_usd(
     *,
     per_env: bool = True,
     source_path: str | None = None,
-) -> tuple[
-    ArticulationDesc,
-    dict[str, MaterialDesc],
-    DeferredArticulationOverrides,
-]:
+) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
     """Select the sole articulation in a USD stage."""
     path = source_path or cfg.fpath
     scene, desc = _parse_singleton(path, "articulations", "articulation")
@@ -113,25 +106,11 @@ def articulation_desc_from_usd(
         cfg.fix_base = bool(desc.fixed_base)
         cfg.disable_self_collision = not desc.enable_self_collision
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
-        overrides = DeferredArticulationOverrides(
-            body_attributes=None,
-            link_attributes={},
-            drive_properties=None,
-            qpos_limits=_copy_value(cfg.qpos_limits),
-            compute_uv=False,
-        )
     else:
         desc.fixed_base = bool(cfg.fix_base)
         desc.enable_self_collision = not bool(cfg.disable_self_collision)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
-        overrides = DeferredArticulationOverrides(
-            body_attributes=copy.deepcopy(cfg.attrs),
-            link_attributes=copy.deepcopy(cfg.link_attrs or {}),
-            drive_properties=copy.deepcopy(cfg.drive_pros),
-            qpos_limits=_copy_value(cfg.qpos_limits),
-            compute_uv=bool(cfg.compute_uv),
-        )
-    return desc, materials, overrides
+    return desc, materials
 
 
 def _parse_singleton(path: object, collection: str, label: str):

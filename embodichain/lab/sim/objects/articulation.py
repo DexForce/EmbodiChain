@@ -73,7 +73,6 @@ from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from dexsim.spawn import SpawnResult, SpawnedArticulation
-    from embodichain.lab.sim.spawn import DeferredArticulationOverrides
 
 
 @dataclass
@@ -455,7 +454,6 @@ class Articulation(BatchEntity):
             self._entities = []
             self._declared_num_instances = declared_num_instances
             self._spawn_result = None
-            self._spawn_overrides_applied = False
             self._world = None
             self._ps = None
             self._data = None
@@ -467,7 +465,6 @@ class Articulation(BatchEntity):
 
         self._declared_num_instances = len(entities)
         self._spawn_result = spawn_result
-        self._spawn_overrides_applied = False
         if spawn_result is None:
             # Legacy initialization remains temporarily while SimulationManager
             # migration is in progress. Spawn-bound facades never reach for a
@@ -566,7 +563,7 @@ class Articulation(BatchEntity):
 
         # Apply configured qpos limits if provided. This replaces the asset
         # limits as the baseline and allows expanding the allowed range.
-        if spawn_result is None and self.cfg.qpos_limits is not None:
+        if self.cfg.qpos_limits is not None:
             if isinstance(self.cfg.qpos_limits, dict):
                 indices, _, values = resolve_matching_names_values(
                     self.cfg.qpos_limits, self.joint_names
@@ -654,14 +651,8 @@ class Articulation(BatchEntity):
         self,
         result: SpawnResult,
         entities: Sequence[SpawnedArticulation],
-        overrides: DeferredArticulationOverrides | None = None,
     ) -> None:
-        """Bind a declared facade to stable Spawn articulation handles.
-
-        Deferred configuration is applied to a temporary fully initialized
-        facade first. The user-visible object is swapped only after that work
-        succeeds, so a failing session callback leaves it in DECLARED state.
-        """
+        """Initialize this declared facade from Spawn articulation handles."""
         if self.is_spawn_bound:
             raise RuntimeError(f"Articulation {self.uid!r} is already Spawn-bound.")
         if not self.is_declared:
@@ -674,142 +665,69 @@ class Articulation(BatchEntity):
                 f"{self._declared_num_instances} Spawn handles, got {len(entities)}."
             )
 
-        bound = type(self)(
-            self.cfg,
+        cfg = self.cfg
+        device = self.device
+        type(self).__init__(
+            self,
+            cfg,
             list(entities),
-            self.device,
+            device,
             spawn_result=result,
         )
-        if overrides is not None:
-            bound.apply_deferred_spawn_overrides(overrides)
-        self.__dict__.clear()
-        self.__dict__.update(bound.__dict__)
+        self._apply_spawn_config()
 
-    def apply_deferred_spawn_overrides(
-        self,
-        overrides: DeferredArticulationOverrides,
-    ) -> None:
-        """Apply configuration that requires finalized source metadata.
+    def _apply_spawn_config(self) -> None:
+        """Apply config values that require finalized source metadata.
 
         The source file is loaded only by the DexSim Spawn adapter.  This
         method runs after binding, when canonical link and active-joint names
-        are available, and deliberately limits itself to live mutations that
-        do not require parsing the source again.
-
-        Args:
-            overrides: Configuration snapshot retained during Spawn translation.
-
-        Raises:
-            RuntimeError: If called before the facade is Spawn-bound.
+        are available.
         """
-        if not self.is_spawn_bound:
-            raise RuntimeError(
-                f"Articulation {self.uid!r} must be Spawn-bound before applying "
-                "deferred configuration."
-            )
-        if self._spawn_overrides_applied:
+        is_usd = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        use_source_properties = is_usd and self.cfg.use_usd_properties
+        if use_source_properties:
             return
 
-        todos: list[str] = []
-        if overrides.drive_properties is not None:
-            self._set_default_joint_drive(overrides.drive_properties)
+        self._set_default_joint_drive()
+        self._apply_configured_link_masses()
 
-        if overrides.qpos_limits is not None:
-            if self.body_data.is_newton_backend:
-                # SimulationManager rejects this combination before declaring
-                # the descriptor. Keep direct facade use non-throwing so a bind
-                # callback can never leave the session in a half transaction.
-                todos.append(
-                    "Newton qpos_limits require a retained-desc configuration "
-                    "phase before model finalize and were not applied"
-                )
-            else:
-                self._apply_spawn_qpos_limits(overrides.qpos_limits)
+        if self.cfg.compute_uv:
+            for entity in self._entities:
+                for link_name in self.link_names:
+                    render_body = entity.get_render_body(link_name)
+                    if render_body is not None:
+                        render_body.set_projective_uv()
 
-        self._apply_spawn_mass_overrides(overrides, todos)
-
-        if overrides.compute_uv:
-            self._apply_spawn_projective_uv()
-
-        if overrides.body_attributes is not None:
-            todos.append(
-                "non-mass articulation link physics attributes are retained in "
-                "cfg but DexSim SpawnedArticulation has no live common setter"
-            )
-
-        for todo in dict.fromkeys(todos):
-            logger.log_warning(f"Spawn articulation {self.uid!r}: TODO: {todo}.")
-        self._spawn_overrides_applied = True
-
-    def _apply_spawn_qpos_limits(self, limits: object) -> None:
-        """Apply resolved joint limits on the live PhysX articulation."""
-        if isinstance(limits, dict):
-            indices, _, values = resolve_matching_names_values(
-                limits,
-                self.joint_names,
-            )
-            joint_ids = torch.as_tensor(
-                indices,
-                dtype=torch.long,
-                device=self.device,
-            )
-            limit_values = torch.as_tensor(
-                values,
-                dtype=torch.float32,
-                device=self.device,
-            ).unsqueeze(0)
-            limit_values = limit_values.expand(self.num_instances, -1, -1)
-            self.set_qpos_limits(limit_values, joint_ids=joint_ids)
-            return
-
-        limit_values = torch.as_tensor(
-            limits,
-            dtype=torch.float32,
-            device=self.device,
+        logger.log_warning(
+            f"Spawn articulation {self.uid!r}: TODO: non-mass link physics "
+            "attributes are not exposed by DexSim SpawnedArticulation."
         )
-        if limit_values.dim() == 2:
-            limit_values = limit_values.unsqueeze(0).expand(
-                self.num_instances,
-                -1,
-                -1,
-            )
-        self.set_qpos_limits(limit_values)
 
-    def _apply_spawn_mass_overrides(
-        self,
-        overrides: DeferredArticulationOverrides,
-        todos: list[str],
-    ) -> None:
-        """Apply the live mass subset once link names have been resolved."""
-        base = overrides.body_attributes
-        groups = overrides.link_attributes
-        has_mass_override = (base is not None and base.mass is not None) or any(
+    def _apply_configured_link_masses(self) -> None:
+        """Apply configured masses after source link names are available."""
+        base_mass = self.cfg.attrs.mass
+        groups = self.cfg.link_attrs or {}
+        if base_mass is None and not any(
             group.attrs.mass is not None for group in groups.values()
-        )
-        if not has_mass_override:
+        ):
             return
         if self.body_data.is_newton_backend:
-            todos.append(
-                "Newton link-mass overrides require a retained-desc rebuild and "
-                "are not applied during the initial bind"
+            logger.log_warning(
+                f"Spawn articulation {self.uid!r}: Newton link-mass overrides "
+                "require retained-desc support and were not applied."
             )
             return
 
+        masses = self.get_mass()
         mass_changed = False
-        if base is not None and base.mass is not None:
-            if base.mass == 0:
-                todos.append(
-                    "density-derived articulation mass is not exposed by the "
-                    "backend-neutral Spawn facade and was not applied"
+        if base_mass is not None:
+            if base_mass == 0:
+                logger.log_warning(
+                    f"Spawn articulation {self.uid!r}: density-derived mass is "
+                    "not exposed by the Spawn facade and was not applied."
                 )
             else:
-                values = torch.full(
-                    (self.num_instances, self.num_links),
-                    float(base.mass),
-                    dtype=torch.float32,
-                    device=self.device,
-                )
-                self.set_mass(values, self.link_names)
+                masses.fill_(float(base_mass))
                 mass_changed = True
 
         claimed: set[str] = set()
@@ -817,12 +735,12 @@ class Articulation(BatchEntity):
             if group.attrs.mass is None:
                 continue
             if group.attrs.mass == 0:
-                todos.append(
-                    "density-derived per-link articulation mass is not exposed "
-                    "by the backend-neutral Spawn facade and was not applied"
+                logger.log_warning(
+                    f"Spawn articulation {self.uid!r}: density-derived per-link "
+                    "mass is not exposed by the Spawn facade and was not applied."
                 )
                 continue
-            _, matched_names = resolve_matching_names(
+            matched_indices, matched_names = resolve_matching_names(
                 keys=group.link_names_expr,
                 list_of_strings=self.link_names,
             )
@@ -833,25 +751,12 @@ class Articulation(BatchEntity):
                     f"{sorted(overlap)}."
                 )
             claimed.update(matched_names)
-            values = torch.full(
-                (self.num_instances, len(matched_names)),
-                float(group.attrs.mass),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            self.set_mass(values, matched_names)
+            masses[:, matched_indices] = float(group.attrs.mass)
             mass_changed = True
 
         if mass_changed:
+            self.set_mass(masses, self.link_names)
             self.default_link_masses = self.get_mass()
-
-    def _apply_spawn_projective_uv(self) -> None:
-        """Apply the render-only UV request after link render bodies exist."""
-        for entity in self._entities:
-            for link_name in self.link_names:
-                render_body = entity.get_render_body(link_name)
-                if render_body is not None:
-                    render_body.set_projective_uv()
 
     def __str__(self) -> str:
         if self.is_declared:

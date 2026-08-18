@@ -23,23 +23,19 @@ between PhysX and Newton.
 
 Articulation joint and link names are resolved by the normal DexSim adapter
 finalization, not by a second source parser in EmbodiChain. Configuration that
-depends on those names is retained in :class:`DeferredArticulationOverrides`
-and its supported live subset is applied after the facade binds to the
-finalized result.
+depends on those names is applied directly from the EmbodiChain config after
+the facade binds to the finalized result.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-import copy
-from dataclasses import MISSING, dataclass, fields
+from collections.abc import Sequence
+from dataclasses import MISSING, fields
 import math
 import os
 from typing import TYPE_CHECKING
 
 import numpy as np
-import torch
-
 from dexsim.spawn import (
     ArticulationDesc,
     ClothObjectDesc,
@@ -48,7 +44,6 @@ from dexsim.spawn import (
     DexsimCollisionDesc,
     DexsimPhysicsDesc,
     GeometryDesc,
-    LightDesc,
     MaterialDesc,
     NewtonCollisionDesc,
     ObjectDesc,
@@ -61,9 +56,6 @@ from dexsim.types import ActorType
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     ClothObjectCfg,
-    JointDrivePropertiesCfg,
-    LightCfg,
-    LinkPhysicsOverrideCfg,
     RigidBodyAttributesCfg,
     RigidObjectCfg,
     SoftObjectCfg,
@@ -75,30 +67,11 @@ if TYPE_CHECKING:
     from embodichain.lab.sim.material import VisualMaterialCfg
 
 __all__ = [
-    "DeferredArticulationOverrides",
     "articulation_desc_from_cfg",
     "cloth_desc_from_cfg",
-    "light_desc_from_cfg",
     "rigid_desc_from_cfg",
     "soft_desc_from_cfg",
 ]
-
-
-@dataclass(frozen=True)
-class DeferredArticulationOverrides:
-    """Typed articulation values that must be consumed after source resolve.
-
-    These are snapshots, not references to the caller's mutable config.  They
-    are intentionally kept separate from :class:`ArticulationDesc`: putting
-    unresolved regex dictionaries on an adapter-specific side channel would
-    make DexSim's descriptor cease to be the canonical scene description.
-    """
-
-    body_attributes: RigidBodyAttributesCfg | None
-    link_attributes: Mapping[str, LinkPhysicsOverrideCfg]
-    drive_properties: JointDrivePropertiesCfg | None
-    qpos_limits: object | None
-    compute_uv: bool
 
 
 def rigid_desc_from_cfg(
@@ -146,65 +119,6 @@ def rigid_desc_from_cfg(
     )
     materials = {} if material_entry is None else {material_entry[0]: material_entry[1]}
     return descriptor, materials
-
-
-def light_desc_from_cfg(
-    cfg: LightCfg,
-    *,
-    per_env: bool | None = None,
-) -> LightDesc:
-    """Translate a light config into a DexSim Spawn descriptor."""
-    uid = _required_uid(cfg.uid, "Light")
-    supported_types = {"point", "sun", "direction", "spot", "rect", "mesh"}
-    if cfg.light_type not in supported_types:
-        raise ValueError(
-            f"Unsupported light type {cfg.light_type!r}; expected one of "
-            f"{tuple(sorted(supported_types))}."
-        )
-
-    color = tuple(float(value) for value in cfg.color)
-    direction = tuple(float(value) for value in cfg.direction)
-    if len(color) != 3 or not np.isfinite(color).all():
-        raise ValueError("Light color must contain three finite values.")
-    if len(direction) != 3 or not np.isfinite(direction).all():
-        raise ValueError("Light direction must contain three finite values.")
-    if not np.isfinite(float(cfg.intensity)):
-        raise ValueError("Light intensity must be finite.")
-    if not np.isfinite(float(cfg.radius)):
-        raise ValueError("Light radius must be finite.")
-
-    is_directional = cfg.light_type in {
-        "sun",
-        "direction",
-        "spot",
-        "rect",
-        "mesh",
-    }
-    resolved_per_env = (
-        cfg.light_type not in {"sun", "direction"} if per_env is None else bool(per_env)
-    )
-    return LightDesc(
-        name=uid,
-        pose=_pose_from_cfg(cfg),
-        light_type=cfg.light_type,
-        color=color,
-        intensity=float(cfg.intensity),
-        shadow=bool(cfg.enable_shadow),
-        falloff=float(cfg.radius) if cfg.light_type == "point" else None,
-        spot_inner_angle=(
-            float(cfg.spot_angle_inner) if cfg.light_type == "spot" else None
-        ),
-        spot_outer_angle=(
-            float(cfg.spot_angle_outer) if cfg.light_type == "spot" else None
-        ),
-        rect_size=(
-            (float(cfg.rect_width), float(cfg.rect_height))
-            if cfg.light_type == "rect"
-            else None
-        ),
-        direction=direction if is_directional else None,
-        per_env=resolved_per_env,
-    )
 
 
 def soft_desc_from_cfg(
@@ -261,8 +175,8 @@ def articulation_desc_from_cfg(
     *,
     per_env: bool = True,
     source_path: str | None = None,
-) -> tuple[ArticulationDesc, DeferredArticulationOverrides]:
-    """Translate an articulation config and retain its post-finalize overrides."""
+) -> ArticulationDesc:
+    """Translate an articulation config into a DexSim Spawn descriptor."""
     path = source_path if source_path is not None else cfg.fpath
     if path is None or not str(path).strip():
         raise ValueError(
@@ -285,7 +199,7 @@ def articulation_desc_from_cfg(
             "backend-neutral Spawn facade and were not applied."
         )
 
-    descriptor = ArticulationDesc(
+    return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
         path=str(path),
@@ -297,14 +211,6 @@ def articulation_desc_from_cfg(
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
         newton_collision=_compile_newton_collision(cfg.attrs),
     )
-    overrides = DeferredArticulationOverrides(
-        body_attributes=copy.deepcopy(cfg.attrs),
-        link_attributes=copy.deepcopy(cfg.link_attrs or {}),
-        drive_properties=copy.deepcopy(cfg.drive_pros),
-        qpos_limits=_copy_value(cfg.qpos_limits),
-        compute_uv=bool(cfg.compute_uv),
-    )
-    return descriptor, overrides
 
 
 def _compile_rigid_physics(
@@ -562,14 +468,6 @@ def _vector3(value: object, *, field_name: str) -> np.ndarray:
     if field_name == "body_scale" and np.any(result <= 0):
         raise ValueError("body_scale values must be positive.")
     return result.copy()
-
-
-def _copy_value(value: object | None) -> object | None:
-    if isinstance(value, torch.Tensor):
-        return value.detach().clone()
-    if isinstance(value, np.ndarray):
-        return value.copy()
-    return copy.deepcopy(value)
 
 
 def _required_uid(value: str | None, label: str) -> str:

@@ -26,10 +26,10 @@ __all__ = ["SpawnScene"]
 AssetBindCallback = Callable[[Any, tuple[Any, ...]], None]
 _AssetKind = Literal[
     "rigid_object",
+    "rigid_object_group",
     "articulation",
     "soft_object",
     "cloth_object",
-    "light",
 ]
 
 
@@ -91,20 +91,16 @@ class SpawnScene:
             on_bind=on_bind,
         )
 
-        if kind == "light" and self.result is not None:
-            arenas = self.arena_names if descriptor.per_env else ("default",)
-            handles = tuple(
-                self.result.add_light(descriptor, arena_name=arena) for arena in arenas
+        if kind == "rigid_object_group":
+            declaration.descriptor = tuple(
+                self.builder.add_object(member) for member in descriptor
             )
-            if on_bind is not None:
-                on_bind(self.result, handles)
         else:
             add_name = {
                 "rigid_object": "add_object",
                 "articulation": "add_articulation",
                 "soft_object": "add_soft_object",
                 "cloth_object": "add_cloth_object",
-                "light": "add_light",
             }[kind]
             declaration.descriptor = getattr(self.builder, add_name)(descriptor)
         self._assets[uid] = declaration
@@ -130,14 +126,13 @@ class SpawnScene:
                 "DexSim Spawn does not yet expose pending removal for "
                 f"{declaration.kind.replace('_', ' ')}."
             )
-        if declaration.kind == "light" and self.result is not None:
-            for path in self._paths(declaration):
-                self.result.remove_light(path)
+        if declaration.kind == "rigid_object_group":
+            for member in declaration.descriptor:
+                self.builder.remove_object(member.name)
         else:
             remove_name = {
                 "rigid_object": "remove_object",
                 "articulation": "remove_articulation",
-                "light": "remove_light",
             }[declaration.kind]
             removed = getattr(self.builder, remove_name)(declaration.descriptor.name)
             if removed is None:
@@ -172,6 +167,12 @@ class SpawnScene:
         self._assets.clear()
 
     def _paths(self, declaration: _AssetDeclaration) -> tuple[str, ...]:
+        if declaration.kind == "rigid_object_group":
+            return tuple(
+                f"{arena}/{member.name}"
+                for arena in self.arena_names
+                for member in declaration.descriptor
+            )
         name = declaration.descriptor.name
         if not declaration.descriptor.per_env:
             return (name,)

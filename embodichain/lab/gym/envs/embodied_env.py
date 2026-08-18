@@ -553,9 +553,9 @@ class EmbodiedEnv(BaseEnv):
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
-        self._setup_lights()
         self._setup_background()
         self._setup_interactive_objects()
+        self._setup_lights()
 
     def _update_sim_state(self, **kwargs) -> None:
         """Perform the simulation step and apply events if configured.

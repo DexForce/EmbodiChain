@@ -54,7 +54,7 @@ from dexsim.types import (
 from dexsim.core import TASK_RETURN
 from dexsim.engine import Material
 from dexsim.models import MeshObject
-from dexsim.render import Windows
+from dexsim.render import LightType, Windows
 from dexsim.engine import GizmoController, ObjectManipulator
 
 from embodichain.lab.sim.objects import (
@@ -98,7 +98,6 @@ from embodichain.lab.sim.physics import make_physics_backend
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     cloth_desc_from_cfg,
-    light_desc_from_cfg,
     rigid_desc_from_cfg,
     soft_desc_from_cfg,
 )
@@ -930,7 +929,6 @@ class SimulationManager:
         result = scene.result
         if (
             result is not None
-            and result.runtime_prepared
             and not result.needs_rebuild
             and not scene.builder.has_pending_changes
         ):
@@ -1334,7 +1332,15 @@ class SimulationManager:
 
     def get_asset(
         self, uid: str
-    ) -> Light | BaseSensor | Robot | RigidObject | Articulation | None:
+    ) -> (
+        Light
+        | BaseSensor
+        | Robot
+        | RigidObject
+        | RigidObjectGroup
+        | Articulation
+        | None
+    ):
         """Get an asset by its UID.
 
         The asset can be a light, sensor, robot, rigid object or articulation.
@@ -1365,6 +1371,16 @@ class SimulationManager:
         logger.log_warning(f"Asset {uid} not found.")
         return None
 
+    _LIGHT_TYPE_MAP: dict[str, LightType] = {
+        "point": LightType.POINT,
+        "sun": LightType.SUN,
+        "direction": LightType.DIRECTION,
+        "spot": LightType.SPOT,
+        "rect": LightType.RECT,
+        "mesh": LightType.MESH,
+    }
+    _GLOBAL_LIGHT_TYPES: tuple[str, ...] = ("sun", "direction")
+
     def add_light(self, cfg: LightCfg) -> Light:
         """Create a light in the scene.
 
@@ -1387,7 +1403,7 @@ class SimulationManager:
             Light: The created light instance.
 
         Raises:
-            RuntimeError: If ``cfg.light_type`` is not one of the supported types.
+            ValueError: If ``cfg.light_type`` is not supported.
         """
         if cfg.uid is None:
             uid = "light"
@@ -1398,7 +1414,14 @@ class SimulationManager:
         if uid in self._lights:
             logger.log_error(f"Light {uid} already exists.")
 
-        # Validation warnings for type-specific constraints
+        light_type = self._LIGHT_TYPE_MAP.get(cfg.light_type)
+        if light_type is None:
+            supported = ", ".join(self._LIGHT_TYPE_MAP)
+            raise ValueError(
+                f"Unsupported light type {cfg.light_type!r}. "
+                f"Supported types: {supported}."
+            )
+
         if cfg.light_type == "mesh" and not cfg.mesh_path:
             logger.log_warning(
                 f"Mesh light '{uid}' has no mesh_path set. "
@@ -1410,25 +1433,23 @@ class SimulationManager:
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
-        descriptor = light_desc_from_cfg(cfg)
-        per_env = descriptor.per_env
-        num_instances = self.sim_config.num_envs if per_env else 1
-        batch_lights = Light.declared(
-            cfg,
-            descriptor=descriptor,
-            num_instances=num_instances,
-            device=self.device,
-        )
+        # Lights are render resources. Materialize pending physical assets so
+        # their Arenas exist, then use DexSim's native render API directly.
+        self.prepare()
+        if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
+            batch_lights = Light(
+                cfg=cfg,
+                entities=[self._env.create_light(uid, light_type)],
+            )
+        else:
+            batch_lights = Light(
+                cfg=cfg,
+                entities=[
+                    arena.create_light(f"{uid}_{index}", light_type)
+                    for index, arena in enumerate(self._arenas)
+                ],
+            )
 
-        def bind_light(_result, handles) -> None:
-            batch_lights.bind_spawn(handles)
-
-        self._spawn_scene.declare(
-            "light",
-            uid,
-            descriptor,
-            on_bind=bind_light,
-        )
         self._lights[uid] = batch_lights
         self.notify_visualization_topology_changed()
         return batch_lights
@@ -2048,12 +2069,70 @@ class SimulationManager:
 
         Args:
             cfg (RigidObjectGroupCfg): Configuration for the rigid object group.
+
+        Returns:
+            The stable Group facade. During initial scene construction it is
+            bound to Spawn handles by :meth:`prepare`.
         """
-        del cfg
-        self._raise_spawn_feature_todo(
-            "rigid object group",
-            "group composition over ObjectDesc declarations",
+        if not self.physics.supports_rigid_object_group:
+            raise NotImplementedError(
+                f"The {self.physics.name} backend does not support rigid object groups."
+            )
+        uid = cfg.uid
+        if uid is None:
+            raise ValueError("Rigid object group uid must be specified.")
+        if uid in self._rigid_object_groups:
+            raise ValueError(f"Rigid object group {uid!r} already exists.")
+        if cfg.body_type == "static":
+            raise ValueError("Rigid object group cannot be static.")
+        if not cfg.rigid_objects:
+            raise ValueError("Rigid object group must contain at least one object.")
+
+        actor_type = {
+            "dynamic": ActorType.DYNAMIC,
+            "kinematic": ActorType.KINEMATIC,
+        }[cfg.body_type]
+        descriptors = []
+        for index, member in enumerate(cfg.rigid_objects.values()):
+            member_cfg = deepcopy(member)
+            member_cfg.uid = f"{uid}__member_{index}"
+            member_cfg.body_type = cfg.body_type
+            source_path = getattr(member_cfg.shape, "fpath", None)
+            if _is_usd_path(source_path):
+                descriptor, materials = rigid_desc_from_usd(member_cfg, per_env=True)
+            else:
+                descriptor, materials = rigid_desc_from_cfg(member_cfg, per_env=True)
+            if descriptor.physics is None:
+                raise ValueError(
+                    f"Rigid object group member {index} has no rigid-body physics."
+                )
+            descriptor.physics.actor_type = actor_type
+            self._spawn_scene.builder.materials.update(materials)
+            descriptors.append(descriptor)
+
+        group = RigidObjectGroup(
+            cfg,
+            entities=None,
+            device=self.device,
+            declared_num_instances=self.sim_config.num_envs,
         )
+
+        def bind_group(result, handles) -> None:
+            if group.is_declared:
+                group.bind_spawn(result, handles)
+
+        was_materialized = self.spawn_result is not None
+        self._spawn_scene.declare(
+            "rigid_object_group",
+            uid,
+            tuple(descriptors),
+            on_bind=bind_group,
+        )
+        self._rigid_object_groups[uid] = group
+        self.notify_visualization_topology_changed()
+        if was_materialized:
+            self.prepare()
+        return group
 
     def get_rigid_object_group(self, uid: str) -> RigidObjectGroup | None:
         """Get a rigid object group by its unique ID.
@@ -2220,17 +2299,17 @@ class SimulationManager:
         intentionally metadata-empty during scene declaration; once the
         adapter has loaded the source exactly once, the bind callback creates
         its batch view from the resolved link/joint metadata and applies the
-        safe post-bind subset of deferred EmbodiChain configuration.
+        supported live values directly from its EmbodiChain config.
         """
         if _is_usd_path(cfg.fpath):
-            descriptor, materials, overrides = articulation_desc_from_usd(
+            descriptor, materials = articulation_desc_from_usd(
                 cfg,
                 per_env=True,
             )
             self._spawn_scene.builder.materials.update(materials)
         else:
-            descriptor, overrides = articulation_desc_from_cfg(cfg, per_env=True)
-        if self.is_newton_backend and overrides.qpos_limits is not None:
+            descriptor = articulation_desc_from_cfg(cfg, per_env=True)
+        if self.is_newton_backend and cfg.qpos_limits is not None:
             # Reject before mutating SceneBuilder. Applying this after bind
             # would immediately make Newton's immutable model stale.
             raise NotImplementedError(
@@ -2250,11 +2329,7 @@ class SimulationManager:
 
         def bind_articulation(result, handles) -> None:
             if facade.is_declared:
-                facade.bind_spawn(
-                    result,
-                    handles,
-                    overrides=overrides,
-                )
+                facade.bind_spawn(result, handles)
 
         self._spawn_scene.declare(
             "articulation",
@@ -2577,10 +2652,10 @@ class SimulationManager:
                 f"Unsupported sensor type {sensor_type!r}. Supported types: "
                 f"{sorted(self.SUPPORTED_SENSOR_TYPES)}."
             )
-        if sensor_type == "ContactSensor":
-            self._raise_spawn_feature_todo(
-                "contact sensors",
-                "a backend-neutral Spawn contact-query service",
+        if sensor_type == "ContactSensor" and self.is_newton_backend:
+            raise NotImplementedError(
+                "ContactSensor currently requires the Default/PhysX PhysicsScene. "
+                "Newton needs a public backend-neutral contact query API in DexSim."
             )
 
         self.prepare()
@@ -2695,7 +2770,8 @@ class SimulationManager:
     def remove_asset(self, uid: str) -> bool:
         """Remove an asset by its UID.
 
-        The asset can be a light, sensor, robot, rigid object or articulation.
+        Native render lights are not removed by this method. Sensors and
+        Spawn-owned physical assets are supported.
 
         Args:
             uid (str): The UID of the asset.
@@ -2722,9 +2798,9 @@ class SimulationManager:
             self.prepare()
 
         self._rigid_objects.pop(uid, None)
+        self._rigid_object_groups.pop(uid, None)
         self._articulations.pop(uid, None)
         self._robots.pop(uid, None)
-        self._lights.pop(uid, None)
         self.notify_visualization_topology_changed()
         return True
 
@@ -3568,6 +3644,7 @@ class SimulationManager:
             # SpawnResult and, finally, the World that owns native resources.
             for registry_name in (
                 "_rigid_objects",
+                "_rigid_object_groups",
                 "_soft_objects",
                 "_cloth_objects",
                 "_articulations",
