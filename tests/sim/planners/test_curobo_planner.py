@@ -218,6 +218,24 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
     assert cfg.obstacle_representation == "sphere"
 
 
+def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
+    planner = object.__new__(CuroboPlanner)
+    configured_pose = torch.eye(4).unsqueeze(0)
+    observed_pose = torch.eye(4).unsqueeze(0)
+    observed_pose[:, 0, 3] = 0.5
+    options = CuroboPlanOptions(dynamic_obstacle_poses={"configured": configured_pose})
+
+    bound = planner.with_collision_world(
+        options,
+        obstacle_poses={"observed": observed_pose},
+    )
+
+    assert bound is options
+    assert set(bound.dynamic_obstacle_poses) == {"configured", "observed"}
+    assert torch.equal(bound.dynamic_obstacle_poses["observed"], observed_pose)
+    assert bound.dynamic_obstacle_poses["observed"] is not observed_pose
+
+
 def test_auto_gen_defaults_keep_sphere_count_low():
     """The voxel sphere estimate must be scaled down so planning stays fast."""
     auto = CuroboPlannerCfg(robot_uid="franka").auto_gen
@@ -713,7 +731,7 @@ def test_curobo_reuses_non_graph_backend():
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )
@@ -732,7 +750,7 @@ def test_curobo_reuses_non_graph_backend():
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )
@@ -767,7 +785,7 @@ def test_curobo_uses_accelerator_with_cpu_physics():
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
                     ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )

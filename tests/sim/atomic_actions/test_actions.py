@@ -71,7 +71,12 @@ from embodichain.lab.sim.atomic_actions import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.sim.planners import MoveType
+from embodichain.lab.sim.planners import (
+    MotionGenerator,
+    MoveType,
+    PlanOptions,
+    PlanResult,
+)
 
 NUM_ENVS = 2
 ARM_DOF = 6
@@ -104,7 +109,11 @@ def _torch_interpolation(monkeypatch: pytest.MonkeyPatch) -> None:
         return torch.lerp(trajectory[:, lower], trajectory[:, upper], weights)
 
     monkeypatch.setattr(
-        "embodichain.lab.sim.atomic_actions.trajectory.interpolate_with_distance",
+        "embodichain.lab.sim.atomic_actions.trajectory_ops.interpolate_with_distance",
+        interpolate,
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.planners.motion_generator.interpolate_with_distance",
         interpolate,
     )
 
@@ -158,18 +167,23 @@ def _robot() -> Mock:
     return robot
 
 
-def _motion_generator() -> Mock:
-    generator = Mock()
+def _motion_generator() -> MotionGenerator:
+    generator = object.__new__(MotionGenerator)
     generator.robot = _robot()
     generator.device = torch.device("cpu")
+    generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
+    generator.planner.default_plan_options.return_value = PlanOptions()
+    generator.planner.with_motion_context.side_effect = (
+        lambda options, *, start_qpos, control_part: options
+    )
     return generator
 
 
 def _bind_action(
-    generator: Mock,
+    generator: MotionGenerator,
     action: ActionT,
     control_profiles: dict[str, ControlPartCommandProfile] | None = None,
 ) -> ActionT:
@@ -275,7 +289,7 @@ def _held(semantics: ObjectSemantics | None = None) -> HeldObjectState:
     )
 
 
-def _dual_motion_generator() -> Mock:
+def _dual_motion_generator() -> MotionGenerator:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = DUAL_ROBOT_DOF
@@ -334,12 +348,17 @@ def _dual_motion_generator() -> Mock:
     robot.compute_ik.side_effect = compute_ik
     robot.compute_fk.side_effect = compute_fk
 
-    generator = Mock()
+    generator = object.__new__(MotionGenerator)
     generator.robot = robot
     generator.device = torch.device("cpu")
+    generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
+    generator.planner.default_plan_options.return_value = PlanOptions()
+    generator.planner.with_motion_context.side_effect = (
+        lambda options, *, start_qpos, control_part: options
+    )
     return generator
 
 
@@ -566,9 +585,9 @@ def test_press_uses_invocation_sample_budget() -> None:
     assert plan.expected_effects.is_empty
 
 
-def test_motion_source_and_sample_count_are_not_action_config_fields() -> None:
+def test_strategy_and_sample_count_are_not_action_config_fields() -> None:
     with pytest.raises(TypeError):
-        MoveEndEffectorOptions(motion_source="motion_gen")  # type: ignore[call-arg]
+        MoveEndEffectorOptions(strategy="motion_gen")  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         MoveJointsOptions(sample_interval=10)  # type: ignore[call-arg]
 
@@ -591,20 +610,20 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
     generator.planner.supports_move_type.side_effect = (
         lambda move_type: move_type is MoveType.JOINT_MOVE
     )
-    generator.generate.return_value.success = torch.ones(NUM_ENVS, dtype=torch.bool)
-    generator.generate.return_value.positions = torch.ones(NUM_ENVS, 3, ARM_DOF)
-    generator.generate.return_value.velocities = torch.full((NUM_ENVS, 3, ARM_DOF), 0.5)
-    generator.generate.return_value.accelerations = torch.zeros(NUM_ENVS, 3, ARM_DOF)
-    generator.generate.return_value.dt = torch.tensor([[0.0, 0.1, 0.2]]).repeat(
-        NUM_ENVS, 1
+    generator.planner.plan.return_value = PlanResult(
+        success=torch.ones(NUM_ENVS, dtype=torch.bool),
+        positions=torch.ones(NUM_ENVS, 3, ARM_DOF),
+        velocities=torch.full((NUM_ENVS, 3, ARM_DOF), 0.5),
+        accelerations=torch.zeros(NUM_ENVS, 3, ARM_DOF),
+        dt=torch.tensor([[0.0, 0.1, 0.2]]).repeat(NUM_ENVS, 1),
+        duration=torch.full((NUM_ENVS,), 0.3),
     )
-    generator.generate.return_value.duration = torch.full((NUM_ENVS,), 0.3)
     action = _bind_action(generator, MoveJoints())
     invocation = ActionInvocation(
         skill_id="move_joints",
         goal=JointPositionGoal(torch.ones(ARM_DOF)),
         binding=ActionBinding(manipulators={"primary": "arm"}),
-        motion_policy=MotionPolicy(motion_source="motion_gen", sample_count=3),
+        motion_policy=MotionPolicy(strategy="motion_gen", sample_count=3),
     )
 
     plan = _plan_action(action, invocation, _context())
@@ -718,6 +737,49 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     held = projected.get_held_object("arm")
     assert held is not None
     assert torch.allclose(held.grasp_xpos, grasp)
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "close",
+        "lift",
+    ]
+    assert plan.segment("close").stop == plan.segment("lift").start
+
+
+def test_pick_holds_only_environment_without_a_feasible_grasp() -> None:
+    generator = _motion_generator()
+    entity = Mock()
+    entity.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(),
+        geometry={},
+        label="partially-graspable-object",
+        entity=entity,
+    )
+    action = _bind_action(generator, PickUp())
+    action._resolve_grasp_pose = Mock(
+        return_value=(
+            torch.tensor([True, False]),
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        )
+    )
+    context = _context()
+
+    plan = _plan_action(
+        action,
+        _invocation("pick_up", GraspGoal(semantics=semantics), sample_count=20),
+        context,
+    )
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert not torch.allclose(plan.trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        plan.trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(20, -1),
+    )
+    held = projected.get_held_object("arm")
+    assert held is not None
+    assert held.env_mask.tolist() == [True, False]
 
 
 def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
@@ -761,7 +823,7 @@ def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
     held = projected.get_held_object("arm")
     assert held is not None
     assert torch.allclose(held.grasp_xpos, expected_grasp)
-    assert plan.phases[0].spec.scene_dependencies == ("target",)
+    assert plan.scene_dependencies == ("target",)
 
 
 def test_pick_session_replans_when_late_bound_target_moves() -> None:
@@ -913,6 +975,82 @@ def test_handover_does_not_mutate_cached_final_pose() -> None:
 
     assert plan.plan_success.all()
     assert torch.equal(handover_options.final_object_pose, original_final_pose)
+    assert [segment.name for segment in plan.segments] == [
+        "transfer",
+        "approach",
+        "close",
+        "hold",
+        "release",
+        "deliver",
+    ]
+
+
+def test_handover_holds_only_environment_with_ik_failure() -> None:
+    generator = _dual_motion_generator()
+    original_compute_ik = generator.robot.compute_ik.side_effect
+
+    def fail_second_receiving_arm(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        success, qpos = original_compute_ik(
+            pose=pose,
+            name=name,
+            joint_seed=joint_seed,
+            **kwargs,
+        )
+        if name == "right_arm":
+            success = success.clone()
+            success[1] = False
+        return success, qpos
+
+    generator.robot.compute_ik.side_effect = fail_second_receiving_arm
+    semantics = _semantics()
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"left_arm": _held(semantics)},
+    )
+    action = _bind_action(
+        generator,
+        HandOver(
+            default_options=HandOverOptions(
+                middle_object_pose=torch.eye(4),
+                final_object_pose=torch.eye(4),
+                hand_interp_steps=4,
+                hold_steps=2,
+                retreat_steps=5,
+            )
+        ),
+    )
+    action._resolve_receive_grasp = Mock(
+        return_value=(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            torch.ones(NUM_ENVS, dtype=torch.bool),
+        )
+    )
+    context = _dual_context(task)
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=GraspGoal(semantics=semantics),
+        binding=_dual_binding("source", "destination"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+
+    plan = _plan_action(action, invocation, context)
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert not torch.allclose(plan.trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        plan.trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(30, -1),
+    )
+    received = projected.get_held_object("right_arm")
+    assert received is not None
+    assert received.env_mask.tolist() == [True, False]
 
 
 def test_coordinated_pick_returns_full_dof_plan_and_projected_relation() -> None:
@@ -955,6 +1093,13 @@ def test_coordinated_pick_returns_full_dof_plan_and_projected_relation() -> None
         projected.get_coordinated_held_object("left_arm", "right_arm"),
         CoordinatedHeldObjectState,
     )
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "close",
+        "lift",
+        "move",
+        "hold",
+    ]
 
 
 def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
@@ -1111,12 +1256,89 @@ def test_coordinated_placement_projects_release_and_support_attachment() -> None
     assert projected.get_held_object("left_arm") is None
     assert projected.get_held_object("right_arm") is not None
     assert projected.get_held_object("right_arm").semantics is support.semantics
+    assert [segment.name for segment in plan.segments] == [
+        "approach",
+        "hold",
+        "release",
+        "retreat",
+    ]
+
+
+def test_coordinated_placement_holds_only_environment_with_ik_failure() -> None:
+    generator = _dual_motion_generator()
+    original_compute_ik = generator.robot.compute_ik.side_effect
+
+    def fail_second_support_arm(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        success, qpos = original_compute_ik(
+            pose=pose,
+            name=name,
+            joint_seed=joint_seed,
+            **kwargs,
+        )
+        if name == "right_arm":
+            success = success.clone()
+            success[1] = False
+        return success, qpos
+
+    generator.robot.compute_ik.side_effect = fail_second_support_arm
+    action = _bind_action(
+        generator,
+        CoordinatedPlacement(
+            default_options=CoordinatedPlacementOptions(
+                hand_interp_steps=4,
+                hold_steps=3,
+                retreat_steps=5,
+            )
+        ),
+    )
+    placing = _held(
+        ObjectSemantics(affordance=AntipodalAffordance(), geometry={}, label="placing")
+    )
+    support = _held(
+        ObjectSemantics(affordance=AntipodalAffordance(), geometry={}, label="support")
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"left_arm": placing, "right_arm": support},
+    )
+    context = _dual_context(task)
+    invocation = ActionInvocation(
+        skill_id="coordinated_placement",
+        goal=CoordinatedPlacementGoal(
+            placing_object_target_pose=torch.eye(4),
+            support_object_target_pose=torch.eye(4),
+        ),
+        binding=_dual_binding("placing", "support"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+
+    plan = _plan_action(action, invocation, context)
+    projected = plan.expected_effects.apply(context.task, plan.plan_success)
+
+    assert plan.plan_success.tolist() == [True, False]
+    assert not torch.allclose(plan.trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        plan.trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand(30, -1),
+    )
+    supported = projected.get_held_object("right_arm")
+    assert supported is not None
+    assert supported.env_mask.tolist() == [True, True]
+    still_placing = projected.get_held_object("left_arm")
+    assert still_placing is not None
+    assert still_placing.env_mask.tolist() == [False, True]
 
 
 def test_coordinated_actions_reject_curobo_motion_generation() -> None:
     generator = _dual_motion_generator()
     generator.planner.cfg.planner_type = "curobo"
-    policy = MotionPolicy(motion_source="motion_gen", sample_count=30)
+    policy = MotionPolicy(strategy="motion_gen", sample_count=30)
     pick = _bind_action(
         generator,
         CoordinatedPickment(),

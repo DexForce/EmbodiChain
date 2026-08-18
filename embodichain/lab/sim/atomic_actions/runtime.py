@@ -31,7 +31,6 @@ from .control import (
     ControlPartCommandProfile,
 )
 from .core import resolve_runtime_device
-from .trajectory import TrajectoryBuilder
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -43,8 +42,8 @@ class ActionPlanningServices:
 
     An action may borrow these resources after the engine binds it, but callers
     never pass a motion generator to individual actions. Keeping the generator
-    and trajectory builder here gives one engine a single planner backend,
-    robot, device, cache, and collision-world owner.
+    here gives one engine a single planner backend, robot, device, cache, and
+    collision-world owner.
 
     Args:
         motion_generator: Motion generator owned by the engine.
@@ -60,7 +59,6 @@ class ActionPlanningServices:
         self._motion_generator = motion_generator
         self._robot: Robot = motion_generator.robot
         self._device = resolve_runtime_device(motion_generator.device)
-        self._trajectory_builder = TrajectoryBuilder(motion_generator)
         self._control_profiles = self._snapshot_control_profiles(
             {} if control_profiles is None else control_profiles
         )
@@ -83,11 +81,6 @@ class ActionPlanningServices:
     def device(self) -> torch.device:
         """Return the concrete device used for planning."""
         return self._device
-
-    @property
-    def trajectory_builder(self) -> TrajectoryBuilder:
-        """Return the shared stateless trajectory builder."""
-        return self._trajectory_builder
 
     @property
     def control_profiles(self) -> Mapping[str, ControlPartCommandProfile]:

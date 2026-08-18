@@ -38,8 +38,9 @@ from ..goals import (
     validate_pose_goal,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
+from ..plans import ActionPlan, normalize_success_mask
 from ..state import CoordinatedHeldObjectState, PlanningContext
+from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -95,7 +96,7 @@ class CoordinatedPickmentOptions(ActionOptions):
     """World-Z lift distance before moving to the object target pose."""
 
     hand_interp_steps: int = 10
-    """Number of waypoints used for the simultaneous hand close phase."""
+    """Number of waypoints used for the simultaneous hand-close segment."""
 
     hold_steps: int = 4
     """Number of waypoints to hold the final object target pose."""
@@ -192,47 +193,7 @@ class _DualArmHelpers:
             start_qpos[:, list(resources.right_arm.joint_ids)],
         )
 
-    def _plan_named_arm_trajectory(
-        self,
-        control_part: str,
-        start_qpos: torch.Tensor,
-        target_poses: torch.Tensor,
-        n_waypoints: int,
-    ) -> tuple[bool, torch.Tensor]:
-        n_state = target_poses.shape[1]
-        arm_dof = start_qpos.shape[-1]
-        trajectory = torch.zeros(
-            (self.n_envs, n_state, arm_dof),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        qpos_seed = start_qpos
-        for i in range(n_state):
-            is_success, qpos = self.robot.compute_ik(
-                pose=target_poses[:, i],
-                name=control_part,
-                joint_seed=qpos_seed,
-            )
-            if not self.builder.all_envs_success(is_success):
-                logger.log_warning(
-                    f"Failed to compute IK for {control_part} target state {i}."
-                )
-                return False, trajectory
-            trajectory[:, i] = qpos
-            qpos_seed = qpos
-
-        trajectory = torch.cat([start_qpos.unsqueeze(1), trajectory], dim=1)
-        return True, (
-            self.builder.plan_joint_traj(
-                trajectory[:, 0],
-                trajectory[:, -1],
-                n_waypoints,
-            )
-            if n_state == 1
-            else self._interpolate_keyframe_qpos(trajectory, n_waypoints)
-        )
-
-    def _assemble_phase(
+    def _assemble_segment(
         self,
         state: PlanningContext,
         first_arm_traj: torch.Tensor,
@@ -377,13 +338,12 @@ class CoordinatedPickment(
     manipulator_roles: ClassVar[tuple[str, ...]] = ("left", "right")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("left", "right")
 
-    _assemble_phase = _DualArmHelpers._assemble_phase
+    _assemble_segment = _DualArmHelpers._assemble_segment
     _expand_qpos = _DualArmHelpers._expand_qpos
     _interpolate_keyframe_qpos = _DualArmHelpers._interpolate_keyframe_qpos
     _interpolate_object_pose = _DualArmHelpers._interpolate_object_pose
     _interpolate_qpos = _DualArmHelpers._interpolate_qpos
     _interpolate_qpos_keyframes = _DualArmHelpers._interpolate_qpos_keyframes
-    _plan_named_arm_trajectory = _DualArmHelpers._plan_named_arm_trajectory
     _repeat_qpos = staticmethod(_DualArmHelpers._repeat_qpos)
     _resolve_dual_arm_start = _DualArmHelpers._resolve_dual_arm_start
     _resolve_pose = _DualArmHelpers._resolve_pose
@@ -625,7 +585,7 @@ class CoordinatedPickment(
     def _compute_segment_lengths(
         self, sample_count: int, options: CoordinatedPickmentOptions
     ) -> dict[str, int]:
-        """Split the invocation sample budget across coordinated-pick phases."""
+        """Split the invocation sample budget across coordinated-pick segments."""
         n_close = max(2, options.hand_interp_steps)
         n_hold = max(0, options.hold_steps)
         n_motion = sample_count - n_close - n_hold
@@ -646,23 +606,11 @@ class CoordinatedPickment(
             "hold": n_hold,
         }
 
-    def get_segment_lengths(
-        self,
-        sample_count: int,
-        options: CoordinatedPickmentOptions | None = None,
-    ) -> dict[str, int]:
-        """Return phase lengths for an explicit invocation sample budget."""
-        return self._compute_segment_lengths(
-            sample_count, self.default_options if options is None else options
-        )
-
     def _compute_pre_grasp_xpos(
         self, grasp_xpos: torch.Tensor, options: CoordinatedPickmentOptions
     ) -> torch.Tensor:
         grasp_z = grasp_xpos[:, :3, 2]
-        return self.builder.apply_local_offset(
-            grasp_xpos, -grasp_z * options.pre_grasp_distance
-        )
+        return translate_pose_world(grasp_xpos, -grasp_z * options.pre_grasp_distance)
 
     def _select_motion_keyframe_indices(
         self, n_waypoints: int, options: CoordinatedPickmentOptions
@@ -677,22 +625,6 @@ class CoordinatedPickment(
             )
             .round()
             .to(dtype=torch.long)
-        )
-
-    def _as_success_mask(self, success: bool | torch.Tensor) -> torch.Tensor:
-        if isinstance(success, torch.Tensor):
-            success = success.to(device=self.device, dtype=torch.bool).reshape(-1)
-            if success.numel() == 1:
-                return success.repeat(self.n_envs)
-            if success.numel() != self.n_envs:
-                logger.log_error(
-                    "IK success mask must contain one value per environment, "
-                    f"but got shape {tuple(success.shape)}.",
-                    ValueError,
-                )
-            return success
-        return torch.full(
-            (self.n_envs,), bool(success), dtype=torch.bool, device=self.device
         )
 
     def _log_ik_failures(
@@ -730,7 +662,12 @@ class CoordinatedPickment(
                 name=control_part,
                 joint_seed=qpos_seed,
             )
-            ik_success = self._as_success_mask(ik_success)
+            ik_success = normalize_success_mask(
+                ik_success,
+                n_envs=self.n_envs,
+                device=self.device,
+                name=f"IK success for {control_part} target state {target_idx}",
+            )
             failed_mask = success_mask & ~ik_success
             self._log_ik_failures(
                 control_part, f"target state {target_idx}", failed_mask
@@ -742,7 +679,7 @@ class CoordinatedPickment(
 
         keyframe_qpos = torch.cat([start_qpos.unsqueeze(1), keyframe_qpos], dim=1)
         trajectory = (
-            self.builder.plan_joint_traj(
+            interpolate_joint_trajectory(
                 keyframe_qpos[:, 0], keyframe_qpos[:, -1], n_waypoints
             )
             if n_state == 1
@@ -791,8 +728,24 @@ class CoordinatedPickment(
                 name=resources.right_arm.name,
                 joint_seed=right_qpos_seed,
             )
-            left_success = self._as_success_mask(left_success)
-            right_success = self._as_success_mask(right_success)
+            left_success = normalize_success_mask(
+                left_success,
+                n_envs=self.n_envs,
+                device=self.device,
+                name=(
+                    f"IK success for {resources.left_arm.name} object waypoint "
+                    f"{waypoint_idx}"
+                ),
+            )
+            right_success = normalize_success_mask(
+                right_success,
+                n_envs=self.n_envs,
+                device=self.device,
+                name=(
+                    f"IK success for {resources.right_arm.name} object waypoint "
+                    f"{waypoint_idx}"
+                ),
+            )
             self._log_ik_failures(
                 resources.left_arm.name,
                 f"object waypoint {waypoint_idx}",
@@ -825,7 +778,7 @@ class CoordinatedPickment(
             self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
         )
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[CoordinatedPickGoal, CoordinatedPickmentOptions],
         context: PlanningContext,
@@ -835,7 +788,7 @@ class CoordinatedPickment(
         options = request.skill_options
         resources = self._resolve_resources(request)
         if (
-            request.motion_policy.motion_source == "motion_gen"
+            request.motion_policy.strategy == "motion_gen"
             and self.motion_generator.planner.cfg.planner_type == "curobo"
         ):
             raise ValueError(
@@ -891,7 +844,7 @@ class CoordinatedPickment(
 
         left_grasp_qpos = left_approach_traj[:, -1]
         right_grasp_qpos = right_approach_traj[:, -1]
-        approach_trajectory = self._assemble_phase(
+        approach_trajectory = self._assemble_segment(
             state,
             left_approach_traj,
             right_approach_traj,
@@ -900,7 +853,7 @@ class CoordinatedPickment(
             resources=resources,
         )
 
-        close_trajectory = self._assemble_phase(
+        close_trajectory = self._assemble_segment(
             state,
             self._repeat_qpos(left_grasp_qpos, segments["close"]),
             self._repeat_qpos(right_grasp_qpos, segments["close"]),
@@ -917,7 +870,7 @@ class CoordinatedPickment(
             resources=resources,
         )
 
-        lift_object_pose = self.builder.apply_local_offset(
+        lift_object_pose = translate_pose_world(
             object_initial_pose,
             torch.tensor([0.0, 0.0, options.lift_height], device=self.device),
         )
@@ -942,7 +895,7 @@ class CoordinatedPickment(
 
         left_lift_qpos = left_lift_traj[:, -1]
         right_lift_qpos = right_lift_traj[:, -1]
-        lift_trajectory = self._assemble_phase(
+        lift_trajectory = self._assemble_segment(
             state,
             left_lift_traj,
             right_lift_traj,
@@ -972,7 +925,7 @@ class CoordinatedPickment(
 
         left_target_qpos = left_move_traj[:, -1]
         right_target_qpos = right_move_traj[:, -1]
-        move_trajectory = self._assemble_phase(
+        move_trajectory = self._assemble_segment(
             state,
             left_move_traj,
             right_move_traj,
@@ -985,7 +938,7 @@ class CoordinatedPickment(
             (self.n_envs, 0, self.robot_dof), dtype=torch.float32, device=self.device
         )
         if segments["hold"] > 0:
-            hold_trajectory = self._assemble_phase(
+            hold_trajectory = self._assemble_segment(
                 state,
                 self._repeat_qpos(left_target_qpos, segments["hold"]),
                 self._repeat_qpos(right_target_qpos, segments["hold"]),
@@ -1003,11 +956,6 @@ class CoordinatedPickment(
                 hold_trajectory,
             ],
             dim=1,
-        )
-        full = torch.where(
-            success_mask[:, None, None],
-            full,
-            state.last_qpos.to(self.device)[:, None, :],
         )
         coordinated_held_object = CoordinatedHeldObjectState(
             semantics=held_state.semantics,
@@ -1033,6 +981,13 @@ class CoordinatedPickment(
                     ): coordinated_held_object,
                 },
             ),
+            segment_lengths={
+                "approach": approach_trajectory.shape[1],
+                "close": close_trajectory.shape[1],
+                "lift": lift_trajectory.shape[1],
+                "move": move_trajectory.shape[1],
+                "hold": hold_trajectory.shape[1],
+            },
         )
 
 

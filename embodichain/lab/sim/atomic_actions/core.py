@@ -19,8 +19,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -39,13 +40,12 @@ from .invocation import (
 )
 from .plans import (
     ActionPlan,
-    CompletionCondition,
-    CompletionConditionKind,
-    PhaseSpec,
-    PlannedPhase,
     PlannerDiagnostics,
     TimedTrajectory,
+    TrajectorySegment,
+    normalize_success_mask,
 )
+from .policies import DynamicCollisionMode
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -53,7 +53,6 @@ if TYPE_CHECKING:
 
     from .runtime import ActionPlanningServices
     from .state import PlanningContext
-    from .trajectory import TrajectoryBuilder
 
 
 def resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -162,6 +161,15 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Reject skill classes that bypass framework-owned scene binding."""
+        super().__init_subclass__(**kwargs)
+        if "plan" in cls.__dict__:
+            raise TypeError(
+                "AtomicAction subclasses must implement _plan(); the public "
+                "plan() method is framework-owned."
+            )
+
     def __init__(
         self,
         default_options: OptionsT | None = None,
@@ -218,11 +226,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     def device(self) -> torch.device:
         """Return the concrete runtime device associated with the engine."""
         return self.planning_services.device
-
-    @property
-    def builder(self) -> TrajectoryBuilder:
-        """Return the engine-owned shared trajectory builder."""
-        return self.planning_services.trajectory_builder
 
     def _bind(self, services: ActionPlanningServices) -> None:
         """Bind engine-owned planning services exactly once."""
@@ -348,6 +351,84 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request.binding.end_effector(role)
         return request.goal
 
+    def plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        """Bind the current collision scene and invoke the skill planner.
+
+        Args:
+            request: Immutable, typed, and embodiment-resolved action request.
+            context: Latest observed robot, task, and scene state.
+
+        Returns:
+            Scene-bound action plan with expected, uncommitted effects.
+        """
+        self.require_goal(request)
+        prepared = self._prepare_request(request, context)
+        return self._plan(prepared, context)
+
+    def _prepare_request(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> ResolvedActionRequest[GoalT, OptionsT]:
+        """Bind snapshot obstacle poses without mutating the resolved request."""
+        if not self._uses_collision_world(request, context):
+            return request
+        poses = context.scene.collision_obstacle_poses(
+            batch_size=context.batch_size,
+            device=context.robot.qpos.device,
+            dtype=context.robot.qpos.dtype,
+        )
+        policy = replace(
+            request.motion_policy,
+            plan_opts=self.motion_generator.bind_collision_world(
+                request.motion_policy.plan_opts,
+                obstacle_poses=poses,
+            ),
+        )
+        return replace(request, motion_policy=policy)
+
+    def _uses_collision_world(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+    ) -> bool:
+        """Return whether this planning attempt consumes collision revisions."""
+        mode = request.motion_policy.dynamic_collision_mode
+        if mode is DynamicCollisionMode.OFF:
+            return False
+
+        uses_motion_generator = request.motion_policy.strategy == "motion_gen"
+        has_collision_entities = bool(context.scene.collision_entity_ids)
+        supports_updates = (
+            getattr(
+                self.motion_generator,
+                "supports_dynamic_collision_world",
+                False,
+            )
+            is True
+        )
+        available = (
+            uses_motion_generator and has_collision_entities and supports_updates
+        )
+        if mode is DynamicCollisionMode.REQUIRED and not available:
+            missing: list[str] = []
+            if not uses_motion_generator:
+                missing.append("strategy='motion_gen'")
+            if not has_collision_entities:
+                missing.append("scene collision entities")
+            if not supports_updates:
+                missing.append("a planner with dynamic collision-world support")
+            raise ValueError(
+                "dynamic_collision_mode='required' cannot be satisfied; missing "
+                + ", ".join(missing)
+                + "."
+            )
+        return available
+
     def build_plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
@@ -356,15 +437,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         success: bool | torch.Tensor,
         trajectory: TimedTrajectory | torch.Tensor,
         expected_effects: StateDelta | None = None,
-        phase_name: str | None = None,
         replannable: bool = True,
-        completion_kind: CompletionConditionKind = (
-            CompletionConditionKind.TRAJECTORY_COMPLETE
-        ),
-        completion_tolerance: float | None = None,
         diagnostics: PlannerDiagnostics | None = None,
+        segment_lengths: Mapping[str, int] | None = None,
     ) -> ActionPlan:
-        """Build a validated single-phase plan for a primitive implementation.
+        """Build a validated action plan for a primitive implementation.
 
         Args:
             request: Resolved invocation snapshot being planned.
@@ -372,37 +449,21 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             success: Per-environment planning success or scalar planner result.
             trajectory: Full-robot timed trajectory or position tensor.
             expected_effects: Symbolic effects to verify after execution.
-            phase_name: Optional phase name; defaults to the stable skill id.
-            replannable: Whether the execution runtime may replan this phase.
-            completion_kind: Completion condition category.
-            completion_tolerance: Optional numerical completion tolerance.
+            replannable: Whether the execution runtime may replan this action.
             diagnostics: Optional retained planner diagnostics.
+            segment_lengths: Optional ordered mapping from semantic segment
+                names to waypoint counts. Zero-length entries are omitted.
 
         Returns:
             Side-effect-free action plan.
         """
         self.require_goal(request)
-        if isinstance(success, bool):
-            success_mask = torch.full(
-                (context.batch_size,),
-                success,
-                dtype=torch.bool,
-                device=self.device,
-            )
-        elif isinstance(success, torch.Tensor):
-            success_mask = success.to(device=self.device)
-            if success_mask.dtype != torch.bool:
-                raise TypeError("Planning success must have dtype torch.bool.")
-            if success_mask.dim() == 0 or success_mask.shape == (1,):
-                success_mask = success_mask.reshape(1).expand(context.batch_size)
-            if success_mask.shape != (context.batch_size,):
-                raise ValueError(
-                    "Planning success must have shape "
-                    f"({context.batch_size},), got {tuple(success_mask.shape)}."
-                )
-            success_mask = success_mask.clone()
-        else:
-            raise TypeError("Planning success must be bool or torch.Tensor.")
+        success_mask = normalize_success_mask(
+            success,
+            n_envs=context.batch_size,
+            device=self.device,
+            name="Planning success",
+        )
 
         if isinstance(trajectory, torch.Tensor):
             timed = TimedTrajectory.from_positions(
@@ -418,31 +479,55 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise ValueError("Trajectory and planning context batch sizes must match.")
         if timed.robot_dof != context.robot.robot_dof:
             raise ValueError("Trajectory robot_dof must match the planning context.")
+        timed = timed.hold_rows(success_mask, context.robot.qpos)
+
+        segments: list[TrajectorySegment] = []
+        if segment_lengths is not None:
+            offset = 0
+            for name, length in segment_lengths.items():
+                if not isinstance(name, str) or not name:
+                    raise ValueError("Trajectory segment names must be non-empty.")
+                if isinstance(length, bool) or not isinstance(length, int):
+                    raise TypeError("Trajectory segment lengths must be integers.")
+                if length < 0:
+                    raise ValueError("Trajectory segment lengths must be non-negative.")
+                if length == 0:
+                    continue
+                segments.append(
+                    TrajectorySegment(
+                        name=name,
+                        start=offset,
+                        stop=offset + length,
+                    )
+                )
+                offset += length
+            if offset != timed.waypoint_count:
+                raise ValueError(
+                    "Trajectory segment lengths must sum to the trajectory "
+                    f"waypoint count ({timed.waypoint_count}), got {offset}."
+                )
 
         if diagnostics is None:
             diagnostics = PlannerDiagnostics(
                 backend=self.planning_services.planner_name
             )
-        phase = PlannedPhase(
-            spec=PhaseSpec(
-                name=phase_name or self.skill_id,
-                goal=request.goal,
-                replannable=replannable,
-                completion_condition=CompletionCondition(
-                    kind=completion_kind,
-                    tolerance=completion_tolerance,
-                ),
-                recovery_policy=request.recovery_policy,
-                scene_dependencies=collect_scene_dependencies(request.goal),
-            ),
-            trajectory=timed,
-            planned_scene_version=context.scene.version,
-            diagnostics=diagnostics,
-        )
         return ActionPlan(
             skill_id=self.skill_id,
             plan_success=success_mask,
-            phases=(phase,),
+            trajectory=timed,
+            recovery_policy=request.recovery_policy,
+            planned_scene_version=context.scene.version,
+            planned_collision_world_revision=(
+                context.scene.collision_world_revisions(context.batch_size)
+            ),
+            diagnostics=diagnostics,
+            segments=tuple(segments),
+            scene_dependencies=collect_scene_dependencies(request.goal),
+            collision_world_sensitive=self._uses_collision_world(
+                request,
+                context,
+            ),
+            replannable=replannable,
             expected_effects=expected_effects or StateDelta(),
             invocation_id=request.invocation_id,
             invocation_revision=request.revision,
@@ -463,7 +548,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             message: Optional diagnostic message.
 
         Returns:
-            Failed action plan with an empty phase trajectory.
+            Failed action plan with an empty trajectory.
         """
         return self.build_plan(
             request,
@@ -485,7 +570,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         )
 
     @abstractmethod
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
         context: PlanningContext,

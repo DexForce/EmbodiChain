@@ -269,8 +269,8 @@ assert result.success.all()
 ## Atomic actions and supported scope
 
 Single-arm MoveEndEffector is supported through the normal
-motion_source="motion_gen" route. MoveJoints can opt in to collision-aware
-joint-space planning with motion_source="motion_gen"; the action uses the planner
+`strategy="motion_gen"` route. MoveJoints can opt in to collision-aware
+joint-space planning with `strategy="motion_gen"`; the action uses the planner
 already owned by its MotionGenerator. Movement phases of PickUp, Place, Press,
 and MoveHeldObject can use the same single-arm static-world route.
 

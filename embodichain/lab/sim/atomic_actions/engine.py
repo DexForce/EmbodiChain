@@ -445,12 +445,12 @@ class AtomicActionEngine:
             raise ValueError("Action plan and engine must share a device.")
         if not torch.equal(trajectory.env_ids, context.env_ids):
             raise ValueError("Action plan and context must share ordered env_ids.")
-        if any(
-            phase.planned_scene_version != context.scene.version
-            for phase in plan.phases
-        ):
+        if plan.planned_scene_version != context.scene.version:
+            raise ValueError("Action plan must record the planning scene version.")
+        collision_revision = context.scene.collision_world_revisions(context.batch_size)
+        if plan.planned_collision_world_revision != collision_revision:
             raise ValueError(
-                "Every action phase must record the planning scene version."
+                "Action plan must record the planning collision-world revision."
             )
 
 

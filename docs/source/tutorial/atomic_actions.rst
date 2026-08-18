@@ -79,8 +79,9 @@ recovery. None of these APIs steps the simulator directly. The application
 sends commands returned by an execution session and supplies new observations.
 
 ``AtomicAction.plan(request, context)`` is different from ``engine.plan()``.
-It is the implementation method overridden by an atomic-action author, not an
-additional application execution entry point. Similarly,
+It is the framework-owned template method called by the engine, not an
+additional application execution entry point. Atomic-action authors implement
+the protected ``_plan()`` hook instead. Similarly,
 ``engine.plan_action()`` is reserved for extensions and isolated tests that
 need to plan an unregistered instance.
 
@@ -100,6 +101,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``coordinated_placement.py``
 * ``hand_over.py``
 * ``moving_target_recovery.py``
+* ``dynamic_obstacle_recovery.py``
 
 The scripts are interactive by default. Add ``--auto_play`` to skip prompts;
 combine it with ``--headless --device cpu`` for a headless run that records
@@ -174,7 +176,13 @@ application-owned orchestration:
    plan = engine.plan(invocation, latest_context)
    if plan.plan_success.all():
        trajectory = plan.trajectory.positions
-       phase_diagnostics = tuple(phase.diagnostics for phase in plan.phases)
+       diagnostics = plan.diagnostics
+       segments = plan.segments
+
+Named segments use half-open action-local waypoint ranges. For a compiled
+sequence, call ``compiled.segment(action_index, name)`` to get the corresponding
+range in concatenated-trajectory coordinates. This is preferable to repeating
+a primitive's private sample-split formula in application or tutorial code.
 
 The returned :class:`~embodichain.lab.sim.atomic_actions.ActionPlan` describes
 only that invocation. Its expected effects are not committed, and ``plan`` does
@@ -231,7 +239,7 @@ projected context and sequence-shaped result are unnecessary.
 Do not compile across a point where later targets depend on physical execution.
 The coordinated-placement tutorial, for example, compiles both pick-ups,
 executes them, rebuilds held-object state from measured poses, and then compiles
-the placement phase. Use ``start`` when that observation and recovery loop
+the placement stage. Use ``start`` when that observation and recovery loop
 should remain active throughout execution.
 
 Dynamic goals and closed-loop execution
@@ -245,6 +253,7 @@ must be resolved from the latest scene snapshot:
    from embodichain.lab.sim.atomic_actions import (
        EndEffectorPoseGoal,
        RecoveryPolicy,
+       RigidObjectSceneProvider,
        SceneEntityPose,
    )
 
@@ -267,12 +276,21 @@ must be resolved from the latest scene snapshot:
        TaskState,
    )
 
-   adapter = SimulationExecutionAdapter(sim, robot, scene_supplier=read_scene)
+   scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
+   adapter = SimulationExecutionAdapter(
+       sim,
+       robot,
+       scene_provider=scene_provider,
+   )
    task = TaskState.empty(robot.get_qpos().shape[0], robot.device)
    initial_context = adapter.observe(task)
    session = engine.start((invocation,), initial_context)
    runner = ExecutionRunner(session, adapter, adapter, clock=adapter)
    result = runner.run_until_blocked()
+
+For a lightweight scene source that does not need environment correlation IDs,
+pass a ``scene_supplier(timestamp)`` callback instead. ``scene_provider`` and
+``scene_supplier`` are mutually exclusive.
 
 The session owns planning progress and bounded recovery. The runner owns the
 outer lifecycle: it requests fresh observations, schedules each command from
@@ -300,6 +318,25 @@ for comparison:
 .. code-block:: bash
 
    python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
+
+For collision-aware execution, list pose-updatable obstacles in
+``RigidObjectSceneProvider.collision_entity_ids`` and configure matching
+dynamic obstacle names on a supporting planner such as cuRobo. The provider
+advances per-environment collision-world revisions when an obstacle moves;
+the session invalidates affected rows and the framework binds the latest poses
+before replanning. Pose thresholds use the last materially published pose as
+their baseline, so cumulative sub-threshold motion is eventually reported:
+
+.. code-block:: bash
+
+   python scripts/tutorials/atomic_action/dynamic_obstacle_recovery.py --headless --auto_play
+
+``MotionPolicy.dynamic_collision_mode`` defaults to
+``DynamicCollisionMode.AUTO``. Use ``DynamicCollisionMode.REQUIRED`` when
+planning must fail unless the live collision world is available, or
+``DynamicCollisionMode.OFF`` to ignore snapshot collision entities and
+collision-world revisions. These modes do not disable static-world or
+self-collision checks configured by the selected planner.
 
 Recovery replans reuse one immutable invocation-revision snapshot. If an
 application intentionally changes the goal, options, policy, binding, or a
@@ -350,14 +387,23 @@ physical grasp or release. If verification is asynchronous, omit the callback;
 can later resume with ``runner.step(effect_success=verified)`` when the next
 cycle is due, or call ``run_until_blocked(effect_verifier=...)`` again. The
 runner remembers the pending boundary even though the session emits its event
-only once.
+only once. The durable state is ``tick.pending_effect`` (an
+``EffectVerificationRequest``), not the presence of that one-time event.
 
 Adding an action
 ----------------
 
 Define an action-owned frozen goal dataclass with a stable ``goal_kind``. Then
-define typed runtime options when needed, implement ``plan(request, context)``,
-and declare the stable skill metadata:
+define typed runtime options when needed, implement the protected
+``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
+override the inherited public ``plan()`` method because it binds the latest
+collision scene first.
+
+Return scalar or per-environment planner success through ``build_plan``. The
+framework normalizes the mask and holds failed rows at the observed qpos, so a
+new action should not reproduce that masking itself.
+
+A minimal implementation looks like:
 
 .. code-block:: python
 
@@ -382,7 +428,7 @@ and declare the stable skill metadata:
        def __init__(self, default_options: PushOptions | None = None) -> None:
            super().__init__(default_options)
 
-       def plan(
+       def _plan(
            self,
            request: ResolvedActionRequest[PushGoal, PushOptions],
            context: PlanningContext,

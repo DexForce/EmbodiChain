@@ -20,10 +20,31 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from enum import Enum
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.planners import PlanOptions
+    import torch
+
+    from embodichain.lab.sim.planners import MotionGenOptions, PlanOptions
+
+
+class DynamicCollisionMode(str, Enum):
+    """Policy for consuming a live dynamic collision world.
+
+    This mode controls scene-snapshot obstacle binding and collision-world
+    revision recovery. It does not enable or disable a planner's configured
+    static-world or self-collision checks.
+    """
+
+    OFF = "off"
+    """Ignore scene-snapshot collision entities and their revisions."""
+
+    AUTO = "auto"
+    """Use live collision entities when the selected motion strategy supports them."""
+
+    REQUIRED = "required"
+    """Require live collision entities and a compatible motion planner."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +59,8 @@ class MotionPolicy:
     planner: str | None = None
     """Optional required planner backend name; ``None`` accepts the configured one."""
 
-    motion_source: str = "ik_interp"
-    """Trajectory source: ``ik_interp`` or ``motion_gen``."""
-
-    interpolation: str = "linear"
-    """Interpolation policy. Only linear interpolation is currently supported."""
+    strategy: Literal["motion_gen", "ik_interp"] = "ik_interp"
+    """Motion strategy: ``motion_gen`` or ``ik_interp``."""
 
     sample_count: int = 50
     """Requested trajectory sample count when the backend does not preserve samples."""
@@ -56,23 +74,18 @@ class MotionPolicy:
     acceleration_limit: float | None = None
     """Optional planner acceleration limit."""
 
-    collision_check: bool = True
-    """Whether collision-aware backends should enable collision checking."""
+    dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO
+    """How this invocation consumes live scene-snapshot collision entities."""
 
     plan_opts: PlanOptions | None = None
     """Optional typed planner-specific options."""
 
     def __post_init__(self) -> None:
-        valid_sources = {"ik_interp", "motion_gen"}
-        if self.motion_source not in valid_sources:
+        valid_strategies = {"motion_gen", "ik_interp"}
+        if self.strategy not in valid_strategies:
             raise ValueError(
-                f"motion_source must be one of {sorted(valid_sources)}, "
-                f"got {self.motion_source!r}."
-            )
-        if self.interpolation != "linear":
-            raise ValueError(
-                "interpolation currently supports only 'linear', "
-                f"got {self.interpolation!r}."
+                f"strategy must be one of {sorted(valid_strategies)}, "
+                f"got {self.strategy!r}."
             )
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
@@ -82,7 +95,51 @@ class MotionPolicy:
             raise ValueError("velocity_limit must be greater than zero when set.")
         if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
             raise ValueError("acceleration_limit must be greater than zero when set.")
+        mode = self.dynamic_collision_mode
+        if isinstance(mode, str):
+            try:
+                mode = DynamicCollisionMode(mode)
+            except ValueError as exc:
+                raise ValueError(
+                    "dynamic_collision_mode must be one of "
+                    f"{[item.value for item in DynamicCollisionMode]}, got {mode!r}."
+                ) from exc
+        elif not isinstance(mode, DynamicCollisionMode):
+            raise TypeError(
+                "dynamic_collision_mode must be a DynamicCollisionMode or string."
+            )
+        object.__setattr__(self, "dynamic_collision_mode", mode)
         object.__setattr__(self, "plan_opts", deepcopy(self.plan_opts))
+
+    def to_motion_gen_options(
+        self,
+        *,
+        start_qpos: "torch.Tensor",
+        control_part: str,
+        sample_count: int | None = None,
+    ) -> "MotionGenOptions":
+        """Translate this atomic policy into motion-generator options.
+
+        Args:
+            start_qpos: Observed controlled-joint start positions.
+            control_part: Bound robot control-part name.
+            sample_count: Optional segment-local sample-count override.
+
+        Returns:
+            Independently owned options for :class:`MotionGenerator`.
+        """
+        from embodichain.lab.sim.planners.motion_generator import MotionGenOptions
+
+        return MotionGenOptions(
+            strategy=self.strategy,
+            sample_count=self.sample_count if sample_count is None else sample_count,
+            velocity_limit=self.velocity_limit,
+            acceleration_limit=self.acceleration_limit,
+            start_qpos=start_qpos,
+            control_part=control_part,
+            plan_opts=self.plan_opts,
+            is_interpolate=True,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,10 +147,10 @@ class RecoveryPolicy:
     """Bounded local recovery policy used by the execution runtime."""
 
     max_replans: int = 3
-    """Maximum current-phase replans."""
+    """Maximum replans within one action attempt."""
 
-    max_phase_retries: int = 2
-    """Maximum retries of a failed phase."""
+    max_action_retries: int = 2
+    """Maximum whole-action retries after planning, execution, or effect failure."""
 
     tracking_error_threshold: float = 0.05
     """Joint tracking-error threshold in radians."""
@@ -104,23 +161,23 @@ class RecoveryPolicy:
     goal_rotation_threshold: float = 0.0872664626
     """Dynamic-goal rotation threshold in radians (five degrees by default)."""
 
-    phase_timeout: float = 30.0
-    """Maximum phase execution time in seconds."""
+    action_timeout: float = 30.0
+    """Maximum execution time for one action attempt in seconds."""
 
     def __post_init__(self) -> None:
         if self.max_replans < 0:
             raise ValueError("max_replans must be non-negative.")
-        if self.max_phase_retries < 0:
-            raise ValueError("max_phase_retries must be non-negative.")
+        if self.max_action_retries < 0:
+            raise ValueError("max_action_retries must be non-negative.")
         threshold_fields = (
             "tracking_error_threshold",
             "goal_translation_threshold",
             "goal_rotation_threshold",
-            "phase_timeout",
+            "action_timeout",
         )
         for name in threshold_fields:
             if getattr(self, name) <= 0.0:
                 raise ValueError(f"{name} must be greater than zero.")
 
 
-__all__ = ["MotionPolicy", "RecoveryPolicy"]
+__all__ = ["DynamicCollisionMode", "MotionPolicy", "RecoveryPolicy"]

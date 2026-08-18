@@ -24,7 +24,6 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import logger
 from embodichain.utils.math import (
     axis_angle_to_rotation_matrix,
@@ -46,9 +45,16 @@ from ..goals import (
     validate_pose_goal,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
+from ..plans import ActionPlan, normalize_success_mask
 from ..policies import MotionPolicy
 from ..state import HeldObjectState, PlanningContext
+from ..trajectory_ops import (
+    build_pose_plan_states,
+    interpolate_hand_qpos,
+    resolve_pose_target,
+    split_three_segments,
+    translate_pose_world,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -78,7 +84,7 @@ class PickUpOptions(ActionOptions):
     """Per-invocation pickup behavior."""
 
     hand_interp_steps: int = 5
-    """Number of waypoints for the gripper close interpolation phase."""
+    """Number of waypoints for the gripper-close interpolation segment."""
 
     pick_object_part: str = "center"
     """Name of the object part to pick up (used for grasp pose generation). Currently support [center | top | bottom]."""
@@ -172,54 +178,51 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         end_effector: ResolvedControlPart,
         hand_open_qpos: torch.Tensor,
         hand_grasp_qpos: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        pre_grasp_xpos = self.builder.apply_local_offset(
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
+        pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
         )
 
-        n_approach, n_close, n_lift = self.builder.split_three_phase(
+        n_approach, n_close, n_lift = split_three_segments(
             motion_policy.sample_count,
             options.hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="lift",
+            first_segment_name="approach",
+            third_segment_name="lift",
         )
 
-        target_states_list = [
-            [
-                PlanState(xpos=pre_grasp_xpos[i], move_type=MoveType.EEF_MOVE),
-                PlanState(xpos=grasp_xpos[i], move_type=MoveType.EEF_MOVE),
-            ]
-            for i in range(self.n_envs)
-        ]
-        approach_success, approach_arm = self.builder.plan_arm_traj(
-            target_states_list,
-            start_arm_qpos,
-            n_approach,
-            control_part=manipulator.name,
-            arm_dof=manipulator.dof,
-            cfg=motion_policy,
+        approach_result = self.motion_generator.generate(
+            build_pose_plan_states(torch.stack([pre_grasp_xpos, grasp_xpos], dim=1)),
+            options=motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=manipulator.name,
+                sample_count=n_approach,
+            ),
         )
+        assert isinstance(approach_result.success, torch.Tensor)
+        assert approach_result.positions is not None
+        approach_success = approach_result.success
+        approach_arm = approach_result.positions
 
         grasp_arm_qpos = approach_arm[:, -1, :]
-        lift_xpos = self.builder.apply_local_offset(
+        lift_xpos = translate_pose_world(
             grasp_xpos,
             torch.tensor([0, 0, 1], device=self.device) * options.lift_height,
         )
-        target_states_list = [
-            [PlanState(xpos=lift_xpos[i], move_type=MoveType.EEF_MOVE)]
-            for i in range(self.n_envs)
-        ]
-        lift_success, lift_arm = self.builder.plan_arm_traj(
-            target_states_list,
-            grasp_arm_qpos,
-            n_lift,
-            control_part=manipulator.name,
-            arm_dof=manipulator.dof,
-            cfg=motion_policy,
+        lift_result = self.motion_generator.generate(
+            build_pose_plan_states(lift_xpos),
+            options=motion_policy.to_motion_gen_options(
+                start_qpos=grasp_arm_qpos,
+                control_part=manipulator.name,
+                sample_count=n_lift,
+            ),
         )
+        assert isinstance(lift_result.success, torch.Tensor)
+        assert lift_result.positions is not None
+        lift_success = lift_result.success
+        lift_arm = lift_result.positions
         is_success = approach_success & lift_success
 
-        hand_close_path = self.builder.interpolate_hand_qpos(
+        hand_close_path = interpolate_hand_qpos(
             hand_open_qpos, hand_grasp_qpos, n_waypoints=n_close
         )
         n_approach_actual = approach_arm.shape[1]
@@ -244,14 +247,22 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         full[:, n_approach_actual + n_close :, hand_joint_ids] = (
             hand_grasp_qpos.unsqueeze(1)
         )
-        return is_success, full
+        return (
+            is_success,
+            full,
+            {
+                "approach": n_approach_actual,
+                "close": n_close,
+                "lift": n_lift_actual,
+            },
+        )
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[GraspGoal, PickUpOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan approach, close, and lift phases without committing attachment."""
+        """Plan approach, close, and lift segments without committing attachment."""
         target = self.require_goal(request)
         options = request.skill_options
         approach_direction = options.approach_direction.to(
@@ -289,33 +300,38 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             logger.log_error(
                 "PickUp requires an entity on the target semantics.", ValueError
             )
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, list(manipulator.joint_ids)),
-            n_envs=self.n_envs,
-            arm_dof=manipulator.dof,
-            control_part=control_part,
+        start_arm_qpos = arm_qpos_from_state(
+            state,
+            list(manipulator.joint_ids),
         )
         if target.grasp_xpos is None:
             is_success, grasp_xpos = self._resolve_grasp_pose(
                 sem, start_arm_qpos, manipulator, options, approach_direction
             )
         else:
-            grasp_xpos = self.builder.resolve_pose_target(
+            grasp_xpos = resolve_pose_target(
                 resolve_pose_goal(target.grasp_xpos, context, name="grasp_xpos"),
                 n_envs=self.n_envs,
+                device=self.device,
             )
             if options.rotate_upright is not None:
                 grasp_xpos = self._upright_adjusted_grasp_poses(
                     sem, grasp_xpos, options
                 )
             is_success = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
-        if not self.builder.all_envs_success(is_success):
+        grasp_success = normalize_success_mask(
+            is_success,
+            n_envs=self.n_envs,
+            device=self.device,
+            name="Grasp-pose success",
+        )
+        if not grasp_success.any():
             logger.log_warning("PickUp failed to resolve a grasp pose.")
             return self.failed_plan(
                 request, context, message="Failed to resolve a grasp pose."
             )
 
-        is_success, full = self._get_full_pickup_trajectory(
+        trajectory_success, full, segment_lengths = self._get_full_pickup_trajectory(
             grasp_xpos,
             start_arm_qpos,
             state.last_qpos,
@@ -326,6 +342,12 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             end_effector,
             hand_open_qpos,
             hand_grasp_qpos,
+        )
+        success_mask = grasp_success & normalize_success_mask(
+            trajectory_success,
+            n_envs=self.n_envs,
+            device=self.device,
+            name="Pick-up trajectory success",
         )
 
         obj_poses = sem.entity.get_local_pose(to_matrix=True)
@@ -339,13 +361,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         return self.build_plan(
             request,
             context,
-            success=is_success,
+            success=success_mask,
             trajectory=full,
             expected_effects=StateDelta(
                 held_object_updates={control_part: held},
                 coordinated_held_object_updates=coordinated_updates,
             ),
-            phase_name="pick",
+            segment_lengths=segment_lengths,
         )
 
     def _resolve_grasp_pose(

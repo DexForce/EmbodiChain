@@ -25,8 +25,13 @@ import torch
 
 from ..core import AtomicAction
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, CompletionConditionKind
+from ..plans import ActionPlan
 from ..state import PlanningContext
+from ..trajectory_ops import (
+    build_joint_plan_states,
+    resolve_joint_target,
+    to_full_robot_trajectory,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -77,7 +82,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     ) -> None:
         super().__init__(default_options)
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
         context: PlanningContext,
@@ -88,7 +93,7 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
         control_part = manipulator.name
         joint_ids = list(manipulator.joint_ids)
         joint_dof = manipulator.dof
-        target_qpos = self.builder.resolve_joint_target(
+        target_qpos = resolve_joint_target(
             self._resolve_target_qpos(
                 goal,
                 request=request,
@@ -97,22 +102,17 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             n_envs=context.batch_size,
             joint_dof=joint_dof,
             control_part=control_part,
+            device=self.device,
         )
-        start_qpos = self.builder.resolve_start_qpos(
-            context.robot.qpos[:, joint_ids],
-            n_envs=context.batch_size,
-            arm_dof=joint_dof,
-            control_part=control_part,
+        start_qpos = context.robot.qpos[:, joint_ids]
+        result = self.motion_generator.generate(
+            build_joint_plan_states(target_qpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+            ),
         )
-        result = self.builder.generate_joint_plan(
-            start_qpos,
-            target_qpos,
-            request.motion_policy.sample_count,
-            control_part=control_part,
-            arm_dof=joint_dof,
-            cfg=request.motion_policy,
-        )
-        success, trajectory = self.builder.to_full_robot_trajectory(
+        success, trajectory = to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
@@ -124,7 +124,6 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             context,
             success=success,
             trajectory=trajectory,
-            completion_kind=CompletionConditionKind.JOINT_GOAL_REACHED,
         )
 
     def _resolve_target_qpos(

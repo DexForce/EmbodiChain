@@ -23,7 +23,6 @@ from typing import ClassVar, Literal
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
@@ -36,6 +35,12 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..state import PlanningContext
+from ..trajectory_ops import (
+    build_pose_plan_states,
+    interpolate_hand_qpos,
+    resolve_pose_target,
+    split_three_segments,
+)
 
 TcpSymmetry = Literal["none", "z_roll_180"]
 
@@ -92,7 +97,7 @@ class PlaceOptions(ActionOptions):
     """Per-invocation placement behavior."""
 
     hand_interp_steps: int = 5
-    """Number of waypoints for the gripper open interpolation phase."""
+    """Number of waypoints for the gripper-open interpolation segment."""
 
     lift_height: float = 0.1
     """Height (m) to retract the end-effector after opening the gripper."""
@@ -118,7 +123,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     The :class:`PlaceGoal` may carry either a single waypoint
     ``(n_envs, 4, 4)`` (or a broadcastable ``(4, 4)``) or a multi-waypoint
     trajectory ``(n_envs, n_waypoint, 4, 4)``. In the multi-waypoint case the
-    down phase visits every waypoint in order; approaching from above the
+    approach segment visits every waypoint in order; approaching from above the
     first waypoint, descending through each waypoint, then opening the gripper
     at the final waypoint and retracting to above the last waypoint. Starting
     joint positions are inherited from :class:`PlanningContext`.
@@ -149,7 +154,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         self.n_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
         context: PlanningContext,
@@ -180,21 +185,16 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         if place_xpos.dim() == 3:
             place_xpos = place_xpos.unsqueeze(1)
 
-        start_arm_qpos = self.builder.resolve_start_qpos(
-            arm_qpos_from_state(state, arm_joint_ids),
-            n_envs=self.n_envs,
-            arm_dof=manipulator.dof,
-            control_part=control_part,
-        )
+        start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
         if isinstance(target, PlaceGoal) and target.tcp_symmetry == "z_roll_180":
             place_xpos = self._select_tcp_symmetric_place_variant(
                 place_xpos, start_arm_qpos, control_part
             )
-        n_down, n_open, n_back = self.builder.split_three_phase(
+        n_down, n_open, n_back = split_three_segments(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
-            first_phase_name="approach",
-            third_phase_name="back",
+            first_segment_name="approach",
+            third_segment_name="back",
         )
 
         approach_xpos = self._lifted_pose(place_xpos[:, 0], options)
@@ -208,48 +208,42 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         down_xpos = torch.cat([approach_xpos.unsqueeze(1), place_xpos], dim=1)
         down_xpos = self._translation_keyframes(start_xpos, down_xpos, options)
 
-        target_states_list = [
-            [
-                PlanState(xpos=down_xpos[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(down_xpos.shape[1])
-            ]
-            for i in range(self.n_envs)
-        ]
-        down_success, down_arm = self.builder.plan_arm_traj(
-            target_states_list,
-            start_arm_qpos,
-            n_down,
-            control_part=control_part,
-            arm_dof=manipulator.dof,
-            cfg=request.motion_policy,
+        down_result = self.motion_generator.generate(
+            build_pose_plan_states(down_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_arm_qpos,
+                control_part=control_part,
+                sample_count=n_down,
+            ),
         )
+        assert isinstance(down_result.success, torch.Tensor)
+        assert down_result.positions is not None
+        down_success = down_result.success
+        down_arm = down_result.positions
         reach_arm_qpos = down_arm[:, -1, :]
 
         back_xpos = self._translation_keyframes(
             place_xpos[:, -1], retract_xpos.unsqueeze(1), options
         )
-        target_states_list = [
-            [
-                PlanState(xpos=back_xpos[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(back_xpos.shape[1])
-            ]
-            for i in range(self.n_envs)
-        ]
-        back_success, back_arm = self.builder.plan_arm_traj(
-            target_states_list,
-            reach_arm_qpos,
-            n_back,
-            control_part=control_part,
-            arm_dof=manipulator.dof,
-            cfg=request.motion_policy,
+        back_result = self.motion_generator.generate(
+            build_pose_plan_states(back_xpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=reach_arm_qpos,
+                control_part=control_part,
+                sample_count=n_back,
+            ),
         )
+        assert isinstance(back_result.success, torch.Tensor)
+        assert back_result.positions is not None
+        back_success = back_result.success
+        back_arm = back_result.positions
         success = down_success & back_success
 
-        hand_open_path = self.builder.interpolate_hand_qpos(
+        hand_open_path = interpolate_hand_qpos(
             hand_grasp_qpos, hand_open_qpos, n_waypoints=n_open
         )
 
-        # Allocate from the actually-returned phase lengths so collision-aware
+        # Allocate from the actually returned segment lengths so collision-aware
         # planners (which preserve their own sample count) are accommodated.
         n_down_actual = down_arm.shape[1]
         n_back_actual = back_arm.shape[1]
@@ -280,7 +274,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 held_object_updates={control_part: None},
                 coordinated_held_object_updates=coordinated_updates,
             ),
-            phase_name="place",
+            segment_lengths={
+                "approach": n_down_actual,
+                "release": n_open,
+                "retract": n_back_actual,
+            },
         )
 
     def _resolve_place_xpos(
@@ -300,9 +298,10 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             ``(n_envs, n_waypoint, 4, 4)``.
         """
         if isinstance(target, PlaceGoal):
-            return self.builder.resolve_pose_target(
+            return resolve_pose_target(
                 resolve_pose_goal(target.xpos, state, name="xpos"),
                 n_envs=self.n_envs,
+                device=self.device,
             )
         return self._resolve_assemble_place_xpos(target, state, control_part)
 

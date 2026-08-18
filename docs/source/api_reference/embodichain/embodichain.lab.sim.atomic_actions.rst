@@ -27,8 +27,8 @@ embodichain.lab.sim.atomic_actions
       PlanningContext
       StateDelta
       TimedTrajectory
-      PhaseSpec
-      PlannedPhase
+      TrajectorySegment
+      PlannerDiagnostics
       ActionPlan
       CompiledTrajectory
 
@@ -52,6 +52,7 @@ embodichain.lab.sim.atomic_actions
       ExecutionClock
       SimulationExecutionAdapter
       ExecutionTick
+      EffectVerificationRequest
       JointCommand
       ExecutionEvent
       ExecutionEventKind
@@ -230,7 +231,4 @@ Semantic objects and helpers
    :members:
 
 .. autoclass:: CoordinatedHeldObjectState
-   :members:
-
-.. autoclass:: TrajectoryBuilder
    :members:

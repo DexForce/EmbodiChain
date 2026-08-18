@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Optional DexSim end-to-end test for cuRobo through AtomicActionEngine.
+"""Optional DexSim end-to-end strategy test for cuRobo through AtomicActionEngine.
 
 Skipped when cuRobo or CUDA is unavailable. When both are present, it builds a
 single-arm Franka + static cuboid scene, executes ``MoveEndEffector`` with
@@ -135,7 +135,7 @@ def test_atomic_move_end_effector_uses_curobo_v2():
                     goal=EndEffectorPoseGoal(xpos=target),
                     binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
                     motion_policy=MotionPolicy(
-                        motion_source="motion_gen",
+                        strategy="motion_gen",
                         sample_count=SAMPLE_INTERVAL,
                     ),
                 ),

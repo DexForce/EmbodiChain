@@ -52,6 +52,7 @@ from .engine import (
     unregister_action,
 )
 from .execution import (
+    EffectVerificationRequest,
     ExecutionEvent,
     ExecutionEventKind,
     ExecutionSession,
@@ -64,14 +65,11 @@ from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
-    CompletionCondition,
-    CompletionConditionKind,
-    PhaseSpec,
-    PlannedPhase,
     PlannerDiagnostics,
     TimedTrajectory,
+    TrajectorySegment,
 )
-from .policies import MotionPolicy, RecoveryPolicy
+from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
@@ -119,7 +117,13 @@ from .runner import (
     RunnerStep,
     RunnerStepCallback,
 )
-from .sim_adapter import SceneSnapshotSupplier, SimulationExecutionAdapter
+from .scene import SceneProvider
+from .sim_adapter import (
+    RigidObjectSceneProvider,
+    RigidObjectSceneProviderCfg,
+    SceneSnapshotSupplier,
+    SimulationExecutionAdapter,
+)
 from .state import (
     CoordinatedHeldObjectState,
     EntityState,
@@ -129,7 +133,6 @@ from .state import (
     SceneSnapshot,
     TaskState,
 )
-from .trajectory import TrajectoryBuilder
 
 __all__ = [
     "ActionBinding",
@@ -152,8 +155,6 @@ __all__ = [
     "CommandDispatch",
     "CommandOperation",
     "CommandSink",
-    "CompletionCondition",
-    "CompletionConditionKind",
     "ControlCommand",
     "ControlPartCommandProfile",
     "CoordinatedHeldObjectState",
@@ -163,8 +164,10 @@ __all__ = [
     "CoordinatedPlacement",
     "CoordinatedPlacementGoal",
     "CoordinatedPlacementOptions",
+    "DynamicCollisionMode",
     "EndEffectorPoseGoal",
     "EntityState",
+    "EffectVerificationRequest",
     "EffectVerifier",
     "ExecutionClock",
     "ExecutionEvent",
@@ -196,13 +199,11 @@ __all__ = [
     "ObjectSemantics",
     "OPEN_COMMAND",
     "ObservationProvider",
-    "PhaseSpec",
     "PickUp",
     "PickUpOptions",
     "Place",
     "PlaceGoal",
     "PlaceOptions",
-    "PlannedPhase",
     "PlannerDiagnostics",
     "PlanningContext",
     "PoseGoalValue",
@@ -210,6 +211,8 @@ __all__ = [
     "PressGoal",
     "PressOptions",
     "RecoveryPolicy",
+    "RigidObjectSceneProvider",
+    "RigidObjectSceneProviderCfg",
     "ResolvedActionRequest",
     "ResolvedActionBinding",
     "ResolvedControlPart",
@@ -217,6 +220,7 @@ __all__ = [
     "RunnerStatus",
     "RunnerStep",
     "RunnerStepCallback",
+    "SceneProvider",
     "SceneSnapshot",
     "SceneSnapshotSupplier",
     "SceneEntityPose",
@@ -225,7 +229,7 @@ __all__ = [
     "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
-    "TrajectoryBuilder",
+    "TrajectorySegment",
     "get_registered_actions",
     "register_action",
     "unregister_action",

@@ -291,8 +291,8 @@ In this mode, the physics simulation stepping is automatically handling by the p
 
 For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
 
-### Related Tutorials
+### Related Documentation
 
-- [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
-- [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
+- {doc}`Basic scene creation </tutorial/create_scene>`
+- {doc}`Interactive Gizmos </features/interaction/gizmo>`
 - {doc}`Viser browser visualization <viser_visualization>`

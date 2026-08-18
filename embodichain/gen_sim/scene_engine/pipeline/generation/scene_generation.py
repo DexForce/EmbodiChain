@@ -22,13 +22,19 @@ from pathlib import Path
 import shutil
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 import trimesh
+from shapely.geometry import Polygon
 
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
+from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
+    OpenAICompatibleVLM,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_support_clamp import (
     AssetsGroupSupportClamp,
 )
@@ -47,11 +53,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils impo
     quaternion_wxyz_to_euler_xyz_degrees,
     transform_matrix_to_layout_object,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.simready_scene_processor import (
-    SimReadySceneProcessor,
-)
-from embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface import (
-    TableSupportSurfaceDetector,
+from embodichain.gen_sim.scene_engine.pipeline.utils.simready_processor import (
+    SimReadyProcessor,
+    SimReadyProcessorConfig,
 )
 from embodichain.utils.logger import log_info
 
@@ -62,11 +66,15 @@ def generate_scene_and_refine(
     image_path: str | Path,
     output_root: str | Path,
     scene: Scene,
+    scene_graph: SceneGraph,
     *,
     geometry_generation_client: GeometryGenerationClient,
+    vlm_client: OpenAICompatibleVLM,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
+    # Validate the scene graph before layout refinement consumes it.
+    scene_graph.validate()
     # Create stage output directory.
     stage_output_root = Path(output_root).expanduser().resolve() / "scene_generation"
     if stage_output_root.exists():
@@ -101,11 +109,18 @@ def generate_scene_and_refine(
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
-    simready_processor = SimReadySceneProcessor(
+    simready_processor = SimReadyProcessor(
         scene=scene,
         coarse_layout_by_id=coarse_layout_by_id,
         coarse_geometry_root=coarse_geometry_output_root,
         simready_geometry_root=simready_geometry_output_root,
+        debug_output_root=debug_output_root,
+        # Image-to-scene uses the geometry service's coarse scale directly.
+        config=SimReadyProcessorConfig(
+            use_vlm_scale=False,
+            use_vlm_rotation=False,
+        ),
+        vlm_client=vlm_client,
     )
     simready_assets_layout = simready_processor.process_assets()
     simready_table_layout = simready_processor.process_table()
@@ -119,6 +134,7 @@ def generate_scene_and_refine(
     # Layout refinement will start with the table.
     refined_table_layout, refined_assets_layout = _layout_refinement(
         scene=scene,  # Update this data structure internally.
+        scene_graph=scene_graph,
         simready_geometry_output_root=simready_geometry_output_root,  # Contains simready assets and their current coarse layout JSON.
         debug_output_root=debug_output_root,  # Keep the table support surface info + optimized layout info (render with matplotlib) for debugging.
     )
@@ -195,16 +211,18 @@ def _generate_coarse_results_from_masks(
     return None
 
 
-def _update_scene_final_y_up_layout(
+def _update_scene_final_y_up_layout_and_z_up_centers(
     *,
     scene: Scene,
     table_layout: dict[str, object],
     assets_layout: list[dict[str, object]],
+    geometry_root: str | Path,
 ) -> None:
-    """Copy final y-up layout values into the matching table and asset objects."""
+    """Write final y-up layouts and z-up XY centers into the scene."""
     if scene.table is None:
         raise ValueError("Cannot update a final layout without a table.")
 
+    # Keep final poses in the y-up layout convention used by exported GLBs.
     _copy_y_up_layout_to_scene_object(scene.table, table_layout)
     assets_by_id = {asset.id: asset for asset in scene.assets}
     layout_ids = set()
@@ -222,6 +240,29 @@ def _update_scene_final_y_up_layout(
         raise ValueError(
             f"Final layout is missing scene assets: {sorted(missing_assets)}."
         )
+
+    # Measure final geometry in z-up so scene edits can compare tabletop XY positions.
+    table_mesh, assets_aabb_corners_by_id = _measure_table_and_assets_in_z_up_world(
+        table_layout=table_layout,
+        assets_layout=assets_layout,
+        geometry_root=geometry_root,
+    )
+    # Persist AABB centers for future scene-edit object disambiguation.
+    scene.table.center_xy = table_mesh.bounds[:, :2].mean(axis=0).tolist()
+    if scene.table.support_contour_xy is not None:
+        # Move SimReady-local support geometry into the final table-frame position.
+        table_center_xy = np.asarray(scene.table.center_xy, dtype=float)
+        scene.table.support_contour_xy = [
+            (np.asarray(point, dtype=float) + table_center_xy).tolist()
+            for point in scene.table.support_contour_xy
+        ]
+        if scene.table.support_optimization_rect_xy is not None:
+            scene.table.support_optimization_rect_xy = [
+                (np.asarray(point, dtype=float) + table_center_xy).tolist()
+                for point in scene.table.support_optimization_rect_xy
+            ]
+    for asset in scene.assets:
+        asset.center_xy = assets_aabb_corners_by_id[asset.id].mean(axis=0).tolist()
 
 
 def _copy_y_up_layout_to_scene_object(
@@ -252,6 +293,7 @@ def _copy_y_up_layout_to_scene_object(
 def _layout_refinement(
     *,
     scene: Scene,
+    scene_graph: SceneGraph,
     simready_geometry_output_root: str | Path,
     debug_output_root: str | Path,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
@@ -318,7 +360,14 @@ def _layout_refinement(
             )
         )
 
-    # 3. Move all assets as one rigid group so its lowest AABB point is 2cm above
+    # 3. Correct image-observed standing containers before every geometry-based
+    # layout stage measures their footprint.
+    refined_assets_layout = _scene_graph_based_calibration(
+        scene_graph=scene_graph,
+        assets_layout=refined_assets_layout,
+    )
+
+    # 4. Move all assets as one rigid group so its lowest AABB point is 2cm above
     # the table. This preserves the initial relative poses for the later
     # gravity simulation, which can settle individual assets physically.
 
@@ -332,31 +381,36 @@ def _layout_refinement(
         log_info("Scene has no movable assets; skipping support-region clamping.")
         return refined_table_layout, []
 
-    # 4. Detect the actual upward support triangles instead of projecting the
-    # entire table mesh to one convex hull.  The result retains concavities
-    # (for example, an L-shaped tabletop) and is the only boundary used for
-    # placement below.
-    (
-        table_world_mesh_z_up,
-        assets_aabb_2d_z_up_world_corners_by_id,
-    ) = _measure_table_and_assets_in_z_up_world(
-        table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
-        geometry_root=simready_geometry_output_root,
+    # 5. Reuse support geometry detected during SimReady processing.
+    if (
+        scene.table is None
+        or scene.table.support_contour_xy is None
+        or scene.table.support_optimization_rect_xy is None
+    ):
+        raise ValueError("Scene table has no persisted support geometry.")
+    table_support_polygon = Polygon(scene.table.support_contour_xy)
+    table_optimization_rectangle = Polygon(scene.table.support_optimization_rect_xy)
+    if not table_support_polygon.is_valid or table_support_polygon.is_empty:
+        raise ValueError("Scene table support contour is not a valid polygon.")
+    if (
+        not table_optimization_rectangle.is_valid
+        or table_optimization_rectangle.is_empty
+    ):
+        raise ValueError("Scene table optimization rectangle is not valid.")
+    _, assets_aabb_2d_z_up_world_corners_by_id = (
+        _measure_table_and_assets_in_z_up_world(
+            table_layout=refined_table_layout,
+            assets_layout=refined_assets_layout,
+            geometry_root=simready_geometry_output_root,
+        )
     )
-    support_detector = TableSupportSurfaceDetector(
-        table_world_mesh=table_world_mesh_z_up,
-        debug_output_root=debug_output_root,
-    )
-    table_support_region = support_detector.detect()
-    support_detector.save_support_surface_debug_images()
 
-    # 5. Keep the complete clutter rigid in the table plane.  A successful
+    # 6. Keep the complete clutter rigid in the table plane.  A successful
     # result applies one shared z-up XY delta to every AABB, so it preserves
     # all existing asset-to-asset relations.  It is *not* an asset packing
     # pass: pre-existing overlap is deliberately left to a later optimizer.
     group_clamp = AssetsGroupSupportClamp(
-        support_region=table_support_region.support_polygon,
+        support_region=table_support_polygon,
         assets_aabb_2d_z_up_world_corners_by_id=(
             assets_aabb_2d_z_up_world_corners_by_id
         ),
@@ -377,13 +431,10 @@ def _layout_refinement(
         )
     )
 
-    # 6. Restore the previous pairwise AABB separation stage, but constrain
-    # every candidate with the actual support polygon rather than the legacy
-    # largest internal rectangle.  Assets may now move independently only as
-    # much as needed to remove overlap; every resulting AABB remains on the
-    # L-shaped, circular, or otherwise non-convex support region.
+    # 7. Optimize independent asset positions inside the conservative rectangle.
+    # The clamp above already used the exact outer contour for the shared shift.
     overlap_optimizer = AssetsSupportLayoutOptimizer(
-        support_region=table_support_region.support_polygon,
+        support_region=table_optimization_rectangle,
         assets_aabb_2d_z_up_world_corners_by_id=(
             clamped_assets_aabb_2d_z_up_world_corners_by_id
         ),
@@ -396,7 +447,7 @@ def _layout_refinement(
     refined_assets_layout = overlap_optimizer.optimize()
     overlap_optimizer.save_overlap_optimization_debug_images()
 
-    # 7. Gravity simulation, to let all the assets to be stable and placed well on the table's support surface.
+    # 8. Gravity simulation, to let all the assets to be stable and placed well on the table's support surface.
     # Notice that: we do not consider the assets like a bottle, which should be standing on the table but laid down
     # after the simulation.
     gravity_settler = AssetsGravitySettler(
@@ -407,13 +458,111 @@ def _layout_refinement(
     )
     refined_assets_layout = gravity_settler.settle()
 
-    # Update the scene data structure with the final y-up layout values.
-    _update_scene_final_y_up_layout(
+    # Update the scene data structure with the final layout and spatial metadata.
+    _update_scene_final_y_up_layout_and_z_up_centers(
         scene=scene,
         table_layout=refined_table_layout,
         assets_layout=refined_assets_layout,
+        geometry_root=simready_geometry_output_root,
     )
     return refined_table_layout, refined_assets_layout
+
+
+def _scene_graph_based_calibration(
+    *,
+    scene_graph: SceneGraph,
+    assets_layout: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Minimally align graph-marked standing assets with the z-up table frame."""
+    # This is the extension point for future image-conditioned scene generation
+    # calibration.  The scene graph may later provide richer image-grounded
+    # constraints, but the current implementation deliberately consumes only
+    # ``orientation_state`` to correct standing container axes before layout.
+    y_up_to_z_up_matrix = np.eye(4)
+    y_up_to_z_up_matrix[:3, :3] = np.array(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
+    z_up_to_y_up_matrix = np.linalg.inv(y_up_to_z_up_matrix)
+    nodes_by_id = scene_graph.node_by_id()
+    calibrated_assets_layout: list[dict[str, object]] = []
+
+    for asset_layout in assets_layout:
+        asset_id = asset_layout.get("id")
+        if not isinstance(asset_id, str) or not asset_id:
+            raise ValueError("Each asset layout must contain a non-empty string id.")
+        node = nodes_by_id.get(asset_id)
+        if node is None:
+            raise ValueError(f"Scene graph does not contain asset {asset_id!r}.")
+        if node.orientation_state != "standing":
+            calibrated_assets_layout.append(asset_layout)
+            continue
+
+        # Conjugate the y-up pose so the SimReady container axis is local z.
+        z_up_asset_to_table_matrix = (
+            y_up_to_z_up_matrix
+            @ layout_object_to_transform_matrix(asset_layout)
+            @ z_up_to_y_up_matrix
+        )
+        linear_matrix = z_up_asset_to_table_matrix[:3, :3]
+        # Layout transforms store rotation and per-axis scale in the same matrix.
+        scale = np.linalg.norm(linear_matrix, axis=0)
+        if np.any(scale <= 1e-8):
+            raise ValueError(f"Asset {asset_id!r} has a zero scale axis.")
+        rotation_matrix = linear_matrix / scale
+        if not np.allclose(rotation_matrix.T @ rotation_matrix, np.eye(3), atol=1e-6):
+            raise ValueError(f"Asset {asset_id!r} layout contains shear.")
+
+        local_z_axis_in_table = rotation_matrix[:, 2]
+        # Treat the long axis as unsigned to avoid an unnecessary 180-degree flip.
+        target_z_axis = np.array(
+            [0.0, 0.0, 1.0 if local_z_axis_in_table[2] >= 0.0 else -1.0]
+        )
+        # Left multiplication applies the correction in the table/world frame.
+        z_up_asset_to_table_matrix[:3, :3] = (
+            _minimum_axis_alignment_rotation(
+                source_axis=local_z_axis_in_table,
+                target_axis=target_z_axis,
+            )
+            @ rotation_matrix
+            @ np.diag(scale)
+        )
+        calibrated_assets_layout.append(
+            transform_matrix_to_layout_object(
+                asset_id,
+                z_up_to_y_up_matrix @ z_up_asset_to_table_matrix @ y_up_to_z_up_matrix,
+            )
+        )
+    return calibrated_assets_layout
+
+
+def _minimum_axis_alignment_rotation(
+    *,
+    source_axis: np.ndarray,
+    target_axis: np.ndarray,
+) -> np.ndarray:
+    """Return the smallest proper rotation mapping one nonzero axis to another."""
+    source = np.asarray(source_axis, dtype=float)
+    target = np.asarray(target_axis, dtype=float)
+    source_norm = np.linalg.norm(source)
+    target_norm = np.linalg.norm(target)
+    if source_norm <= 1e-8 or target_norm <= 1e-8:
+        raise ValueError("Axis alignment requires nonzero axes.")
+    source /= source_norm
+    target /= target_norm
+
+    cross_product = np.cross(source, target)
+    sine = np.linalg.norm(cross_product)
+    cosine = float(np.clip(np.dot(source, target), -1.0, 1.0))
+    if sine <= 1e-8:
+        if cosine > 0.0:
+            return np.eye(3)
+        basis_axis = np.eye(3)[np.argmin(np.abs(source))]
+        rotation_axis = np.cross(source, basis_axis)
+        rotation_axis /= np.linalg.norm(rotation_axis)
+        return Rotation.from_rotvec(np.pi * rotation_axis).as_matrix()
+
+    rotation_axis = cross_product / sine
+    return Rotation.from_rotvec(np.arctan2(sine, cosine) * rotation_axis).as_matrix()
 
 
 def _measure_table_and_assets_in_z_up_world(

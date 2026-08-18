@@ -27,6 +27,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
     Affordance,
+    DynamicCollisionMode,
     EndEffectorPoseGoal,
     EntityState,
     HeldObjectState,
@@ -97,10 +98,48 @@ def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
     policy = MotionPolicy(sample_count=24, control_dt=0.01)
     assert policy.sample_count == 24
     assert policy.control_dt == 0.01
+    assert policy.dynamic_collision_mode is DynamicCollisionMode.AUTO
     with pytest.raises(ValueError, match="sample_count"):
         MotionPolicy(sample_count=1)
+    with pytest.raises(ValueError, match="strategy"):
+        MotionPolicy(strategy="planner")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="max_replans"):
         RecoveryPolicy(max_replans=-1)
+
+
+def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
+    assert (
+        MotionPolicy(dynamic_collision_mode="off").dynamic_collision_mode
+        is DynamicCollisionMode.OFF
+    )
+    with pytest.raises(ValueError, match="dynamic_collision_mode"):
+        MotionPolicy(dynamic_collision_mode="unknown")
+    with pytest.raises(TypeError, match="DynamicCollisionMode"):
+        MotionPolicy(dynamic_collision_mode=object())  # type: ignore[arg-type]
+
+
+def test_motion_policy_maps_to_motion_generator_strategy() -> None:
+    policy = MotionPolicy(
+        strategy="ik_interp",
+        sample_count=24,
+        velocity_limit=0.2,
+        acceleration_limit=0.5,
+    )
+    start_qpos = torch.zeros(2, 6)
+
+    options = policy.to_motion_gen_options(
+        start_qpos=start_qpos,
+        control_part="arm",
+        sample_count=12,
+    )
+
+    assert options.strategy == "ik_interp"
+    assert options.sample_count == 12
+    assert options.start_qpos is not start_qpos
+    assert torch.equal(options.start_qpos, start_qpos)
+    assert options.control_part == "arm"
+    assert options.velocity_limit == 0.2
+    assert options.acceleration_limit == 0.5
 
 
 def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
@@ -175,6 +214,34 @@ def test_scene_entity_pose_enforces_confidence() -> None:
         )
 
 
+def test_scene_snapshot_expands_global_collision_world_revision() -> None:
+    pose = torch.eye(4).repeat(2, 1, 1)
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"obstacle": EntityState(pose)},
+        collision_world_revision=3,
+        collision_entity_ids=("obstacle",),
+    )
+
+    assert snapshot.collision_world_revisions(2) == (3, 3)
+    obstacle_poses = snapshot.collision_obstacle_poses(
+        batch_size=2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    assert torch.equal(obstacle_poses["obstacle"], pose)
+
+
+def test_scene_snapshot_rejects_unknown_collision_entity() -> None:
+    with pytest.raises(ValueError, match="missing scene entities"):
+        SceneSnapshot(
+            timestamp=0.0,
+            version=0,
+            collision_entity_ids=("missing",),
+        )
+
+
 def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
     positions = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
     trajectory = TimedTrajectory.from_positions(
@@ -190,6 +257,25 @@ def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
     assert trajectory.duration.tolist() == pytest.approx([0.04, 0.04])
     assert torch.equal(held.positions[0], positions[0])
     assert torch.all(held.positions[1] == -1.0)
+
+
+def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
+    trajectory = TimedTrajectory.from_positions(
+        torch.arange(12, dtype=torch.float32).reshape(1, 3, 4),
+        env_ids=torch.tensor([4]),
+        control_dt=0.02,
+    )
+
+    snapshot = trajectory.snapshot()
+    snapshot.positions.zero_()
+    snapshot.dt.zero_()
+    snapshot.duration.zero_()
+    snapshot.env_ids.zero_()
+
+    assert torch.count_nonzero(trajectory.positions).item() > 0
+    assert torch.count_nonzero(trajectory.dt).item() > 0
+    assert trajectory.duration.item() > 0.0
+    assert trajectory.env_ids.tolist() == [4]
 
 
 def test_timed_trajectory_concatenates_metadata() -> None:

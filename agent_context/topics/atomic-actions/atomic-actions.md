@@ -23,13 +23,27 @@ There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
 
 `PlanningContext` separates measured `RobotObservation`, verified symbolic
 `TaskState`, versioned `SceneSnapshot`, and environment IDs. An `ActionPlan`
-contains per-environment planning success, one or more `PlannedPhase` objects,
-full-robot `TimedTrajectory` data, diagnostics, completion conditions, and an
-uncommitted `StateDelta`.
+contains per-environment planning success, one full-robot `TimedTrajectory`,
+action-level recovery and scene-invalidation metadata, planner diagnostics,
+named `TrajectorySegment` ranges, and an uncommitted `StateDelta`. Segments are
+inspection/tracing metadata inside one trajectory; they are not independently
+replannable execution boundaries.
+
+`AtomicAction.build_plan()` normalizes the success mask and freezes unsuccessful
+trajectory rows at the context's observed qpos; skill implementations should
+return row-local success instead of duplicating failure-row masking.
+Use `plan.segment(name)` for action-local half-open ranges and
+`compiled.segment(action_index, name)` for concatenated coordinates; do not
+recompute private sample splits in callers.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
-instance, which contains its robot, motion generator, planner backend, shared
-`TrajectoryBuilder`, and control-part command profiles. Actions retain only an
+instance, which contains its robot, one `MotionGenerator`/planner backend, and
+control-part command profiles. `MotionGenerator.generate()` is the only
+stateful motion-planning entry point. `MotionPolicy.to_motion_gen_options()`
+passes the invocation's `strategy` directly into `MotionGenOptions`; it is either
+`"motion_gen"` or `"ik_interp"`. Target shaping, world-frame pose translation,
+hand/joint interpolation used by composite actions, and full-robot trajectory
+embedding are pure functions in `trajectory_ops.py`. Actions retain only an
 owned copy of typed default options and borrow engine services. Engine
 construction creates and binds a fresh instance of every type in
 `BUILTIN_ACTION_TYPES`; use `load_builtins=False` only for isolated tests or a
@@ -50,9 +64,12 @@ split compilation at observation boundaries when later goals depend on measured
 results. Use `start()` when observation, effect verification, and replanning
 must remain active during execution.
 
-`AtomicAction.plan(request, context)` is the skill implementation hook called
-by the engine, not a fourth application entry point. `engine.plan_action(...)`
-is only an extension/testing escape hatch for an unregistered instance.
+`AtomicAction.plan(request, context)` is the framework-owned template method
+called by the engine, not a fourth application entry point. It binds collision
+entities from the current scene into a copied motion policy before delegating
+to the skill-specific `_plan()` hook. New actions implement `_plan()` and must
+not override `plan()`. `engine.plan_action(...)` is only an extension/testing
+escape hatch for an unregistered instance.
 
 ## Static compilation
 
@@ -74,7 +91,7 @@ Use invocation `skill_options` for multiple variants with the same stable
 
 `SceneEntityPose(entity_id, relative_pose)` is resolved from the latest scene
 snapshot every time the action plans. Its entity ID is recorded in
-`PhaseSpec.scene_dependencies`.
+`ActionPlan.scene_dependencies`.
 
 ```python
 session = engine.start(invocations, initial_context)
@@ -96,16 +113,20 @@ session monitors:
 
 - joint tracking error against the previous command;
 - translation/rotation drift of referenced scene entities;
-- phase timeout;
+- per-environment collision-world revision changes for collision-sensitive
+  actions;
+- action-attempt timeout;
 - planner and semantic-effect failure.
 
 It replans from the latest observation within per-environment budgets. The
-budgets and eligibility masks are row-local, while the phase and waypoint
-cursors are batch-synchronized: one allowed replan regenerates the active cohort
-and restarts its shared phase cursor without charging unaffected rows. Unknown
+budgets and eligibility masks are row-local, while the action waypoint cursor
+is batch-synchronized: one allowed replan regenerates the active cohort and
+restarts its action trajectory without charging unaffected rows. Unknown
 or exhausted failures are reported as structured `ExecutionEvent` objects. A
 non-empty `StateDelta` is not committed until the caller supplies an external
-`effect_success` mask.
+`effect_success` mask. While verification is outstanding,
+`ExecutionTick.pending_effect` retains a typed `EffectVerificationRequest` on
+every tick; `EFFECT_VERIFICATION_REQUIRED` is only the one-time audit event.
 
 Recovery replans reuse the current immutable `ResolvedActionRequest`, including
 its owned goal snapshot. Mutable goal values are copied, while simulator-backed
@@ -151,22 +172,56 @@ to simulation robot indices rather than using those IDs as array indices.
 Real-device adapters should implement the same protocols and enforce the passed
 acknowledgement timeout in their transport/controller layer.
 
+`SceneProvider.snapshot(timestamp=..., env_ids=...)` is the scene-observation
+boundary used by execution adapters. `SceneSnapshot.collision_entity_ids`
+identifies obstacle poses consumed by a planner, while
+`collision_world_revision` is either global or per environment. A newer
+revision invalidates only affected batch rows. `RigidObjectSceneProvider`
+tracks live simulation objects, filters sub-threshold pose noise, advances the
+general scene version, and maintains per-environment collision revisions.
+Thresholds are measured from the last materially published pose per entity and
+environment, so repeated sub-threshold motion eventually becomes observable.
+For lightweight sources that do not need environment correlation IDs,
+`SimulationExecutionAdapter` also accepts a mutually exclusive
+`SceneSnapshotSupplier(timestamp)` callback.
+
+The public `AtomicAction.plan()` copies `MotionPolicy` and binds collision entity
+poses through `MotionGenerator.bind_collision_world()`. The motion generator
+owns option copying and the backend capability boundary, then forwards the
+update through `BasePlanner.with_collision_world()`. Backends opt in via
+`supports_collision_world_updates`; cuRobo implements this bridge using
+`CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore consumes the
+same scene snapshot that triggered invalidation without adding obstacle
+parameters to each skill. Add/remove/geometry mutations are not yet supported
+by this pose-update path; providers should revision only pose-updatable
+registered obstacles.
+
+Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
+`tracking_error_recovery.py`, `moving_target_recovery.py`, and
+`dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
+structured invalidation/replan events, and requires terminal completion.
+
 The latest validated session context is retained for safe hold if the first
 live observation fails. Environment IDs must remain stable and ordered for the
 entire session; robot and scene timestamps and scene versions must be monotonic.
+Collision-world revisions must also remain monotonic per environment.
 
 ## Parameter ownership
 
 Goal dataclasses carry only semantic task intent. They do not carry robot part
 names, planner configuration, retry policy, or runtime state.
 
-`MotionPolicy` owns planner selection, motion source, sample count, fallback
-control period, limits, and typed planner options. `RecoveryPolicy` owns
-tracking/dynamic-goal thresholds, timeouts, and budgets. Each built-in has a
-frozen `*Options` value for invocation-varying phase counts, offsets, and grasp
-selection behavior. An action constructor may accept `default_options`; an
-invocation's `skill_options` replaces them for that call. There is no
-`ActionCfg` or built-in `*Cfg` layer.
+`MotionPolicy` owns planner selection, motion strategy, sample count, fallback
+control period, limits, dynamic-collision mode, and typed planner options.
+`DynamicCollisionMode.AUTO` consumes a live collision world when available,
+`OFF` ignores snapshot collision entities and their revisions, and `REQUIRED`
+fails unless the motion strategy, scene, and planner support that path. These
+modes do not toggle backend-configured static-world or self-collision checks.
+`RecoveryPolicy` owns tracking/dynamic-goal thresholds, timeouts, and budgets.
+Each built-in has a frozen `*Options` value for invocation-varying segment counts,
+offsets, and grasp selection behavior. An action constructor may accept
+`default_options`; an invocation's `skill_options` replaces them for that call.
+There is no `ActionCfg` or built-in `*Cfg` layer.
 
 `engine.register(action)` is reserved for custom skill implementations. A
 built-in can be replaced only with explicit `replace=True`. Registration means
@@ -234,11 +289,16 @@ registers the referenced entity as a recovery dependency, allowing an executing
 1. Define a frozen action-owned goal dataclass with `goal_kind`.
 2. Define a frozen `ActionOptions` subclass only when runtime behavior exists.
 3. Declare `skill_id`, `GoalType`, `OptionsType`, and required semantic roles.
-4. Validate with `require_goal(request)` and consume only the resolved binding.
-5. Plan from `context.robot.qpos`; never read an implicit live start state.
-6. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
-7. Declare symbolic changes with `StateDelta`; do not mutate context or commit
+4. Implement `_plan()`; do not override the framework-owned `plan()` method.
+5. Validate with `require_goal(request)` and consume only the resolved binding.
+6. Plan from `context.robot.qpos`; never read an implicit live start state.
+7. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
+   Build batched `list[PlanState]`, translate the policy with
+   `request.motion_policy.to_motion_gen_options()`, and call
+   `self.motion_generator.generate()`. Import pure operations directly from
+   `trajectory_ops.py`.
+8. Declare symbolic changes with `StateDelta`; do not mutate context or commit
    physical effects during planning.
-8. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
+9. Keep scene stepping, controller I/O, and task-graph/MLLM logic outside the
    atomic action. Put execution-loop I/O behind the runner protocols rather than
    calling a simulator or device from `plan()` or `ExecutionSession`.

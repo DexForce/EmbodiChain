@@ -34,7 +34,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
@@ -376,9 +376,10 @@ class CuroboPlannerCfg(BasePlannerCfg):
     preserve_plan_samples: bool = False
     """Whether callers must retain cuRobo's raw collision-checked samples exactly.
 
-    When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-    resamples the returned trajectory to the atomic action's ``sample_interval``
-    waypoint count - matching the documented contract of
+    When ``False`` (default),
+    :class:`~embodichain.lab.sim.planners.motion_generator.MotionGenerator`
+    resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
+    matching the documented contract of
     :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
@@ -386,7 +387,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     :attr:`interpolation_dt` and the trajectory duration, e.g. ~82 for a 2 s
     plan at 0.025 s).
 
-    When ``True``, the builder returns cuRobo's own samples unchanged. Use this
+    When ``True``, the generator returns cuRobo's own samples unchanged. Use this
     when you need cuRobo's exact time-parameterized, collision-checked samples
     rather than a fixed waypoint count.
     """
@@ -748,15 +749,15 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
+    supports_collision_world_updates = True
 
     @property
     def preserve_plan_samples(self) -> bool:
         """Whether callers must retain this planner's raw samples exactly.
 
-        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by
-        :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-        to decide whether to resample the returned trajectory to the action's
-        ``sample_interval``.
+        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by the
+        atomic-action motion adapter to decide whether to resample the returned
+        trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
 
@@ -886,6 +887,32 @@ class CuroboPlanner(BasePlanner):
             "multi_env": bool(self.cfg.world.multi_env),
             "use_cuda_graph": backend.use_cuda_graph,
         }
+
+    def with_collision_world(
+        self,
+        options: PlanOptions,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> CuroboPlanOptions:
+        """Bind snapshot obstacle poses to one cuRobo planning attempt.
+
+        Args:
+            options: Reusable caller options copied by the atomic-action layer.
+            obstacle_poses: Batched simulator-world poses keyed by configured
+                dynamic obstacle name.
+
+        Returns:
+            cuRobo options containing an owned obstacle-pose mapping.
+        """
+        if not isinstance(options, CuroboPlanOptions):
+            logger.log_error("CuroboPlanner requires CuroboPlanOptions", TypeError)
+        merged = {
+            name: pose.clone()
+            for name, pose in (options.dynamic_obstacle_poses or {}).items()
+        }
+        merged.update({name: pose.clone() for name, pose in obstacle_poses.items()})
+        options.dynamic_obstacle_poses = merged or None
+        return options
 
     @validate_plan_options(options_cls=CuroboPlanOptions)
     def plan(

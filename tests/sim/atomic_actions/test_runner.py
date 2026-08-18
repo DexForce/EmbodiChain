@@ -168,7 +168,7 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         self.with_effect = with_effect
         self.plan_count = 0
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
         context: PlanningContext,
@@ -252,7 +252,7 @@ def _make_runner(
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             tracking_error_threshold=0.05,
-            phase_timeout=10.0,
+            action_timeout=10.0,
         ),
     )
     session = engine.start((invocation,), initial_context)
@@ -287,6 +287,15 @@ def test_runner_dispatches_only_when_timed_waypoint_is_due() -> None:
     assert second.wait_duration == pytest.approx(SECOND_INTERVAL)
     assert third.command_count == 3
     assert third.wait_duration == pytest.approx(SECOND_INTERVAL)
+
+
+def test_session_active_trajectory_returns_an_owned_snapshot() -> None:
+    runner, _, _, _, _ = _make_runner()
+
+    trajectory = runner.session.active_trajectory
+    trajectory.positions.fill_(-1.0)
+
+    assert torch.all(runner.session.active_trajectory.positions >= 0.0)
 
 
 def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
@@ -386,7 +395,7 @@ def test_runner_surfaces_explicit_invocation_revision() -> None:
         recovery_policy=RecoveryPolicy(
             max_replans=2,
             tracking_error_threshold=0.05,
-            phase_timeout=10.0,
+            action_timeout=10.0,
         ),
         revision=1,
     )
@@ -470,6 +479,8 @@ def test_blocking_runner_resumes_a_stored_effect_verification_boundary() -> None
     blocked = runner.run_until_blocked()
 
     assert blocked.status is RunnerStatus.RUNNING
+    assert blocked.tick is not None
+    assert blocked.tick.pending_effect is not None
     assert runner.effect_verification_pending is True
 
     completed = runner.run_until_blocked(
