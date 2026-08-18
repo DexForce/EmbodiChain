@@ -18,14 +18,72 @@ from __future__ import annotations
 
 import torch
 import numpy as np
-from typing import TYPE_CHECKING, List, Sequence
-from dexsim.render import Light as _Light
+from typing import Any, TYPE_CHECKING, List, Sequence
 from embodichain.lab.sim.cfg import LightCfg
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
     from dexsim.models import MeshObject
+    from dexsim.spawn import LightDesc
+
+
+class _DeclaredLightEntity:
+    """Native-light-shaped proxy used until a Spawn binding is available."""
+
+    def __init__(self, descriptor: "LightDesc") -> None:
+        self._pose = np.asarray(descriptor.pose, dtype=np.float32).reshape(4, 4).copy()
+        self._target: Any | None = None
+        self._pending: list[tuple[str, tuple[Any, ...]]] = []
+
+    def bind(self, target: Any) -> None:
+        if target is self._target:
+            return
+        pending = tuple(self._pending)
+        for method, args in pending:
+            getattr(target, method)(*args)
+        self._target = target
+        self._pending.clear()
+
+    def _call(self, method: str, *args: Any) -> Any:
+        if method == "set_location":
+            self._pose[:3, 3] = np.asarray(args, dtype=np.float32)
+        if self._target is not None:
+            return getattr(self._target, method)(*args)
+        self._pending.append((method, args))
+        return None
+
+    def set_color(self, *args: Any) -> Any:
+        return self._call("set_color", *args)
+
+    def set_intensity(self, *args: Any) -> Any:
+        return self._call("set_intensity", *args)
+
+    def set_shadow(self, *args: Any) -> Any:
+        return self._call("set_shadow", *args)
+
+    def set_falloff(self, *args: Any) -> Any:
+        return self._call("set_falloff", *args)
+
+    def set_location(self, *args: Any) -> Any:
+        return self._call("set_location", *args)
+
+    def set_direction(self, *args: Any) -> Any:
+        return self._call("set_direction", *args)
+
+    def set_spot_angle(self, *args: Any) -> Any:
+        return self._call("set_spot_angle", *args)
+
+    def set_rect_wh(self, *args: Any) -> Any:
+        return self._call("set_rect_wh", *args)
+
+    def set_mesh(self, *args: Any) -> Any:
+        return self._call("set_mesh", *args)
+
+    def get_local_pose(self) -> np.ndarray:
+        if self._target is not None:
+            return np.asarray(self._target.get_local_pose(), dtype=np.float32)
+        return self._pose.copy()
 
 
 class Light(BatchEntity):
@@ -41,11 +99,39 @@ class Light(BatchEntity):
     def __init__(
         self,
         cfg: LightCfg,
-        entities: List[_Light] = None,
+        entities: List[Any] = None,
         device: torch.device = torch.device("cpu"),
+        auto_reset: bool = True,
     ) -> None:
 
-        super().__init__(cfg, entities, device)
+        super().__init__(cfg, entities, device, auto_reset=auto_reset)
+
+    @classmethod
+    def declared(
+        cls,
+        cfg: LightCfg,
+        *,
+        descriptor: "LightDesc",
+        num_instances: int,
+        device: torch.device = torch.device("cpu"),
+    ) -> "Light":
+        """Create a stable batch facade before native lights materialize."""
+        if num_instances <= 0:
+            raise ValueError("Declared light instance count must be positive.")
+        entities = [_DeclaredLightEntity(descriptor) for _ in range(num_instances)]
+        return cls(cfg, entities, device, auto_reset=False)
+
+    def bind_spawn(self, handles: Sequence[Any]) -> None:
+        """Bind the declared facade to one SpawnedLight per instance."""
+        if len(handles) != self.num_instances:
+            raise ValueError(
+                f"Light {self.uid!r} expected {self.num_instances} Spawn handle(s), "
+                f"got {len(handles)}."
+            )
+        for entity, handle in zip(self._entities, handles):
+            if not isinstance(entity, _DeclaredLightEntity):
+                raise RuntimeError(f"Light {self.uid!r} is not a declared facade.")
+            entity.bind(handle)
 
     def set_color(
         self, colors: torch.Tensor, env_ids: Sequence[int] | None = None

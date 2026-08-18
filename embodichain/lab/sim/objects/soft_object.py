@@ -19,10 +19,11 @@ from __future__ import annotations
 import torch
 import dexsim
 import numpy as np
+from copy import deepcopy
 from functools import cached_property
 
 from dataclasses import dataclass
-from typing import List, Sequence, Union
+from typing import Any, List, Sequence, TYPE_CHECKING, Union
 
 from dexsim.models import MeshObject
 from dexsim.engine import PhysicsScene, SoftBody
@@ -46,6 +47,9 @@ from embodichain.lab.sim.cfg import (
     SoftObjectCfg,
 )
 from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult
 
 __all__ = ["SoftBodyData", "SoftObject", "SoftObjectCfg"]
 
@@ -198,18 +202,48 @@ class SoftObject(BatchEntity):
     def __init__(
         self,
         cfg: SoftObjectCfg,
-        entities: List[MeshObject] = None,
+        entities: Sequence[Any] | None = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
-        self._world: dexsim.World = dexsim.default_world()
-        from embodichain.lab.sim.sim_manager import get_physics_scene
+        if entities is None:
+            if declared_num_instances is None or declared_num_instances <= 0:
+                raise ValueError(
+                    "A declared SoftObject requires declared_num_instances > 0."
+                )
+            self.cfg = deepcopy(cfg)
+            self.uid = self.cfg.uid
+            self.device = device
+            self._entities = []
+            self._declared_num_instances = declared_num_instances
+            self._spawn_result = None
+            self._world = None
+            self._ps = None
+            self._data = None
+            self._all_indices = list(range(declared_num_instances))
+            self._visual_material = [None] * declared_num_instances
+            self.is_shared_visual_material = False
+            return
 
-        self._ps = get_physics_scene()
+        entities = list(entities)
+        self._declared_num_instances = len(entities)
+        self._spawn_result = spawn_result
+        if spawn_result is None:
+            self._world = dexsim.default_world()
+            from embodichain.lab.sim.sim_manager import get_physics_scene
+
+            self._ps = get_physics_scene()
+        else:
+            self._world = spawn_result.world
+            self._ps = self._world.get_physics_scene()
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         self._data = SoftBodyData(entities=entities, ps=self._ps, device=device)
 
-        self._world.update(0.001)
+        if spawn_result is None:
+            self._world.update(0.001)
 
         self._visual_material: List[VisualMaterialInst | None] = [None] * len(entities)
         self.is_shared_visual_material = False
@@ -220,6 +254,44 @@ class SoftObject(BatchEntity):
 
         # set default collision filter
         self._set_default_collision_filter()
+
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized SpawnResult."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its SpawnResult binding."""
+        return self._spawn_result is None and len(self._entities) == 0
+
+    @property
+    def num_instances(self) -> int:
+        return len(self._entities) if self._entities else self._declared_num_instances
+
+    def bind_spawn(self, result: SpawnResult, entities: Sequence[Any]) -> None:
+        """Bind a declared facade to finalized soft-body handles in place."""
+        if len(entities) != self._declared_num_instances:
+            raise ValueError(
+                f"SoftObject {self.uid!r} expected {self._declared_num_instances} "
+                f"Spawn handles, got {len(entities)}."
+            )
+        bound = SoftObject(
+            self.cfg,
+            entities,
+            self.device,
+            spawn_result=result,
+        )
+        self.__dict__.clear()
+        self.__dict__.update(bound.__dict__)
+
+    def __str__(self) -> str:
+        if self.is_declared:
+            return (
+                f"{self.__class__}: declared {self.num_instances} Spawn soft "
+                f"objects | uid: {self.uid} | device: {self.device}"
+            )
+        return super().__str__()
 
     def _initialize_existing_visual_material(self) -> None:
         """Wrap asset-parsed materials during soft-object construction.
@@ -528,6 +600,8 @@ class SoftObject(BatchEntity):
         self.set_local_pose(pose, env_ids=local_env_ids)
 
     def destroy(self) -> None:
+        if self.is_spawn_bound:
+            return
         # TODO: not tested yet
         env = self._world.get_env()
         arenas = env.get_all_arenas()

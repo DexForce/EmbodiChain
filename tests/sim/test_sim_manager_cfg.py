@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import torch
+import pytest
 
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, WindowCameraPoseCfg
@@ -60,6 +61,14 @@ def test_simulation_manager_cfg_initializes_window_camera_pose() -> None:
     cfg = SimulationManagerCfg(window_camera_pose=window_camera_pose)
 
     assert cfg.window_camera_pose == window_camera_pose
+
+
+def test_simulation_manager_cfg_has_no_scene_construction_switch() -> None:
+    cfg = SimulationManagerCfg()
+
+    assert "scene_construction" not in cfg.to_dict()
+    with pytest.raises(TypeError, match="scene_construction"):
+        SimulationManagerCfg(scene_construction="legacy")
 
 
 def test_newton_physics_cfg_uses_device() -> None:

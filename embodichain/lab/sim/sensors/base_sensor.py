@@ -171,10 +171,18 @@ class BaseSensor(BatchEntity):
     SUPPORTED_DATA_TYPES = []
 
     def __init__(
-        self, config: SensorCfg, device: torch.device = torch.device("cpu")
+        self,
+        config: SensorCfg,
+        device: torch.device = torch.device("cpu"),
+        *,
+        num_instances: int | None = None,
     ) -> None:
-
-        num_envs = get_dexsim_arena_num()
+        num_envs = (
+            get_dexsim_arena_num() if num_instances is None else int(num_instances)
+        )
+        if num_envs <= 0:
+            raise ValueError("A sensor requires at least one simulation instance.")
+        self._num_instances = num_envs
         self._data_buffer: TensorDict[str, torch.Tensor] = TensorDict(
             {}, batch_size=[num_envs], device=device
         )
@@ -186,7 +194,7 @@ class BaseSensor(BatchEntity):
 
     @cached_property
     def num_instances(self) -> int:
-        return get_dexsim_arena_num()
+        return self._num_instances
 
     @abstractmethod
     def _build_sensor_from_config(

@@ -22,26 +22,19 @@ from typing import TYPE_CHECKING
 import dexsim
 
 from embodichain.lab.sim.cfg import PhysicsCfg
-from embodichain.utils import logger
 
 from .base import PhysicsBackend
 
 if TYPE_CHECKING:
-    import dexsim as _dexsim  # noqa: F401
-
     from embodichain.lab.sim.cfg import SimulationManagerCfg
 
 __all__ = ["DefaultPhysicsBackend"]
 
 
 class DefaultPhysicsBackend(PhysicsBackend):
-    """The legacy DexSim default physics backend (GPU or CPU)."""
+    """DexSim's default PhysX backend (GPU or CPU)."""
 
     name = "default"
-
-    def __init__(self, manager) -> None:
-        super().__init__(manager)
-        self._is_initialized_gpu_physics = False
 
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
@@ -59,53 +52,10 @@ class DefaultPhysicsBackend(PhysicsBackend):
         dexsim.set_physics_config(**cfg.to_dexsim_args())
         dexsim.set_physics_gpu_memory_config(**cfg.gpu_memory.to_dict())
 
-    # -- lifecycle ------------------------------------------------------ #
-    def invalidate(self) -> None:
-        # The default backend has no dirty/finalize lifecycle.
-        pass
-
-    @property
-    def is_initialized(self) -> bool:
-        return self._is_initialized_gpu_physics
-
-    def prepare(self) -> None:
-        """Initialize GPU physics for the default backend.
-
-        Implements the unified :meth:`PhysicsBackend.prepare` contract. For the
-        default backend "becoming ready to step" is initializing GPU physics; on
-        CPU there is nothing to initialize so this is a no-op.
-        """
-        if not self._manager.is_use_gpu_physics:
-            logger.log_warning(
-                "The simulation device is not cuda, cannot initialize GPU physics."
-            )
-            return
-
-        if self._is_initialized_gpu_physics:
-            return
-
-        for art in self._manager._articulations.values():
-            art.reallocate_body_data()
-        for robot in self._manager._robots.values():
-            robot.reallocate_body_data()
-
-        # Re-establish rigid object positions after articulation resets, ensuring
-        # no articulation kinematics step has inadvertently corrupted the broadphase
-        # state for rigid bodies.
-        for rigid_obj in self._manager._rigid_objects.values():
-            rigid_obj.reset()
-
-        self._is_initialized_gpu_physics = True
-
-    def ensure_initialized(self) -> None:
-        if self._manager.is_use_gpu_physics and not self._is_initialized_gpu_physics:
-            logger.log_warning(
-                "Using GPU physics, but not initialized yet. Forcing initialization."
-            )
-            self.prepare()
-
     # -- scene ---------------------------------------------------------- #
     def get_scene(self):
+        """Return PhysX's compatibility scene after Spawn is prepared."""
+        self._manager.prepare()
         return self._manager._world.get_physics_scene()
 
     # -- capabilities --------------------------------------------------- #

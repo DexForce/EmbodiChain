@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Swappable physics-backend abstraction for :class:`SimulationManager`.
+"""Spawn-aware physics-backend abstraction for :class:`SimulationManager`.
 
 This module defines the contract that every physics backend (DexSim default,
 Newton/Warp, ...) satisfies. The owning :class:`SimulationManager`
 holds a single :class:`PhysicsBackend` instance as ``self.physics`` and
-delegates the backend-specific lifecycle, scene access, world-config
-activation and capability queries to it, instead of branching on a backend
-name string throughout the manager.
+delegates backend-specific world configuration, compatibility scene access,
+and capability queries to it. Scene topology and runtime readiness are owned
+by DexSim's ``SceneBuilder`` and ``SpawnResult``.
 
 The design deliberately mirrors IsaacLab's split of an orchestrator
 (``SimulationContext``) from a swappable physics manager (``PhysicsManager``),
@@ -92,68 +92,25 @@ class PhysicsBackend(ABC):
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         """Perform backend setup immediately after the dexsim World is created.
 
-        This is the counterpart of the backend split that used to live in
-        ``SimulationManager.__init__`` (default ``set_physics_config`` vs
-        ``get_newton_manager``).
+        Default configures the native PhysX globals. Newton is already
+        registered from ``WorldConfig.newton_cfg`` and therefore has no
+        additional activation work.
         """
-
-    # ------------------------------------------------------------------ #
-    # Lifecycle
-    # ------------------------------------------------------------------ #
-    @abstractmethod
-    def ensure_initialized(self) -> None:
-        """Ensure the backend runtime is ready before a physics step.
-
-        Called at the top of :meth:`SimulationManager.update`. For the default
-        backend this lazy-initializes GPU physics; for Newton it finalizes the
-        scene (rebuilding if the scene was mutated). Idempotent.
-        """
-
-    @abstractmethod
-    def invalidate(self) -> None:
-        """Mark the backend scene as needing re-initialization.
-
-        Called after any scene mutation (adding/removing assets) so that the
-        next :meth:`ensure_initialized` rebuilds as needed. A no-op for
-        backends without a dirty/finalize lifecycle.
-        """
-
-    @abstractmethod
-    def prepare(self) -> None:
-        """Force the backend into a ready-to-step state.
-
-        This unifies what the legacy code exposed as two separate operations -
-        "GPU physics init" on the default backend and "Newton finalize" - into a
-        single backend-agnostic entry point. It is idempotent: a backend that is
-        already ready is a no-op, and after :meth:`invalidate` the next call
-        re-prepares (re-initializes GPU physics / re-finalizes the Newton scene)
-        as needed.
-
-        Called both lazily by :meth:`ensure_initialized` before each step and
-        directly by the public :meth:`SimulationManager.init_gpu_physics` and
-        :meth:`SimulationManager.finalize_newton_physics` entry points (both of
-        which delegate here).
-        """
-
-    @property
-    @abstractmethod
-    def is_initialized(self) -> bool:
-        """Whether the backend runtime has been initialized/finalized."""
 
     # ------------------------------------------------------------------ #
     # Scene access
     # ------------------------------------------------------------------ #
     @abstractmethod
     def get_scene(self):
-        """Return the active physics scene object (default DexSim or Newton)."""
+        """Return a backend compatibility scene, or raise if none exists."""
 
     @property
     def newton_manager(self):
-        """The DexSim Newton manager, or ``None`` if not the Newton backend.
+        """Return ``None`` because Spawn does not use ``NewtonManager``.
 
-        Returns:
-            The :class:`dexsim.engine.newton_physics.NewtonManager` for the
-            Newton backend, otherwise ``None``.
+        The Newton backend overrides this property with an actionable error so
+        callers do not accidentally mix the removed manager ownership domain
+        with the World-owned Spawn backend.
         """
         return None
 

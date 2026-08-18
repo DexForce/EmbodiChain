@@ -20,8 +20,9 @@ import torch
 import dexsim
 import numpy as np
 
+from copy import deepcopy
 from dataclasses import dataclass, MISSING
-from typing import List, Sequence, Union
+from typing import TYPE_CHECKING, List, Sequence, Union
 from functools import cached_property
 
 from dexsim.models import MeshObject
@@ -56,6 +57,9 @@ from embodichain.utils.math import convert_quat
 from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_from_euler
 from embodichain.utils import logger
 
+if TYPE_CHECKING:
+    from dexsim.spawn import SpawnResult, SpawnedObject
+
 _UINT64_MAX = (1 << 64) - 1
 __all__ = ["RigidBodyData", "RigidObject", "RigidObjectCfg"]
 
@@ -69,7 +73,11 @@ class RigidBodyData:
     """
 
     def __init__(
-        self, entities: List[MeshObject], ps: PhysicsScene, device: torch.device
+        self,
+        entities: List[MeshObject],
+        ps: PhysicsScene | None,
+        device: torch.device,
+        body_view: RigidBodyViewBase | None = None,
     ) -> None:
         """Initialize the RigidBodyData.
 
@@ -84,7 +92,9 @@ class RigidBodyData:
         self.device = device
 
         # Create the appropriate backend view.
-        if is_newton_scene(ps):
+        if body_view is not None:
+            self.body_view = body_view
+        elif is_newton_scene(ps):
             self.body_view: RigidBodyViewBase = NewtonRigidBodyView(
                 entities=entities, scene=ps, device=device
             )
@@ -133,7 +143,13 @@ class RigidBodyData:
 
     @property
     def is_newton_backend(self) -> bool:
-        return isinstance(self.body_view, NewtonRigidBodyView)
+        return bool(
+            getattr(
+                self.body_view,
+                "is_newton_backend",
+                isinstance(self.body_view, NewtonRigidBodyView),
+            )
+        )
 
     @property
     def gpu_indices(self) -> torch.Tensor:
@@ -227,27 +243,68 @@ class RigidObject(BatchEntity):
         cfg: RigidObjectCfg,
         entities: List[MeshObject] = None,
         device: torch.device = torch.device("cpu"),
+        *,
+        spawn_result: SpawnResult | None = None,
+        declared_num_instances: int | None = None,
     ) -> None:
+        if entities is None:
+            if declared_num_instances is None or declared_num_instances <= 0:
+                raise ValueError(
+                    "A declared RigidObject requires declared_num_instances > 0."
+                )
+            self.cfg = deepcopy(cfg)
+            self.uid = self.cfg.uid
+            self.device = device
+            self.body_type = cfg.body_type
+            self._entities = []
+            self._declared_num_instances = declared_num_instances
+            self._spawn_result = None
+            self._ps = None
+            self._world = None
+            self._data = None
+            self._all_indices = list(range(declared_num_instances))
+            self._visual_material = [None] * declared_num_instances
+            self.is_shared_visual_material = False
+            self._has_collision_visible_node = False
+            return
+
+        self._declared_num_instances = len(entities)
+        self._spawn_result = spawn_result
         self.body_type = cfg.body_type
 
-        self._world = dexsim.default_world()
-        from embodichain.lab.sim.sim_manager import get_physics_scene
+        if spawn_result is None:
+            self._world = dexsim.default_world()
+            from embodichain.lab.sim.sim_manager import get_physics_scene
 
-        self._ps = get_physics_scene()
+            self._ps = get_physics_scene()
+        else:
+            self._world = spawn_result.world
+            self._ps = None
 
         self._all_indices = torch.arange(len(entities), dtype=torch.int32).tolist()
 
         # data for managing body data (only for dynamic and kinematic bodies) on GPU.
         self._data: RigidBodyData | None = None
         if self.is_static is False:
-            self._data = RigidBodyData(entities=entities, ps=self._ps, device=device)
+            body_view = None
+            if spawn_result is not None:
+                from embodichain.lab.sim.objects.backends import SpawnRigidBodyView
+
+                batch = spawn_result.create_rigid_body_batch(entities)
+                body_view = SpawnRigidBodyView(spawn_result, batch, device)
+            self._data = RigidBodyData(
+                entities=entities,
+                ps=self._ps,
+                device=device,
+                body_view=body_view,
+            )
 
         # For rendering purposes, each instance can have its own material.
         self._visual_material: List[VisualMaterialInst] = [None] * len(entities)
         self.is_shared_visual_material = False
 
         # Determine if we should use USD properties or cfg properties.
-        if not cfg.use_usd_properties:
+        if spawn_result is None and not cfg.use_usd_properties:
             for entity in entities:
                 entity.set_body_scale(*cfg.body_scale)
                 if is_newton_scene(self._ps):
@@ -256,7 +313,7 @@ class RigidObject(BatchEntity):
                     # set_physical_attr() is still default-backend only.
                     continue
                 entity.set_physical_attr(cfg.attrs.attr())
-        else:
+        elif spawn_result is None:
             # Read current properties from USD-loaded entities and write back to cfg
             # Use first entity as reference
             first_entity: MeshObject = entities[0]
@@ -271,7 +328,8 @@ class RigidObject(BatchEntity):
         self._initialize_existing_visual_material()
 
         # set default collision filter
-        self._set_default_collision_filter()
+        if spawn_result is None:
+            self._set_default_collision_filter()
 
         self._apply_initial_state()
 
@@ -281,15 +339,66 @@ class RigidObject(BatchEntity):
 
         # TODO: Must be called after setting all attributes.
         # May be improved in the future.
-        if cfg.attrs.enable_collision is False:
+        if spawn_result is None and cfg.attrs.enable_collision is False:
             flag = torch.zeros(len(entities), dtype=torch.bool)
             self.enable_collision(flag)
 
         # reserve flag for collision visible node existence
         self._has_collision_visible_node = False
 
+    @property
+    def is_spawn_bound(self) -> bool:
+        """Whether this facade is bound to one finalized SpawnResult."""
+        return self._spawn_result is not None
+
+    @property
+    def is_declared(self) -> bool:
+        """Whether this facade is waiting for its SpawnResult binding."""
+        return self._spawn_result is None and len(self._entities) == 0
+
+    @property
+    def num_instances(self) -> int:
+        if self._entities:
+            return len(self._entities)
+        return self._declared_num_instances
+
+    def bind_spawn(
+        self,
+        result: SpawnResult,
+        entities: Sequence[SpawnedObject],
+    ) -> None:
+        """Bind a declared facade to stable Spawn handles in place."""
+        if self.is_spawn_bound:
+            raise RuntimeError(f"RigidObject {self.uid!r} is already Spawn-bound.")
+        if len(entities) != self._declared_num_instances:
+            raise ValueError(
+                f"RigidObject {self.uid!r} expected {self._declared_num_instances} "
+                f"Spawn handles, got {len(entities)}."
+            )
+        cfg = self.cfg
+        device = self.device
+        # Construct the bound state off to the side. Batch creation may fail
+        # (for example when a backend/device capability is unavailable); the
+        # public declaration facade must remain retryable rather than becoming
+        # half-bound. Replacing the dictionary also drops declaration-time
+        # cached_property values such as the empty user-id cache.
+        bound = RigidObject(
+            cfg,
+            list(entities),
+            device,
+            spawn_result=result,
+        )
+        self.__dict__.clear()
+        self.__dict__.update(bound.__dict__)
+
     def __str__(self) -> str:
-        parent_str = super().__str__()
+        if self.is_declared:
+            parent_str = (
+                f"{self.__class__}: declared {self.num_instances} Spawn objects "
+                f"| uid: {self.uid} | device: {self.device}"
+            )
+        else:
+            parent_str = super().__str__()
         max_hull = self.cfg.max_convex_hull_num
         if max_hull is MISSING:
             if isinstance(self.cfg.shape, MeshCfg):
@@ -480,6 +589,12 @@ class RigidObject(BatchEntity):
         if len(local_env_ids) != len(filter_data):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match pose length {len(filter_data)}."
+            )
+
+        if self.is_spawn_bound:
+            raise NotImplementedError(
+                "DexSim Spawn does not expose rigid-body collision-filter batch "
+                "updates yet. The filter must remain in the birth descriptor."
             )
 
         if is_newton_scene(self._ps):
@@ -746,6 +861,13 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if self.is_spawn_bound:
+            raise NotImplementedError(
+                "RigidObject.set_attrs() needs the remaining typed Spawn property "
+                "batch APIs (friction/restitution/contact offset). Use the "
+                "supported set_mass/set_inertia/set_com_pose methods meanwhile."
+            )
+
         if isinstance(attrs, List) and len(local_env_ids) != len(attrs):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match attrs length {len(attrs)}."
@@ -956,6 +1078,11 @@ class RigidObject(BatchEntity):
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
 
+        if self.is_spawn_bound:
+            raise NotImplementedError(
+                "DexSim Spawn does not expose rigid-body damping yet."
+            )
+
         if len(local_env_ids) != len(damping):
             logger.log_error(
                 f"Length of env_ids {len(local_env_ids)} does not match damping length {len(damping)}."
@@ -989,6 +1116,11 @@ class RigidObject(BatchEntity):
             torch.Tensor: The damping of the rigid object with shape (N, 2), where the first column is linear damping and the second column is angular damping.
         """
         local_env_ids = self._all_indices if env_ids is None else env_ids
+
+        if self.is_spawn_bound:
+            raise NotImplementedError(
+                "DexSim Spawn does not expose rigid-body damping yet."
+            )
 
         dampings = []
         for _, env_idx in enumerate(local_env_ids):
@@ -1363,6 +1495,12 @@ class RigidObject(BatchEntity):
         """
         from dexsim.types import ActorType
 
+        if self.is_spawn_bound:
+            raise NotImplementedError(
+                "Changing actor topology after Spawn binding requires a public "
+                "descriptor mutation transaction and is not implemented yet."
+            )
+
         if is_newton_scene(self._ps):
             logger.log_warning(
                 "Newton backend does not support changing RigidObject body type at "
@@ -1518,6 +1656,13 @@ class RigidObject(BatchEntity):
         if len(rgba) != 4:
             logger.log_error(f"Invalid rgba {rgba}, should be a sequence of 4 floats.")
 
+        if self.is_spawn_bound:
+            color = np.asarray(rgba, dtype=np.float32)
+            for entity in self._entities:
+                self._spawn_result.set_physical_visible(entity, color, visible)
+            self._has_collision_visible_node = True
+            return
+
         # create collision visible node if not exist
         if visible:
             if not self._has_collision_visible_node:
@@ -1550,6 +1695,16 @@ class RigidObject(BatchEntity):
     def _build_cfg_init_pose(self, env_ids: Sequence[int]) -> torch.Tensor:
         """Build initial root poses from cfg as ``(N, 4, 4)`` matrices."""
         num_instances = len(env_ids)
+        if self.cfg.init_local_pose is not None:
+            return (
+                torch.as_tensor(
+                    self.cfg.init_local_pose,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                .reshape(1, 4, 4)
+                .repeat(num_instances, 1, 1)
+            )
         pos = torch.as_tensor(
             self.cfg.init_pos, dtype=torch.float32, device=self.device
         )
@@ -1577,6 +1732,19 @@ class RigidObject(BatchEntity):
         ``BUILDER`` via the scene batch API; velocities are cleared after
         finalization through :meth:`SimulationManager.finalize_newton_physics`.
         """
+        if self.is_spawn_bound:
+            if self._spawn_result.backend == "dexsim":
+                # PhysX Direct GPU readiness performs native warm-up updates.
+                # Re-apply the authored state after the batch becomes usable
+                # so prepare() itself is not an observable simulation step.
+                self.reset()
+            else:
+                # Newton finalization materializes the descriptor pose without
+                # advancing simulation; only one-step dynamics buffers need
+                # clearing after batch binding.
+                self.clear_dynamics()
+            return
+
         if is_newton_scene(self._ps):
             if self._newton_lifecycle_state() == "BUILDER":
                 self.set_local_pose(
@@ -1594,8 +1762,9 @@ class RigidObject(BatchEntity):
 
         self.restore_visual_material(env_ids=local_env_ids)
 
-        # TODO: support attributes setter for newton.
-        if not is_newton_scene(self._ps):
+        # Spawn descriptors and their live property APIs are the canonical
+        # physical configuration; reset changes state only.
+        if not self.is_spawn_bound and not is_newton_scene(self._ps):
             self.set_attrs(self.cfg.attrs, env_ids=local_env_ids)
 
         self.clear_dynamics(env_ids=local_env_ids)
@@ -1605,6 +1774,10 @@ class RigidObject(BatchEntity):
         )
 
     def destroy(self) -> None:
+        if self.is_declared or self.is_spawn_bound:
+            # SimulationManager owns topology removal and SpawnResult lifetime.
+            # Direct facade destruction must never bypass that owner.
+            return
         env = self._world.get_env()
         arenas = env.get_all_arenas()
         if len(arenas) == 0:

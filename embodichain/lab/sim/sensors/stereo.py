@@ -21,7 +21,7 @@ import torch
 import numpy as np
 import dexsim.render as dr
 
-from typing import Dict, Tuple, List, Sequence
+from typing import Callable, Dict, Tuple, List, Sequence
 
 from dexsim.utility import inv_transform
 from embodichain.lab.sim.sensors import Camera, CameraCfg
@@ -155,8 +155,18 @@ class StereoCamera(Camera):
         self,
         config: StereoCameraCfg,
         device: torch.device = torch.device("cpu"),
+        *,
+        world: dexsim.World | None = None,
+        arenas: Sequence[dexsim.environment.Arena] | None = None,
+        parent_node_resolver: Callable[[str], Sequence[object]] | None = None,
     ) -> None:
-        super().__init__(config, device)
+        super().__init__(
+            config,
+            device,
+            world=world,
+            arenas=arenas,
+            parent_node_resolver=parent_node_resolver,
+        )
 
         # check valid config
         if self.cfg.enable_disparity and not self.cfg.enable_depth:
@@ -165,21 +175,14 @@ class StereoCamera(Camera):
     def _build_sensor_from_config(
         self, config: StereoCameraCfg, device: torch.device
     ) -> None:
-        self._world = dexsim.default_world()
-        env = self._world.get_env()
-        arenas = env.get_all_arenas()
-        if len(arenas) == 0:
-            arenas = [env]
-        num_instances = len(arenas)
-
         self._frame_buffer = self._world.create_camera_group(
-            [config.width, config.height], num_instances * 2, True
+            [config.width, config.height], self.num_instances * 2, True
         )
         view_attrib = config.get_view_attrib()
         left_list = []
         right_list = []
-        for i, arena in enumerate(arenas):
-            left_view_name = f"{self.uid}_left_view{i + 1}"
+        for i, arena in enumerate(self._arenas):
+            left_view_name = f"{config.uid}_left_view{i + 1}"
             left_view = arena.create_camera(
                 left_view_name,
                 config.width,
@@ -192,9 +195,10 @@ class StereoCamera(Camera):
             left_view.set_near(config.near)
             left_view.set_far(config.far)
             left_list.append(left_view)
+            self._camera_names.append((arena, left_view_name))
 
-        for i, arena in enumerate(arenas):
-            right_view_name = f"{self.uid}_right_view{i + 1}"
+        for i, arena in enumerate(self._arenas):
+            right_view_name = f"{config.uid}_right_view{i + 1}"
             right_view = arena.create_camera(
                 right_view_name,
                 config.width,
@@ -207,8 +211,9 @@ class StereoCamera(Camera):
             right_view.set_near(config.near)
             right_view.set_far(config.far)
             right_list.append(right_view)
+            self._camera_names.append((arena, right_view_name))
 
-        for i in range(num_instances):
+        for i in range(self.num_instances):
             self._entities[i] = PairCameraView(
                 left_list[i], right_list[i], config.left_to_right.cpu().numpy()
             )
@@ -343,14 +348,10 @@ class StereoCamera(Camera):
         Returns:
             torch.Tensor: The local pose of the left camera with shape (num_envs, 4, 4).
         """
-        from embodichain.lab.sim.utility import get_dexsim_arenas
-
-        arenas = get_dexsim_arenas()
-
         left_poses = []
         right_poses = []
         for i, entity in enumerate(self._entities):
-            arena_pose = arenas[i].get_root_node().get_local_pose()
+            arena_pose = self._arenas[i].get_root_node().get_local_pose()
             left_pose = entity._left_view.get_world_pose()
             left_pose[:2, 3] -= arena_pose[:2, 3]
             left_poses.append(
