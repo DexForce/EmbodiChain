@@ -85,15 +85,6 @@ def test_action_binding_is_role_based_and_immutable() -> None:
         binding.manipulator("destination")
 
 
-def test_invocation_rejects_values_without_goal_contract() -> None:
-    with pytest.raises(TypeError, match="goal_kind"):
-        ActionInvocation(
-            skill_id="move_end_effector",
-            goal=object(),  # type: ignore[arg-type]
-            binding=ActionBinding(manipulators={"primary": "arm"}),
-        )
-
-
 def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
     policy = MotionPolicy(sample_count=24, control_dt=0.01)
     assert policy.sample_count == 24
@@ -269,9 +260,9 @@ def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
     snapshot = trajectory.snapshot()
     snapshot.positions.zero_()
     snapshot.dt.zero_()
-    snapshot.duration.zero_()
     snapshot.env_ids.zero_()
 
+    assert snapshot.duration.item() == 0.0
     assert torch.count_nonzero(trajectory.positions).item() > 0
     assert torch.count_nonzero(trajectory.dt).item() > 0
     assert trajectory.duration.item() > 0.0

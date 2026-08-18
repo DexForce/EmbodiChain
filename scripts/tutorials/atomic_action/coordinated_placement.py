@@ -548,7 +548,7 @@ def run_coordinated_placement_demo(
     pan.clear_dynamics()
     bread_pose = bread_pose_batch[0].to(device=sim.device, dtype=torch.float32)
     pan_pose = pan_pose_batch[0].to(device=sim.device, dtype=torch.float32)
-    n_envs = bread_pose_batch.shape[0]
+    num_envs = bread_pose_batch.shape[0]
     bread_vertices = get_local_vertices(bread)
     pan_vertices = get_local_vertices(pan)
     bread_local_min, bread_local_max = compute_local_bounds(bread_vertices)
@@ -625,7 +625,7 @@ def run_coordinated_placement_demo(
             skill_id="pick_up",
             goal=GraspGoal(
                 semantics=bread_semantics,
-                grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=n_envs),
+                grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
             ),
             binding=ActionBinding(
                 manipulators={"primary": "left_arm"},
@@ -638,7 +638,7 @@ def run_coordinated_placement_demo(
             skill_id="pick_up",
             goal=GraspGoal(
                 semantics=pan_semantics,
-                grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=n_envs),
+                grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
             ),
             binding=ActionBinding(
                 manipulators={"primary": "right_arm"},
@@ -748,7 +748,6 @@ def run_coordinated_placement_demo(
                 batch_size=state.batch_size,
                 device=state.robot.qpos.device,
                 held_objects=held_objects,
-                coordinated_held_objects=state.task.coordinated_held_objects,
             ),
         )
 
@@ -771,14 +770,14 @@ def run_coordinated_placement_demo(
             sim,
             support_target_pose,
             placing_target_pose,
-            num_envs=n_envs,
+            num_envs=num_envs,
         )
     coordinated_target = CoordinatedPlacementGoal(
         placing_object_target_pose=broadcast_pose_batch(
-            placing_target_pose, num_envs=n_envs
+            placing_target_pose, num_envs=num_envs
         ),
         support_object_target_pose=broadcast_pose_batch(
-            support_target_pose, num_envs=n_envs
+            support_target_pose, num_envs=num_envs
         ),
         placing_height_offset=BREAD_TARGET_HEIGHT_OFFSET,
         support_height_offset=SUPPORT_TARGET_HEIGHT_OFFSET,
@@ -835,7 +834,7 @@ def run_coordinated_placement_demo(
             sim,
             support_target_pose,
             placing_target_pose,
-            num_envs=n_envs,
+            num_envs=num_envs,
         )
     if wait_for_user:
         input("Press Enter to execute coordinated placement...")

@@ -45,12 +45,7 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
-from .engine import (
-    AtomicActionEngine,
-    get_registered_actions,
-    register_action,
-    unregister_action,
-)
+from .engine import AtomicActionEngine
 from .execution import (
     EffectVerificationRequest,
     ExecutionEvent,
@@ -60,7 +55,7 @@ from .execution import (
     ExecutionTick,
     JointCommand,
 )
-from .goals import ActionGoal, ObjectActionGoal, PoseGoalValue, SceneEntityPose
+from .goals import ObjectActionGoal, PoseGoalValue, SceneEntityPose
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
@@ -125,7 +120,6 @@ from .sim_adapter import (
     SimulationExecutionAdapter,
 )
 from .state import (
-    CoordinatedHeldObjectState,
     EntityState,
     HeldObjectState,
     PlanningContext,
@@ -137,7 +131,6 @@ from .state import (
 __all__ = [
     "ActionBinding",
     "ActionControlOverrides",
-    "ActionGoal",
     "ActionInvocation",
     "ActionOptions",
     "ActionPlan",
@@ -157,7 +150,6 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
-    "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",
@@ -230,7 +222,4 @@ __all__ = [
     "TaskState",
     "TimedTrajectory",
     "TrajectorySegment",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
 ]

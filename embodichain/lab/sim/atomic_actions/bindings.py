@@ -206,7 +206,7 @@ class ResolvedControlPart:
         self,
         name: str,
         *,
-        n_envs: int,
+        num_envs: int,
         device: torch.device | str,
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
@@ -224,7 +224,7 @@ class ResolvedControlPart:
                 f"{type(command).__name__}, not JointPositionCommand."
             )
         return command.resolve(
-            n_envs=n_envs,
+            num_envs=num_envs,
             control_dof=self.dof,
             device=device,
             dtype=dtype,

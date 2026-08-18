@@ -23,8 +23,6 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils import logger
-
 from ._helpers import arm_qpos_from_state
 from ..control import GRASP_COMMAND
 from ..core import AtomicAction
@@ -44,10 +42,8 @@ from ..trajectory_ops import (
 class PressGoal:
     """Single end-effector contact pose used by :class:`Press`."""
 
-    goal_kind: ClassVar[str] = "press_pose"
-
     xpos: PoseGoalValue
-    """Contact pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+    """Contact pose, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     def __post_init__(self) -> None:
         validate_pose_goal(self.xpos, "xpos", allow_waypoints=False)
@@ -74,24 +70,13 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
 
-    def __init__(
-        self,
-        default_options: PressOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
-
     def _plan(
         self,
         request: ResolvedActionRequest[PressGoal, PressOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a close, press, and retract sequence."""
-        target = self.require_goal(request)
+        target = request.goal
         options = request.skill_options
         binding = request.binding
         manipulator = binding.manipulator()
@@ -101,14 +86,14 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         hand_joint_ids = list(end_effector.joint_ids)
         hand_close_qpos = end_effector.joint_positions(
             GRASP_COMMAND,
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
         state = context
         press_xpos = resolve_pose_target(
             resolve_pose_goal(target.xpos, context, name="xpos"),
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
         )
         start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
@@ -157,7 +142,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         n_down_actual = down_arm.shape[1]
         n_back_actual = back_arm.shape[1]
         full = torch.empty(
-            (self.n_envs, n_close + n_down_actual + n_back_actual, self.robot_dof),
+            (self.num_envs, n_close + n_down_actual + n_back_actual, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
@@ -195,10 +180,9 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         n_down = motion_waypoints // 2
         n_back = motion_waypoints - n_down
         if n_down < 2 or n_back < 2:
-            logger.log_error(
+            raise ValueError(
                 "Not enough waypoints for press trajectory. Increase "
-                "MotionPolicy.sample_count or decrease hand_interp_steps.",
-                ValueError,
+                "MotionPolicy.sample_count or decrease hand_interp_steps."
             )
         return n_close, n_down, n_back
 

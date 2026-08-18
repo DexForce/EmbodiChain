@@ -44,7 +44,7 @@ def _validate_pose(value: torch.Tensor, name: str) -> int | None:
         return None
     if value.dim() != 3 or value.shape[-2:] != (4, 4) or value.shape[0] == 0:
         raise ValueError(
-            f"{name} must have shape (4, 4) or (n_envs, 4, 4), "
+            f"{name} must have shape (4, 4) or (num_envs, 4, 4), "
             f"got {tuple(value.shape)}."
         )
     return int(value.shape[0])
@@ -136,49 +136,6 @@ class HeldObjectState:
             )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class CoordinatedHeldObjectState:
-    """Observed or projected relation for an object held by two manipulators."""
-
-    semantics: ObjectSemantics
-    left_object_to_eef: torch.Tensor
-    right_object_to_eef: torch.Tensor
-    left_grasp_xpos: torch.Tensor
-    right_grasp_xpos: torch.Tensor
-    env_mask: torch.Tensor | None = None
-
-    def __post_init__(self) -> None:
-        from .core import ObjectSemantics
-
-        if not isinstance(self.semantics, ObjectSemantics):
-            raise TypeError("semantics must be an ObjectSemantics instance.")
-        poses = {
-            "left_object_to_eef": self.left_object_to_eef,
-            "right_object_to_eef": self.right_object_to_eef,
-            "left_grasp_xpos": self.left_grasp_xpos,
-            "right_grasp_xpos": self.right_grasp_xpos,
-        }
-        batches = {_validate_pose(value, name) for name, value in poses.items()}
-        batches.discard(None)
-        if len(batches) > 1:
-            raise ValueError("Coordinated held-object poses must share a batch size.")
-        if len({value.device for value in poses.values()}) != 1:
-            raise ValueError("Coordinated held-object poses must share a device.")
-        if self.env_mask is not None:
-            mask_batch = int(self.env_mask.shape[0]) if self.env_mask.dim() == 1 else -1
-            batch_size = next(iter(batches), mask_batch)
-            object.__setattr__(
-                self,
-                "env_mask",
-                _normalize_mask(
-                    self.env_mask,
-                    batch_size=batch_size,
-                    device=self.left_object_to_eef.device,
-                    name="env_mask",
-                ),
-            )
-
-
 def _normalize_held(
     value: HeldObjectState,
     *,
@@ -209,48 +166,6 @@ def _normalize_held(
     )
 
 
-def _normalize_coordinated_held(
-    value: CoordinatedHeldObjectState,
-    *,
-    batch_size: int,
-    device: torch.device,
-) -> CoordinatedHeldObjectState:
-    """Normalize a coordinated relation to one task-state batch."""
-    return CoordinatedHeldObjectState(
-        semantics=value.semantics,
-        left_object_to_eef=_broadcast_pose(
-            value.left_object_to_eef,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.left_object_to_eef",
-        ),
-        right_object_to_eef=_broadcast_pose(
-            value.right_object_to_eef,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.right_object_to_eef",
-        ),
-        left_grasp_xpos=_broadcast_pose(
-            value.left_grasp_xpos,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.left_grasp_xpos",
-        ),
-        right_grasp_xpos=_broadcast_pose(
-            value.right_grasp_xpos,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.right_grasp_xpos",
-        ),
-        env_mask=_normalize_mask(
-            value.env_mask,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.env_mask",
-        ),
-    )
-
-
 @dataclass(frozen=True, slots=True, eq=False)
 class TaskState:
     """Symbolic task state, separate from measured robot state."""
@@ -263,11 +178,6 @@ class TaskState:
 
     held_objects: Mapping[str, HeldObjectState] = field(default_factory=dict)
     """Single-manipulator held-object relations keyed by control resource."""
-
-    coordinated_held_objects: Mapping[tuple[str, str], CoordinatedHeldObjectState] = (
-        field(default_factory=dict)
-    )
-    """Two-manipulator held-object relations keyed by ordered resource pairs."""
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:
@@ -283,32 +193,8 @@ class TaskState:
                 value, batch_size=self.batch_size, device=device
             )
 
-        normalized_coordinated: dict[tuple[str, str], CoordinatedHeldObjectState] = {}
-        for resources, value in self.coordinated_held_objects.items():
-            if (
-                not isinstance(resources, tuple)
-                or len(resources) != 2
-                or not all(isinstance(item, str) and item for item in resources)
-            ):
-                raise TypeError(
-                    "coordinated_held_objects keys must be pairs of non-empty strings."
-                )
-            if not isinstance(value, CoordinatedHeldObjectState):
-                raise TypeError(
-                    "coordinated_held_objects values must be "
-                    "CoordinatedHeldObjectState objects."
-                )
-            normalized_coordinated[resources] = _normalize_coordinated_held(
-                value, batch_size=self.batch_size, device=device
-            )
-
         object.__setattr__(self, "device", device)
         object.__setattr__(self, "held_objects", MappingProxyType(normalized_held))
-        object.__setattr__(
-            self,
-            "coordinated_held_objects",
-            MappingProxyType(normalized_coordinated),
-        )
 
     @classmethod
     def empty(
@@ -331,14 +217,6 @@ class TaskState:
         """Return the object held by ``resource``, if any."""
         return self.held_objects.get(resource)
 
-    def get_coordinated_held_object(
-        self,
-        first_resource: str,
-        second_resource: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return the relation for an ordered resource pair, if any."""
-        return self.coordinated_held_objects.get((first_resource, second_resource))
-
 
 @dataclass(frozen=True, slots=True, eq=False)
 class RobotObservation:
@@ -356,7 +234,7 @@ class RobotObservation:
             raise ValueError("RobotObservation.timestamp must be non-negative.")
         if not isinstance(self.qpos, torch.Tensor) or self.qpos.dim() != 2:
             raise ValueError(
-                "RobotObservation.qpos must have shape (n_envs, robot_dof)."
+                "RobotObservation.qpos must have shape (num_envs, robot_dof)."
             )
         if self.qpos.shape[0] == 0 or self.qpos.shape[1] == 0:
             raise ValueError("RobotObservation.qpos dimensions must be non-zero.")
@@ -609,24 +487,9 @@ class PlanningContext:
         """Single-resource held-object relations."""
         return self.task.held_objects
 
-    @property
-    def coordinated_held_objects(
-        self,
-    ) -> Mapping[tuple[str, str], CoordinatedHeldObjectState]:
-        """Coordinated held-object relations."""
-        return self.task.coordinated_held_objects
-
     def get_held_object(self, resource: str) -> HeldObjectState | None:
         """Return the object held by ``resource``, if any."""
         return self.task.get_held_object(resource)
-
-    def get_coordinated_held_object(
-        self,
-        first_resource: str,
-        second_resource: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return a coordinated held-object relation, if any."""
-        return self.task.get_coordinated_held_object(first_resource, second_resource)
 
     def project(
         self,
@@ -652,7 +515,6 @@ class PlanningContext:
 
 
 __all__ = [
-    "CoordinatedHeldObjectState",
     "EntityState",
     "HeldObjectState",
     "PlanningContext",

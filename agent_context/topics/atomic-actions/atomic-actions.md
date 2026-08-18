@@ -13,7 +13,7 @@ There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
 
 `ActionInvocation` separates:
 
-- an action-owned typed goal (`goal_kind` is its stable discriminator);
+- an action-owned typed goal, validated against the action's `GoalType`;
 - `ActionBinding`, which maps semantic roles to names from the engine robot's
   `control_parts` mapping;
 - reusable `MotionPolicy` planner/timing choices;
@@ -68,8 +68,8 @@ must remain active during execution.
 called by the engine, not a fourth application entry point. It binds collision
 entities from the current scene into a copied motion policy before delegating
 to the skill-specific `_plan()` hook. New actions implement `_plan()` and must
-not override `plan()`. `engine.plan_action(...)` is only an extension/testing
-escape hatch for an unregistered instance.
+not override `plan()`. Custom actions must be installed with
+`engine.register()` before using the same public entry points.
 
 ## Static compilation
 
@@ -228,9 +228,10 @@ built-in can be replaced only with explicit `replace=True`. Registration means
 an implementation is installed; it does not prove that the current embodiment
 has compatible control parts, profiles, bindings, or task state. Capability
 adapters must filter registered descriptors before exposing skills to an Agent.
-The module-level `register_action()` API is a process-wide extension-type
-discovery catalog only; it neither binds actions nor changes an engine's
-default built-in set.
+Registration is engine-local; there is no independent process-wide action
+catalog. Construct extensions explicitly and install them with
+`engine.register()` so discovery and execution cannot observe disconnected
+registries.
 
 `ExecutionRunnerCfg` is intentionally separate from action options. It
 configures controller acknowledgement deadlines, scheduler cadence, and final
@@ -242,6 +243,9 @@ TCP-frame, joint, or scene-object name. Planning services validate those names
 and resolve immutable `ResolvedControlPart` values containing full-robot joint
 indices. Built-ins use the binding as the only source for participating arm and
 hand names; attachment state and `StateDelta` keys use the bound manipulator.
+`TaskState.held_objects` is the sole attachment map. A multi-manipulator grasp
+stores one `HeldObjectState` per manipulator with the same `ObjectSemantics`
+instance, so coordinated outputs are directly consumable by later skills.
 
 Embodiment-specific joint commands do not belong to Action options. Register
 them once by actual control-part name:
@@ -286,7 +290,7 @@ registers the referenced entity as a recovery dependency, allowing an executing
 
 ## Extension rules
 
-1. Define a frozen action-owned goal dataclass with `goal_kind`.
+1. Define a frozen action-owned goal dataclass.
 2. Define a frozen `ActionOptions` subclass only when runtime behavior exists.
 3. Declare `skill_id`, `GoalType`, `OptionsType`, and required semantic roles.
 4. Implement `_plan()`; do not override the framework-owned `plan()` method.

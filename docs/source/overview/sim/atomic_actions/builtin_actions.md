@@ -143,7 +143,7 @@ The animations below are the focused simulator demos under
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
-| `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
+| `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | attach the shared object to both manipulators |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
 | `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held by source arm | transfer attachment to destination arm |
 
@@ -308,7 +308,7 @@ bound manipulator.
 | Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
 | Binding | manipulator + end effector role `primary` |
 | Precondition | `ObjectSemantics.entity` is set; an `AntipodalAffordance` is required when no explicit grasp pose is supplied |
-| Effect | write `HeldObjectState` for the bound manipulator and clear overlapping coordinated attachment state |
+| Effect | write `HeldObjectState` for the bound manipulator |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
 `grasp_xpos` may be `(4, 4)`, `(B, 4, 4)`, or a `SceneEntityPose`. A scene
@@ -375,7 +375,7 @@ one.
 | Goal | `PlaceGoal(xpos=..., tcp_symmetry="none")` |
 | Binding | manipulator + end effector role `primary` |
 | State | consumes the bound manipulator's attachment when present |
-| Effect | detach the object and clear overlapping coordinated attachment state |
+| Effect | detach the object from the bound manipulator |
 | Verification | release must be verified during closed-loop execution |
 | Dynamic target | explicit pose/waypoints or `SceneEntityPose` |
 
@@ -460,16 +460,17 @@ both hands -> lift -> move object -> hold**.
 | Binding | manipulator + end effector roles `left` and `right` |
 | Precondition | `ObjectSemantics.entity` is set and the affordance is an `AntipodalAffordance` |
 | Goal geometry | shared-object target pose and optional initial object pose; left/right grasps are sampled from the affordance |
-| Effect | clear individual left/right attachments and create `CoordinatedHeldObjectState[(left, right)]` |
+| Effect | write one `HeldObjectState` per bound manipulator; both entries share the same object semantics |
 | Verification | coordinated attachment must be externally verified |
 
 The left/right grasp poses are not supplied by the caller. At planning time the
 action calls `AntipodalAffordance.get_dual_arm_valid_grasp_poses` with the
 `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
 options to partition the object into left/right grasp regions and select the
-lowest-cost grasp on each side. The derived `object_to_eef` transforms are
-stored in the projected `CoordinatedHeldObjectState` and reused by later
-object-centric skills.
+lowest-cost grasp on each side. Each derived `object_to_eef` transform is stored
+in the corresponding projected `HeldObjectState`. Later object-centric skills
+can consume those per-manipulator entries directly; sharing the same
+`ObjectSemantics` instance identifies the common object.
 
 The object target and optional initial pose may use `SceneEntityPose`. When no
 initial pose is supplied, `ObjectSemantics.entity` provides the object's current
@@ -504,7 +505,7 @@ hold -> optionally release the placing hand -> retreat the placing arm**.
 | Binding | manipulator + end effector roles `placing` and `support` |
 | Precondition | separate `HeldObjectState` entries exist for both bound arms |
 | Goal geometry | placing/support object target poses, optional height offsets, optional release override |
-| Effect | preserve support attachment; remove or preserve placing attachment according to `release`; clear overlapping coordinated state |
+| Effect | preserve support attachment; remove or preserve placing attachment according to `release` |
 
 Both object targets may use `SceneEntityPose`, so either can participate in
 dynamic-goal invalidation. Goal-level height/release values override

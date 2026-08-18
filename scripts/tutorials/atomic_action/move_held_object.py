@@ -139,9 +139,9 @@ def main() -> None:
     )
     move_position = obj.get_local_pose(to_matrix=True)[0, :3, 3].clone()
     move_position[2] = 0.36
-    n_envs = robot.get_qpos().shape[0]
-    move_target = broadcast_pose_batch(make_eef_pose_at(robot, move_position), n_envs)
-    object_target = broadcast_pose_batch(make_object_target_pose(sim.device), n_envs)
+    num_envs = robot.get_qpos().shape[0]
+    move_target = broadcast_pose_batch(make_eef_pose_at(robot, move_position), num_envs)
+    object_target = broadcast_pose_batch(make_object_target_pose(sim.device), num_envs)
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "move_held_object_target_axis", object_target)
     wait_for_user = prepare_tutorial_scene(

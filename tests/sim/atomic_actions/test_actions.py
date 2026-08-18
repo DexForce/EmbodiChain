@@ -33,7 +33,6 @@ from embodichain.lab.sim.atomic_actions import (
     AtomicAction,
     AtomicActionEngine,
     ControlPartCommandProfile,
-    CoordinatedHeldObjectState,
     CoordinatedPickGoal,
     CoordinatedPickment,
     CoordinatedPickmentOptions,
@@ -604,6 +603,36 @@ def test_move_joints_rejects_binding_with_wrong_goal_skill() -> None:
         action.resolve_request(invocation)
 
 
+def test_move_joints_rejects_incompatible_goal_at_action_boundary() -> None:
+    action = _bind_action(_motion_generator(), MoveJoints())
+    invocation = ActionInvocation(
+        skill_id="move_joints",
+        goal=object(),  # type: ignore[arg-type]
+        binding=ActionBinding(manipulators={"primary": "arm"}),
+    )
+
+    with pytest.raises(TypeError, match="expects goal JointPositionGoal"):
+        action.resolve_request(invocation)
+
+
+def test_builtin_action_validates_resolved_request_once() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, MoveEndEffector())
+    validator = Mock(wraps=action.require_goal)
+    action.require_goal = validator  # type: ignore[method-assign]
+
+    _plan_action(
+        action,
+        _invocation(
+            "move_end_effector",
+            EndEffectorPoseGoal(torch.eye(4)),
+        ),
+        _context(),
+    )
+
+    validator.assert_called_once()
+
+
 def test_planner_timing_is_preserved_in_simple_action() -> None:
     generator = _motion_generator()
     generator.planner.cfg.planner_type = "toppra"
@@ -925,7 +954,9 @@ def test_press_closes_hand_without_changing_projected_attachment() -> None:
     assert torch.equal(projected_held.object_to_eef, held.object_to_eef)
 
 
-def test_handover_does_not_mutate_cached_final_pose() -> None:
+def test_handover_does_not_mutate_cached_final_pose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     generator = _dual_motion_generator()
     handover_options = HandOverOptions(
         middle_object_pose=torch.eye(4),
@@ -955,6 +986,7 @@ def test_handover_does_not_mutate_cached_final_pose() -> None:
     )
 
     def plan_from_start(
+        motion_generator: MotionGenerator,
         control_part: str,
         start_qpos: torch.Tensor,
         target_poses: torch.Tensor,
@@ -963,7 +995,11 @@ def test_handover_does_not_mutate_cached_final_pose() -> None:
     ) -> tuple[bool, torch.Tensor]:
         return True, start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
-    action._plan_named_arm_trajectory = Mock(side_effect=plan_from_start)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.atomic_actions.primitives.hand_over."
+        "plan_named_arm_trajectory",
+        plan_from_start,
+    )
     invocation = ActionInvocation(
         skill_id="hand_over",
         goal=GraspGoal(semantics=semantics),
@@ -1087,12 +1123,12 @@ def test_coordinated_pick_returns_full_dof_plan_and_projected_relation() -> None
 
     assert plan.plan_success.tolist() == [True, True]
     assert plan.trajectory.positions.shape == (NUM_ENVS, 30, DUAL_ROBOT_DOF)
-    assert projected.get_held_object("left_arm") is None
-    assert projected.get_held_object("right_arm") is None
-    assert isinstance(
-        projected.get_coordinated_held_object("left_arm", "right_arm"),
-        CoordinatedHeldObjectState,
-    )
+    left_held = projected.get_held_object("left_arm")
+    right_held = projected.get_held_object("right_arm")
+    assert isinstance(left_held, HeldObjectState)
+    assert isinstance(right_held, HeldObjectState)
+    assert left_held.semantics is right_held.semantics
+    assert left_held.semantics is not semantics
     assert [segment.name for segment in plan.segments] == [
         "approach",
         "close",
@@ -1159,9 +1195,12 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
         plan.trajectory.positions[1],
         context.robot.qpos[1].unsqueeze(0).repeat(30, 1),
     )
-    held = projected.get_coordinated_held_object("left_arm", "right_arm")
-    assert held is not None
-    assert held.env_mask.tolist() == [True, False]
+    left_held = projected.get_held_object("left_arm")
+    right_held = projected.get_held_object("right_arm")
+    assert left_held is not None and right_held is not None
+    assert left_held.semantics is right_held.semantics
+    assert left_held.env_mask.tolist() == [True, False]
+    assert right_held.env_mask.tolist() == [True, False]
 
 
 def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
