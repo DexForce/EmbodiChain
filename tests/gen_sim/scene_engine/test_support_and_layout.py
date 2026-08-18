@@ -191,9 +191,7 @@ def test_layout_optimizer_projects_out_of_bounds_aabb_into_rectangle() -> None:
 def test_layout_optimizer_rejects_aabb_larger_than_rectangle() -> None:
     optimizer = AssetsSupportLayoutOptimizer(
         support_region=Polygon([(0, 0), (2, 0), (2, 2), (0, 2)]),
-        assets_aabb_2d_z_up_world_corners_by_id={
-            "large": _aabb(-0.5, 0.5, 2.5, 1.5)
-        },
+        assets_aabb_2d_z_up_world_corners_by_id={"large": _aabb(-0.5, 0.5, 2.5, 1.5)},
         assets_layout=[_layout("large", 1.0, 1.0)],
     )
 
