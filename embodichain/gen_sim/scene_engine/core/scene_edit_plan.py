@@ -21,6 +21,7 @@ from typing import Literal
 
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    OrientationState,
     SceneConstraintType,
     SceneGraph,
     TableRegion,
@@ -44,6 +45,7 @@ class SceneEditOperation:
     category: str | None = None
     name: str | None = None
     description: str | None = None
+    orientation_state: OrientationState | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Serialize one normalized edit operation."""
@@ -56,6 +58,7 @@ class SceneEditOperation:
             "category": self.category,
             "name": self.name,
             "description": self.description,
+            "orientation_state": self.orientation_state,
         }
 
 
@@ -84,6 +87,7 @@ class SceneEditPlan:
         # Edit-plan rules:
         # - move and delete identify one existing non-table object with object_id.
         # - add carries generated object_id plus non-empty category, name, and description.
+        # - add may preserve an explicit standing or lying user placement intent.
         # - move always supplies target_id and relation; add may omit both.
         # - table_region is only valid with target_id=table and relation=on.
         # - target_id and relation are otherwise supplied together or both absent.
@@ -164,6 +168,7 @@ class SceneEditPlan:
                     operation.category,
                     operation.name,
                     operation.description,
+                    operation.orientation_state,
                 )
             ):
                 raise ValueError("Delete operations may only specify object_id.")
@@ -171,6 +176,13 @@ class SceneEditPlan:
 
         if operation.target_id is None or operation.relation is None:
             raise ValueError("Move operations must specify target_id and relation.")
+        existing_orientation_state = self.scene_graph.node_by_id()[
+            operation.object_id
+        ].orientation_state
+        if operation.orientation_state not in {None, existing_orientation_state}:
+            raise ValueError(
+                "Move operations may only preserve the existing orientation_state."
+            )
         self._validate_position_reference(
             operation=operation,
             existing_object_ids=existing_object_ids,
@@ -178,7 +190,11 @@ class SceneEditPlan:
         )
         if any(
             value is not None
-            for value in (operation.category, operation.name, operation.description)
+            for value in (
+                operation.category,
+                operation.name,
+                operation.description,
+            )
         ):
             raise ValueError("Move operations must not declare a new object.")
 
@@ -203,6 +219,8 @@ class SceneEditPlan:
             for value in (operation.category, operation.name, operation.description)
         ):
             raise ValueError("Add operations require category, name, and description.")
+        if operation.orientation_state not in {None, "standing", "lying"}:
+            raise ValueError("Add operation orientation_state is invalid.")
         SceneEditPlan._validate_position_reference(
             operation=operation,
             existing_object_ids=existing_object_ids,

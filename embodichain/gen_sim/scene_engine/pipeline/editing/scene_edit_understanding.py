@@ -25,6 +25,7 @@ from embodichain.gen_sim.scene_engine.core.scene_edit_plan import (
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
+    OrientationState,
     PlanarRelationType,
     SceneGraph,
     SceneGraphNode,
@@ -50,7 +51,9 @@ Each operation is one of:
    singular snake_case category, name, and description. Multiple add operations
    may have the same category and name; their final IDs are assigned by the
    program in operation order. target_id and relation are either both provided
-   or both null.
+   or both null. Set orientation_state to standing or lying only when the user
+   explicitly asks for that placement; otherwise set it to null so the object
+   uses its natural, physically stable tabletop pose.
 
 For every move and every positioned add, target_id must be an Existing object
 ID and relation must be one of on, left_of, right_of, in_front_of, or behind.
@@ -77,11 +80,14 @@ For every newly added object, category is its lower-case singular snake_case
 class. name contains only color, material, texture, shape, and object details.
 description contains only visible category, material, color, texture, shape,
 and structural details. name and description must not mention position, the
-table, or relations to any object.
+table, relations to any object, or orientation. orientation_state must be null
+unless the user explicitly requests standing/upright/vertical or lying/flat/
+horizontal placement. Follow that explicit user intent even if it is not the
+object's natural stable pose.
 
 Return JSON only: no Markdown, comments, or prose. Every operation must contain
 exactly these fields: op, object_id, target_id, relation, table_region, category,
-name, and description. Use null for every field that does not apply:
+name, description, and orientation_state. Use null for every field that does not apply:
 {
   "operations": [
     {
@@ -92,7 +98,8 @@ name, and description. Use null for every field that does not apply:
       "table_region": null,
       "category": null,
       "name": null,
-      "description": null
+      "description": null,
+      "orientation_state": null
     },
     {
       "op": "delete",
@@ -102,7 +109,8 @@ name, and description. Use null for every field that does not apply:
       "table_region": null,
       "category": null,
       "name": null,
-      "description": null
+      "description": null,
+      "orientation_state": null
     },
     {
       "op": "add",
@@ -112,7 +120,8 @@ name, and description. Use null for every field that does not apply:
       "table_region": "back_center",
       "category": "orange",
       "name": "small orange",
-      "description": "small round orange with a textured peel"
+      "description": "small round orange with a textured peel",
+      "orientation_state": null
     },
     {
       "op": "add",
@@ -122,7 +131,8 @@ name, and description. Use null for every field that does not apply:
       "table_region": null,
       "category": "orange",
       "name": "small orange",
-      "description": "small round orange with a textured peel"
+      "description": "small round orange with a textured peel",
+      "orientation_state": null
     },
     {
       "op": "add",
@@ -130,14 +140,31 @@ name, and description. Use null for every field that does not apply:
       "target_id": null,
       "relation": null,
       "table_region": null,
-      "category": "banana",
-      "name": "yellow banana",
-      "description": "curved yellow banana with a green stem"
+      "category": "bottle",
+      "name": "blue glass bottle",
+      "description": "tall transparent blue glass bottle with a narrow neck",
+      "orientation_state": "standing"
+    },
+    {
+      "op": "add",
+      "object_id": null,
+      "target_id": null,
+      "relation": null,
+      "table_region": null,
+      "category": "fork",
+      "name": "silver metal fork",
+      "description": "four-tined silver stainless-steel fork with a plain handle",
+      "orientation_state": "lying"
     }
   ]
 }
-The two orange additions intentionally share category and name. Do not add
-fields beyond the required schema."""
+The two orange additions intentionally share category and name. The bottle
+example represents an explicit user request to stand it upright, and the fork
+example represents an explicit user request to lay it flat. Only add operations
+may introduce a new non-null orientation_state. A move may use null or repeat
+its existing orientation_state from the supplied scene metadata, but it must not
+change that state. Delete operations must use null. Do not add fields beyond the
+required schema."""
 
 
 def understand_scene_edit(
@@ -223,6 +250,7 @@ def _apply_scene_edit_plan_to_scene_graph(
     """Apply the target graph updates implied by add and move operations."""
     deleted_object_ids: set[str] = set()
     added_object_ids: list[str] = []
+    added_orientation_states_by_id: dict[str, OrientationState | None] = {}
     on_parent_updates: list[tuple[str, str, TableRegion | None]] = []
     planar_relation_updates: list[tuple[str, PlanarRelationType, str]] = []
     for operation in scene_edit_plan.operations:
@@ -234,6 +262,9 @@ def _apply_scene_edit_plan_to_scene_graph(
             raise ValueError("Add and move operations must have an object_id.")
         if operation.op == "add":
             added_object_ids.append(operation.object_id)
+            added_orientation_states_by_id[operation.object_id] = (
+                operation.orientation_state
+            )
         if operation.target_id is None or operation.relation is None:
             continue
         if operation.relation == "on":
@@ -253,6 +284,7 @@ def _apply_scene_edit_plan_to_scene_graph(
     scene_graph.apply_updates(
         deleted_object_ids=deleted_object_ids,
         added_object_ids=added_object_ids,
+        added_orientation_states_by_id=added_orientation_states_by_id,
         on_parent_updates=on_parent_updates,
         planar_relation_updates=planar_relation_updates,
     )
@@ -267,6 +299,9 @@ def _simplify_scene_info(
     table_regions_by_id = {
         node.object_id: node.table_region for node in scene_graph.nodes
     }
+    orientation_states_by_id = {
+        node.object_id: node.orientation_state for node in scene_graph.nodes
+    }
     return {
         "existing_object_ids": [scene_object.id for scene_object in scene.objects],
         "objects": [
@@ -277,6 +312,7 @@ def _simplify_scene_info(
                 "description": scene_object.description,
                 "center_xy": scene_object.center_xy,
                 "table_region": table_regions_by_id.get(scene_object.id),
+                "orientation_state": orientation_states_by_id.get(scene_object.id),
             }
             for scene_object in scene.objects
         ],
@@ -351,6 +387,7 @@ def _parse_scene_edit_operations(
         "category",
         "name",
         "description",
+        "orientation_state",
     }
     # Get ids and counts of existing objects to assign new add IDs.
     assigned_object_ids = {scene_object.id for scene_object in scene.objects}
@@ -371,6 +408,7 @@ def _parse_scene_edit_operations(
             raise ValueError("Scene edit operations must use the required schema.")
         object_id = _optional_string(value.get("object_id"), field_name="object_id")
         category = _optional_string(value.get("category"), field_name="category")
+        orientation_state = _optional_orientation_state(value.get("orientation_state"))
         if op == "add":
             if object_id is not None:
                 raise ValueError("VLM add operations must set object_id to null.")
@@ -397,6 +435,7 @@ def _parse_scene_edit_operations(
                 description=_optional_string(
                     value.get("description"), field_name="description"
                 ),
+                orientation_state=orientation_state,
             )
         )
     return operations
@@ -441,4 +480,13 @@ def _optional_table_region(value: object) -> TableRegion | None:
         return None
     if value not in TABLE_REGIONS:
         raise ValueError("Scene edit operation table_region is invalid.")
+    return value
+
+
+def _optional_orientation_state(value: object) -> OrientationState | None:
+    """Validate an optional explicit upright or lying edit intent."""
+    if value is None:
+        return None
+    if value not in {"standing", "lying"}:
+        raise ValueError("Scene edit operation orientation_state is invalid.")
     return value

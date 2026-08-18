@@ -70,6 +70,27 @@ Examples:
   rotate_about_x=false and use target_xy_size_cm=[8.0, 8.0].
 """
 
+DEFAULT_NEEDED_LAYOUT = (
+    "Place this asset on the table in its natural, physically stable resting "
+    "orientation. For example, a fork should lie flat on the table rather "
+    "than stand on an edge."
+)
+STANDING_NEEDED_LAYOUT = (
+    "The scene graph requires this asset to stand vertically on the table, "
+    "even when its natural stable pose would be lying down. For example, a "
+    "bottle should stand on its base and a fork should stand upright. If the "
+    "coarse GLB is lying flat, set rotate_about_x=true so its semantic vertical "
+    "axis aligns with the z-up world's z axis; if it is already upright, set "
+    "it to false."
+)
+LYING_NEEDED_LAYOUT = (
+    "The scene graph requires this asset to lie flat on the table, even when "
+    "its natural stable pose would be standing. For example, a bottle should "
+    "lie on its side and a fork should lie flat. Choose rotate_about_x so the "
+    "asset's semantic long axis remains in the tabletop x-y plane rather than "
+    "along the z-up world's z axis."
+)
+
 
 def render_object_front_top_views(
     *,
@@ -267,17 +288,60 @@ def query_vlm_object_rotation_and_target_size(
     rendered_views_path: str | Path,
     vlm_client: OpenAICompatibleVLM,
     debug_output_path: str | Path | None = None,
+    json_max_attempts: int = 3,
 ) -> dict[str, object]:
-    """Ask the VLM for rotation and post-rotation tabletop footprint."""
-    response_text = vlm_client.complete(
-        system_prompt=_VLM_SYSTEM_PROMPT,
-        user_prompt=(
-            f"Object description:\n{scene_object_description}\n\n"
-            f"Needed layout:\n{needed_layout}\n\n"
-            "The image contains front view on the left and top view on the right."
-        ),
-        image_path=rendered_views_path,
-    )
+    """Ask the VLM for a valid rotation and post-rotation tabletop footprint."""
+    if json_max_attempts < 1:
+        raise ValueError("json_max_attempts must be at least 1.")
+    last_validation_error: ValueError | None = None
+    for _ in range(json_max_attempts):
+        response_text = vlm_client.complete(
+            system_prompt=_VLM_SYSTEM_PROMPT,
+            user_prompt=(
+                f"Object description:\n{scene_object_description}\n\n"
+                f"Needed layout:\n{needed_layout}\n\n"
+                "The image contains front view on the left and top view on the right."
+            ),
+            image_path=rendered_views_path,
+        )
+        try:
+            value = _parse_vlm_rotation_and_target_size_response(response_text)
+            break
+        except ValueError as exc:
+            last_validation_error = exc
+    else:
+        assert last_validation_error is not None
+        raise ValueError(
+            "VLM transform response is invalid after "
+            f"{json_max_attempts} attempts: {last_validation_error}"
+        ) from last_validation_error
+
+    if debug_output_path is not None:
+        output_path = Path(debug_output_path).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "description": scene_object_description,
+                    "needed_layout": needed_layout,
+                    "rendered_views_path": str(
+                        Path(rendered_views_path).expanduser().resolve()
+                    ),
+                    "vlm_output": value,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    return value
+
+
+def _parse_vlm_rotation_and_target_size_response(
+    response_text: str,
+) -> dict[str, object]:
+    """Validate one VLM rotation-and-scale JSON response."""
     try:
         value = json.loads(_strip_json_code_fence(response_text))
     except json.JSONDecodeError as exc:
@@ -300,25 +364,6 @@ def query_vlm_object_rotation_and_target_size(
         or not all(np.isfinite(item) and item > 0 for item in target_size)
     ):
         raise ValueError("VLM target_xy_size_cm must contain two positive numbers.")
-    if debug_output_path is not None:
-        output_path = Path(debug_output_path).expanduser().resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "description": scene_object_description,
-                    "needed_layout": needed_layout,
-                    "rendered_views_path": str(
-                        Path(rendered_views_path).expanduser().resolve()
-                    ),
-                    "vlm_output": value,
-                },
-                indent=2,
-                ensure_ascii=False,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
     return value
 
 

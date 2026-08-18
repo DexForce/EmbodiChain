@@ -117,10 +117,18 @@ def prepare_scene_edit_assets(
         coarse_layout_by_id=_coarse_layouts_by_id(generated_asset_glbs),
         coarse_geometry_root=stage_output_root / "coarse_geometry",
         simready_geometry_root=stage_output_root / "simready_geometry",
-        # Scene editing will later provide the VLM-selected scale and rotation.
+        # Every added asset uses the VLM's pose and post-pose XY footprint scale.
         config=SimReadyProcessorConfig(
             use_vlm_scale=vlm_client is not None,
             use_vlm_rotation=vlm_client is not None,
+            # An explicit edit state overrides the default stable tabletop pose.
+            orientation_states_by_id={
+                operation.object_id: operation.orientation_state
+                for operation in scene_edit_plan.operations
+                if operation.op == "add"
+                and operation.object_id is not None
+                and operation.orientation_state is not None
+            },
         ),
         vlm_client=vlm_client,
     )
