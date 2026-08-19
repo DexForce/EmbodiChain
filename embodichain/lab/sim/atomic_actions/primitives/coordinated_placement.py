@@ -31,7 +31,7 @@ from ..core import AtomicAction
 from ..effects import StateDelta
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
+from ..plans import ActionPlan, TimedTrajectory, normalize_success_mask
 from ..requirements import (
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
@@ -269,6 +269,7 @@ class CoordinatedPlacement(
             torch.stack([placing_lift_xpos, placing_xpos], dim=1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -289,6 +290,7 @@ class CoordinatedPlacement(
             support_xpos.unsqueeze(1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -348,6 +350,7 @@ class CoordinatedPlacement(
             placing_lift_xpos.unsqueeze(1),
             segments["retreat"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -386,7 +389,11 @@ class CoordinatedPlacement(
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
                     resources.placing_arm.name: (

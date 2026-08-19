@@ -42,7 +42,10 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
     ResolvedActionRequest,
+    TimedTrajectory,
 )
+
+ACTION_DT = 0.02
 
 
 class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
@@ -68,7 +71,11 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
         if torch.isnan(target).any(dim=1).any():
             success &= ~torch.isnan(target).any(dim=1)
             target = torch.nan_to_num(target)
-        trajectory = torch.stack([context.robot.qpos, target], dim=1)
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack([context.robot.qpos, target], dim=1),
+            env_ids=context.env_ids,
+            step_dt=ACTION_DT,
+        )
         return self.build_plan(
             request,
             context,
@@ -268,6 +275,18 @@ def test_engine_binds_one_planning_service_to_every_action() -> None:
     assert second.motion_generator is engine.motion_generator
     assert first.planning_services is engine.planning_services
     assert second.planning_services is engine.planning_services
+
+
+def test_engine_preserves_custom_action_timing() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    plan = engine.plan(_invocation(torch.ones(2, 3)))
+
+    assert torch.allclose(
+        plan.trajectory.dt,
+        torch.tensor([[0.0, ACTION_DT], [0.0, ACTION_DT]]),
+    )
 
 
 def test_engine_resolves_action_binding_from_robot_control_parts() -> None:

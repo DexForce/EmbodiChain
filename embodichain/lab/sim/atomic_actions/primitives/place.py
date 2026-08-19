@@ -38,7 +38,7 @@ from ..goals import (
     validate_pose_goal,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
+from ..plans import ActionPlan, TimedTrajectory
 from ..requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -265,6 +265,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 start_qpos=start_arm_qpos,
                 control_part=control_part,
                 sample_count=n_down,
+                interpolation_dt=context.control_dt,
             ),
         )
         assert isinstance(down_result.success, torch.Tensor)
@@ -282,6 +283,7 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 start_qpos=reach_arm_qpos,
                 control_part=control_part,
                 sample_count=n_back,
+                interpolation_dt=context.control_dt,
             ),
         )
         assert isinstance(back_result.success, torch.Tensor)
@@ -317,7 +319,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(held_object_updates={control_part: None}),
             segment_lengths={
                 "approach": n_down_actual,

@@ -281,6 +281,10 @@ class BasePlanner(ABC):
                   be ``None`` for planners that do not.
                 - dt: torch.Tensor ``(B, N)``, per-point time deltas
                 - duration: torch.Tensor ``(B,)``, total trajectory duration per env
+
+                Returning ``positions`` without both timing tensors, or with a
+                duration that differs from ``dt.sum(dim=1)``, raises at
+                :class:`PlanResult` construction.
         """
         logger.log_error("Subclasses must implement plan() method", NotImplementedError)
 

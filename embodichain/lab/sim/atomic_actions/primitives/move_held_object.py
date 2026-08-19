@@ -34,7 +34,7 @@ from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
+from ..plans import ActionPlan, TimedTrajectory
 from ..requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -177,6 +177,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             options=request.motion_policy.to_motion_gen_options(
                 start_qpos=start_arm_qpos,
                 control_part=control_part,
+                interpolation_dt=context.control_dt,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
@@ -192,12 +193,17 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         full[:, :, :] = state.last_qpos.unsqueeze(1)
         full[:, :, arm_joint_ids] = arm_traj
         full[:, :, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        assert result.dt is not None
 
         return self.build_plan(
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_positions(
+                full,
+                env_ids=context.env_ids,
+                dt=result.dt,
+            ),
             segment_lengths={"transport": full.shape[1]},
         )
 

@@ -248,8 +248,12 @@ Use this rule when configuring a built-in or adding a new one:
   invocation; an action may provide defaults;
 - the engine's **control-part profiles** carry embodiment-specific semantic
   commands such as `open`, `grasp`, and named postures;
-- `MotionPolicy` carries sample count, timing, motion strategy, limits,
-  collision choice, and planner options;
+- `MotionPolicy` carries sample count, motion strategy, collision choice, and
+  typed planner options;
+- planner-backed segments preserve explicit planner timing, while action-owned
+  interpolation reads the environment cadence from `PlanningContext.control_dt`;
+- missing planner or action timing is an error; the engine has no fallback
+  control period;
 - `RecoveryPolicy` carries all replan/retry thresholds and budgets.
 
 All built-ins resolve participating arm and hand names exclusively from
@@ -398,8 +402,9 @@ a live scene entity.
 
 The bound end-effector profile must provide `grasp`; optional upright-transport
 settings belong to `MoveHeldObjectOptions`. The arm and hand are selected by
-`ActionBinding`; generic timing and trajectory sampling remain in
-`MotionPolicy`. In a vectorized batch, rows where another manipulator holds the
+`ActionBinding`; trajectory sampling remains in `MotionPolicy`, while timing is
+explicit on the planner result or planning context. In a vectorized batch, rows
+where another manipulator holds the
 same semantic object or live entity are marked unsuccessful and held in place.
 
 **Example:** `scripts/tutorials/atomic_action/move_held_object.py`

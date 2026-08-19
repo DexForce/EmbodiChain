@@ -16,13 +16,14 @@ There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
 - an action-owned typed goal, validated against the action's `GoalType`;
 - `ActionBinding`, which maps semantic roles to names from the engine robot's
   `control_parts` mapping;
-- reusable `MotionPolicy` planner/timing choices;
+- reusable `MotionPolicy` strategy, sampling, collision, and backend options;
 - bounded `RecoveryPolicy` thresholds and retry budgets;
 - optional typed `skill_options` and role-scoped `control_overrides` for one
   invocation revision.
 
 `PlanningContext` separates measured `RobotObservation`, verified symbolic
-`TaskState`, versioned `SceneSnapshot`, and environment IDs. An `ActionPlan`
+`TaskState`, versioned `SceneSnapshot`, environment IDs, and an optional
+explicit `control_dt` used only by action-owned interpolation. An `ActionPlan`
 contains per-environment planning success, one full-robot `TimedTrajectory`,
 action-level recovery and scene-invalidation metadata, planner diagnostics,
 named `TrajectorySegment` ranges, and an uncommitted `StateDelta`. Segments are
@@ -38,14 +39,19 @@ recompute private sample splits in callers.
 
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
-the legacy core's control-part command profiles. `MotionGenerator.generate()` is the only
-stateful motion-planning entry point. `MotionPolicy.to_motion_gen_options()`
-passes the invocation's `strategy` directly into `MotionGenOptions`; it is either
-`"motion_gen"` or `"ik_interp"`. Target shaping, world-frame pose translation,
-hand/joint interpolation used by composite actions, and full-robot trajectory
-embedding are pure functions in `trajectory_ops.py`. Actions retain only an
-owned copy of typed default options and borrow engine services. Engine
-construction creates and binds a fresh instance of every type in
+the legacy core's control-part command profiles. It does not own a timing
+fallback. Planner results with positions require explicit `dt` and matching
+`duration`, and actions must pass a complete `TimedTrajectory` to
+`build_plan()`. Environment-backed integrations put `BaseEnv.step_dt` on
+`PlanningContext.control_dt` when action-owned interpolation needs a cadence.
+`MotionGenerator.generate()` is the only stateful motion-planning entry point.
+`MotionPolicy.to_motion_gen_options()` passes the invocation's `strategy`
+directly into `MotionGenOptions`; it is either `"motion_gen"` or `"ik_interp"`.
+Target shaping, world-frame pose translation, hand/joint interpolation used by
+composite actions, and full-robot trajectory embedding are pure functions in
+`trajectory_ops.py`. Actions retain only an owned copy of typed default options
+and borrow engine services. Engine construction creates and binds a fresh
+instance of every type in
 `BUILTIN_ACTION_TYPES`; use `load_builtins=False` only for isolated tests or a
 fully custom action set. A bound action cannot be reused by another engine.
 
@@ -474,8 +480,14 @@ Collision-world revisions must also remain monotonic per environment.
 Goal dataclasses carry only semantic task intent. They do not carry robot part
 names, planner configuration, retry policy, or runtime state.
 
-`MotionPolicy` owns planner selection, motion strategy, sample count, fallback
-control period, limits, dynamic-collision mode, and typed planner options.
+`MotionPolicy` owns motion strategy, sample count, dynamic-collision mode, and
+typed planner options. Optional planner-backend compatibility belongs to
+`SkillPolicyPreset.required_planner`; velocity and acceleration constraints
+belong to the selected backend's typed `PlanOptions`. Timing belongs to the
+trajectory producer: planners return explicit `dt`/`duration`, while custom or
+composite interpolation constructs a `TimedTrajectory` using an explicit
+cadence such as `PlanningContext.require_control_dt()`. Missing timing is an
+error rather than an engine-owned default.
 `DynamicCollisionMode.AUTO` consumes a live collision world when available,
 `OFF` ignores snapshot collision entities and their revisions, and `REQUIRED`
 fails unless the motion strategy, scene, and planner support that path. These
@@ -586,9 +598,13 @@ snapshot-grounded object example.
 7. If planning consumes a semantic object's snapshot pose, override
    `_scene_dependencies()`, preserve `super()` dependencies, and add exactly
    that semantic ID.
-8. Return full-robot positions or a `TimedTrajectory` through `build_plan()`.
+8. Return a full-robot `TimedTrajectory` through `build_plan()`; raw position
+   tensors are rejected. Preserve planner `dt`, or use
+   `TimedTrajectory.from_uniform_step()` with an explicitly selected cadence for
+   action-owned interpolation.
    Build batched `list[PlanState]`, translate the policy with
-   `request.motion_policy.to_motion_gen_options()`, and call
+   `request.motion_policy.to_motion_gen_options()` (including
+   `interpolation_dt=context.control_dt` when applicable), and call
    `self.motion_generator.generate()`. Import pure operations directly from
    `trajectory_ops.py`.
 9. Declare symbolic changes with `StateDelta`; do not mutate context or commit

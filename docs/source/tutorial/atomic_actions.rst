@@ -48,6 +48,13 @@ step. Put invocation-varying behavior in ``ActionInvocation.skill_options``.
 ``register()`` remains available for custom implementations, and
 ``load_builtins=False`` creates an isolated or fully custom engine.
 
+Trajectory timing is strict. A planner that returns positions must also return
+per-waypoint ``dt`` and matching ``duration``; a custom action must pass a
+complete ``TimedTrajectory`` to ``build_plan``. The engine does not repair
+missing timing. Action-owned interpolation reads an explicit
+``PlanningContext.control_dt`` supplied by the integration, normally
+``BaseEnv.step_dt``.
+
 Choosing an engine entry point
 ------------------------------
 
@@ -97,6 +104,7 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 
 * ``move_end_effector.py``
 * ``move_joints.py``
+* ``control_dt.py``
 * ``pickup.py``
 * ``move_held_object.py``
 * ``place.py``
@@ -115,9 +123,16 @@ video under ``outputs/videos``:
 .. code-block:: bash
 
    python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_play --device cpu
+   python scripts/tutorials/atomic_action/control_dt.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/assemble.py --headless --auto_play --device cpu
    python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
+
+``control_dt.py`` compiles the same 40-waypoint ``ik_interp`` path twice. The
+positions stay identical, while changing ``PlanningContext.control_dt`` from
+``2 * physics_dt`` to ``8 * physics_dt`` makes every arrival interval and the
+total trajectory duration four times longer. The script checks that relationship
+before replaying the fast and slow trajectories in sequence.
 
 The ``motion_generator`` variable in the snippets below is a configured
 :class:`~embodichain.lab.sim.planners.MotionGenerator`; its robot, planner,
@@ -175,7 +190,7 @@ application-owned orchestration:
        skill_id="move_end_effector",
        goal=EndEffectorPoseGoal(xpos=target_pose),
        binding=ActionBinding(manipulators={"primary": "left_arm"}),
-       motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+       motion_policy=MotionPolicy(sample_count=80),
    )
 
    plan = engine.plan(invocation, latest_context)
@@ -213,7 +228,7 @@ planning:
 
    engine = AtomicActionEngine(motion_generator)
    binding = ActionBinding(manipulators={"primary": "left_arm"})
-   motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
+   motion_policy = MotionPolicy(sample_count=80)
 
    approach = ActionInvocation(
        skill_id="move_end_effector",
@@ -427,7 +442,8 @@ rename it to ``_plan()``; defining ``plan()`` is rejected immediately.
 
 Return scalar or per-environment planner success through ``build_plan``. The
 framework normalizes the mask and holds failed rows at the observed qpos, so a
-new action should not reproduce that masking itself.
+new action should not reproduce that masking itself. ``build_plan`` accepts
+only a ``TimedTrajectory``; an untimed position tensor raises immediately.
 
 A minimal implementation looks like:
 
@@ -460,13 +476,17 @@ A minimal implementation looks like:
        ) -> ActionPlan:
            goal = self.require_goal(request)
            options = request.skill_options
-           # Resolve the bound resource, plan from context.robot.qpos, and
-           # return a full-robot TimedTrajectory or position tensor.
+           # Resolve the bound resource and plan from context.robot.qpos.
+           trajectory = TimedTrajectory.from_uniform_step(
+               full_robot_positions,
+               env_ids=context.env_ids,
+               step_dt=context.require_control_dt(),
+           )
            return self.build_plan(
                request,
                context,
                success=success_mask,
-               trajectory=full_robot_positions,
+               trajectory=trajectory,
            )
 
 Do not step simulation, mutate ``PlanningContext``, commit ``StateDelta``, or

@@ -28,7 +28,7 @@ from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
+from ..plans import ActionPlan, TimedTrajectory
 from ..requirements import (
     CARTESIAN_POSE_CAPABILITY,
     JOINT_POSITION_CAPABILITY,
@@ -135,6 +135,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 start_qpos=start_arm_qpos,
                 control_part=control_part,
                 sample_count=n_down,
+                interpolation_dt=context.control_dt,
             ),
         )
         assert isinstance(down_result.success, torch.Tensor)
@@ -149,6 +150,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 start_qpos=press_arm_qpos,
                 control_part=control_part,
                 sample_count=n_back,
+                interpolation_dt=context.control_dt,
             ),
         )
         assert isinstance(back_result.success, torch.Tensor)
@@ -182,7 +184,11 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             segment_lengths={
                 "close": n_close,
                 "press": n_down_actual,

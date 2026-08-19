@@ -31,7 +31,7 @@ from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
 from ..core import AtomicAction, ObjectSemantics, _same_object_identity
 from ..effects import StateDelta
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
+from ..plans import ActionPlan, TimedTrajectory, normalize_success_mask
 from ..requirements import (
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
@@ -360,6 +360,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             transfer_middle_eef.unsqueeze(1),
             segments["transfer"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -378,6 +379,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             torch.stack([receive_pre_grasp_eef, receive_grasp_xpos], dim=1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -401,6 +403,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             transfer_retreat_eef.unsqueeze(1),
             segments["deliver"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -421,6 +424,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_final_eef.unsqueeze(1),
             segments["deliver"],
             request.motion_policy,
+            context.control_dt,
         )
         success_mask &= normalize_success_mask(
             segment_success,
@@ -549,7 +553,11 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
                     resources.transfer_arm.name: None,

@@ -597,7 +597,7 @@ def run_coordinated_placement_demo(
         },
     )
     full_joint_ids = list(range(robot.dof))
-    state = engine.initial_context()
+    state = engine.initial_context(control_dt=sim.sim_config.physics_dt)
 
     wait_for_user = prepare_tutorial_scene(
         sim, args, "Inspect the scene, then press Enter to compile both pick-ups..."

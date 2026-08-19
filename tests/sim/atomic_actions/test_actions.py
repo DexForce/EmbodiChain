@@ -84,6 +84,7 @@ NUM_ENVS = 2
 ARM_DOF = 6
 HAND_DOF = 2
 ROBOT_DOF = ARM_DOF + HAND_DOF
+CONTROL_DT = 1.0 / 60.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 
@@ -233,6 +234,7 @@ def _context(
         task=task or TaskState.empty(batch_size=NUM_ENVS, device="cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
 
@@ -381,6 +383,7 @@ def _dual_context(
         task=task or TaskState.empty(NUM_ENVS, "cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
 
@@ -510,6 +513,7 @@ def test_move_joints_uses_binding_and_preserves_uncontrolled_joints() -> None:
         task=TaskState.empty(NUM_ENVS, "cpu"),
         scene=SceneSnapshot.empty(),
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
     plan = _plan_action(
@@ -546,6 +550,7 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
         task=picked_task,
         scene=initial.scene,
         env_ids=initial.env_ids,
+        control_dt=initial.control_dt,
     )
     place_plan = _plan_action(
         place,
@@ -1157,7 +1162,9 @@ def test_handover_does_not_mutate_cached_final_pose(
         target_poses: torch.Tensor,
         n_waypoints: int,
         motion_policy: MotionPolicy,
+        interpolation_dt: float | None,
     ) -> tuple[bool, torch.Tensor]:
+        del interpolation_dt
         return True, start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
     monkeypatch.setattr(

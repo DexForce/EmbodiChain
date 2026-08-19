@@ -90,6 +90,7 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
             options=request.motion_policy.to_motion_gen_options(
                 start_qpos=start_qpos,
                 control_part=control_part,
+                interpolation_dt=context.control_dt,
             ),
         )
         success, trajectory = to_full_robot_trajectory(
@@ -97,7 +98,6 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
             request,

@@ -412,7 +412,6 @@ def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
     trajectory = TimedTrajectory.from_positions(
         torch.zeros(1, 3, 2),
         env_ids=torch.tensor([0], dtype=torch.long),
-        control_dt=0.1,
         dt=torch.tensor([[0.0, 0.2, 0.25]]),
     )
 
