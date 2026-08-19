@@ -51,12 +51,8 @@ from ..policies import MotionPolicy
 from ..requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
-    DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from ..state import HeldObjectState, PlanningContext
 from ..trajectory_ops import (
@@ -66,6 +62,7 @@ from ..trajectory_ops import (
     split_three_segments,
     translate_pose_world,
 )
+from ._binding_contracts import make_manipulation_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -163,29 +160,19 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     OptionsType: ClassVar[type] = PickUpOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                BATCH_INVERSE_KINEMATICS_CAPABILITY,
-                                CARTESIAN_POSE_CAPABILITY,
-                                FORWARD_KINEMATICS_CAPABILITY,
-                            }
-                        ),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                    ),
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        BATCH_INVERSE_KINEMATICS_CAPABILITY,
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
                 ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
         ),
     )

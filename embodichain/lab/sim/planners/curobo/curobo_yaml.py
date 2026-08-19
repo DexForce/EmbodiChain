@@ -42,6 +42,18 @@ if TYPE_CHECKING:
 __all__ = ["generate_curobo_robot_yaml", "generate_curobo_world_yaml"]
 
 
+def _named_rigid_objects(
+    rigid_objects: Sequence[RigidObject] | Mapping[str, RigidObject] | None,
+) -> list[tuple[str, RigidObject]]:
+    """Return canonical obstacle names paired with their live objects."""
+    if isinstance(rigid_objects, Mapping):
+        return list(rigid_objects.items())
+    return [
+        (getattr(obj, "uid", None) or f"obstacle_{index}", obj)
+        for index, obj in enumerate(rigid_objects or ())
+    ]
+
+
 def _parse_mimic_joint_names(urdf_path: str) -> set[str]:
     """Return the names of URDF joints that mimic another joint.
 
@@ -598,13 +610,7 @@ def generate_curobo_world_yaml(
     import yaml
 
     registry_backed = isinstance(rigid_objects, Mapping)
-    if registry_backed:
-        named_rigid_objects = list(rigid_objects.items())
-    else:
-        named_rigid_objects = [
-            (getattr(obj, "uid", None) or f"obstacle_{idx}", obj)
-            for idx, obj in enumerate(rigid_objects)
-        ]
+    named_rigid_objects = _named_rigid_objects(rigid_objects)
     if not named_rigid_objects:
         raise ValueError("rigid_objects must contain at least one RigidObject.")
 

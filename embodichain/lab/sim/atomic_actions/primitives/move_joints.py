@@ -27,18 +27,14 @@ from ..bindings import JointPositionTarget
 from ..core import AtomicAction
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
-from ..requirements import (
-    JOINT_POSITION_CAPABILITY,
-    SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
-)
+from ..requirements import JOINT_POSITION_CAPABILITY, SkillBindingContract
 from ..state import PlanningContext
 from ..trajectory_ops import (
     build_joint_plan_states,
     resolve_joint_target,
     to_full_robot_trajectory,
 )
+from ._binding_contracts import make_motion_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -81,14 +77,9 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     agent_visible: ClassVar[bool] = False
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
-                    ),
-                ),
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
             ),
         ),
     )

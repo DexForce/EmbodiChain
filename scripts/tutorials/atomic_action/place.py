@@ -43,12 +43,12 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -123,9 +123,9 @@ def main() -> None:
     """Plan and replay PickUp followed by a multi-waypoint Place."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
@@ -170,7 +170,10 @@ def main() -> None:
                 "pick_up",
                 GraspGoal(semantics),
                 pick_binding,
-                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICK_SAMPLE_INTERVAL,
+                ),
                 skill_options=PickUpOptions(
                     pre_grasp_distance=0.15,
                     lift_height=0.16,
@@ -185,7 +188,10 @@ def main() -> None:
                     )
                 ),
                 place_binding,
-                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PLACE_SAMPLE_INTERVAL,
+                ),
                 skill_options=PlaceOptions(
                     lift_height=PLACE_LIFT_HEIGHT,
                     hand_interp_steps=HAND_INTERP_STEPS,

@@ -1647,7 +1647,7 @@ class BoundRobotSkillProfile:
                 resource
                 for resource in self._resources.values()
                 if (selected is None or resource.resource_id == selected)
-                and self._resource_matches(resource, slot)
+                and not self._rejection_reasons(resource, slot)
             )
             if not candidates:
                 return ()
@@ -1661,37 +1661,6 @@ class BoundRobotSkillProfile:
             if self._constraints_match(contract, assignment):
                 assignments.append(assignment)
         return tuple(assignments)
-
-    def _resource_matches(
-        self,
-        resource: ResolvedRobotResource,
-        slot: SkillResourceSlot,
-    ) -> bool:
-        """Return whether one resource satisfies all slot-local endpoints."""
-        matched_endpoints: dict[str, ResolvedResourceEndpoint] = {}
-        for requirement in slot.endpoints:
-            endpoint = resource.endpoints.get(requirement.endpoint_id)
-            if endpoint is None:
-                return False
-            if not requirement.capabilities.issubset(endpoint.capabilities):
-                return False
-            for command_name, command_type in requirement.required_commands.items():
-                command = endpoint.commands.get(command_name)
-                if not isinstance(command, command_type):
-                    return False
-            matched_endpoints[requirement.endpoint_id] = endpoint
-        for constraint in slot.constraints:
-            if isinstance(constraint, DisjointSlotEndpoints):
-                endpoints = [
-                    matched_endpoints[endpoint_id]
-                    for endpoint_id in constraint.endpoint_ids
-                ]
-                for index, left in enumerate(endpoints):
-                    if any(
-                        left.conflicts_with(right) for right in endpoints[index + 1 :]
-                    ):
-                        return False
-        return True
 
     @staticmethod
     def _constraints_match(

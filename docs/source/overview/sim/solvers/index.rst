@@ -67,7 +67,7 @@ space to end-effector motion.
 
 
 Multi-chain and closed-loop kinematics
--------------------------------------
+--------------------------------------
 
 Solvers can handle serial chains, branched kinematic trees and some closed-loop
 mechanisms. Closed-loop systems commonly require constraint solvers and may

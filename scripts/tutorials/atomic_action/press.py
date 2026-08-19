@@ -46,9 +46,9 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     broadcast_pose_batch,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -149,7 +149,7 @@ def main() -> None:
     """Plan, verify, and replay MoveEndEffector followed by Press."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     block = create_wooden_block(sim, [*args.block_pos, 0.5 * BLOCK_SIZE[2]])
     if sim.device.type == "cuda":
         sim.init_gpu_physics()
@@ -157,7 +157,7 @@ def main() -> None:
     sim.update(step=5)
     block.clear_dynamics()
 
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -198,13 +198,19 @@ def main() -> None:
                 "move_end_effector",
                 EndEffectorPoseGoal(move_target),
                 move_binding,
-                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=MOVE_SAMPLE_INTERVAL,
+                ),
             ),
             ActionInvocation(
                 "press",
                 PressGoal(press_target),
                 press_binding,
-                MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PRESS_SAMPLE_INTERVAL,
+                ),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),

@@ -42,12 +42,8 @@ from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
 from ..requirements import (
     DisjointResourceSlots,
-    DisjointSlotEndpoints,
-    GRASP_CAPABILITY,
     INVERSE_KINEMATICS_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from ..state import HeldObjectState, PlanningContext
 from ..trajectory_ops import interpolate_joint_trajectory, translate_pose_world
@@ -56,6 +52,7 @@ from ._helpers import (
     repeat_qpos,
     resolve_batched_pose,
 )
+from ._binding_contracts import make_manipulation_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -341,23 +338,13 @@ class CoordinatedPickment(
     OptionsType: ClassVar[type] = CoordinatedPickmentOptions
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=tuple(
-            SkillResourceSlot(
-                slot_id=role,
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                role,
+                motion_capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             )
             for role in ("left", "right")
         ),

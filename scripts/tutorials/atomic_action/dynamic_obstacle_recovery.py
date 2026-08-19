@@ -30,7 +30,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
@@ -58,11 +57,12 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.visualization import SceneOverlays, TrajectoryOverlay
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    add_tutorial_robot,
+    create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     prepare_tutorial_scene,
@@ -73,7 +73,6 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     stop_auto_play_recording,
 )
 
-ROBOT_UID = "dynamic_scene_franka"
 OBSTACLE_UID = "dynamic_obstacle"
 CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
@@ -389,11 +388,9 @@ def _publish_path_overlays(
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the dynamic-obstacle tutorial."""
-    parser = argparse.ArgumentParser(
-        description="Demonstrate collision-world revision recovery with cuRobo."
+    parser = create_tutorial_argument_parser(
+        "Demonstrate collision-world revision recovery with cuRobo."
     )
-    add_env_launcher_args_to_parser(parser)
-    parser.add_argument("--auto_play", action="store_true")
     parser.add_argument(
         "--no_obstacle_motion",
         action="store_true",
@@ -406,9 +403,7 @@ def main() -> None:
     """Move an obstacle during execution and replan from the latest snapshot."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = sim.add_robot(
-        cfg=FrankaPandaCfg.from_dict({"uid": ROBOT_UID, "robot_type": "panda"})
-    )
+    robot = add_tutorial_robot(sim, args.robot)
     obstacle = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=OBSTACLE_UID,
@@ -433,7 +428,7 @@ def main() -> None:
     motion_gen = MotionGenerator(
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
-                robot_uid=ROBOT_UID,
+                robot_uid=robot.uid,
                 # The coarse default voxel fit under-covers the hand and
                 # fingertips. A denser fit plus modest padding matches the
                 # physical gripper without making the arm path infeasible.
