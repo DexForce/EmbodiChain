@@ -32,6 +32,7 @@ from .affordance import (
     Affordance,
     AntipodalAffordance,
     AssembleAffordance,
+    AxisAlignAffordance,
     InteractionPoints,
     PressAffordance,
     SlideAffordance,
@@ -85,6 +86,9 @@ from .requirements import (
 from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
+    AxisAlign,
+    AxisAlignGoal,
+    AxisAlignOptions,
     BUILTIN_ACTION_TYPES,
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -163,6 +167,10 @@ __all__ = [
     "AntipodalAffordance",
     "AssembleAffordance",
     "AssembleGoal",
+    "AxisAlign",
+    "AxisAlignAffordance",
+    "AxisAlignGoal",
+    "AxisAlignOptions",
     "AtomicAction",
     "AtomicActionEngine",
     "BUILTIN_ACTION_TYPES",

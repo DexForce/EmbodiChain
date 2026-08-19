@@ -76,6 +76,9 @@ embodichain.lab.sim.atomic_actions
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      AxisAlignGoal
+      AxisAlignOptions
+      AxisAlignAffordance
       HeldObjectPoseGoal
       PlaceGoal
       AssembleGoal
@@ -93,6 +96,7 @@ embodichain.lab.sim.atomic_actions
       MoveEndEffector
       MoveJoints
       PickUp
+      AxisAlign
       MoveHeldObject
       Place
       Press

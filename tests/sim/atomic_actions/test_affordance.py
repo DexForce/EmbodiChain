@@ -27,6 +27,7 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     Affordance,
     AntipodalAffordance,
     AssembleAffordance,
+    AxisAlignAffordance,
     InteractionPoints,
     PressAffordance,
     SlideAffordance,
@@ -119,6 +120,29 @@ class TestAntipodalAffordance:
         _, approach_direction = generator.get_grasp_poses.call_args.args
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
+
+
+class TestAxisAlignAffordance:
+    def test_extends_antipodal_affordance_with_owned_internal_axis(self):
+        internal_axis = torch.tensor([1.0, 0.0, 0.0])
+
+        affordance = AxisAlignAffordance(internal_axis=internal_axis)
+        internal_axis[0] = 0.0
+
+        assert isinstance(affordance, AntipodalAffordance)
+        assert torch.equal(affordance.internal_axis, torch.tensor([1.0, 0.0, 0.0]))
+
+    @pytest.mark.parametrize(
+        "internal_axis",
+        (
+            torch.zeros(3),
+            torch.tensor([float("nan"), 0.0, 0.0]),
+            torch.zeros(2),
+        ),
+    )
+    def test_rejects_invalid_internal_axis(self, internal_axis):
+        with pytest.raises(ValueError, match="internal_axis"):
+            AxisAlignAffordance(internal_axis=internal_axis)
 
 
 class TestTwistAffordance:

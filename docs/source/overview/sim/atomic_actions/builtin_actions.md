@@ -5,7 +5,7 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships eleven built-in action implementations with stable skill IDs;
+EmbodiChain ships twelve built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
@@ -66,6 +66,13 @@ The animations below are the focused simulator demos under
 `pick_up` · approach, close, and lift
 
 <img src="../../../_static/atomic_actions/pickup.gif" alt="PickUp demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `AxisAlign`
+:link: builtin-axis-align
+:link-type: ref
+
+`axis_align` · grasp, lift, align an object-local axis, and release
 :::
 
 :::{grid-item-card} `MoveHeldObject`
@@ -152,6 +159,7 @@ The animations below are the focused simulator demos under
 | `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` | none | none | none |
 | `move_joints` | `JointPositionGoal` | manipulator `primary` | named target only: command matching `target` | none | none |
 | `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
+| `axis_align` | `AxisAlignGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AxisAlignAffordance` + semantic object/entity | open-loop motion; application verifies final object pose |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
@@ -217,6 +225,8 @@ entity as a recovery dependency.
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
 | `PickUp.grasp_xpos` | yes | yes |
 | `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| `AxisAlign.grasp_xpos` | yes | yes |
+| `AxisAlign` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
 | Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
 | `AssembleGoal.base_pose` | yes | yes |
 | Deprecated `ObjectSemantics.entity` / `AssembleAffordance.base_object_entity` fallback | no | no |
@@ -387,6 +397,36 @@ live pose does not create an automatic scene dependency.
 deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
 `scripts/tutorials/atomic_action/moving_target_recovery.py`.
+
+(builtin-axis-align)=
+
+## `AxisAlign`
+
+Plans **approach -> reach -> close -> lift -> align -> lower -> open**. The
+object's `AxisAlignAffordance.internal_axis` is expressed in the object-local
+frame, while `AxisAlignOptions.target_axis` is expressed in the world frame.
+The align segment applies the shortest rotation about the lifted object's
+origin so that
+`aligned_object_rotation @ internal_axis == normalized_target_axis`, then
+derives every end-effector keyframe through the fixed grasp transform.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `axis_align` |
+| Goal | `AxisAlignGoal(semantics=..., grasp_xpos=None)` |
+| Binding | manipulator + end effector role `primary` |
+| Precondition | an `AxisAlignAffordance`; the object pose resolves from `ObjectSemantics.entity_id` or the deprecated live entity fallback |
+| Motion | approach, grasp, lift, rotate in place, lower, release |
+| Effect | explicitly open-loop; no final object-pose success is claimed |
+
+An explicit `grasp_xpos` accepts the same pose forms as `GraspGoal`; omitting it
+selects the lowest-cost valid antipodal affordance grasp. `AxisAlignOptions`
+extends `PickUpOptions` with `target_axis` and `lower_distance`. Shared and
+per-environment target axes use shapes `(3,)` and `(B, 3)` respectively. Zero
+or non-finite axes are rejected, and exactly opposite axes use a deterministic
+180-degree rotation rather than an unstable cross-product direction.
+
+**Example:** `scripts/tutorials/atomic_action/axis_align.py`
 
 (builtin-move-held-object)=
 

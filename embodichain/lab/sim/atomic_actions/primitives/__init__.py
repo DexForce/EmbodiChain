@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from ..core import AtomicAction
+from .axis_align import AxisAlign, AxisAlignGoal, AxisAlignOptions
 from .coordinated_pickment import (
     CoordinatedPickGoal,
     CoordinatedPickment,
@@ -55,6 +56,7 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
     MoveJoints,
     PickUp,
+    AxisAlign,
     MoveHeldObject,
     Place,
     Press,
@@ -68,6 +70,9 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
 
 __all__ = [
     "AssembleGoal",
+    "AxisAlign",
+    "AxisAlignGoal",
+    "AxisAlignOptions",
     "BUILTIN_ACTION_TYPES",
     "CoordinatedPickGoal",
     "CoordinatedPickment",

@@ -234,6 +234,29 @@ class AntipodalAffordance(Affordance):
 
 
 @dataclass
+class AxisAlignAffordance(AntipodalAffordance):
+    """Antipodal grasp affordance with an object-local alignment axis."""
+
+    internal_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 0.0, 1.0])
+    )
+    """Axis expressed in the target object's local frame."""
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.internal_axis, torch.Tensor)
+            or self.internal_axis.shape != (3,)
+            or not torch.isfinite(self.internal_axis).all()
+        ):
+            raise ValueError(
+                "AxisAlignAffordance.internal_axis must be a finite (3,) tensor."
+            )
+        if torch.linalg.vector_norm(self.internal_axis) <= 1.0e-6:
+            raise ValueError("AxisAlignAffordance.internal_axis must be non-zero.")
+        self.internal_axis = self.internal_axis.clone()
+
+
+@dataclass
 class TwistAffordance(Affordance):
     """Target-local grasp point and rotation-axis geometry for twisting."""
 
@@ -617,6 +640,7 @@ class AssembleAffordance(Affordance):
 __all__ = [
     "Affordance",
     "AntipodalAffordance",
+    "AxisAlignAffordance",
     "SlideAffordance",
     "PressAffordance",
     "TwistAffordance",

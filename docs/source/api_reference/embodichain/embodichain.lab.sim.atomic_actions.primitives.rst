@@ -23,6 +23,8 @@ full-robot timed trajectory and uncommitted expected effects.
       MoveJointsOptions
       PickUp
       PickUpOptions
+      AxisAlign
+      AxisAlignOptions
       MoveHeldObject
       MoveHeldObjectOptions
       Place
@@ -47,6 +49,7 @@ full-robot timed trajectory and uncommitted expected effects.
       EndEffectorPoseGoal
       JointPositionGoal
       GraspGoal
+      AxisAlignGoal
       HeldObjectPoseGoal
       PlaceGoal
       AssembleGoal
@@ -78,6 +81,14 @@ PickUp
 ------
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.pick_up
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+AxisAlign
+---------
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.axis_align
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
