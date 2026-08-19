@@ -245,6 +245,19 @@ def main() -> None:
         logger.log_warning("Failed to plan the Press demo trajectory.")
         return
 
+    if isinstance(target, RigidObject):
+        focus_pose = target.get_local_pose(to_matrix=True)
+    elif isinstance(target, Articulation):
+        focus_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
+    else:
+        raise ValueError("Unsupported target type for Press demo.")
+    focus_position = [focus_pose[0, 0, 3], focus_pose[0, 1, 3], focus_pose[0, 2, 3]]
+    camera_position = [
+        focus_position[0] + 0.0,
+        focus_position[1] + 0.3,
+        focus_position[2] + 0.2,
+    ]
+    look_at = [camera_position, focus_position, [0, 0, 1]]
     if wait_for_user:
         input("Press Enter to replay the Press demo...")
     replay_trajectory(
@@ -258,6 +271,7 @@ def main() -> None:
             else "press_microwave_button_auto_play"
         ),
         hold_steps=POST_TRAJECTORY_STEPS,
+        look_at=look_at,
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")
