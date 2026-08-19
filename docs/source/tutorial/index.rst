@@ -33,7 +33,7 @@ Follow the tutorials in this order for the best learning experience:
 
 **Phase 3: Extending the Framework**
 
-17. :doc:`add_robot` — Add a new robot model to EmbodiChain.
+17. :doc:`/guides/add_robot` — Add a new robot model to EmbodiChain.
 
 .. toctree::
    :maxdepth: 1
@@ -46,7 +46,6 @@ Follow the tutorials in this order for the best learning experience:
    rigid_constraint
    articulation
    robot
-   add_robot
    solver
    sensor
    motion_gen
