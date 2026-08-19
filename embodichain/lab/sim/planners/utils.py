@@ -184,7 +184,12 @@ class MoveType(Enum):
 
 @dataclass
 class PlanResult:
-    r"""Data class representing the result of a motion plan (env-batched)."""
+    r"""Data class representing the result of a motion plan (env-batched).
+
+    A result that contains joint positions must also contain complete timing:
+    per-sample ``dt`` and a matching per-environment ``duration``. Failed plans
+    may omit all trajectory fields by leaving ``positions`` as ``None``.
+    """
 
     success: bool | torch.Tensor = False
     """Per-env success, shape ``(B,)`` bool tensor (or scalar bool)."""
@@ -204,8 +209,49 @@ class PlanResult:
     dt: torch.Tensor | None = None
     """Per-env time deltas, shape ``(B, N)``."""
 
-    duration: float | torch.Tensor = 0.0
+    duration: torch.Tensor | None = None
     """Per-env total duration, shape ``(B,)``."""
+
+    def __post_init__(self) -> None:
+        """Validate the explicit trajectory-timing contract."""
+        if self.positions is None:
+            if self.dt is not None or self.duration is not None:
+                raise ValueError("PlanResult timing requires positions.")
+            return
+        if not isinstance(self.positions, torch.Tensor) or self.positions.dim() != 3:
+            raise ValueError("PlanResult.positions must have shape (B, N, DOF).")
+        batch_size, waypoint_count, _ = self.positions.shape
+        if not isinstance(self.dt, torch.Tensor):
+            raise ValueError(
+                "PlanResult with positions requires explicit dt with shape (B, N)."
+            )
+        if self.dt.shape != (batch_size, waypoint_count):
+            raise ValueError(
+                "PlanResult.dt must match positions batch and waypoint dimensions."
+            )
+        if self.dt.device != self.positions.device:
+            raise ValueError("PlanResult.dt and positions must share a device.")
+        if not torch.isfinite(self.dt).all() or (self.dt < 0).any():
+            raise ValueError("PlanResult.dt must contain finite non-negative values.")
+        if not isinstance(self.duration, torch.Tensor):
+            raise ValueError(
+                "PlanResult with positions requires explicit duration with shape (B,)."
+            )
+        if self.duration.shape != (batch_size,):
+            raise ValueError(f"PlanResult.duration must have shape ({batch_size},).")
+        if self.duration.device != self.positions.device:
+            raise ValueError("PlanResult.duration and positions must share a device.")
+        if not torch.isfinite(self.duration).all() or (self.duration < 0).any():
+            raise ValueError(
+                "PlanResult.duration must contain finite non-negative values."
+            )
+        if not torch.allclose(
+            self.duration,
+            self.dt.sum(dim=1).to(dtype=self.duration.dtype),
+            rtol=1.0e-4,
+            atol=1.0e-6,
+        ):
+            raise ValueError("PlanResult.duration must equal dt.sum(dim=1).")
 
     def is_all_success(self) -> bool:
         """Return True only when every env succeeded."""

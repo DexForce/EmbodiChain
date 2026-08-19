@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from embodichain.lab.sim.planners import PlanResult
@@ -41,6 +43,16 @@ class IkInterpolateAdapter(PlannerAdapter):
     def plan(self, case: BenchmarkCase) -> PlanResult:
         """Solve each waypoint sequentially while retaining per-env failures."""
         robot = self.context.robot
+        interpolation_dt = self.spec.config.get("interpolation_dt")
+        if isinstance(interpolation_dt, bool) or not isinstance(
+            interpolation_dt, (int, float)
+        ):
+            raise ValueError(
+                "ik_interpolate requires an explicit numeric interpolation_dt."
+            )
+        interpolation_dt = float(interpolation_dt)
+        if not math.isfinite(interpolation_dt) or interpolation_dt <= 0.0:
+            raise ValueError("interpolation_dt must be finite and greater than zero.")
         seed = case.start_qpos
         alive = torch.ones(case.batch_size, dtype=torch.bool, device=robot.device)
         targets = [seed]
@@ -66,10 +78,14 @@ class IkInterpolateAdapter(PlannerAdapter):
             interp_num=self.context.sample_interval,
             device=robot.device,
         )
+        dt = torch.zeros(positions.shape[:2], dtype=torch.float32, device=robot.device)
+        if positions.shape[1] > 1:
+            dt[:, 1:] = interpolation_dt
         return PlanResult(
             success=alive,
             positions=positions,
-            duration=torch.zeros(case.batch_size, device=robot.device),
+            dt=dt,
+            duration=dt.sum(dim=1),
         )
 
 

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
@@ -138,70 +139,80 @@ class TimedTrajectory:
         positions: torch.Tensor,
         *,
         env_ids: torch.Tensor,
-        control_dt: float,
+        dt: torch.Tensor,
         velocities: torch.Tensor | None = None,
         accelerations: torch.Tensor | None = None,
-        dt: torch.Tensor | None = None,
-        duration: torch.Tensor | float | None = None,
     ) -> TimedTrajectory:
-        """Build a timed trajectory and synthesize missing timing metadata.
+        """Build a trajectory from positions and explicit per-sample timing.
 
         Args:
             positions: Full-robot positions, shape ``(B, N, D)``.
             env_ids: Environment identifiers, shape ``(B,)``.
-            control_dt: Fallback interval used when ``dt`` is absent.
+            dt: Per-sample arrival intervals, shape ``(B, N)``.
             velocities: Optional joint velocities.
             accelerations: Optional joint accelerations.
-            dt: Optional per-sample time deltas.
-            duration: Optional duration used to synthesize or validate ``dt``.
 
         Returns:
             Validated timed trajectory.
         """
-        if control_dt <= 0.0:
-            raise ValueError("control_dt must be greater than zero.")
         if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
             raise ValueError("positions must have shape (B, N, D).")
-        batch_size, waypoint_count, _ = positions.shape
-        if dt is None:
-            dt = torch.zeros(
-                (batch_size, waypoint_count),
-                dtype=torch.float32,
-                device=positions.device,
-            )
-            if waypoint_count > 1:
-                if duration is None:
-                    dt[:, 1:] = control_dt
-                else:
-                    duration_tensor = torch.as_tensor(
-                        duration, dtype=torch.float32, device=positions.device
-                    )
-                    if duration_tensor.dim() == 0:
-                        duration_tensor = duration_tensor.expand(batch_size)
-                    if duration_tensor.shape != (batch_size,):
-                        raise ValueError(f"duration must have shape ({batch_size},).")
-                    dt[:, 1:] = duration_tensor[:, None] / (waypoint_count - 1)
-        else:
-            dt = dt.to(device=positions.device, dtype=torch.float32)
-        computed_duration = dt.sum(dim=1)
-        if duration is not None:
-            duration_tensor = torch.as_tensor(
-                duration, dtype=torch.float32, device=positions.device
-            )
-            if duration_tensor.dim() == 0:
-                duration_tensor = duration_tensor.expand(batch_size)
-            if duration_tensor.shape != (batch_size,):
-                raise ValueError(f"duration must have shape ({batch_size},).")
-            if not torch.allclose(
-                computed_duration, duration_tensor, rtol=1e-4, atol=1e-6
-            ):
-                raise ValueError("duration does not match the supplied dt.")
+        if not isinstance(dt, torch.Tensor):
+            raise TypeError("dt must be a torch.Tensor.")
         return cls(
             positions=positions,
             velocities=velocities,
             accelerations=accelerations,
-            dt=dt,
+            dt=dt.to(device=positions.device, dtype=torch.float32),
             env_ids=env_ids,
+        )
+
+    @classmethod
+    def from_uniform_step(
+        cls,
+        positions: torch.Tensor,
+        *,
+        env_ids: torch.Tensor,
+        step_dt: float,
+        velocities: torch.Tensor | None = None,
+        accelerations: torch.Tensor | None = None,
+    ) -> TimedTrajectory:
+        """Build an explicitly uniform-time trajectory.
+
+        The first waypoint has zero arrival time; every following waypoint uses
+        ``step_dt``. This factory is intended for interpolation algorithms whose
+        cadence is selected by the caller, not for repairing untimed plans.
+
+        Args:
+            positions: Full-robot positions, shape ``(B, N, D)``.
+            env_ids: Environment identifiers, shape ``(B,)``.
+            step_dt: Explicit interval between consecutive waypoints.
+            velocities: Optional joint velocities.
+            accelerations: Optional joint accelerations.
+
+        Returns:
+            Validated uniformly timed trajectory.
+        """
+        if isinstance(step_dt, bool) or not isinstance(step_dt, (int, float)):
+            raise TypeError("step_dt must be a real number.")
+        if not math.isfinite(step_dt) or step_dt <= 0.0:
+            raise ValueError("step_dt must be finite and greater than zero.")
+        if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
+            raise ValueError("positions must have shape (B, N, D).")
+        batch_size, waypoint_count, _ = positions.shape
+        dt = torch.zeros(
+            (batch_size, waypoint_count),
+            dtype=torch.float32,
+            device=positions.device,
+        )
+        if waypoint_count > 1:
+            dt[:, 1:] = float(step_dt)
+        return cls.from_positions(
+            positions,
+            env_ids=env_ids,
+            dt=dt,
+            velocities=velocities,
+            accelerations=accelerations,
         )
 
     @classmethod

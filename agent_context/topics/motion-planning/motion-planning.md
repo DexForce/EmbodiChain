@@ -181,7 +181,8 @@ Unified interface for trajectory planning with optional pre-interpolation.
 - `MotionGenCfg.planner_cfg` is **MISSING** — must be provided.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
-  supplied `start_qpos`.
+  supplied `start_qpos`, and every returned trajectory has explicit `dt` and
+  matching `duration`.
 
 `MotionGenOptions` fields:
 
@@ -195,6 +196,7 @@ Unified interface for trajectory planning with optional pre-interpolation.
 | `control_part` | `str \| None` | `None` | Robot control part name (must match `RobotCfg.control_parts` key) |
 | `plan_opts` | `PlanOptions \| None` | `None` | Passed to the underlying planner |
 | `is_interpolate` | `bool` | `False` | Pre-interpolate waypoints before planning |
+| `interpolation_dt` | `float \| None` | `None` | Required explicit waypoint interval for `strategy="ik_interp"` and automatic joint interpolation fallback |
 | `interpolate_nums` | `int \| list[int]` | `10` | Points per segment (scalar or per-segment list) |
 | `is_linear` | `bool` | `False` | `True` = Cartesian linear interpolation; `False` = joint-space |
 | `interpolate_position_step` | `float` | `0.002` | Cartesian step size (meters) or joint step size (radians) |
@@ -231,10 +233,14 @@ Convenience constructors:
 | `positions` | `torch.Tensor \| None` | Joint positions `(B, N, DOF)` |
 | `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
 | `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
-| `dt` | `torch.Tensor \| None` | Per-step time durations `(B, N)` |
-| `duration` | `float \| torch.Tensor` | Total trajectory time per env `(B,)` |
+| `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
+| `duration` | `torch.Tensor \| None` | Total trajectory time `(B,)`; required with `positions` and equal to `dt.sum(dim=1)` |
 
 Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.
+`PlanResult` rejects positions with missing, malformed, or inconsistent timing.
+A failed result may omit the trajectory entirely by leaving `positions=None`.
+When `MotionGenerator` resamples a fully timed result, it preserves each row's
+total duration and emits new explicit arrival intervals.
 
 ### MoveType enum
 
@@ -260,7 +266,7 @@ Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env
 
 ### Registering a new planner
 
-1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`.
+1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`; every result containing positions must include `dt` and matching `duration`.
 2. Create a `BasePlannerCfg` subclass with a unique `planner_type` string.
 3. Optionally create a `PlanOptions` subclass for planner-specific options.
 4. For a planner that accepts live obstacles, set
@@ -299,7 +305,10 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
 - **IK interpolation with unsupported MoveType** — `strategy="ik_interp"`
   accepts only `EEF_MOVE` and `JOINT_MOVE` and raises for other target types.
 - **Missing interpolation inputs** — `strategy="ik_interp"` requires explicit
-  `start_qpos` and `sample_count`; it never reads live robot state implicitly.
+  `start_qpos`, `sample_count`, and `interpolation_dt`; it never reads live robot
+  state or guesses a command period implicitly.
+- **Missing planner timing** — constructing a `PlanResult` with positions but
+  without matching `dt` and `duration` raises immediately.
 - **CUDA requested on a CPU-only runtime** — planner success-mask normalization
   raises a direct `ValueError` before querying the active CUDA device. It never
   silently falls back to CPU.

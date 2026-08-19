@@ -51,17 +51,36 @@ class TestPlanResultBatched:
         assert r.is_all_success() is True
 
     def test_batched_shapes(self):
+        dt = torch.zeros(2, 10)
+        dt[:, 1:] = 0.1
         r = PlanResult(
             success=torch.tensor([True, False]),
             positions=torch.zeros(2, 10, 7),
             velocities=torch.zeros(2, 10, 7),
             accelerations=torch.zeros(2, 10, 7),
-            dt=torch.zeros(2, 10),
-            duration=torch.tensor([1.0, 0.0]),
+            dt=dt,
+            duration=dt.sum(dim=1),
         )
         assert r.positions.shape == (2, 10, 7)
         assert r.dt.shape == (2, 10)
         assert r.duration.shape == (2,)
+
+    def test_positions_require_complete_matching_timing(self):
+        positions = torch.zeros(2, 3, 7)
+        with pytest.raises(ValueError, match="explicit dt"):
+            PlanResult(success=True, positions=positions)
+
+        dt = torch.zeros(2, 3)
+        with pytest.raises(ValueError, match="explicit duration"):
+            PlanResult(success=True, positions=positions, dt=dt)
+
+        with pytest.raises(ValueError, match="equal"):
+            PlanResult(
+                success=True,
+                positions=positions,
+                dt=dt,
+                duration=torch.ones(2),
+            )
 
 
 class TestValidateBatchConsistency:

@@ -352,6 +352,9 @@ topics:
       - motion generator
       - resolve_plan_options
       - MotionGenOptions.strategy
+      - MotionGenOptions.interpolation_dt
+      - PlanResult.dt
+      - explicit trajectory timing
       - ik_interp
       - path
       - waypoint
@@ -375,6 +378,8 @@ topics:
       - embodichain/lab/sim/planners/curobo/curobo_planner.py
       - embodichain/lab/sim/planners/curobo/curobo_yaml.py
       - embodichain/lab/sim/planners/motion_generator.py
+      - embodichain/lab/sim/planners/neural_planner.py
+      - embodichain/lab/sim/planners/utils.py
       - embodichain/lab/sim/skills/scene.py
     related_topics:
       - simulation-system
@@ -617,6 +622,7 @@ topics:
       - ResolvedRobotResource
       - ResolvedSkillBinding
       - SkillPolicyPreset
+      - SkillPolicyPreset.required_planner
       - binding_contract
       - engine.skills
       - skill_profile
@@ -645,6 +651,9 @@ topics:
       - invocation revision
       - MotionPolicy
       - MotionPolicy.strategy
+      - PlanningContext.control_dt
+      - explicit trajectory timing
+      - TimedTrajectory.from_uniform_step
       - RecoveryPolicy
       - MotionGenOptions.strategy
       - motion_gen

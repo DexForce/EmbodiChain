@@ -457,7 +457,8 @@ def run_coordinated_pickment_demo(
                 ),
                 skill_options=pickment_options,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

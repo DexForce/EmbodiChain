@@ -12,8 +12,10 @@ explicit cuRobo world.
 * **Unified planning interface**: Supports interpolation-oriented planners and collision-aware cuRobo V2 planning through one `generate()` API.
 * **Explicit strategy**: Accepts only `"motion_gen"` or `"ik_interp"`; no
   planner bypass is inferred from a missing backend-options object.
-* **Normalized results**: Validates batched positions, success, derivatives and
-  timing, applies requested resampling, and holds failed rows at `start_qpos`.
+* **Strict timed results**: A planner result with positions must include
+  per-waypoint `dt` and matching `duration`. The generator validates that
+  contract, preserves total duration when resampling, and holds failed rows at
+  `start_qpos`.
 * **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CuroboPlanner backend, which plans on CUDA with either CPU or CUDA physics simulation.
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
 * **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
@@ -29,7 +31,8 @@ through `supported_move_types` and exposes them through
 * convert EEF targets into joint waypoints only for joint-only backends such as
   TOPPRA when `MotionGenOptions.is_interpolate=True`;
 * fall back to deterministic joint interpolation when a backend cannot consume
-  a `JOINT_MOVE` target and explicit `start_qpos`/`sample_count` are available;
+  a `JOINT_MOVE` target and explicit `start_qpos`/`sample_count`/
+  `interpolation_dt` are available;
 * reject unsupported target types before entering the backend.
 
 The built-in declarations are:
@@ -138,6 +141,22 @@ result = motion_gen.generate(
     options=motion_opts
 )
 ```
+
+For deterministic interpolation, select the timing explicitly:
+
+```python
+motion_opts = MotionGenOptions(
+    strategy="ik_interp",
+    sample_count=50,
+    interpolation_dt=0.02,
+    start_qpos=start_qpos,
+    control_part="arm",
+)
+```
+
+Missing interpolation timing is an error; it is never inferred from an engine
+or global default. Custom planners likewise must return `PlanResult.dt` with
+shape `(B, N)` and `duration == dt.sum(dim=1)` whenever they return positions.
 
 #### Cartesian Space Planning
 

@@ -99,6 +99,7 @@ def plan_named_arm_trajectory(
     target_poses: torch.Tensor,
     n_waypoints: int,
     motion_policy: MotionPolicy,
+    interpolation_dt: float | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Plan a fixed-size pose trajectory for one named manipulator."""
     result = motion_generator.generate(
@@ -107,6 +108,7 @@ def plan_named_arm_trajectory(
             start_qpos=start_qpos,
             control_part=control_part,
             sample_count=n_waypoints,
+            interpolation_dt=interpolation_dt,
         ),
     )
     if not isinstance(result.success, torch.Tensor):

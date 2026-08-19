@@ -28,7 +28,8 @@ planners:
     adapter: ik_interpolate
     role: diagnostic_baseline
     enabled: false
-    config: {}
+    config:
+      interpolation_dt: 0.025
   - id: toppra
     adapter: toppra
     role: diagnostic_baseline

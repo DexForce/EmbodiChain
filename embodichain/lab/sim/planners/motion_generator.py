@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import MISSING
@@ -105,6 +106,9 @@ class MotionGenOptions:
         - The pre-interpolation only works for PlanState with MoveType.EEF_MOVE or MoveType.JOINT_MOVE.
     """
 
+    interpolation_dt: float | None = None
+    """Explicit waypoint interval for deterministic interpolation."""
+
     interpolate_nums: int | list[int] = 10
     """Number of interpolation points to generate between each pair of waypoints. 
     
@@ -140,6 +144,15 @@ class MotionGenOptions:
             raise ValueError("velocity_limit must be greater than zero when set.")
         if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
             raise ValueError("acceleration_limit must be greater than zero when set.")
+        if self.interpolation_dt is not None:
+            if isinstance(self.interpolation_dt, bool) or not isinstance(
+                self.interpolation_dt, (int, float)
+            ):
+                raise TypeError("interpolation_dt must be a real number or None.")
+            if not math.isfinite(self.interpolation_dt) or self.interpolation_dt <= 0.0:
+                raise ValueError(
+                    "interpolation_dt must be finite and greater than zero when set."
+                )
 
 
 class MotionGenerator:
@@ -549,6 +562,8 @@ class MotionGenerator:
             raise ValueError("IK interpolation requires start_qpos.")
         if options.sample_count is None:
             raise ValueError("IK interpolation requires sample_count.")
+        if options.interpolation_dt is None:
+            raise ValueError("IK interpolation requires explicit interpolation_dt.")
         start_qpos = options.start_qpos
         if start_qpos.dim() == 1:
             start_qpos = start_qpos.unsqueeze(0)
@@ -581,9 +596,17 @@ class MotionGenerator:
                 interp_num=options.sample_count,
                 device=device,
             )
+            dt = self._uniform_dt(
+                batch_size=batch_size,
+                waypoint_count=positions.shape[1],
+                step_dt=options.interpolation_dt,
+                device=device,
+            )
             return PlanResult(
                 success=torch.ones(batch_size, dtype=torch.bool, device=device),
                 positions=positions,
+                dt=dt,
+                duration=dt.sum(dim=1),
             )
 
         if move_type is not MoveType.EEF_MOVE:
@@ -661,7 +684,36 @@ class MotionGenerator:
             )
         held = start_qpos.unsqueeze(1).expand_as(positions)
         positions = torch.where(success[:, None, None], positions, held)
-        return PlanResult(success=success, positions=positions)
+        dt = self._uniform_dt(
+            batch_size=batch_size,
+            waypoint_count=positions.shape[1],
+            step_dt=options.interpolation_dt,
+            device=device,
+        )
+        return PlanResult(
+            success=success,
+            positions=positions,
+            dt=dt,
+            duration=dt.sum(dim=1),
+        )
+
+    @staticmethod
+    def _uniform_dt(
+        *,
+        batch_size: int,
+        waypoint_count: int,
+        step_dt: float,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Return explicit uniform arrival intervals for interpolation."""
+        dt = torch.zeros(
+            (batch_size, waypoint_count),
+            dtype=torch.float32,
+            device=device,
+        )
+        if waypoint_count > 1:
+            dt[:, 1:] = step_dt
+        return dt
 
     def _normalize_plan_result(
         self,
@@ -717,6 +769,21 @@ class MotionGenerator:
         if not torch.isfinite(positions).all():
             raise ValueError("MotionGenerator returned non-finite positions.")
 
+        dt = result.dt
+        if not isinstance(dt, torch.Tensor):
+            raise ValueError(
+                "MotionGenerator planner results with positions require explicit dt."
+            )
+        if dt.shape != positions.shape[:2]:
+            raise ValueError(
+                "MotionGenerator dt must match positions batch and sample "
+                f"dimensions, got {tuple(dt.shape)} and "
+                f"{tuple(positions.shape[:2])}."
+            )
+        if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
+            raise ValueError("MotionGenerator returned invalid time deltas.")
+        raw_duration = dt.sum(dim=1)
+
         resampled = False
         preserve_samples = getattr(self.planner, "preserve_plan_samples", False) is True
         if (
@@ -730,6 +797,13 @@ class MotionGenerator:
                 device=device,
             )
             resampled = True
+            dt = torch.zeros(
+                positions.shape[:2],
+                dtype=result.dt.dtype,
+                device=device,
+            )
+            if positions.shape[1] > 1:
+                dt[:, 1:] = raw_duration[:, None] / (positions.shape[1] - 1)
 
         def normalize_derivative(
             value: torch.Tensor | None,
@@ -750,21 +824,7 @@ class MotionGenerator:
 
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
-        dt = None if resampled else result.dt
-        if dt is not None:
-            if not isinstance(dt, torch.Tensor):
-                raise TypeError("MotionGenerator dt must be a torch.Tensor.")
-            if dt.shape != positions.shape[:2]:
-                raise ValueError(
-                    "MotionGenerator dt must match positions batch and sample "
-                    f"dimensions, got {tuple(dt.shape)} and "
-                    f"{tuple(positions.shape[:2])}."
-                )
-            if dt.device != device or not torch.isfinite(dt).all() or (dt < 0).any():
-                raise ValueError("MotionGenerator returned invalid time deltas.")
-            duration: float | torch.Tensor = dt.sum(dim=1)
-        else:
-            duration = result.duration
+        duration = dt.sum(dim=1)
 
         if start_qpos is not None and not success.all():
             held = (

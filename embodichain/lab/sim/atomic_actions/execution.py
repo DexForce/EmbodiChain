@@ -386,6 +386,7 @@ class ExecutionSession:
             task=self._task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
         events = self._drain_events()
         if self._status is not ExecutionStatus.RUNNING:
@@ -659,6 +660,7 @@ class ExecutionSession:
                 task=self._task_state,
                 scene=self._context.scene,
                 env_ids=self._context.env_ids,
+                control_dt=self._context.control_dt,
             )
             self._pending &= ~verified
         failed_effect = execution_mask & ~verified

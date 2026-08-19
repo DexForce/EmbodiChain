@@ -254,6 +254,9 @@ class SimulationExecutionAdapter:
         simulation: Simulation manager advanced by the execution clock.
         robot: Robot observed and commanded by the adapter.
         physics_dt: Optional physics period. Defaults to the simulation config.
+        control_dt: Optional command period exposed to action interpolation.
+            Defaults to ``physics_dt`` because that is the adapter's minimum
+            executable command cadence.
         env_ids: Optional stable correlation IDs matching every robot row. They
             are not used as simulator indices; row order maps to robot instances.
         scene_provider: Optional provider for versioned scene observations.
@@ -268,6 +271,7 @@ class SimulationExecutionAdapter:
         robot: Robot,
         *,
         physics_dt: float | None = None,
+        control_dt: float | None = None,
         env_ids: torch.Tensor | None = None,
         scene_provider: SceneProvider | None = None,
         scene_supplier: SceneSnapshotSupplier | None = None,
@@ -282,6 +286,11 @@ class SimulationExecutionAdapter:
         )
         if not math.isfinite(resolved_physics_dt) or resolved_physics_dt <= 0.0:
             raise ValueError("physics_dt must be finite and greater than zero.")
+        resolved_control_dt = (
+            resolved_physics_dt if control_dt is None else float(control_dt)
+        )
+        if not math.isfinite(resolved_control_dt) or resolved_control_dt <= 0.0:
+            raise ValueError("control_dt must be finite and greater than zero.")
         qpos = robot.get_qpos()
         if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
             raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
@@ -301,6 +310,7 @@ class SimulationExecutionAdapter:
         self.simulation = simulation
         self.robot = robot
         self.physics_dt = resolved_physics_dt
+        self.control_dt = resolved_control_dt
         self.env_ids = env_ids.clone()
         self._robot_env_indices = list(range(qpos.shape[0]))
         if scene_provider is not None and scene_supplier is not None:
@@ -391,6 +401,7 @@ class SimulationExecutionAdapter:
             task=task_state,
             scene=scene,
             env_ids=self.env_ids,
+            control_dt=self.control_dt,
         )
 
     def send(

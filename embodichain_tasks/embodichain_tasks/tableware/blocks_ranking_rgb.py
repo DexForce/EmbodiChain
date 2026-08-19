@@ -253,7 +253,8 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
                         hand_interp_steps=HAND_INTERP_STEPS,
                     ),
                 ),
-            )
+            ),
+            self._action_engine.initial_context(control_dt=self.step_dt),
         )
         pick_success = pick_compiled.plan_success
         pick_trajectory = pick_compiled.trajectory.positions

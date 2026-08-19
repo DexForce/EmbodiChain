@@ -250,6 +250,7 @@ def main() -> None:
     sim_runtime = SimulationExecutionAdapter(
         sim,
         robot,
+        control_dt=2.0 * sim.sim_config.physics_dt,
         scene_supplier=target_scene.snapshot,
     )
     motion_gen = create_curobo_motion_generator(robot)
@@ -303,7 +304,6 @@ def main() -> None:
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=PICK_SAMPLE_COUNT,
-            control_dt=2.0 * sim_runtime.physics_dt,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,

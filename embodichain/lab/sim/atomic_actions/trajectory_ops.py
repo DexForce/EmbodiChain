@@ -320,7 +320,6 @@ def to_full_robot_trajectory(
     base_qpos: torch.Tensor,
     joint_ids: list[int],
     env_ids: torch.Tensor,
-    control_dt: float,
 ) -> tuple[torch.Tensor, TimedTrajectory]:
     """Embed a controlled-joint plan into a timed full-robot trajectory."""
     positions = result.positions
@@ -340,23 +339,14 @@ def to_full_robot_trajectory(
         full[:, :, joint_ids] = value
         return full
 
-    duration: float | torch.Tensor | None = result.duration
     if result.dt is None:
-        duration_tensor = torch.as_tensor(
-            result.duration,
-            dtype=torch.float32,
-            device=base_qpos.device,
-        )
-        if not bool((duration_tensor > 0.0).any().item()):
-            duration = None
+        raise ValueError("PlanResult must include explicit dt.")
     timed = TimedTrajectory.from_positions(
         full_positions,
         env_ids=env_ids,
-        control_dt=control_dt,
         velocities=embed_derivative(result.velocities),
         accelerations=embed_derivative(result.accelerations),
         dt=result.dt,
-        duration=duration,
     )
     success = normalize_success_mask(
         result.success,

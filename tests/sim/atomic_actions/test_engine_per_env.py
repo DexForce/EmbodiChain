@@ -81,11 +81,16 @@ class DynamicAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         self.requests.append(request)
         pose = resolve_pose_goal(goal.xpos, context, name="xpos")
         target = pose[:, 0, 3].unsqueeze(1).expand_as(context.robot.qpos)
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack([context.robot.qpos, target], dim=1),
+            env_ids=context.env_ids,
+            step_dt=0.1,
+        )
         return self.build_plan(
             request,
             context,
             success=True,
-            trajectory=torch.stack([context.robot.qpos, target], dim=1),
+            trajectory=trajectory,
         )
 
 
@@ -110,11 +115,16 @@ class EffectAction(DynamicAction):
             object_to_eef=torch.eye(4),
             grasp_xpos=torch.eye(4),
         )
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack([context.robot.qpos, target], dim=1),
+            env_ids=context.env_ids,
+            step_dt=0.1,
+        )
         return self.build_plan(
             request,
             context,
             success=True,
-            trajectory=torch.stack([context.robot.qpos, target], dim=1),
+            trajectory=trajectory,
             expected_effects=StateDelta(held_object_updates={"arm": held}),
         )
 
@@ -156,9 +166,7 @@ class NonuniformTimingAction(DynamicAction):
         trajectory = TimedTrajectory.from_positions(
             positions,
             env_ids=context.env_ids,
-            control_dt=request.motion_policy.control_dt,
             dt=dt,
-            duration=dt.sum(dim=1),
         )
         return self.build_plan(
             request,
@@ -279,7 +287,6 @@ def _invocation(
     max_replans: int = 2,
     max_action_retries: int = 2,
     action_timeout: float = 30.0,
-    control_dt: float = 1.0 / 60.0,
     strategy: str = "ik_interp",
     dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
@@ -289,7 +296,6 @@ def _invocation(
         binding=ActionBinding(manipulators={"primary": "arm"}),
         motion_policy=MotionPolicy(
             sample_count=2,
-            control_dt=control_dt,
             strategy=strategy,
             dynamic_collision_mode=dynamic_collision_mode,
         ),
