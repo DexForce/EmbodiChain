@@ -44,8 +44,9 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner 
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.assets_gravity_settler import (
-    AssetsGravitySettler,
+from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
+    GravitySettleBody,
+    GravitySettler,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
@@ -109,16 +110,24 @@ def generate_scene_and_refine(
     coarse_layout_by_id = {
         layout_object["id"]: layout_object for layout_object in coarse_layout
     }
+    # Coarse poses already preserve lying and unconstrained assets; only standing
+    # assets need a VLM semantic-axis correction before later z-up calibration.
+    standing_orientation_states_by_id = {
+        node.object_id: node.orientation_state
+        for node in scene_graph.nodes
+        if node.orientation_state == "standing"
+    }
     simready_processor = SimReadyProcessor(
         scene=scene,
         coarse_layout_by_id=coarse_layout_by_id,
         coarse_geometry_root=coarse_geometry_output_root,
         simready_geometry_root=simready_geometry_output_root,
         debug_output_root=debug_output_root,
-        # Image-to-scene uses the geometry service's coarse scale directly.
+        # Keep the geometry-server scale and only correct unstable standing poses.
         config=SimReadyProcessorConfig(
             use_vlm_scale=False,
             use_vlm_rotation=False,
+            orientation_states_by_id=standing_orientation_states_by_id,
         ),
         vlm_client=vlm_client,
     )
@@ -447,16 +456,31 @@ def _layout_refinement(
     refined_assets_layout = overlap_optimizer.optimize()
     overlap_optimizer.save_overlap_optimization_debug_images()
 
-    # 8. Gravity simulation, to let all the assets to be stable and placed well on the table's support surface.
-    # Notice that: we do not consider the assets like a bottle, which should be standing on the table but laid down
-    # after the simulation.
-    gravity_settler = AssetsGravitySettler(
-        scene=scene,
-        table_layout=refined_table_layout,
-        assets_layout=refined_assets_layout,
-        geometry_root=simready_geometry_output_root,
-    )
-    refined_assets_layout = gravity_settler.settle()
+    # 8. The initial image graph has one on-table level, so every asset settles
+    # dynamically against the table in this first generic gravity pass.
+    assets_by_id = {asset.id: asset for asset in scene.assets}
+    # All the assets are dynamic; the table is static.
+    settled_pose_by_id = GravitySettler(
+        table_body=GravitySettleBody(
+            scene_object=scene.table,
+            y_up_layout=refined_table_layout,
+        ),
+        participant_bodies=[
+            GravitySettleBody(
+                scene_object=assets_by_id[str(asset_layout["id"])],
+                y_up_layout=asset_layout,
+            )
+            for asset_layout in refined_assets_layout
+        ],
+        dynamic_asset_ids=set(assets_by_id),
+        static_asset_ids=set(),
+    ).settle()
+    # Update.
+    for asset_layout in refined_assets_layout:
+        asset_id = str(asset_layout["id"])
+        settled_pose = settled_pose_by_id[asset_id]
+        asset_layout["pos"] = settled_pose["pos"]
+        asset_layout["rot"] = settled_pose["rot"]
 
     # Update the scene data structure with the final layout and spatial metadata.
     _update_scene_final_y_up_layout_and_z_up_centers(
@@ -493,6 +517,7 @@ def _scene_graph_based_calibration(
         node = nodes_by_id.get(asset_id)
         if node is None:
             raise ValueError(f"Scene graph does not contain asset {asset_id!r}.")
+        # Only correct the standing assets.
         if node.orientation_state != "standing":
             calibrated_assets_layout.append(asset_layout)
             continue
