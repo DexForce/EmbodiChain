@@ -1047,7 +1047,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     sim.add_argument(
         "--renderer",
         type=str,
-        choices=["hybrid", "fast-rt", "offline-rt"],
+        choices=["hybrid", "fast-rt", "rt"],
         default="hybrid",
         help="Renderer backend (default: hybrid).",
     )

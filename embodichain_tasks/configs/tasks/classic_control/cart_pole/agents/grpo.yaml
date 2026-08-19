@@ -40,6 +40,7 @@ trainer:
           - 600
           - 320
           - 240
+          save_path: ./outputs/videos/eval
   renderer: hybrid
 policy:
   name: actor_only

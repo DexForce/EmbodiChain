@@ -434,7 +434,7 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=["hybrid", "fast-rt", "offline-rt"],
+        choices=["hybrid", "fast-rt", "rt"],
         default="hybrid",
         help="Renderer backend (default: hybrid).",
     )

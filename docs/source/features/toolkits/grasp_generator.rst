@@ -151,7 +151,7 @@ You can customize the run with additional arguments:
 
 .. code-block:: bash
 
-   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --renderer <auto|hybrid|fast-rt|offline-rt> --headless
+   python scripts/tutorials/grasp/grasp_generator.py --num_envs <n> --device <cuda/cpu> --renderer <legacy|hybrid|fast-rt|rt> --headless
 
 The script computes a grasp pose, prints the elapsed time, and then waits for
 you to press **Enter** before executing the full grasp trajectory. Press
