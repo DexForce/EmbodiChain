@@ -309,7 +309,9 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
 | `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
 | `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
-| `Press` | A `SceneEntityPose` in `xpos`. |
+| `Press` | None; the configured `PressAffordance` supplies the live target pose. |
+| `Slide` | None; the articulation-backed `SlideAffordance` supplies the live link pose. |
+| `Twist` | None; the configured `TwistAffordance` supplies the live target pose. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
 | `HandOver` | No semantic-object scene dependency. It verifies stable attachment identity and derives current pose from held state; its middle/final option poses are tensors, and the reused `GraspGoal.grasp_xpos` field is ignored. |
 
@@ -554,6 +556,8 @@ the legacy core mapping.
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator/end effector `primary` |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator/end effector `primary` |
 | `press` | `PressGoal` | manipulator/end effector `primary` |
+| `slide` | `SlideGoal` | manipulator/end effector `primary` |
+| `twist` | `TwistGoal` | manipulator/end effector `primary` |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left`, `right` |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing`, `support` |
 | `hand_over` | `GraspGoal` | `source`, `destination` |

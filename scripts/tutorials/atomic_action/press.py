@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate PressButton on an articulation link or rigid button."""
+"""Demonstrate Press on an articulation link or rigid object."""
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     MotionPolicy,
     ObjectSemantics,
-    PressButtonAffordance,
-    PressButtonGoal,
-    PressButtonOptions,
+    PressAffordance,
+    PressGoal,
+    PressOptions,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -71,9 +71,9 @@ RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the PressButton tutorial."""
+    """Parse command-line arguments for the Press tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate PressButton on an articulation-link or rigid button.",
+        "Demonstrate Press on an articulation-link or rigid button.",
         features=("visualize_axes",),
     )
     parser.add_argument("--press_distance", type=float, default=0.03)
@@ -131,7 +131,7 @@ def create_button_semantics(
 ) -> ObjectSemantics:
     """Create press semantics for an articulation-link or rigid button."""
     if isinstance(target, Articulation):
-        affordance = PressButtonAffordance(
+        affordance = PressAffordance(
             articulation=target,
             link_name=BUTTON_LINK_NAME,
             # button_cap's local -z direction matches the prismatic joint's
@@ -140,7 +140,7 @@ def create_button_semantics(
         )
         label = "microwave_start_button"
     else:
-        affordance = PressButtonAffordance(
+        affordance = PressAffordance(
             rigid_object=target,
             press_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
         )
@@ -154,7 +154,7 @@ def create_button_semantics(
 
 
 def main() -> None:
-    """Plan and replay PressButton for the selected target object type."""
+    """Plan and replay Press for the selected target object type."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(
@@ -165,7 +165,7 @@ def main() -> None:
     motion_gen = create_toppra_motion_generator(robot)
     semantics = create_button_semantics(target)
     affordance = semantics.affordance
-    assert isinstance(affordance, PressButtonAffordance)
+    assert isinstance(affordance, PressAffordance)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -179,20 +179,20 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Inspect the button target, then press Enter to plan PressButton...",
+        "Inspect the button target, then press Enter to plan Press...",
     )
 
     compiled = engine.compile(
         (
             ActionInvocation(
-                skill_id="press_button",
-                goal=PressButtonGoal(semantics),
+                skill_id="press",
+                goal=PressGoal(semantics),
                 binding=ActionBinding(
                     manipulators={"primary": "arm"},
                     end_effectors={"primary": "hand"},
                 ),
                 motion_policy=MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
-                skill_options=PressButtonOptions(
+                skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     approach_distance=0.12,
                     press_distance=args.press_distance,
@@ -206,11 +206,11 @@ def main() -> None:
         )
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan the PressButton demo trajectory.")
+        logger.log_warning("Failed to plan the Press demo trajectory.")
         return
 
     if wait_for_user:
-        input("Press Enter to replay the PressButton demo...")
+        input("Press Enter to replay the Press demo...")
     replay_trajectory(
         sim,
         robot,

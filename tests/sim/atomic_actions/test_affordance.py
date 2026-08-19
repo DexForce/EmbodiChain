@@ -28,9 +28,9 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
-    PressButtonAffordance,
-    PullPushAffordance,
-    TurnAffordance,
+    PressAffordance,
+    SlideAffordance,
+    TwistAffordance,
 )
 
 
@@ -156,7 +156,7 @@ class TestAntipodalAffordance:
         assert approach_direction.device == generator.device
 
 
-class TestTurnAffordance:
+class TestTwistAffordance:
     def test_builds_grasp_pose_from_mesh_center_and_axes(self):
         vertices = torch.tensor(
             [
@@ -174,10 +174,10 @@ class TestTurnAffordance:
         articulation = Mock()
         articulation.get_link_vert_face.return_value = (vertices, triangles)
         articulation.get_link_pose.return_value = link_pose
-        affordance = TurnAffordance(
+        affordance = TwistAffordance(
             articulation=articulation,
             link_name="knob",
-            turn_axis=torch.tensor([1.0, 0.0, 0.0]),
+            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
         )
 
         grasp_pose = affordance.get_grasp_pose()
@@ -198,17 +198,17 @@ class TestTurnAffordance:
         articulation.get_link_vert_face.assert_called_once_with("knob")
         articulation.get_link_pose.assert_called_once_with("knob", to_matrix=True)
 
-    def test_rejects_turn_axis_parallel_to_world_up(self):
+    def test_rejects_twist_axis_parallel_to_world_up(self):
         articulation = Mock()
         articulation.get_link_vert_face.return_value = (
             torch.ones(3, 3),
             torch.tensor([[0, 1, 2]]),
         )
         articulation.get_link_pose.return_value = torch.eye(4).unsqueeze(0)
-        affordance = TurnAffordance(
+        affordance = TwistAffordance(
             articulation=articulation,
             link_name="knob",
-            turn_axis=torch.tensor([0.0, 0.0, 1.0]),
+            twist_axis=torch.tensor([0.0, 0.0, 1.0]),
         )
 
         with pytest.raises(ValueError, match="parallel"):
@@ -223,9 +223,9 @@ class TestTurnAffordance:
         rigid_object.get_triangles.return_value = triangles.unsqueeze(0)
         rigid_object.get_local_pose.return_value = object_pose
 
-        affordance = TurnAffordance(
+        affordance = TwistAffordance(
             rigid_object=rigid_object,
-            turn_axis=torch.tensor([1.0, 0.0, 0.0]),
+            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
         )
 
         assert torch.equal(affordance.mesh_vertices, vertices)
@@ -235,7 +235,7 @@ class TestTurnAffordance:
         rigid_object.get_local_pose.assert_called_once_with(to_matrix=True)
 
 
-class TestPullPushAffordance:
+class TestSlideAffordance:
     def test_uses_articulation_antipodal_sampling_with_batched_directions(self):
         vertices = torch.tensor(
             [
@@ -250,7 +250,7 @@ class TestPullPushAffordance:
         articulation = Mock()
         articulation.get_link_vert_face.return_value = (vertices, triangles)
         articulation.get_link_pose.return_value = link_pose
-        affordance = PullPushAffordance(
+        affordance = SlideAffordance(
             articulation=articulation,
             link_name="handle",
             translation_axis=torch.tensor([0.0, -1.0, 0.0]),
@@ -290,7 +290,7 @@ class TestPullPushAffordance:
 
     def test_requires_articulation_backed_antipodal_geometry(self):
         with pytest.raises(ValueError, match="requires articulation and link_name"):
-            PullPushAffordance(
+            SlideAffordance(
                 mesh_vertices=torch.zeros(3, 3),
                 mesh_triangles=torch.tensor([[0, 1, 2]]),
             )
@@ -311,14 +311,14 @@ class TestPullPushAffordance:
         )
 
         with pytest.raises(ValueError, match="translation_axis"):
-            PullPushAffordance(
+            SlideAffordance(
                 articulation=articulation,
                 link_name="handle",
                 translation_axis=translation_axis,
             )
 
 
-class TestPressButtonAffordance:
+class TestPressAffordance:
     def test_builds_press_pose_at_mesh_vertex_center(self):
         vertices = torch.tensor(
             [
@@ -334,7 +334,7 @@ class TestPressButtonAffordance:
         articulation = Mock()
         articulation.get_link_vert_face.return_value = (vertices, triangles)
         articulation.get_link_pose.return_value = link_pose
-        affordance = PressButtonAffordance(
+        affordance = PressAffordance(
             articulation=articulation,
             link_name="button",
             press_axis=torch.tensor([1.0, 0.0, 0.0]),
@@ -359,7 +359,7 @@ class TestPressButtonAffordance:
         )
 
         with pytest.raises(ValueError, match="press_axis must be non-zero"):
-            PressButtonAffordance(
+            PressAffordance(
                 articulation=articulation,
                 link_name="button",
                 press_axis=torch.zeros(3),
@@ -374,7 +374,7 @@ class TestPressButtonAffordance:
         rigid_object.get_vertices.return_value = vertices.unsqueeze(0)
         rigid_object.get_triangles.return_value = triangles.unsqueeze(0)
         rigid_object.get_local_pose.return_value = object_pose
-        affordance = PressButtonAffordance(
+        affordance = PressAffordance(
             rigid_object=rigid_object,
             press_axis=torch.tensor([1.0, 0.0, 0.0]),
             press_position=(0.25, -0.5, 0.75),
@@ -396,7 +396,7 @@ class TestPressButtonAffordance:
             torch.ones(3, 3),
             torch.tensor([[0, 1, 2]]),
         )
-        affordance = PressButtonAffordance(
+        affordance = PressAffordance(
             articulation=articulation,
             link_name="button",
             press_axis=torch.tensor([1.0, 0.0, 0.0]),

@@ -43,13 +43,13 @@ from .move_held_object import (
 from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
-from .press_button import PressButton, PressButtonGoal, PressButtonOptions
-from .pull_push_articulated_part import (
-    PullPushArticulatedPart,
-    PullPushArticulatedPartGoal,
-    PullPushArticulatedPartOptions,
+from .press import Press, PressGoal, PressOptions
+from .slide import (
+    Slide,
+    SlideGoal,
+    SlideOptions,
 )
-from .turn_knob import TurnKnob, TurnKnobGoal, TurnKnobOptions
+from .twist import Twist, TwistGoal, TwistOptions
 
 BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     MoveEndEffector,
@@ -57,9 +57,9 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     PickUp,
     MoveHeldObject,
     Place,
-    PressButton,
-    PullPushArticulatedPart,
-    TurnKnob,
+    Press,
+    Slide,
+    Twist,
     CoordinatedPickment,
     CoordinatedPlacement,
     HandOver,
@@ -92,13 +92,13 @@ __all__ = [
     "Place",
     "PlaceGoal",
     "PlaceOptions",
-    "PressButton",
-    "PressButtonGoal",
-    "PressButtonOptions",
-    "PullPushArticulatedPart",
-    "PullPushArticulatedPartGoal",
-    "PullPushArticulatedPartOptions",
-    "TurnKnob",
-    "TurnKnobGoal",
-    "TurnKnobOptions",
+    "Press",
+    "PressGoal",
+    "PressOptions",
+    "Slide",
+    "SlideGoal",
+    "SlideOptions",
+    "Twist",
+    "TwistGoal",
+    "TwistOptions",
 ]

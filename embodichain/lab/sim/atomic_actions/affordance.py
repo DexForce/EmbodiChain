@@ -278,22 +278,22 @@ class AntipodalAffordance(Affordance):
 
 
 @dataclass
-class TurnAffordance(Affordance):
-    """Geometry and rotation semantics for an articulation link or rigid knob."""
+class TwistAffordance(Affordance):
+    """Geometry and twist semantics for an articulation link or rigid object."""
 
     articulation: Articulation | None = None
-    """Optional articulation whose link supplies the knob mesh and live pose."""
+    """Optional articulation whose link supplies the target mesh and live pose."""
 
     rigid_object: RigidObject | None = None
-    """Optional rigid object that supplies the knob mesh and live pose."""
+    """Optional rigid object that supplies the target mesh and live pose."""
 
     link_name: str | None = None
     """Link used when :attr:`articulation` is configured."""
 
-    turn_axis: torch.Tensor = field(
+    twist_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
     )
-    """Knob rotation axis expressed in the target object's local frame."""
+    """Twist axis expressed in the target object's local frame."""
 
     mesh_vertices: torch.Tensor = field(init=False, repr=False)
     """Target-local mesh vertices used to compute the grasp position."""
@@ -306,29 +306,29 @@ class TurnAffordance(Affordance):
         rigid_object = self.rigid_object
         if (articulation is None) == (rigid_object is None):
             raise ValueError(
-                "TurnAffordance requires exactly one of articulation or "
+                "TwistAffordance requires exactly one of articulation or "
                 "rigid_object."
             )
         if articulation is not None and (
             not isinstance(self.link_name, str) or not self.link_name.strip()
         ):
             raise ValueError(
-                "TurnAffordance.link_name must be a non-empty string for an "
+                "TwistAffordance.link_name must be a non-empty string for an "
                 "articulation."
             )
         if rigid_object is not None and self.link_name is not None:
             raise ValueError(
-                "TurnAffordance.link_name is only valid with an articulation."
+                "TwistAffordance.link_name is only valid with an articulation."
             )
         if (
-            not isinstance(self.turn_axis, torch.Tensor)
-            or self.turn_axis.shape != (3,)
-            or not torch.isfinite(self.turn_axis).all()
+            not isinstance(self.twist_axis, torch.Tensor)
+            or self.twist_axis.shape != (3,)
+            or not torch.isfinite(self.twist_axis).all()
         ):
-            raise ValueError("TurnAffordance.turn_axis must be a finite (3,) tensor.")
-        if torch.linalg.vector_norm(self.turn_axis) <= 1.0e-6:
-            raise ValueError("TurnAffordance.turn_axis must be non-zero.")
-        self.turn_axis = self.turn_axis.clone()
+            raise ValueError("TwistAffordance.twist_axis must be a finite (3,) tensor.")
+        if torch.linalg.vector_norm(self.twist_axis) <= 1.0e-6:
+            raise ValueError("TwistAffordance.twist_axis must be non-zero.")
+        self.twist_axis = self.twist_axis.clone()
         if articulation is not None:
             vertices, triangles = articulation.get_link_vert_face(self.link_name)
         else:
@@ -337,9 +337,9 @@ class TurnAffordance(Affordance):
         self.mesh_vertices = torch.as_tensor(vertices)
         self.mesh_triangles = torch.as_tensor(triangles)
         if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
-            raise ValueError("TurnAffordance mesh vertices must have shape (N, 3).")
+            raise ValueError("TwistAffordance mesh vertices must have shape (N, 3).")
         if self.mesh_vertices.shape[0] == 0:
-            raise ValueError("TurnAffordance requires a non-empty target mesh.")
+            raise ValueError("TwistAffordance requires a non-empty target mesh.")
 
     def get_link_pose(self) -> torch.Tensor:
         """Return the current batched world pose of the configured target."""
@@ -348,20 +348,20 @@ class TurnAffordance(Affordance):
             return articulation.get_link_pose(self.link_name, to_matrix=True)
         rigid_object = self.rigid_object
         if rigid_object is None:
-            raise RuntimeError("TurnAffordance has no target object.")
+            raise RuntimeError("TwistAffordance has no target object.")
         return rigid_object.get_local_pose(to_matrix=True)
 
     def get_grasp_pose(self, link_pose: torch.Tensor | None = None) -> torch.Tensor:
         """Construct the deterministic grasp pose at the link mesh center.
 
-        The pose z-axis follows :attr:`turn_axis` transformed into the world
+        The pose z-axis follows :attr:`twist_axis` transformed into the world
         frame, while its y-axis is fixed to world ``(0, 0, 1)``.
 
         Returns:
             Batched world-frame grasp poses with shape ``(B, 4, 4)``.
 
         Raises:
-            ValueError: If the world turn axis is parallel to the fixed y-axis.
+            ValueError: If the world twist axis is parallel to the fixed y-axis.
         """
         link_pose = self.get_link_pose() if link_pose is None else link_pose
         if link_pose.dim() != 3 or link_pose.shape[1:] != (4, 4):
@@ -369,10 +369,10 @@ class TurnAffordance(Affordance):
         link_pose = link_pose.to(dtype=torch.float32)
         device = link_pose.device
         center = self.mesh_vertices.to(device=device, dtype=torch.float32).mean(dim=0)
-        turn_axis = self.turn_axis.to(device=device, dtype=torch.float32)
-        turn_axis = turn_axis / torch.linalg.vector_norm(turn_axis)
+        twist_axis = self.twist_axis.to(device=device, dtype=torch.float32)
+        twist_axis = twist_axis / torch.linalg.vector_norm(twist_axis)
 
-        z_axis = torch.matmul(link_pose[:, :3, :3], turn_axis)
+        z_axis = torch.matmul(link_pose[:, :3, :3], twist_axis)
         z_axis = torch.nn.functional.normalize(z_axis, dim=1)
         y_axis = torch.tensor(
             [0.0, 0.0, 1.0], dtype=torch.float32, device=device
@@ -380,7 +380,7 @@ class TurnAffordance(Affordance):
         x_axis = torch.linalg.cross(y_axis, z_axis, dim=1)
         if torch.any(torch.linalg.vector_norm(x_axis, dim=1) <= 1.0e-6):
             raise ValueError(
-                "TurnAffordance turn axis must not be parallel to world (0, 0, 1)."
+                "TwistAffordance twist axis must not be parallel to world (0, 0, 1)."
             )
         x_axis = torch.nn.functional.normalize(x_axis, dim=1)
 
@@ -397,7 +397,7 @@ class TurnAffordance(Affordance):
 
 
 @dataclass
-class PullPushAffordance(AntipodalAffordance):
+class SlideAffordance(AntipodalAffordance):
     """Antipodal grasp and translation semantics for one articulation link.
 
     The positive translation-axis direction denotes approaching and pushing
@@ -414,29 +414,29 @@ class PullPushAffordance(AntipodalAffordance):
     def __post_init__(self) -> None:
         AntipodalAffordance.__post_init__(self)
         if not self.is_articulation:
-            raise ValueError("PullPushAffordance requires articulation and link_name.")
+            raise ValueError("SlideAffordance requires articulation and link_name.")
         if (
             not isinstance(self.translation_axis, torch.Tensor)
             or self.translation_axis.shape != (3,)
             or not torch.isfinite(self.translation_axis).all()
         ):
             raise ValueError(
-                "PullPushAffordance.translation_axis must be a finite (3,) tensor."
+                "SlideAffordance.translation_axis must be a finite (3,) tensor."
             )
         if torch.linalg.vector_norm(self.translation_axis) <= 1.0e-6:
-            raise ValueError("PullPushAffordance.translation_axis must be non-zero.")
+            raise ValueError("SlideAffordance.translation_axis must be non-zero.")
         self.translation_axis = self.translation_axis.clone()
 
 
 @dataclass
-class PressButtonAffordance(Affordance):
-    """Geometry and pressing semantics for an articulation or rigid button."""
+class PressAffordance(Affordance):
+    """Geometry and pressing semantics for an articulation link or rigid object."""
 
     articulation: Articulation | None = None
-    """Optional articulation whose link supplies the button mesh and live pose."""
+    """Optional articulation whose link supplies the target mesh and live pose."""
 
     rigid_object: RigidObject | None = None
-    """Optional rigid object that supplies the button mesh and live pose."""
+    """Optional rigid object that supplies the target mesh and live pose."""
 
     link_name: str | None = None
     """Link used when :attr:`articulation` is configured."""
@@ -460,34 +460,32 @@ class PressButtonAffordance(Affordance):
         rigid_object = self.rigid_object
         if (articulation is None) == (rigid_object is None):
             raise ValueError(
-                "PressButtonAffordance requires exactly one of articulation or "
+                "PressAffordance requires exactly one of articulation or "
                 "rigid_object."
             )
         if articulation is not None and (
             not isinstance(self.link_name, str) or not self.link_name.strip()
         ):
             raise ValueError(
-                "PressButtonAffordance.link_name must be a non-empty string for "
+                "PressAffordance.link_name must be a non-empty string for "
                 "an articulation."
             )
         if rigid_object is not None and self.link_name is not None:
             raise ValueError(
-                "PressButtonAffordance.link_name is only valid with an articulation."
+                "PressAffordance.link_name is only valid with an articulation."
             )
         if (
             not isinstance(self.press_axis, torch.Tensor)
             or self.press_axis.shape != (3,)
             or not torch.isfinite(self.press_axis).all()
         ):
-            raise ValueError(
-                "PressButtonAffordance.press_axis must be a finite (3,) tensor."
-            )
+            raise ValueError("PressAffordance.press_axis must be a finite (3,) tensor.")
         if torch.linalg.vector_norm(self.press_axis) <= 1.0e-6:
-            raise ValueError("PressButtonAffordance.press_axis must be non-zero.")
+            raise ValueError("PressAffordance.press_axis must be non-zero.")
         self.press_axis = self.press_axis.clone()
         self.press_position = self._validate_press_position(
             self.press_position,
-            field_name="PressButtonAffordance.press_position",
+            field_name="PressAffordance.press_position",
         )
         if articulation is not None:
             vertices, triangles = articulation.get_link_vert_face(self.link_name)
@@ -497,11 +495,9 @@ class PressButtonAffordance(Affordance):
         self.mesh_vertices = torch.as_tensor(vertices)
         self.mesh_triangles = torch.as_tensor(triangles)
         if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
-            raise ValueError(
-                "PressButtonAffordance mesh vertices must have shape (N, 3)."
-            )
+            raise ValueError("PressAffordance mesh vertices must have shape (N, 3).")
         if self.mesh_vertices.shape[0] == 0:
-            raise ValueError("PressButtonAffordance requires a non-empty target mesh.")
+            raise ValueError("PressAffordance requires a non-empty target mesh.")
 
     def get_link_pose(self) -> torch.Tensor:
         """Return the current batched world pose of the configured target."""
@@ -510,7 +506,7 @@ class PressButtonAffordance(Affordance):
             return articulation.get_link_pose(self.link_name, to_matrix=True)
         rigid_object = self.rigid_object
         if rigid_object is None:
-            raise RuntimeError("PressButtonAffordance has no target object.")
+            raise RuntimeError("PressAffordance has no target object.")
         return rigid_object.get_local_pose(to_matrix=True)
 
     def get_press_pose(
@@ -518,14 +514,14 @@ class PressButtonAffordance(Affordance):
         link_pose: torch.Tensor | None = None,
         press_position: tuple[float, float, float] | None = None,
     ) -> torch.Tensor:
-        """Construct a press pose at the configured or default button center.
+        """Construct a press pose at the configured or default target center.
 
         The end-effector z-axis follows :attr:`press_axis` in world space. The
         position uses a configured target-local point or the mean of all mesh
         vertices when no point is configured.
 
         Args:
-            link_pose: Optional current world pose of the button link with
+            link_pose: Optional current world pose of the target with
                 shape ``(B, 4, 4)``.
             press_position: Optional per-call exact local-frame press position.
                 It overrides :attr:`press_position`. When both are ``None``,
@@ -568,8 +564,7 @@ class PressButtonAffordance(Affordance):
         x_axis = torch.linalg.cross(y_axis, z_axis, dim=1)
         if torch.any(torch.linalg.vector_norm(x_axis, dim=1) <= 1.0e-6):
             raise ValueError(
-                "PressButtonAffordance press axis must not be parallel to world "
-                "(0, 0, 1)."
+                "PressAffordance press axis must not be parallel to world " "(0, 0, 1)."
             )
         x_axis = torch.nn.functional.normalize(x_axis, dim=1)
 
@@ -713,9 +708,9 @@ class AssembleAffordance(Affordance):
 __all__ = [
     "Affordance",
     "AntipodalAffordance",
-    "PullPushAffordance",
-    "PressButtonAffordance",
-    "TurnAffordance",
+    "SlideAffordance",
+    "PressAffordance",
+    "TwistAffordance",
     "InteractionPoints",
     "AssembleAffordance",
 ]

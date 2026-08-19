@@ -14,13 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate PullPushArticulatedPart on a translating drawer."""
+"""Demonstrate Slide on a translating drawer."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
+from typing import Literal
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
@@ -37,9 +38,9 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     MotionPolicy,
     ObjectSemantics,
-    PullPushAffordance,
-    PullPushArticulatedPartGoal,
-    PullPushArticulatedPartOptions,
+    SlideAffordance,
+    SlideGoal,
+    SlideOptions,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -80,7 +81,7 @@ POST_TRAJECTORY_STEPS = 240
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the drawer pull/push tutorial."""
     parser = create_tutorial_argument_parser(
-        "Pull a drawer open, then push it closed with PullPushArticulatedPart.",
+        "Pull a drawer open, then push it closed with Slide.",
         features=("grasp_sampling", "visualize_axes"),
     )
     parser.add_argument("--translation_distance", type=float, default=0.18)
@@ -131,7 +132,7 @@ def create_drawer_semantics(
         label="drawer_large_handle",
         geometry={},
         entity=drawer,
-        affordance=PullPushAffordance(
+        affordance=SlideAffordance(
             articulation=drawer,
             link_name=HANDLE_LINK_NAME,
             translation_axis=torch.tensor(
@@ -164,7 +165,7 @@ def create_drawer_semantics(
 def create_invocation(
     semantics: ObjectSemantics,
     *,
-    is_pull: bool,
+    direction: Literal["pull", "push"],
     approach_distance: float,
     translation_distance: float,
 ) -> ActionInvocation:
@@ -172,7 +173,7 @@ def create_invocation(
 
     Args:
         semantics: Drawer-handle semantics shared by both operations.
-        is_pull: Whether this invocation pulls open instead of pushing closed.
+        direction: Whether this invocation pulls open or pushes closed.
         approach_distance: Pre-grasp offset opposite the approach axis.
         translation_distance: Drawer travel distance for this operation.
 
@@ -180,15 +181,15 @@ def create_invocation(
         A grounded pull/push invocation for the tutorial UR5.
     """
     return ActionInvocation(
-        skill_id="pull_push_articulated_part",
-        goal=PullPushArticulatedPartGoal(semantics),
+        skill_id="slide",
+        goal=SlideGoal(semantics),
         binding=ActionBinding(
             manipulators={"primary": "arm"},
             end_effectors={"primary": "hand"},
         ),
         motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
-        skill_options=PullPushArticulatedPartOptions(
-            is_pull=is_pull,
+        skill_options=SlideOptions(
+            direction=direction,
             hand_interp_steps=HAND_INTERP_STEPS,
             approach_distance=approach_distance,
             translation_distance=translation_distance,
@@ -219,7 +220,7 @@ def main() -> None:
         force_reannotate=args.force_reannotate,
     )
     affordance = semantics.affordance
-    assert isinstance(affordance, PullPushAffordance)
+    assert isinstance(affordance, SlideAffordance)
     if not args.no_vis_eef_axis:
         draw_axis_marker(
             sim,
@@ -242,9 +243,8 @@ def main() -> None:
         "Inspect the closed drawer, then press Enter to plan the pull...",
     )
 
-    for is_pull in (True, False):
-        operation_name = "pull" if is_pull else "push"
-        if not is_pull and wait_for_user:
+    for direction in ("pull", "push"):
+        if direction == "push" and wait_for_user:
             input(
                 "Pull replay finished. Press Enter to read the moved handle "
                 "pose and plan the push..."
@@ -254,27 +254,24 @@ def main() -> None:
             (
                 create_invocation(
                     semantics,
-                    is_pull=is_pull,
+                    direction=direction,
                     approach_distance=args.approach_distance,
                     translation_distance=args.translation_distance,
                 ),
             )
         )
         if not compiled.plan_success.all():
-            logger.log_warning(
-                "Failed to plan the PullPushArticulatedPart "
-                f"{operation_name} trajectory."
-            )
+            logger.log_warning(f"Failed to plan the Slide {direction} trajectory.")
             return
 
         if wait_for_user:
-            input(f"Press Enter to replay the drawer {operation_name}...")
+            input(f"Press Enter to replay the drawer {direction}...")
         replay_trajectory(
             sim,
             robot,
             compiled.trajectory,
             args,
-            video_prefix=f"{operation_name}_drawer_auto_play",
+            video_prefix=f"{direction}_drawer_auto_play",
             hold_steps=POST_TRAJECTORY_STEPS,
             look_at=(
                 (-1.35, -1.15, 1.0),

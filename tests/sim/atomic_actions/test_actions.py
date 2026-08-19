@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import Literal, TypeVar
 from unittest.mock import Mock
 
 import pytest
@@ -63,22 +63,22 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceGoal,
     PlaceOptions,
     PlanningContext,
-    PressButton,
-    PressButtonAffordance,
-    PressButtonGoal,
-    PressButtonOptions,
-    PullPushAffordance,
-    PullPushArticulatedPart,
-    PullPushArticulatedPartGoal,
-    PullPushArticulatedPartOptions,
+    Press,
+    PressAffordance,
+    PressGoal,
+    PressOptions,
+    SlideAffordance,
+    Slide,
+    SlideGoal,
+    SlideOptions,
     RobotObservation,
     SceneEntityPose,
     SceneSnapshot,
     TaskState,
-    TurnAffordance,
-    TurnKnob,
-    TurnKnobGoal,
-    TurnKnobOptions,
+    TwistAffordance,
+    Twist,
+    TwistGoal,
+    TwistOptions,
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.planners import (
@@ -431,12 +431,20 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert PickUp.GoalType is GraspGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
-    assert PressButton.GoalType is PressButtonGoal
-    assert PullPushArticulatedPart.GoalType is PullPushArticulatedPartGoal
-    assert TurnKnob.GoalType is TurnKnobGoal
+    assert Press.GoalType is PressGoal
+    assert Slide.GoalType is SlideGoal
+    assert Twist.GoalType is TwistGoal
     assert CoordinatedPickment.GoalType is CoordinatedPickGoal
     assert CoordinatedPlacement.GoalType is CoordinatedPlacementGoal
     assert HandOver.GoalType is GraspGoal
+
+
+def test_interaction_primitives_use_motion_centric_skill_ids() -> None:
+    assert (Press.skill_id, Slide.skill_id, Twist.skill_id) == (
+        "press",
+        "slide",
+        "twist",
+    )
 
 
 @pytest.mark.parametrize(
@@ -445,9 +453,9 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
         PickUpOptions(),
         MoveHeldObjectOptions(),
         PlaceOptions(),
-        PressButtonOptions(),
-        PullPushArticulatedPartOptions(),
-        TurnKnobOptions(),
+        PressOptions(),
+        SlideOptions(),
+        TwistOptions(),
         CoordinatedPickmentOptions(),
         CoordinatedPlacementOptions(),
         HandOverOptions(),
@@ -1041,17 +1049,17 @@ def test_pick_uses_binding_control_part_as_effect_resource() -> None:
     assert projected.get_held_object("arm") is None
 
 
-def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
+def test_twist_plans_six_segments_from_articulation_link() -> None:
     articulation = Mock(spec=Articulation)
     articulation.get_link_vert_face.return_value = (
         torch.zeros(8, 3),
         torch.zeros(4, 3, dtype=torch.long),
     )
     articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    affordance = TurnAffordance(
+    affordance = TwistAffordance(
         articulation=articulation,
         link_name="knob",
-        turn_axis=torch.tensor([0.0, 1.0, 0.0]),
+        twist_axis=torch.tensor([0.0, 1.0, 0.0]),
     )
     semantics = ObjectSemantics(
         affordance=affordance,
@@ -1060,16 +1068,16 @@ def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
         entity=articulation,
     )
     generator = _motion_generator()
-    action = _bind_action(generator, TurnKnob())
+    action = _bind_action(generator, Twist())
 
     plan = _plan_action(
         action,
         ActionInvocation(
-            skill_id="turn_knob",
-            goal=TurnKnobGoal(semantics),
+            skill_id="twist",
+            goal=TwistGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=24),
-            skill_options=TurnKnobOptions(hand_interp_steps=3),
+            skill_options=TwistOptions(hand_interp_steps=3),
         ),
         _context(),
     )
@@ -1080,7 +1088,7 @@ def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
         "approach",
         "reach",
         "close",
-        "turn",
+        "twist",
         "open",
         "retract",
     ]
@@ -1094,21 +1102,20 @@ def test_turn_knob_plans_six_segments_from_articulation_link() -> None:
     first_target = generator.robot.compute_ik.call_args_list[0].kwargs["pose"]
     grasp_pose = affordance.get_grasp_pose(torch.eye(4).repeat(NUM_ENVS, 1, 1))
     expected_pre_grasp_position = (
-        grasp_pose[:, :3, 3]
-        - grasp_pose[:, :3, 2] * TurnKnobOptions().pre_grasp_distance
+        grasp_pose[:, :3, 3] - grasp_pose[:, :3, 2] * TwistOptions().pre_grasp_distance
     )
     assert torch.allclose(first_target[:, :3, 3], expected_pre_grasp_position)
 
 
-def test_turn_knob_plans_from_rigid_object() -> None:
+def test_twist_plans_from_rigid_object() -> None:
     rigid_object = Mock(spec=RigidObject)
     rigid_object.get_vertices.return_value = torch.zeros(1, 8, 3)
     rigid_object.get_triangles.return_value = torch.zeros(1, 4, 3, dtype=torch.long)
     rigid_object.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     semantics = ObjectSemantics(
-        affordance=TurnAffordance(
+        affordance=TwistAffordance(
             rigid_object=rigid_object,
-            turn_axis=torch.tensor([0.0, 1.0, 0.0]),
+            twist_axis=torch.tensor([0.0, 1.0, 0.0]),
         ),
         geometry={},
         label="rigid-knob",
@@ -1116,13 +1123,13 @@ def test_turn_knob_plans_from_rigid_object() -> None:
     )
 
     plan = _plan_action(
-        _bind_action(_motion_generator(), TurnKnob()),
+        _bind_action(_motion_generator(), Twist()),
         ActionInvocation(
-            skill_id="turn_knob",
-            goal=TurnKnobGoal(semantics),
+            skill_id="twist",
+            goal=TwistGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=24),
-            skill_options=TurnKnobOptions(hand_interp_steps=3),
+            skill_options=TwistOptions(hand_interp_steps=3),
         ),
         _context(),
     )
@@ -1132,18 +1139,18 @@ def test_turn_knob_plans_from_rigid_object() -> None:
 
 
 @pytest.mark.parametrize(
-    ("is_pull", "expected_segments", "translation_sign"),
+    ("direction", "expected_segments", "translation_sign"),
     (
-        (True, ["approach", "reach", "close", "pull", "open"], -1.0),
+        ("pull", ["approach", "reach", "close", "pull", "open"], -1.0),
         (
-            False,
+            "push",
             ["approach", "reach", "close", "push", "open", "return"],
             1.0,
         ),
     ),
 )
-def test_pull_push_articulated_part_plans_expected_segments(
-    is_pull: bool,
+def test_slide_plans_expected_segments(
+    direction: Literal["pull", "push"],
     expected_segments: list[str],
     translation_sign: float,
     monkeypatch: pytest.MonkeyPatch,
@@ -1161,7 +1168,7 @@ def test_pull_push_articulated_part_plans_expected_segments(
     )
     link_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     articulation.get_link_pose.return_value = link_pose
-    affordance = PullPushAffordance(
+    affordance = SlideAffordance(
         articulation=articulation,
         link_name="handle",
         translation_axis=torch.tensor([0.0, -1.0, 0.0]),
@@ -1169,7 +1176,7 @@ def test_pull_push_articulated_part_plans_expected_segments(
     grasp_calls: list[tuple[torch.Tensor, torch.Tensor]] = []
 
     def sample_grasp(
-        self: PullPushAffordance,
+        self: SlideAffordance,
         obj_poses: torch.Tensor,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -1181,7 +1188,7 @@ def test_pull_push_articulated_part_plans_expected_segments(
         )
 
     monkeypatch.setattr(
-        PullPushAffordance,
+        SlideAffordance,
         "get_best_grasp_poses",
         sample_grasp,
     )
@@ -1192,9 +1199,9 @@ def test_pull_push_articulated_part_plans_expected_segments(
         entity=articulation,
     )
     generator = _motion_generator()
-    action = _bind_action(generator, PullPushArticulatedPart())
-    options = PullPushArticulatedPartOptions(
-        is_pull=is_pull,
+    action = _bind_action(generator, Slide())
+    options = SlideOptions(
+        direction=direction,
         hand_interp_steps=3,
         approach_distance=0.1,
         translation_distance=0.15,
@@ -1203,8 +1210,8 @@ def test_pull_push_articulated_part_plans_expected_segments(
     plan = _plan_action(
         action,
         ActionInvocation(
-            skill_id="pull_push_articulated_part",
-            goal=PullPushArticulatedPartGoal(semantics),
+            skill_id="slide",
+            goal=SlideGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=24),
             skill_options=options,
@@ -1245,21 +1252,21 @@ def test_pull_push_articulated_part_plans_expected_segments(
         expected_axis.expand(NUM_ENVS, -1)
         * (translation_sign * options.translation_distance),
     )
-    if not is_pull:
+    if direction == "push":
         assert torch.allclose(
             planned_targets[3][:, :3, 3],
             -expected_axis.expand(NUM_ENVS, -1) * options.approach_distance,
         )
 
 
-def test_pull_push_articulated_part_holds_failed_environment() -> None:
+def test_slide_holds_failed_environment() -> None:
     articulation = Mock(spec=Articulation)
     articulation.get_link_vert_face.return_value = (
         torch.zeros(3, 3),
         torch.tensor([[0, 1, 2]]),
     )
     articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    affordance = PullPushAffordance(
+    affordance = SlideAffordance(
         articulation=articulation,
         link_name="handle",
         translation_axis=torch.tensor([0.0, -1.0, 0.0]),
@@ -1289,17 +1296,17 @@ def test_pull_push_articulated_part_holds_failed_environment() -> None:
         return torch.ones(NUM_ENVS, dtype=torch.bool), torch.ones_like(joint_seed)
 
     generator.robot.compute_ik.side_effect = successful_ik
-    action = _bind_action(generator, PullPushArticulatedPart())
+    action = _bind_action(generator, Slide())
     context = _context()
 
     plan = _plan_action(
         action,
         ActionInvocation(
-            skill_id="pull_push_articulated_part",
-            goal=PullPushArticulatedPartGoal(semantics),
+            skill_id="slide",
+            goal=SlideGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=18),
-            skill_options=PullPushArticulatedPartOptions(hand_interp_steps=3),
+            skill_options=SlideOptions(hand_interp_steps=3),
         ),
         context,
     )
@@ -1312,7 +1319,7 @@ def test_pull_push_articulated_part_holds_failed_environment() -> None:
     )
 
 
-def test_press_button_plans_close_approach_press_and_retract() -> None:
+def test_press_plans_close_approach_press_and_retract() -> None:
     articulation = Mock(spec=Articulation)
     vertices = torch.tensor(
         [
@@ -1327,7 +1334,7 @@ def test_press_button_plans_close_approach_press_and_retract() -> None:
         torch.zeros(4, 3, dtype=torch.long),
     )
     articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    affordance = PressButtonAffordance(
+    affordance = PressAffordance(
         articulation=articulation,
         link_name="button",
         press_axis=torch.tensor([1.0, 0.0, 0.0]),
@@ -1339,8 +1346,8 @@ def test_press_button_plans_close_approach_press_and_retract() -> None:
         entity=articulation,
     )
     generator = _motion_generator()
-    action = _bind_action(generator, PressButton())
-    options = PressButtonOptions(
+    action = _bind_action(generator, Press())
+    options = PressOptions(
         hand_interp_steps=3,
         approach_distance=0.1,
         press_distance=0.02,
@@ -1349,8 +1356,8 @@ def test_press_button_plans_close_approach_press_and_retract() -> None:
     plan = _plan_action(
         action,
         ActionInvocation(
-            skill_id="press_button",
-            goal=PressButtonGoal(semantics),
+            skill_id="press",
+            goal=PressGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=24),
             skill_options=options,
@@ -1385,12 +1392,12 @@ def test_press_button_plans_close_approach_press_and_retract() -> None:
     assert torch.allclose(planned_targets[2][:, :3, 3], expected_approach)
 
 
-def test_press_button_plans_from_rigid_object_with_option_position() -> None:
+def test_press_plans_from_rigid_object_with_option_position() -> None:
     rigid_object = Mock(spec=RigidObject)
     rigid_object.get_vertices.return_value = torch.zeros(1, 8, 3)
     rigid_object.get_triangles.return_value = torch.zeros(1, 4, 3, dtype=torch.long)
     rigid_object.get_local_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
-    affordance = PressButtonAffordance(
+    affordance = PressAffordance(
         rigid_object=rigid_object,
         press_axis=torch.tensor([1.0, 0.0, 0.0]),
         press_position=(0.5, 0.5, 0.5),
@@ -1404,13 +1411,13 @@ def test_press_button_plans_from_rigid_object_with_option_position() -> None:
     generator = _motion_generator()
 
     plan = _plan_action(
-        _bind_action(generator, PressButton()),
+        _bind_action(generator, Press()),
         ActionInvocation(
-            skill_id="press_button",
-            goal=PressButtonGoal(semantics),
+            skill_id="press",
+            goal=PressGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=24),
-            skill_options=PressButtonOptions(
+            skill_options=PressOptions(
                 hand_interp_steps=3,
                 press_position=(0.1, 0.2, 0.3),
             ),
@@ -1427,7 +1434,7 @@ def test_press_button_plans_from_rigid_object_with_option_position() -> None:
     rigid_object.get_local_pose.assert_called_with(to_matrix=True)
 
 
-def test_press_button_preserves_failed_environment_at_observed_qpos() -> None:
+def test_press_preserves_failed_environment_at_observed_qpos() -> None:
     articulation = Mock(spec=Articulation)
     articulation.get_link_vert_face.return_value = (
         torch.tensor(
@@ -1442,7 +1449,7 @@ def test_press_button_preserves_failed_environment_at_observed_qpos() -> None:
     )
     articulation.get_link_pose.return_value = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     semantics = ObjectSemantics(
-        affordance=PressButtonAffordance(
+        affordance=PressAffordance(
             articulation=articulation,
             link_name="button",
             press_axis=torch.tensor([1.0, 0.0, 0.0]),
@@ -1463,17 +1470,17 @@ def test_press_button_preserves_failed_environment_at_observed_qpos() -> None:
         return torch.tensor([True, False]), torch.ones_like(joint_seed)
 
     generator.robot.compute_ik.side_effect = partial_ik
-    action = _bind_action(generator, PressButton())
+    action = _bind_action(generator, Press())
     context = _context()
 
     plan = _plan_action(
         action,
         ActionInvocation(
-            skill_id="press_button",
-            goal=PressButtonGoal(semantics),
+            skill_id="press",
+            goal=PressGoal(semantics),
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=18),
-            skill_options=PressButtonOptions(hand_interp_steps=3),
+            skill_options=PressOptions(hand_interp_steps=3),
         ),
         context,
     )
@@ -1486,7 +1493,7 @@ def test_press_button_preserves_failed_environment_at_observed_qpos() -> None:
     )
 
 
-def test_press_button_rejects_non_button_affordance() -> None:
+def test_press_rejects_non_press_affordance() -> None:
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(
             mesh_vertices=torch.zeros(8, 3),
@@ -1495,26 +1502,26 @@ def test_press_button_rejects_non_button_affordance() -> None:
         geometry={},
         label="mesh-button",
     )
-    action = _bind_action(_motion_generator(), PressButton())
+    action = _bind_action(_motion_generator(), Press())
 
-    with pytest.raises(ValueError, match="PressButtonAffordance"):
+    with pytest.raises(ValueError, match="PressAffordance"):
         _plan_action(
             action,
-            _invocation("press_button", PressButtonGoal(semantics)),
+            _invocation("press", PressGoal(semantics)),
             _context(),
         )
 
 
-def test_press_button_requires_primary_arm_and_end_effector_bindings() -> None:
+def test_press_requires_primary_arm_and_end_effector_bindings() -> None:
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(),
         geometry={},
         label="button",
     )
-    action = _bind_action(_motion_generator(), PressButton())
+    action = _bind_action(_motion_generator(), Press())
     invocation = ActionInvocation(
-        skill_id="press_button",
-        goal=PressButtonGoal(semantics),
+        skill_id="press",
+        goal=PressGoal(semantics),
         binding=ActionBinding(manipulators={"primary": "arm"}),
     )
 
@@ -1522,22 +1529,22 @@ def test_press_button_requires_primary_arm_and_end_effector_bindings() -> None:
         action.resolve_request(invocation)
 
 
-def test_press_axis_belongs_to_button_affordance_not_action_options() -> None:
-    assert "press_axis" not in PressButtonOptions.__dataclass_fields__
+def test_press_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "press_axis" not in PressOptions.__dataclass_fields__
 
 
 @pytest.mark.parametrize(
     "press_position",
     ((0.0, 1.0), (0.0, 1.0, float("nan"))),
 )
-def test_press_button_options_reject_invalid_press_position(
+def test_press_options_reject_invalid_press_position(
     press_position: tuple[float, ...],
 ) -> None:
     with pytest.raises(ValueError, match="press_position"):
-        PressButtonOptions(press_position=press_position)  # type: ignore[arg-type]
+        PressOptions(press_position=press_position)  # type: ignore[arg-type]
 
 
-def test_turn_knob_rejects_non_turn_affordance() -> None:
+def test_twist_rejects_non_twist_affordance() -> None:
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(
             mesh_vertices=torch.zeros(8, 3),
@@ -1546,22 +1553,22 @@ def test_turn_knob_rejects_non_turn_affordance() -> None:
         geometry={},
         label="mesh-knob",
     )
-    action = _bind_action(_motion_generator(), TurnKnob())
+    action = _bind_action(_motion_generator(), Twist())
 
-    with pytest.raises(ValueError, match="TurnAffordance"):
+    with pytest.raises(ValueError, match="TwistAffordance"):
         _plan_action(
             action,
-            _invocation("turn_knob", TurnKnobGoal(semantics)),
+            _invocation("twist", TwistGoal(semantics)),
             _context(),
         )
 
 
-def test_turn_axis_belongs_to_affordance_not_action_options() -> None:
-    assert "turn_axis" not in TurnKnobOptions.__dataclass_fields__
-    assert "approach_direction" not in TurnKnobOptions.__dataclass_fields__
+def test_twist_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "twist_axis" not in TwistOptions.__dataclass_fields__
+    assert "approach_direction" not in TwistOptions.__dataclass_fields__
 
 
-def test_pull_push_articulated_part_rejects_non_pull_push_affordance() -> None:
+def test_slide_rejects_non_slide_affordance() -> None:
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(
             mesh_vertices=torch.zeros(8, 3),
@@ -1570,29 +1577,29 @@ def test_pull_push_articulated_part_rejects_non_pull_push_affordance() -> None:
         geometry={},
         label="mesh-handle",
     )
-    action = _bind_action(_motion_generator(), PullPushArticulatedPart())
+    action = _bind_action(_motion_generator(), Slide())
 
-    with pytest.raises(ValueError, match="PullPushAffordance"):
+    with pytest.raises(ValueError, match="SlideAffordance"):
         _plan_action(
             action,
             _invocation(
-                "pull_push_articulated_part",
-                PullPushArticulatedPartGoal(semantics),
+                "slide",
+                SlideGoal(semantics),
             ),
             _context(),
         )
 
 
-def test_pull_push_articulated_part_requires_primary_end_effector() -> None:
+def test_slide_requires_primary_end_effector() -> None:
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(),
         geometry={},
         label="drawer_handle",
     )
-    action = _bind_action(_motion_generator(), PullPushArticulatedPart())
+    action = _bind_action(_motion_generator(), Slide())
     invocation = ActionInvocation(
-        skill_id="pull_push_articulated_part",
-        goal=PullPushArticulatedPartGoal(semantics),
+        skill_id="slide",
+        goal=SlideGoal(semantics),
         binding=ActionBinding(manipulators={"primary": "arm"}),
     )
 
@@ -1600,8 +1607,13 @@ def test_pull_push_articulated_part_requires_primary_end_effector() -> None:
         action.resolve_request(invocation)
 
 
-def test_pull_push_axis_belongs_to_affordance_not_action_options() -> None:
-    assert "translation_axis" not in PullPushArticulatedPartOptions.__dataclass_fields__
+def test_slide_axis_belongs_to_affordance_not_action_options() -> None:
+    assert "translation_axis" not in SlideOptions.__dataclass_fields__
+
+
+def test_slide_options_reject_invalid_direction() -> None:
+    with pytest.raises(ValueError, match="direction"):
+        SlideOptions(direction="open")  # type: ignore[arg-type]
 
 
 def test_handover_does_not_mutate_cached_final_pose(

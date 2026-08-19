@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate TurnKnob on an articulation link or rigid knob."""
+"""Demonstrate Twist on an articulation link or rigid object."""
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     MotionPolicy,
     ObjectSemantics,
-    TurnAffordance,
-    TurnKnobGoal,
-    TurnKnobOptions,
+    TwistAffordance,
+    TwistGoal,
+    TwistOptions,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -63,7 +63,7 @@ MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
 KNOB_LINK_NAME = "cap_1"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
-TURN_SAMPLE_INTERVAL = 140
+TWIST_SAMPLE_INTERVAL = 140
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 RIGID_KNOB_POSITION = (-0.7, -0.00, 0.70)
@@ -71,12 +71,12 @@ RIGID_KNOB_SIZE = (0.05, 0.05, 0.05)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the TurnKnob tutorial."""
+    """Parse command-line arguments for the Twist tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate TurnKnob on an articulation-link or rigid knob.",
+        "Demonstrate Twist on an articulation-link or rigid knob.",
         features=("visualize_axes",),
     )
-    parser.add_argument("--turn_angle", type=float, default=-0.7853981634)
+    parser.add_argument("--twist_angle", type=float, default=-0.7853981634)
     parser.add_argument(
         "--rigid_object",
         action="store_true",
@@ -118,18 +118,18 @@ def create_rigid_knob(sim) -> RigidObject:
 
 
 def create_knob_semantics(target: Articulation | RigidObject) -> ObjectSemantics:
-    """Create turn semantics for an articulation-link or rigid knob."""
+    """Create twist semantics for an articulation-link or rigid knob."""
     if isinstance(target, Articulation):
-        affordance = TurnAffordance(
+        affordance = TwistAffordance(
             articulation=target,
             link_name=KNOB_LINK_NAME,
-            turn_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
+            twist_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
         )
         label = "microwave_power_knob"
     else:
-        affordance = TurnAffordance(
+        affordance = TwistAffordance(
             rigid_object=target,
-            turn_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
+            twist_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
         )
         label = "rigid_knob"
     return ObjectSemantics(
@@ -141,7 +141,7 @@ def create_knob_semantics(target: Articulation | RigidObject) -> ObjectSemantics
 
 
 def main() -> None:
-    """Plan and replay TurnKnob for the selected target object type."""
+    """Plan and replay Twist for the selected target object type."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(
@@ -164,42 +164,42 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Inspect the knob target, then press Enter to plan TurnKnob...",
+        "Inspect the knob target, then press Enter to plan Twist...",
     )
 
     compiled = engine.compile(
         (
             ActionInvocation(
-                skill_id="turn_knob",
-                goal=TurnKnobGoal(semantics),
+                skill_id="twist",
+                goal=TwistGoal(semantics),
                 binding=ActionBinding(
                     manipulators={"primary": "arm"},
                     end_effectors={"primary": "hand"},
                 ),
-                motion_policy=MotionPolicy(sample_count=TURN_SAMPLE_INTERVAL),
-                skill_options=TurnKnobOptions(
+                motion_policy=MotionPolicy(sample_count=TWIST_SAMPLE_INTERVAL),
+                skill_options=TwistOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     pre_grasp_distance=0.12,
-                    turn_angle=args.turn_angle,
+                    twist_angle=args.twist_angle,
                 ),
             ),
         )
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan the TurnKnob demo trajectory.")
+        logger.log_warning("Failed to plan the Twist demo trajectory.")
         return
 
     if wait_for_user:
-        input("Press Enter to replay the TurnKnob demo...")
+        input("Press Enter to replay the Twist demo...")
     replay_trajectory(
         sim,
         robot,
         compiled.trajectory,
         args,
         video_prefix=(
-            "turn_rigid_knob_auto_play"
+            "twist_rigid_knob_auto_play"
             if args.rigid_object
-            else "turn_microwave_knob_auto_play"
+            else "twist_microwave_knob_auto_play"
         ),
         hold_steps=POST_TRAJECTORY_STEPS,
     )

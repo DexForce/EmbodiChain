@@ -14,23 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""TurnKnob atomic action implementation."""
+"""Slide atomic action implementation."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 import torch
 
-from embodichain.utils.math import (
-    axis_angle_to_rotation_matrix,
-    pose_inv,
-    get_relative_rotation,
-)
-
-from embodichain.lab.sim.atomic_actions.affordance import TurnAffordance
+from embodichain.lab.sim.atomic_actions.affordance import SlideAffordance
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     OPEN_COMMAND,
@@ -43,13 +37,12 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
 from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
     ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     DisjointSlotEndpoints,
-    FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     SkillBindingContract,
     SkillEndpointRequirement,
@@ -64,45 +57,49 @@ from embodichain.lab.sim.atomic_actions.trajectory_ops import (
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class TurnKnobGoal(ObjectActionGoal):
-    """Articulation-link or rigid knob described by a turn affordance."""
+class SlideGoal(ObjectActionGoal):
+    """Translating articulation link described by a slide affordance."""
 
-    goal_kind: ClassVar[str] = "turn_knob"
+    goal_kind: ClassVar[str] = "slide"
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class TurnKnobOptions(ActionOptions):
-    """Per-invocation knob-turning behavior."""
+class SlideOptions(ActionOptions):
+    """Per-invocation sliding behavior for a translating articulation link."""
+
+    direction: Literal["pull", "push"] = "pull"
+    """Whether to pull the part open or push it closed."""
 
     hand_interp_steps: int = 5
     """Number of waypoints used for each close/open hand segment."""
 
-    turn_waypoint_count: int = 8
-    """Number of Cartesian keyframes along the knob's circular turn arc."""
+    approach_distance: float = 0.1
+    """Pre-grasp distance opposite the approach/push axis."""
 
-    pre_grasp_distance: float = 0.1
-    """Distance from the grasp pose along its negative z-axis."""
-
-    turn_angle: float = math.pi / 4
-    """Requested knob rotation in radians."""
+    translation_distance: float = 0.15
+    """Distance traveled along the pull or push direction."""
 
     def __post_init__(self) -> None:
+        if self.direction not in ("pull", "push"):
+            raise ValueError("direction must be either 'pull' or 'push'.")
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
-        if self.turn_waypoint_count < 1:
-            raise ValueError("turn_waypoint_count must be at least 1.")
-        if self.pre_grasp_distance < 0.0:
-            raise ValueError("pre_grasp_distance must be non-negative.")
-        if not math.isfinite(self.turn_angle):
-            raise ValueError("turn_angle must be finite.")
+        if not math.isfinite(self.approach_distance):
+            raise ValueError("approach_distance must be finite.")
+        if self.approach_distance < 0.0:
+            raise ValueError("approach_distance must be non-negative.")
+        if not math.isfinite(self.translation_distance):
+            raise ValueError("translation_distance must be finite.")
+        if self.translation_distance <= 0.0:
+            raise ValueError("translation_distance must be positive.")
 
 
-class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
-    """Approach, grasp, rotate, release, and retract from a knob."""
+class Slide(AtomicAction[SlideGoal, SlideOptions]):
+    """Approach, grasp, and pull or push one translating articulation link."""
 
-    skill_id: ClassVar[str] = "turn_knob"
-    GoalType: ClassVar[type] = TurnKnobGoal
-    OptionsType: ClassVar[type] = TurnKnobOptions
+    skill_id: ClassVar[str] = "slide"
+    GoalType: ClassVar[type] = SlideGoal
+    OptionsType: ClassVar[type] = SlideOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
@@ -112,12 +109,7 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
                 endpoints=(
                     SkillEndpointRequirement(
                         endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                CARTESIAN_POSE_CAPABILITY,
-                                FORWARD_KINEMATICS_CAPABILITY,
-                            }
-                        ),
+                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
                         route=ActionBindingRoute("manipulator", "primary"),
                     ),
                     SkillEndpointRequirement(
@@ -135,7 +127,10 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         ),
     )
 
-    def __init__(self, default_options: TurnKnobOptions | None = None) -> None:
+    def __init__(
+        self,
+        default_options: SlideOptions | None = None,
+    ) -> None:
         super().__init__(default_options)
 
     def _on_bind(self) -> None:
@@ -143,31 +138,17 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         self.num_envs = self.robot.get_qpos().shape[0]
         self.robot_dof = self.robot.dof
 
-    def _find_symmetric_nearest_xpos(
-        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
-    ) -> torch.Tensor:
-        """Find the nearest symmetric pose to the reference pose."""
-        symmetric_xpos = target_xpos.clone()
-        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
-        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
-        angle_a = get_relative_rotation(
-            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
-        )
-        angle_b = get_relative_rotation(
-            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
-        )
-        choose_target = (angle_a < angle_b)[..., None, None]
-        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
-        return target_xpos
-
     def _plan(
         self,
-        request: ResolvedActionRequest[TurnKnobGoal, TurnKnobOptions],
+        request: ResolvedActionRequest[
+            SlideGoal,
+            SlideOptions,
+        ],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan all six knob-turning segments without stepping simulation."""
+        """Plan the complete pull/push sequence without stepping simulation."""
         target = self.require_goal(request)
-        affordance = self._require_turn_affordance(target.semantics)
+        affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
         manipulator = request.binding.manipulator()
         end_effector = request.binding.end_effector()
@@ -187,69 +168,84 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        link_pose = affordance.get_link_pose().to(
+        link_pose = affordance.get_articulation_link_pose().to(
             device=self.device, dtype=torch.float32
         )
         if link_pose.shape != (self.num_envs, 4, 4):
             raise ValueError(
-                "Knob target pose must have shape "
+                "Articulation link pose must have shape "
                 f"({self.num_envs}, 4, 4), got {tuple(link_pose.shape)}."
             )
-        grasp_xpos = affordance.get_grasp_pose(link_pose).to(
+        translation_axis = affordance.translation_axis.to(
             device=self.device, dtype=torch.float32
         )
-        grasp_xpos = self._find_symmetric_nearest_xpos(
-            grasp_xpos,
-            reference_xpos=self.robot.compute_fk(
-                qpos=start_arm_qpos, name=manipulator.name, to_matrix=True
-            ),
+        translation_axis = translation_axis / torch.linalg.vector_norm(translation_axis)
+        translation_axis_world = torch.matmul(link_pose[:, :3, :3], translation_axis)
+        grasp_success, grasp_xpos, _ = affordance.get_best_grasp_poses(
+            obj_poses=link_pose,
+            approach_direction=translation_axis_world,
         )
-        pre_grasp_xpos = translate_pose_world(
-            grasp_xpos,
-            -grasp_xpos[:, :3, 2] * options.pre_grasp_distance,
+        grasp_xpos = grasp_xpos.to(device=self.device, dtype=torch.float32)
+        grasp_success = normalize_success_mask(
+            grasp_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Slide grasp-pose success",
         )
-        turn_xpos = self._turned_grasp_poses(
-            link_pose,
+        if not grasp_success.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Failed to resolve an articulated-part grasp pose.",
+            )
+        approach_xpos = translate_pose_world(
             grasp_xpos,
-            affordance.turn_axis,
-            options.turn_angle,
-            options.turn_waypoint_count,
+            -translation_axis_world * options.approach_distance,
+        )
+        translation_sign = -1.0 if options.direction == "pull" else 1.0
+        translated_xpos = translate_pose_world(
+            grasp_xpos,
+            translation_axis_world * (translation_sign * options.translation_distance),
         )
 
-        n_approach, n_reach, n_turn, n_retract = self._motion_segment_lengths(
+        motion_lengths = self._motion_segment_lengths(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
+            direction=options.direction,
         )
-
         approach_success, approach_arm = self._plan_pose_segment(
-            pre_grasp_xpos,
+            approach_xpos,
             start_arm_qpos,
             manipulator.name,
             request,
-            n_approach,
+            motion_lengths[0],
         )
         reach_success, reach_arm = self._plan_pose_segment(
             grasp_xpos,
             approach_arm[:, -1],
             manipulator.name,
             request,
-            n_reach,
+            motion_lengths[1],
         )
-        turn_success, turn_arm = self._plan_pose_segment(
-            turn_xpos,
+        translate_success, translate_arm = self._plan_pose_segment(
+            translated_xpos,
             reach_arm[:, -1],
             manipulator.name,
             request,
-            n_turn,
+            motion_lengths[2],
         )
-        retract_success, retract_arm = self._plan_pose_segment(
-            pre_grasp_xpos,
-            turn_arm[:, -1],
-            manipulator.name,
-            request,
-            n_retract,
-        )
-        success = approach_success & reach_success & turn_success & retract_success
+        success = grasp_success & approach_success & reach_success & translate_success
+
+        return_arm: torch.Tensor | None = None
+        if options.direction == "push":
+            return_success, return_arm = self._plan_pose_segment(
+                approach_xpos,
+                translate_arm[:, -1],
+                manipulator.name,
+                request,
+                motion_lengths[3],
+            )
+            success = success & return_success
 
         hand_close = interpolate_hand_qpos(
             hand_open_qpos,
@@ -261,48 +257,49 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
             hand_open_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        parts = (
-            approach_arm,
-            reach_arm,
-            hand_close,
-            turn_arm,
-            hand_open,
-            retract_arm,
-        )
-        lengths = tuple(part.shape[1] for part in parts)
+        named_parts: list[tuple[str, torch.Tensor]] = [
+            ("approach", approach_arm),
+            ("reach", reach_arm),
+            ("close", hand_close),
+            (options.direction, translate_arm),
+            ("open", hand_open),
+        ]
+        if return_arm is not None:
+            named_parts.append(("return", return_arm))
+
+        segment_lengths = {name: part.shape[1] for name, part in named_parts}
         full = torch.empty(
-            (self.num_envs, sum(lengths), self.robot_dof),
+            (self.num_envs, sum(segment_lengths.values()), self.robot_dof),
             dtype=context.robot.qpos.dtype,
             device=self.device,
         )
         full[:] = context.last_qpos.unsqueeze(1)
         offset = 0
-        arm_parts = (approach_arm, reach_arm, turn_arm, retract_arm)
-        arm_hands = (
-            hand_open_qpos,
-            hand_open_qpos,
-            hand_grasp_qpos,
-            hand_open_qpos,
-        )
-        for arm, hand in zip(arm_parts[:2], arm_hands[:2]):
+
+        for arm in (approach_arm, reach_arm):
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand.unsqueeze(1)
+            full[:, offset:stop, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
             offset = stop
+
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
         full[:, offset:stop, hand_joint_ids] = hand_close
         offset = stop
-        stop = offset + turn_arm.shape[1]
-        full[:, offset:stop, arm_joint_ids] = turn_arm
+
+        stop = offset + translate_arm.shape[1]
+        full[:, offset:stop, arm_joint_ids] = translate_arm
         full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
         offset = stop
+
         stop = offset + hand_open.shape[1]
-        full[:, offset:stop, arm_joint_ids] = turn_arm[:, -1].unsqueeze(1)
+        full[:, offset:stop, arm_joint_ids] = translate_arm[:, -1].unsqueeze(1)
         full[:, offset:stop, hand_joint_ids] = hand_open
         offset = stop
-        full[:, offset:, arm_joint_ids] = retract_arm
-        full[:, offset:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+
+        if return_arm is not None:
+            full[:, offset:, arm_joint_ids] = return_arm
+            full[:, offset:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
         return self.build_plan(
             request,
@@ -310,46 +307,46 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
             success=success,
             trajectory=full,
             expected_effects=StateDelta(),
-            segment_lengths={
-                "approach": lengths[0],
-                "reach": lengths[1],
-                "close": lengths[2],
-                "turn": lengths[3],
-                "open": lengths[4],
-                "retract": lengths[5],
-            },
+            segment_lengths=segment_lengths,
         )
 
     @staticmethod
-    def _require_turn_affordance(
+    def _require_slide_affordance(
         semantics: ObjectSemantics,
-    ) -> TurnAffordance:
+    ) -> SlideAffordance:
         affordance = semantics.affordance
-        if not isinstance(affordance, TurnAffordance):
-            raise ValueError("TurnKnob requires a TurnAffordance.")
+        if not isinstance(affordance, SlideAffordance):
+            raise ValueError("Slide requires a SlideAffordance.")
         return affordance
 
     @staticmethod
     def _motion_segment_lengths(
         sample_count: int,
         hand_interp_steps: int,
-    ) -> tuple[int, int, int, int]:
+        *,
+        direction: Literal["pull", "push"],
+    ) -> tuple[int, ...]:
+        motion_segment_count = 3 if direction == "pull" else 4
         motion_count = sample_count - 2 * hand_interp_steps
-        if motion_count < 8:
+        if motion_count < 2 * motion_segment_count:
             raise ValueError(
-                "Not enough waypoints for TurnKnob. Increase sample_count or "
-                "decrease hand_interp_steps."
+                "Not enough waypoints for Slide. Increase "
+                "sample_count or decrease hand_interp_steps."
             )
-        base, remainder = divmod(motion_count, 4)
-        values = [base + (index < remainder) for index in range(4)]
-        return values[0], values[1], values[2], values[3]
+        base, remainder = divmod(motion_count, motion_segment_count)
+        return tuple(
+            base + (index < remainder) for index in range(motion_segment_count)
+        )
 
     def _plan_pose_segment(
         self,
         target_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
-        request: ResolvedActionRequest[TurnKnobGoal, TurnKnobOptions],
+        request: ResolvedActionRequest[
+            SlideGoal,
+            SlideOptions,
+        ],
         sample_count: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
@@ -364,35 +361,9 @@ class TurnKnob(AtomicAction[TurnKnobGoal, TurnKnobOptions]):
         assert result.positions is not None
         return result.success, result.positions
 
-    def _turned_grasp_poses(
-        self,
-        link_pose: torch.Tensor,
-        grasp_xpos: torch.Tensor,
-        turn_axis: torch.Tensor,
-        turn_angle: float,
-        waypoint_count: int,
-    ) -> torch.Tensor:
-        """Build Cartesian EEF keyframes that follow the knob's circular arc."""
-        axis = turn_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
-        angles = torch.linspace(
-            turn_angle / waypoint_count,
-            turn_angle,
-            waypoint_count,
-            dtype=torch.float32,
-            device=self.device,
-        )
-        rotations = (
-            torch.eye(4, dtype=torch.float32, device=self.device)
-            .reshape(1, 4, 4)
-            .repeat(waypoint_count, 1, 1)
-        )
-        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
-        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
-        return torch.matmul(
-            torch.matmul(link_pose[:, None], rotations[None]),
-            link_to_eef[:, None],
-        )
 
-
-__all__ = ["TurnKnob", "TurnKnobGoal", "TurnKnobOptions"]
+__all__ = [
+    "Slide",
+    "SlideGoal",
+    "SlideOptions",
+]

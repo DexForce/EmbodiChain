@@ -27,12 +27,12 @@ full-robot timed trajectory and uncommitted expected effects.
       MoveHeldObjectOptions
       Place
       PlaceOptions
-      PressButton
-      PressButtonOptions
-      PullPushArticulatedPart
-      PullPushArticulatedPartOptions
-      TurnKnob
-      TurnKnobOptions
+      Press
+      PressOptions
+      Slide
+      SlideOptions
+      Twist
+      TwistOptions
       CoordinatedPickment
       CoordinatedPickmentOptions
       CoordinatedPlacement
@@ -50,9 +50,9 @@ full-robot timed trajectory and uncommitted expected effects.
       HeldObjectPoseGoal
       PlaceGoal
       AssembleGoal
-      PressButtonGoal
-      PullPushArticulatedPartGoal
-      TurnKnobGoal
+      PressGoal
+      SlideGoal
+      TwistGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
 
@@ -98,26 +98,26 @@ Place
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
 
-PressButton
------------
+Press
+-----
 
-.. automodule:: embodichain.lab.sim.atomic_actions.primitives.press_button
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.press
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
 
-PullPushArticulatedPart
------------------------
+Slide
+-----
 
-.. automodule:: embodichain.lab.sim.atomic_actions.primitives.pull_push_articulated_part
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.slide
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
 
-TurnKnob
---------
+Twist
+-----
 
-.. automodule:: embodichain.lab.sim.atomic_actions.primitives.turn_knob
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.twist
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict
