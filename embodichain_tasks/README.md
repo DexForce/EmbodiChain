@@ -62,9 +62,10 @@ Importing `embodichain_tasks` recursively imports every sub-package, which
 triggers each task's `@register_env` decorator and registers it in the
 gymnasium registry. The unified CLI calls `discover_task_packages()` (from
 `embodichain.lab.gym.utils.registration`) at startup, which imports this
-package via its entry point. See
-`docs/superpowers/specs/2026-07-07-task-env-refactor-design.md` for the full
-design.
+package via its entry point. See the
+[task-package discovery utilities](../embodichain/lab/gym/utils/registration.py)
+and the [official task package initializer](embodichain_tasks/__init__.py) for
+the implementation.
 
 ## Extending with your own tasks
 

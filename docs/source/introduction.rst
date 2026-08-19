@@ -80,15 +80,15 @@ Contribution Guide
 ------------------
 
 We welcome contributions! Please see the
-`CONTRIBUTING.md <CONTRIBUTING.md>`__ file in this repository for
-guidelines on how to get started.
+`CONTRIBUTING.md <https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md>`__
+file in this repository for guidelines on how to get started.
 
 Publications
 ------------
 
 See `Academic
-Publications <docs/source/resources/publications/README.md>`__ for a
-complete list of academic papers related to EmbodiChain.
+Publications <https://dexforce.github.io/EmbodiChain/main/resources/publications/README.html>`__
+for a complete list of academic papers related to EmbodiChain.
 
 Citation
 --------
