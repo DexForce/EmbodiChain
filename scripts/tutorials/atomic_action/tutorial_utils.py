@@ -36,8 +36,13 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.cfg import LightCfg, MarkerCfg, RenderCfg, RobotCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator, ToppraPlannerCfg
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain.lab.sim.planners import (
+    CuroboPlannerCfg,
+    MotionGenCfg,
+    MotionGenerator,
+    ToppraPlannerCfg,
+)
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
 from embodichain.lab.sim.solvers import URSolverCfg
 from embodichain.toolkits.graspkit.pg_grasp.antipodal_generator import (
     AntipodalSamplerCfg,
@@ -64,13 +69,21 @@ DEFAULT_AXIS_SIZE = 0.003
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
-GRIPPER_TCP_Z = 0.15
 GRIPPER_MAX_OPEN_WIDTH = 0.100
-GRIPPER_FINGER_LENGTH = 0.12
+GRIPPER_MIN_OPEN_WIDTH = 0.003
+GRIPPER_FINGER_LENGTH = 0.10
 GRIPPER_ROOT_Z_WIDTH = 0.096
 GRIPPER_Y_THICKNESS = 0.040
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
+_FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
+_DEFAULT_GRIPPER_TCP_Z = 0.17
+_GRIPPER_TCP = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, _DEFAULT_GRIPPER_TCP_Z),
+    (0.0, 0.0, 0.0, 1.0),
+)
 TOP_DOWN_EEF_ROTATION = (
     (-0.0539, -0.9985, -0.0022),
     (-0.9977, 0.0540, -0.0401),
@@ -84,6 +97,8 @@ TutorialCliFeature = Literal[
     "headless_play",
     "visualize_axes",
 ]
+TutorialRobot = Literal["ur5", "franka"]
+TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = ("ur5", "franka")
 
 
 def create_tutorial_argument_parser(
@@ -108,6 +123,12 @@ def create_tutorial_argument_parser(
         "--auto_play",
         action="store_true",
         help="Run the demo without waiting for keyboard input.",
+    )
+    parser.add_argument(
+        "--robot",
+        choices=TUTORIAL_ROBOTS,
+        default="ur5",
+        help="Robot construction to use (default: ur5).",
     )
     if "debug_state" in features:
         parser.add_argument(
@@ -224,6 +245,8 @@ def run_tutorial(main: Callable[[], None]) -> None:
 def add_ur5_gripper_robot(
     sim: SimulationManager,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
 ) -> Robot:
     """Add the standard UR5 plus PGI gripper tutorial robot.
 
@@ -234,7 +257,65 @@ def add_ur5_gripper_robot(
     Returns:
         The added robot instance.
     """
-    return sim.add_robot(cfg=create_ur5_gripper_robot_cfg(init_pos=init_pos))
+    return sim.add_robot(
+        cfg=create_ur5_gripper_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            tcp_z=tcp_z,
+        )
+    )
+
+
+def add_franka_panda_robot(
+    sim: SimulationManager,
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+) -> Robot:
+    """Add a Franka arm with the standard PGI tutorial gripper.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        init_pos: Root position of the robot in its arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        The added robot instance.
+    """
+    return sim.add_robot(
+        cfg=create_franka_panda_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+        )
+    )
+
+
+def add_tutorial_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+) -> Robot:
+    """Add a selected tutorial robot with the shared PGI gripper.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        robot_type: Tutorial robot family to construct.
+        init_pos: Root position of the robot in its arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        The added robot instance.
+
+    Raises:
+        ValueError: If ``robot_type`` is not supported.
+    """
+    return sim.add_robot(
+        cfg=create_tutorial_robot_cfg(
+            robot_type,
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+        )
+    )
 
 
 def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
@@ -251,13 +332,27 @@ def create_toppra_motion_generator(robot: Robot) -> MotionGenerator:
     )
 
 
+def create_curobo_motion_generator(robot: Robot) -> MotionGenerator:
+    """Create a cuRobo-backed motion generator for a tutorial robot.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+
+    Returns:
+        The configured motion generator with an empty external collision world.
+    """
+    return MotionGenerator(
+        cfg=MotionGenCfg(planner_cfg=CuroboPlannerCfg(robot_uid=robot.uid))
+    )
+
+
 def get_hand_open_close_qpos(
     robot: Robot,
     *,
     hand_control_part: str = "hand",
     close_qpos: float = DEFAULT_GRIPPER_CLOSE_QPOS,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return the open limit and a safe closed position for a gripper.
+    """Return the open limit and a safe closed position for a PGI gripper.
 
     Args:
         robot: Robot containing the gripper control part.
@@ -308,7 +403,7 @@ def create_antipodal_semantics(
                 finger_length=GRIPPER_FINGER_LENGTH,
                 y_thickness=GRIPPER_Y_THICKNESS,
                 root_z_width=GRIPPER_ROOT_Z_WIDTH,
-                open_check_margin=0.002,
+                open_check_margin=0.03,
                 point_sample_dense=0.012,
             ),
             generator_cfg=GraspGeneratorCfg(
@@ -316,7 +411,7 @@ def create_antipodal_semantics(
                 antipodal_sampler_cfg=AntipodalSamplerCfg(
                     n_sample=n_sample,
                     max_length=GRIPPER_MAX_OPEN_WIDTH,
-                    min_length=0.005,
+                    min_length=GRIPPER_MIN_OPEN_WIDTH,
                 ),
                 is_partial_annotate=False,
                 is_filter_ground_collision=False,
@@ -364,7 +459,7 @@ def make_eef_pose_at(robot: Robot, position: torch.Tensor) -> torch.Tensor:
 
     Args:
         robot: Robot whose current arm pose supplies the orientation.
-        position: Position tensor with shape ``(3,)`` or ``(n_envs, 3)``.
+        position: Position tensor with shape ``(3,)`` or ``(num_envs, 3)``.
 
     Returns:
         A single or batched homogeneous pose matching ``position``.
@@ -385,7 +480,7 @@ def initialize_pre_pick_robot_pose(
     *,
     height: float = 0.36,
 ) -> None:
-    """Set a UR5 at a deterministic open-gripper pose above an object.
+    """Set a tutorial robot at a deterministic open-gripper pose above an object.
 
     Args:
         robot: Robot to initialize.
@@ -505,7 +600,7 @@ def replay_trajectory(
         sim: Simulation manager to step and record.
         robot: Robot receiving full-DOF trajectory positions.
         trajectory: Timed full-robot trajectory, or a legacy position tensor
-            with shape ``(n_envs, n_steps, dof)``.
+            with shape ``(num_envs, n_steps, dof)``.
         args: Parsed tutorial arguments controlling auto-play recording.
         video_prefix: Output video filename prefix.
         hold_steps: Number of final-pose simulation updates after the trajectory.
@@ -678,14 +773,14 @@ def draw_axis_marker(
 ) -> None:
     """Draw a named coordinate-frame marker for a semantic tutorial target."""
     arena_offsets = sim.arena_offsets
-    n_envs = arena_offsets.shape[0]
+    num_envs = arena_offsets.shape[0]
 
     # Normalize a single (4, 4) pose to (1, 4, 4) so it is not mistaken for a
     # per-environment batch when num_envs happens to equal 4.
     if xpos.dim() == 2:
         xpos = xpos.unsqueeze(0)
 
-    if n_envs == xpos.shape[0]:
+    if num_envs == xpos.shape[0]:
         # add arena offsets to xpos
         draw_xpos = xpos.clone()
         draw_xpos[:, :3, 3] += arena_offsets
@@ -749,6 +844,8 @@ def clone_local_pose_from_first_env(entity) -> torch.Tensor:
 
 def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -773,6 +870,11 @@ def create_ur5_gripper_robot_cfg(
     Returns:
         A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
     """
+    qpos = (
+        [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+        if init_qpos is None
+        else list(init_qpos)
+    )
     return URRobotCfg.from_dict(
         {
             "robot_type": "ur5",
@@ -804,14 +906,109 @@ def create_ur5_gripper_robot_cfg(
                     "tcp": [
                         [1.0, 0.0, 0.0, 0.0],
                         [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, GRIPPER_TCP_Z],
+                        [0.0, 0.0, 1.0, tcp_z],
                         [0.0, 0.0, 0.0, 1.0],
                     ]
                 }
             },
-            "init_qpos": [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0],
+            "init_qpos": qpos,
             "init_pos": init_pos,
         }
+    )
+
+
+def create_franka_panda_robot_cfg(
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+) -> RobotCfg:
+    """Build a Franka arm + PGI gripper configuration for the tutorials.
+
+    The shared scenes place manipulation targets on the robot's negative-X
+    side, so the base is rotated 180 degrees. The arm-only Franka URDF is
+    assembled with the same DH_PGI_140_80 component, hand control part, drive
+    properties, open state, and TCP offset used by the UR5 tutorial robot.
+
+    Args:
+        init_pos: Initial root position of the robot in the arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
+    """
+    overrides = {
+        "robot_type": "panda",
+        "uid": "FrankaPanda",
+        "init_pos": init_pos,
+        "init_rot": _FRANKA_TUTORIAL_BASE_ROTATION,
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "Franka/Panda/Panda.urdf",
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": GRIPPER_URDF_PATH,
+                },
+            ],
+        },
+        "control_parts": {"hand": [GRIPPER_HAND_JOINT_PATTERN]},
+        "drive_pros": {
+            "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
+            "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
+            "max_effort": {GRIPPER_HAND_JOINT_PATTERN: 1e4},
+        },
+        "solver_cfg": {
+            "arm": {
+                "end_link_name": "fr3_link8",
+                "tcp": _GRIPPER_TCP,
+            }
+        },
+    }
+    if init_qpos is not None:
+        overrides["init_qpos"] = list(init_qpos)
+    cfg = FrankaPandaCfg.from_dict(overrides)
+    if init_qpos is None:
+        cfg.init_qpos[-2:] = [0.0, 0.0]
+    for drive_values in (
+        cfg.drive_pros.stiffness,
+        cfg.drive_pros.damping,
+        cfg.drive_pros.max_effort,
+    ):
+        drive_values.pop("fr3_finger_joint[1-2]", None)
+    return cfg
+
+
+def create_tutorial_robot_cfg(
+    robot_type: TutorialRobot,
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+) -> RobotCfg:
+    """Build a selected tutorial arm with the common PGI gripper contract.
+
+    Args:
+        robot_type: Tutorial robot family to construct.
+        init_pos: Initial root position of the robot in its arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        A UR5 or Franka robot configuration exposing ``arm`` and ``hand``.
+
+    Raises:
+        ValueError: If ``robot_type`` is not supported.
+    """
+    if robot_type == "ur5":
+        return create_ur5_gripper_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+        )
+    if robot_type == "franka":
+        return create_franka_panda_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+        )
+    raise ValueError(
+        f"Unsupported tutorial robot {robot_type!r}; expected one of {TUTORIAL_ROBOTS}."
     )
 
 
@@ -822,17 +1019,23 @@ __all__ = [
     "DEFAULT_GRIPPER_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_LIGHT_POS",
     "GRIPPER_HAND_JOINT_PATTERN",
-    "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",
+    "TutorialRobot",
+    "TUTORIAL_ROBOTS",
+    "add_franka_panda_robot",
+    "add_tutorial_robot",
     "add_ur5_gripper_robot",
     "broadcast_pose_batch",
     "broadcast_waypoint_pose_batch",
     "clone_local_pose_from_first_env",
     "create_antipodal_semantics",
+    "create_curobo_motion_generator",
+    "create_franka_panda_robot_cfg",
     "create_toppra_motion_generator",
     "create_tutorial_argument_parser",
+    "create_tutorial_robot_cfg",
     "create_tutorial_simulation",
     "create_ur5_gripper_robot_cfg",
     "format_tensor",

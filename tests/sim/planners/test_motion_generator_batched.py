@@ -16,20 +16,56 @@
 
 from __future__ import annotations
 
-import torch
-import pytest
+from typing import Literal
 from unittest.mock import Mock, patch
 
+import pytest
+import torch
+
+from embodichain.lab.sim.planners.base_planner import CollisionWorldInfo, PlanOptions
 from embodichain.lab.sim.planners.motion_generator import (
     MotionGenerator,
     MotionGenOptions,
 )
-from embodichain.lab.sim.planners.base_planner import PlanOptions
 from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
 
 BATCH_SIZE = 2
 CONTROLLED_DOF = 6
 SAMPLE_COUNT = 8
+STEP_DT = 0.05
+
+
+def _collision_world_info(
+    dynamic_entity_ids: tuple[str, ...] = (),
+    *,
+    entity_ids: tuple[str, ...] | None = None,
+    batch_mode: Literal["shared", "per_env"] | None = "shared",
+    supports_updates: bool = True,
+) -> CollisionWorldInfo:
+    """Build a valid collision-world contract for planner test doubles."""
+    return CollisionWorldInfo(
+        entity_ids=dynamic_entity_ids if entity_ids is None else entity_ids,
+        dynamic_entity_ids=dynamic_entity_ids,
+        batch_mode=batch_mode,
+        supports_updates=supports_updates,
+    )
+
+
+def _timed_result(
+    positions: torch.Tensor,
+    *,
+    success: bool | torch.Tensor = True,
+    step_dt: float = STEP_DT,
+) -> PlanResult:
+    """Build a planner result that satisfies the explicit timing contract."""
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    if positions.shape[1] > 1:
+        dt[:, 1:] = step_dt
+    return PlanResult(
+        success=success,
+        positions=positions,
+        dt=dt,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -81,9 +117,9 @@ class _DirectCartesianPlanner:
 
     def plan(self, target_states, options):
         self.target_states = target_states
-        return PlanResult(
+        return _timed_result(
+            torch.zeros(1, 3, 2),
             success=torch.tensor([True]),
-            positions=torch.zeros(1, 3, 2),
         )
 
 
@@ -128,8 +164,7 @@ def test_direct_cartesian_planner_requires_joint_fallback_inputs():
 
 def test_bind_collision_world_copies_caller_options() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("obstacle",)
+    planner.collision_world_info = _collision_world_info(("obstacle",))
     original = PlanOptions()
     obstacle_pose = torch.eye(4).unsqueeze(0)
 
@@ -171,8 +206,7 @@ def test_bind_collision_world_requires_exact_planner_entity_ids(
     configured_ids, obstacle_poses, expected
 ) -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = configured_ids
+    planner.collision_world_info = _collision_world_info(configured_ids)
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
@@ -184,8 +218,7 @@ def test_bind_collision_world_requires_exact_planner_entity_ids(
 
 def test_bind_collision_world_rejects_extra_ids_in_caller_options() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("cube",)
+    planner.collision_world_info = _collision_world_info(("cube",))
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     options = PlanOptions()
@@ -202,8 +235,7 @@ def test_bind_collision_world_rejects_extra_ids_in_caller_options() -> None:
 
 def test_bind_collision_world_rejects_ids_injected_by_backend() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("cube",)
+    planner.collision_world_info = _collision_world_info(("cube",))
 
     def bind(options, *, obstacle_poses):
         options.dynamic_obstacle_poses = {
@@ -225,8 +257,7 @@ def test_bind_collision_world_rejects_ids_injected_by_backend() -> None:
 
 def test_bind_collision_world_allows_none_for_empty_configured_world() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ()
+    planner.collision_world_info = _collision_world_info()
     planner.default_plan_options.return_value = PlanOptions()
 
     def bind(options, *, obstacle_poses):
@@ -245,8 +276,7 @@ def test_bind_collision_world_allows_none_for_empty_configured_world() -> None:
 
 def test_bind_collision_world_rejects_non_string_option_keys() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ()
+    planner.collision_world_info = _collision_world_info()
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     options = PlanOptions()
@@ -260,39 +290,34 @@ def test_bind_collision_world_rejects_non_string_option_keys() -> None:
 
 def test_motion_generator_exposes_collision_integration_metadata() -> None:
     planner = Mock()
-    planner.dynamic_collision_entity_ids = ("cube", "tray")
-    planner.collision_world_entity_ids = ("cube", "tray", "table")
-    planner.collision_world_batch_mode = "per_env"
+    info = _collision_world_info(
+        ("cube", "tray"),
+        entity_ids=("cube", "tray", "table"),
+        batch_mode="per_env",
+    )
+    planner.collision_world_info = info
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
+    assert generator.collision_world_info is info
     assert generator.dynamic_collision_entity_ids == ("cube", "tray")
     assert generator.collision_world_entity_ids == ("cube", "tray", "table")
     assert generator.collision_world_batch_mode == "per_env"
 
 
-@pytest.mark.parametrize(
-    ("entity_ids", "error_type", "match"),
-    [
-        (("cube", "cube"), ValueError, "unique"),
-        ((" cube",), TypeError, "outer whitespace"),
-    ],
-)
-def test_motion_generator_rejects_invalid_collision_entity_metadata(
-    entity_ids, error_type, match
-) -> None:
+def test_motion_generator_rejects_invalid_collision_world_contract() -> None:
     planner = Mock()
-    planner.dynamic_collision_entity_ids = entity_ids
+    planner.collision_world_info = object()
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
-    with pytest.raises(error_type, match=match):
-        _ = generator.dynamic_collision_entity_ids
+    with pytest.raises(TypeError, match="CollisionWorldInfo"):
+        _ = generator.collision_world_info
 
 
 def test_bind_collision_world_rejects_unsupported_planner() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = False
+    planner.collision_world_info = None
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
 
@@ -308,8 +333,7 @@ def test_bind_collision_world_rejects_unsupported_planner() -> None:
 
 def test_bind_collision_world_uses_backend_default_options() -> None:
     planner = Mock()
-    planner.supports_collision_world_updates = True
-    planner.dynamic_collision_entity_ids = ("obstacle",)
+    planner.collision_world_info = _collision_world_info(("obstacle",))
     defaults = PlanOptions()
     planner.default_plan_options.return_value = defaults
     planner.with_collision_world.return_value = defaults
@@ -334,9 +358,9 @@ def _mock_planner(b=3, n=15, dofs=6):
     )
     planner.robot.num_instances = b
     planner.robot.device = torch.device("cpu")
-    planner.plan.return_value = PlanResult(
+    planner.plan.return_value = _timed_result(
+        torch.zeros(b, n, dofs),
         success=torch.ones(b, dtype=torch.bool),
-        positions=torch.zeros(b, n, dofs),
     )
     planner.preserve_plan_samples = False
     planner.default_plan_options.return_value = PlanOptions()
@@ -375,9 +399,9 @@ def _mock_generator(
     planner.with_motion_context.side_effect = (
         lambda options, *, start_qpos, control_part: options
     )
-    planner.plan.return_value = result or PlanResult(
+    planner.plan.return_value = result or _timed_result(
+        torch.zeros(batch_size, 5, controlled_dof),
         success=torch.ones(batch_size, dtype=torch.bool),
-        positions=torch.zeros(batch_size, 5, controlled_dof),
     )
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
@@ -450,6 +474,21 @@ class TestMotionStrategy:
         assert MotionGenOptions(strategy="ik_interp").strategy == "ik_interp"
         with pytest.raises(ValueError, match="strategy"):
             MotionGenOptions(strategy="planner")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="interpolation_dt"):
+            MotionGenOptions(interpolation_dt=0.0)
+
+    def test_ik_interp_rejects_missing_timing(self):
+        generator = _mock_generator()
+        with pytest.raises(ValueError, match="explicit interpolation_dt"):
+            generator.generate(
+                [PlanState.from_qpos(torch.ones(BATCH_SIZE, CONTROLLED_DOF))],
+                MotionGenOptions(
+                    strategy="ik_interp",
+                    sample_count=SAMPLE_COUNT,
+                    start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                    control_part="arm",
+                ),
+            )
 
     def test_ik_interp_solves_batched_poses_without_calling_backend(self):
         generator = _mock_generator()
@@ -468,6 +507,7 @@ class TestMotionStrategy:
                 sample_count=SAMPLE_COUNT,
                 start_qpos=start,
                 control_part="arm",
+                interpolation_dt=STEP_DT,
             ),
         )
 
@@ -485,12 +525,57 @@ class TestMotionStrategy:
         )
         generator.planner.plan.assert_not_called()
 
+    def test_linear_cartesian_motion_grounds_every_output_sample_with_ik(self):
+        generator = _mock_generator()
+
+        def encode_position(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            qpos = joint_seed.clone()
+            qpos[:, :3] = pose[:, :3, 3]
+            return torch.ones(BATCH_SIZE, dtype=torch.bool), qpos
+
+        generator.robot.compute_ik.side_effect = encode_position
+        weights = torch.linspace(1.0 / (SAMPLE_COUNT - 1), 1.0, SAMPLE_COUNT - 1)
+        targets = []
+        for weight in weights:
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = weight
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="motion_gen",
+                sample_count=SAMPLE_COUNT,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=STEP_DT,
+                preserve_cartesian_samples=True,
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape == (
+            BATCH_SIZE,
+            SAMPLE_COUNT,
+            CONTROLLED_DOF,
+        )
+        expected_x = torch.linspace(0.0, 1.0, SAMPLE_COUNT)
+        assert torch.allclose(
+            result.positions[:, :, 0], expected_x.expand(BATCH_SIZE, -1)
+        )
+        assert generator.robot.compute_ik.call_count == SAMPLE_COUNT - 1
+        generator.planner.plan.assert_not_called()
+
     def test_motion_gen_delegates_and_resamples_backend_result(self):
         raw_sample_count = 5
         generator = _mock_generator(
-            result=PlanResult(
-                success=True,
-                positions=torch.zeros(
+            result=_timed_result(
+                torch.zeros(
                     BATCH_SIZE,
                     raw_sample_count,
                     CONTROLLED_DOF,
@@ -515,15 +600,20 @@ class TestMotionStrategy:
             SAMPLE_COUNT,
             CONTROLLED_DOF,
         )
+        assert result.dt is not None
+        assert result.duration is not None
+        assert result.dt.shape == (BATCH_SIZE, SAMPLE_COUNT)
+        assert result.duration.tolist() == pytest.approx(
+            [STEP_DT * (raw_sample_count - 1)] * BATCH_SIZE
+        )
         generator.planner.plan.assert_called_once()
 
     def test_motion_gen_preserves_backend_samples_when_required(self):
         raw_sample_count = 5
         generator = _mock_generator(
             preserve_plan_samples=True,
-            result=PlanResult(
-                success=True,
-                positions=torch.zeros(
+            result=_timed_result(
+                torch.zeros(
                     BATCH_SIZE,
                     raw_sample_count,
                     CONTROLLED_DOF,
@@ -556,6 +646,7 @@ class TestMotionStrategy:
                 sample_count=SAMPLE_COUNT,
                 start_qpos=start,
                 control_part="arm",
+                interpolation_dt=STEP_DT,
             ),
         )
 
@@ -594,9 +685,7 @@ class TestNormalizedPlanResult:
     def test_non_finite_positions_are_rejected(self):
         positions = torch.zeros(BATCH_SIZE, 5, CONTROLLED_DOF)
         positions[0, 0, 0] = float("nan")
-        generator = _mock_generator(
-            result=PlanResult(success=True, positions=positions)
-        )
+        generator = _mock_generator(result=_timed_result(positions))
 
         with pytest.raises(ValueError, match="non-finite"):
             generator.generate(
@@ -628,9 +717,9 @@ class TestNormalizedPlanResult:
         positions = torch.zeros(BATCH_SIZE, 5, CONTROLLED_DOF)
         positions[1] = 1.0
         generator = _mock_generator(
-            result=PlanResult(
+            result=_timed_result(
+                positions,
                 success=torch.tensor([True, False]),
-                positions=positions,
             )
         )
         start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)

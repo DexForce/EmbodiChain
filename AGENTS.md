@@ -6,22 +6,36 @@ EmbodiChain keeps agent-facing context in a structured topic registry:
 
 - `agent_context/` — agent-readable Markdown context, indexed by `agent_context/MAP.yaml`
 - `docs/source/` — human-facing Sphinx documentation
-- `.agents/skills/project-dev-context/` — the skill that routes "reference project context" requests
+- `.agents/skills/project-dev-context/` — the skill that routes project-context and codebase-navigation requests
 - `.claude/skills/` and `.github/copilot/` — thin tool-specific adapters that point back to `.agents/skills/`
 
 When a request says things like:
 
 - `reference project development docs`
 - `reference project context`
+- `where is X`
+- `where do I change X`
+- `配置或默认值在哪里`
+- `入口或注册逻辑在哪里`
 
 the agent should:
 
 1. Read `agent_context/MAP.yaml` first
 2. Resolve the topic by `id`, `aliases`, then `keywords`
-3. Load only the matched Markdown files under `agent_context/`
-4. Avoid reading `docs/source/` unless the user explicitly asks for the Sphinx documentation
+3. For context reads, load only the matched Markdown files under
+   `agent_context/`
+4. For navigation, verify matched facts against the current
+   `source_of_truth`; if no topic matches, use `rg --files` and `rg -n`
+   against the current tree
+5. Report the owning entry point, resolution path, recommended change site,
+   and focused validation surface when relevant
+6. Avoid reading `docs/source/` unless the user explicitly asks for the
+   Sphinx documentation
 
-Available topics: `env-framework`, `manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`, `sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`, `configclass-pattern`, `randomization`.
+Available topics: `simulation-system`, `env-framework`,
+`manager-functor`, `ik-solvers`, `robot-system`, `sensor-system`,
+`sim-visualization`, `motion-planning`, `atomic-actions`, `rl-learning`,
+`configclass-pattern`, `randomization`.
 
 ---
 
@@ -43,14 +57,11 @@ EmbodiChain/
 ├── .claude/                      # Claude adapters for canonical skills
 │   └── skills/
 ├── embodichain/                  # Main Python package
-│   ├── agents/                   # AI agents
-│   │   ├── hierarchy/            # LLM-based hierarchical agents (task, code, validation)
-│   │   ├── mllm/                 # Multimodal LLM prompt scaffolding
-│   │   └── prompts/              # Agent prompt templates
-│   ├── data_pipeline/            # Datasets and online data streaming
-│   ├── learning/                 # Learning systems: RL, IL, frontier model architectures
-│   │   └── rl/                   # RL: PPO/GRPO algo, rollout buffer, collectors, policies
 │   ├── data/                     # Assets, datasets, constants, enums
+│   ├── data_pipeline/            # Datasets and online data streaming
+│   ├── gen_sim/                  # Scene Engine and SimReady generation pipelines
+│   ├── learning/                 # Learning systems
+│   │   └── rl/                   # RL: PPO/GRPO/APG, buffers, collectors, policies
 │   ├── lab/                      # Simulation lab
 │   │   ├── visualization/        # Browser visualization protocol, runtime, and Viser backend
 │   │   ├── gym/                  # OpenAI Gym-compatible environments
@@ -62,14 +73,18 @@ EmbodiChain/
 │   │   │   │   └── wrapper/      # Env wrappers (e.g. no_fail)
 │   │   │   └── utils/            # Gym registration, misc helpers
 │   │   ├── sim/                  # Simulation core
+│   │   │   ├── atomic_actions/   # Typed planning and execution primitives
 │   │   │   ├── objects/          # Robot, RigidObject, Articulation, Light, Gizmo, SoftObject
 │   │   │   ├── sensors/          # Camera, StereoCamera, BaseSensor
 │   │   │   ├── robots/           # Robot-specific configs and params (dexforce_w1, cobotmagic)
 │   │   │   ├── planners/         # Motion planners (TOPPRA, motion generator)
-│   │   │   └── solvers/          # IK solvers (SRS, OPW, pink, pinocchio, pytorch)
+│   │   │   ├── solvers/          # IK solvers (SRS, OPW, pink, pinocchio, pytorch)
+│   │   │   ├── skills/           # Semantic scene and robot-skill binding contracts
+│   │   │   └── workspace/        # Reachability analysis and runtime workspace queries
 │   │   ├── devices/              # Real-device controllers
-│   │   └── scripts/              # Entry-point scripts (run_env, run_agent)
+│   │   └── scripts/              # Environment, preview, and analysis entry points
 │   ├── toolkits/                 # Standalone tools
+│   │   ├── acd/                  # URDF convex-decomposition CLI
 │   │   ├── graspkit/pg_grasp/    # Parallel-gripper grasp sampling
 │   │   └── urdf_assembly/        # URDF builder utilities
 │   └── utils/                    # Shared utilities
@@ -82,6 +97,7 @@ EmbodiChain/
 │   └── source/                   # .md doc pages (overview, quick_start, features, resources)
 ├── tests/                        # Test suite
 ├── .github/                      # CI workflows, issue/PR templates, Copilot adapters
+├── pyproject.toml                # Distribution metadata and unified CLI entry point
 ├── setup.py                      # Package setup
 └── VERSION                       # Package version file
 ```
@@ -234,7 +250,7 @@ Include:
 
 ### Adding a New Robot
 
-Refer to `docs/source/tutorial/add_robot.rst` for a detailed guide. The basic structure requires:
+Refer to `docs/source/guides/add_robot.rst` for a detailed guide. The basic structure requires:
 
 - A config class (inheriting from `RobotCfg`)
 - URDF configuration for the robot

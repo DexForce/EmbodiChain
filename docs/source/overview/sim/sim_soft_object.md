@@ -43,7 +43,7 @@ Soft bodies require both voxelization and physical attributes.
 | `mass` | `float` | `-1.0` | Total mass. If negative, density is used. |
 | `density` | `float` | `1000.0` | Material density in kg/m^3. |
 
-For Soft Object tutorial, please refer to the [Soft Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html).
+For a runnable example, see the {doc}`Soft Body Simulation </tutorial/create_softbody>` tutorial.
 
 
 ### Setup & Initialization

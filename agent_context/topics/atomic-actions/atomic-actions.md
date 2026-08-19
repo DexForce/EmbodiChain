@@ -13,17 +13,18 @@ There is no `ActionTarget`, `WorldState`, `ActionResult`, `execute()`, or
 
 `ActionInvocation` separates:
 
-- an action-owned typed goal (`goal_kind` is its stable discriminator);
+- an action-owned typed goal, validated against the action's `GoalType`;
 - an engine-owned `ActionBinding`, which covers the skill contract by exact
   `(slot_id, endpoint_id)` keys and terminates every endpoint at an immutable
   `RuntimeEndpointTarget`;
-- reusable `MotionPolicy` planner/timing choices;
+- reusable `MotionPolicy` strategy, sampling, collision, and backend options;
 - bounded `RecoveryPolicy` thresholds and retry budgets;
 - optional typed `skill_options` and endpoint-scoped `control_overrides` for
   one invocation revision.
 
 `PlanningContext` separates measured `RobotObservation`, verified symbolic
-`TaskState`, versioned `SceneSnapshot`, and environment IDs. An `ActionPlan`
+`TaskState`, versioned `SceneSnapshot`, environment IDs, and an optional
+explicit `control_dt` used only by action-owned interpolation. An `ActionPlan`
 contains per-environment planning success, an authoritative
 `TimedCommandSequence` in `commands`, an optional full-robot `TimedTrajectory`
 in `joint_trajectory`, action-level recovery and scene-invalidation metadata,
@@ -45,7 +46,11 @@ recompute private sample splits in callers.
 Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
 its direct control-part command-profile snapshot. It also issues an opaque
-binding-owner ID, so an `ActionBinding` cannot cross engine instances.
+binding-owner ID, so an `ActionBinding` cannot cross engine instances. It does
+not own a timing fallback. Planner results with positions require explicit `dt`;
+`duration` is derived from it. Actions must pass a complete `TimedTrajectory` to
+`build_plan()`. Environment-backed integrations put `BaseEnv.step_dt` on
+`PlanningContext.control_dt` when action-owned interpolation needs a cadence.
 `MotionGenerator.generate()` is the only stateful motion-planning entry point.
 `MotionPolicy.to_motion_gen_options()` passes the invocation's `strategy`
 directly into `MotionGenOptions`; it is either `"motion_gen"` or `"ik_interp"`.
@@ -76,8 +81,8 @@ must remain active during execution.
 called by the engine, not a fourth application entry point. It binds collision
 entities from the current scene into a copied motion policy before delegating
 to the skill-specific `_plan()` hook. New actions implement `_plan()` and must
-not override `plan()`. `engine.plan_action(...)` is only an extension/testing
-escape hatch for an unregistered instance.
+not override `plan()`. Custom actions must be installed with
+`engine.register()` before using the same public entry points.
 
 The `_plan()` extension boundary is an intentional hard break with no legacy
 adapter. A subclass that defines `plan()` raises `TypeError` at class definition;
@@ -149,6 +154,16 @@ disjointness, then emits the same generic `ActionBinding` with
 and this path deliberately does not perform profile resource discovery or
 capability matching.
 
+`engine.make_invocation(skill_id, goal, ...)` is the convenience construction
+boundary when callers do not need to retain a binding separately. Pass
+`control_parts` for the direct path, or rely on a bound `RobotSkillProfile` and
+optionally pass `resources` as `slot -> resource_id` selections. The two binding
+sources are mutually exclusive. Without a profile, `control_parts` is required;
+with a profile, omitting `resources` uses unique or configured-default profile
+resolution. The method returns an ordinary `ActionInvocation` and does not plan
+or execute it. It resolves bindings only; profile policy presets and runner
+configuration remain semantic-runtime concerns.
+
 Discovery boundaries are distinct:
 
 - `engine.actions` contains every installed action instance and is the
@@ -215,6 +230,52 @@ executable only when its adapter supplies a target, the action emits a matching
 runtime payload, and the target's transport is registered with the
 `EndpointCommandRouter`. Successful binding or a non-conflicting claim alone is
 not proof that a planner/controller path or safe concurrent execution exists.
+
+## Semantic call integration and compilation
+
+`embodichain.lab.sim.skills` adds a side-effect-free semantic layer above
+`AtomicActionEngine`:
+
+- `calls.py` owns immutable, robot-independent call values: `Pick`, `Place`,
+  `HandOver`, and the data-only `RegisteredSemanticCall`. `SemanticCallCatalog`
+  is a discovery catalog; it neither installs actions nor executes providers.
+- `SceneRegistry` indexes typed/versioned affordance capabilities and
+  capability-scoped defaults. `SceneManifest` is its provider-free projection.
+  `SemanticIntegrationManifest.link_call()` resolves canonical scene references,
+  affordances, declared resources, and policy presets without observing state or
+  running a planner.
+- `SemanticIntegrationManifest.bind()` requires the live registry to match the
+  static scene manifest, binds the robot profile to the exact engine, and returns
+  a `BoundSemanticIntegration`. Its `link_call()` additionally verifies the
+  installed skill descriptor, physical resource binding, and preset.
+- `SemanticSkillCompiler.analyze()` links an ordered workflow, validates all
+  reachable lowerers/grounders/providers, tracks attach/release/transfer
+  dependencies, and records downstream object targets. It is provider-free.
+- `SemanticSkillCompiler.ground()` lowers exactly one analyzed call against the
+  latest `PlanningContext` into an `ActionInvocation` plus an eligibility mask.
+  It does not plan, execute, or commit effects; pass the invocation to the
+  ordinary engine lifecycle.
+
+Relation targets dispatch through an exact
+`(capability, affordance type, revision)` `RelationTargetGrounder`.
+Hand-over poses dispatch through the provider ID selected by
+`RobotSkillProfile.grounding_providers`. Registered calls require both a catalog
+descriptor and an explicitly installed `RegisteredSemanticLowerer`; Version 1
+treats them as opaque workflow effect boundaries.
+
+The compiler preserves object-space intent. Pick look-ahead targets remain
+late-bound when they depend on scene relations, while Place and HandOver lower
+only from verified held-object state and compose the observed
+`object_to_eef` transform. A lowering has no common goal discriminator contract:
+registered lowerers are checked against the target `SkillDescriptor`, and the
+installed action validates its concrete goal/options types.
+
+Workflows are owned by one compiler, engine binding owner, and monotonic
+`skill_catalog_revision`. Registering or replacing an agent-visible action
+invalidates bound profiles and analyzed workflows even when the replacement has
+an equal descriptor; rebind the profile and analyze again. Static and live
+integration failures use `SemanticValidationError` with a stable code, full
+path, and canonical candidates.
 
 ## Object identity and pose grounding
 
@@ -330,7 +391,9 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
 | `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
 | `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
-| `Press` | A `SceneEntityPose` in `xpos`. |
+| `Press` | `PressGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
+| `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
+| `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
 | `HandOver` | No semantic-object scene dependency. It verifies stable attachment identity and derives current pose from held state; its middle/final option poses are tensors, and the reused `GraspGoal.grasp_xpos` field is ignored. |
 
@@ -502,21 +565,20 @@ For lightweight sources that do not need environment correlation IDs,
 The public `AtomicAction.plan()` copies `MotionPolicy` and binds collision entity
 poses through `MotionGenerator.bind_collision_world()`. The motion generator
 owns option copying and the backend capability boundary, then forwards the
-update through `BasePlanner.with_collision_world()`. Backends opt in via
-`supports_collision_world_updates`; cuRobo implements this bridge using
-`CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore consumes the
-same scene snapshot that triggered invalidation without adding obstacle
-parameters to each skill. Add/remove/geometry mutations are not yet supported
-by this pose-update path; providers should revision only pose-updatable
-registered obstacles.
+update through `BasePlanner.with_collision_world()`. Backends opt in through
+`BasePlanner.collision_world_info.supports_updates`; cuRobo implements this
+bridge using `CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore
+consumes the same scene snapshot that triggered invalidation without adding
+obstacle parameters to each skill. Add/remove/geometry mutations are not yet
+supported by this pose-update path; providers should revision only
+pose-updatable registered obstacles.
 
-`BasePlanner.collision_world_entity_ids`, `dynamic_collision_entity_ids`, and
-`collision_world_batch_mode` expose the backend's complete world, dynamic
-subset, and batching contract. `MotionGenerator` validates and forwards those
-properties for `SceneRegistry.make_planning_scene_provider()`. External
-providers call `validate_collision_integration(..., scene_provider=...)`.
-These construction checks are separate from per-plan
-`bind_collision_world()`.
+`BasePlanner.collision_world_info` exposes the backend's complete world,
+dynamic subset, batching mode, and update capability as one immutable contract.
+`MotionGenerator` validates and forwards it for
+`SceneRegistry.make_planning_scene_provider()`. External providers call
+`validate_collision_integration(..., scene_provider=...)`. These construction
+checks are separate from per-plan `bind_collision_world()`.
 
 Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `tracking_error_recovery.py`, `moving_target_recovery.py`, and
@@ -533,8 +595,14 @@ Collision-world revisions must also remain monotonic per environment.
 Goal dataclasses carry only semantic task intent. They do not carry robot part
 names, planner configuration, retry policy, or runtime state.
 
-`MotionPolicy` owns planner selection, motion strategy, sample count, fallback
-control period, limits, dynamic-collision mode, and typed planner options.
+`MotionPolicy` owns motion strategy, sample count, dynamic-collision mode, and
+typed planner options. Optional planner-backend compatibility belongs to
+`SkillPolicyPreset.required_planner`; velocity and acceleration constraints
+belong to the selected backend's typed `PlanOptions`. Timing belongs to the
+trajectory producer: planners return explicit `dt` with derived `duration`,
+while custom or composite interpolation constructs a `TimedTrajectory` using
+an explicit cadence such as `PlanningContext.require_control_dt()`. Missing
+timing is an error rather than an engine-owned default.
 `DynamicCollisionMode.AUTO` consumes a live collision world when available,
 `OFF` ignores snapshot collision entities and their revisions, and `REQUIRED`
 fails unless the motion strategy, scene, and planner support that path. These
@@ -546,13 +614,17 @@ offsets, and grasp selection behavior. An action constructor may accept
 There is no `ActionCfg` or built-in `*Cfg` layer.
 
 `engine.register(action)` is reserved for custom skill implementations. A
-built-in can be replaced only with explicit `replace=True`. Registration puts
-the implementation in `engine.actions`; it does not prove that the current
-embodiment supports it. Semantic exposure additionally requires a concrete
-class-local `binding_contract` for `engine.skills` and a valid profile assignment
-for `engine.skill_profile.skills`. The module-level `register_action()` API is a
-process-wide extension-type discovery catalog only; it neither binds actions nor
-changes an engine's default built-in set.
+built-in can be replaced only with explicit `replace=True`. Registration means
+an implementation is installed; it does not prove that the current embodiment
+has compatible control parts, profiles, bindings, or task state. Capability
+discovery is separate: `engine.skills`
+contains only agent-visible installed actions whose concrete classes explicitly
+declare a `binding_contract`; when a robot profile is bound,
+`engine.skill_profile.skills` further filters that catalog to valid resource
+assignments. Registration is engine-local; there is no independent process-wide
+action catalog. Construct extensions explicitly and install them with
+`engine.register()` so discovery and execution cannot observe disconnected
+registries.
 
 `ExecutionRunnerCfg` is intentionally separate from action options. It
 configures controller acknowledgement deadlines, scheduler cadence, and final
@@ -570,6 +642,15 @@ within that transport. `JointPositionTarget` is the built-in target for a named
 Built-in joint primitives explicitly require that target type when they need
 IK, joint interpolation, or current attachment keys; a custom mobile or
 whole-body skill is not required to masquerade as an arm or hand.
+
+Attachment state and `StateDelta` keys use the bound target's concrete control
+part. `TaskState.held_objects` is the sole attachment map. A multi-manipulator
+grasp stores one `HeldObjectState` per manipulator with the same
+`ObjectSemantics` instance. `TaskState.held_object_mask()` exposes active rows,
+while `exclusive_held_object_mask()` excludes rows where another manipulator
+holds the same semantic object or live entity. Single-arm transport, release,
+and handover operations only succeed on exclusive rows; coordinated placement
+likewise requires two distinct, exclusively held objects.
 
 Embodiment-specific semantic commands do not belong to action options. A caller
 using direct control-part binding without a `RobotSkillProfile` registers them
@@ -610,9 +691,28 @@ on their resolved endpoint.
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` |
 | `press` | `PressGoal` | `primary.motion`, `primary.grasp` |
+| `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` |
+| `twist` | `TwistGoal` | `primary.motion`, `primary.grasp` |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left.motion`, `left.grasp`, `right.motion`, `right.grasp` |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing.motion`, `placing.grasp`, `support.motion`, `support.grasp` |
 | `hand_over` | `GraspGoal` | `source.motion`, `source.grasp`, `destination.motion`, `destination.grasp` |
+
+`PressAffordance`, `SlideAffordance`, and `TwistAffordance` contain only
+target-local geometry and interaction semantics. Their goals own an explicit
+`target_pose`, which may be a deterministic tensor snapshot or a late-bound
+`SceneEntityPose`. Never put an `Articulation`, `RigidObject`, or live link pose
+reader in these affordances.
+
+`Press` and `Slide` use dense axis-aligned Cartesian targets for their contact
+motion. The linear motion-generator path solves every output sample with IK;
+it does not resample sparse IK endpoints in joint space. `Press` has a distinct
+contact segment before penetration. `TwistAffordance.axis_origin` and
+`twist_axis` together define the full 3D rotation axis.
+
+These three motion-centric primitives declare `SkillDescriptor.open_loop=True`
+and an empty `StateDelta`. Their completion means motion execution only, not
+verified button actuation, grasp retention, or articulation travel. Applications
+that need semantic completion must observe and verify those physical outcomes.
 
 `GraspGoal.grasp_xpos` accepts an explicit pose tensor, a late-bound
 `SceneEntityPose`, or `None` for affordance sampling. A `SceneEntityPose`
@@ -631,7 +731,7 @@ snapshot-grounded object example.
 
 ## Extension rules
 
-1. Define a frozen action-owned goal dataclass with `goal_kind`.
+1. Define a frozen action-owned goal dataclass.
 2. Define a frozen `ActionOptions` subclass only when runtime behavior exists.
 3. Declare `skill_id`, `GoalType`, `OptionsType`, and a class-local
    `SkillBindingContract` when the skill should appear in `engine.skills`.
@@ -646,11 +746,15 @@ snapshot-grounded object example.
 7. If planning consumes a semantic object's snapshot pose, override
    `_scene_dependencies()`, preserve `super()` dependencies, and add exactly
    that semantic ID.
-8. For planner-backed joint motion, return full-robot positions or a
-   `TimedTrajectory` through `build_plan()`: build batched `list[PlanState]`,
-   translate the policy with `request.motion_policy.to_motion_gen_options()`,
-   call `self.motion_generator.generate()`, and import pure operations directly
-   from `trajectory_ops.py`. For mobile, whole-body, or other controller-native
+8. For planner-backed joint motion, return a full-robot `TimedTrajectory`
+   through `build_plan()`; raw position tensors are rejected. Preserve planner
+   `dt`, or use `TimedTrajectory.from_uniform_step()` with an explicitly
+   selected cadence for action-owned interpolation. Build batched
+   `list[PlanState]`, translate the policy with
+   `request.motion_policy.to_motion_gen_options()` (including
+   `interpolation_dt=context.control_dt` when applicable), call
+   `self.motion_generator.generate()`, and import pure operations directly from
+   `trajectory_ops.py`. For mobile, whole-body, or other controller-native
    motion, build `EndpointCommand` frames and a `TimedCommandSequence`, then use
    `build_command_plan()`. A new transport family must define matching
    `RuntimeEndpointTarget` and `RuntimeCommandPayload` types with the same

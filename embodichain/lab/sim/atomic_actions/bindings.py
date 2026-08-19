@@ -310,7 +310,7 @@ class EndpointBinding:
         self,
         name: str,
         *,
-        n_envs: int,
+        num_envs: int,
         device: torch.device | str,
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
@@ -325,7 +325,7 @@ class EndpointBinding:
                 "JointPositionCommand."
             )
         return command.resolve(
-            n_envs=n_envs,
+            num_envs=num_envs,
             control_dof=len(target.joint_ids),
             device=device,
             dtype=dtype,

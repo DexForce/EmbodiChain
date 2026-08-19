@@ -200,7 +200,7 @@ class ExecutionSession:
         engine._validate_context(context)
         self._engine = engine
         self._requests: tuple[ResolvedActionRequest, ...] = tuple(
-            engine.resolve(invocation) for invocation in invocations
+            engine._resolve(invocation) for invocation in invocations
         )
         self._task_state = context.task
         self._context = context
@@ -343,7 +343,6 @@ class ExecutionSession:
             replacement_plan,
             ExecutionEventKind.INVOCATION_REVISED,
         )
-
         requests = list(self._requests)
         requests[self._invocation_index] = replacement
         self._requests = tuple(requests)
@@ -355,6 +354,7 @@ class ExecutionSession:
             replacement_plan,
             replacement_context,
             ExecutionEventKind.INVOCATION_REVISED,
+            destination_continuity_validated=True,
         )
 
     def _validate_revision_identity(
@@ -552,6 +552,7 @@ class ExecutionSession:
             task=self._task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
 
     def _plan_current(
@@ -561,7 +562,7 @@ class ExecutionSession:
     ) -> None:
         """Plan the current invocation from the latest observation."""
         request = self._requests[self._invocation_index]
-        plan = self._engine.plan_request(request, context)
+        plan = self._engine._plan_request(request, context)
         self._install_plan(plan, context, event_kind)
 
     def _install_plan(
@@ -569,14 +570,17 @@ class ExecutionSession:
         plan: ActionPlan,
         context: PlanningContext,
         event_kind: ExecutionEventKind,
+        *,
+        destination_continuity_validated: bool = False,
     ) -> None:
-        """Install an already validated plan as the current execution plan."""
+        """Install a plan, checking target continuity unless already checked."""
         replacement_targets = {
-            (target.transport_id, target.target_id): target.snapshot()
+            (target.transport_id, target.target_id): target
             for target in plan.commands.targets
         }
         replacement_destinations = frozenset(replacement_targets)
-        self._validate_destination_continuity(plan, event_kind)
+        if not destination_continuity_validated:
+            self._validate_destination_continuity(plan, event_kind)
         if (
             event_kind
             not in (
@@ -847,6 +851,7 @@ class ExecutionSession:
                 task=self._task_state,
                 scene=self._context.scene,
                 env_ids=self._context.env_ids,
+                control_dt=self._context.control_dt,
             )
             self._pending &= ~verified
         failed_effect = execution_mask & ~verified

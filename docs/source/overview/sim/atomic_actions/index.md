@@ -116,7 +116,7 @@ manual_invocation = ActionInvocation(
     skill_id="move_end_effector",
     goal=EndEffectorPoseGoal(xpos=target_pose),
     binding=binding,
-    motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+    motion_policy=MotionPolicy(sample_count=80),
     recovery_policy=RecoveryPolicy(max_replans=2),
 )
 
@@ -182,25 +182,36 @@ from leaking into an Action Agent schema.
 
 | Contract | Contains | Does not contain |
 |---|---|---|
-| `ActionGoal` | Action-specific desired outcome, such as an EEF pose or object pose | Arm names, planner instances, recovery counters |
+| Action-owned goal dataclass | Action-specific desired outcome, such as an EEF pose or object pose | Arm names, planner instances, recovery counters |
 | `SkillBindingContract` | Skill-local participant slots, required endpoint capabilities and commands, and disjointness constraints | Concrete robot resources, controller handles, or transport configuration |
 | `ActionBinding` / `EndpointBinding` | Engine-owned endpoint snapshots keyed by `(slot_id, endpoint_id)`, including capabilities, semantic commands, claims, and an immutable runtime target | Live controllers, planner settings, task geometry, or caller-owned mutable mappings |
 | `ActionOptions` / built-in `*Options` | Frozen invocation-varying skill behavior: segment counts, offsets, grasp-selection rules | Robot resource names, hand qpos, planner backend |
 | `ControlPartCommandProfile` | Embodiment-specific semantic commands such as `open`, `grasp`, and `ready`, keyed by actual control-part name | Skill slots/endpoints, task goals, recovery state |
 | `ActionControlOverrides` | Optional `(slot, endpoint)`-scoped command replacements for one invocation revision | Persistent robot configuration |
-| `MotionPolicy` | Motion strategy, sample count, timing, limits, dynamic-collision mode, typed planner options | Skill semantics or robot-resource names |
+| `MotionPolicy` | Motion strategy, sample count, dynamic-collision mode, typed planner options | Execution cadence, skill semantics, or robot-resource names |
 | `RecoveryPolicy` | Action replan/retry budgets, tracking and dynamic-goal thresholds, action-attempt timeout | Controller state or mutable counters |
 | `ExecutionRunnerCfg` | Runner-level acknowledgement deadlines, minimum feedback cadence, and completion hold policy | Skill behavior, planning resources, or invocation revision data |
-| `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs | Hypothetical simulator mutation |
+| `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs, and optional explicit control cadence for action-owned interpolation | Hypothetical simulator mutation or a planner timing fallback |
 | `ActionPlan` | Per-environment result, `TimedCommandSequence`, optional joint trajectory, named segments, action-level recovery metadata, diagnostics, expected `StateDelta` | Proof that a grasp/release/contact physically succeeded; independently recoverable segment boundaries |
 | `RuntimeCommandFrame` | Synchronized endpoint commands, active rows, stable environment IDs, and per-row hold duration | Live transport or controller objects |
 
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
+Every planner result that contains positions must also contain per-waypoint
+`dt`; its per-environment `duration` is derived from those intervals. Every
+action passes a `TimedTrajectory` to `build_plan()`; raw position tensors are
+rejected. For
+action-owned deterministic interpolation, the integration supplies its
+authoritative cadence as `PlanningContext.control_dt` (normally
+`BaseEnv.step_dt`). The engine never supplies or guesses missing timing.
+Planner-backend compatibility is a profile-level concern expressed by
+`SkillPolicyPreset.required_planner`, not a per-invocation motion choice.
 
-Goals follow the structural `ActionGoal` protocol: each action owns one or more
-frozen dataclasses with a stable `goal_kind`. There is no shared `ActionTarget`
-base class and no closed union that must change whenever a skill is added.
+Each action owns one or more frozen goal dataclasses and declares the accepted
+type through `AtomicAction.GoalType`. The action validates that type when the
+engine resolves an invocation. There is no marker protocol, shared
+`ActionTarget` base class, or closed union that must change whenever a skill is
+added.
 
 ### Skill contracts and endpoint binding
 
@@ -344,7 +355,7 @@ instances to the engine's planning services:
 ```python
 engine = AtomicActionEngine(motion_generator, control_profiles=profiles)
 
-# All nine built-ins are immediately usable by stable skill ID.
+# All eleven built-ins are immediately usable by stable skill ID.
 assert "move_end_effector" in engine.actions
 assert "pick_up" in engine.actions
 ```
@@ -407,10 +418,9 @@ custom_engine.register(MyAction())
 engine.register(CustomPickUp(), replace=True)
 ```
 
-The module-level `register_action()` catalog is only for process-wide extension
-type discovery. It does not mutate existing engines or join their default
-built-in set; instantiate a discovered extension and pass it to
-`engine.register()` explicitly.
+Registration is deliberately engine-local. Construct an extension and pass it
+to `engine.register()` explicitly; there is no separate process-wide catalog
+whose contents can drift from the actions installed in an engine.
 
 ### Implementation and advanced APIs
 
@@ -450,7 +460,7 @@ invocation = ActionInvocation(
     skill_id="move_end_effector",
     goal=EndEffectorPoseGoal(xpos=target_pose),
     binding=binding,
-    motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+    motion_policy=MotionPolicy(sample_count=80),
 )
 
 plan = engine.plan(invocation, latest_context)
@@ -472,6 +482,9 @@ action must be planned against this action's hypothetical result, use
 and replaces unsuccessful rows with the context's observed joint position.
 Primitive implementations therefore preserve row-local failures in
 `plan_success`; they do not need to duplicate failure-row hold logic.
+It accepts only `TimedTrajectory`. Interpolation code can construct one with
+`TimedTrajectory.from_uniform_step(..., step_dt=context.require_control_dt())`;
+planner-backed code should preserve the planner's explicit `dt`.
 
 `TrajectorySegment.start` and `.stop` form an action-local half-open waypoint
 range. `plan.segment(name)` resolves that local metadata, while
@@ -501,7 +514,7 @@ binding = engine.bind_control_parts(
     "move_end_effector",
     {"primary": {"motion": "left_arm"}},
 )
-motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
+motion_policy = MotionPolicy(sample_count=80)
 
 approach = ActionInvocation(
     skill_id="move_end_effector",
@@ -757,6 +770,13 @@ environment row. Pick, place, handover, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
 
+`TaskState.held_objects` uses one `HeldObjectState` per bound manipulator.
+Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
+there is no parallel coordinated-attachment representation to synchronize.
+Consumers query per-environment active and exclusive-hold masks from that one
+map. A single-arm transport, release, or handover row fails safely while a
+second manipulator still holds the same semantic object or live entity.
+
 At the terminal waypoint, an `ExecutionSession` requests an external
 per-environment verification mask before committing a non-empty effect:
 
@@ -804,7 +824,7 @@ decision without mutating an in-flight request implicitly.
 
 A new primitive should:
 
-1. define a frozen, action-owned goal dataclass with a stable `goal_kind`;
+1. define a frozen, action-owned goal dataclass;
 2. define a frozen `ActionOptions` subclass only for behavior that can vary per
    invocation;
 3. declare `skill_id`, `GoalType`, `OptionsType`, an explicit

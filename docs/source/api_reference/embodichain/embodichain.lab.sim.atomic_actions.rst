@@ -7,7 +7,6 @@ embodichain.lab.sim.atomic_actions
 
    .. autosummary::
 
-      ActionGoal
       ActionBinding
       EndpointBinding
       RuntimeEndpointTarget
@@ -88,6 +87,14 @@ embodichain.lab.sim.atomic_actions
       PlaceGoal
       AssembleGoal
       PressGoal
+      PressOptions
+      PressAffordance
+      SlideGoal
+      SlideOptions
+      SlideAffordance
+      TwistGoal
+      TwistOptions
+      TwistAffordance
       CoordinatedPickGoal
       CoordinatedPlacementGoal
       MoveEndEffector
@@ -96,6 +103,8 @@ embodichain.lab.sim.atomic_actions
       MoveHeldObject
       Place
       Press
+      Slide
+      Twist
       CoordinatedPickment
       CoordinatedPlacement
       HandOver
@@ -307,7 +316,4 @@ Semantic objects and helpers
    :members:
 
 .. autoclass:: HeldObjectState
-   :members:
-
-.. autoclass:: CoordinatedHeldObjectState
    :members:

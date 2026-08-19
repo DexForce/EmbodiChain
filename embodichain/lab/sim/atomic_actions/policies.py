@@ -56,23 +56,11 @@ class MotionPolicy:
     cannot change an invocation after it has been created.
     """
 
-    planner: str | None = None
-    """Optional required planner backend name; ``None`` accepts the configured one."""
-
     strategy: Literal["motion_gen", "ik_interp"] = "ik_interp"
     """Motion strategy: ``motion_gen`` or ``ik_interp``."""
 
     sample_count: int = 50
     """Requested trajectory sample count when the backend does not preserve samples."""
-
-    control_dt: float = 1.0 / 60.0
-    """Fallback command period in seconds when a planner supplies no timing."""
-
-    velocity_limit: float | None = None
-    """Optional planner velocity limit."""
-
-    acceleration_limit: float | None = None
-    """Optional planner acceleration limit."""
 
     dynamic_collision_mode: DynamicCollisionMode = DynamicCollisionMode.AUTO
     """How this invocation consumes live scene-snapshot collision entities."""
@@ -89,12 +77,6 @@ class MotionPolicy:
             )
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
-        if self.control_dt <= 0.0:
-            raise ValueError("control_dt must be greater than zero.")
-        if self.velocity_limit is not None and self.velocity_limit <= 0.0:
-            raise ValueError("velocity_limit must be greater than zero when set.")
-        if self.acceleration_limit is not None and self.acceleration_limit <= 0.0:
-            raise ValueError("acceleration_limit must be greater than zero when set.")
         mode = self.dynamic_collision_mode
         if isinstance(mode, str):
             try:
@@ -117,6 +99,8 @@ class MotionPolicy:
         start_qpos: "torch.Tensor",
         control_part: str,
         sample_count: int | None = None,
+        interpolation_dt: float | None = None,
+        cartesian_linear: bool = False,
     ) -> "MotionGenOptions":
         """Translate this atomic policy into motion-generator options.
 
@@ -124,6 +108,10 @@ class MotionPolicy:
             start_qpos: Observed controlled-joint start positions.
             control_part: Bound robot control-part name.
             sample_count: Optional segment-local sample-count override.
+            interpolation_dt: Explicit waypoint interval used only by
+                deterministic interpolation.
+            cartesian_linear: Whether every supplied Cartesian keyframe is a
+                required linear-path sample rather than a sparse endpoint.
 
         Returns:
             Independently owned options for :class:`MotionGenerator`.
@@ -133,12 +121,13 @@ class MotionPolicy:
         return MotionGenOptions(
             strategy=self.strategy,
             sample_count=self.sample_count if sample_count is None else sample_count,
-            velocity_limit=self.velocity_limit,
-            acceleration_limit=self.acceleration_limit,
             start_qpos=start_qpos,
             control_part=control_part,
             plan_opts=self.plan_opts,
             is_interpolate=True,
+            interpolation_dt=interpolation_dt,
+            is_linear=cartesian_linear,
+            preserve_cartesian_samples=cartesian_linear,
         )
 
 
