@@ -42,10 +42,10 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -126,11 +126,11 @@ def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -162,7 +162,10 @@ def main() -> None:
                     manipulators={"primary": "arm"},
                     end_effectors={"primary": "hand"},
                 ),
-                motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICK_SAMPLE_INTERVAL,
+                ),
                 skill_options=PickUpOptions(
                     approach_direction=resolve_approach_direction(args, sim.device),
                     pre_grasp_distance=0.15,

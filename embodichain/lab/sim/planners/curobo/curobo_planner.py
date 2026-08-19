@@ -54,6 +54,7 @@ from embodichain.lab.sim.planners.base_planner import (
     PlanOptions,
     validate_plan_options,
 )
+from embodichain.lab.sim.planners.curobo.curobo_yaml import _named_rigid_objects
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
@@ -141,18 +142,6 @@ class _RigidObjectRefMapping(dict):
 
     def __deepcopy__(self, memo: dict) -> "_RigidObjectRefMapping":  # noqa: ARG002
         return _RigidObjectRefMapping(self)
-
-
-def _named_rigid_objects(
-    rigid_objects: list[RigidObject] | Mapping[str, RigidObject] | None,
-) -> list[tuple[str, RigidObject]]:
-    """Return canonical cuRobo obstacle names paired with their live objects."""
-    if isinstance(rigid_objects, Mapping):
-        return list(rigid_objects.items())
-    return [
-        (getattr(obj, "uid", None) or f"obstacle_{index}", obj)
-        for index, obj in enumerate(rigid_objects or ())
-    ]
 
 
 @configclass

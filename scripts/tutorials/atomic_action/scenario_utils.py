@@ -39,8 +39,14 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg
+from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.solvers import PytorchSolverCfg, SolverCfg, URSolverCfg
 from embodichain.utils import logger
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    GRIPPER_HAND_JOINT_PATTERN,
+    TutorialRobot,
+    create_tutorial_robot_cfg,
+)
 
 ARM_URDF_PATH = "UniversalRobots/UR5/UR5.urdf"
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
@@ -210,6 +216,190 @@ def add_dual_ur5_robot(
     return sim.add_robot(cfg=cfg)
 
 
+def create_dual_tutorial_robot_cfg(
+    *,
+    robot_type: TutorialRobot,
+    uid: str,
+    urdf_name: str,
+    tcp_z: float,
+    solver: Literal["ur", "pytorch"] = "ur",
+    ur_ik_nearest_weight: Sequence[float] | None = None,
+    pytorch_num_samples: int = 30,
+    init_pos: Sequence[float] = DUAL_UR5_INIT_POS,
+    init_rot: Sequence[float] = DUAL_UR5_INIT_ROT,
+    left_arm_home: Sequence[float] | None = None,
+    right_arm_home: Sequence[float] | None = None,
+    hand_stiffness: float = 1e3,
+    hand_damping: float = 1e2,
+    hand_max_effort: float = 1e4,
+) -> RobotCfg:
+    """Build a dual tutorial robot from the selected arm and shared PGI hand.
+
+    Franka always uses its PyTorch kinematics solver; ``solver="ur"`` selects
+    the analytical solver only when ``robot_type="ur5"``. The mounting layout,
+    control-part names, gripper component, and downstream action bindings stay
+    identical across both robot choices.
+
+    Args:
+        robot_type: Arm family to mount on both sides.
+        uid: Simulation robot identifier.
+        urdf_name: Cache name for the assembled dual-arm URDF.
+        tcp_z: PGI tool-center-point offset along local Z.
+        solver: Preferred UR5 solver implementation.
+        ur_ik_nearest_weight: Optional nearest-solution weights for UR5 IK.
+        pytorch_num_samples: Number of PyTorch IK seed samples.
+        init_pos: Root position of the assembled robot.
+        init_rot: Root xyz Euler rotation in degrees.
+        left_arm_home: Optional left-arm initial configuration.
+        right_arm_home: Optional right-arm initial configuration.
+        hand_stiffness: PGI joint drive stiffness.
+        hand_damping: PGI joint drive damping.
+        hand_max_effort: PGI joint maximum effort.
+
+    Returns:
+        A dual-arm robot configuration with two PGI grippers.
+    """
+    base_cfg = create_tutorial_robot_cfg(robot_type)
+    tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, tcp_z],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    base_solver = base_cfg.solver_cfg["arm"]
+    if robot_type == "ur5" and solver == "ur":
+        base_solver.tcp = tcp
+        base_solver.ik_nearest_weight = ur_ik_nearest_weight
+    else:
+        base_solver = PytorchSolverCfg(
+            end_link_name=base_solver.end_link_name,
+            root_link_name=base_solver.root_link_name,
+            tcp=tcp,
+            num_samples=pytorch_num_samples,
+        )
+        base_cfg.solver_cfg["arm"] = base_solver
+
+    for property_name, value in (
+        ("stiffness", hand_stiffness),
+        ("damping", hand_damping),
+        ("max_effort", hand_max_effort),
+    ):
+        getattr(base_cfg.drive_pros, property_name)[GRIPPER_HAND_JOINT_PATTERN] = value
+
+    arm_facing_rotation = make_yaw_transform(
+        (0.0, 0.0, 0.0),
+        math.radians(float(base_cfg.init_rot[2])),
+    )
+    mounts = {
+        "left": make_yaw_transform((-0.3, -1.45, 0.4), np.pi / 2) @ arm_facing_rotation,
+        "right": make_yaw_transform((0.3, -1.45, 0.4), np.pi / 2) @ arm_facing_rotation,
+    }
+    cfg = build_dual_arm_cfg(base_cfg, mounts)
+
+    # ``build_dual_arm_cfg`` duplicates the arm component and all control
+    # parts. The tutorial robots intentionally keep the PGI as a separate URDF
+    # component, so mount one copy on each assembled arm as well.
+    cfg.urdf_cfg.fname = urdf_name
+    hand_component = base_cfg.urdf_cfg.components["hand"]
+    for side in ("left", "right"):
+        cfg.urdf_cfg.add_component(
+            f"{side}_hand",
+            hand_component["urdf_path"],
+            hand_component["transform"],
+            **hand_component.get("params", {}),
+        )
+
+    arm_dof = len(base_cfg.control_parts["arm"])
+    base_arm_home = list(base_cfg.init_qpos[:arm_dof])
+    base_hand_home = list(base_cfg.init_qpos[arm_dof:])
+    if left_arm_home is None:
+        left_arm_home = base_arm_home
+    if right_arm_home is None:
+        right_arm_home = base_arm_home
+    if len(left_arm_home) != arm_dof or len(right_arm_home) != arm_dof:
+        raise ValueError(
+            f"Dual {robot_type} arm homes must each contain {arm_dof} joints."
+        )
+
+    cfg.uid = uid
+    cfg.init_pos = list(init_pos)
+    cfg.init_rot = list(init_rot)
+    # DexSim traverses the two arm branches breadth-first, so their active
+    # joints appear left/right interleaved even though the URDF components are
+    # emitted one after the other. Match that runtime order before appending
+    # the two gripper components.
+    cfg.init_qpos = (
+        [
+            qpos
+            for joint_pair in zip(left_arm_home, right_arm_home, strict=True)
+            for qpos in joint_pair
+        ]
+        + base_hand_home
+        + base_hand_home
+    )
+    return cfg
+
+
+def add_dual_tutorial_robot(
+    sim: SimulationManager,
+    *,
+    robot_type: TutorialRobot,
+    uid: str,
+    urdf_name: str,
+    tcp_z: float,
+    solver: Literal["ur", "pytorch"] = "ur",
+    ur_ik_nearest_weight: Sequence[float] | None = None,
+    pytorch_num_samples: int = 30,
+    init_pos: Sequence[float] = DUAL_UR5_INIT_POS,
+    init_rot: Sequence[float] = DUAL_UR5_INIT_ROT,
+    left_arm_home: Sequence[float] | None = None,
+    right_arm_home: Sequence[float] | None = None,
+    hand_stiffness: float = 1e3,
+    hand_damping: float = 1e2,
+    hand_max_effort: float = 1e4,
+) -> Robot:
+    """Add a dual UR5 or Franka tutorial robot to a simulation.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        robot_type: Arm family to mount on both sides.
+        uid: Simulation robot identifier.
+        urdf_name: Cache name for the assembled dual-arm URDF.
+        tcp_z: PGI tool-center-point offset along local Z.
+        solver: Preferred UR5 solver implementation.
+        ur_ik_nearest_weight: Optional nearest-solution weights for UR5 IK.
+        pytorch_num_samples: Number of PyTorch IK seed samples.
+        init_pos: Root position of the assembled robot.
+        init_rot: Root xyz Euler rotation in degrees.
+        left_arm_home: Optional left-arm initial configuration.
+        right_arm_home: Optional right-arm initial configuration.
+        hand_stiffness: PGI joint drive stiffness.
+        hand_damping: PGI joint drive damping.
+        hand_max_effort: PGI joint maximum effort.
+
+    Returns:
+        The added dual-arm robot instance.
+    """
+    return sim.add_robot(
+        cfg=create_dual_tutorial_robot_cfg(
+            robot_type=robot_type,
+            uid=uid,
+            urdf_name=urdf_name,
+            tcp_z=tcp_z,
+            solver=solver,
+            ur_ik_nearest_weight=ur_ik_nearest_weight,
+            pytorch_num_samples=pytorch_num_samples,
+            init_pos=init_pos,
+            init_rot=init_rot,
+            left_arm_home=left_arm_home,
+            right_arm_home=right_arm_home,
+            hand_stiffness=hand_stiffness,
+            hand_damping=hand_damping,
+            hand_max_effort=hand_max_effort,
+        )
+    )
+
+
 def add_support_surface(
     sim: SimulationManager,
     *,
@@ -333,11 +523,13 @@ __all__ = [
     "GRIPPER_URDF_PATH",
     "LEFT_ARM_HOME",
     "RIGHT_ARM_HOME",
+    "add_dual_tutorial_robot",
     "add_dual_ur5_robot",
     "add_support_surface",
     "compute_local_bounds",
     "compute_world_bounds",
     "create_manual_object_semantics",
+    "create_dual_tutorial_robot_cfg",
     "get_local_vertices",
     "invert_pose",
     "log_action_plan",

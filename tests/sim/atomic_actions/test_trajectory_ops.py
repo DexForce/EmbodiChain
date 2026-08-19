@@ -93,7 +93,7 @@ class TestNormalizeSuccessMask:
         with pytest.raises(ValueError, match="CUDA device requested"):
             normalize_success_mask(
                 True,
-                n_envs=2,
+                num_envs=2,
                 device="cuda",
                 name="IK success",
             )
