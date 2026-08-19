@@ -39,6 +39,7 @@ trainer:
           - 600
           - 320
           - 240
+          save_path: ./outputs/videos/eval
   renderer: fast-rt
 policy:
   name: actor_critic

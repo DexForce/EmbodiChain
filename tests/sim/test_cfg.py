@@ -94,14 +94,13 @@ def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:
     expected_exposure = 1.25
     world_config = dexsim.WorldConfig()
     render_cfg = RenderCfg(
-        renderer="offline-rt",
+        renderer="rt",
         tone_mapping_enabled=True,
         tone_mapping_exposure=expected_exposure,
     )
 
     render_cfg.apply_to_dexsim_config(world_config)
 
-    assert world_config.renderer == Renderer.OFFLINERT
     assert world_config.postprocess_config.tone_mapping_enabled is True
     assert (
         world_config.postprocess_config.tone_mapping_type

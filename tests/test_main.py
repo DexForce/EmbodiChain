@@ -28,7 +28,6 @@ EXPECTED_COMMANDS = {
     "benchmark",
     "data",
     "decompose-urdf",
-    "eval-policy",
     "preview-asset",
     "preview_lerobot_data",
     "run-env",

@@ -18,7 +18,6 @@ collection logic, policy/model builders, and training entry points.
       buffer
       collector
       models
-      policy_evaluation
       train
       utils
 

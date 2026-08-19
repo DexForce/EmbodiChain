@@ -264,19 +264,6 @@ All outputs are written to ``./outputs/<exp_name>_<timestamp>/``:
 
 - **logs/**: TensorBoard logs
 - **checkpoints/**: Model checkpoints
-- **configs/**: Training config and referenced gym config snapshots
-- **evaluations/**: Timestamped policy evaluation reports
-- **run-manifest.json**: Training configs and best/latest checkpoint index used by ``eval-policy``
-
-A training run can be evaluated Headless or opened in its simulator task:
-
-.. code-block:: bash
-
-   embodichain eval-policy outputs/<exp_name>_<timestamp>
-   embodichain eval-policy outputs/<exp_name>_<timestamp> --viewer
-
-See :doc:`../guides/policy_evaluation` for EmbodiChain ``.pt`` training
-runs and the external Motion Profile example.
 
 Training Process
 ~~~~~~~~~~~~~~~
@@ -465,9 +452,9 @@ Best Practices
 
 - **Configuration**: Use JSON for all hyperparameters. This makes experiments reproducible and easy to track.
 
-- **Logging**: Metrics are automatically logged to TensorBoard and Weights & Biases. Check ``outputs/<exp_name>_<timestamp>/logs/`` for TensorBoard logs.
+- **Logging**: Metrics are automatically logged to TensorBoard and Weights & Biases. Check ``outputs/<exp_name>/logs/`` for TensorBoard logs.
 
-- **Checkpoints**: Regular checkpoints are saved to ``outputs/<exp_name>_<timestamp>/checkpoints/``. Use these to resume training or evaluate policies.
+- **Checkpoints**: Regular checkpoints are saved to ``outputs/<exp_name>/checkpoints/``. Use these to resume training or evaluate policies.
 
 See Also
 --------
@@ -477,4 +464,3 @@ See Also
 - :doc:`basic_env` — Creating basic Gymnasium environments
 - :doc:`modular_env` — Advanced modular environments with managers
 - :doc:`/resources/task/index` — List of available RL task environments
-- :doc:`/guides/policy_evaluation` — Headless and Viewer evaluation of EmbodiChain ``.pt`` checkpoints and external Motion Profiles

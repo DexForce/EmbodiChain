@@ -8,5 +8,4 @@ sphinx-autosummary-accessors
 sphinxcontrib-bibtex
 sphinx-design
 sphinx_autodoc_typehints
-sphinxcontrib-mermaid
 pypandoc_binary
