@@ -31,6 +31,7 @@ from ..models import AlgorithmRole, BenchmarkCase, PlannerMetadata
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.planners import MotionGenerator
 
 __all__ = ["PlannerAdapter", "PlannerContext"]
 
@@ -43,6 +44,7 @@ class PlannerContext:
     control_part: str
     device: torch.device
     sample_interval: int
+    robot_id: str = "unknown"
 
 
 class PlannerAdapter(ABC):
@@ -69,6 +71,7 @@ class PlannerAdapter(ABC):
             model_revision=str(
                 self.spec.config.get("model_revision", self.model_revision)
             ),
+            supported_robots=(self.context.robot_id,),
             parameters=dict(self.spec.config),
         )
 
@@ -83,6 +86,25 @@ class PlannerAdapter(ABC):
     def prepare(self, case: BenchmarkCase) -> dict[str, object] | None:
         """Prepare a lazy backend, or return ``None`` when not applicable."""
         return None
+
+    @property
+    def motion_policy_planner(self) -> str:
+        """Return the backend name pinned into Atomic Action motion policies."""
+        return self.spec.adapter
+
+    def require_motion_generator(self) -> "MotionGenerator":
+        """Return the adapter-owned MotionGenerator or fail clearly.
+
+        Atomic-task scenarios use this boundary instead of reaching into a
+        backend implementation.  Every planner that opts into the
+        ``atomic_action`` capability must expose its generator here.
+        """
+        motion_generator = getattr(self, "motion_generator", None)
+        if motion_generator is None:
+            raise RuntimeError(
+                f"Planner adapter {self.spec.id!r} does not expose a MotionGenerator."
+            )
+        return motion_generator
 
     @abstractmethod
     def plan(self, case: BenchmarkCase) -> PlanResult:

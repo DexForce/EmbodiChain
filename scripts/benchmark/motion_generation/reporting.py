@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Render the free-space benchmark as exactly three Markdown tables."""
+"""Render planner and Atomic Task tracks as exactly three Markdown tables."""
 
 from __future__ import annotations
 
@@ -30,6 +30,10 @@ TIME_COLUMNS = (
     "track",
     "algorithm",
     "algorithm_role",
+    "robot",
+    "skill",
+    "object",
+    "task_difficulty",
     "batch_size",
     "waypoint_count",
     "num_trials",
@@ -45,6 +49,10 @@ TIME_COLUMNS = (
     "cpu_delta_mb",
     "gpu_delta_mb",
     "peak_gpu_mb",
+    "execution_time_ms",
+    "end_to_end_time_ms",
+    "trajectory_duration_s",
+    "trajectory_waypoints",
 )
 
 METRIC_COLUMNS = (
@@ -52,6 +60,11 @@ METRIC_COLUMNS = (
     "scenario",
     "algorithm",
     "algorithm_role",
+    "robot",
+    "skill",
+    "object",
+    "task_difficulty",
+    "primary_success",
     "batch_size",
     "waypoint_count",
     "path_shape",
@@ -61,6 +74,9 @@ METRIC_COLUMNS = (
     "coverage_rate",
     "success_rate",
     "planning_success_rate",
+    "motion_valid_rate",
+    "execution_success_rate",
+    "task_success_rate",
     "ordered_waypoint_success_rate",
     "waypoint_completion_rate",
     "final_pos_err_mm",
@@ -71,6 +87,10 @@ METRIC_COLUMNS = (
     "joint_path_length_rad",
     "cartesian_path_length_m",
     "path_efficiency",
+    "task_completion_time_s",
+    "joint_tracking_rmse_rad",
+    "object_lift_delta_m",
+    "replan_count",
     "top_failure",
 )
 
@@ -86,6 +106,7 @@ LEADERBOARD_COLUMNS = (
     "overall_success_rate",
     "planning_success_rate",
     "motion_valid_rate",
+    "execution_success_rate",
     "task_success_rate",
     "latency_p95_ms",
     "peak_gpu_mb",
@@ -132,7 +153,7 @@ def write_markdown_report(
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Motion Generation Benchmark Report",
+        "# Planner Motion Generation & Atomic Skill Benchmark Report",
         "",
         f"Generated at: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         "",
@@ -158,7 +179,8 @@ def write_markdown_report(
             "## Success & Other Metrics",
             "",
             "Continuous error/path columns are conditioned on `motion_valid` "
-            "outcomes; use `n_valid` as the denominator before comparing them.",
+            "outcomes; use `n_valid` as the denominator. Atomic Task "
+            "`success_rate` follows the case-owned `primary_success` stage.",
             "",
         ]
     )

@@ -15,6 +15,28 @@ The default comparison should be NMG versus cuRobo. IK plus interpolation and
 TOPPRA should remain optional diagnostic baselines rather than define the main
 leaderboard.
 
+## Implemented vertical slice
+
+The first physics-backed slice is available as
+`suites/atomic_franka_pgi_curobo.yaml`. It runs Franka + PGI with cuRobo only,
+and covers `MoveEndEffector` plus antipodal-grasp `PickUp`. Both skills pin
+`MotionPolicy(strategy="motion_gen", planner="curobo")` and compile through the
+same `AtomicActionEngine`; scenario code never calls cuRobo directly.
+
+The shared runner now selects planners, scenarios, robots, Atomic Action case
+providers, and object kinds through registries. Cases freeze the full robot
+start state, explicit targets/grasp, object configuration, difficulty factors,
+and independent sequential-IK evidence before measured planner calls. Reports
+keep planning, kinematic motion validity, controller execution, and physical
+task success separate while retaining exactly three tables.
+
+Run the slice with:
+
+```bash
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_curobo --device cuda
+```
+
 ## Motivation
 
 The existing NeuralPlanner benchmark provides useful latency, memory, rollout,

@@ -1,0 +1,102 @@
+schema_version: 1
+name: atomic_skill_franka_pgi_curobo
+suite_version: atomic_franka_pgi_curobo_smoke_v1
+profile: smoke
+
+robot:
+  id: franka_pgi
+  provider: franka_pgi
+  config: {}
+
+planners:
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        fit_type: voxel
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+
+protocol:
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 128
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: atomic-task
+    scenario: atomic_task
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        steps_per_waypoint: 4
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: hand
+        open_qpos: [0.0]
+        grasp_qpos: [0.024]
+      objects:
+        - id: cube_50mm
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          contact_offset: 0.003
+          rest_offset: 0.001
+          settle_steps: 10
+      skills:
+        - id: move_end_effector
+          sample_count: 80
+          cases:
+            - name: relative_two_waypoint
+              task_difficulty: simple
+              target_offsets_m:
+                - [-0.08, -0.08, 0.08]
+                - [0.04, 0.12, 0.04]
+              difficulty_factors:
+                waypoint_count: 2
+                maximum_translation_m: 0.13
+                obstacles: 0
+        - id: pick_up
+          sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          minimum_object_lift_m: 0.04
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_pick_height_m: 0.36
+          cases:
+            - name: cube_top_center
+              object: cube_50mm
+              task_difficulty: simple
+              grasp_offset_m: [0.0, 0.0, 0.0]
+              difficulty_factors:
+                approach: top
+                pre_grasp_clearance_m: 0.15
+                required_lift_m: 0.04

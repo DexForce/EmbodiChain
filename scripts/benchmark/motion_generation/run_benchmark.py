@@ -14,13 +14,15 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run the extensible free-space motion-generation benchmark.
+"""Run the extensible planner motion-generation benchmark.
 
 cuRobo is the default primary baseline. IK interpolation and TOPPRA are
 optional diagnostic baselines. NMG remains an explicitly configurable,
 unsupported adapter stub until its production checkpoint contract is ready.
 
-Run: ``embodichain benchmark motion-generation --suite smoke``
+Run: ``python -m scripts.benchmark.motion_generation.run_benchmark --suite
+smoke`` or select the Franka + PGI Atomic Task slice with
+``--suite atomic_franka_pgi_curobo``.
 """
 
 from __future__ import annotations
@@ -43,11 +45,14 @@ __all__ = [
 
 
 def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add free-space benchmark options to an existing argument parser."""
+    """Add planner benchmark options to an existing argument parser."""
     parser.add_argument(
         "--suite",
         default="smoke",
-        help="Suite short name (smoke/coverage) or an explicit YAML path.",
+        help=(
+            "Suite short name (smoke/coverage/atomic_franka_pgi_curobo) "
+            "or an explicit YAML path."
+        ),
     )
     parser.add_argument(
         "--algorithms",
@@ -214,7 +219,7 @@ def run_all_benchmarks(
     nmg_rot_eps: float | None = None,
     output_root: str | Path = "outputs/benchmarks",
 ) -> BenchmarkRunResult:
-    """Resolve configuration and run all selected free-space benchmarks."""
+    """Resolve configuration and run all selected benchmark tracks."""
     from .runner import BenchmarkRunner
 
     suite = load_suite(suite_name)
@@ -274,7 +279,7 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
 def _parse_args() -> argparse.Namespace:
     """Parse standalone module arguments using the unified option schema."""
     parser = argparse.ArgumentParser(
-        description="Benchmark motion generation on fixed free-space cases."
+        description="Benchmark planners on fixed motion and Atomic Task cases."
     )
     add_parser_arguments(parser)
     return parser.parse_args()

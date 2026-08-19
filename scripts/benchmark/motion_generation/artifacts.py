@@ -124,13 +124,39 @@ def _case_to_dict(case: BenchmarkCase) -> dict[str, Any]:
         "num_waypoints": case.num_waypoints,
         "path_shape": case.path_shape,
         "start_state_bin": case.start_state_bin,
+        "robot_id": case.robot_id,
+        "skill_id": case.skill_id,
+        "object_id": case.object_id,
+        "task_difficulty": case.task_difficulty,
+        "primary_success": case.primary_success,
         "start_qpos": case.start_qpos.detach().cpu().tolist(),
+        "full_start_qpos": (
+            None
+            if case.full_start_qpos is None
+            else case.full_start_qpos.detach().cpu().tolist()
+        ),
         "target_waypoints": case.target_waypoints.detach().cpu().tolist(),
+        "case_parameters": _to_json_value(case.case_parameters),
         "validity_evidence": {
-            "method": "reference_qpos_fk",
+            "method": (
+                "reference_qpos_fk"
+                if case.skill_id == "N/A"
+                else "independent_sequential_ik"
+            ),
             "reference_qpos": case.reference_qpos.detach().cpu().tolist(),
         },
     }
+
+
+def _to_json_value(value: object) -> object:
+    """Recursively preserve tensors and numeric case configuration values."""
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().tolist()
+    if isinstance(value, dict):
+        return {str(key): _to_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_json_value(item) for item in value]
+    return value
 
 
 def write_case_manifest(path: str | Path, cases: list[BenchmarkCase]) -> Path:
@@ -138,7 +164,7 @@ def write_case_manifest(path: str | Path, cases: list[BenchmarkCase]) -> Path:
     return write_json(
         path,
         {
-            "case_schema_version": 1,
+            "case_schema_version": 2,
             "cases": [_case_to_dict(case) for case in cases],
         },
     )

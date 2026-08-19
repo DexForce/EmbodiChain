@@ -25,10 +25,9 @@ from typing import TYPE_CHECKING, TypeVar
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.planners.utils import PlanResult
-from embodichain.lab.sim.robots import FrankaPandaCfg
 
 from . import planners as _builtin_planners  # noqa: F401 - registry side effects
+from . import robots as _builtin_robots  # noqa: F401 - registry side effects
 from . import scenarios as _builtin_scenarios  # noqa: F401 - registry side effects
 from .aggregation import aggregate_results
 from .artifacts import (
@@ -40,8 +39,7 @@ from .artifacts import (
     write_resolved_suite,
 )
 from .config import PlannerSpecCfg, SuiteCfg
-from .metrics import compute_case_outcomes, timed_call
-from .metrics.trajectory import make_failure_outcomes
+from .metrics import timed_call
 from .models import (
     BenchmarkCase,
     PlannerMetadata,
@@ -49,8 +47,14 @@ from .models import (
     TrialRecord,
 )
 from .planners.base import PlannerAdapter, PlannerContext
-from .registry import create_planner_adapter, create_scenario_provider
+from .registry import (
+    create_planner_adapter,
+    create_robot_provider,
+    create_scenario_provider,
+)
 from .reporting import write_markdown_report
+from .scenarios.base import ScenarioEvaluation, ScenarioProvider
+from .scenarios.free_space import FreeSpaceScenario
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -60,8 +64,6 @@ if TYPE_CHECKING:
 __all__ = ["BenchmarkRunResult", "BenchmarkRunner", "resolve_device"]
 
 _T = TypeVar("_T")
-_CONTROL_PART = "arm"
-_ROBOT_UID = "benchmark_franka_panda"
 
 
 @dataclass(frozen=True)
@@ -109,13 +111,15 @@ class BenchmarkRunner:
         self.device = resolve_device(device)
         self.headless = headless
         self.output_root = Path(output_root)
+        self.robot_provider = create_robot_provider(suite.robot)
+        self.control_part = self.robot_provider.control_part
         self.records: list[TrialRecord] = []
         self.cases: list[BenchmarkCase] = []
         self.metadata: dict[str, PlannerMetadata] = {}
         self.notes: list[str] = []
 
     def _create_simulation(self, batch_size: int) -> tuple[SimulationManager, "Robot"]:
-        """Create one isolated Franka simulator for a fixed batch size."""
+        """Create one isolated suite-selected robot for a fixed batch size."""
         sim = SimulationManager(
             SimulationManagerCfg(
                 headless=self.headless,
@@ -124,21 +128,9 @@ class BenchmarkRunner:
                 arena_space=2.0,
             )
         )
-        robot = sim.add_robot(
-            cfg=FrankaPandaCfg.from_dict({"uid": _ROBOT_UID, "robot_type": "panda"})
-        )
+        robot = self.robot_provider.add_robot(sim)
         sim.update(step=1)
         return sim, robot
-
-    @staticmethod
-    def _set_case_start(
-        sim: SimulationManager, robot: "Robot", case: BenchmarkCase
-    ) -> None:
-        """Restore current and target robot state outside the timed region."""
-        robot.set_qpos(case.start_qpos, name=_CONTROL_PART, target=False)
-        robot.set_qpos(case.start_qpos, name=_CONTROL_PART, target=True)
-        robot.clear_dynamics()
-        sim.update(step=1)
 
     def _append(self, writer: TrialJsonlWriter, record: TrialRecord) -> None:
         """Retain and immediately persist one raw record."""
@@ -169,6 +161,11 @@ class BenchmarkRunner:
             "waypoint_count": case.num_waypoints,
             "path_shape": case.path_shape,
             "start_state_bin": case.start_state_bin,
+            "robot_id": case.robot_id,
+            "skill_id": case.skill_id,
+            "object_id": case.object_id,
+            "task_difficulty": case.task_difficulty,
+            "primary_success": case.primary_success,
             "phase": phase,
         }
 
@@ -237,49 +234,50 @@ class BenchmarkRunner:
         adapter: PlannerAdapter,
         metadata: PlannerMetadata,
         case: BenchmarkCase,
+        provider: ScenarioProvider,
         phase: TrialPhase,
         repeat: int,
     ) -> None:
         """Time one plan, validate outside timing, and persist the record."""
-        self._set_case_start(sim, robot, case)
-        measured = timed_call(lambda: _capture(lambda: adapter.plan(case)))
+        provider.reset_case(sim, robot, case, self.control_part)
+        measured = timed_call(
+            lambda: _capture(lambda: provider.plan_case(adapter, case))
+        )
         result, error = measured.result
         failure_code = None
         failure_message = None
         status = "ok"
+        evaluation: ScenarioEvaluation | None = None
         if error is not None:
             status = "error"
             failure_code = "planner_exception"
             failure_message = str(error)
-            outcomes = make_failure_outcomes(case.batch_size, failure_code)
-        elif not isinstance(result, PlanResult):
+            outcomes = provider.failure_outcomes(case, failure_code)
+        elif (contract_error := provider.plan_contract_error(result)) is not None:
             status = "error"
             failure_code = "planner_contract_error"
-            failure_message = f"Expected PlanResult, got {type(result).__name__}."
-            outcomes = make_failure_outcomes(case.batch_size, failure_code)
+            failure_message = contract_error
+            outcomes = provider.failure_outcomes(case, failure_code)
         elif phase in (TrialPhase.WARMUP, TrialPhase.COLD):
             # Cold/warmup timing must not pay for FK validation that is unused
             # by aggregation.
             outcomes = ()
         else:
             try:
-                outcomes = compute_case_outcomes(
+                evaluation = provider.evaluate_case(
                     result,
                     case,
                     robot,
-                    _CONTROL_PART,
-                    validation_samples=self.suite.protocol.validation_samples,
-                    position_threshold_m=self.suite.protocol.position_threshold_m,
-                    rotation_threshold_rad=self.suite.protocol.rotation_threshold_rad,
-                    joint_limit_tolerance_rad=(
-                        self.suite.protocol.joint_limit_tolerance_rad
-                    ),
+                    self.control_part,
+                    self.suite,
+                    planning_time_ms=measured.cost_time_ms,
                 )
+                outcomes = evaluation.outcomes
             except Exception as exc:  # noqa: BLE001 - metric failure is recorded
                 status = "error"
                 failure_code = "metric_evaluation_error"
                 failure_message = str(exc)
-                outcomes = make_failure_outcomes(case.batch_size, failure_code)
+                outcomes = provider.failure_outcomes(case, failure_code)
 
         self._append(
             writer,
@@ -292,13 +290,26 @@ class BenchmarkRunner:
                 cpu_delta_mb=measured.cpu_delta_mb,
                 gpu_delta_mb=measured.gpu_delta_mb,
                 peak_gpu_mb=measured.peak_gpu_mb,
+                execution_time_ms=(
+                    None if evaluation is None else evaluation.execution_time_ms
+                ),
+                end_to_end_time_ms=(
+                    None if evaluation is None else evaluation.end_to_end_time_ms
+                ),
+                trajectory_duration_s=(
+                    None if evaluation is None else evaluation.trajectory_duration_s
+                ),
+                trajectory_waypoints=(
+                    None if evaluation is None else evaluation.trajectory_waypoints
+                ),
+                metadata={} if evaluation is None else evaluation.metadata,
                 outcomes=outcomes,
             ),
         )
         if phase is not TrialPhase.WARMUP:
             print(
                 f"  {metadata.algorithm_id:<16} B={case.batch_size:>3d} "
-                f"W={case.num_waypoints} {case.path_shape:<16} "
+                f"W={case.num_waypoints} {case.skill_id:<20} "
                 f"{phase.value:<8} {measured.cost_time_ms:>10.3f} ms "
                 f"status={status}"
             )
@@ -311,13 +322,16 @@ class BenchmarkRunner:
         spec: PlannerSpecCfg,
         cases: list[BenchmarkCase],
         required_capabilities: frozenset[str],
+        provider: ScenarioProvider | None = None,
     ) -> None:
         """Execute one adapter over every case for a fixed simulator batch."""
+        provider = provider or FreeSpaceScenario()
         context = PlannerContext(
             robot=robot,
-            control_part=_CONTROL_PART,
+            control_part=self.control_part,
             device=self.device,
             sample_interval=self.suite.protocol.sample_interval,
+            robot_id=self.suite.robot.id,
         )
         adapter = create_planner_adapter(spec, context)
         metadata = adapter.metadata
@@ -354,6 +368,7 @@ class BenchmarkRunner:
         if build_error is not None:
             adapter.close()
             return
+        scenario_prepared = False
         try:
             if adapter.separate_prepare:
                 _, prepare_error = self._record_timed_lifecycle(
@@ -366,6 +381,25 @@ class BenchmarkRunner:
                 if prepare_error is not None:
                     return
 
+            try:
+                provider.prepare_planner(adapter, first_case)
+                scenario_prepared = True
+            except Exception as exc:  # noqa: BLE001 - recorded benchmark failure
+                self._append(
+                    writer,
+                    TrialRecord(
+                        **self._base_record(metadata, first_case, TrialPhase.PREPARE),
+                        status="error",
+                        failure_code="scenario_prepare_error",
+                        failure_message=str(exc),
+                    ),
+                )
+                self.notes.append(
+                    f"{metadata.algorithm_id} scenario prepare failed for "
+                    f"B={first_case.batch_size}: {exc}"
+                )
+                return
+
             self._run_plan_call(
                 writer,
                 sim,
@@ -373,6 +407,7 @@ class BenchmarkRunner:
                 adapter,
                 metadata,
                 first_case,
+                provider,
                 TrialPhase.COLD,
                 repeat=-1,
             )
@@ -385,6 +420,7 @@ class BenchmarkRunner:
                         adapter,
                         metadata,
                         case,
+                        provider,
                         TrialPhase.WARMUP,
                         repeat=warmup_index,
                     )
@@ -396,10 +432,13 @@ class BenchmarkRunner:
                         adapter,
                         metadata,
                         case,
+                        provider,
                         TrialPhase.MEASURED,
                         repeat=repeat,
                     )
         finally:
+            if scenario_prepared:
+                provider.close_planner(adapter)
             adapter.close()
 
     def run(self) -> BenchmarkRunResult:
@@ -423,10 +462,19 @@ class BenchmarkRunner:
             provider = create_scenario_provider(track.scenario)
             for batch_size in provider.batch_sizes(self.suite, track):
                 sim: SimulationManager | None = None
+                runtime_configured = False
                 try:
                     sim, robot = self._create_simulation(batch_size)
+                    provider.configure_runtime(
+                        sim,
+                        robot,
+                        self.suite,
+                        track,
+                        self.control_part,
+                    )
+                    runtime_configured = True
                     cases = provider.generate_cases(
-                        self.suite, track, robot, _CONTROL_PART, batch_size
+                        self.suite, track, robot, self.control_part, batch_size
                     )
                     self.cases.extend(cases)
                     for spec in self.planner_specs:
@@ -437,8 +485,11 @@ class BenchmarkRunner:
                             spec,
                             cases,
                             provider.required_capabilities,
+                            provider,
                         )
                 finally:
+                    if runtime_configured:
+                        provider.close_runtime()
                     if sim is not None:
                         # Benchmarks must aggregate and report after simulator
                         # teardown; the SimulationManager default exits the whole
@@ -459,6 +510,24 @@ class BenchmarkRunner:
             self.suite.protocol.measured_trials,
         )
         write_json(run_dir / "aggregates.json", aggregates)
+        enabled_scenarios = {track.scenario for track in enabled_tracks}
+        track_notes: list[str] = []
+        if "free_space" in enabled_scenarios:
+            track_notes.append(
+                "Collision, dynamic, execution, and task metrics are N/A in "
+                "free-space-common v1."
+            )
+        if "atomic_task" in enabled_scenarios:
+            track_notes.extend(
+                [
+                    "Atomic Task cost_time_ms measures AtomicActionEngine.compile only; "
+                    "execution_time_ms is common physics-replay wall time and "
+                    "end_to_end_time_ms is their sum.",
+                    "trajectory_duration_s is planner-native nominal duration; "
+                    "task_completion_time_s is simulated replay time through the "
+                    "stability hold for successful tasks.",
+                ]
+            )
         report_path = write_markdown_report(
             run_dir / "report.md",
             self.suite,
@@ -473,7 +542,7 @@ class BenchmarkRunner:
                 "path lengths, path_efficiency) average only motion_valid outcomes "
                 "(success-conditioned / survivor-biased). Always read them with n_valid; "
                 "a high path_efficiency on n_valid=2 is not comparable to n_valid=200.",
-                "Collision, dynamic, execution, and task metrics are N/A in free-space-common v1.",
+                *track_notes,
                 "Leaderboard and Success-table boolean rates "
                 "(overall_success_rate / success_rate / motion_valid_rate / "
                 "planning_success_rate / ordered_waypoint_success_rate) are macro averages "
