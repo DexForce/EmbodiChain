@@ -100,6 +100,8 @@ The animations below are the focused simulator demos under
 :link-type: ref
 
 `press` · close, approach, press, and retract
+
+<img src="../../../_static/atomic_actions/press.gif" alt="Press demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `Slide`
@@ -107,6 +109,9 @@ The animations below are the focused simulator demos under
 :link-type: ref
 
 `slide` · grasped translation along a constrained axis
+
+<img src="../../../_static/atomic_actions/slide_pull.gif" alt="Slide pull demo" width="480" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/slide_push.gif" alt="Slide push demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `Twist`
@@ -114,6 +119,8 @@ The animations below are the focused simulator demos under
 :link-type: ref
 
 `twist` · grasped rotation about a configured axis
+
+<img src="../../../_static/atomic_actions/twist.gif" alt="Twist demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `CoordinatedPickment`
