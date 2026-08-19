@@ -26,9 +26,19 @@ from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
-from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_optimizer import (
-    SceneLayoutOptimizerConfig,
-    SceneLayoutOptimizer,
+from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optimizer import (
+    ParentSurfaceLayoutOptimizer,
+    ParentSurfaceLayoutOptimizerConfig,
+    ParentSurfaceLayoutProblem,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+    translate_scene_object_y_up_by_z_up_delta,
+    update_scene_object_y_up_pose_from_z_up_support,
+)
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_surface_layout_optimizer import (
+    TableSurfaceLayoutOptimizer,
+    TableSurfaceLayoutOptimizerConfig,
+    TableSurfaceLayoutProblem,
 )
 
 
@@ -66,33 +76,45 @@ class SceneLayoutConstructor:
         layout_variable_ids: set[str],
         generated_scene_objects: list[SceneObject],
         output_root: str | Path,
-        config: SceneLayoutOptimizerConfig | None = None,
+        table_surface_config: TableSurfaceLayoutOptimizerConfig | None = None,
+        parent_surface_config: ParentSurfaceLayoutOptimizerConfig | None = None,
     ) -> None:
         self.formal_scene = formal_scene
         self.goal_scene_graph = goal_scene_graph
         self.layout_variable_ids = layout_variable_ids
         self.generated_scene_objects = generated_scene_objects
         self.output_root = Path(output_root).expanduser().resolve()
-        self.layout_optimizer = SceneLayoutOptimizer(config=config)
+        # Table surface optimizer.
+        self.table_surface_layout_optimizer = TableSurfaceLayoutOptimizer(
+            config=table_surface_config
+        )
+        # Parent surface (on) optimizer.
+        self.parent_surface_layout_optimizer = ParentSurfaceLayoutOptimizer(
+            config=parent_surface_config
+        )
         self._current_xy_by_id: dict[str, list[float] | None] = {}
         self._solved_delta_xy_by_id: dict[str, list[float]] = {}
         self._updated_object_ids: set[str] = set()
 
     def construct(self) -> Scene:
         """Construct table-root layouts before later stacked-group refinement."""
+        # Build layout problem.
         layout_problem = self._build_problem()
+        # Get current XY centers.
         self._current_xy_by_id = {
             object_id: list(initial_xy) if initial_xy is not None else None
             for object_id, initial_xy in layout_problem.initial_xy_by_id.items()
         }
         self._solved_delta_xy_by_id = {}
         self._updated_object_ids = set()
+        # Check the group.
         if (
             layout_problem.groups
             and layout_problem.groups[0].parent_id != TABLE_OBJECT_ID
         ):
             raise ValueError("The first layout group must be rooted at the table.")
 
+        # Optimize each group in BFS order, propagating solved deltas to descendants.
         for group in layout_problem.groups:
             if group.parent_id == TABLE_OBJECT_ID:
                 self._optimize_table_group(
@@ -114,56 +136,18 @@ class SceneLayoutConstructor:
         group: SceneLayoutGroup,
     ) -> None:
         """Optimize all direct on-table children before any stacked child groups."""
+        table_surface_problem = TableSurfaceLayoutProblem.from_layout_problem(
+            layout_problem=layout_problem,
+            group=group,
+            current_xy_by_id=self._current_xy_by_id,
+        )
+        solved_root_xy_by_id = self.table_surface_layout_optimizer.optimize(
+            table_surface_problem
+        )
         table = layout_problem.post_edit_scene.table
         if table is None:
             raise ValueError("Table group optimization requires a table.")
-        if table.support_optimization_rect_xy is None:
-            raise ValueError(
-                "Table group optimization requires a table support optimization rectangle."
-            )
-
-        root_ids = set(group.child_ids)
-        root_relations = [
-            relation
-            for relation in layout_problem.goal_scene_graph.relations
-            if relation.source_id in root_ids and relation.target_id in root_ids
-        ]
-        root_seed_xy_by_id: dict[str, list[float]] = {}
-        for root_id in group.child_ids:
-            inherited_xy = self._current_xy_by_id[root_id]
-            # New roots start from the table-local origin; imported roots keep their pose.
-            root_seed_xy_by_id[root_id] = (
-                [0.0, 0.0] if inherited_xy is None else list(inherited_xy)
-            )
-            self._current_xy_by_id[root_id] = root_seed_xy_by_id[root_id]
-
-        nodes_by_id = layout_problem.goal_scene_graph.node_by_id()
-        solved_root_xy_by_id = self.layout_optimizer.optimize_table_root_xy(
-            assets_by_id={
-                asset.id: asset for asset in layout_problem.post_edit_scene.assets
-            },
-            root_ids=group.child_ids,
-            root_seed_xy_by_id=root_seed_xy_by_id,
-            imported_root_ids={
-                root_id
-                for root_id in group.child_ids
-                if layout_problem.initial_xy_by_id[root_id] is not None
-            },
-            fixed_root_xy_by_id={
-                root_id: (
-                    None
-                    if root_id in layout_problem.layout_variable_ids
-                    else self._current_xy_by_id[root_id]
-                )
-                for root_id in group.child_ids
-            },
-            root_table_regions_by_id={
-                root_id: nodes_by_id[root_id].table_region
-                for root_id in group.child_ids
-            },
-            table_optimization_rect_xy=table.support_optimization_rect_xy,
-            root_relations=root_relations,
-        )
+        # Check the table's z.
         if table.support_surface_z is None and any(
             root_id in layout_problem.layout_variable_ids for root_id in group.child_ids
         ):
@@ -172,7 +156,7 @@ class SceneLayoutConstructor:
             asset.id: asset for asset in layout_problem.post_edit_scene.assets
         }
         for root_id, solved_xy in solved_root_xy_by_id.items():
-            seed_xy = root_seed_xy_by_id[root_id]
+            seed_xy = table_surface_problem.root_seed_xy_by_id[root_id]
             delta_xy = [
                 solved_xy[0] - seed_xy[0],
                 solved_xy[1] - seed_xy[1],
@@ -182,10 +166,11 @@ class SceneLayoutConstructor:
             if root_id in layout_problem.layout_variable_ids:
                 # Direct add/move roots receive a new pose on the table support.
                 assert table.support_surface_z is not None
-                self.layout_optimizer.update_scene_object_y_up_pose_from_z_up_support(
+                update_scene_object_y_up_pose_from_z_up_support(
                     scene_object=assets_by_id[root_id],
                     support_region_z=table.support_surface_z,
                     center_xy=solved_xy,
+                    clearance_m=0.00,  # Directly place on the support surface.
                 )
                 self._updated_object_ids.add(root_id)
             self._propagate_descendant_delta(
@@ -202,6 +187,7 @@ class SceneLayoutConstructor:
         delta_xy: list[float],
     ) -> None:
         """Move every positioned descendant by one solved ancestor XY delta."""
+        # A zero root delta cannot change any descendant pose, so skip the subtree walk.
         if delta_xy == [0.0, 0.0]:
             return
         assets_by_id = {asset.id: asset for asset in scene.assets}
@@ -219,7 +205,7 @@ class SceneLayoutConstructor:
                     descendant_xy[0] + delta_xy[0],
                     descendant_xy[1] + delta_xy[1],
                 ]
-                self.layout_optimizer.translate_scene_object_y_up_by_z_up_delta(
+                translate_scene_object_y_up_by_z_up_delta(
                     scene_object=assets_by_id[descendant_id],
                     delta_xy=delta_xy,
                 )
@@ -233,54 +219,17 @@ class SceneLayoutConstructor:
         group: SceneLayoutGroup,
     ) -> None:
         """Optimize one settled parent's direct on-children in local XY coordinates."""
-        assets_by_id = {
-            asset.id: asset for asset in layout_problem.post_edit_scene.assets
-        }
-        parent = assets_by_id.get(group.parent_id)
-        if parent is None:
-            raise ValueError(f"Parent {group.parent_id!r} is not an asset.")
-        parent_aabb = self.layout_optimizer.scene_object_z_up_world_aabb(
-            scene_object=parent
+        parent_surface_problem = ParentSurfaceLayoutProblem.from_layout_problem(
+            layout_problem=layout_problem,
+            group=group,
+            current_xy_by_id=self._current_xy_by_id,
         )
-        parent_aabb_xy = [
-            [parent_aabb[0][0], parent_aabb[0][1]],
-            [parent_aabb[1][0], parent_aabb[1][1]],
-        ]
-        parent_center_xy = [
-            (parent_aabb[0][0] + parent_aabb[1][0]) / 2.0,
-            (parent_aabb[0][1] + parent_aabb[1][1]) / 2.0,
-        ]
-        child_seed_xy_by_id: dict[str, list[float]] = {}
-        for child_id in group.child_ids:
-            inherited_xy = self._current_xy_by_id[child_id]
-            # New children start at their parent's current AABB center.
-            child_seed_xy_by_id[child_id] = (
-                parent_center_xy if inherited_xy is None else list(inherited_xy)
-            )
-            self._current_xy_by_id[child_id] = child_seed_xy_by_id[child_id]
-
-        solved_child_xy_by_id = self.layout_optimizer.optimize_parent_child_xy(
-            assets_by_id=assets_by_id,
-            child_ids=group.child_ids,
-            child_seed_xy_by_id=child_seed_xy_by_id,
-            imported_child_ids={
-                child_id
-                for child_id in group.child_ids
-                if layout_problem.initial_xy_by_id[child_id] is not None
-            },
-            fixed_child_xy_by_id={
-                child_id: (
-                    None
-                    if child_id in layout_problem.layout_variable_ids
-                    else self._current_xy_by_id[child_id]
-                )
-                for child_id in group.child_ids
-            },
-            parent_aabb_xy=parent_aabb_xy,
+        # Get results.
+        solved_child_xy_by_id = self.parent_surface_layout_optimizer.optimize(
+            parent_surface_problem
         )
-        parent_top_z = parent_aabb[1][2]
         for child_id, solved_xy in solved_child_xy_by_id.items():
-            seed_xy = child_seed_xy_by_id[child_id]
+            seed_xy = parent_surface_problem.child_seed_xy_by_id[child_id]
             delta_xy = [
                 solved_xy[0] - seed_xy[0],
                 solved_xy[1] - seed_xy[1],
@@ -289,10 +238,11 @@ class SceneLayoutConstructor:
             self._solved_delta_xy_by_id[child_id] = delta_xy
             if child_id in layout_problem.layout_variable_ids:
                 # Variable children are placed directly above the parent's current top.
-                self.layout_optimizer.update_scene_object_y_up_pose_from_z_up_support(
-                    scene_object=assets_by_id[child_id],
-                    support_region_z=parent_top_z,
+                update_scene_object_y_up_pose_from_z_up_support(
+                    scene_object=parent_surface_problem.assets_by_id[child_id],
+                    support_region_z=parent_surface_problem.parent_top_z,
                     center_xy=solved_xy,
+                    clearance_m=0.00,  # Directly place on the parent's top surface.
                 )
                 self._updated_object_ids.add(child_id)
             self._propagate_descendant_delta(
@@ -303,6 +253,7 @@ class SceneLayoutConstructor:
 
     def _build_problem(self) -> SceneLayoutProblem:
         """Build post-edit objects and preserve formal-scene centers as seeds."""
+        # Validate the graph first.
         self.goal_scene_graph.validate()
         graph_object_ids = set(self.goal_scene_graph.node_by_id())
         generated_objects_by_id = self._generated_scene_objects_by_id()
@@ -326,13 +277,14 @@ class SceneLayoutConstructor:
         }
         if post_edit_object_ids != graph_object_ids:
             raise ValueError("Goal scene graph and post-edit scene have different ids.")
+        # Get the movable asset ids.
         if not self.layout_variable_ids.issubset(post_edit_object_ids - {"table"}):
             raise ValueError(
                 "Only post-edit assets may participate in layout optimization."
             )
-
+        # Get initial XY centers.
         initial_xy_by_id = {
-            asset.id: self._initial_xy(
+            asset.id: self._initial_xy(  # The assets' center XY should always be updated whenever changes are made.
                 asset,
                 is_generated=asset.id in generated_objects_by_id,
             )
@@ -343,13 +295,15 @@ class SceneLayoutConstructor:
                 raise ValueError(
                     f"New asset {object_id!r} must participate in layout optimization."
                 )
+        # Build the table-rooted BFS groups.
+        groups = self._build_groups()
 
         return SceneLayoutProblem(
             post_edit_scene=post_edit_scene,
             goal_scene_graph=self.goal_scene_graph,
             layout_variable_ids=set(self.layout_variable_ids),
             initial_xy_by_id=initial_xy_by_id,
-            groups=self._build_groups(),
+            groups=groups,
         )
 
     def _build_groups(self) -> list[SceneLayoutGroup]:
