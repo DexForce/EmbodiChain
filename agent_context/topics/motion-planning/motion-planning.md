@@ -97,6 +97,19 @@ Learning-based EEF waypoint planner. Franka Panda only.
 
 ### CuroboPlanner collision worlds
 
+`CuroboWorldCfg.rigid_objects` accepts either a mapping or a sequence. Use
+`Mapping[registry_id, RigidObject]` for a registry-backed integration. The
+mapping key is the authoritative logical/source obstacle ID used by the
+content-cache key, `collision_world_entity_ids`, and registry validation. For
+`cuboid` and `mesh`, it is also the physical YAML obstacle name and dynamic
+update key. For `sphere`, one static source expands to physical YAML names such
+as `registry_id_0`; dynamic sphere configuration is rejected, while cache and
+full-world identity remain keyed by `registry_id`. A registry mapping whose
+source lacks mesh geometry required by the selected representation fails fast
+instead of silently dropping the source. The sequence form is an advanced
+direct-core path that derives names from each object's `uid` or an
+`obstacle_<index>` fallback.
+
 `CuroboWorldCfg.multi_env` controls collision-world batching, not whether robot
 states or goals are batched:
 
@@ -126,6 +139,32 @@ them into `CuroboPlanOptions.dynamic_obstacle_poses`.
 to the backend hook. Atomic actions use that facade from their framework-owned
 `plan()` template when a `SceneSnapshot` declares collision entities;
 individual skills must not construct backend obstacle options themselves.
+`BasePlanner.collision_world_entity_ids`, `dynamic_collision_entity_ids`, and
+`collision_world_batch_mode` expose the complete canonical world, its dynamic
+subset, and the `"shared"` / `"per_env"` mode. `MotionGenerator` validates and
+forwards those properties to the integration layer. For cuRobo, the complete
+set is every mapping key (or inferred sequence name), while the dynamic set is
+exactly `CuroboWorldCfg.dynamic_obstacle_names`. Sphere-expanded physical YAML
+names are not part of either logical ID declaration.
+`CuroboWorldCfg` rejects duplicate obstacle names and requires every
+`dynamic_obstacle_name` to match an object registered in `rigid_objects`, so a
+planner-local mismatch fails before backend construction.
+
+For the canonical path, pass `SceneRegistry.collision_geometry_by_id()` into
+`CuroboWorldCfg.rigid_objects`, derive dynamic names from the registry, and call
+`SceneRegistry.make_planning_scene_provider(motion_generator, batch_size=...)`
+before execution. The geometry mapping excludes `NONE` registrations. The
+factory first requires the registry's complete `STATIC ∪ DYNAMIC` set to
+equal `MotionGenerator.collision_world_entity_ids`, then requires exact
+registry/derived-provider/planner dynamic-subset agreement. It also checks
+update capability for a non-empty dynamic set and the same collision-world
+batch mode. An external perception/hardware provider instead uses
+`validate_collision_integration(..., scene_provider=provider)`.
+
+One environment may infer `SHARED`; a multi-environment registry with dynamic
+entities must explicitly choose `SHARED` or `PER_ENV`. Alias normalization
+happens before planner construction, so planner IDs must never be simulator
+UIDs unless that string is also the chosen canonical registry ID.
 
 `MotionGenerator.resolve_plan_options()` is the corresponding option-ownership
 boundary. It copies caller-supplied typed options, otherwise obtains backend
@@ -261,7 +300,15 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
   accepts only `EEF_MOVE` and `JOINT_MOVE` and raises for other target types.
 - **Missing interpolation inputs** — `strategy="ik_interp"` requires explicit
   `start_qpos` and `sample_count`; it never reads live robot state implicitly.
+- **CUDA requested on a CPU-only runtime** — planner success-mask normalization
+  raises a direct `ValueError` before querying the active CUDA device. It never
+  silently falls back to CPU.
 - **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
 - **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
 - **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.
 - **Dynamic obstacles silently stale** — A planner participates in atomic-action collision revision recovery only when it declares `supports_collision_world_updates=True`; its hook must bind every `collision_entity_id` pose into the current planning attempt.
+- **Registry/planner identity drift** — Registry-backed cuRobo worlds must use a
+  canonical-ID mapping, not a list whose names are inferred from UIDs. Validate
+  exact full registry/planner collision-world agreement, dynamic
+  registry/provider/planner agreement, and batch-mode agreement through
+  `SceneRegistry` before starting execution.

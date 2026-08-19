@@ -11,7 +11,8 @@ combines that snapshot with the latest
 For the complete architecture and ownership model, see
 :doc:`/overview/sim/atomic_actions/index`. For the capability matrix and visual
 demonstrations of every built-in skill, see
-:doc:`/overview/sim/atomic_actions/builtin_actions`.
+:doc:`/overview/sim/atomic_actions/builtin_actions`. Canonical scene identity and
+snapshot/provider setup are documented in :doc:`/overview/sim/scene_registry`.
 
 The contracts deliberately separate six concerns:
 
@@ -83,6 +84,11 @@ It is the framework-owned template method called by the engine, not an
 additional application execution entry point. Atomic-action authors implement
 the protected ``_plan()`` hook instead. Register custom action instances with
 ``engine.register()`` before using the same public planning entry points.
+
+This extension contract is intentionally strict: a subclass that defines
+``plan()`` raises ``TypeError`` at class definition. There is no legacy adapter;
+custom actions must rename that implementation to ``_plan()`` so the
+framework-owned collision-scene preparation cannot be bypassed.
 
 Runnable examples
 -----------------
@@ -253,7 +259,6 @@ must be resolved from the latest scene snapshot:
    from embodichain.lab.sim.atomic_actions import (
        EndEffectorPoseGoal,
        RecoveryPolicy,
-       RigidObjectSceneProvider,
        SceneEntityPose,
    )
 
@@ -275,8 +280,16 @@ must be resolved from the latest scene snapshot:
        SimulationExecutionAdapter,
        TaskState,
    )
+   from embodichain.lab.sim.skills import SceneRegistry
 
-   scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
+   registry = SceneRegistry.from_simulation(
+       sim,
+       rigid_objects={"moving_tray": moving_tray.uid},
+   )
+   scene_provider = registry.make_planning_scene_provider(
+       motion_generator,
+       batch_size=robot.num_instances,
+   )
    adapter = SimulationExecutionAdapter(
        sim,
        robot,
@@ -319,13 +332,24 @@ for comparison:
 
    python scripts/tutorials/atomic_action/moving_target_recovery.py --headless --auto_play --device cpu
 
-For collision-aware execution, list pose-updatable obstacles in
-``RigidObjectSceneProvider.collision_entity_ids`` and configure matching
-dynamic obstacle names on a supporting planner such as cuRobo. The provider
-advances per-environment collision-world revisions when an obstacle moves;
-the session invalidates affected rows and the framework binds the latest poses
-before replanning. Pose thresholds use the last materially published pose as
-their baseline, so cumulative sub-threshold motion is eventually reported:
+For collision-aware execution, register each pose-updatable obstacle with
+``SceneCollisionRole.DYNAMIC`` and configure the same canonical registry IDs as
+the planner's dynamic obstacle names. Derive the cuRobo object mapping with
+``registry.collision_geometry_by_id()`` and construct the runtime provider with
+``registry.make_planning_scene_provider(motion_generator, batch_size=...)``.
+That one factory call checks that the registry's complete ``STATIC ∪
+DYNAMIC`` set exactly matches the planner's complete collision world, then
+checks that the registry, provider, and planner dynamic subsets exactly match.
+It also checks planner capability and shared/per-environment world mode. One
+environment may infer a shared world; a multi-environment dynamic registry must choose
+``SceneCollisionWorldMode.SHARED`` or ``PER_ENV`` explicitly. See
+:doc:`/overview/sim/scene_registry` for the complete cuRobo mapping example.
+
+The provider advances per-environment collision-world revisions when an
+obstacle moves; the session invalidates affected rows and the framework binds
+the latest poses before replanning. Pose thresholds use the last materially
+published pose as their baseline, so cumulative sub-threshold motion is
+eventually reported:
 
 .. code-block:: bash
 
@@ -361,10 +385,12 @@ The session replans from its latest context and emits an
 ``invocation_revised`` event. ``skill_id`` and ``invocation_id`` must still
 identify the active logical call.
 
-Only entities referenced through ``SceneEntityPose`` become automatic
-scene-motion dependencies. A skill may query a simulation entity's live pose
-when it plans, but that query alone does not cause an executing session to
-replan when the entity moves.
+Entities referenced through ``SceneEntityPose`` become automatic scene-motion
+dependencies. Object-centric skills may additionally declare an explicit
+``ObjectSemantics.entity_id`` when they ground an object pose from the same
+scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
+legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
+create a scene dependency.
 
 Task-state effects
 ------------------
@@ -397,7 +423,8 @@ Define an action-owned frozen goal dataclass. Then define typed runtime options
 when needed, implement the protected
 ``_plan(request, context)`` hook, and declare the stable skill metadata. Do not
 override the inherited public ``plan()`` method because it binds the latest
-collision scene first.
+collision scene first. Legacy custom actions that implemented ``plan()`` must
+rename it to ``_plan()``; defining ``plan()`` is rejected immediately.
 
 Return scalar or per-environment planner success through ``build_plan``. The
 framework normalizes the mask and holds failed rows at the observed qpos, so a

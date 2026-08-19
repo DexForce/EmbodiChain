@@ -46,6 +46,8 @@ def _merge_held(
     update_mask: torch.Tensor,
 ) -> HeldObjectState | None:
     """Apply one optional held-object update per environment."""
+    from .core import _same_object_identity
+
     if previous is None and candidate is None:
         return None
     if previous is None:
@@ -63,7 +65,7 @@ def _merge_held(
     if (
         previous_retained
         and candidate_applied
-        and previous.semantics is not candidate.semantics
+        and not _same_object_identity(previous.semantics, candidate.semantics)
     ):
         raise ValueError(
             "Cannot merge different held-object semantics for one resource "
@@ -74,7 +76,7 @@ def _merge_held(
         return None
     selector = update_mask[:, None, None]
     return HeldObjectState(
-        semantics=candidate.semantics if candidate_applied else previous.semantics,
+        semantics=(previous.semantics if previous_retained else candidate.semantics),
         object_to_eef=torch.where(
             selector, candidate.object_to_eef, previous.object_to_eef
         ),

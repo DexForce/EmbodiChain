@@ -23,9 +23,16 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+    get_relative_rotation,
+    pose_inv,
+)
 
-from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    JointPositionCommand,
+)
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
 from embodichain.lab.sim.atomic_actions.goals import (
     PoseGoalValue,
@@ -37,6 +44,16 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     resolve_object_target,
@@ -92,6 +109,32 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     OptionsType: ClassVar[type] = MoveHeldObjectOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset(
+                            {
+                                CARTESIAN_POSE_CAPABILITY,
+                                FORWARD_KINEMATICS_CAPABILITY,
+                            }
+                        ),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={GRASP_COMMAND: JointPositionCommand},
+                        route=ActionBindingRoute("end_effector", "primary"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+    )
 
     def _plan(
         self,
@@ -140,18 +183,19 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         end_arm_xpos = self.robot.compute_fk(
             start_arm_qpos, name=control_part, to_matrix=True
         )
-        if options.pick_rotate_upright is not None:
-            self._apply_configured_upright_rotation(
-                object_target_pose,
-                end_arm_xpos,
-                held_object.semantics.entity.get_local_pose(to_matrix=True),
-                options,
-            )
         object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
         if object_to_eef.shape == (4, 4):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        current_object_pose = torch.bmm(end_arm_xpos, pose_inv(object_to_eef))
+        if options.pick_rotate_upright is not None:
+            self._apply_configured_upright_rotation(
+                object_target_pose,
+                end_arm_xpos,
+                current_object_pose,
+                options,
+            )
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
         if options.pick_rotate_upright is None:

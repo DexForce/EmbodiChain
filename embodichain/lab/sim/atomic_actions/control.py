@@ -44,6 +44,10 @@ class ControlCommand(ABC):
     def snapshot(self) -> ControlCommand:
         """Return an independently owned copy of this command."""
 
+    @abstractmethod
+    def equivalent_to(self, other: ControlCommand) -> bool:
+        """Return whether ``other`` has exactly the same command semantics."""
+
 
 @dataclass(frozen=True, slots=True, eq=False, init=False)
 class JointPositionCommand(ControlCommand):
@@ -77,6 +81,12 @@ class JointPositionCommand(ControlCommand):
     def snapshot(self) -> JointPositionCommand:
         """Return an independently owned command snapshot."""
         return JointPositionCommand(self._positions)
+
+    def equivalent_to(self, other: ControlCommand) -> bool:
+        """Return whether ``other`` owns identical joint positions."""
+        return isinstance(other, JointPositionCommand) and self._positions.equal(
+            other._positions
+        )
 
     def resolve(
         self,
@@ -131,11 +141,19 @@ def _snapshot_commands(
         raise TypeError(f"{field_name} must be a mapping.")
     snapshots: dict[str, ControlCommand] = {}
     for name, command in commands.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(f"{field_name} keys must be non-empty strings.")
+        if not isinstance(name, str) or not name or name != name.strip():
+            raise ValueError(
+                f"{field_name} keys must be non-empty strings without outer "
+                "whitespace."
+            )
         if not isinstance(command, ControlCommand):
             raise TypeError(f"{field_name} values must be ControlCommand instances.")
-        snapshots[name] = command.snapshot()
+        snapshot = command.snapshot()
+        if not isinstance(snapshot, ControlCommand):
+            raise TypeError(
+                f"{field_name}[{name!r}].snapshot() must return a ControlCommand."
+            )
+        snapshots[name] = snapshot
     return MappingProxyType(snapshots)
 
 
@@ -186,8 +204,11 @@ def _snapshot_role_commands(
         raise TypeError(f"{field_name} must be a mapping.")
     snapshots: dict[str, Mapping[str, ControlCommand]] = {}
     for role, commands in values.items():
-        if not isinstance(role, str) or not role.strip():
-            raise ValueError(f"{field_name} roles must be non-empty strings.")
+        if not isinstance(role, str) or not role or role != role.strip():
+            raise ValueError(
+                f"{field_name} roles must be non-empty strings without outer "
+                "whitespace."
+            )
         snapshots[role] = _snapshot_commands(
             commands,
             field_name=f"{field_name}[{role!r}]",

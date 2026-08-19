@@ -26,7 +26,11 @@ import torch
 from embodichain.utils import logger
 
 from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
-from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND, OPEN_COMMAND
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
 from embodichain.lab.sim.atomic_actions.core import AtomicAction
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import (
@@ -39,6 +43,16 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointResourceSlots,
+    DisjointSlotEndpoints,
+    GRASP_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
@@ -141,6 +155,48 @@ class CoordinatedPlacement(
     OptionsType: ClassVar[type] = CoordinatedPlacementOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="placing",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                        route=ActionBindingRoute("manipulator", "placing"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={
+                            OPEN_COMMAND: JointPositionCommand,
+                            GRASP_COMMAND: JointPositionCommand,
+                        },
+                        route=ActionBindingRoute("end_effector", "placing"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+            SkillResourceSlot(
+                slot_id="support",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                        route=ActionBindingRoute("manipulator", "support"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={GRASP_COMMAND: JointPositionCommand},
+                        route=ActionBindingRoute("end_effector", "support"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+        constraints=(DisjointResourceSlots(("placing", "support")),),
+    )
     _repeat_qpos = staticmethod(repeat_qpos)
 
     def _resolve_resources(

@@ -29,6 +29,13 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
+    ActionBindingRoute,
+    JOINT_POSITION_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_joint_plan_states,
@@ -76,6 +83,20 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     OptionsType: ClassVar[type] = MoveJointsOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                ),
+            ),
+        ),
+    )
 
     def _plan(
         self,

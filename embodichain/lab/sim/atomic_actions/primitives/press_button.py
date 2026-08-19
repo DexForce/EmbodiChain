@@ -26,7 +26,10 @@ import torch
 
 from embodichain.utils.math import get_relative_rotation
 from embodichain.lab.sim.atomic_actions.affordance import PressButtonAffordance
-from embodichain.lab.sim.atomic_actions.control import GRASP_COMMAND
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    JointPositionCommand,
+)
 from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.goals import ObjectActionGoal
@@ -36,6 +39,16 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.requirements import (
+    ActionBindingRoute,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
@@ -97,6 +110,32 @@ class PressButton(AtomicAction[PressButtonGoal, PressButtonOptions]):
     OptionsType: ClassVar[type] = PressButtonOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset(
+                            {
+                                CARTESIAN_POSE_CAPABILITY,
+                                FORWARD_KINEMATICS_CAPABILITY,
+                            }
+                        ),
+                        route=ActionBindingRoute("manipulator", "primary"),
+                    ),
+                    SkillEndpointRequirement(
+                        endpoint_id="grasp",
+                        capabilities=frozenset({GRASP_CAPABILITY}),
+                        required_commands={GRASP_COMMAND: JointPositionCommand},
+                        route=ActionBindingRoute("end_effector", "primary"),
+                    ),
+                ),
+                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            ),
+        ),
+    )
 
     def __init__(self, default_options: PressButtonOptions | None = None) -> None:
         super().__init__(default_options)
