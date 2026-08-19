@@ -122,9 +122,12 @@ class SceneInventory:
         return self.interactive
 
     def left_score(self, entity: SceneEntity) -> float:
-        """Return robot-relative lateral score; positive values are left."""
-        sign = 1.0 if self.profile == "dual_franka" else -1.0
-        return sign * entity.position[1]
+        """Return robot-relative lateral score; positive values are left.
+
+        Generated dual-arm profiles share one final world layout: the semantic
+        left arm is on world ``-Y`` after all robot-level transforms.
+        """
+        return -entity.position[1]
 
 
 class GroundedTaskBuilder:

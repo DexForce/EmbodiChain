@@ -329,6 +329,7 @@ class ProgramExecutor:
         self._candidate_diagnostics: dict[str, tuple[str, ...]] = {}
         self._candidate_blockers: dict[str, tuple[dict[str, Any], ...]] = {}
         self._reported_candidates: set[str] = set()
+        self._pickup_retry_exclusions: dict[tuple[str, int], set[str]] = {}
         self._targets: dict[str, torch.Tensor] = {}
         self._target_poses: dict[str, torch.Tensor] = {}
         self._orientation_references: dict[str, torch.Tensor] = {}
@@ -943,14 +944,28 @@ class ProgramExecutor:
                 str(action.get("atomic_action_class"))
             )
             if capability.state_effect == "hold":
+                previous = list(self._assignments[step.id])
+                for env_id in (
+                    torch.nonzero(decision.retry, as_tuple=False).flatten().tolist()
+                ):
+                    arm = previous[env_id]
+                    if step.actor.get("mode") == "auto" and arm in {
+                        "left_arm",
+                        "right_arm",
+                    }:
+                        self._pickup_retry_exclusions.setdefault(
+                            (step.id, env_id), set()
+                        ).add(str(arm))
                 for arm in ("left_arm", "right_arm"):
-                    assigned = any(
-                        assignment == arm and bool(decision.retry[index])
-                        for index, assignment in enumerate(self._assignments[step.id])
-                    )
-                    if assigned:
-                        self._step_states.pop((step.id, arm), None)
-                        self._candidate(step, arm, ~decision.retry)
+                    self._step_states.pop((step.id, arm), None)
+                if step.actor.get("mode") == "auto":
+                    self._assignments.pop(step.id, None)
+                    self._ensure_assignment(step, ~decision.retry)
+                    refreshed = self._assignments[step.id]
+                    self._assignments[step.id] = [
+                        refreshed[index] if bool(decision.retry[index]) else assignment
+                        for index, assignment in enumerate(previous)
+                    ]
             retry_result = self._execute_edge(
                 edge,
                 step,
@@ -1576,6 +1591,7 @@ class ProgramExecutor:
         self._candidate_diagnostics.clear()
         self._candidate_blockers.clear()
         self._reported_candidates.clear()
+        self._pickup_retry_exclusions.clear()
         self._targets.clear()
         self._target_poses.clear()
         self._orientation_references.clear()
@@ -1752,6 +1768,25 @@ class ProgramExecutor:
             return None
         return "left_arm" if lateral > 0.0 else "right_arm"
 
+    def _preferred_live_pickup_arm(
+        self,
+        step: SemanticStep,
+        env_id: int,
+    ) -> str | None:
+        """Choose the arm on the object's current side when estimates fail."""
+        pose = self._entity_pose(step.object_uid)
+        center, _, lateral_axis = self._arm_selection_workspace(step)
+        index = min(env_id, pose.shape[0] - 1)
+        lateral = float(
+            torch.sum((pose[index, :2, 3] - center[index]) * lateral_axis[index])
+        )
+        if (
+            abs(lateral)
+            <= self.runtime_policy.arm_selection.orient_object_preferred_arm_deadband
+        ):
+            return None
+        return "left_arm" if lateral > 0.0 else "right_arm"
+
     def _ensure_assignment(
         self,
         step: SemanticStep,
@@ -1807,10 +1842,11 @@ class ProgramExecutor:
                 ]
                 return
             candidate = self._candidate(step, arm, failed)
+            conflicts = self._resource_conflicts(step, arm)
             self._assignments[step.id] = [
                 (
                     arm
-                    if not bool(failed[index]) and bool(candidate.feasible[index])
+                    if not bool(failed[index]) and not bool(conflicts[index])
                     else None
                 )
                 for index in range(len(failed))
@@ -1820,6 +1856,11 @@ class ProgramExecutor:
 
         left = self._candidate(step, "left_arm", failed)
         right = self._candidate(step, "right_arm", failed)
+        candidates = {"left_arm": left, "right_arm": right}
+        conflicts = {
+            arm: self._resource_conflicts(step, arm)
+            for arm in ("left_arm", "right_arm")
+        }
         owners = self._object_owners.get(step.object_uid, [None] * len(failed))
         assignments: list[str | None] = []
         selection_failed = torch.zeros_like(failed)
@@ -1829,41 +1870,38 @@ class ProgramExecutor:
                 continue
             if owners[env_id] is not None:
                 owner = str(owners[env_id])
-                owned = left if owner == "left_arm" else right
-                if bool(owned.feasible[env_id]):
+                excluded = self._pickup_retry_exclusions.get((step.id, env_id), set())
+                if owner not in excluded and not bool(conflicts[owner][env_id]):
                     assignments.append(owner)
                 else:
                     assignments.append(None)
                     selection_failed[env_id] = True
                 continue
-            left_ok = bool(left.feasible[env_id])
-            right_ok = bool(right.feasible[env_id])
-            preferred = self._preferred_in_place_arm(step, env_id)
-            if preferred == "left_arm":
-                if left_ok:
-                    assignments.append("left_arm")
-                elif right_ok:
-                    assignments.append("right_arm")
-                else:
-                    assignments.append(None)
-                    selection_failed[env_id] = True
-            elif preferred == "right_arm":
-                if right_ok:
-                    assignments.append("right_arm")
-                elif left_ok:
-                    assignments.append("left_arm")
-                else:
-                    assignments.append(None)
-                    selection_failed[env_id] = True
-            elif left_ok and (
-                not right_ok or float(left.cost[env_id]) <= float(right.cost[env_id])
-            ):
-                assignments.append("left_arm")
-            elif right_ok:
-                assignments.append("right_arm")
-            else:
+            excluded = self._pickup_retry_exclusions.get((step.id, env_id), set())
+            available = [
+                arm
+                for arm in ("left_arm", "right_arm")
+                if arm not in excluded and not bool(conflicts[arm][env_id])
+            ]
+            if not available:
                 assignments.append(None)
                 selection_failed[env_id] = True
+                continue
+            preferred = self._preferred_in_place_arm(step, env_id)
+            feasible = [
+                arm for arm in available if bool(candidates[arm].feasible[env_id])
+            ]
+            if preferred in feasible:
+                assignments.append(preferred)
+            elif feasible:
+                assignments.append(
+                    min(feasible, key=lambda arm: float(candidates[arm].cost[env_id]))
+                )
+            else:
+                live_preferred = self._preferred_live_pickup_arm(step, env_id)
+                assignments.append(
+                    live_preferred if live_preferred in available else available[0]
+                )
 
         if (
             allow_rematch
@@ -1912,11 +1950,23 @@ class ProgramExecutor:
         for env_id in range(len(failed)):
             if bool(failed[env_id]):
                 continue
-            ranked: list[tuple[bool, float, float, str, str]] = []
+            ranked: list[tuple[bool, bool, float, float, str, str]] = []
             for first_arm, second_arm in permutations:
                 first = candidates[(steps[0].id, first_arm)]
                 second = candidates[(steps[1].id, second_arm)]
                 feasible = bool(first.feasible[env_id] and second.feasible[env_id])
+                required_match = all(
+                    candidate_step.actor.get("mode") != "required"
+                    or str(candidate_step.actor.get("arm")) == candidate_arm
+                    for candidate_step, candidate_arm in (
+                        (steps[0], first_arm),
+                        (steps[1], second_arm),
+                    )
+                )
+                available = required_match and not bool(
+                    self._resource_conflicts(steps[0], first_arm)[env_id]
+                    or self._resource_conflicts(steps[1], second_arm)[env_id]
+                )
                 preferred = (
                     self._preferred_in_place_arm(steps[0], env_id),
                     self._preferred_in_place_arm(steps[1], env_id),
@@ -1927,6 +1977,7 @@ class ProgramExecutor:
                 )
                 ranked.append(
                     (
+                        not available,
                         not feasible,
                         side_penalty,
                         float(first.cost[env_id] + second.cost[env_id]),
@@ -1935,8 +1986,8 @@ class ProgramExecutor:
                     )
                 )
             ranked.sort()
-            infeasible, _, _, first_arm, second_arm = ranked[0]
-            if infeasible:
+            unavailable, _, _, _, first_arm, second_arm = ranked[0]
+            if unavailable:
                 continue
             assignments[steps[0].id][env_id] = first_arm
             assignments[steps[1].id][env_id] = second_arm
@@ -2769,6 +2820,8 @@ class ProgramExecutor:
             for arm in outcomes
         }
         grounded_items: list[GroundedAction] = []
+        planner_traces: list[dict[str, Any]] = []
+        planning_failed = torch.zeros_like(failed)
         action_class = str(edge.actions[0]["atomic_action_class"])
         capability = self.adapter.capabilities.get(action_class)
         for arm in outcomes:
@@ -2776,17 +2829,16 @@ class ProgramExecutor:
                 continue
             state = self._state_for(step, arm)
             if capability.state_effect == "hold":
-                candidate = self._candidate_cache.get((step.id, arm))
-                planned = None if candidate is None else candidate.plans.get(edge.id)
-                if planned is None:
-                    raise RuntimeError(
-                        f"Selected arm {arm!r} for {step.id!r} has no cached "
-                        f"PickUp plan for edge {edge.id!r}."
+                try:
+                    grounded, outcome = self._plan_live_hold(edge, step, arm)
+                except Exception as exc:
+                    planning_failed |= masks[arm]
+                    planner_traces.append(
+                        self._live_hold_failure_trace(edge, step, arm, exc)
                     )
-                grounded, outcome = planned
+                    continue
             else:
-                # Re-ground transport and placement from live simulator state;
-                # only the expensive, immediately executed PickUp is reusable.
+                # Re-ground transport and placement from live simulator state.
                 grounded, outcome = self._ground_and_plan_candidates(
                     edge.actions[0],
                     step,
@@ -2800,6 +2852,7 @@ class ProgramExecutor:
             grounded = outcome.grounded
             outcomes[arm] = outcome
             grounded_items.append(grounded)
+            planner_traces.append(outcome.planner_trace)
             self._remember_target(step, grounded)
             placement_index = grounded.motion_policy.get("placement_candidate_index")
             if placement_index is not None and bool(
@@ -2808,16 +2861,17 @@ class ProgramExecutor:
                 self._placement_candidate_history.setdefault((step.id, arm), set()).add(
                     int(placement_index)
                 )
+        assigned = masks["left_arm"] | masks["right_arm"]
         if not grounded_items:
             return _EdgeResult(
                 [],
-                torch.ones_like(failed),
+                failed | (~failed & ~assigned) | planning_failed,
                 [],
+                planner_traces,
                 executed=torch.zeros_like(failed),
             )
         trajectory, action_success = self.adapter.combine(outcomes, masks)
-        assigned = masks["left_arm"] | masks["right_arm"]
-        active = assigned & action_success & ~failed
+        active = assigned & action_success & ~failed & ~planning_failed
         actions = self.adapter.execute_trajectory(trajectory, active=active)
         physical_failed = torch.zeros_like(failed)
         for arm, outcome in outcomes.items():
@@ -2887,19 +2941,79 @@ class ProgramExecutor:
             failed
             | (~failed & ~assigned)
             | (assigned & ~action_success)
+            | planning_failed
             | physical_failed
         )
         return _EdgeResult(
             actions,
             edge_failed,
             grounded_items,
-            [
-                outcome.planner_trace
-                for outcome in outcomes.values()
-                if outcome is not None
-            ],
+            planner_traces,
             active,
         )
+
+    def _plan_live_hold(
+        self,
+        edge: ExecutionEdge,
+        step: SemanticStep,
+        arm: str,
+    ) -> tuple[GroundedAction, ActionOutcome]:
+        """Replace a speculative hold plan with one grounded at execution time."""
+        candidate = self._candidate_cache.get((step.id, arm))
+        cached_plan_available = candidate is not None and edge.id in candidate.plans
+        update_obj_info = getattr(self.env, "update_obj_info", None)
+        if callable(update_obj_info):
+            update_obj_info()
+        object_pose = self._entity_pose(step.object_uid).detach().clone()
+        state = self._state_for(step, arm)
+        grounded = self.grounder.ground(
+            edge.actions[0],
+            step,
+            arm=arm,
+            state=state,
+            orientation_reference_pose=self._orientation_references.get(step.id),
+        )
+        grounded = self._with_downstream_targets(step, edge.id, arm, state, grounded)
+        outcome = self.adapter.plan(grounded, state)
+        return grounded, replace(
+            outcome,
+            planner_trace={
+                **outcome.planner_trace,
+                "execution_replanned_from_live_state": True,
+                "speculative_candidate_available": cached_plan_available,
+                "speculative_candidate_replaced": cached_plan_available,
+                "execution_object_pose": object_pose,
+            },
+        )
+
+    def _live_hold_failure_trace(
+        self,
+        edge: ExecutionEdge,
+        step: SemanticStep,
+        arm: str,
+        exc: Exception,
+    ) -> dict[str, Any]:
+        """Describe a live PickUp planning exception without aborting the task."""
+        candidate = self._candidate_cache.get((step.id, arm))
+        return {
+            "action_class": str(edge.actions[0].get("atomic_action_class")),
+            "arm": arm,
+            "primary_strategy": "live_pickup_replan",
+            "primary_success": torch.zeros(
+                int(self.env.num_envs),
+                dtype=torch.bool,
+                device=self.env.device,
+            ),
+            "execution_replanned_from_live_state": True,
+            "speculative_candidate_available": (
+                candidate is not None and edge.id in candidate.plans
+            ),
+            "speculative_candidate_replaced": False,
+            "execution_object_pose": self._entity_pose(step.object_uid)
+            .detach()
+            .clone(),
+            "exception": f"{type(exc).__name__}: {exc}",
+        }
 
     def _physical_pickup(
         self,
@@ -3028,6 +3142,9 @@ class ProgramExecutor:
                 if held_object is not None:
                     held_objects[control_part] = held_object
             state = state.with_updates(held_objects=held_objects)
+        update_obj_info = getattr(self.env, "update_obj_info", None)
+        if callable(update_obj_info):
+            update_obj_info()
         groundings = self.grounder.ground_candidates(
             action,
             step,
@@ -3062,6 +3179,17 @@ class ProgramExecutor:
             for message in dict.fromkeys(selected_warnings):
                 log_warning(message)
         grounded, outcome = selected
+        if capability.state_effect == "transfer_hold":
+            outcome = replace(
+                outcome,
+                planner_trace={
+                    **outcome.planner_trace,
+                    "execution_replanned_from_live_state": True,
+                    "execution_object_pose": self._entity_pose(step.object_uid)
+                    .detach()
+                    .clone(),
+                },
+            )
         self._remember_target(step, grounded)
         successful = active & outcome.success
         actions = self.adapter.execute_trajectory(
@@ -3352,11 +3480,23 @@ class ProgramExecutor:
         for env_id in range(len(failed)):
             if bool(failed[env_id]):
                 continue
-            ranked: list[tuple[bool, float, float, str, str]] = []
+            ranked: list[tuple[bool, bool, float, float, str, str]] = []
             for first_arm, second_arm in permutations:
                 first = candidates[(steps[0].id, first_arm)]
                 second = candidates[(steps[1].id, second_arm)]
                 feasible = bool(first.feasible[env_id] and second.feasible[env_id])
+                required_match = all(
+                    candidate_step.actor.get("mode") != "required"
+                    or str(candidate_step.actor.get("arm")) == candidate_arm
+                    for candidate_step, candidate_arm in (
+                        (steps[0], first_arm),
+                        (steps[1], second_arm),
+                    )
+                )
+                available = required_match and not bool(
+                    self._resource_conflicts(steps[0], first_arm)[env_id]
+                    or self._resource_conflicts(steps[1], second_arm)[env_id]
+                )
                 first_preferred = self._preferred_in_place_arm(steps[0], env_id)
                 second_preferred = self._preferred_in_place_arm(steps[1], env_id)
                 side_penalty = (
@@ -3366,10 +3506,19 @@ class ProgramExecutor:
                     float(second_arm != second_preferred) if second_preferred else 0.0
                 )
                 cost = float(first.cost[env_id] + second.cost[env_id])
-                ranked.append((not feasible, side_penalty, cost, first_arm, second_arm))
+                ranked.append(
+                    (
+                        not available,
+                        not feasible,
+                        side_penalty,
+                        cost,
+                        first_arm,
+                        second_arm,
+                    )
+                )
             ranked.sort()
-            infeasible, _, _, first_arm, second_arm = ranked[0]
-            if infeasible:
+            unavailable, _, _, _, first_arm, second_arm = ranked[0]
+            if unavailable:
                 selection_failed[env_id] = True
                 continue
             assignments[steps[0].id][env_id] = first_arm
@@ -3407,12 +3556,45 @@ class ProgramExecutor:
                 "right_arm": partition,
             }
             edge_by_arm = {first_arm: edges[0], second_arm: edges[1]}
+            parallel_planning_failed = False
             for arm, edge in edge_by_arm.items():
                 step = self.step_by_edge[edge.id]
-                grounded, outcome = candidates[(step.id, arm)].plans[edge.id]
+                try:
+                    grounded, outcome = self._plan_live_hold(edge, step, arm)
+                except Exception as exc:
+                    parallel_planning_failed = True
+                    results[edge.id].planner_traces.append(
+                        self._live_hold_failure_trace(edge, step, arm, exc)
+                    )
+                    continue
                 outcomes[arm] = outcome
                 results[edge.id].grounded.append(outcome.grounded)
                 results[edge.id].planner_traces.append(outcome.planner_trace)
+                if bool((partition & ~outcome.success).any()):
+                    parallel_planning_failed = True
+            if parallel_planning_failed:
+                serial_actions: list[torch.Tensor] = []
+                for edge in edges:
+                    step = self.step_by_edge[edge.id]
+                    serial = self._execute_edge_with_retries(
+                        edge,
+                        step,
+                        failed=~partition,
+                    )
+                    serial_actions.extend(serial.actions)
+                    results[edge.id].grounded.extend(serial.grounded)
+                    results[edge.id].planner_traces.extend(serial.planner_traces)
+                    results[edge.id].failed = torch.where(
+                        partition,
+                        serial.failed,
+                        results[edge.id].failed,
+                    )
+                    assert results[edge.id].executed is not None
+                    if serial.executed is not None:
+                        results[edge.id].executed |= serial.executed
+                for edge in edges:
+                    results[edge.id].actions.extend(serial_actions)
+                continue
             trajectory, action_success = self.adapter.combine(outcomes, masks)
             active = partition & ~base_failed & action_success
             commands = self.adapter.execute_trajectory(trajectory, active=active)

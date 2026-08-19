@@ -85,6 +85,12 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
     assert runtime.motion_modifiers["orientation"]["upright"]["MoveHeldObject"][
         "surface_clearance"
     ] == pytest.approx(0.05)
+    assert runtime.motion_modifiers["handover_role"]["transfer"]["PickUp"] == {
+        "sample_interval": 80,
+        "hand_interp_steps": 5,
+        "pick_object_part": "top",
+    }
+    assert runtime.motion_defaults["HandOver"]["receive_pick_object_part"] == "bottom"
     assert runtime.predicate_fallbacks["upright_max_tilt"] == pytest.approx(
         0.2617993877991494
     )

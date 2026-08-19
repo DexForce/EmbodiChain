@@ -221,7 +221,7 @@ runtime:
         pre_grasp_distance: 0.08
         lift_height: 0.08
         receiver_hold_joint_tolerance: 0.002
-        receive_pick_object_part: center
+        receive_pick_object_part: bottom
         exchange_clearance: 0.06
         exchange_candidate_offset: 0.16
         exchange_obstacle_clearance: 0.04
@@ -270,7 +270,7 @@ runtime:
           PickUp:
             sample_interval: 80
             hand_interp_steps: 5
-            approach_direction_mode: handover_transfer
+            pick_object_part: top
 
     predicate_fallbacks:
       held_position_tolerance: 0.06

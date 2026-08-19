@@ -62,7 +62,8 @@ def test_upright_and_handover_role_modifiers_compose_without_named_cross_product
     )
 
     assert resolved["rotate_upright"] == pytest.approx(0.7853981633974483)
-    assert resolved["approach_direction_mode"] == "handover_transfer"
+    assert resolved["pick_object_part"] == "top"
+    assert "approach_direction_mode" not in resolved
     assert resolved["sample_interval"] == 80
 
 

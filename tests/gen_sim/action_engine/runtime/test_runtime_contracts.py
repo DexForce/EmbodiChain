@@ -256,8 +256,8 @@ class _FakeEnv:
     def get_current_xpos_agent(self) -> tuple[torch.Tensor, torch.Tensor]:
         left = torch.eye(4).repeat(self.num_envs, 1, 1)
         right = left.clone()
-        left[:, 1, 3] = 0.2
-        right[:, 1, 3] = -0.2
+        left[:, 1, 3] = -0.2
+        right[:, 1, 3] = 0.2
         return left, right
 
     def get_current_qpos_agent(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -882,6 +882,79 @@ def test_ready_scheduler_defers_pickups_until_a_carried_payload_is_released() ->
     assert not executor._parallel_pickup_candidate(packed[0])
 
 
+def test_parallel_pickups_plan_each_arm_at_execution_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _hold_step("first", "can_a", "left_arm")
+    second = _hold_step("second", "can_b", "right_arm")
+    first["actor"] = {"mode": "auto"}
+    second["actor"] = {"mode": "auto"}
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(first, second))),
+        _FakeEnv(
+            {
+                "can_a": _FakeEntity(
+                    "can_a", _pose(0.0, 0.2, 0.75), _box_vertices(0.03)
+                ),
+                "can_b": _FakeEntity(
+                    "can_b", _pose(0.0, -0.2, 0.75), _box_vertices(0.03)
+                ),
+            }
+        ),
+        record_runtime=False,
+    )
+    edges = tuple(
+        next(
+            edge
+            for edge in executor.program.edges
+            if edge.id in step.edge_ids
+            and edge.actions[0]["atomic_action_class"] == "PickUp"
+        )
+        for step in executor.program.semantic_steps
+    )
+    estimate = SimpleNamespace(
+        feasible=torch.tensor([True]),
+        cost=torch.tensor([0.0]),
+    )
+    monkeypatch.setattr(executor, "_candidate", lambda *_args, **_kwargs: estimate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+    live_calls: list[tuple[str, str]] = []
+
+    def plan_live(edge, step, arm):
+        live_calls.append((step.id, arm))
+        grounded = GroundedAction(
+            action_class="PickUp",
+            arm=arm,
+            control="arm",
+            target=SimpleNamespace(),
+            cfg={},
+        )
+        return grounded, ActionOutcome(
+            trajectory=torch.zeros(1, 1, executor.env.robot.dof),
+            success=torch.tensor([True]),
+            next_state=ExecutionState(last_qpos=executor.env.robot.get_qpos()),
+            grounded=grounded,
+        )
+
+    monkeypatch.setattr(executor, "_plan_live_hold", plan_live)
+    monkeypatch.setattr(executor.adapter, "execute_trajectory", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        executor, "_physical_pickup", lambda _u, _a, _s, attempted: attempted
+    )
+    monkeypatch.setattr(
+        executor, "_rebase_held_state", lambda _u, _a, state, *_args, **_kwargs: state
+    )
+    monkeypatch.setattr(executor, "_update_ownership", lambda *_args, **_kwargs: None)
+
+    _, failed = executor._execute_parallel_pickups(
+        edges,
+        failed=torch.tensor([False]),
+    )
+
+    assert {step_id for step_id, _ in live_calls} == {"first", "second"}
+    assert not bool(failed[0])
+
+
 def test_required_arm_rejects_wrong_candidate_without_planning() -> None:
     compiled = compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
     executor = ProgramExecutor(
@@ -899,6 +972,131 @@ def test_required_arm_rejects_wrong_candidate_without_planning() -> None:
 
     assert not bool(candidate.feasible.any())
     assert bool(torch.isinf(candidate.cost).all())
+
+
+def test_required_arm_speculative_failure_still_reaches_live_planning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        _FakeEnv(
+            {"can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))}
+        ),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    estimate = SimpleNamespace(
+        feasible=torch.tensor([False]),
+        cost=torch.tensor([torch.inf]),
+    )
+    monkeypatch.setattr(executor, "_candidate", lambda *_args, **_kwargs: estimate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+
+    executor._ensure_assignment(step, torch.tensor([False]))
+
+    assert executor._assignments[step.id] == ["left_arm"]
+
+
+def test_auto_pickup_retry_exclusion_switches_from_failed_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step_mapping = _hold_step("hold", "can", "left_arm")
+    step_mapping["actor"] = {"mode": "auto"}
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(step_mapping))),
+        _FakeEnv(
+            {"can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))}
+        ),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    estimate = SimpleNamespace(
+        feasible=torch.tensor([False]),
+        cost=torch.tensor([torch.inf]),
+    )
+    monkeypatch.setattr(executor, "_candidate", lambda *_args, **_kwargs: estimate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+    monkeypatch.setattr(
+        executor,
+        "_preferred_live_pickup_arm",
+        lambda *_args: "left_arm",
+    )
+
+    executor._ensure_assignment(step, torch.tensor([False]))
+    assert executor._assignments[step.id] == ["left_arm"]
+
+    executor._pickup_retry_exclusions[(step.id, 0)] = {"left_arm"}
+    executor._assignments.pop(step.id)
+    executor._ensure_assignment(step, torch.tensor([False]))
+
+    assert executor._assignments[step.id] == ["right_arm"]
+
+
+def test_auto_pickup_runtime_retry_uses_the_other_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step_mapping = _hold_step("hold", "can", "left_arm")
+    step_mapping["actor"] = {"mode": "auto"}
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(step_mapping))),
+        _FakeEnv(
+            {"can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))}
+        ),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    original_edge = executor.edges[step.edge_ids[0]]
+    action = {**original_edge.actions[0], "seed_node_id": "pickup_node"}
+    edge = replace(original_edge, actions=(action,))
+    estimate = SimpleNamespace(
+        feasible=torch.tensor([False]),
+        cost=torch.tensor([torch.inf]),
+    )
+    monkeypatch.setattr(executor, "_candidate", lambda *_args, **_kwargs: estimate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+    monkeypatch.setattr(
+        executor,
+        "_preferred_live_pickup_arm",
+        lambda *_args: "left_arm",
+    )
+    executor._ensure_assignment(step, torch.tensor([False]))
+    attempts: list[str | None] = []
+
+    def execute(_edge, _step, *, failed):
+        arm = executor._assignments[step.id][0]
+        attempts.append(arm)
+        return _EdgeResult(
+            actions=[],
+            failed=torch.tensor([arm == "left_arm"]) | failed,
+            grounded=[],
+            planner_traces=[],
+            executed=torch.tensor([False]),
+        )
+
+    decisions = 0
+
+    def record_failure(*_args, **_kwargs):
+        nonlocal decisions
+        decisions += 1
+        return SimpleNamespace(retry=torch.tensor([decisions == 1]))
+
+    executor.runtime_graph = SimpleNamespace(
+        graph={"nodes": [{"id": "pickup_node", "precondition": {}}]},
+        record_failure=record_failure,
+    )
+    monkeypatch.setattr(executor, "_execute_edge", execute)
+
+    result = executor._execute_edge_with_retries(
+        edge,
+        step,
+        failed=torch.tensor([False]),
+    )
+
+    assert attempts == ["left_arm", "right_arm"]
+    assert executor.retry_count == 1
+    assert not bool(result.failed[0])
 
 
 def _held_state(
@@ -1080,7 +1278,7 @@ def _handover_held_state(
     return state.with_updates(held_objects=held_objects)
 
 
-def test_handover_grounding_uses_center_exchange_and_diagonal_receive() -> None:
+def test_handover_grounding_uses_bottom_region_and_diagonal_receive() -> None:
     entities = {
         "can": _FakeEntity(
             "can",
@@ -1150,6 +1348,7 @@ def test_handover_grounding_uses_center_exchange_and_diagonal_receive() -> None:
     assert middle[0, 1, 3] == pytest.approx(0.0)
     torch.testing.assert_close(final, middle)
     torch.testing.assert_close(cfg.middle_object_pose, cfg.final_object_pose)
+    assert cfg.receive_pick_object_part == "bottom"
     assert cfg.receive_approach_direction[1] < 0.0
     assert cfg.receive_approach_direction[2] < 0.0
     assert staging.motion_policy["upright_yaw_samples"] == 8
@@ -2986,10 +3185,16 @@ def test_handover_commits_receiver_ownership_only_after_physical_verification(
         next_state=receiver_state,
         grounded=grounded,
     )
+    observed_poses: list[torch.Tensor] = []
+
+    def ground_candidates(*_args, **_kwargs):
+        observed_poses.append(entities["can"].get_local_pose(to_matrix=True))
+        return (grounded,)
+
     monkeypatch.setattr(
         executor.grounder,
         "ground_candidates",
-        lambda *_args, **_kwargs: (grounded,),
+        ground_candidates,
     )
     monkeypatch.setattr(
         executor.adapter, "plan", lambda *_args, **_kwargs: successful_outcome
@@ -3000,8 +3205,11 @@ def test_handover_commits_receiver_ownership_only_after_physical_verification(
         lambda *_args, **_kwargs: [],
     )
 
+    entities["can"]._pose[:, 0, 3] += 0.30
     result = executor._execute_coordinated(edge, step, torch.tensor([False]))
 
+    assert observed_poses[0][0, 0, 3] == pytest.approx(0.30)
+    assert result.planner_traces[0]["execution_replanned_from_live_state"] is True
     assert bool(result.failed[0])
     assert executor._object_owners["can"] == [None]
     assert executor._arm_owners["left_arm"] == [None]
@@ -3100,7 +3308,8 @@ def test_orient_then_handover_reacquires_with_a_separate_transfer_policy() -> No
     )
 
     assert "approach_direction_mode" not in orient_pickup.cfg
-    assert handover_pickup.cfg["approach_direction_mode"] == "handover_transfer"
+    assert "approach_direction_mode" not in handover_pickup.cfg
+    assert handover_pickup.cfg["pick_object_part"] == "top"
     assert orient_pickup.target.grasp_xpos is None
     assert orient_pickup.target.semantics.affordance is semantics.affordance
     assert handover_pickup.target.grasp_xpos is None
@@ -3113,7 +3322,7 @@ def test_orient_then_handover_reacquires_with_a_separate_transfer_policy() -> No
 
 def test_handover_clearance_verifier_checks_distance_and_transfer_side() -> None:
     entities = {
-        "can": _FakeEntity("can", _pose(0.0, 0.2, 1.0), _box_vertices(0.03)),
+        "can": _FakeEntity("can", _pose(0.0, -0.2, 1.0), _box_vertices(0.03)),
         "target": _FakeEntity("target", _pose(0.2, 0.0, 0.75), _box_vertices(0.03)),
         "table": _FakeEntity("table", _pose(0.0, 0.0, 0.5), _box_vertices(0.5)),
     }
@@ -3157,8 +3366,8 @@ def test_handover_clearance_verifier_checks_distance_and_transfer_side() -> None
         )[0]
     )
 
-    clear_left = _pose(0.0, 0.0, 1.0)
-    env.get_current_xpos_agent = lambda: (clear_left, _pose(0.0, -0.2, 1.0))
+    clear_left = _pose(0.0, -0.4, 1.0)
+    env.get_current_xpos_agent = lambda: (clear_left, _pose(0.0, 0.2, 1.0))
     assert bool(
         hook(
             executor=executor,
@@ -3170,38 +3379,36 @@ def test_handover_clearance_verifier_checks_distance_and_transfer_side() -> None
     )
 
 
-@pytest.mark.parametrize(
-    ("arm", "expected_lateral"),
-    [("left_arm", 1.0), ("right_arm", -1.0)],
-)
-def test_handover_transfer_modifier_uses_inward_diagonal_approach(
+@pytest.mark.parametrize("arm", ["left_arm", "right_arm"])
+def test_handover_source_policy_uses_pickup_default_top_down_approach(
     arm: str,
-    expected_lateral: float,
 ) -> None:
     action = GroundedAction(
         action_class="PickUp",
         arm=arm,
         control="arm",
         target=SimpleNamespace(),
-        cfg={"approach_direction_mode": "handover_transfer"},
+        cfg={"pick_object_part": "top"},
     )
 
     cfg = AtomicActionAdapter(_FakeEnv())._build_config(action, PickUpOptions)
 
-    assert cfg.approach_direction[0] == pytest.approx(0.0)
-    diagonal = 2.0**-0.5
-    assert cfg.approach_direction[1] == pytest.approx(expected_lateral * diagonal)
-    assert cfg.approach_direction[2] == pytest.approx(-diagonal)
+    assert cfg.pick_object_part == "top"
+    torch.testing.assert_close(
+        cfg.approach_direction,
+        torch.tensor([0.0, 0.0, -1.0]),
+    )
 
 
 @pytest.mark.parametrize(
-    ("transfer_arm", "expected_receiver_lateral"),
+    ("transfer_arm", "expected_world_y"),
     [("left_arm", -1.0), ("right_arm", 1.0)],
 )
 def test_handover_receiver_uses_the_mirrored_diagonal_approach(
     transfer_arm: str,
-    expected_receiver_lateral: float,
+    expected_world_y: float,
 ) -> None:
+    env = _FakeEnv()
     action = GroundedAction(
         action_class="HandOver",
         arm="coordinated",
@@ -3214,13 +3421,56 @@ def test_handover_receiver_uses_the_mirrored_diagonal_approach(
         },
     )
 
-    cfg = AtomicActionAdapter(_FakeEnv())._build_config(action, HandOverOptions)
+    cfg = AtomicActionAdapter(env)._build_config(action, HandOverOptions)
 
     diagonal = 2.0**-0.5
     assert cfg.receive_approach_direction[0] == pytest.approx(0.0)
     assert cfg.receive_approach_direction[1] == pytest.approx(
-        expected_receiver_lateral * diagonal
+        expected_world_y * diagonal
     )
+    assert cfg.receive_approach_direction[2] == pytest.approx(-diagonal)
+    _, lateral = robot_frame_axes(env)
+    receive_side = "right_arm" if transfer_arm == "left_arm" else "left_arm"
+    receiver_outward = lateral[0] if receive_side == "left_arm" else -lateral[0]
+    pre_grasp_offset = -cfg.receive_approach_direction[:2] * cfg.pre_grasp_distance
+    assert torch.dot(pre_grasp_offset, receiver_outward) > 0.0
+
+
+@pytest.mark.parametrize(
+    ("transfer_arm", "expected_x"),
+    [("left_arm", 1.0), ("right_arm", -1.0)],
+)
+def test_handover_receiver_approach_tracks_rotated_robot_lateral_axis(
+    monkeypatch: pytest.MonkeyPatch,
+    transfer_arm: str,
+    expected_x: float,
+) -> None:
+    env = _FakeEnv()
+
+    def get_link_pose(*, link_name: str, to_matrix: bool) -> torch.Tensor:
+        assert to_matrix
+        pose = torch.eye(4).unsqueeze(0)
+        pose[:, 0, 3] = 0.3 if link_name == "physical_left_base" else -0.3
+        return pose
+
+    monkeypatch.setattr(env.robot, "get_link_pose", get_link_pose)
+    action = GroundedAction(
+        action_class="HandOver",
+        arm="coordinated",
+        control="coordinated",
+        target=SimpleNamespace(),
+        cfg={
+            "transfer_arm": transfer_arm,
+            "middle_object_pose": torch.eye(4).unsqueeze(0),
+            "final_object_pose": torch.eye(4).unsqueeze(0),
+        },
+    )
+
+    cfg = AtomicActionAdapter(env)._build_config(action, HandOverOptions)
+
+    diagonal = 2.0**-0.5
+    assert cfg.receive_approach_direction[0] == pytest.approx(expected_x * diagonal)
+    assert cfg.receive_approach_direction[1] == pytest.approx(0.0)
     assert cfg.receive_approach_direction[2] == pytest.approx(-diagonal)
 
 
@@ -3228,7 +3478,7 @@ def test_handover_receiver_uses_the_mirrored_diagonal_approach(
     ("arm", "outward_x"),
     [("left_arm", 1.0), ("right_arm", -1.0)],
 )
-def test_handover_transfer_approach_tracks_a_rotated_live_base_line(
+def test_legacy_handover_transfer_mode_tracks_a_rotated_live_base_line(
     monkeypatch: pytest.MonkeyPatch,
     arm: str,
     outward_x: float,
@@ -3257,7 +3507,7 @@ def test_handover_transfer_approach_tracks_a_rotated_live_base_line(
     assert cfg.approach_direction[2] < 0.0
 
 
-def test_candidate_plan_is_reused_and_screens_downstream_targets(
+def test_pickup_is_replanned_from_live_pose_and_screens_downstream_targets(
     monkeypatch: Any,
 ) -> None:
     entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
@@ -3290,7 +3540,7 @@ def test_candidate_plan_is_reused_and_screens_downstream_targets(
             arm=arm,
             control=str(action.get("control", "arm")),
             target=SimpleNamespace(xpos=None),
-            cfg={},
+            cfg={"planned_object_pose": entity.get_local_pose(to_matrix=True)},
             target_object_pose=target_pose,
         )
 
@@ -3314,14 +3564,49 @@ def test_candidate_plan_is_reused_and_screens_downstream_targets(
 
     executor._ensure_assignment(step, failed)
     planned_call_count = len(plan_calls)
+    executor._candidate_cache.clear()
+    entity._pose[:, 0, 3] += 0.25
     edge_result = executor._execute_edge(
         executor.edges[step.edge_ids[0]], step, failed=failed
     )
 
-    assert len(plan_calls) == planned_call_count == len(step.edge_ids)
+    assert len(plan_calls) == planned_call_count + 1
+    assert planned_call_count == len(step.edge_ids)
     assert len(plan_calls[0].cfg["downstream_object_target_poses"]) == 1
+    assert plan_calls[-1].cfg["planned_object_pose"][0, 0, 3] == pytest.approx(0.25)
+    assert plan_calls[-1].cfg["downstream_object_target_poses"]
+    assert edge_result.planner_traces[0]["execution_replanned_from_live_state"]
+    assert not edge_result.planner_traces[0]["speculative_candidate_available"]
     assert bool(edge_result.failed[0])
     assert executor._object_owners["can"] == [None]
+
+
+def test_live_pickup_planning_exception_is_a_retryable_edge_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entity = _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))
+    executor = ProgramExecutor(
+        load_execution_program(
+            compile_task_agent(_task_agent(_hold_step("hold", "can", "left_arm")))
+        ),
+        _FakeEnv({"can": entity}),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+    edge = executor.edges[step.edge_ids[0]]
+    executor._assignments[step.id] = ["left_arm"]
+    monkeypatch.setattr(
+        executor.grounder,
+        "ground",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("no IK")),
+    )
+
+    result = executor._execute_edge(edge, step, failed=torch.tensor([False]))
+
+    assert bool(result.failed[0])
+    assert result.actions == []
+    assert result.planner_traces[0]["primary_strategy"] == "live_pickup_replan"
+    assert result.planner_traces[0]["exception"] == "RuntimeError: no IK"
 
 
 def test_pickup_candidate_screens_handover_successor_target(

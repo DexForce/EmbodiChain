@@ -703,6 +703,26 @@ class AtomicActionAdapter:
         }
         if reachability_search is not None:
             trace["reachability_search"] = deepcopy(dict(reachability_search))
+        options = invocation.skill_options
+        object_part = getattr(options, "pick_object_part", None)
+        approach_direction = getattr(options, "approach_direction", None)
+        if object_part is None:
+            object_part = getattr(options, "receive_pick_object_part", None)
+            approach_direction = getattr(
+                options,
+                "receive_approach_direction",
+                approach_direction,
+            )
+        if object_part is not None:
+            grasp_policy: dict[str, Any] = {"object_part": str(object_part)}
+            if isinstance(approach_direction, torch.Tensor):
+                direction = approach_direction.to(dtype=torch.float32)
+                norm = torch.linalg.vector_norm(direction)
+                if bool(torch.isfinite(norm)) and float(norm) > 0.0:
+                    grasp_policy["approach_direction"] = (
+                        (direction / norm).detach().cpu().tolist()
+                    )
+            trace["grasp_policy"] = grasp_policy
         return trace
 
     def _select_upright_transport_yaw(
@@ -1136,12 +1156,14 @@ class AtomicActionAdapter:
         if middle is None or final is None:
             raise ValueError("HandOver grounding must provide middle and final poses.")
         transfer_side = str(action.cfg.get("transfer_arm", "left_arm"))
+        receive_side = "right_arm" if transfer_side == "left_arm" else "left_arm"
         from .frames import robot_frame_axes
 
         _, lateral = robot_frame_axes(self.env)
-        transfer_outward = (
-            lateral[0] if transfer_side == "left_arm" else -lateral[0]
+        receiver_outward = (
+            lateral[0] if receive_side == "left_arm" else -lateral[0]
         ).to(device=self.device)
+        receiver_inward_approach = -receiver_outward
         policy.update(
             {
                 "middle_object_pose": middle,
@@ -1149,7 +1171,7 @@ class AtomicActionAdapter:
                 # Keep the receiver fixed while the source retreats here.
                 "final_object_pose": middle,
                 "receive_approach_direction": _diagonal_approach_direction(
-                    transfer_outward
+                    receiver_inward_approach
                 ),
             }
         )

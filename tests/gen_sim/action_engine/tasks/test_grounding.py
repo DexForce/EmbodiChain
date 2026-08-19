@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -149,9 +150,22 @@ def test_grounding_prompt_preserves_open_semantics_and_redacts_geometry() -> Non
     assert '"name": "wood board"' in prompt
     assert '"orientation": "fallen"' in prompt
     assert '"size": "large"' in prompt
-    assert '"side": "left"' in prompt
+    prompt_inventory = json.loads(prompt.split("Redacted scene inventory:\n", 1)[1])
+    side_by_uid = {item["uid"]: item["side"] for item in prompt_inventory}
+    assert side_by_uid["cutting_board"] == "right"
+    assert side_by_uid["salt_shaker"] == "left"
     assert '"position"' not in prompt
     assert '"init_pos"' not in prompt
+
+
+@pytest.mark.parametrize("robot_profile", ["ur5", "ur10", "franka"])
+def test_scene_inventory_uses_the_shared_final_world_lateral_axis(
+    robot_profile: str,
+) -> None:
+    inventory = SceneInventory(_scene(), robot_profile=robot_profile)
+
+    assert inventory.left_score(inventory.by_uid["salt_shaker"]) > 0.0
+    assert inventory.left_score(inventory.by_uid["cutting_board"]) < 0.0
 
 
 def test_grounding_repairs_one_invalid_uid_in_the_same_batch() -> None:
