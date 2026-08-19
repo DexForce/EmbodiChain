@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 from embodichain.toolkits.graspkit.pg_grasp import (
-    GraspCandidateProvider,
     GraspGenerator,
     GraspGeneratorCfg,
 )
@@ -83,15 +82,9 @@ class AntipodalAffordance(Affordance):
     force_reannotate: bool = False
     """If True, recompute the grasp annotation on each access."""
 
-    candidate_provider: GraspCandidateProvider | None = None
-    """Optional EEF-aware provider shared by tutorials and agent runtimes."""
-
     _generator: GraspGenerator | None = field(default=None, init=False, repr=False)
 
     def _init_generator(self) -> None:
-        if self.candidate_provider is not None:
-            self._generator = self.candidate_provider.generator
-            return
         if self.mesh_vertices is None or self.mesh_triangles is None:
             logger.log_error(
                 "mesh_vertices and mesh_triangles must be provided to initialize "
@@ -106,15 +99,6 @@ class AntipodalAffordance(Affordance):
         )
         if self.force_reannotate or self._generator._hit_point_pairs is None:
             self._generator.annotate()
-
-    @property
-    def grasp_diagnostics(self) -> dict[str, Any]:
-        """Return the latest provider/generator filtering trace."""
-        if self.candidate_provider is not None:
-            return self.candidate_provider.diagnostics
-        if self._generator is None:
-            return {}
-        return self._generator.last_filter_diagnostics
 
     def _resolve_approach_direction(
         self, approach_direction: torch.Tensor
@@ -135,7 +119,6 @@ class AntipodalAffordance(Affordance):
         grasp_cost_fn: (
             Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
-        approach_attempt_id: int = 0,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         if self._generator is None:
             self._init_generator()
@@ -154,7 +137,6 @@ class AntipodalAffordance(Affordance):
                 approach_direction=approach_direction,
                 object_part=object_part,
                 pose_cost_fn=pose_cost_fn,
-                approach_attempt_id=approach_attempt_id,
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)
@@ -181,7 +163,6 @@ class AntipodalAffordance(Affordance):
             [0, 0, -1], dtype=torch.float32
         ),
         middle_empty_ratio: float = 0.4,
-        approach_attempt_id: int = 0,
     ) -> list[dict | None]:
         if self._generator is None:
             self._init_generator()
@@ -193,7 +174,6 @@ class AntipodalAffordance(Affordance):
                 approach_direction=approach_direction,
                 left_to_right_arm_direction=left_to_right_arm_direction,
                 middle_empty_ratio=middle_empty_ratio,
-                approach_attempt_id=approach_attempt_id,
             )
             results.append(result)
         return results

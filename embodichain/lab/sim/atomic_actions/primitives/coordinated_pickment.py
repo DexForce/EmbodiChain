@@ -117,15 +117,6 @@ class CoordinatedPickmentOptions(ActionOptions):
     """Fraction of the object's left-to-right extent left grasp-free in the middle
     so the two grippers pinch opposite ends. Must be in ``[0, 1]``."""
 
-    grasp_attempt_id: int = 0
-    """Deterministic approach-cone schedule index used by bounded retries."""
-
-    middle_empty_ratio_retry_step: float = 0.0
-    """Per-attempt deterministic widening of the left/right grasp regions."""
-
-    lift_height_retry_step: float = 0.0
-    """Per-attempt lift reduction used after a coordinated IK failure."""
-
     def __post_init__(self) -> None:
         if self.object_motion_keyframes < 2:
             raise ValueError("object_motion_keyframes must be at least 2.")
@@ -147,12 +138,6 @@ class CoordinatedPickmentOptions(ActionOptions):
             object.__setattr__(self, name, value.clone())
         if not 0.0 <= self.middle_empty_ratio <= 1.0:
             raise ValueError("middle_empty_ratio must be in [0, 1].")
-        if self.middle_empty_ratio_retry_step < 0.0:
-            raise ValueError("middle_empty_ratio_retry_step must be non-negative.")
-        if self.lift_height_retry_step < 0.0:
-            raise ValueError("lift_height_retry_step must be non-negative.")
-        if isinstance(self.grasp_attempt_id, bool) or self.grasp_attempt_id < 0:
-            raise ValueError("grasp_attempt_id must be a non-negative integer.")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -455,9 +440,6 @@ class CoordinatedPickment(
         target: CoordinatedPickGoal,
         context: PlanningContext,
         options: CoordinatedPickmentOptions,
-        resources: _CoordinatedPickResources,
-        left_start_qpos: torch.Tensor,
-        right_start_qpos: torch.Tensor,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -479,13 +461,7 @@ class CoordinatedPickment(
         )
         left_grasp_xpos, right_grasp_xpos, grasp_success = (
             self._resolve_dual_arm_grasp_poses(
-                target.semantics,
-                object_initial_pose,
-                object_target_pose,
-                options,
-                resources,
-                left_start_qpos,
-                right_start_qpos,
+                target.semantics, object_initial_pose, options
             )
         )
         left_object_to_eef = torch.bmm(pose_inv(object_initial_pose), left_grasp_xpos)
@@ -514,11 +490,7 @@ class CoordinatedPickment(
         self,
         semantics: ObjectSemantics,
         object_poses: torch.Tensor,
-        object_target_poses: torch.Tensor,
         options: CoordinatedPickmentOptions,
-        resources: _CoordinatedPickResources,
-        left_start_qpos: torch.Tensor,
-        right_start_qpos: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample left/right grasp poses from the target antipodal affordance.
 
@@ -540,6 +512,11 @@ class CoordinatedPickment(
                 "dual-arm grasps.",
                 ValueError,
             )
+        n_envs = object_poses.shape[0]
+        identity = torch.eye(4, dtype=torch.float32, device=self.device)
+        left_grasp_xpos = identity.unsqueeze(0).repeat(n_envs, 1, 1)
+        right_grasp_xpos = identity.unsqueeze(0).repeat(n_envs, 1, 1)
+        success_mask = torch.zeros(n_envs, dtype=torch.bool, device=self.device)
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )
@@ -554,118 +531,56 @@ class CoordinatedPickment(
             left_to_right_arm_direction=left_to_right_arm_direction,
             approach_direction=approach_direction,
             middle_empty_ratio=options.middle_empty_ratio,
-            approach_attempt_id=options.grasp_attempt_id,
-        )
-        left_grasp_xpos, left_success = self._select_reachable_grasp_batch(
-            dual_results,
-            arm="left",
-            object_poses=object_poses,
-            object_target_poses=object_target_poses,
-            start_qpos=left_start_qpos,
-            manipulator=resources.left_arm,
-            options=options,
-        )
-        right_grasp_xpos, right_success = self._select_reachable_grasp_batch(
-            dual_results,
-            arm="right",
-            object_poses=object_poses,
-            object_target_poses=object_target_poses,
-            start_qpos=right_start_qpos,
-            manipulator=resources.right_arm,
-            options=options,
-        )
-        success_mask = left_success & right_success
-        if not bool(success_mask.all()):
-            failed = torch.nonzero(~success_mask, as_tuple=False).flatten().tolist()
-            logger.log_warning(
-                "No dual grasp pair has a feasible approach/lift/target IK path "
-                f"for environment(s) {failed}."
-            )
-        return left_grasp_xpos, right_grasp_xpos, success_mask
-
-    def _select_reachable_grasp_batch(
-        self,
-        dual_results: list[dict | None],
-        *,
-        arm: str,
-        object_poses: torch.Tensor,
-        object_target_poses: torch.Tensor,
-        start_qpos: torch.Tensor,
-        manipulator: ResolvedControlPart,
-        options: CoordinatedPickmentOptions,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Select the lowest-cost grasp with feasible coordinated endpoints."""
-        candidate_counts = [
-            0
-            if result is None or not result[arm].get("is_success", False)
-            else int(result[arm]["grasp_poses"].reshape(-1, 4, 4).shape[0])
-            for result in dual_results
-        ]
-        max_candidates = max(1, max(candidate_counts, default=0))
-        poses = torch.eye(4, dtype=torch.float32, device=self.device).repeat(
-            self.n_envs, max_candidates, 1, 1
-        )
-        costs = torch.full(
-            (self.n_envs, max_candidates),
-            torch.inf,
-            dtype=torch.float32,
-            device=self.device,
         )
         for env_idx, result in enumerate(dual_results):
-            count = candidate_counts[env_idx]
-            if result is None or count == 0:
+            if result is None:
+                logger.log_warning(
+                    f"Failed to sample dual-arm grasps for environment {env_idx}."
+                )
                 continue
-            candidate_poses = result[arm]["grasp_poses"].reshape(-1, 4, 4).to(
+            left_grasp = self._select_best_grasp(result["left"])
+            right_grasp = self._select_best_grasp(result["right"])
+            if left_grasp is None or right_grasp is None:
+                logger.log_warning(
+                    f"No valid left/right grasp for environment {env_idx}."
+                )
+                continue
+            left_grasp_xpos[env_idx] = left_grasp.to(
                 device=self.device, dtype=torch.float32
             )
-            candidate_costs = result[arm]["total_cost"].reshape(-1).to(
+            right_grasp_xpos[env_idx] = right_grasp.to(
                 device=self.device, dtype=torch.float32
             )
-            poses[env_idx, :count] = candidate_poses
-            poses[env_idx, count:] = candidate_poses[0]
-            costs[env_idx, :count] = candidate_costs
+            success_mask[env_idx] = True
+        return left_grasp_xpos, right_grasp_xpos, success_mask
 
-        pre_grasp = poses.clone()
-        pre_grasp[..., :3, 3] -= (
-            pre_grasp[..., :3, 2] * options.pre_grasp_distance
-        )
-        object_to_eef = torch.matmul(pose_inv(object_poses)[:, None], poses)
-        lift_object_poses = translate_pose_world(
-            object_poses,
-            torch.tensor([0.0, 0.0, options.lift_height], device=self.device),
-        )
-        lift_poses = torch.matmul(lift_object_poses[:, None], object_to_eef)
-        target_poses = torch.matmul(object_target_poses[:, None], object_to_eef)
+    @staticmethod
+    def _select_best_grasp(arm_result: dict) -> torch.Tensor | None:
+        """Return the lowest-cost grasp pose from one arm's sampler result.
 
-        seed = start_qpos[:, None].expand(-1, max_candidates, -1)
-        pre_success, pre_qpos = self.robot.compute_batch_ik(
-            pose=pre_grasp,
-            name=manipulator.name,
-            joint_seed=seed,
-        )
-        grasp_success, grasp_qpos = self.robot.compute_batch_ik(
-            pose=poses,
-            name=manipulator.name,
-            joint_seed=pre_qpos,
-        )
-        lift_success, lift_qpos = self.robot.compute_batch_ik(
-            pose=lift_poses,
-            name=manipulator.name,
-            joint_seed=grasp_qpos,
-        )
-        target_success, _ = self.robot.compute_batch_ik(
-            pose=target_poses,
-            name=manipulator.name,
-            joint_seed=lift_qpos,
-        )
-        feasible = (
-            pre_success & grasp_success & lift_success & target_success
-        ).to(device=self.device, dtype=torch.bool)
-        feasible &= torch.isfinite(costs)
-        ranked_costs = torch.where(feasible, costs, torch.inf)
-        best_cost, best_index = ranked_costs.min(dim=1)
-        env_index = torch.arange(self.n_envs, device=self.device)
-        return poses[env_index, best_index], torch.isfinite(best_cost)
+        Args:
+            arm_result: One ``"left"``/``"right"`` entry of the dict returned by
+                :meth:`AntipodalAffordance.get_dual_arm_valid_grasp_poses`.
+
+        Returns:
+            The selected ``(4, 4)`` grasp pose, or ``None`` when the sampler
+            reports no valid grasp for this arm.
+        """
+        if not arm_result.get("is_success", False):
+            return None
+        grasp_poses = arm_result["grasp_poses"].to(dtype=torch.float32)
+        costs = arm_result["total_cost"].to(dtype=torch.float32)
+        if grasp_poses.dim() == 2:
+            # The sampler returns a single eye(4) placeholder when it finds no
+            # valid pair; is_success should already cover this, but stay robust.
+            grasp_poses = grasp_poses.unsqueeze(0)
+            costs = costs.unsqueeze(0)
+        if grasp_poses.shape[0] == 0:
+            return None
+        best_idx = torch.argmin(costs)
+        if not torch.isfinite(costs[best_idx]):
+            return None
+        return grasp_poses[best_idx]
 
     def _compute_segment_lengths(
         self, sample_count: int, options: CoordinatedPickmentOptions
@@ -880,9 +795,6 @@ class CoordinatedPickment(
                 "Coordinated dual-arm planning is not supported by the cuRobo backend."
             )
         state = context
-        left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(
-            state, resources
-        )
         (
             object_initial_pose,
             object_target_pose,
@@ -892,24 +804,17 @@ class CoordinatedPickment(
             right_target_xpos,
             held_state,
             grasp_success,
-        ) = self._resolve_target(
-            target,
-            context,
-            options,
-            resources,
-            left_start_qpos,
-            right_start_qpos,
-        )
+        ) = self._resolve_target(target, context, options)
         if not grasp_success.any():
             logger.log_warning("CoordinatedPickment failed to resolve dual-arm grasps.")
             return self.failed_plan(
                 request,
                 context,
                 message="Failed to resolve dual-arm grasps.",
-                metadata={
-                    "grasp_candidate_trace": target.semantics.affordance.grasp_diagnostics
-                },
             )
+        left_start_qpos, right_start_qpos = self._resolve_dual_arm_start(
+            state, resources
+        )
         segments = self._compute_segment_lengths(
             request.motion_policy.sample_count, options
         )

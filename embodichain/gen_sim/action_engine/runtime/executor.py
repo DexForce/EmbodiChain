@@ -303,7 +303,6 @@ class ProgramExecutor:
         self.adapter = AtomicActionAdapter(
             env,
             grasp_policy=runtime_policy.grasp,
-            end_effector_profile=runtime_policy.end_effector_profile,
             planner_policy=runtime_policy.planner,
             capability_registry=capability_registry,
             scene_provider=scene_provider,
@@ -905,7 +904,6 @@ class ProgramExecutor:
         failed: torch.Tensor,
     ) -> _EdgeResult:
         """Retry a complete AtomicAction with fresh Grounding on failed rows."""
-        self.adapter.set_grasp_attempt_id(0)
         result = self._execute_edge(edge, step, failed=failed)
         if self.runtime_graph is None or len(edge.actions) != 1:
             return result
@@ -923,7 +921,6 @@ class ProgramExecutor:
         )
         current_failed = result.failed.clone()
         attempted_failure = current_failed & ~failed
-        grasp_attempt_id = 0
         while bool(attempted_failure.any()):
             precondition = self._retry_precondition(node_id, attempted_failure)
             decision = self.runtime_graph.record_failure(
@@ -939,8 +936,6 @@ class ProgramExecutor:
             ):
                 self._retry_counts[env_id] += 1
             self._consume_transitions(1)
-            grasp_attempt_id += 1
-            self.adapter.set_grasp_attempt_id(grasp_attempt_id)
             for arm in ("left_arm", "right_arm"):
                 self._candidate_cache.pop((step.id, arm), None)
                 self._candidate_failures.pop((step.id, arm), None)
@@ -969,7 +964,6 @@ class ProgramExecutor:
             succeeded = decision.retry & ~retry_result.failed
             current_failed &= ~succeeded
             attempted_failure = decision.retry & retry_result.failed
-        self.adapter.set_grasp_attempt_id(0)
         return _EdgeResult(
             aggregate_actions,
             current_failed,

@@ -840,7 +840,7 @@ def test_generation_calls_interpreter_recipe_and_renderer_once(
     assert agent_config["seed_task_graph"] == "seed_task_graph.json"
     assert len(agent_config["seed_task_graph_hash"]) == 64
     assert agent_config["runtime_policy"]["schema_version"] == (
-        "action_engine_runtime_policy_v7"
+        "action_engine_runtime_policy_v6"
     )
     assert agent_config["runtime_policy"]["planner"]["dynamic_collision"] is True
     assert agent_config["runtime_policy"]["planner"]["static_obstacle_uids"] == [
@@ -1257,13 +1257,7 @@ def test_agent_config_uses_relative_program_paths(gym_export: Path) -> None:
     assert config["runtime_policy"]["motion_defaults"]["PickUp"][
         "lift_height"
     ] == pytest.approx(0.30)
-    assert config["end_effector_profile_id"] == "robotiq_arg2f_140"
-    assert config["runtime_policy"]["end_effector_profile"][
-        "jaw_opening_max"
-    ] == pytest.approx(0.115)
-    assert config["runtime_policy"]["grasp"]["min_contact_span"] == pytest.approx(
-        0.003
-    )
+    assert config["runtime_policy"]["grasp"]["max_open_length"] == pytest.approx(0.115)
     assert len(config["runtime_policy_hash"]) == 64
 
 

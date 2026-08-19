@@ -19,8 +19,6 @@ from __future__ import annotations
 import os
 import argparse
 from collections.abc import Callable
-from copy import deepcopy
-import json
 import open3d as o3d
 import time
 import torch
@@ -49,49 +47,10 @@ GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
 )
 GRASP_ANNOTATOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-VERSION_TAG = "v0.0.2"
+VERSION_TAG = "v0.0.1"
 
 
-__all__ = ["GraspGenerator", "GraspGeneratorCfg", "antipodal_cache_key"]
-
-
-def antipodal_cache_key(
-    vertices: torch.Tensor,
-    triangles: torch.Tensor,
-    cfg: AntipodalSamplerCfg,
-) -> str:
-    """Return the stage-aware identity for raw antipodal point pairs.
-
-    Raw pairs depend on object/submesh content and antipodal sampling policy,
-    but not on end-effector collision geometry or downstream approach-pose
-    deviations. Keeping those stages out of this key avoids invalidating an
-    expensive mesh sample for unrelated planner changes.
-
-    Args:
-        vertices: Mesh vertices consumed by the sampler.
-        triangles: Mesh triangle indices consumed by the sampler.
-        cfg: Raw antipodal sampling policy.
-
-    Returns:
-        Stable cache key containing the algorithm version and content hashes.
-    """
-    mesh_hash = hashlib.sha256(
-        vertices.detach().to("cpu").contiguous().numpy().tobytes()
-        + triangles.detach().to("cpu").contiguous().numpy().tobytes()
-    ).hexdigest()
-    policy_payload = json.dumps(
-        {
-            "max_angle": float(cfg.max_angle),
-            "max_length": float(cfg.max_length),
-            "min_length": float(cfg.min_length),
-            "n_sample": int(cfg.n_sample),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    ).encode("utf-8")
-    policy_hash = hashlib.sha256(policy_payload).hexdigest()
-    return f"{VERSION_TAG}_{mesh_hash}_{policy_hash}"
+__all__ = ["GraspGenerator", "GraspGeneratorCfg"]
 
 
 @configclass
@@ -204,7 +163,6 @@ class GraspGenerator:
         self.cfg = cfg
         self._antipodal_sampler = AntipodalSampler(cfg=cfg.antipodal_sampler_cfg)
         self._hit_point_pairs: torch.Tensor | None = None
-        self._last_filter_diagnostics: dict[str, Any] = {}
 
         # Load cached antipodal pairs for the whole mesh if available.
         cache_path = self._get_cache_dir(self.vertices, self.triangles)
@@ -461,21 +419,13 @@ class GraspGenerator:
         self._save_cache(cache_path, hit_point_pairs)
 
     def _get_cache_dir(self, vertices: torch.Tensor, triangles: torch.Tensor):
-        key = antipodal_cache_key(
-            vertices,
-            triangles,
-            self.cfg.antipodal_sampler_cfg,
-        )
+        vert_bytes = vertices.to("cpu").numpy().tobytes()
+        face_bytes = triangles.to("cpu").numpy().tobytes()
+        md5_hash = hashlib.md5(vert_bytes + face_bytes).hexdigest()
         cache_path = os.path.join(
-            GRASP_ANNOTATOR_CACHE_DIR,
-            f"antipodal_cache_{key}.npy",
+            GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{VERSION_TAG}_{md5_hash}.npy"
         )
         return cache_path
-
-    @property
-    def last_filter_diagnostics(self) -> dict[str, Any]:
-        """Return a detached trace for the most recent grasp-filtering call."""
-        return deepcopy(self._last_filter_diagnostics)
 
     def _save_cache(self, cache_path: str, hit_point_pairs: torch.Tensor):
         np.save(cache_path, hit_point_pairs.cpu().numpy().astype(np.float32))
@@ -660,49 +610,6 @@ class GraspGenerator:
         t = transform[:3, 3]
         return points @ r.T + t
 
-    @staticmethod
-    def _deterministic_approach_directions(
-        direction: torch.Tensor,
-        *,
-        count: int,
-        max_angle: float,
-        attempt_id: int,
-    ) -> list[torch.Tensor]:
-        """Enumerate a reproducible low-discrepancy cone around ``direction``."""
-        if count <= 0:
-            raise ValueError("count must be positive.")
-        if attempt_id < 0:
-            raise ValueError("attempt_id must be non-negative.")
-        base = F.normalize(direction, dim=0)
-        approaches = [base] if attempt_id == 0 else []
-        if count == 1 or max_angle <= 0.0:
-            return [base]
-
-        reference_index = int(torch.argmin(torch.abs(base)).item())
-        reference = torch.zeros_like(base)
-        reference[reference_index] = 1.0
-        tangent = F.normalize(torch.cross(base, reference, dim=0), dim=0)
-        bitangent = torch.cross(base, tangent, dim=0)
-        golden_ratio_conjugate = (5.0**0.5 - 1.0) / 2.0
-        per_attempt = count - len(approaches)
-        sequence_start = (
-            0 if attempt_id == 0 else (count - 1) + (attempt_id - 1) * count
-        )
-        for offset in range(per_attempt):
-            sequence_index = sequence_start + offset + 1
-            fraction = (sequence_index * golden_ratio_conjugate) % 1.0
-            polar = float(max_angle) * fraction**0.5
-            azimuth = base.new_tensor(2.0 * torch.pi * fraction)
-            radial = (
-                torch.cos(azimuth) * tangent
-                + torch.sin(azimuth) * bitangent
-            )
-            approaches.append(
-                torch.cos(base.new_tensor(polar)) * base
-                + torch.sin(base.new_tensor(polar)) * radial
-            )
-        return approaches
-
     def get_valid_grasp_poses(
         self,
         object_pose: torch.Tensor,
@@ -712,15 +619,7 @@ class GraspGenerator:
         pose_cost_fn: (
             Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
-        approach_attempt_id: int = 0,
     ):
-        self._last_filter_diagnostics = {
-            "mode": "single_arm",
-            "raw_pair_count": (
-                0 if self._hit_point_pairs is None else len(self._hit_point_pairs)
-            ),
-            "approach_attempt_id": int(approach_attempt_id),
-        }
         if self._hit_point_pairs is None:
             logger.log_warning(
                 "No antipodal point pairs available. "
@@ -767,8 +666,6 @@ class GraspGenerator:
             mesh_vert_transformed=mesh_vert_transformed,
             visualize_collision=visualize_collision,
             pose_cost_fn=pose_cost_fn,
-            stage_name=str(object_part),
-            approach_attempt_id=approach_attempt_id,
         )
 
     def get_dual_arm_valid_grasp_poses(
@@ -778,15 +675,7 @@ class GraspGenerator:
         left_to_right_arm_direction: torch.Tensor,
         middle_empty_ratio: float = 0.4,
         visualize_collision: bool = False,
-        approach_attempt_id: int = 0,
     ) -> dict | None:
-        self._last_filter_diagnostics = {
-            "mode": "dual_arm",
-            "raw_pair_count": (
-                0 if self._hit_point_pairs is None else len(self._hit_point_pairs)
-            ),
-            "approach_attempt_id": int(approach_attempt_id),
-        }
         if self._hit_point_pairs is None:
             logger.log_warning(
                 "No antipodal point pairs available. "
@@ -831,11 +720,6 @@ class GraspGenerator:
         hit_left = hit_points_[left_mask]
         origin_right = origin_points_[right_mask]
         hit_right = hit_points_[right_mask]
-        self._last_filter_diagnostics["partition"] = {
-            "middle_empty_ratio": float(middle_empty_ratio),
-            "left_pair_count": int(left_mask.sum().item()),
-            "right_pair_count": int(right_mask.sum().item()),
-        }
         is_succes_left, grasp_poses_left, open_lengths_left, total_cost_left = (
             self._filter_valid_grasp_poses(
                 hit_points_=hit_left,
@@ -844,8 +728,6 @@ class GraspGenerator:
                 approach_direction=approach_direction,
                 mesh_vert_transformed=mesh_vert_transformed,
                 visualize_collision=visualize_collision,
-                stage_name="left",
-                approach_attempt_id=approach_attempt_id,
             )
         )
         is_succes_right, grasp_poses_right, open_lengths_right, total_cost_right = (
@@ -856,8 +738,6 @@ class GraspGenerator:
                 approach_direction=approach_direction,
                 mesh_vert_transformed=mesh_vert_transformed,
                 visualize_collision=visualize_collision,
-                stage_name="right",
-                approach_attempt_id=approach_attempt_id,
             )
         )
         result = {
@@ -892,20 +772,13 @@ class GraspGenerator:
         pose_cost_fn: (
             Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None
         ) = None,
-        stage_name: str = "grasp",
-        approach_attempt_id: int = 0,
     ):
-        stage_trace: dict[str, Any] = {
-            "input_pair_count": int(origin_points_.shape[0]),
-        }
-        self._last_filter_diagnostics[stage_name] = stage_trace
         grasp_x = F.normalize(hit_points_ - origin_points_, dim=-1)
         cos_angle = torch.clamp((grasp_x * approach_direction).sum(dim=-1), -1.0, 1.0)
         positive_angle = torch.abs(torch.acos(cos_angle))
         valid_mask = (
             positive_angle - torch.pi / 2
         ).abs() <= self.cfg.max_deviation_angle
-        stage_trace["angle_valid_pair_count"] = int(valid_mask.sum().item())
         if valid_mask.sum() == 0:
             logger.log_warning("No valid antipodal pairs after angle filtering.")
             return (
@@ -925,12 +798,12 @@ class GraspGenerator:
         )
 
         # compute grasp poses using antipodal point pairs and approach direction
-        approach_directions = self._deterministic_approach_directions(
-            approach_direction,
-            count=self.cfg.n_deviated_approach_directions,
-            max_angle=self.cfg.max_deviation_angle,
-            attempt_id=approach_attempt_id,
-        )
+        approach_directions = [approach_direction]
+        for i in range(self.cfg.n_deviated_approach_directions - 1):
+            rota_direction = AntipodalSampler._random_rotate_unit_vectors(
+                approach_direction.unsqueeze(0), self.cfg.max_deviation_angle
+            )
+            approach_directions.append(rota_direction[0])
         valid_grasp_poses_list = []
         for direct in approach_directions:
             valid_grasp_poses = GraspGenerator._grasp_pose_from_approach_direction(
@@ -943,7 +816,6 @@ class GraspGenerator:
         valid_open_lengths = valid_open_lengths.repeat(
             self.cfg.n_deviated_approach_directions
         )
-        stage_trace["pose_candidate_count"] = int(valid_grasp_poses.shape[0])
 
         # TODO: too slow
         # # remove near grasp poses using non-maximum suppression
@@ -963,10 +835,6 @@ class GraspGenerator:
             is_filter_ground_collision=self.cfg.is_filter_ground_collision,
             is_visual=visualize_collision,
             collision_threshold=0.0,
-        )
-        stage_trace["collision"] = self._collision_checker.last_query_diagnostics
-        stage_trace["collision_free_pose_count"] = int(
-            is_colliding.logical_not().sum().item()
         )
         if is_colliding.logical_not().sum() == 0:
             logger.log_warning("No valid antipodal pairs after collision filtering.")
@@ -1020,7 +888,6 @@ class GraspGenerator:
             top_grasp_poses = valid_grasp_poses
             top_open_lengths = valid_open_lengths
             top_total_cost = total_cost
-        stage_trace["returned_pose_count"] = int(top_grasp_poses.shape[0])
         # self.visualize_grasp_poses(
         #     obj_pose=object_pose,
         #     grasp_poses=top_grasp_poses,

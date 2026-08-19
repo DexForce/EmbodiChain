@@ -153,14 +153,14 @@ runtime:
     grasp:
       antipodal_n_sample: 10000
       antipodal_max_angle: 0.2617993877991494
-      min_contact_span: 0.003
-      max_contact_span: null
+      max_open_length: 0.115
+      min_open_length: 0.01
+      finger_length: 0.13
+      point_sample_dense: 0.012
       max_deviation_angle: 0.3490658503988659
       n_deviated_approach_directions: 4
-      n_top_grasps: 50
       viser_port: 11801
       max_decomposition_hulls: 16
-      filter_support_collision: true
       force_grasp_reannotate: false
 
     motion_defaults:
@@ -215,9 +215,6 @@ runtime:
         object_motion_keyframes: 6
         pre_grasp_distance: 0.10
         lift_height: 0.08
-        lift_height_retry_step: 0.02
-        middle_empty_ratio: 0.4
-        middle_empty_ratio_retry_step: 0.15
         postcondition_tolerance: 0.06
       HandOver:
         sample_interval: 140
@@ -306,7 +303,6 @@ runtime:
 
   profiles:
     dual_franka:
-      end_effector_profile_id: robotiq_arg2f_140
       motion_defaults:
         MoveHeldObject:
           exchange_maximum_reach: 0.85
@@ -315,14 +311,12 @@ runtime:
         HandOver:
           exchange_maximum_reach: 0.85
     dual_ur3:
-      end_effector_profile_id: robotiq_arg2f_140
       motion_defaults:
         MoveHeldObject:
           exchange_maximum_reach: 0.55
         HandOver:
           exchange_maximum_reach: 0.55
     dual_ur5:
-      end_effector_profile_id: robotiq_arg2f_140
       motion_defaults:
         MoveHeldObject:
           exchange_maximum_reach: 0.85
@@ -336,7 +330,6 @@ runtime:
             MoveHeldObject:
               staging_lift_height: 0.12
     dual_ur10:
-      end_effector_profile_id: robotiq_arg2f_140
       motion_defaults:
         MoveHeldObject:
           exchange_maximum_reach: 1.25
