@@ -50,6 +50,10 @@ _TABLE_BOUNDS = [
 _OVERLAPPING_CENTER_XY = [0.0, 0.0]
 _ASSET_SIDE_LENGTH_M = 0.2
 _RELATION_CLEARANCE_M = 0.03
+_COLLISION_MARGIN_M = 0.02
+_BOARD_XY_SIZE_M = 0.6
+_CAN_XY_SIZE_M = 0.1
+_PENCIL_XY_SIZE_M = [0.04, 0.2]
 
 
 def _asset(
@@ -233,6 +237,73 @@ def test_table_optimizer_separates_variable_sibling_from_fixed_sibling(
 
     assert solved_xy_by_id[fixed_id] == _OVERLAPPING_CENTER_XY
     assert np.max(np.abs(solved_xy_by_id[variable_id])) >= _ASSET_SIDE_LENGTH_M - 1e-6
+
+
+def test_table_optimizer_can_reverse_a_collision_order(tmp_path: Path) -> None:
+    board_glb = tmp_path / "board.glb"
+    can_glb = tmp_path / "can.glb"
+    pencil_glb = tmp_path / "pencil.glb"
+    # SimReady GLBs are y-up, so z-up XY uses the source XZ extents.
+    trimesh.creation.box(
+        extents=[_BOARD_XY_SIZE_M, _ASSET_SIDE_LENGTH_M, _BOARD_XY_SIZE_M]
+    ).export(board_glb)
+    trimesh.creation.box(
+        extents=[_CAN_XY_SIZE_M, _ASSET_SIDE_LENGTH_M, _CAN_XY_SIZE_M]
+    ).export(can_glb)
+    trimesh.creation.box(
+        extents=[
+            _PENCIL_XY_SIZE_M[0],
+            _ASSET_SIDE_LENGTH_M,
+            _PENCIL_XY_SIZE_M[1],
+        ]
+    ).export(pencil_glb)
+    board_id, pencil_id, can_id = "board_001", "pencil_001", "can_001"
+    board_xy, pencil_xy, can_xy = [0.0, 0.0], [-0.2, 0.0], [-0.4, 0.0]
+
+    solved_xy_by_id = TableSurfaceLayoutOptimizer().optimize(
+        TableSurfaceLayoutProblem(
+            assets_by_id={
+                board_id: _asset(
+                    object_id=board_id,
+                    glb_path=board_glb,
+                    center_xy=board_xy,
+                ),
+                pencil_id: _asset(object_id=pencil_id, glb_path=pencil_glb),
+                can_id: _asset(
+                    object_id=can_id,
+                    glb_path=can_glb,
+                    center_xy=can_xy,
+                ),
+            },
+            root_ids=[board_id, pencil_id, can_id],
+            root_seed_xy_by_id={
+                board_id: board_xy,
+                pencil_id: pencil_xy,
+                can_id: can_xy,
+            },
+            imported_root_ids={board_id, can_id},
+            fixed_root_xy_by_id={
+                board_id: board_xy,
+                pencil_id: None,
+                can_id: can_xy,
+            },
+            root_table_regions_by_id={
+                board_id: None,
+                pencil_id: None,
+                can_id: None,
+            },
+            table_optimization_rect_xy=_TABLE_BOUNDS,
+            root_relations=[],
+        )
+    )
+
+    expected_pencil_x_upper_bound = (
+        can_xy[0]
+        - _CAN_XY_SIZE_M / 2.0
+        - _PENCIL_XY_SIZE_M[0] / 2.0
+        - _COLLISION_MARGIN_M
+    )
+    assert solved_xy_by_id[pencil_id][0] <= expected_pencil_x_upper_bound + 1e-6
 
 
 def test_parent_optimizer_applies_sibling_planar_relation(tmp_path: Path) -> None:
