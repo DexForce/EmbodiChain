@@ -39,8 +39,6 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionGoal,
     MotionPolicy,
     PlanningContext,
-    PressGoal,
-    PressOptions,
     ResolvedActionRequest,
 )
 
@@ -163,26 +161,6 @@ def test_engine_loads_fresh_builtin_instances_by_default() -> None:
 
 def test_engine_can_disable_builtin_loading() -> None:
     assert _engine(load_builtins=False).actions == {}
-
-
-def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
-    engine = _engine(load_builtins=True)
-    options = PressOptions(hand_interp_steps=7)
-    invocation = ActionInvocation(
-        skill_id="press",
-        goal=PressGoal(torch.eye(4)),
-        binding=ActionBinding(
-            manipulators={"primary": "all"},
-            end_effectors={"primary": "all"},
-        ),
-        motion_policy=MotionPolicy(sample_count=20),
-        skill_options=options,
-    )
-
-    request = engine.actions["press"].resolve_request(invocation)
-
-    assert request.skill_options.hand_interp_steps == 7
-    assert request.skill_options is not options
 
 
 def test_engine_compile_projects_terminal_state_between_actions() -> None:

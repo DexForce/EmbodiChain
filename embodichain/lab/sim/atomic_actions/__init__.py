@@ -33,6 +33,9 @@ from .affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
+    PressAffordance,
+    SlideAffordance,
+    TwistAffordance,
 )
 from .bindings import ActionBinding, ResolvedActionBinding, ResolvedControlPart
 from .control import (
@@ -109,6 +112,12 @@ from .primitives import (
     Press,
     PressGoal,
     PressOptions,
+    Slide,
+    SlideGoal,
+    SlideOptions,
+    Twist,
+    TwistGoal,
+    TwistOptions,
 )
 from .runner import (
     CommandAcknowledgement,
@@ -223,8 +232,16 @@ __all__ = [
     "PlanningContext",
     "PoseGoalValue",
     "Press",
+    "PressAffordance",
     "PressGoal",
     "PressOptions",
+    "SlideAffordance",
+    "Slide",
+    "SlideGoal",
+    "SlideOptions",
+    "Twist",
+    "TwistGoal",
+    "TwistOptions",
     "RecoveryPolicy",
     "RigidObjectSceneProvider",
     "RigidObjectSceneProviderCfg",
@@ -247,5 +264,6 @@ __all__ = [
     "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
+    "TwistAffordance",
     "TrajectorySegment",
 ]

@@ -309,7 +309,9 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
 | `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
 | `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
-| `Press` | A `SceneEntityPose` in `xpos`. |
+| `Press` | `PressGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
+| `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
+| `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
 | `HandOver` | No semantic-object scene dependency. It verifies stable attachment identity and derives current pose from held state; its middle/final option poses are tensors, and the reused `GraspGoal.grasp_xpos` field is ignored. |
 
@@ -554,9 +556,28 @@ the legacy core mapping.
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator/end effector `primary` |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator/end effector `primary` |
 | `press` | `PressGoal` | manipulator/end effector `primary` |
+| `slide` | `SlideGoal` | manipulator/end effector `primary` |
+| `twist` | `TwistGoal` | manipulator/end effector `primary` |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left`, `right` |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing`, `support` |
 | `hand_over` | `GraspGoal` | `source`, `destination` |
+
+`PressAffordance`, `SlideAffordance`, and `TwistAffordance` contain only
+target-local geometry and interaction semantics. Their goals own an explicit
+`target_pose`, which may be a deterministic tensor snapshot or a late-bound
+`SceneEntityPose`. Never put an `Articulation`, `RigidObject`, or live link pose
+reader in these affordances.
+
+`Press` and `Slide` use dense axis-aligned Cartesian targets for their contact
+motion. The linear motion-generator path solves every output sample with IK;
+it does not resample sparse IK endpoints in joint space. `Press` has a distinct
+contact segment before penetration. `TwistAffordance.axis_origin` and
+`twist_axis` together define the full 3D rotation axis.
+
+These three motion-centric primitives declare `SkillDescriptor.open_loop=True`
+and an empty `StateDelta`. Their completion means motion execution only, not
+verified button actuation, grasp retention, or articulation travel. Applications
+that need semantic completion must observe and verify those physical outcomes.
 
 `GraspGoal.grasp_xpos` accepts an explicit pose tensor, a late-bound
 `SceneEntityPose`, or `None` for affordance sampling. A `SceneEntityPose`

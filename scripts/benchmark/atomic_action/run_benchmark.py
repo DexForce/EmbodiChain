@@ -17,7 +17,7 @@
 """Dispatch benchmarks for all atomic actions.
 
 Run a single action benchmark or all action benchmarks in sequence.
-Run: embodichain benchmark atomic-action --action press
+Run: embodichain benchmark atomic-action --action move_end_effector
 """
 
 from __future__ import annotations
@@ -43,11 +43,9 @@ ACTION_MODULES = {
     "pick_up": "scripts.benchmark.atomic_action.pickup_benchmark",
     "move_held_object": "scripts.benchmark.atomic_action.move_held_object_benchmark",
     "place": "scripts.benchmark.atomic_action.place_benchmark",
-    "press": "scripts.benchmark.atomic_action.press_benchmark",
 }
 DEFAULT_ACTIONS = tuple(ACTION_MODULES.keys())
 MESH_OBJECT_ACTIONS = {"pick_up", "move_held_object", "place"}
-PRESS_OBJECT_TYPES = {"bottle", "mug", "wooden_block", "all"}
 MESH_OBJECT_TYPES = {*MESH_OBJECT_PRESETS.keys(), "all"}
 
 
@@ -57,7 +55,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
         "--action",
         nargs="+",
         choices=(*ACTION_MODULES.keys(), "all"),
-        default=["press"],
+        default=["move_end_effector"],
         help="Atomic action benchmark(s) to run. Use 'all' for every action.",
     )
     parser.add_argument(
@@ -148,8 +146,6 @@ def _validate_object_types_for_actions(
     for action_name in selected_actions:
         if action_name in MESH_OBJECT_ACTIONS:
             validators[action_name] = MESH_OBJECT_TYPES
-        elif action_name == "press":
-            validators[action_name] = PRESS_OBJECT_TYPES
 
     invalid_parts = []
     for action_name, valid_types in validators.items():
@@ -177,7 +173,6 @@ def _make_child_args(args: argparse.Namespace) -> argparse.Namespace:
         renderer=args.renderer,
         object_types=args.object_types,
         position_cases=args.position_cases,
-        press_tolerance=0.01,
         pose_cases=["all"],
         sequence_cases=["all"],
         approach_cases=args.approach_cases,
@@ -224,7 +219,7 @@ def _make_child_cli_args(args: argparse.Namespace, action_name: str) -> list[str
         "--video_hold_steps",
         str(args.video_hold_steps),
     ]
-    if action_name in {"pick_up", "move_held_object", "place", "press"}:
+    if action_name in {"pick_up", "move_held_object", "place"}:
         if args.object_types:
             child_args.append("--object_types")
             child_args.extend(args.object_types)

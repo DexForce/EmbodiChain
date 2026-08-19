@@ -545,6 +545,11 @@ topics:
       - whole body resource
       - leaf resource claim
       - SceneEntityPose
+      - PressGoal.target_pose
+      - SlideGoal.target_pose
+      - TwistGoal.target_pose
+      - open_loop
+      - axis_translation_keyframes
       - dynamic goal
       - error recovery
       - ActionOptions
