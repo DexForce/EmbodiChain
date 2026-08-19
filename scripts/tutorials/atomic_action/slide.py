@@ -284,6 +284,14 @@ def main() -> None:
 
         if wait_for_user:
             input(f"Press Enter to replay the drawer {direction}...")
+        focus_pose = drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
+        focus_position = [focus_pose[0, 0, 3], focus_pose[0, 1, 3], focus_pose[0, 2, 3]]
+        camera_position = [
+            focus_position[0] + 0.5,
+            focus_position[1] + 0.5,
+            focus_position[2] + 0.5,
+        ]
+        look_at = [camera_position, focus_position, [0, 0, 1]]
         replay_trajectory(
             sim,
             robot,
@@ -291,11 +299,7 @@ def main() -> None:
             args,
             video_prefix=f"{direction}_drawer_auto_play",
             hold_steps=POST_TRAJECTORY_STEPS,
-            look_at=(
-                (-1.35, -1.15, 1.0),
-                (-0.55, -0.2, 0.45),
-                (0.0, 0.0, 1.0),
-            ),
+            look_at=look_at,
         )
 
     if wait_for_user:
