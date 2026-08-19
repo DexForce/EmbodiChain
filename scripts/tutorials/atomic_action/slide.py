@@ -32,7 +32,6 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -168,8 +167,8 @@ def create_drawer_semantics(
 
 
 def create_invocation(
+    engine: AtomicActionEngine,
     semantics: ObjectSemantics,
-    binding: ActionBinding,
     *,
     direction: Literal["pull", "push"],
     approach_distance: float,
@@ -178,8 +177,8 @@ def create_invocation(
     """Create one pull or push invocation for the shared drawer target.
 
     Args:
+        engine: Engine used to resolve the slide control-part binding.
         semantics: Drawer-handle semantics shared by both operations.
-        binding: Engine-owned motion and grasp endpoint binding.
         direction: Whether this invocation pulls open or pushes closed.
         approach_distance: Pre-grasp offset opposite the approach axis.
         translation_distance: Drawer travel distance for this operation.
@@ -187,13 +186,13 @@ def create_invocation(
     Returns:
         A grounded pull/push invocation for the tutorial UR5.
     """
-    return ActionInvocation(
-        skill_id="slide",
-        goal=SlideGoal(
+    return engine.make_invocation(
+        "slide",
+        SlideGoal(
             semantics,
             SceneEntityPose(HANDLE_SCENE_ENTITY_ID),
         ),
-        binding=binding,
+        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
         skill_options=SlideOptions(
             direction=direction,
@@ -249,10 +248,6 @@ def main() -> None:
         args,
         "Inspect the closed drawer, then press Enter to plan the pull...",
     )
-    slide_binding = engine.bind_control_parts(
-        "slide",
-        {"primary": {"motion": "arm", "grasp": "hand"}},
-    )
 
     for scene_version, direction in enumerate(("pull", "push")):
         if direction == "push" and wait_for_user:
@@ -265,8 +260,8 @@ def main() -> None:
         compiled = engine.compile(
             (
                 create_invocation(
+                    engine,
                     semantics,
-                    slide_binding,
                     direction=direction,
                     approach_distance=args.approach_distance,
                     translation_distance=args.translation_distance,

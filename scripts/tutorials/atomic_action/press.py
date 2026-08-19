@@ -30,7 +30,6 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     EntityState,
@@ -207,19 +206,15 @@ def main() -> None:
         "Inspect the button target, then press Enter to plan Press...",
     )
 
-    press_binding = engine.bind_control_parts(
-        "press",
-        {"primary": {"motion": "arm", "grasp": "hand"}},
-    )
     compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="press",
-                goal=PressGoal(
+            engine.make_invocation(
+                "press",
+                PressGoal(
                     semantics,
                     SceneEntityPose(BUTTON_SCENE_ENTITY_ID),
                 ),
-                binding=press_binding,
+                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,

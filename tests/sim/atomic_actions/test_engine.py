@@ -51,6 +51,12 @@ from embodichain.lab.sim.atomic_actions import (
     SkillResourceSlot,
     TimedTrajectory,
 )
+from embodichain.lab.sim.skills import (
+    ControlPartEndpoint,
+    ResourceBinding,
+    RobotResource,
+    RobotSkillProfile,
+)
 
 ACTION_DT = 0.02
 
@@ -349,6 +355,104 @@ def test_engine_resolves_action_binding_from_robot_control_parts() -> None:
 
     assert target.control_part == "all"
     assert target.joint_ids == (0, 1, 2)
+
+
+def test_engine_make_invocation_binds_direct_control_parts() -> None:
+    engine = _engine(robot_dof=3)
+    engine.register(StubAction())
+    goal = JointPositionGoal(torch.ones(2, 3))
+    motion_policy = MotionPolicy(sample_count=2)
+
+    invocation = engine.make_invocation(
+        "stub",
+        goal,
+        control_parts={"primary": {"motion": "all"}},
+        motion_policy=motion_policy,
+        invocation_id="direct-call",
+        revision=1,
+    )
+    target = invocation.binding.endpoint("primary", "motion").require_target(
+        JointPositionTarget
+    )
+
+    assert invocation.skill_id == "stub"
+    assert invocation.goal is goal
+    assert invocation.motion_policy is motion_policy
+    assert invocation.invocation_id == "direct-call"
+    assert invocation.revision == 1
+    assert target.control_part == "all"
+    assert engine.plan(invocation).plan_success.tolist() == [True, True]
+
+
+def test_engine_make_invocation_uses_profile_default_binding() -> None:
+    engine = _engine(robot_dof=3)
+    engine.register(StubAction())
+    engine.bind_skill_profile(
+        RobotSkillProfile(
+            profile_id="stub-profile",
+            resources={
+                "whole_robot": RobotResource(
+                    "whole_robot",
+                    endpoints={
+                        "motion": ControlPartEndpoint(
+                            "all",
+                            capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                        )
+                    },
+                )
+            },
+            defaults={
+                "stub": ResourceBinding({"primary": "whole_robot"}),
+            },
+        )
+    )
+
+    invocation = engine.make_invocation(
+        "stub",
+        JointPositionGoal(torch.ones(2, 3)),
+        motion_policy=MotionPolicy(sample_count=2),
+    )
+    endpoint = invocation.binding.endpoint("primary", "motion")
+
+    assert endpoint.resource_id == "whole_robot"
+    assert endpoint.require_target(JointPositionTarget).control_part == "all"
+    assert engine.plan(invocation).plan_success.tolist() == [True, True]
+
+
+def test_engine_make_invocation_requires_direct_binding_without_profile() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(ValueError, match="control_parts is required"):
+        engine.make_invocation(
+            "stub",
+            JointPositionGoal(torch.ones(2, 3)),
+        )
+
+
+def test_engine_make_invocation_rejects_resources_without_profile() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(ValueError, match="requires a bound RobotSkillProfile"):
+        engine.make_invocation(
+            "stub",
+            JointPositionGoal(torch.ones(2, 3)),
+            resources={"primary": "whole_robot"},
+        )
+
+
+def test_engine_make_invocation_rejects_conflicting_binding_sources() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        engine.make_invocation(
+            "stub",
+            JointPositionGoal(torch.ones(2, 3)),
+            control_parts={"primary": {"motion": "all"}},
+            resources={"primary": "whole_robot"},
+        )
 
 
 def test_engine_resolves_invocation_control_override_into_request() -> None:

@@ -32,7 +32,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
     ExecutionEventKind,
@@ -469,14 +468,10 @@ def main() -> None:
         device=target_pose.device,
     )
     engine = AtomicActionEngine(motion_generator=motion_gen)
-    binding = engine.bind_control_parts(
+    invocation = engine.make_invocation(
         "move_end_effector",
-        {"primary": {"motion": CONTROL_PART}},
-    )
-    invocation = ActionInvocation(
-        skill_id="move_end_effector",
-        goal=EndEffectorPoseGoal(target_pose),
-        binding=binding,
+        EndEffectorPoseGoal(target_pose),
+        control_parts={"primary": {"motion": CONTROL_PART}},
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=SAMPLE_COUNT,

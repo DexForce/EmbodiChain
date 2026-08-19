@@ -5,7 +5,7 @@
 | What | Path |
 |---|---|
 | Planner registry | `embodichain/lab/sim/planners/__init__.py` |
-| Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `PlanOptions`, `validate_plan_options` |
+| Base planner class & config | `embodichain/lab/sim/planners/base_planner.py` → `BasePlanner`, `BasePlannerCfg`, `CollisionWorldInfo`, `PlanOptions`, `validate_plan_options` |
 | TOPPRA planner | `embodichain/lab/sim/planners/toppra_planner.py` → `ToppraPlanner`, `ToppraPlannerCfg`, `ToppraPlanOptions` |
 | Neural planner | `embodichain/lab/sim/planners/neural_planner.py` → `NeuralPlanner`, `NeuralPlannerCfg`, `NeuralPlanOptions` |
 | cuRobo planner | `embodichain/lab/sim/planners/curobo/curobo_planner.py` → `CuroboPlanner`, `CuroboPlannerCfg`, `CuroboWorldCfg`, `CuroboPlanOptions` |
@@ -129,23 +129,25 @@ differences require `"cuboid"` or `"mesh"` representation, registration in
 data and collision caches, so retain the shared default for identical rebased
 layouts.
 
-`BasePlanner.supports_collision_world_updates` and
+`BasePlanner.collision_world_info` and
 `with_collision_world(options, obstacle_poses=...)` form the generic per-plan
-dynamic-world bridge. The base implementation opts out and leaves options
-unchanged. `CuroboPlanner` opts in, clones the supplied pose tensors, and merges
-them into `CuroboPlanOptions.dynamic_obstacle_poses`.
+dynamic-world bridge. The base property returns `None` and the base hook leaves
+options unchanged. `CuroboPlanner` returns an immutable `CollisionWorldInfo`
+with updates enabled, clones the supplied pose tensors, and merges them into
+`CuroboPlanOptions.dynamic_obstacle_poses`.
 `MotionGenerator.supports_dynamic_collision_world` exposes the capability and
 `MotionGenerator.bind_collision_world()` owns option copying before forwarding
 to the backend hook. Atomic actions use that facade from their framework-owned
 `plan()` template when a `SceneSnapshot` declares collision entities;
 individual skills must not construct backend obstacle options themselves.
-`BasePlanner.collision_world_entity_ids`, `dynamic_collision_entity_ids`, and
-`collision_world_batch_mode` expose the complete canonical world, its dynamic
-subset, and the `"shared"` / `"per_env"` mode. `MotionGenerator` validates and
-forwards those properties to the integration layer. For cuRobo, the complete
-set is every mapping key (or inferred sequence name), while the dynamic set is
-exactly `CuroboWorldCfg.dynamic_obstacle_names`. Sphere-expanded physical YAML
-names are not part of either logical ID declaration.
+`CollisionWorldInfo` carries the complete canonical world, its dynamic subset,
+the `"shared"` / `"per_env"` mode, and update capability as one validated
+contract. It requires unique canonical IDs and requires the dynamic subset to
+belong to the complete world. `MotionGenerator.collision_world_info` forwards
+that contract and retains derived ID/mode properties for callers. For cuRobo,
+the complete set is every mapping key (or inferred sequence name), while the
+dynamic set is exactly `CuroboWorldCfg.dynamic_obstacle_names`. Sphere-expanded
+physical YAML names are not part of either logical ID declaration.
 `CuroboWorldCfg` rejects duplicate obstacle names and requires every
 `dynamic_obstacle_name` to match an object registered in `rigid_objects`, so a
 planner-local mismatch fails before backend construction.
@@ -269,8 +271,8 @@ total duration and emits new explicit arrival intervals.
 1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`; every result containing positions must include `dt`, from which `duration` is derived.
 2. Create a `BasePlannerCfg` subclass with a unique `planner_type` string.
 3. Optionally create a `PlanOptions` subclass for planner-specific options.
-4. For a planner that accepts live obstacles, set
-   `supports_collision_world_updates = True` and implement
+4. For a planner that accepts live obstacles, override `collision_world_info`
+   with a `CollisionWorldInfo` whose `supports_updates=True`, and implement
    `with_collision_world()` without mutating caller-owned reusable options.
 5. Register in `MotionGenerator._support_planner_dict`:
    ```python
@@ -315,7 +317,7 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
 - **Constraint tolerance** — `is_satisfied_constraint` allows 10% velocity / 25% acceleration overshoot. Dense waypoint trajectories may appear to violate constraints but pass validation.
 - **Fork safety with GPU sim** — `ToppraPlannerCfg.mp_context=None` defaults to `spawn` on GPU to avoid fork-after-CUDA-init hazards. Force `fork` only when the sim device is CPU or you have verified it is safe.
 - **cuRobo shared-world mismatch** — World-frame poses may differ solely because replicated arenas are offset. Compare poses after robot-base rebasing: keep `multi_env=False` if they match, and enable it only when robot-relative layouts differ.
-- **Dynamic obstacles silently stale** — A planner participates in atomic-action collision revision recovery only when it declares `supports_collision_world_updates=True`; its hook must bind every `collision_entity_id` pose into the current planning attempt.
+- **Dynamic obstacles silently stale** — A planner participates in atomic-action collision revision recovery only when `collision_world_info.supports_updates=True`; its hook must bind every `collision_entity_id` pose into the current planning attempt.
 - **Registry/planner identity drift** — Registry-backed cuRobo worlds must use a
   canonical-ID mapping, not a list whose names are inferred from UIDs. Validate
   exact full registry/planner collision-world agreement, dynamic

@@ -35,7 +35,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     GraspGoal,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -257,34 +256,29 @@ def run_handover_demo(
     # wait for object to drop
     for _ in range(20):
         sim.update(step=10)
-    pick_binding = engine.bind_control_parts(
-        "pick_up",
-        {"primary": {"motion": "left_arm", "grasp": "left_hand"}},
-    )
-    handover_binding = engine.bind_control_parts(
-        "hand_over",
-        {
-            "source": {"motion": "left_arm", "grasp": "left_hand"},
-            "destination": {"motion": "right_arm", "grasp": "right_hand"},
-        },
-    )
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(object_semantics),
-                pick_binding,
-                MotionPolicy(
+                control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICKUP_SAMPLE_INTERVAL,
                 ),
                 skill_options=pick_up_options,
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "hand_over",
                 GraspGoal(object_semantics),
-                handover_binding,
-                MotionPolicy(
+                control_parts={
+                    "source": {"motion": "left_arm", "grasp": "left_hand"},
+                    "destination": {
+                        "motion": "right_arm",
+                        "grasp": "right_hand",
+                    },
+                },
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=HANDOVER_SAMPLE_INTERVAL,
                 ),

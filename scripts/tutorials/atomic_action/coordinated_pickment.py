@@ -37,7 +37,6 @@ import torch
 from embodichain.lab.sim import SimulationManager
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     CoordinatedPickGoal,
@@ -441,20 +440,16 @@ def run_coordinated_pickment_demo(
     )
 
     start_time = time.time()
-    binding = engine.bind_control_parts(
-        "coordinated_pickment",
-        {
-            "left": {"motion": "left_arm", "grasp": "left_hand"},
-            "right": {"motion": "right_arm", "grasp": "right_hand"},
-        },
-    )
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "coordinated_pickment",
                 pickment_target,
-                binding,
-                MotionPolicy(
+                control_parts={
+                    "left": {"motion": "left_arm", "grasp": "left_hand"},
+                    "right": {"motion": "right_arm", "grasp": "right_hand"},
+                },
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICKMENT_SAMPLE_INTERVAL,
                 ),

@@ -38,7 +38,6 @@ from scipy.spatial.transform import Rotation as SciRotation
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     CoordinatedPlacementOptions,
@@ -616,35 +615,27 @@ def run_coordinated_placement_demo(
         sim.device,
         z_clearance=PAN_GRASP_Z_CLEARANCE,
     )
-    left_pick_binding = engine.bind_control_parts(
-        "pick_up",
-        {"primary": {"motion": "left_arm", "grasp": "left_hand"}},
-    )
-    right_pick_binding = engine.bind_control_parts(
-        "pick_up",
-        {"primary": {"motion": "right_arm", "grasp": "right_hand"}},
-    )
     pick_invocations = (
-        ActionInvocation(
-            skill_id="pick_up",
-            goal=GraspGoal(
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
                 semantics=bread_semantics,
                 grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
             ),
-            binding=left_pick_binding,
+            control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
             motion_policy=MotionPolicy(
                 strategy="motion_gen",
                 sample_count=PICK_SAMPLE_INTERVAL,
             ),
             skill_options=left_pick_options,
         ),
-        ActionInvocation(
-            skill_id="pick_up",
-            goal=GraspGoal(
+        engine.make_invocation(
+            "pick_up",
+            GraspGoal(
                 semantics=pan_semantics,
                 grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
             ),
-            binding=right_pick_binding,
+            control_parts={"primary": {"motion": "right_arm", "grasp": "right_hand"}},
             motion_policy=MotionPolicy(
                 strategy="motion_gen",
                 sample_count=PAN_PICK_SAMPLE_INTERVAL,
@@ -792,19 +783,15 @@ def run_coordinated_placement_demo(
         release=True,
     )
     start_time = time.time()
-    placement_binding = engine.bind_control_parts(
-        "coordinated_placement",
-        {
-            "placing": {"motion": "left_arm", "grasp": "left_hand"},
-            "support": {"motion": "right_arm", "grasp": "right_hand"},
-        },
-    )
     placement_compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="coordinated_placement",
-                goal=coordinated_target,
-                binding=placement_binding,
+            engine.make_invocation(
+                "coordinated_placement",
+                coordinated_target,
+                control_parts={
+                    "placing": {"motion": "left_arm", "grasp": "left_hand"},
+                    "support": {"motion": "right_arm", "grasp": "right_hand"},
+                },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=COORDINATED_SAMPLE_INTERVAL,

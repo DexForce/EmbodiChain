@@ -365,6 +365,8 @@ topics:
       - physical YAML obstacle name
       - sphere derived obstacle names
       - empty collision mesh
+      - CollisionWorldInfo
+      - collision_world_info
       - dynamic_collision_entity_ids
       - collision_world_entity_ids
       - collision_world_batch_mode
@@ -678,6 +680,7 @@ topics:
       - build_pose_plan_states
       - build_joint_plan_states
       - engine.register
+      - engine.make_invocation
       - BUILTIN_ACTION_TYPES
       - load_builtins
       - engine.plan

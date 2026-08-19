@@ -28,6 +28,7 @@ import torch
 
 from embodichain.lab.sim.planners import (
     BasePlannerCfg,
+    CollisionWorldInfo,
     PlanOptions,
     BasePlanner,
     ToppraPlanner,
@@ -180,50 +181,36 @@ class MotionGenerator:
         self.device = self.robot.device
 
     @property
+    def collision_world_info(self) -> CollisionWorldInfo | None:
+        """Return the selected planner's collision-world contract."""
+        info = self.planner.collision_world_info
+        if info is not None and not isinstance(info, CollisionWorldInfo):
+            raise TypeError(
+                "Planner.collision_world_info must be a CollisionWorldInfo or None."
+            )
+        return info
+
+    @property
     def supports_dynamic_collision_world(self) -> bool:
         """Whether the planner accepts per-plan dynamic obstacle poses.
 
         Returns:
             ``True`` when the selected planner supports collision-world updates.
         """
-        return getattr(self.planner, "supports_collision_world_updates", False) is True
+        info = self.collision_world_info
+        return info is not None and info.supports_updates
 
     @property
     def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
         """Return canonical dynamic-obstacle IDs declared by the planner."""
-        entity_ids = getattr(self.planner, "dynamic_collision_entity_ids", ())
-        return self._validate_collision_entity_ids(
-            entity_ids,
-            field_name="dynamic_collision_entity_ids",
-        )
+        info = self.collision_world_info
+        return () if info is None else info.dynamic_entity_ids
 
     @property
     def collision_world_entity_ids(self) -> tuple[str, ...]:
         """Return every canonical entity ID in the planner collision world."""
-        entity_ids = getattr(self.planner, "collision_world_entity_ids", ())
-        return self._validate_collision_entity_ids(
-            entity_ids,
-            field_name="collision_world_entity_ids",
-        )
-
-    @staticmethod
-    def _validate_collision_entity_ids(
-        entity_ids: object,
-        *,
-        field_name: str,
-    ) -> tuple[str, ...]:
-        """Validate one planner-owned canonical collision-ID declaration."""
-        if not isinstance(entity_ids, tuple) or not all(
-            isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()
-            for entity_id in entity_ids
-        ):
-            raise TypeError(
-                f"Planner.{field_name} must be a tuple of "
-                "non-empty strings without outer whitespace."
-            )
-        if len(set(entity_ids)) != len(entity_ids):
-            raise ValueError(f"Planner.{field_name} must contain unique IDs.")
-        return entity_ids
+        info = self.collision_world_info
+        return () if info is None else info.entity_ids
 
     @staticmethod
     def _validate_collision_pose_keys(
@@ -246,13 +233,8 @@ class MotionGenerator:
     @property
     def collision_world_batch_mode(self) -> Literal["shared", "per_env"] | None:
         """Return the backend's dynamic collision-world batch-sharing mode."""
-        mode = getattr(self.planner, "collision_world_batch_mode", None)
-        if mode not in (None, "shared", "per_env"):
-            raise ValueError(
-                "Planner.collision_world_batch_mode must be 'shared', 'per_env', "
-                "or None."
-            )
-        return mode
+        info = self.collision_world_info
+        return None if info is None else info.batch_mode
 
     def bind_collision_world(
         self,
@@ -272,13 +254,15 @@ class MotionGenerator:
         Raises:
             ValueError: If the selected planner cannot consume dynamic obstacles.
         """
-        if not self.supports_dynamic_collision_world:
+        info = self.collision_world_info
+        if info is None or not info.supports_updates:
             logger.log_error(
                 f"{type(self.planner).__name__} does not support dynamic "
                 "collision-world updates.",
                 ValueError,
             )
-        configured_ids = self.dynamic_collision_entity_ids
+        assert info is not None
+        configured_ids = info.dynamic_entity_ids
         received_ids = tuple(obstacle_poses)
         if not all(
             isinstance(entity_id, str) and entity_id and entity_id == entity_id.strip()

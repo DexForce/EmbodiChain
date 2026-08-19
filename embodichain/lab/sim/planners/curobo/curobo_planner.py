@@ -40,7 +40,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import torch
 import yaml
@@ -51,6 +51,7 @@ from embodichain.utils.math import pose_inv, quat_from_matrix
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
+    CollisionWorldInfo,
     PlanOptions,
     validate_plan_options,
 )
@@ -815,7 +816,6 @@ class CuroboPlanner(BasePlanner):
     """
 
     supported_move_types = frozenset({MoveType.EEF_MOVE, MoveType.JOINT_MOVE})
-    supports_collision_world_updates = True
 
     @property
     def preserve_plan_samples(self) -> bool:
@@ -828,21 +828,16 @@ class CuroboPlanner(BasePlanner):
         return self.cfg.preserve_plan_samples
 
     @property
-    def dynamic_collision_entity_ids(self) -> tuple[str, ...]:
-        """Return canonical registry IDs accepted for dynamic pose updates."""
-        return tuple(self.cfg.world.dynamic_obstacle_names)
-
-    @property
-    def collision_world_entity_ids(self) -> tuple[str, ...]:
-        """Return every obstacle ID represented in the generated world."""
-        return tuple(
-            name for name, _ in _named_rigid_objects(self.cfg.world.rigid_objects)
+    def collision_world_info(self) -> CollisionWorldInfo:
+        """Return the configured collision-world integration contract."""
+        return CollisionWorldInfo(
+            entity_ids=tuple(
+                name for name, _ in _named_rigid_objects(self.cfg.world.rigid_objects)
+            ),
+            dynamic_entity_ids=tuple(self.cfg.world.dynamic_obstacle_names),
+            batch_mode="per_env" if self.cfg.world.multi_env else "shared",
+            supports_updates=True,
         )
-
-    @property
-    def collision_world_batch_mode(self) -> Literal["shared", "per_env"]:
-        """Return the configured collision-world batching policy."""
-        return "per_env" if self.cfg.world.multi_env else "shared"
 
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)

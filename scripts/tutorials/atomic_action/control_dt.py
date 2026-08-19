@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionInvocation,
     AtomicActionEngine,
     JointPositionGoal,
     MotionPolicy,
@@ -81,14 +80,10 @@ def main() -> None:
         arm_limits[:, 1],
     )
 
-    binding = engine.bind_control_parts(
+    invocation = engine.make_invocation(
         "move_joints",
-        {"primary": {"motion": "arm"}},
-    )
-    invocation = ActionInvocation(
-        skill_id="move_joints",
-        goal=JointPositionGoal(target_arm_qpos),
-        binding=binding,
+        JointPositionGoal(target_arm_qpos),
+        control_parts={"primary": {"motion": "arm"}},
         motion_policy=MotionPolicy(
             strategy="ik_interp",
             sample_count=SAMPLE_COUNT,

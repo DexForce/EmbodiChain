@@ -25,9 +25,10 @@ import torch
 
 from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
-from .control import ControlPartCommandProfile
-from .invocation import ActionInvocation, ResolvedActionRequest
+from .control import ActionControlOverrides, ControlPartCommandProfile
+from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 
@@ -226,6 +227,84 @@ class AtomicActionEngine:
                 f"Skill {action.skill_id!r} has no explicit SkillBindingContract."
             )
         return self._planning_services.bind_control_parts(contract, endpoints)
+
+    def make_invocation(
+        self,
+        skill_id: str,
+        goal: GoalT,
+        *,
+        control_parts: Mapping[str, Mapping[str, str]] | None = None,
+        resources: Mapping[str, str] | None = None,
+        motion_policy: MotionPolicy | None = None,
+        recovery_policy: RecoveryPolicy | None = None,
+        skill_options: OptionsT | None = None,
+        control_overrides: ActionControlOverrides | None = None,
+        invocation_id: str | None = None,
+        revision: int = 0,
+    ) -> ActionInvocation[GoalT, OptionsT]:
+        """Construct a grounded invocation while naming the skill only once.
+
+        ``control_parts`` uses the advanced direct-core binding path. When it is
+        omitted, the engine must own a bound robot skill profile; ``resources``
+        then optionally selects logical resource IDs by skill-local slot. An
+        omitted resource selection uses the profile's unique or default binding.
+        This method resolves bindings only; profile policy presets and runner
+        configuration remain responsibilities of the semantic runtime layer.
+
+        Args:
+            skill_id: Stable identifier of an installed atomic skill.
+            goal: Action-specific typed goal.
+            control_parts: Optional direct ``slot -> endpoint -> control_part``
+                mapping.
+            resources: Optional profile ``slot -> resource_id`` selections.
+            motion_policy: Optional invocation motion policy.
+            recovery_policy: Optional invocation recovery policy.
+            skill_options: Optional action-specific invocation options.
+            control_overrides: Optional endpoint-scoped command overrides.
+            invocation_id: Optional correlation identifier.
+            revision: Monotonic invocation revision.
+
+        Returns:
+            A standard :class:`ActionInvocation` accepted by ``plan``,
+            ``compile``, and ``start``.
+
+        Raises:
+            ValueError: If binding sources conflict or no binding source is
+                available.
+            KeyError: If the skill or an explicitly selected resource is unknown.
+            TypeError: If an invocation field or binding input has an invalid type.
+        """
+        if control_parts is not None and resources is not None:
+            raise ValueError("control_parts and resources are mutually exclusive.")
+        if control_parts is not None:
+            binding = self.bind_control_parts(skill_id, control_parts)
+        else:
+            profile = self.skill_profile
+            if profile is None:
+                if resources is not None:
+                    raise ValueError("resources requires a bound RobotSkillProfile.")
+                raise ValueError(
+                    "control_parts is required when no RobotSkillProfile is bound."
+                )
+            binding = profile.resolve(skill_id, resources).action_binding
+
+        return ActionInvocation(
+            skill_id=skill_id,
+            goal=goal,
+            binding=binding,
+            motion_policy=MotionPolicy() if motion_policy is None else motion_policy,
+            recovery_policy=(
+                RecoveryPolicy() if recovery_policy is None else recovery_policy
+            ),
+            skill_options=skill_options,
+            control_overrides=(
+                ActionControlOverrides()
+                if control_overrides is None
+                else control_overrides
+            ),
+            invocation_id=invocation_id,
+            revision=revision,
+        )
 
     def register(self, action: AtomicAction, *, replace: bool = False) -> None:
         """Register one action instance using its descriptor.

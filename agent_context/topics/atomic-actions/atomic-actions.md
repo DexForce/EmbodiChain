@@ -154,6 +154,16 @@ disjointness, then emits the same generic `ActionBinding` with
 and this path deliberately does not perform profile resource discovery or
 capability matching.
 
+`engine.make_invocation(skill_id, goal, ...)` is the convenience construction
+boundary when callers do not need to retain a binding separately. Pass
+`control_parts` for the direct path, or rely on a bound `RobotSkillProfile` and
+optionally pass `resources` as `slot -> resource_id` selections. The two binding
+sources are mutually exclusive. Without a profile, `control_parts` is required;
+with a profile, omitting `resources` uses unique or configured-default profile
+resolution. The method returns an ordinary `ActionInvocation` and does not plan
+or execute it. It resolves bindings only; profile policy presets and runner
+configuration remain semantic-runtime concerns.
+
 Discovery boundaries are distinct:
 
 - `engine.actions` contains every installed action instance and is the
@@ -509,21 +519,20 @@ For lightweight sources that do not need environment correlation IDs,
 The public `AtomicAction.plan()` copies `MotionPolicy` and binds collision entity
 poses through `MotionGenerator.bind_collision_world()`. The motion generator
 owns option copying and the backend capability boundary, then forwards the
-update through `BasePlanner.with_collision_world()`. Backends opt in via
-`supports_collision_world_updates`; cuRobo implements this bridge using
-`CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore consumes the
-same scene snapshot that triggered invalidation without adding obstacle
-parameters to each skill. Add/remove/geometry mutations are not yet supported
-by this pose-update path; providers should revision only pose-updatable
-registered obstacles.
+update through `BasePlanner.with_collision_world()`. Backends opt in through
+`BasePlanner.collision_world_info.supports_updates`; cuRobo implements this
+bridge using `CuroboPlanOptions.dynamic_obstacle_poses`. Replanning therefore
+consumes the same scene snapshot that triggered invalidation without adding
+obstacle parameters to each skill. Add/remove/geometry mutations are not yet
+supported by this pose-update path; providers should revision only
+pose-updatable registered obstacles.
 
-`BasePlanner.collision_world_entity_ids`, `dynamic_collision_entity_ids`, and
-`collision_world_batch_mode` expose the backend's complete world, dynamic
-subset, and batching contract. `MotionGenerator` validates and forwards those
-properties for `SceneRegistry.make_planning_scene_provider()`. External
-providers call `validate_collision_integration(..., scene_provider=...)`.
-These construction checks are separate from per-plan
-`bind_collision_world()`.
+`BasePlanner.collision_world_info` exposes the backend's complete world,
+dynamic subset, batching mode, and update capability as one immutable contract.
+`MotionGenerator` validates and forwards it for
+`SceneRegistry.make_planning_scene_provider()`. External providers call
+`validate_collision_integration(..., scene_provider=...)`. These construction
+checks are separate from per-plan `bind_collision_world()`.
 
 Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `tracking_error_recovery.py`, `moving_target_recovery.py`, and
