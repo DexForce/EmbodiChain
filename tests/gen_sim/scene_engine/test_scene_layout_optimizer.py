@@ -31,8 +31,18 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor im
     SceneLayoutConstructor,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_optimizer import (
+    SceneLayoutOptimizer,
     _table_region_bounds,
 )
+
+_TABLE_BOUNDS = [
+    [-2.0, -2.0],
+    [2.0, -2.0],
+    [2.0, 2.0],
+    [-2.0, 2.0],
+]
+_OVERLAPPING_CENTER_XY = [0.0, 0.0]
+_ASSET_SIDE_LENGTH_M = 0.2
 
 
 def _asset(
@@ -136,3 +146,79 @@ def test_layout_constructor_places_new_child_on_parent_top(
     assert placed_cup.center_xy == [0.0, 0.0]
     # book top is z=0.62 m; cup half-height is 0.1 m and clearance is 0.02 m.
     assert np.allclose(placed_cup.pos, [0.0, 0.74, 0.0])
+
+
+def test_table_optimizer_ignores_fixed_sibling_overlap(tmp_path: Path) -> None:
+    asset_glb = tmp_path / "asset.glb"
+    trimesh.creation.box(extents=[_ASSET_SIDE_LENGTH_M] * 3).export(asset_glb)
+    first_id, second_id = "first_001", "second_001"
+    optimizer = SceneLayoutOptimizer()
+
+    solved_xy_by_id = optimizer.optimize_table_root_xy(
+        assets_by_id={
+            first_id: _asset(
+                object_id=first_id,
+                glb_path=asset_glb,
+                center_xy=_OVERLAPPING_CENTER_XY,
+            ),
+            second_id: _asset(
+                object_id=second_id,
+                glb_path=asset_glb,
+                center_xy=_OVERLAPPING_CENTER_XY,
+            ),
+        },
+        root_ids=[first_id, second_id],
+        root_seed_xy_by_id={
+            first_id: _OVERLAPPING_CENTER_XY,
+            second_id: _OVERLAPPING_CENTER_XY,
+        },
+        imported_root_ids={first_id, second_id},
+        fixed_root_xy_by_id={
+            first_id: _OVERLAPPING_CENTER_XY,
+            second_id: _OVERLAPPING_CENTER_XY,
+        },
+        root_table_regions_by_id={first_id: None, second_id: None},
+        table_optimization_rect_xy=_TABLE_BOUNDS,
+        root_relations=[],
+    )
+
+    assert solved_xy_by_id == {
+        first_id: _OVERLAPPING_CENTER_XY,
+        second_id: _OVERLAPPING_CENTER_XY,
+    }
+
+
+def test_table_optimizer_separates_variable_sibling_from_fixed_sibling(
+    tmp_path: Path,
+) -> None:
+    asset_glb = tmp_path / "asset.glb"
+    trimesh.creation.box(extents=[_ASSET_SIDE_LENGTH_M] * 3).export(asset_glb)
+    fixed_id, variable_id = "fixed_001", "variable_001"
+    optimizer = SceneLayoutOptimizer()
+
+    solved_xy_by_id = optimizer.optimize_table_root_xy(
+        assets_by_id={
+            fixed_id: _asset(
+                object_id=fixed_id,
+                glb_path=asset_glb,
+                center_xy=_OVERLAPPING_CENTER_XY,
+            ),
+            variable_id: _asset(
+                object_id=variable_id,
+                glb_path=asset_glb,
+            ),
+        },
+        root_ids=[fixed_id, variable_id],
+        root_seed_xy_by_id={
+            fixed_id: _OVERLAPPING_CENTER_XY,
+            variable_id: _OVERLAPPING_CENTER_XY,
+        },
+        imported_root_ids={fixed_id},
+        fixed_root_xy_by_id={fixed_id: _OVERLAPPING_CENTER_XY, variable_id: None},
+        root_table_regions_by_id={fixed_id: None, variable_id: None},
+        table_optimization_rect_xy=_TABLE_BOUNDS,
+        root_relations=[],
+    )
+
+    assert solved_xy_by_id[fixed_id] == _OVERLAPPING_CENTER_XY
+    assert np.max(np.abs(solved_xy_by_id[variable_id])) >= _ASSET_SIDE_LENGTH_M - 1e-6

@@ -143,6 +143,7 @@ class SceneLayoutOptimizer:
             root_half_extents_xy=child_half_extents_xy,
             inequality_constraints=inequality_constraints,
             equality_constraints=equality_constraints,
+            fixed_root_xy_by_id=fixed_child_xy_by_id,
             solved_root_xy_by_id=solved_child_xy_by_id,
             config=self.config,
         )
@@ -225,6 +226,7 @@ def _optimize_table_root_xy(
         root_half_extents_xy=root_half_extents_xy,
         inequality_constraints=inequality_constraints,
         equality_constraints=equality_constraints,
+        fixed_root_xy_by_id=fixed_root_xy_by_id,
         solved_root_xy_by_id=solved_root_xy_by_id,
         config=config,
     )
@@ -443,18 +445,26 @@ def _refine_root_collisions(
     root_half_extents_xy: dict[str, np.ndarray],
     inequality_constraints: list[tuple[np.ndarray, float]],
     equality_constraints: list[tuple[np.ndarray, float]],
+    fixed_root_xy_by_id: dict[str, list[float] | None],
     solved_root_xy_by_id: dict[str, list[float]],
     config: SceneLayoutOptimizerConfig,
 ) -> dict[str, list[float]]:
-    """Add AABB separation constraints until the table roots no longer overlap."""
+    """Separate only sibling pairs that include a layout-variable object."""
     seen_pairs: set[tuple[str, str]] = set()
     current_xy_by_id = solved_root_xy_by_id
     for _ in range(config.max_collision_rounds):
-        overlaps = _root_aabb_overlaps(
+        all_overlaps = _root_aabb_overlaps(
             root_ids=root_ids,
             root_half_extents_xy=root_half_extents_xy,
             xy_by_id=current_xy_by_id,
         )
+        # Fixed/fixed siblings are outside this edit and therefore cannot be solved here.
+        overlaps = [
+            overlap
+            for overlap in all_overlaps
+            if fixed_root_xy_by_id[overlap[1]] is None
+            or fixed_root_xy_by_id[overlap[2]] is None
+        ]
         if not overlaps:
             return current_xy_by_id
         added_constraint_count = 0
@@ -494,6 +504,8 @@ def _refine_root_collisions(
             root_half_extents_xy=root_half_extents_xy,
             xy_by_id=current_xy_by_id,
         )
+        if fixed_root_xy_by_id[first_id] is None
+        or fixed_root_xy_by_id[second_id] is None
     ]
     raise ValueError(
         "Table-root AABB collisions remain after layout refinement: "
