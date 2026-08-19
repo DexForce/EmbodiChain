@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from embodichain.learning.rl.train import (
+    _event_params,
     _resolve_profile_output,
     parse_args,
     train_from_config,
@@ -65,3 +66,13 @@ def test_learning_env_rejects_profile(tmp_path):
 
     with pytest.raises(ValueError, match="--profile_output requires --profile"):
         train_from_config(str(config_path), profile_output="prof.json")
+
+
+def test_camera_recording_defaults_to_the_run_directory(tmp_path):
+    params = _event_params(
+        {"func": "record_camera_data_async", "params": {"name": "main"}},
+        run_base=tmp_path / "run",
+        phase="eval",
+    )
+
+    assert params["save_path"] == str(tmp_path / "run" / "videos" / "eval")
