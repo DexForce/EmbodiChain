@@ -951,7 +951,10 @@ def test_parallel_pickups_plan_each_arm_at_execution_time(
         failed=torch.tensor([False]),
     )
 
-    assert {step_id for step_id, _ in live_calls} == {"first", "second"}
+    assert set(live_calls) == {
+        ("first", "right_arm"),
+        ("second", "left_arm"),
+    }
     assert not bool(failed[0])
 
 
@@ -999,7 +1002,67 @@ def test_required_arm_speculative_failure_still_reaches_live_planning(
     assert executor._assignments[step.id] == ["left_arm"]
 
 
-def test_auto_pickup_retry_exclusion_switches_from_failed_arm(
+def test_auto_pickup_outside_deadband_requires_same_side_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step_mapping = _hold_step("hold", "can", "left_arm")
+    step_mapping["actor"] = {"mode": "auto"}
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(step_mapping))),
+        _FakeEnv(
+            {"can": _FakeEntity("can", _pose(0.0, -0.2, 0.75), _box_vertices(0.03))}
+        ),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    def candidate(_step, arm, _failed):
+        cost = 10.0 if arm == "left_arm" else 1.0
+        return SimpleNamespace(
+            feasible=torch.tensor([True]),
+            cost=torch.tensor([cost]),
+        )
+
+    monkeypatch.setattr(executor, "_candidate", candidate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+
+    executor._ensure_assignment(step, torch.tensor([False]))
+
+    assert executor._preferred_live_pickup_arm(step, 0) == "left_arm"
+    assert executor._assignments[step.id] == ["left_arm"]
+
+
+def test_auto_pickup_inside_deadband_selects_lower_cost_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step_mapping = _hold_step("hold", "can", "left_arm")
+    step_mapping["actor"] = {"mode": "auto"}
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(step_mapping))),
+        _FakeEnv(
+            {"can": _FakeEntity("can", _pose(0.0, 0.01, 0.75), _box_vertices(0.03))}
+        ),
+        record_runtime=False,
+    )
+    step = executor.program.semantic_steps[0]
+
+    def candidate(_step, arm, _failed):
+        cost = 10.0 if arm == "left_arm" else 1.0
+        return SimpleNamespace(
+            feasible=torch.tensor([True]),
+            cost=torch.tensor([cost]),
+        )
+
+    monkeypatch.setattr(executor, "_candidate", candidate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+
+    executor._ensure_assignment(step, torch.tensor([False]))
+
+    assert executor._preferred_live_pickup_arm(step, 0) is None
+    assert executor._assignments[step.id] == ["right_arm"]
+
+
+def test_auto_pickup_retry_does_not_cross_sides_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     step_mapping = _hold_step("hold", "can", "left_arm")
@@ -1031,6 +1094,38 @@ def test_auto_pickup_retry_exclusion_switches_from_failed_arm(
     executor._assignments.pop(step.id)
     executor._ensure_assignment(step, torch.tensor([False]))
 
+    assert executor._assignments[step.id] == [None]
+
+
+def test_auto_pickup_retry_can_explicitly_cross_sides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step_mapping = _hold_step("hold", "can", "left_arm")
+    step_mapping["actor"] = {"mode": "auto"}
+    executor = ProgramExecutor(
+        load_execution_program(compile_task_agent(_task_agent(step_mapping))),
+        _FakeEnv(
+            {"can": _FakeEntity("can", _pose(0.0, 0.2, 0.75), _box_vertices(0.03))}
+        ),
+        record_runtime=False,
+    )
+    executor.runtime_policy.arm_selection.allow_cross_side_fallback = True
+    step = executor.program.semantic_steps[0]
+    estimate = SimpleNamespace(
+        feasible=torch.tensor([False]),
+        cost=torch.tensor([torch.inf]),
+    )
+    monkeypatch.setattr(executor, "_candidate", lambda *_args, **_kwargs: estimate)
+    monkeypatch.setattr(executor, "_report_candidates", lambda *_args: None)
+    monkeypatch.setattr(
+        executor,
+        "_preferred_live_pickup_arm",
+        lambda *_args: "left_arm",
+    )
+
+    executor._pickup_retry_exclusions[(step.id, 0)] = {"left_arm"}
+    executor._ensure_assignment(step, torch.tensor([False]))
+
     assert executor._assignments[step.id] == ["right_arm"]
 
 
@@ -1046,6 +1141,7 @@ def test_auto_pickup_runtime_retry_uses_the_other_arm(
         ),
         record_runtime=False,
     )
+    executor.runtime_policy.arm_selection.allow_cross_side_fallback = True
     step = executor.program.semantic_steps[0]
     original_edge = executor.edges[step.edge_ids[0]]
     action = {**original_edge.actions[0], "seed_node_id": "pickup_node"}

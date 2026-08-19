@@ -38,6 +38,7 @@ def test_default_runtime_policy_preserves_current_arm_selection_behavior() -> No
 
     assert policy.arm_selection.as_mapping() == {
         "crossing_deadband_ratio": 0.08,
+        "allow_cross_side_fallback": False,
         "pickup_crossing_weight": 1.0,
         "placement_crossing_weight": 1.5,
         "motion_cost_scale": pytest.approx(3.141592653589793),
@@ -163,6 +164,35 @@ def test_arm_selection_policy_rejects_invalid_values(
 
     with pytest.raises(ValueError, match=message):
         ArmSelectionPolicyCfg.from_mapping(values)
+
+
+def test_arm_selection_policy_requires_boolean_cross_side_fallback() -> None:
+    values = default_runtime_policy("dual_ur10").arm_selection.as_mapping()
+    values["allow_cross_side_fallback"] = "false"
+
+    with pytest.raises(TypeError, match="allow_cross_side_fallback"):
+        ArmSelectionPolicyCfg.from_mapping(values)
+
+
+def test_arm_selection_policy_loads_old_snapshot_without_fallback_field() -> None:
+    snapshot = default_runtime_policy("dual_ur10").as_mapping()
+    snapshot["arm_selection"].pop("allow_cross_side_fallback")
+    payload = json.dumps(
+        snapshot,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+    policy = resolve_agent_runtime_policy(
+        {
+            "robot_profile": "dual_ur10",
+            "runtime_policy": snapshot,
+            "runtime_policy_hash": hashlib.sha256(payload).hexdigest(),
+        }
+    )
+
+    assert policy.arm_selection.allow_cross_side_fallback is False
 
 
 def test_agent_policy_snapshot_is_hash_verified_and_legacy_config_falls_back() -> None:

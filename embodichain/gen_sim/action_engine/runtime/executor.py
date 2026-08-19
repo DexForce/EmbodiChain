@@ -1773,19 +1773,37 @@ class ProgramExecutor:
         step: SemanticStep,
         env_id: int,
     ) -> str | None:
-        """Choose the arm on the object's current side when estimates fail."""
+        """Return the object's same-side arm outside the central deadband."""
         pose = self._entity_pose(step.object_uid)
-        center, _, lateral_axis = self._arm_selection_workspace(step)
+        center, half_width, lateral_axis = self._arm_selection_workspace(step)
         index = min(env_id, pose.shape[0] - 1)
         lateral = float(
             torch.sum((pose[index, :2, 3] - center[index]) * lateral_axis[index])
         )
-        if (
-            abs(lateral)
-            <= self.runtime_policy.arm_selection.orient_object_preferred_arm_deadband
-        ):
+        deadband = float(half_width[index]) * float(
+            self.runtime_policy.arm_selection.crossing_deadband_ratio
+        )
+        if abs(lateral) <= deadband:
             return None
         return "left_arm" if lateral > 0.0 else "right_arm"
+
+    def _auto_arm_is_allowed(
+        self,
+        step: SemanticStep,
+        arm: str,
+        env_id: int,
+    ) -> bool:
+        """Apply the same-side constraint to automatic arm allocation."""
+        if step.actor.get("mode") != "auto":
+            return True
+        preferred = self._preferred_live_pickup_arm(step, env_id)
+        if preferred is None or arm == preferred:
+            return True
+        excluded = self._pickup_retry_exclusions.get((step.id, env_id), set())
+        return bool(
+            self.runtime_policy.arm_selection.allow_cross_side_fallback
+            and preferred in excluded
+        )
 
     def _ensure_assignment(
         self,
@@ -1881,7 +1899,9 @@ class ProgramExecutor:
             available = [
                 arm
                 for arm in ("left_arm", "right_arm")
-                if arm not in excluded and not bool(conflicts[arm][env_id])
+                if arm not in excluded
+                and not bool(conflicts[arm][env_id])
+                and self._auto_arm_is_allowed(step, arm, env_id)
             ]
             if not available:
                 assignments.append(None)
@@ -1963,9 +1983,19 @@ class ProgramExecutor:
                         (steps[1], second_arm),
                     )
                 )
-                available = required_match and not bool(
-                    self._resource_conflicts(steps[0], first_arm)[env_id]
-                    or self._resource_conflicts(steps[1], second_arm)[env_id]
+                available = (
+                    required_match
+                    and not bool(
+                        self._resource_conflicts(steps[0], first_arm)[env_id]
+                        or self._resource_conflicts(steps[1], second_arm)[env_id]
+                    )
+                    and all(
+                        self._auto_arm_is_allowed(candidate_step, candidate_arm, env_id)
+                        for candidate_step, candidate_arm in (
+                            (steps[0], first_arm),
+                            (steps[1], second_arm),
+                        )
+                    )
                 )
                 preferred = (
                     self._preferred_in_place_arm(steps[0], env_id),
@@ -3493,9 +3523,19 @@ class ProgramExecutor:
                         (steps[1], second_arm),
                     )
                 )
-                available = required_match and not bool(
-                    self._resource_conflicts(steps[0], first_arm)[env_id]
-                    or self._resource_conflicts(steps[1], second_arm)[env_id]
+                available = (
+                    required_match
+                    and not bool(
+                        self._resource_conflicts(steps[0], first_arm)[env_id]
+                        or self._resource_conflicts(steps[1], second_arm)[env_id]
+                    )
+                    and all(
+                        self._auto_arm_is_allowed(candidate_step, candidate_arm, env_id)
+                        for candidate_step, candidate_arm in (
+                            (steps[0], first_arm),
+                            (steps[1], second_arm),
+                        )
+                    )
                 )
                 first_preferred = self._preferred_in_place_arm(steps[0], env_id)
                 second_preferred = self._preferred_in_place_arm(steps[1], env_id)
@@ -3681,6 +3721,7 @@ class ProgramExecutor:
         arrangement = self.arrangements.get(step.id)
         result = []
         for env_id, assignment in enumerate(assignments):
+            same_side_arm = self._preferred_live_pickup_arm(step, env_id)
             physical_part = assignment
             if assignment in {"left_arm", "right_arm"}:
                 physical_part = arm_control_part(self.env, assignment)
@@ -3702,6 +3743,16 @@ class ProgramExecutor:
             item: dict[str, Any] = {
                 "assigned_arm": assignment,
                 "physical_control_part": physical_part,
+                "same_side_arm": same_side_arm,
+                "inside_arm_deadband": same_side_arm is None,
+                "cross_side_fallback_allowed": bool(
+                    self.runtime_policy.arm_selection.allow_cross_side_fallback
+                ),
+                "cross_side_fallback_used": bool(
+                    same_side_arm is not None
+                    and assignment in {"left_arm", "right_arm"}
+                    and assignment != same_side_arm
+                ),
                 "observed_object_pose": observed_pose[env_id],
                 "final_target_pose": (
                     None if target_pose is None else target_pose[env_id]

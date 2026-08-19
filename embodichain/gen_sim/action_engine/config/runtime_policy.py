@@ -56,6 +56,7 @@ _ARM_SELECTION_KEYS = (
     "fallback_workspace_half_width",
     "orient_object_preferred_arm_deadband",
 )
+_ARM_SELECTION_OPTIONAL_KEYS = {"allow_cross_side_fallback"}
 _GROUNDING_KEYS = {
     "semantic_defaults": {
         "surface_clearance",
@@ -175,9 +176,10 @@ _DEPRECATED_PREDICATE_KEYS = {
 
 @configclass
 class ArmSelectionPolicyCfg:
-    """Soft arm-allocation cost parameters resolved for one robot profile."""
+    """Arm-allocation constraints and costs resolved for one robot profile."""
 
     crossing_deadband_ratio: float = 0.08
+    allow_cross_side_fallback: bool = False
     pickup_crossing_weight: float = 1.0
     placement_crossing_weight: float = 1.5
     motion_cost_scale: float = math.pi
@@ -185,6 +187,8 @@ class ArmSelectionPolicyCfg:
     orient_object_preferred_arm_deadband: float = 0.02
 
     def __post_init__(self) -> None:
+        if not isinstance(self.allow_cross_side_fallback, bool):
+            raise TypeError("allow_cross_side_fallback must be a bool.")
         for name in _ARM_SELECTION_KEYS:
             value = float(getattr(self, name))
             if not math.isfinite(value):
@@ -201,14 +205,22 @@ class ArmSelectionPolicyCfg:
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> ArmSelectionPolicyCfg:
         """Build a strict policy from a JSON/YAML mapping."""
-        if set(value) != set(_ARM_SELECTION_KEYS):
+        keys = frozenset(value)
+        if keys not in {
+            frozenset(_ARM_SELECTION_KEYS),
+            frozenset((*_ARM_SELECTION_KEYS, *_ARM_SELECTION_OPTIONAL_KEYS)),
+        }:
             raise ValueError("arm_selection fields do not match the policy schema.")
-        return cls(**{key: float(value[key]) for key in _ARM_SELECTION_KEYS})
+        fields: dict[str, Any] = {key: float(value[key]) for key in _ARM_SELECTION_KEYS}
+        if "allow_cross_side_fallback" in value:
+            fields["allow_cross_side_fallback"] = value["allow_cross_side_fallback"]
+        return cls(**fields)
 
-    def as_mapping(self) -> dict[str, float]:
+    def as_mapping(self) -> dict[str, float | bool]:
         """Return a stable JSON-compatible representation."""
         return {
             "crossing_deadband_ratio": float(self.crossing_deadband_ratio),
+            "allow_cross_side_fallback": bool(self.allow_cross_side_fallback),
             "pickup_crossing_weight": float(self.pickup_crossing_weight),
             "placement_crossing_weight": float(self.placement_crossing_weight),
             "motion_cost_scale": float(self.motion_cost_scale),
@@ -630,9 +642,7 @@ def resolve_agent_runtime_policy(agent_config: Mapping[str, Any]) -> RuntimePoli
             str(agent_config.get("robot_profile", "dual_ur10"))
         )
         merged = policy.arm_selection.as_mapping()
-        merged.update(
-            {key: float(value) for key, value in snapshot["arm_selection"].items()}
-        )
+        merged.update(snapshot["arm_selection"])
         policy.arm_selection = ArmSelectionPolicyCfg.from_mapping(merged)
         return policy
     if snapshot.get("schema_version") == _PREVIOUS_RUNTIME_POLICY_SCHEMA:
