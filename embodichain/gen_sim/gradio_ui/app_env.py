@@ -30,7 +30,6 @@ __all__ = [
     "ARTICRAFT_OUTPUT_ROOT",
     "ARTICRAFT_REPOSITORY_URL",
     "ARTICRAFT_ROOT",
-    "ARTICRAFT_VISER_PORT",
     "DIRECT_NO_PROXY_VALUE",
     "EMBODICHAIN_ROOT",
     "GRADIO_AUTH_PASSWORD",
@@ -85,14 +84,13 @@ ARTICRAFT_ROOT = Path(
     _getenv("ARTICRAFT_ROOT", str(APP_ROOT / ".articraft"))
 ).expanduser()
 ARTICRAFT_REPOSITORY_URL = _getenv(
-    "ARTICRAFT_REPOSITORY_URL", "https://github.com/mattzh72/articraft.git"
+    "ARTICRAFT_REPOSITORY_URL", "https://github.com/XuanchaoPENG/Articraft.git"
 )
 ARTICRAFT_CONDA_ENV = _getenv("ARTICRAFT_CONDA_ENV", "articraft")
 ARTICRAFT_OUTPUT_ROOT = Path(
     _getenv("ARTICRAFT_OUTPUT_ROOT", str(GEN_SIM_ROOT / "articraft"))
 ).expanduser()
 SCENE_ENGINE_VISER_PORT = int(_getenv("SCENE_ENGINE_VISER_PORT", "8080"))
-ARTICRAFT_VISER_PORT = int(_getenv("ARTICRAFT_VISER_PORT", "8081"))
 ACTION_ENGINE_VISER_PORT = int(_getenv("ACTION_ENGINE_VISER_PORT", "8082"))
 SERVER_NAME = _getenv("GRADIO_SERVER_NAME", "127.0.0.1")
 SERVER_PORT = int(_getenv("GRADIO_SERVER_PORT", "7860"))

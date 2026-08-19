@@ -30,12 +30,12 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
 | `gradio_app.py` | 唯一启动入口；校验 `EMBODICHAIN_ROOT`，创建 Blocks，设置队列和本地文件访问路径。 |
 | `app_ui.py` | 顶部图标、引擎面板切换和回调绑定；不实现 pipeline。 |
 | `app_asset_engine.py` | SimReady 上传适配、输入/输出 GLB 预览、处理日志，以及 Asset engine 的 Articraft 标签页。 |
-| `app_articraft.py` | Articraft checkout/环境检查、外部记录创建、Codex 生成与校验、URDF bundle 和 Viser 关节预览。 |
+| `app_articraft.py` | Articraft fork checkout/来源检查、Conda 环境调用、Codex provider 生成、USDZ 结果校验和下载。 |
 | `app_workflows.py` | Scene Engine 工作流、Action Engine 的会话状态、Viser 预览和 DexSim。 |
 | `app_processes.py` | 子进程环境、进程组终止、stdout 读取和 pipeline 阶段检测。 |
 | `app_state.py` | `RuntimeState`、互斥锁、进度阶段、运行 token 和耗时统计。 |
 | `app_commands.py` | Action engine 的 `run_agent` 参数构造。 |
-| `app_media.py` | DexSim 观众视频发现和 Articraft Viser CLI 适配。 |
+| `app_media.py` | DexSim 观众视频发现。 |
 | `app_config.py` | UI 文案、引擎模式、路径推导和 CLI 固定参数。 |
 | `app_env.py` | 从 `.env` 读取 Gradio、Articraft 和 SimReady 的部署值，并保留未配置时的默认值。 |
 | `../.env` | Gradio 与 Scene Engine 共用的路径、端口、LLM 和服务端点配置；不提交凭据。 |
@@ -56,13 +56,13 @@ conda run -n embodichain python gradio_app.py
 | `GRADIO_AUTH_USERNAME` | 空 | 非本机部署的 Gradio 用户名。 |
 | `GRADIO_AUTH_PASSWORD` | 空 | 非本机部署的 Gradio 密码。 |
 | `SCENE_ENGINE_VISER_PORT` | `8080` | Scene Engine 的首选 Viser 端口；占用时为会话分配其他可用端口。 |
-| `ARTICRAFT_VISER_PORT` | `8081` | Articraft 关节预览的首选 Viser 端口；占用时为会话分配其他可用端口。 |
 | `ACTION_ENGINE_VISER_PORT` | `8082` | Action Engine 已保存场景预览的首选 Viser 端口；占用时为会话分配其他可用端口。 |
 | `ARTICRAFT_ROOT` | `<项目>/.articraft` | Articraft checkout。 |
-| `ARTICRAFT_CONDA_ENV` | `articraft` | 运行 Articraft CLI 的 Conda 环境。 |
-| `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft 记录、运行日志和导出 bundle。 |
+| `ARTICRAFT_REPOSITORY_URL` | `https://github.com/XuanchaoPENG/Articraft.git` | 带 Codex provider 的 Articraft fork。 |
+| `ARTICRAFT_CONDA_ENV` | `articraft` | 运行新版 Articraft 源码及其依赖的既有 Conda 环境。 |
+| `ARTICRAFT_OUTPUT_ROOT` | `<项目>/.gen_sim/articraft` | Articraft run record 和 USDZ 产物。 |
 
-`app.launch()` 仅开放 UI 静态资源、`.gen_sim/` 生成物和配置的 Articraft 输出目录，并显式禁止 `.env`、`.git/` 等敏感路径。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`；Scene Engine、DexSim、Viser 和 Articraft 直接继承 `.env` 中的原始配置。Codex 作为用户指令驱动的子进程，使用独立登录状态和最小化环境，不继承 GenSim 服务凭据；但 Articulation 启动 Codex 时会恢复 Gradio 强制直连前的代理与 `NO_PROXY` 变量，以便 Codex 按启动 shell 的原始网络路由访问模型服务。
+`app.launch()` 仅开放 UI 静态资源、`.gen_sim/` 生成物和配置的 Articraft 输出目录，并显式禁止 `.env`、`.git/` 等敏感路径。pipeline 子进程由 `build_pipeline_env()` 从共享 `.env` 创建环境：它清除代理变量、设置 `NO_PROXY=no_proxy=*` 并关闭 Gradio analytics。只有 SimReady 子进程会额外把非空的 `SIMREADY_OPENAI_*` 映射为其上游 CLI 需要的 `OPENAI_*`。Articraft 和其内部 Codex provider 使用 `build_codex_env()` 的最小化环境，不继承 GenSim 服务凭据，但会恢复 Gradio 强制直连前的代理与 `NO_PROXY` 变量，以便 Codex 按启动 shell 的原始网络路由访问模型服务。
 
 ## 页面与引擎
 
@@ -71,7 +71,7 @@ conda run -n embodichain python gradio_app.py
 | Engine | 输入 | 预览/下载 | 实际产物 | 是否启动 DexSim |
 | --- | --- | --- | --- | --- |
 | Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
-| Asset engine / Articulation | 文字、可选参考图 | URDF articulation 的 Viser、zip 下载 | `.gen_sim/articraft/` | 否 |
+| Asset engine / Articulation | 文字、可选参考图 | USDZ 下载和 run 摘要 | `.gen_sim/articraft/runs/` | 否 |
 | Scene engine | 一张图片，或已保存场景 + 文本编辑指令 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
@@ -109,30 +109,23 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 
 ### Articulation：Articraft + Codex
 
-Articulation 标签页根据文本和可选参考图生成一个可下载的 articulated asset。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会 clone `ARTICRAFT_REPOSITORY_URL`；随后检查 Conda、指定的 Articraft 环境和 Codex CLI。该操作会创建 checkout 和 `.gen_sim/articraft/` 中的输出目录，现有的非 Articraft 目录不会被覆盖。
+Articulation 标签页根据文本和可选参考图生成可下载的 USDZ。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会从 `ARTICRAFT_REPOSITORY_URL` 的 `main` 分支 clone；已存在时只校验 `origin` 是否指向配置的 fork。随后检查 `ARTICRAFT_CONDA_ENV` 和其中的 Codex CLI。现有的其他 Git checkout 不会被覆盖。运行时通过 `conda run` 激活该环境，并把新版 checkout 的 `src` 作为 `PYTHONPATH`，因此复用既有依赖但不会回退到旧版 Articraft 源码。
 
 生成流程：
 
 ```text
 description + optional image
-  → Articraft external init（创建 rec_ui_articraft_* 记录）
-  → 启动 Codex CLI，仅授权编辑该记录的 active model.py
-  → Articraft external check
-      └─ 旧版 CLI 无 check 时：compile --validate --strict-geom-qc + compile_report
-  → Articraft external finalize
-  → materialized model.urdf + meshes（编译器为缺少惯性的 link 聚合几何并自动补齐 mass/COM/inertia）
-  → 复制到 exports/<record-id>/，保留 model.raw.urdf
-  → Codex 读取完整 URDF 并选择真实操作面（link + visual）
-  → 校验后按 joint 类型注入 <interact type="rotate|translate"/>
-  → interactions.json
-  → exports/<record-id>.zip + Viser articulation preview
+  → conda run -n articraft python -m articraft.app generate --provider codex-cli --no-tui
+  → Articraft 内部 agent loop 调用 Codex CLI
+  → workspace/main.py 编辑、compile 反馈和校验
+  → runs/<run-id>/record.json + result/model.json
+  → runs/<run-id>/result/usdz/<version>.usdz
+  → Gradio 校验 success record 并提供 USDZ 下载
 ```
 
-交互后处理不修改 Articraft materialization cache。Codex 只选择应当接触的 visual；最终运动类型由程序根据 child link 的父 joint 确定：`revolute`/`continuous` 映射为 `rotate`，`prismatic` 映射为 `translate`。所选 visual 必须有同名 collision，否则不发布下载包。
+产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下。当前产物是 Articraft 原生 USDZ，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义转换/导入流程。
 
-产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义并实现转换/导入流程。Articraft Viser 按 Gradio 会话管理预览进程：首先尝试 `ARTICRAFT_VISER_PORT`，若已被占用则分配其他可用端口，不会查找或发送信号给占用端口的外部进程。
-
-`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，终止该会话的 Articraft/Codex 命令进程组，并关闭该会话启动的 Viser。
+`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，并终止该会话的 Articraft 命令进程组。
 
 ## 独立 Scene engine、文本编辑和 Viser
 
@@ -239,7 +232,7 @@ embodichain/gen_sim/scene_engine/cli/preview.py
 .env
 ```
 
-Articulation 还需要 Git（首次 clone）、Conda、`ARTICRAFT_CONDA_ENV` 和已通过独立凭据存储完成登录的 Codex CLI。Codex 子进程不继承 `.env` 中的 API key、token 或密码，输出在返回浏览器前还会按已知敏感环境值脱敏。生成请求会交给本机 Codex CLI 执行，因此默认只在本机可信工作台中使用。
+Articulation 还需要 Git（首次 clone）、配置的 Articraft Conda 环境和已通过独立凭据存储完成登录的 Codex CLI。Articraft/Codex 子进程不继承 `.env` 中的 API key、token 或密码，输出在返回浏览器前还会按已知敏感环境值脱敏。生成请求会交给本机 Codex CLI 执行，因此默认只在本机可信工作台中使用。
 
 每次修改后至少执行：
 
@@ -258,6 +251,6 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
 手动检查：
 
 1. SimReady 上传简单网格后能显示输入预览；执行后显示 SimReady 输出或明确错误。
-2. Articulation 环境检查能报告 checkout、Conda 和 Codex 状态；成功生成后有 zip、记录目录和 Viser 或明确的预览错误。
+2. Articulation 环境检查能报告 fork checkout、Articraft Conda 环境和 Codex 状态；成功生成后有 USDZ 和 run 目录。
 3. Scene engine 从图像生成 `scene_export/scene_config.json`，也能选择已保存场景预览并通过文本修改；编辑后应重启该场景的 Viser，且不改写 `gym_project/current`。
 4. Action engine 在没有 `current` Gym/action 配置或缺少 CLI 时给出预检错误。
