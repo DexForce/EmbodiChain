@@ -48,14 +48,12 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
 from embodichain.lab.sim.atomic_actions.requirements import (
-    ActionBindingRoute,
     DisjointResourceSlots,
-    DisjointSlotEndpoints,
-    GRASP_CAPABILITY,
     INVERSE_KINEMATICS_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
@@ -354,25 +352,13 @@ class CoordinatedPickment(
     end_effector_roles: ClassVar[tuple[str, ...]] = ("left", "right")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=tuple(
-            SkillResourceSlot(
-                slot_id=role,
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", role),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", role),
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                role,
+                motion_capabilities=frozenset({INVERSE_KINEMATICS_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             )
             for role in ("left", "right")
         ),

@@ -54,17 +54,15 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
-    ActionBindingRoute,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
     CARTESIAN_POSE_CAPABILITY,
-    DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
@@ -173,31 +171,19 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                BATCH_INVERSE_KINEMATICS_CAPABILITY,
-                                CARTESIAN_POSE_CAPABILITY,
-                                FORWARD_KINEMATICS_CAPABILITY,
-                            }
-                        ),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "primary"),
-                    ),
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        BATCH_INVERSE_KINEMATICS_CAPABILITY,
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
                 ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
         ),
     )

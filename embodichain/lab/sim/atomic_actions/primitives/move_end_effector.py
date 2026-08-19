@@ -35,11 +35,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan
 from embodichain.lab.sim.atomic_actions.requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
@@ -72,15 +72,9 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     GoalType: ClassVar[type] = EndEffectorPoseGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                ),
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
             ),
         ),
     )

@@ -44,15 +44,13 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
 from embodichain.lab.sim.atomic_actions.requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
-    DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
@@ -165,50 +163,26 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     end_effector_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="source",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                CARTESIAN_POSE_CAPABILITY,
-                                FORWARD_KINEMATICS_CAPABILITY,
-                            }
-                        ),
-                        route=ActionBindingRoute("manipulator", "source"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "source"),
-                    ),
+            make_manipulation_slot(
+                "source",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
                 ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
-            SkillResourceSlot(
-                slot_id="destination",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "destination"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "destination"),
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                "destination",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
         ),
         constraints=(DisjointResourceSlots(("source", "destination")),),
