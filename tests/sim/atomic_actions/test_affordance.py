@@ -62,41 +62,6 @@ class TestAntipodalAffordance:
         aff = AntipodalAffordance()
         assert not hasattr(aff, "geometry")
 
-    def test_articulation_link_resolves_mesh_and_live_pose(self):
-        vertices = torch.randn(8, 3)
-        triangles = torch.randint(0, 8, (5, 3))
-        link_pose = torch.eye(4).repeat(2, 1, 1)
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (vertices, triangles)
-        articulation.get_link_pose.return_value = link_pose
-
-        aff = AntipodalAffordance(
-            articulation=articulation,
-            link_name="knob",
-        )
-
-        articulation.get_link_vert_face.assert_called_once_with("knob")
-        assert aff.is_articulation
-        assert aff.mesh_vertices is vertices
-        assert aff.mesh_triangles is triangles
-        assert aff.get_articulation_link_pose() is link_pose
-        articulation.get_link_pose.assert_called_once_with("knob", to_matrix=True)
-
-    def test_articulation_and_link_name_must_be_provided_together(self):
-        with pytest.raises(ValueError, match="must be provided together"):
-            AntipodalAffordance(articulation=Mock())
-        with pytest.raises(ValueError, match="must be provided together"):
-            AntipodalAffordance(link_name="knob")
-
-    def test_articulation_geometry_is_mutually_exclusive_with_mesh_input(self):
-        articulation = Mock()
-        with pytest.raises(ValueError, match="either articulation"):
-            AntipodalAffordance(
-                articulation=articulation,
-                link_name="knob",
-                mesh_vertices=torch.zeros(1, 3),
-            )
-
     def test_failed_valid_grasp_poses_are_batched_with_inf_costs(self):
         aff = AntipodalAffordance()
         generator = Mock()
@@ -157,86 +122,44 @@ class TestAntipodalAffordance:
 
 
 class TestTwistAffordance:
-    def test_builds_grasp_pose_from_mesh_center_and_axes(self):
-        vertices = torch.tensor(
-            [
-                [0.0, 0.0, 0.0],
-                [2.0, 2.0, 2.0],
-                [1.0, 1.0, 1.0],
-            ]
-        )
-        triangles = torch.tensor([[0, 1, 2]])
+    def test_requires_explicit_grasp_position_and_axis_origin(self):
+        with pytest.raises(TypeError, match="grasp_position"):
+            TwistAffordance()  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "twist_axis",
+        (
+            torch.tensor([1.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, -1.0]),
+        ),
+    )
+    def test_builds_right_handed_orthonormal_grasp_frame(self, twist_axis):
         link_pose = torch.eye(4).repeat(2, 1, 1)
-        link_pose[:, :3, :3] = torch.tensor(
-            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
-        )
         link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (vertices, triangles)
-        articulation.get_link_pose.return_value = link_pose
         affordance = TwistAffordance(
-            articulation=articulation,
-            link_name="knob",
-            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
+            grasp_position=(0.25, -0.5, 0.75),
+            axis_origin=(0.1, 0.2, 0.3),
+            twist_axis=twist_axis,
         )
 
-        grasp_pose = affordance.get_grasp_pose()
+        grasp_pose = affordance.get_grasp_pose(link_pose)
+        rotation = grasp_pose[:, :3, :3]
 
         assert torch.allclose(
             grasp_pose[:, :3, 3],
-            torch.matmul(link_pose[:, :3, :3], vertices.mean(dim=0))
-            + link_pose[:, :3, 3],
+            link_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
         )
         assert torch.allclose(
-            grasp_pose[:, :3, 1],
-            torch.tensor([0.0, 0.0, 1.0]).expand(2, -1),
+            torch.matmul(rotation.transpose(1, 2), rotation),
+            torch.eye(3).expand(2, -1, -1),
+            atol=1.0e-6,
         )
-        assert torch.allclose(
-            grasp_pose[:, :3, 2],
-            torch.tensor([0.0, 1.0, 0.0]).expand(2, -1),
-        )
-        articulation.get_link_vert_face.assert_called_once_with("knob")
-        articulation.get_link_pose.assert_called_once_with("knob", to_matrix=True)
-
-    def test_rejects_twist_axis_parallel_to_world_up(self):
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (
-            torch.ones(3, 3),
-            torch.tensor([[0, 1, 2]]),
-        )
-        articulation.get_link_pose.return_value = torch.eye(4).unsqueeze(0)
-        affordance = TwistAffordance(
-            articulation=articulation,
-            link_name="knob",
-            twist_axis=torch.tensor([0.0, 0.0, 1.0]),
-        )
-
-        with pytest.raises(ValueError, match="parallel"):
-            affordance.get_grasp_pose()
-
-    def test_reads_geometry_and_pose_from_rigid_object(self):
-        vertices = torch.tensor([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-        triangles = torch.tensor([[0, 1, 2]])
-        object_pose = torch.eye(4).repeat(2, 1, 1)
-        rigid_object = Mock()
-        rigid_object.get_vertices.return_value = vertices.unsqueeze(0)
-        rigid_object.get_triangles.return_value = triangles.unsqueeze(0)
-        rigid_object.get_local_pose.return_value = object_pose
-
-        affordance = TwistAffordance(
-            rigid_object=rigid_object,
-            twist_axis=torch.tensor([1.0, 0.0, 0.0]),
-        )
-
-        assert torch.equal(affordance.mesh_vertices, vertices)
-        assert affordance.get_link_pose() is object_pose
-        rigid_object.get_vertices.assert_called_once_with(env_ids=[0], scale=True)
-        rigid_object.get_triangles.assert_called_once_with(env_ids=[0])
-        rigid_object.get_local_pose.assert_called_once_with(to_matrix=True)
+        assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
 
 
 class TestSlideAffordance:
-    def test_uses_articulation_antipodal_sampling_with_batched_directions(self):
+    def test_uses_local_antipodal_mesh_with_batched_directions(self):
         vertices = torch.tensor(
             [
                 [-1.0, 0.0, 0.0],
@@ -247,12 +170,9 @@ class TestSlideAffordance:
         triangles = torch.tensor([[0, 1, 2]])
         link_pose = torch.eye(4).repeat(2, 1, 1)
         link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (vertices, triangles)
-        articulation.get_link_pose.return_value = link_pose
         affordance = SlideAffordance(
-            articulation=articulation,
-            link_name="handle",
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
             translation_axis=torch.tensor([0.0, -1.0, 0.0]),
         )
         generator = Mock()
@@ -274,11 +194,9 @@ class TestSlideAffordance:
         )
 
         assert isinstance(affordance, AntipodalAffordance)
-        assert affordance.is_articulation
         assert success.tolist() == [True, True]
         assert torch.allclose(grasp_poses, torch.stack([first_grasp, second_grasp]))
         assert torch.allclose(open_lengths, torch.tensor([0.03, 0.04]))
-        articulation.get_link_vert_face.assert_called_once_with("handle")
         assert torch.equal(
             generator.get_grasp_poses.call_args_list[0].args[1],
             approach_directions[0],
@@ -288,12 +206,9 @@ class TestSlideAffordance:
             approach_directions[1],
         )
 
-    def test_requires_articulation_backed_antipodal_geometry(self):
-        with pytest.raises(ValueError, match="requires articulation and link_name"):
-            SlideAffordance(
-                mesh_vertices=torch.zeros(3, 3),
-                mesh_triangles=torch.tensor([[0, 1, 2]]),
-            )
+    def test_requires_local_antipodal_geometry(self):
+        with pytest.raises(TypeError, match="mesh_vertices"):
+            SlideAffordance()
 
     @pytest.mark.parametrize(
         "translation_axis",
@@ -304,101 +219,73 @@ class TestSlideAffordance:
         ),
     )
     def test_rejects_invalid_translation_axis(self, translation_axis):
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (
-            torch.ones(3, 3),
-            torch.tensor([[0, 1, 2]]),
-        )
-
         with pytest.raises(ValueError, match="translation_axis"):
             SlideAffordance(
-                articulation=articulation,
-                link_name="handle",
+                mesh_vertices=torch.ones(3, 3),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
                 translation_axis=translation_axis,
             )
 
 
 class TestPressAffordance:
-    def test_builds_press_pose_at_mesh_vertex_center(self):
-        vertices = torch.tensor(
-            [
-                [-2.0, -1.0, -1.0],
-                [-2.0, 1.0, 1.0],
-                [2.0, -1.0, 1.0],
-                [2.0, 1.0, -1.0],
-            ]
-        )
-        triangles = torch.tensor([[0, 1, 2], [1, 2, 3]])
+    def test_requires_explicit_surface_press_position(self):
+        with pytest.raises(TypeError, match="press_position"):
+            PressAffordance()  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "press_axis",
+        (
+            torch.tensor([1.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, -1.0]),
+        ),
+    )
+    def test_builds_right_handed_orthonormal_press_frame(self, press_axis):
         link_pose = torch.eye(4).repeat(2, 1, 1)
         link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (vertices, triangles)
-        articulation.get_link_pose.return_value = link_pose
         affordance = PressAffordance(
-            articulation=articulation,
-            link_name="button",
-            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_axis=press_axis,
+            press_position=(0.25, -0.5, 0.75),
         )
 
-        press_pose = affordance.get_press_pose()
+        press_pose = affordance.get_press_pose(link_pose)
+        rotation = press_pose[:, :3, :3]
 
-        expected_center = link_pose[:, :3, 3] + vertices.mean(dim=0)
-        assert torch.allclose(press_pose[:, :3, 3], expected_center)
         assert torch.allclose(
-            press_pose[:, :3, 2],
-            torch.tensor([1.0, 0.0, 0.0]).expand(2, -1),
+            press_pose[:, :3, 3],
+            link_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
         )
-        articulation.get_link_vert_face.assert_called_once_with("button")
-        articulation.get_link_pose.assert_called_once_with("button", to_matrix=True)
+        assert torch.allclose(
+            torch.matmul(rotation.transpose(1, 2), rotation),
+            torch.eye(3).expand(2, -1, -1),
+            atol=1.0e-6,
+        )
+        assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
 
     def test_rejects_zero_press_axis(self):
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (
-            torch.ones(3, 3),
-            torch.tensor([[0, 1, 2]]),
-        )
-
         with pytest.raises(ValueError, match="press_axis must be non-zero"):
             PressAffordance(
-                articulation=articulation,
-                link_name="button",
                 press_axis=torch.zeros(3),
+                press_position=(0.0, 0.0, 0.0),
             )
 
-    def test_uses_rigid_object_and_configured_press_position(self):
-        vertices = torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0], [0.0, 0.0, 0.0]])
-        triangles = torch.tensor([[0, 1, 2]])
+    def test_uses_configured_press_position(self):
         object_pose = torch.eye(4).repeat(2, 1, 1)
         object_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
-        rigid_object = Mock()
-        rigid_object.get_vertices.return_value = vertices.unsqueeze(0)
-        rigid_object.get_triangles.return_value = triangles.unsqueeze(0)
-        rigid_object.get_local_pose.return_value = object_pose
         affordance = PressAffordance(
-            rigid_object=rigid_object,
             press_axis=torch.tensor([1.0, 0.0, 0.0]),
             press_position=(0.25, -0.5, 0.75),
         )
 
-        press_pose = affordance.get_press_pose()
+        press_pose = affordance.get_press_pose(object_pose)
 
         assert torch.allclose(
             press_pose[:, :3, 3],
             object_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
         )
-        rigid_object.get_vertices.assert_called_once_with(env_ids=[0], scale=True)
-        rigid_object.get_triangles.assert_called_once_with(env_ids=[0])
-        rigid_object.get_local_pose.assert_called_once_with(to_matrix=True)
 
     def test_per_call_press_position_overrides_affordance_position(self):
-        articulation = Mock()
-        articulation.get_link_vert_face.return_value = (
-            torch.ones(3, 3),
-            torch.tensor([[0, 1, 2]]),
-        )
         affordance = PressAffordance(
-            articulation=articulation,
-            link_name="button",
             press_axis=torch.tensor([1.0, 0.0, 0.0]),
             press_position=(1.0, 1.0, 1.0),
         )

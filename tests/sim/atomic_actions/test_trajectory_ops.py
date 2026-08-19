@@ -28,6 +28,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     resolve_object_target,
 )
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_joint_plan_states,
     build_pose_plan_states,
     interpolate_hand_qpos,
@@ -320,6 +321,45 @@ class TestTranslatePoseWorld:
         offset = torch.zeros(3, 3)
         with pytest.raises(ValueError, match="offset batch size"):
             translate_pose_world(pose, offset)
+
+
+class TestAxisTranslationKeyframes:
+    def test_excludes_start_includes_end_and_stays_on_axis(self):
+        start = torch.eye(4).repeat(2, 1, 1)
+        start[:, :3, 3] = torch.tensor([[-0.1, 0.2, 0.3], [0.4, -0.2, 0.1]])
+        axis = torch.tensor([[1.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
+        axis = torch.nn.functional.normalize(axis, dim=1)
+        end = start.clone()
+        end[:, :3, 3] += axis * torch.tensor([[0.5], [-0.3]])
+
+        keyframes = axis_translation_keyframes(
+            start,
+            end,
+            axis,
+            n_waypoints=5,
+        )
+
+        displacement = keyframes[:, :, :3, 3] - start[:, None, :3, 3]
+        orthogonal = (
+            displacement
+            - (displacement * axis[:, None]).sum(dim=-1, keepdim=True) * axis[:, None]
+        )
+        assert keyframes.shape == (2, 5, 4, 4)
+        assert torch.allclose(keyframes[:, -1], end)
+        assert torch.allclose(orthogonal, torch.zeros_like(orthogonal), atol=1.0e-6)
+
+    def test_rejects_off_axis_displacement(self):
+        start = torch.eye(4).unsqueeze(0)
+        end = start.clone()
+        end[:, 1, 3] = 0.1
+
+        with pytest.raises(ValueError, match="parallel to axis"):
+            axis_translation_keyframes(
+                start,
+                end,
+                torch.tensor([1.0, 0.0, 0.0]),
+                n_waypoints=2,
+            )
 
 
 def test_interpolate_hand_qpos_preserves_endpoints():

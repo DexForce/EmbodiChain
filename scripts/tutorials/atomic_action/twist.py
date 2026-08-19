@@ -34,11 +34,14 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
+    EntityState,
     MotionPolicy,
     ObjectSemantics,
     TwistAffordance,
     TwistGoal,
     TwistOptions,
+    SceneEntityPose,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -68,6 +71,8 @@ HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 RIGID_KNOB_POSITION = (-0.7, -0.00, 0.70)
 RIGID_KNOB_SIZE = (0.05, 0.05, 0.05)
+KNOB_SCENE_ENTITY_ID = "twist-target"
+KNOB_AXIS_ORIGIN = (0.0, 0.0, 0.0)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -117,27 +122,44 @@ def create_rigid_knob(sim) -> RigidObject:
     return knob
 
 
-def create_knob_semantics(target: Articulation | RigidObject) -> ObjectSemantics:
+def create_knob_semantics(
+    target: Articulation | RigidObject,
+) -> tuple[ObjectSemantics, torch.Tensor]:
     """Create twist semantics for an articulation-link or rigid knob."""
     if isinstance(target, Articulation):
+        vertices, _ = target.get_link_vert_face(KNOB_LINK_NAME)
+        target_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
         affordance = TwistAffordance(
-            articulation=target,
-            link_name=KNOB_LINK_NAME,
+            grasp_position=_mesh_center(vertices),
+            # The cap_1 revolute axis passes through its link-frame origin.
+            axis_origin=KNOB_AXIS_ORIGIN,
             twist_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
         )
         label = "microwave_power_knob"
     else:
+        vertices = target.get_vertices(env_ids=[0], scale=True)[0]
+        target_pose = target.get_local_pose(to_matrix=True)
         affordance = TwistAffordance(
-            rigid_object=target,
+            grasp_position=_mesh_center(vertices),
+            axis_origin=KNOB_AXIS_ORIGIN,
             twist_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
         )
         label = "rigid_knob"
-    return ObjectSemantics(
-        label=label,
-        geometry={},
-        entity=target,
-        affordance=affordance,
+    return (
+        ObjectSemantics(
+            label=label,
+            geometry={},
+            entity_id=KNOB_SCENE_ENTITY_ID,
+            affordance=affordance,
+        ),
+        target_pose,
     )
+
+
+def _mesh_center(vertices: torch.Tensor) -> tuple[float, float, float]:
+    """Return an explicit local gripper-center point for a knob mesh."""
+    center = torch.as_tensor(vertices, dtype=torch.float32).mean(dim=0)
+    return tuple(float(value) for value in center)
 
 
 def main() -> None:
@@ -150,7 +172,7 @@ def main() -> None:
     target = create_rigid_knob(sim) if args.rigid_object else create_microwave(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
-    semantics = create_knob_semantics(target)
+    semantics, target_pose = create_knob_semantics(target)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -171,7 +193,10 @@ def main() -> None:
         (
             ActionInvocation(
                 skill_id="twist",
-                goal=TwistGoal(semantics),
+                goal=TwistGoal(
+                    semantics,
+                    SceneEntityPose(KNOB_SCENE_ENTITY_ID),
+                ),
                 binding=ActionBinding(
                     manipulators={"primary": "arm"},
                     end_effectors={"primary": "hand"},
@@ -183,7 +208,14 @@ def main() -> None:
                     twist_angle=args.twist_angle,
                 ),
             ),
-        )
+        ),
+        context=engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={KNOB_SCENE_ENTITY_ID: EntityState(target_pose)},
+            )
+        ),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Twist demo trajectory.")

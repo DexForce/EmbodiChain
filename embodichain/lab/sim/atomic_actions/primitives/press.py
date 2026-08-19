@@ -32,7 +32,12 @@ from embodichain.lab.sim.atomic_actions.control import (
 )
 from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.goals import ObjectActionGoal
+from embodichain.lab.sim.atomic_actions.goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
@@ -51,8 +56,10 @@ from embodichain.lab.sim.atomic_actions.requirements import (
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
+    resolve_pose_target,
     translate_pose_world,
 )
 
@@ -62,6 +69,13 @@ class PressGoal(ObjectActionGoal):
     """Target object described by a press affordance."""
 
     goal_kind: ClassVar[str] = "press"
+
+    target_pose: PoseGoalValue
+    """Target pose snapshot or late-bound stable scene-entity reference."""
+
+    def __post_init__(self) -> None:
+        ObjectActionGoal.__post_init__(self)
+        validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -103,13 +117,14 @@ class PressOptions(ActionOptions):
 
 
 class Press(AtomicAction[PressGoal, PressOptions]):
-    """Close the gripper, approach and press a target, then retract."""
+    """Open-loop motion primitive that approaches, presses, and retracts."""
 
     skill_id: ClassVar[str] = "press"
     GoalType: ClassVar[type] = PressGoal
     OptionsType: ClassVar[type] = PressOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -184,16 +199,13 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        link_pose = affordance.get_link_pose().to(
-            device=self.device, dtype=torch.float32
+        target_pose = resolve_pose_target(
+            resolve_pose_goal(target.target_pose, context, name="target_pose"),
+            num_envs=self.num_envs,
+            device=self.device,
         )
-        if link_pose.shape != (self.num_envs, 4, 4):
-            raise ValueError(
-                "Press target pose must have shape "
-                f"({self.num_envs}, 4, 4), got {tuple(link_pose.shape)}."
-            )
         contact_xpos = affordance.get_press_pose(
-            link_pose,
+            target_pose,
             press_position=options.press_position,
         ).to(device=self.device, dtype=torch.float32)
         contact_xpos = self._find_symmetric_nearest_xpos(
@@ -210,7 +222,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             contact_xpos,
             contact_xpos[:, :3, 2] * options.press_distance,
         )
-        n_approach, n_press, n_retract = self._motion_segment_lengths(
+        n_approach, n_contact, n_press, n_retract = self._motion_segment_lengths(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
         )
@@ -226,23 +238,51 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             request,
             n_approach,
         )
-        press_success, press_arm = self._plan_pose_segment(
-            pressed_xpos,
+        contact_keyframes = axis_translation_keyframes(
+            approach_xpos,
+            contact_xpos,
+            contact_xpos[:, :3, 2],
+            n_waypoints=n_contact - 1,
+        )
+        contact_success, contact_arm = self._plan_pose_segment(
+            contact_keyframes,
             approach_arm[:, -1],
             manipulator.name,
             request,
+            n_contact,
+            cartesian_linear=True,
+        )
+        press_keyframes = axis_translation_keyframes(
+            contact_xpos,
+            pressed_xpos,
+            contact_xpos[:, :3, 2],
+            n_waypoints=n_press - 1,
+        )
+        press_success, press_arm = self._plan_pose_segment(
+            press_keyframes,
+            contact_arm[:, -1],
+            manipulator.name,
+            request,
             n_press,
+            cartesian_linear=True,
+        )
+        retract_keyframes = axis_translation_keyframes(
+            pressed_xpos,
+            approach_xpos,
+            contact_xpos[:, :3, 2],
+            n_waypoints=n_retract - 1,
         )
         retract_success, retract_arm = self._plan_pose_segment(
-            approach_xpos,
+            retract_keyframes,
             press_arm[:, -1],
             manipulator.name,
             request,
             n_retract,
+            cartesian_linear=True,
         )
-        success = approach_success & press_success & retract_success
+        success = approach_success & contact_success & press_success & retract_success
 
-        parts = (hand_close, approach_arm, press_arm, retract_arm)
+        parts = (hand_close, approach_arm, contact_arm, press_arm, retract_arm)
         lengths = tuple(part.shape[1] for part in parts)
         full = torch.empty(
             (self.num_envs, sum(lengths), self.robot_dof),
@@ -257,7 +297,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         full[:, offset:stop, hand_joint_ids] = hand_close
         offset = stop
 
-        for arm in (approach_arm, press_arm, retract_arm):
+        for arm in (approach_arm, contact_arm, press_arm, retract_arm):
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
             full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
@@ -272,8 +312,9 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             segment_lengths={
                 "close": lengths[0],
                 "approach": lengths[1],
-                "press": lengths[2],
-                "retract": lengths[3],
+                "contact": lengths[2],
+                "press": lengths[3],
+                "retract": lengths[4],
             },
         )
 
@@ -290,16 +331,16 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     def _motion_segment_lengths(
         sample_count: int,
         hand_interp_steps: int,
-    ) -> tuple[int, int, int]:
+    ) -> tuple[int, int, int, int]:
         motion_count = sample_count - hand_interp_steps
-        if motion_count < 6:
+        if motion_count < 8:
             raise ValueError(
                 "Not enough waypoints for Press. Increase sample_count or "
                 "decrease hand_interp_steps."
             )
-        base, remainder = divmod(motion_count, 3)
-        values = [base + (index < remainder) for index in range(3)]
-        return values[0], values[1], values[2]
+        base, remainder = divmod(motion_count, 4)
+        values = [base + (index < remainder) for index in range(4)]
+        return values[0], values[1], values[2], values[3]
 
     def _plan_pose_segment(
         self,
@@ -308,6 +349,8 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         control_part: str,
         request: ResolvedActionRequest[PressGoal, PressOptions],
         sample_count: int,
+        *,
+        cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -315,6 +358,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 start_qpos=start_qpos,
                 control_part=control_part,
                 sample_count=sample_count,
+                cartesian_linear=cartesian_linear,
             ),
         )
         assert isinstance(result.success, torch.Tensor)

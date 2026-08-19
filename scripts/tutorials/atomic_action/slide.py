@@ -36,11 +36,14 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
+    EntityState,
     MotionPolicy,
     ObjectSemantics,
     SlideAffordance,
     SlideGoal,
     SlideOptions,
+    SceneEntityPose,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -76,6 +79,7 @@ TRANSLATION_AXIS = (0.0, 1.0, 0.0)  # handle-link frame, approach/push direction
 TRAJECTORY_SAMPLE_COUNT = 140
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+HANDLE_SCENE_ENTITY_ID = "drawer-large-handle"
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -126,15 +130,16 @@ def create_drawer_semantics(
         force_reannotate: Whether to ignore a cached grasp annotation.
 
     Returns:
-        Object semantics backed by an articulation-link pull/push affordance.
+        Pure target-local semantics for the handle's pull/push affordance.
     """
+    vertices, triangles = drawer.get_link_vert_face(HANDLE_LINK_NAME)
     return ObjectSemantics(
         label="drawer_large_handle",
         geometry={},
-        entity=drawer,
+        entity_id=HANDLE_SCENE_ENTITY_ID,
         affordance=SlideAffordance(
-            articulation=drawer,
-            link_name=HANDLE_LINK_NAME,
+            mesh_vertices=torch.as_tensor(vertices),
+            mesh_triangles=torch.as_tensor(triangles),
             translation_axis=torch.tensor(
                 TRANSLATION_AXIS,
                 dtype=torch.float32,
@@ -182,7 +187,10 @@ def create_invocation(
     """
     return ActionInvocation(
         skill_id="slide",
-        goal=SlideGoal(semantics),
+        goal=SlideGoal(
+            semantics,
+            SceneEntityPose(HANDLE_SCENE_ENTITY_ID),
+        ),
         binding=ActionBinding(
             manipulators={"primary": "arm"},
             end_effectors={"primary": "hand"},
@@ -225,7 +233,7 @@ def main() -> None:
         draw_axis_marker(
             sim,
             "drawer_handle_link_pose",
-            affordance.get_articulation_link_pose(),
+            drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True),
         )
 
     engine = AtomicActionEngine(
@@ -243,13 +251,14 @@ def main() -> None:
         "Inspect the closed drawer, then press Enter to plan the pull...",
     )
 
-    for direction in ("pull", "push"):
+    for scene_version, direction in enumerate(("pull", "push")):
         if direction == "push" and wait_for_user:
             input(
                 "Pull replay finished. Press Enter to read the moved handle "
                 "pose and plan the push..."
             )
 
+        handle_pose = drawer.get_link_pose(HANDLE_LINK_NAME, to_matrix=True)
         compiled = engine.compile(
             (
                 create_invocation(
@@ -258,7 +267,16 @@ def main() -> None:
                     approach_distance=args.approach_distance,
                     translation_distance=args.translation_distance,
                 ),
-            )
+            ),
+            context=engine.initial_context(
+                scene=SceneSnapshot(
+                    timestamp=float(scene_version),
+                    version=scene_version,
+                    entities={
+                        HANDLE_SCENE_ENTITY_ID: EntityState(handle_pose),
+                    },
+                )
+            ),
         )
         if not compiled.plan_success.all():
             logger.log_warning(f"Failed to plan the Slide {direction} trajectory.")

@@ -32,7 +32,12 @@ from embodichain.lab.sim.atomic_actions.control import (
 )
 from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.goals import ObjectActionGoal
+from embodichain.lab.sim.atomic_actions.goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
@@ -50,8 +55,10 @@ from embodichain.lab.sim.atomic_actions.requirements import (
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
+    resolve_pose_target,
     translate_pose_world,
 )
 
@@ -61,6 +68,13 @@ class SlideGoal(ObjectActionGoal):
     """Translating articulation link described by a slide affordance."""
 
     goal_kind: ClassVar[str] = "slide"
+
+    target_pose: PoseGoalValue
+    """Link pose snapshot or late-bound stable scene-entity reference."""
+
+    def __post_init__(self) -> None:
+        ObjectActionGoal.__post_init__(self)
+        validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -95,13 +109,14 @@ class SlideOptions(ActionOptions):
 
 
 class Slide(AtomicAction[SlideGoal, SlideOptions]):
-    """Approach, grasp, and pull or push one translating articulation link."""
+    """Open-loop approach, grasp, and axis-constrained sliding motion."""
 
     skill_id: ClassVar[str] = "slide"
     GoalType: ClassVar[type] = SlideGoal
     OptionsType: ClassVar[type] = SlideOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -168,14 +183,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        link_pose = affordance.get_articulation_link_pose().to(
-            device=self.device, dtype=torch.float32
+        link_pose = resolve_pose_target(
+            resolve_pose_goal(target.target_pose, context, name="target_pose"),
+            num_envs=self.num_envs,
+            device=self.device,
         )
-        if link_pose.shape != (self.num_envs, 4, 4):
-            raise ValueError(
-                "Articulation link pose must have shape "
-                f"({self.num_envs}, 4, 4), got {tuple(link_pose.shape)}."
-            )
         translation_axis = affordance.translation_axis.to(
             device=self.device, dtype=torch.float32
         )
@@ -220,30 +232,51 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             request,
             motion_lengths[0],
         )
-        reach_success, reach_arm = self._plan_pose_segment(
+        reach_keyframes = axis_translation_keyframes(
+            approach_xpos,
             grasp_xpos,
+            translation_axis_world,
+            n_waypoints=motion_lengths[1] - 1,
+        )
+        reach_success, reach_arm = self._plan_pose_segment(
+            reach_keyframes,
             approach_arm[:, -1],
             manipulator.name,
             request,
             motion_lengths[1],
+            cartesian_linear=True,
+        )
+        translate_keyframes = axis_translation_keyframes(
+            grasp_xpos,
+            translated_xpos,
+            translation_axis_world,
+            n_waypoints=motion_lengths[2] - 1,
         )
         translate_success, translate_arm = self._plan_pose_segment(
-            translated_xpos,
+            translate_keyframes,
             reach_arm[:, -1],
             manipulator.name,
             request,
             motion_lengths[2],
+            cartesian_linear=True,
         )
         success = grasp_success & approach_success & reach_success & translate_success
 
         return_arm: torch.Tensor | None = None
         if options.direction == "push":
-            return_success, return_arm = self._plan_pose_segment(
+            return_keyframes = axis_translation_keyframes(
+                translated_xpos,
                 approach_xpos,
+                translation_axis_world,
+                n_waypoints=motion_lengths[3] - 1,
+            )
+            return_success, return_arm = self._plan_pose_segment(
+                return_keyframes,
                 translate_arm[:, -1],
                 manipulator.name,
                 request,
                 motion_lengths[3],
+                cartesian_linear=True,
             )
             success = success & return_success
 
@@ -348,6 +381,8 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             SlideOptions,
         ],
         sample_count: int,
+        *,
+        cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -355,6 +390,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 start_qpos=start_qpos,
                 control_part=control_part,
                 sample_count=sample_count,
+                cartesian_linear=cartesian_linear,
             ),
         )
         assert isinstance(result.success, torch.Tensor)

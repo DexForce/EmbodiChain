@@ -154,9 +154,9 @@ The animations below are the focused simulator demos under
 | `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
-| `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressAffordance` | none |
-| `slide` | `SlideGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `SlideAffordance` | none |
-| `twist` | `TwistGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TwistAffordance` | none |
+| `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
+| `slide` | `SlideGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
+| `twist` | `TwistGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `TwistAffordance` + target pose | open-loop motion; application verifies joint travel/grasp |
 | `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
 | `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held by source arm | transfer attachment to destination arm |
@@ -484,28 +484,28 @@ migration.
 
 ## `Press`
 
-Plans **close hand -> approach target -> press along axis -> return to the
-approach pose** for an articulation link or a rigid object. Configure
-`PressAffordance` with either `articulation + link_name` or
-`rigid_object`, plus a target-local `press_axis`. The affordance obtains mesh
-geometry and the live target pose from the selected source.
+Plans **close hand -> approach target -> contact -> press along axis -> return
+to the approach pose**. `PressAffordance` is entity-free and stores an explicit
+target-local surface `press_position` and `press_axis`. `PressGoal.target_pose`
+is either a pose snapshot or `SceneEntityPose`, which resolves through the
+current `PlanningContext.scene` and participates in dynamic-goal recovery.
 
-By default, the contact position is the mean of the target's mesh vertices. The
-end-effector z-axis follows the world-transformed press axis, so the approach
-pose lies on negative z and the pressed pose lies on positive z.
+The contact, press, and retract segments use axis-aligned Cartesian keyframes;
+each output sample is grounded with IK instead of being interpolated only in
+joint space. The generated tool frame uses an adaptive reference axis and is a
+right-handed orthonormal rotation even for vertical or oblique press axes.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `press` |
-| Goal | `PressGoal(semantics=...)` |
+| Goal | `PressGoal(semantics=..., target_pose=...)` |
 | Binding | manipulator + end effector role `primary` |
-| Motion | close, approach, press along the target-local axis, retract to approach |
-| Effect | none |
+| Motion | close, approach, contact, axis-constrained press, axis-constrained retract |
+| Effect | explicitly open-loop; no physical button/contact effect is claimed |
 
 `PressOptions` controls hand-close interpolation, approach distance,
 press distance, and an optional target-local `press_position`. An options-level
-position overrides `PressAffordance.press_position`; if both are `None`,
-the action uses the mesh vertex center. The bound
+position overrides the affordance's explicit surface point. The bound
 end-effector profile must provide `grasp`; the action keeps the gripper closed
 for all arm-motion segments.
 
@@ -515,12 +515,12 @@ for all arm-motion segments.
 
 ## `Slide`
 
-Plans a grasped linear interaction for one articulation link. The goal requires
-a `SlideAffordance` constructed with an `Articulation`, `link_name`, and
-link-frame `translation_axis`. The positive axis direction means approach and
-push/close; pull/open uses its negative direction. `SlideAffordance` inherits
-`AntipodalAffordance`, resolves mesh geometry from the articulation link, and
-selects a grasp with `get_best_grasp_poses()` at planning time. The grasp
+Plans a grasped linear interaction for one articulation link. The entity-free
+`SlideAffordance` stores the link-local grasp mesh, `translation_axis`, and
+optional joint name/limits. `SlideGoal.target_pose` supplies the link pose as a
+snapshot or `SceneEntityPose`. The positive axis direction means approach and
+push/close; pull/open uses its negative direction. The affordance inherits
+`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The grasp
 approach direction is the link-frame translation axis transformed by the
 current link rotation.
 
@@ -532,15 +532,16 @@ pose.
 | Contract | Value |
 |---|---|
 | Skill ID | `slide` |
-| Goal | `SlideGoal(semantics=...)` |
+| Goal | `SlideGoal(semantics=..., target_pose=...)` |
 | Binding | manipulator + end effector role `primary` |
 | Motion | pull: approach, reach, close, pull, open; push adds return to approach |
-| Effect | none |
+| Effect | explicitly open-loop; no articulation travel or grasp success is claimed |
 
 `SlideOptions` controls `direction`, hand close/open
 interpolation, approach distance, and translation distance. The link-frame
 translation axis belongs to `SlideAffordance`; the bound end-effector profile
-must provide `open` and `grasp`.
+must provide `open` and `grasp`. Reach, pull/push, and push-return use
+axis-aligned Cartesian samples rather than sparse joint-space endpoints.
 
 **Example:** `scripts/tutorials/atomic_action/slide.py`
 plans and replays a pull first, then replans a push from the drawer's measured
@@ -551,23 +552,22 @@ post-pull link pose.
 ## `Twist`
 
 Plans **approach -> reach -> close -> twist -> open -> retract** for an
-articulation link or a rigid object. Configure `TwistAffordance` with either
-`articulation + link_name` or `rigid_object`, plus a target-local `twist_axis`.
-The affordance reads link geometry/pose for articulations and object
-geometry/pose for rigid objects.
+articulation link or a rigid object. The entity-free `TwistAffordance` stores an
+explicit local `grasp_position`, `twist_axis`, and `axis_origin`, plus optional
+joint name/limits. `TwistGoal.target_pose` supplies the grounded target pose.
 
-The grasp position is the world-space transform of the target mesh's mean vertex
-position. Its rotation z-axis follows the world-transformed twist axis, its
-y-axis is fixed to world `(0, 0, 1)`, and its x-axis completes the right-handed
-frame. No antipodal grasp sampling is performed.
+The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
+reference completes a right-handed orthonormal frame. Twist keyframes rotate
+around the full 3D axis defined by `axis_origin + twist_axis`, not implicitly
+around the target link origin.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `twist` |
-| Goal | `TwistGoal(semantics=...)` |
+| Goal | `TwistGoal(semantics=..., target_pose=...)` |
 | Binding | manipulator + end effector role `primary` |
 | Motion | approach, reach, close, rotate about the target-local axis, open, retract |
-| Effect | none |
+| Effect | explicitly open-loop; no articulation travel or grasp success is claimed |
 
 `TwistOptions` controls the pre-grasp distance, close/open interpolation,
 Cartesian twist keyframes, and twist angle. The pre-grasp pose is offset along
@@ -577,6 +577,11 @@ the grasp pose's negative z-axis; the target-local twist axis belongs to
 `Twist` is intentionally a pure-rotation primitive. Thread pitch, coupled axial
 translation, and regrasping are outside its contract; an `Unscrew` action should
 model those behaviors separately.
+
+For all three primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
+completion therefore means commanded motion completion only. Applications that
+need semantic success must observe button/contact or articulation state and
+verify it outside the side-effect-free planner.
 
 **Example:** `scripts/tutorials/atomic_action/twist.py`
 

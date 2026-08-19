@@ -34,11 +34,14 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
+    EntityState,
     MotionPolicy,
     ObjectSemantics,
     PressAffordance,
     PressGoal,
     PressOptions,
+    SceneEntityPose,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -68,6 +71,7 @@ HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
 RIGID_BUTTON_POSITION = (-0.7, -0.00, 0.70)
 RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
+BUTTON_SCENE_ENTITY_ID = "press-target"
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -128,29 +132,51 @@ def create_rigid_button(sim) -> RigidObject:
 
 def create_button_semantics(
     target: Articulation | RigidObject,
-) -> ObjectSemantics:
+) -> tuple[ObjectSemantics, torch.Tensor]:
     """Create press semantics for an articulation-link or rigid button."""
     if isinstance(target, Articulation):
+        vertices, _ = target.get_link_vert_face(BUTTON_LINK_NAME)
+        target_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
+        press_axis = torch.tensor([0.0, 0.0, -1.0], device=target.device)
         affordance = PressAffordance(
-            articulation=target,
-            link_name=BUTTON_LINK_NAME,
             # button_cap's local -z direction matches the prismatic joint's
             # inward press direction in this asset.
-            press_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
+            press_axis=press_axis,
+            press_position=_surface_center(vertices, press_axis),
         )
         label = "microwave_start_button"
     else:
+        vertices = target.get_vertices(env_ids=[0], scale=True)[0]
+        target_pose = target.get_local_pose(to_matrix=True)
+        press_axis = torch.tensor([-1.0, 0.0, 0.0], device=target.device)
         affordance = PressAffordance(
-            rigid_object=target,
-            press_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
+            press_axis=press_axis,
+            press_position=_surface_center(vertices, press_axis),
         )
         label = "rigid_button"
-    return ObjectSemantics(
-        label=label,
-        geometry={},
-        entity=target,
-        affordance=affordance,
+    return (
+        ObjectSemantics(
+            label=label,
+            geometry={},
+            entity_id=BUTTON_SCENE_ENTITY_ID,
+            affordance=affordance,
+        ),
+        target_pose,
     )
+
+
+def _surface_center(
+    vertices: torch.Tensor,
+    inward_axis: torch.Tensor,
+) -> tuple[float, float, float]:
+    """Return the center of the outermost mesh face opposite inward travel."""
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=inward_axis.device)
+    axis = inward_axis.to(dtype=torch.float32)
+    axis = axis / torch.linalg.vector_norm(axis)
+    projection = torch.matmul(vertices, axis)
+    surface = vertices[torch.isclose(projection, projection.min(), atol=1.0e-5)]
+    point = surface.mean(dim=0)
+    return tuple(float(value) for value in point)
 
 
 def main() -> None:
@@ -163,7 +189,7 @@ def main() -> None:
     target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
     motion_gen = create_toppra_motion_generator(robot)
-    semantics = create_button_semantics(target)
+    semantics, target_pose = create_button_semantics(target)
     affordance = semantics.affordance
     assert isinstance(affordance, PressAffordance)
 
@@ -186,7 +212,10 @@ def main() -> None:
         (
             ActionInvocation(
                 skill_id="press",
-                goal=PressGoal(semantics),
+                goal=PressGoal(
+                    semantics,
+                    SceneEntityPose(BUTTON_SCENE_ENTITY_ID),
+                ),
                 binding=ActionBinding(
                     manipulators={"primary": "arm"},
                     end_effectors={"primary": "hand"},
@@ -203,7 +232,14 @@ def main() -> None:
                     ),
                 ),
             ),
-        )
+        ),
+        context=engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={BUTTON_SCENE_ENTITY_ID: EntityState(target_pose)},
+            )
+        ),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Press demo trajectory.")

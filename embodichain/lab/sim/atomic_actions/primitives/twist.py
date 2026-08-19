@@ -38,7 +38,12 @@ from embodichain.lab.sim.atomic_actions.control import (
 )
 from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
-from embodichain.lab.sim.atomic_actions.goals import ObjectActionGoal
+from embodichain.lab.sim.atomic_actions.goals import (
+    ObjectActionGoal,
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
@@ -59,6 +64,7 @@ from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     interpolate_hand_qpos,
+    resolve_pose_target,
     translate_pose_world,
 )
 
@@ -68,6 +74,13 @@ class TwistGoal(ObjectActionGoal):
     """Target object described by a twist affordance."""
 
     goal_kind: ClassVar[str] = "twist"
+
+    target_pose: PoseGoalValue
+    """Target pose snapshot or late-bound stable scene-entity reference."""
+
+    def __post_init__(self) -> None:
+        ObjectActionGoal.__post_init__(self)
+        validate_pose_goal(self.target_pose, "target_pose", allow_waypoints=False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -91,6 +104,8 @@ class TwistOptions(ActionOptions):
             raise ValueError("hand_interp_steps must be at least 1.")
         if self.twist_waypoint_count < 1:
             raise ValueError("twist_waypoint_count must be at least 1.")
+        if not math.isfinite(self.pre_grasp_distance):
+            raise ValueError("pre_grasp_distance must be finite.")
         if self.pre_grasp_distance < 0.0:
             raise ValueError("pre_grasp_distance must be non-negative.")
         if not math.isfinite(self.twist_angle):
@@ -98,13 +113,14 @@ class TwistOptions(ActionOptions):
 
 
 class Twist(AtomicAction[TwistGoal, TwistOptions]):
-    """Approach, grasp, twist, release, and retract from a target."""
+    """Open-loop approach, grasp, twist, release, and retract motion."""
 
     skill_id: ClassVar[str] = "twist"
     GoalType: ClassVar[type] = TwistGoal
     OptionsType: ClassVar[type] = TwistOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             SkillResourceSlot(
@@ -187,14 +203,11 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        link_pose = affordance.get_link_pose().to(
-            device=self.device, dtype=torch.float32
+        link_pose = resolve_pose_target(
+            resolve_pose_goal(target.target_pose, context, name="target_pose"),
+            num_envs=self.num_envs,
+            device=self.device,
         )
-        if link_pose.shape != (self.num_envs, 4, 4):
-            raise ValueError(
-                "Twist target pose must have shape "
-                f"({self.num_envs}, 4, 4), got {tuple(link_pose.shape)}."
-            )
         grasp_xpos = affordance.get_grasp_pose(link_pose).to(
             device=self.device, dtype=torch.float32
         )
@@ -212,6 +225,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             link_pose,
             grasp_xpos,
             affordance.twist_axis,
+            affordance.axis_origin,
             options.twist_angle,
             options.twist_waypoint_count,
         )
@@ -369,6 +383,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         link_pose: torch.Tensor,
         grasp_xpos: torch.Tensor,
         twist_axis: torch.Tensor,
+        axis_origin: tuple[float, float, float],
         twist_angle: float,
         waypoint_count: int,
     ) -> torch.Tensor:
@@ -389,8 +404,16 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         )
         rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
         link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
+        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
+        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
+        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
+        to_origin[:3, 3] = origin
+        from_origin[:3, 3] = -origin
+        local_rotations = torch.matmul(
+            torch.matmul(to_origin[None], rotations), from_origin[None]
+        )
         return torch.matmul(
-            torch.matmul(link_pose[:, None], rotations[None]),
+            torch.matmul(link_pose[:, None], local_rotations[None]),
             link_to_eef[:, None],
         )
 
