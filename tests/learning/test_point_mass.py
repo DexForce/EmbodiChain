@@ -31,6 +31,7 @@ from embodichain.learning.rl.env import (
     build_learning_env,
 )
 from embodichain.learning.rl.models import ActorCritic
+from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
 from embodichain.learning.rl.train import train_from_config
 from embodichain.learning.rl.utils import OptimizerCfg
 from embodichain.learning.rl.utils.trainer import Trainer
@@ -183,6 +184,13 @@ def test_unified_train_entry_runs_apg_and_ppo(
 
     assert summary["global_step"] == 8
     assert summary["latest_checkpoint_path"] is not None
+    checkpoint = Path(summary["latest_checkpoint_path"]).resolve()
+    run = checkpoint.parents[1]
+    manifest = RunManifest.load(run)
+    assert (
+        manifest.configs["train"] == run / "configs" / f"train.{config_path.suffix[1:]}"
+    )
+    assert manifest.select_checkpoint("latest")[1] == checkpoint
 
 
 def test_sync_collector_accepts_tensor_point_mass_observations() -> None:

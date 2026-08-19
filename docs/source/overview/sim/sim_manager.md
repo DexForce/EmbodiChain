@@ -68,7 +68,7 @@ The {class}`~cfg.RenderCfg` class controls the rendering backend and quality set
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
+| `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'offline-rt'` (offline ray-traced renderer for maximum visual fidelity). |
 | `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least 1. |
 | `tone_mapping_enabled` | `bool` | `False` | Whether to map HDR RGB output with the modified Reinhard curve. |
 | `tone_mapping_exposure` | `float` | `1.0` | Non-negative fixed linear exposure multiplier applied before tone mapping. |

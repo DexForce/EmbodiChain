@@ -102,7 +102,7 @@ def add_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=("auto", "hybrid", "fast-rt", "rt"),
+        choices=("auto", "hybrid", "fast-rt", "offline-rt"),
         default="auto",
         help="Renderer backend forwarded to each selected benchmark.",
     )

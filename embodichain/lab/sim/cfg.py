@@ -56,13 +56,13 @@ from .workspace.cfg import RobotWorkspaceCfg
 # :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`). Assigning a
 # concrete renderer here (e.g. in test fixtures) forces that renderer and takes
 # precedence over auto-selection.
-DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "offline-rt"] = "auto"
 
 
 @configclass
 class RenderCfg:
-    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
-    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "hybrid", "fast-rt", "offline-rt"] = "auto"
+    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'offline-rt'.
 
     Note:
     - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
@@ -71,11 +71,11 @@ class RenderCfg:
     - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering,
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.
-    - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
+    - 'offline-rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
 
     spp: int = 1
-    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'rt'."""
+    """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid', 'fast-rt' or 'offline-rt'."""
 
     tone_mapping_enabled: bool = False
     """Whether to map HDR RGB output with the modified Reinhard curve."""
@@ -98,7 +98,7 @@ class RenderCfg:
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
             return Renderer.FASTRT
-        elif self.renderer == "rt":
+        elif self.renderer == "offline-rt":
             return Renderer.OFFLINERT
         elif self.renderer == "auto":
             # 'auto' is normally resolved by the SimulationManager before this is
@@ -110,7 +110,7 @@ class RenderCfg:
             return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'offline-rt'."
             )
 
     def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
