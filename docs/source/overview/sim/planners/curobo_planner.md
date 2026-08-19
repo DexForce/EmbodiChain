@@ -341,7 +341,7 @@ assert result.success.all()
 Single-arm MoveEndEffector is supported through the normal
 `strategy="motion_gen"` route. MoveJoints can opt in to collision-aware
 joint-space planning with `strategy="motion_gen"`; the action uses the planner
-already owned by its MotionGenerator. Movement phases of PickUp, Place, Press,
+already owned by its MotionGenerator. Movement phases of PickUp, Place,
 and MoveHeldObject can use the same single-arm static-world route.
 
 This first release intentionally has the following limits:

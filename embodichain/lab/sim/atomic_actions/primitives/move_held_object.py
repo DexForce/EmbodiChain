@@ -29,20 +29,35 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
-from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..control import GRASP_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, TimedTrajectory
-from ..requirements import (
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
-from ..state import PlanningContext
-from ..trajectory_ops import build_pose_plan_states
-from ._binding_contracts import make_manipulation_slot
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
 
 
 @dataclass(frozen=True, slots=True, eq=False)

@@ -117,6 +117,13 @@ class MotionGenOptions:
     is_linear: bool = False
     """If True, use cartesian linear interpolation, else joint space"""
 
+    preserve_cartesian_samples: bool = False
+    """Treat Cartesian targets as exact output samples and solve each with IK.
+
+    This constrained mode requires exactly ``sample_count - 1`` target states;
+    the observed start configuration supplies the first output sample.
+    """
+
     interpolate_position_step: float = 0.002
     """Step size for interpolation. If is_linear is True, this is the step size in Cartesian space (meters). If is_linear is False, this is the step size in joint space (radians)."""
 
@@ -439,9 +446,13 @@ class MotionGenerator:
             names = sorted(move_type.name for move_type in move_types)
             raise ValueError(f"All target states must share move_type; got {names}.")
         move_type = target_states[0].move_type
-        use_interpolation = options.strategy == "ik_interp" or (
-            move_type is MoveType.JOINT_MOVE
-            and not self.planner.supports_move_type(MoveType.JOINT_MOVE)
+        use_interpolation = (
+            options.preserve_cartesian_samples
+            or options.strategy == "ik_interp"
+            or (
+                move_type is MoveType.JOINT_MOVE
+                and not self.planner.supports_move_type(MoveType.JOINT_MOVE)
+            )
         )
         if use_interpolation:
             raw_result = self._generate_ik_interpolation(target_states, options)
@@ -656,11 +667,21 @@ class MotionGenerator:
             [start_qpos.unsqueeze(1), torch.stack(solved_waypoints, dim=1)],
             dim=1,
         )
-        positions = interpolate_with_distance(
-            trajectory=keyframes,
-            interp_num=options.sample_count,
-            device=device,
-        )
+        if options.preserve_cartesian_samples:
+            if keyframes.shape[1] != options.sample_count:
+                raise ValueError(
+                    "Linear Cartesian targets must provide sample_count - 1 "
+                    "keyframes so every output sample is IK-grounded; got "
+                    f"{len(target_states)} targets for sample_count "
+                    f"{options.sample_count}."
+                )
+            positions = keyframes
+        else:
+            positions = interpolate_with_distance(
+                trajectory=keyframes,
+                interp_num=options.sample_count,
+                device=device,
+            )
         held = start_qpos.unsqueeze(1).expand_as(positions)
         positions = torch.where(success[:, None, None], positions, held)
         dt = self._uniform_dt(

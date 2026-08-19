@@ -100,6 +100,7 @@ class MotionPolicy:
         control_part: str,
         sample_count: int | None = None,
         interpolation_dt: float | None = None,
+        cartesian_linear: bool = False,
     ) -> "MotionGenOptions":
         """Translate this atomic policy into motion-generator options.
 
@@ -109,6 +110,8 @@ class MotionPolicy:
             sample_count: Optional segment-local sample-count override.
             interpolation_dt: Explicit waypoint interval used only by
                 deterministic interpolation.
+            cartesian_linear: Whether every supplied Cartesian keyframe is a
+                required linear-path sample rather than a sparse endpoint.
 
         Returns:
             Independently owned options for :class:`MotionGenerator`.
@@ -123,6 +126,8 @@ class MotionPolicy:
             plan_opts=self.plan_opts,
             is_interpolate=True,
             interpolation_dt=interpolation_dt,
+            is_linear=cartesian_linear,
+            preserve_cartesian_samples=cartesian_linear,
         )
 
 

@@ -520,6 +520,52 @@ class TestMotionStrategy:
         )
         generator.planner.plan.assert_not_called()
 
+    def test_linear_cartesian_motion_grounds_every_output_sample_with_ik(self):
+        generator = _mock_generator()
+
+        def encode_position(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            qpos = joint_seed.clone()
+            qpos[:, :3] = pose[:, :3, 3]
+            return torch.ones(BATCH_SIZE, dtype=torch.bool), qpos
+
+        generator.robot.compute_ik.side_effect = encode_position
+        weights = torch.linspace(1.0 / (SAMPLE_COUNT - 1), 1.0, SAMPLE_COUNT - 1)
+        targets = []
+        for weight in weights:
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = weight
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="motion_gen",
+                sample_count=SAMPLE_COUNT,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=STEP_DT,
+                preserve_cartesian_samples=True,
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape == (
+            BATCH_SIZE,
+            SAMPLE_COUNT,
+            CONTROLLED_DOF,
+        )
+        expected_x = torch.linspace(0.0, 1.0, SAMPLE_COUNT)
+        assert torch.allclose(
+            result.positions[:, :, 0], expected_x.expand(BATCH_SIZE, -1)
+        )
+        assert generator.robot.compute_ik.call_count == SAMPLE_COUNT - 1
+        generator.planner.plan.assert_not_called()
+
     def test_motion_gen_delegates_and_resamples_backend_result(self):
         raw_sample_count = 5
         generator = _mock_generator(

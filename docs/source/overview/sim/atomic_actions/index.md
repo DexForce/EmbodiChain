@@ -324,7 +324,7 @@ instances to the engine's planning services:
 ```python
 engine = AtomicActionEngine(motion_generator, control_profiles=profiles)
 
-# All nine built-ins are immediately usable by stable skill ID.
+# All eleven built-ins are immediately usable by stable skill ID.
 assert "move_end_effector" in engine.actions
 assert "pick_up" in engine.actions
 ```

@@ -561,7 +561,6 @@ Suggested coverage:
 | PickUp | Approach/lift plan succeeds, `held_object` is created, minimum object lift is reached, no drop |
 | MoveHeldObject | Object reaches target pose, grasp remains stable, object drift/tilt stays within threshold |
 | Place | Place pose reached, release succeeds, final object pose is correct and stable |
-| Press | Press depth and valid contact/force reached, retract succeeds, no abnormal object motion |
 | Pick-Move-Place | Every stage succeeds in sequence; final object pose and release state are correct |
 
 Record:
@@ -675,7 +674,6 @@ tracks:
       - pick_up
       - move_held_object
       - place
-      - press
       - pick_move_place
 
 scenario_overrides:
@@ -960,7 +958,7 @@ Minimum tests:
 - Parameterize planner construction in Atomic Action benchmarks.
 - Explicitly separate `ik_interp` and `motion_gen`.
 - Reuse current object/position/approach profiles and physical-success rules.
-- Add MoveEndEffector, PickUp, MoveHeldObject, Place, Press, and
+- Add MoveEndEffector, PickUp, MoveHeldObject, Place, and
   Pick-Move-Place.
 - Add controller tracking, collision/contact, and stable-hold metrics.
 
