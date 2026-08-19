@@ -47,8 +47,8 @@ Each `AtomicActionEngine` exclusively owns one `ActionPlanningServices`
 instance, which contains its robot, one `MotionGenerator`/planner backend, and
 its direct control-part command-profile snapshot. It also issues an opaque
 binding-owner ID, so an `ActionBinding` cannot cross engine instances. It does
-not own a timing fallback. Planner results with positions require explicit `dt` and matching
-`duration`, and actions must pass a complete `TimedTrajectory` to
+not own a timing fallback. Planner results with positions require explicit `dt`;
+`duration` is derived from it. Actions must pass a complete `TimedTrajectory` to
 `build_plan()`. Environment-backed integrations put `BaseEnv.step_dt` on
 `PlanningContext.control_dt` when action-owned interpolation needs a cadence.
 `MotionGenerator.generate()` is the only stateful motion-planning entry point.
@@ -542,10 +542,10 @@ names, planner configuration, retry policy, or runtime state.
 typed planner options. Optional planner-backend compatibility belongs to
 `SkillPolicyPreset.required_planner`; velocity and acceleration constraints
 belong to the selected backend's typed `PlanOptions`. Timing belongs to the
-trajectory producer: planners return explicit `dt`/`duration`, while custom or
-composite interpolation constructs a `TimedTrajectory` using an explicit
-cadence such as `PlanningContext.require_control_dt()`. Missing timing is an
-error rather than an engine-owned default.
+trajectory producer: planners return explicit `dt` with derived `duration`,
+while custom or composite interpolation constructs a `TimedTrajectory` using
+an explicit cadence such as `PlanningContext.require_control_dt()`. Missing
+timing is an error rather than an engine-owned default.
 `DynamicCollisionMode.AUTO` consumes a live collision world when available,
 `OFF` ignores snapshot collision entities and their revisions, and `REQUIRED`
 fails unless the motion strategy, scene, and planner support that path. These

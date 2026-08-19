@@ -64,9 +64,9 @@ step. Put invocation-varying behavior in ``ActionInvocation.skill_options``.
 ``load_builtins=False`` creates an isolated or fully custom engine.
 
 Trajectory timing is strict. A planner that returns positions must also return
-per-waypoint ``dt`` and matching ``duration``; a custom action must pass a
-complete ``TimedTrajectory`` to ``build_plan``. The engine does not repair
-missing timing. Action-owned interpolation reads an explicit
+per-waypoint ``dt``; ``PlanResult.duration`` is derived from it. A custom action
+must pass a complete ``TimedTrajectory`` to ``build_plan``. The engine does not
+repair missing timing. Action-owned interpolation reads an explicit
 ``PlanningContext.control_dt`` supplied by the integration, normally
 ``BaseEnv.step_dt``.
 

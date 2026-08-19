@@ -2084,12 +2084,10 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
-        duration = dt.sum(dim=1)
         return PlanResult(
             success=alive.to(self.device),
             positions=positions.to(self.device),
             dt=dt.to(self.device),
-            duration=duration.to(self.device),
         )
 
     # ------------------------------------------------------------------

@@ -431,7 +431,7 @@ For Atomic Action tracks, separate `action_planning_ms`,
 Distinguish three evaluation views:
 
 1. **path-only**: resample by arc length and compare geometry;
-2. **native-timing**: use each planner's own `dt/duration`;
+2. **native-timing**: use each planner's own `dt` and derived duration;
 3. **common-execution**: use the same controller, control dt, and simulator.
 
 Do not directly compare NMG's fixed nominal `dt=0.01` against IK interpolation

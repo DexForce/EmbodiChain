@@ -583,23 +583,20 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             )
         if not torch.equal(commands.env_ids, context.env_ids):
             raise ValueError("Command sequence env_ids must match the context.")
-        commands = self._authorize_command_targets(request, commands)
         success_mask = normalize_success_mask(
             success,
             num_envs=context.batch_size,
             device=self.device,
             name="Planning success",
         )
-        masked_commands = TimedCommandSequence(
-            frames=tuple(
-                frame.with_active_mask(frame.active_mask & success_mask)
-                for frame in commands.frames
-            ),
-            env_ids=commands.env_ids,
+        commands = self._authorize_command_targets(
+            request,
+            commands,
+            active_mask=success_mask,
         )
         segments = self._build_segments(
             segment_lengths,
-            frame_count=masked_commands.frame_count,
+            frame_count=commands.frame_count,
         )
         if diagnostics is None:
             diagnostics = PlannerDiagnostics(
@@ -608,7 +605,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         return ActionPlan(
             skill_id=self.skill_id,
             plan_success=success_mask,
-            commands=masked_commands,
+            commands=commands,
             recovery_policy=request.recovery_policy,
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(
@@ -630,6 +627,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     def _authorize_command_targets(
         request: ResolvedActionRequest[GoalT, OptionsT],
         commands: TimedCommandSequence,
+        *,
+        active_mask: torch.Tensor | None = None,
     ) -> TimedCommandSequence:
         """Bind every emitted command to an endpoint authorized by the request.
 
@@ -637,7 +636,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         they cannot synthesize a destination outside the resolved resource
         binding. The returned sequence replaces caller-provided target metadata
         with the engine-owned binding snapshot, so transports never receive
-        altered joint claims or other target fields.
+        altered joint claims or other target fields. When ``active_mask`` is
+        provided, authorization and failed-row masking share the same rebuild.
         """
         authorized: dict[tuple[str, str], list[EndpointBinding]] = {}
         for endpoint in request.binding.endpoints:
@@ -716,7 +716,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             frames.append(
                 RuntimeCommandFrame(
                     commands=tuple(endpoint_commands),
-                    active_mask=frame.active_mask,
+                    active_mask=(
+                        frame.active_mask
+                        if active_mask is None
+                        else frame.active_mask & active_mask
+                    ),
                     env_ids=frame.env_ids,
                     hold_duration=frame.hold_duration,
                 )

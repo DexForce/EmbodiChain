@@ -198,8 +198,9 @@ from leaking into an Action Agent schema.
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
 Every planner result that contains positions must also contain per-waypoint
-`dt` and a matching per-environment `duration`. Every action passes a
-`TimedTrajectory` to `build_plan()`; raw position tensors are rejected. For
+`dt`; its per-environment `duration` is derived from those intervals. Every
+action passes a `TimedTrajectory` to `build_plan()`; raw position tensors are
+rejected. For
 action-owned deterministic interpolation, the integration supplies its
 authoritative cadence as `PlanningContext.control_dt` (normally
 `BaseEnv.step_dt`). The engine never supplies or guesses missing timing.

@@ -719,7 +719,7 @@ fallback `control_dt`. Environment integrations copy `BaseEnv.step_dt` into
 `PlanningContext.control_dt` when an action performs deterministic interpolation.
 
 Timing is a strict producer contract. A planner result with positions includes
-per-waypoint `dt` and a matching per-environment `duration`; an atomic action
+per-waypoint `dt` and derives its per-environment `duration`; an atomic action
 passes a complete `TimedTrajectory` to `build_plan()`. Missing or inconsistent
 timing is rejected at construction. No layer repairs an untimed planner result
 or raw action position tensor with a default period.

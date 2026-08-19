@@ -182,7 +182,7 @@ Unified interface for trajectory planning with optional pre-interpolation.
 - `generate()` and `interpolate_trajectory()` are env-batched (`B, N, DOF`).
 - `generate()` always returns a normalized `PlanResult`; failed rows hold the
   supplied `start_qpos`, and every returned trajectory has explicit `dt` and
-  matching `duration`.
+  a `duration` derived from it.
 
 `MotionGenOptions` fields:
 
@@ -234,7 +234,7 @@ Convenience constructors:
 | `velocities` | `torch.Tensor \| None` | Joint velocities `(B, N, DOF)` |
 | `accelerations` | `torch.Tensor \| None` | Joint accelerations `(B, N, DOF)` |
 | `dt` | `torch.Tensor \| None` | Per-step arrival intervals `(B, N)`; required whenever `positions` is present |
-| `duration` | `torch.Tensor \| None` | Total trajectory time `(B,)`; required with `positions` and equal to `dt.sum(dim=1)` |
+| `duration` | `torch.Tensor \| None` | Read-only total trajectory time `(B,)`, derived as `dt.sum(dim=1)` |
 
 Helper: `PlanResult.is_all_success() -> bool` returns `True` only when every env succeeded.
 `PlanResult` rejects positions with missing, malformed, or inconsistent timing.
@@ -266,7 +266,7 @@ total duration and emits new explicit arrival intervals.
 
 ### Registering a new planner
 
-1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`; every result containing positions must include `dt` and matching `duration`.
+1. Create a `BasePlanner` subclass with a `plan()` method decorated with `@validate_plan_options`; every result containing positions must include `dt`, from which `duration` is derived.
 2. Create a `BasePlannerCfg` subclass with a unique `planner_type` string.
 3. Optionally create a `PlanOptions` subclass for planner-specific options.
 4. For a planner that accepts live obstacles, set
@@ -308,7 +308,7 @@ The decorator checks that every `PlanState` in `target_states` shares the same l
   `start_qpos`, `sample_count`, and `interpolation_dt`; it never reads live robot
   state or guesses a command period implicitly.
 - **Missing planner timing** — constructing a `PlanResult` with positions but
-  without matching `dt` and `duration` raises immediately.
+  without `dt` raises immediately; `duration` is derived from `dt`.
 - **CUDA requested on a CPU-only runtime** — planner success-mask normalization
   raises a direct `ValueError` before querying the active CUDA device. It never
   silently falls back to CPU.

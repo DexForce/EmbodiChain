@@ -354,6 +354,7 @@ class ExecutionSession:
             replacement_plan,
             replacement_context,
             ExecutionEventKind.INVOCATION_REVISED,
+            destination_continuity_validated=True,
         )
 
     def _validate_revision_identity(
@@ -569,14 +570,17 @@ class ExecutionSession:
         plan: ActionPlan,
         context: PlanningContext,
         event_kind: ExecutionEventKind,
+        *,
+        destination_continuity_validated: bool = False,
     ) -> None:
-        """Install an already validated plan as the current execution plan."""
+        """Install a plan, checking target continuity unless already checked."""
         replacement_targets = {
-            (target.transport_id, target.target_id): target.snapshot()
+            (target.transport_id, target.target_id): target
             for target in plan.commands.targets
         }
         replacement_destinations = frozenset(replacement_targets)
-        self._validate_destination_continuity(plan, event_kind)
+        if not destination_continuity_validated:
+            self._validate_destination_continuity(plan, event_kind)
         if (
             event_kind
             not in (

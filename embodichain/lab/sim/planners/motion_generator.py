@@ -595,7 +595,6 @@ class MotionGenerator:
                 success=torch.ones(batch_size, dtype=torch.bool, device=device),
                 positions=positions,
                 dt=dt,
-                duration=dt.sum(dim=1),
             )
 
         if move_type is not MoveType.EEF_MOVE:
@@ -673,7 +672,6 @@ class MotionGenerator:
             success=success,
             positions=positions,
             dt=dt,
-            duration=dt.sum(dim=1),
         )
 
     @staticmethod
@@ -803,8 +801,6 @@ class MotionGenerator:
 
         velocities = normalize_derivative(result.velocities, "velocities")
         accelerations = normalize_derivative(result.accelerations, "accelerations")
-        duration = dt.sum(dim=1)
-
         if start_qpos is not None and not success.all():
             held = (
                 start_qpos.to(dtype=positions.dtype).unsqueeze(1).expand_as(positions)
@@ -830,7 +826,6 @@ class MotionGenerator:
             velocities=velocities,
             accelerations=accelerations,
             dt=dt,
-            duration=duration,
         )
 
     def _runtime_device(self) -> torch.device:

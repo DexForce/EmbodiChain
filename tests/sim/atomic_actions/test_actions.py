@@ -844,7 +844,6 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
         velocities=torch.full((NUM_ENVS, 3, ARM_DOF), 0.5),
         accelerations=torch.zeros(NUM_ENVS, 3, ARM_DOF),
         dt=torch.tensor([[0.0, 0.1, 0.2]]).repeat(NUM_ENVS, 1),
-        duration=torch.full((NUM_ENVS,), 0.3),
     )
     action = _bind_action(generator, MoveJoints())
     invocation = ActionInvocation(

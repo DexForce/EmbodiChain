@@ -85,7 +85,6 @@ class IkInterpolateAdapter(PlannerAdapter):
             success=alive,
             positions=positions,
             dt=dt,
-            duration=dt.sum(dim=1),
         )
 
 
