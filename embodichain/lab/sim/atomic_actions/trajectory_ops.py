@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 
 from embodichain.lab.sim.planners import MoveType, PlanResult, PlanState
@@ -30,29 +29,29 @@ from .plans import TimedTrajectory, normalize_success_mask
 def resolve_pose_target(
     target: torch.Tensor,
     *,
-    n_envs: int,
+    num_envs: int,
     device: torch.device | str,
 ) -> torch.Tensor:
     """Validate and copy an end-effector target onto the planning device."""
     if not isinstance(target, torch.Tensor):
         raise TypeError(
-            f"target must be torch.Tensor of shape (4, 4), ({n_envs}, 4, 4), "
-            f"or ({n_envs}, n_waypoint, 4, 4)"
+            f"target must be torch.Tensor of shape (4, 4), ({num_envs}, 4, 4), "
+            f"or ({num_envs}, n_waypoint, 4, 4)"
         )
     target = target.to(device=device, dtype=torch.float32).clone()
     if target.shape == (4, 4):
-        target = target.unsqueeze(0).repeat(n_envs, 1, 1)
+        target = target.unsqueeze(0).repeat(num_envs, 1, 1)
     if target.dim() == 3:
-        if target.shape != (n_envs, 4, 4):
+        if target.shape != (num_envs, 4, 4):
             raise ValueError(
-                f"target tensor must have shape (4, 4) or ({n_envs}, 4, 4), "
+                f"target tensor must have shape (4, 4) or ({num_envs}, 4, 4), "
                 f"but got {target.shape}"
             )
     elif target.dim() == 4:
-        if target.shape[0] != n_envs or target.shape[2:] != (4, 4):
+        if target.shape[0] != num_envs or target.shape[2:] != (4, 4):
             raise ValueError(
                 "multi-waypoint target tensor must have shape "
-                f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}"
+                f"({num_envs}, n_waypoint, 4, 4), but got {target.shape}"
             )
         if target.shape[1] == 0:
             raise ValueError(
@@ -61,8 +60,8 @@ def resolve_pose_target(
             )
     else:
         raise ValueError(
-            f"target tensor must be (4, 4), ({n_envs}, 4, 4), or "
-            f"({n_envs}, n_waypoint, 4, 4), but got {target.shape}"
+            f"target tensor must be (4, 4), ({num_envs}, 4, 4), or "
+            f"({num_envs}, n_waypoint, 4, 4), but got {target.shape}"
         )
     return target
 
@@ -70,7 +69,7 @@ def resolve_pose_target(
 def resolve_joint_target(
     target_qpos: torch.Tensor,
     *,
-    n_envs: int,
+    num_envs: int,
     joint_dof: int,
     control_part: str,
     device: torch.device | str,
@@ -79,23 +78,23 @@ def resolve_joint_target(
     if not isinstance(target_qpos, torch.Tensor):
         raise TypeError(
             f"target qpos for '{control_part}' must be a torch.Tensor with shape "
-            f"({joint_dof},), ({n_envs}, {joint_dof}), or "
-            f"({n_envs}, n_waypoint, {joint_dof})"
+            f"({joint_dof},), ({num_envs}, {joint_dof}), or "
+            f"({num_envs}, n_waypoint, {joint_dof})"
         )
     target_qpos = target_qpos.to(device=device, dtype=torch.float32).clone()
     if target_qpos.shape == (joint_dof,):
-        target_qpos = target_qpos.unsqueeze(0).repeat(n_envs, 1)
+        target_qpos = target_qpos.unsqueeze(0).repeat(num_envs, 1)
     if target_qpos.dim() == 2:
-        if target_qpos.shape != (n_envs, joint_dof):
+        if target_qpos.shape != (num_envs, joint_dof):
             raise ValueError(
                 f"target qpos for '{control_part}' must have shape ({joint_dof},) "
-                f"or ({n_envs}, {joint_dof}), but got {target_qpos.shape}"
+                f"or ({num_envs}, {joint_dof}), but got {target_qpos.shape}"
             )
     elif target_qpos.dim() == 3:
-        if target_qpos.shape[0] != n_envs or target_qpos.shape[2] != joint_dof:
+        if target_qpos.shape[0] != num_envs or target_qpos.shape[2] != joint_dof:
             raise ValueError(
                 f"multi-waypoint target qpos for '{control_part}' must have shape "
-                f"({n_envs}, n_waypoint, {joint_dof}), but got {target_qpos.shape}"
+                f"({num_envs}, n_waypoint, {joint_dof}), but got {target_qpos.shape}"
             )
         if target_qpos.shape[1] == 0:
             raise ValueError(
@@ -182,7 +181,7 @@ def split_three_segments(
     third_segment_name: str = "third",
 ) -> tuple[int, int, int]:
     """Split a sample budget into motion, hand, and motion segments."""
-    first = int(np.round(sample_count - hand_interp_steps) * first_segment_ratio)
+    first = int(round((sample_count - hand_interp_steps) * first_segment_ratio))
     if first < 2:
         raise ValueError(
             f"Not enough waypoints for {first_segment_name} trajectory. "
@@ -291,7 +290,7 @@ def to_full_robot_trajectory(
     )
     success = normalize_success_mask(
         result.success,
-        n_envs=base_qpos.shape[0],
+        num_envs=base_qpos.shape[0],
         device=base_qpos.device,
         name="PlanResult.success",
     )

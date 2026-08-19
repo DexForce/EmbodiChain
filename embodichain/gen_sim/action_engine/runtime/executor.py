@@ -1287,9 +1287,6 @@ class ProgramExecutor:
                 state = cache[key]
                 delta = StateDelta(
                     held_object_updates={name: None for name in state.held_objects},
-                    coordinated_held_object_updates={
-                        name: None for name in state.coordinated_held_objects
-                    },
                 )
                 if delta.is_empty:
                     continue
@@ -3295,7 +3292,7 @@ class ProgramExecutor:
                 arm_control_part(self.env, "right_arm"),
             )
             released_task = StateDelta(
-                coordinated_held_object_updates={control_parts: None}
+                held_object_updates={name: None for name in control_parts}
             ).apply(coordinated_state.to_task_state(), released)
             released_state = ExecutionState.from_task_state(
                 released_task,

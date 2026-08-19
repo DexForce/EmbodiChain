@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -46,6 +47,7 @@ from .plans import (
     normalize_success_mask,
 )
 from .policies import DynamicCollisionMode
+from .requirements import SkillBindingContract
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -70,9 +72,15 @@ def resolve_runtime_device(device: torch.device | str) -> torch.device:
     return resolved
 
 
-@dataclass
+@dataclass(frozen=True, slots=True, eq=False)
 class ObjectSemantics:
-    """Semantic and geometric information about an interaction object."""
+    """Shallow-frozen semantic information about an interaction object.
+
+    .. attention::
+        Top-level fields cannot be rebound after construction. Nested
+        affordance and metadata objects may remain mutable but never establish
+        object identity.
+    """
 
     affordance: Affordance
     """Affordance data describing supported interactions."""
@@ -89,6 +97,9 @@ class ObjectSemantics:
     entity: BatchEntity | None = None
     """Optional simulation entity used by deterministic grounding."""
 
+    entity_id: str | None = None
+    """Stable scene identifier used by snapshot grounding and explicit identity."""
+
     def __post_init__(self) -> None:
         if not isinstance(self.affordance, Affordance):
             raise TypeError("affordance must be an Affordance instance.")
@@ -98,7 +109,37 @@ class ObjectSemantics:
             raise TypeError("properties must be a dict.")
         if not isinstance(self.label, str) or not self.label:
             raise ValueError("label must be a non-empty string.")
+        if self.entity_id is not None and (
+            not isinstance(self.entity_id, str) or not self.entity_id.strip()
+        ):
+            raise ValueError("entity_id must be a non-empty string when set.")
         self.affordance.object_label = self.label
+
+
+def _legacy_object_uid(semantics: ObjectSemantics) -> str | None:
+    """Return a valid legacy simulation UID without alias normalization."""
+    uid = getattr(semantics.entity, "uid", None)
+    return uid if isinstance(uid, str) and uid.strip() else None
+
+
+def _same_object_identity(
+    left: ObjectSemantics,
+    right: ObjectSemantics,
+) -> bool:
+    """Return whether two semantic snapshots identify the same object."""
+    if left is right:
+        return True
+    if left.entity_id is not None or right.entity_id is not None:
+        return (
+            left.entity_id is not None
+            and right.entity_id is not None
+            and left.entity_id == right.entity_id
+        )
+    left_uid = _legacy_object_uid(left)
+    right_uid = _legacy_object_uid(right)
+    if left_uid is not None or right_uid is not None:
+        return left_uid is not None and right_uid is not None and left_uid == right_uid
+    return left.entity is not None and left.entity is right.entity
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +152,8 @@ class SkillDescriptor:
     manipulator_roles: tuple[str, ...] = ()
     end_effector_roles: tuple[str, ...] = ()
     agent_visible: bool = True
+    binding_contract: SkillBindingContract | None = None
+    """Explicit generic resource contract used by the semantic skill layer."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -133,6 +176,16 @@ class SkillDescriptor:
             ):
                 raise ValueError(f"{field_name} must contain unique non-empty roles.")
             object.__setattr__(self, field_name, roles)
+        if self.binding_contract is not None:
+            if not isinstance(self.binding_contract, SkillBindingContract):
+                raise TypeError(
+                    "SkillDescriptor.binding_contract must be a "
+                    "SkillBindingContract or None."
+                )
+            self.binding_contract.validate_action_roles(
+                manipulator_roles=self.manipulator_roles,
+                end_effector_roles=self.end_effector_roles,
+            )
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -160,6 +213,14 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
+
+    binding_contract: ClassVar[SkillBindingContract | None] = None
+    """Explicit robot-independent requirements for semantic discovery.
+
+    Concrete action classes must declare this attribute in their own class
+    body to opt into the semantic catalog. Inheriting another action's contract
+    does not silently expose a new skill identifier.
+    """
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Reject skill classes that bypass framework-owned scene binding."""
@@ -208,7 +269,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         if self._planning_services is None:
             raise RuntimeError(
                 f"Atomic action {self.skill_id!r} is not bound to an "
-                "AtomicActionEngine. Register it or call engine.plan_action()."
+                "AtomicActionEngine. Register it with engine.register()."
             )
         return self._planning_services
 
@@ -227,6 +288,16 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         """Return the concrete runtime device associated with the engine."""
         return self.planning_services.device
 
+    @cached_property
+    def num_envs(self) -> int:
+        """Number of environments owned by the bound robot."""
+        return int(self.robot.get_qpos().shape[0])
+
+    @cached_property
+    def robot_dof(self) -> int:
+        """Number of full-robot degrees of freedom."""
+        return int(self.robot.dof)
+
     def _bind(self, services: ActionPlanningServices) -> None:
         """Bind engine-owned planning services exactly once."""
         if self._planning_services is services:
@@ -237,14 +308,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 "AtomicActionEngine."
             )
         self._planning_services = services
-        try:
-            self._on_bind()
-        except Exception:
-            self._planning_services = None
-            raise
-
-    def _on_bind(self) -> None:
-        """Initialize implementation state that depends on engine resources."""
 
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
@@ -256,6 +319,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             manipulator_roles=cls.manipulator_roles,
             end_effector_roles=cls.end_effector_roles,
             agent_visible=cls.agent_visible,
+            binding_contract=cls.__dict__.get("binding_contract"),
         )
 
     def resolve_request(
@@ -429,6 +493,13 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             )
         return available
 
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+    ) -> tuple[str, ...]:
+        """Return scene entities whose poses materially affect this plan."""
+        return collect_scene_dependencies(request.goal)
+
     def build_plan(
         self,
         request: ResolvedActionRequest[GoalT, OptionsT],
@@ -457,10 +528,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         Returns:
             Side-effect-free action plan.
         """
-        self.require_goal(request)
         success_mask = normalize_success_mask(
             success,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             name="Planning success",
         )
@@ -522,7 +592,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             ),
             diagnostics=diagnostics,
             segments=tuple(segments),
-            scene_dependencies=collect_scene_dependencies(request.goal),
+            scene_dependencies=self._scene_dependencies(request),
             collision_world_sensitive=self._uses_collision_world(
                 request,
                 context,

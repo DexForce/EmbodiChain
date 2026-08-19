@@ -66,11 +66,11 @@ for details.
 
 ## Contribution Guide
 
-We welcome contributions! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file in this repository for guidelines on how to get started.
+We welcome contributions! Please see the [CONTRIBUTING.md](https://github.com/DexForce/EmbodiChain/blob/main/CONTRIBUTING.md) file in this repository for guidelines on how to get started.
 
 ## Publications
 
-See [Academic Publications](docs/source/resources/publications/README.md) for a complete list of academic papers related to EmbodiChain.
+See [Academic Publications](https://dexforce.github.io/EmbodiChain/main/resources/publications/README.html) for a complete list of academic papers related to EmbodiChain.
 
 ## Citation
 

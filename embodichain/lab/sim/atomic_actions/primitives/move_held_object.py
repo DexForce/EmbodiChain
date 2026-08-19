@@ -23,27 +23,34 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.utils import logger
-from embodichain.utils.math import axis_angle_to_rotation_matrix, get_relative_rotation
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+    get_relative_rotation,
+    pose_inv,
+)
 
 from ._helpers import arm_qpos_from_state, resolve_object_target
-from ..control import GRASP_COMMAND
+from ..control import GRASP_COMMAND, JointPositionCommand
 from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
+from ..requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
 from ..state import PlanningContext
 from ..trajectory_ops import build_pose_plan_states
+from ._binding_contracts import make_manipulation_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class HeldObjectPoseGoal:
     """Desired pose for the object held by this action's control part."""
 
-    goal_kind: ClassVar[str] = "held_object_pose"
-
     object_target_pose: PoseGoalValue
-    """Target object pose, shape ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+    """Target object pose, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     def __post_init__(self) -> None:
         validate_pose_goal(
@@ -85,17 +92,20 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     OptionsType: ClassVar[type] = MoveHeldObjectOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
-
-    def __init__(
-        self,
-        default_options: MoveHeldObjectOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
+                ),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
+            ),
+        ),
+    )
 
     def _plan(
         self,
@@ -103,7 +113,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan held-object transport without changing the attachment relation."""
-        target = self.require_goal(request)
+        target = request.goal
         options = request.skill_options
         binding = request.binding
         manipulator = binding.manipulator()
@@ -113,17 +123,23 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         hand_joint_ids = list(end_effector.joint_ids)
         hand_grasp_qpos = end_effector.joint_positions(
             GRASP_COMMAND,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
         state = context
         held_object = state.get_held_object(control_part)
         if held_object is None:
-            logger.log_error(
+            raise ValueError(
                 "MoveHeldObject requires an object held by control part "
-                f"{control_part!r} - run PickUp first.",
-                ValueError,
+                f"{control_part!r} - run PickUp first."
+            )
+        eligible = context.task.exclusive_held_object_mask(control_part)
+        if not eligible.any():
+            return self.failed_plan(
+                request,
+                context,
+                message="Held object is not exclusive to the control part.",
             )
         object_target_pose = resolve_object_target(
             resolve_pose_goal(
@@ -131,25 +147,26 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
                 context,
                 name="object_target_pose",
             ),
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
         )
         start_arm_qpos = arm_qpos_from_state(state, arm_joint_ids)
         end_arm_xpos = self.robot.compute_fk(
             start_arm_qpos, name=control_part, to_matrix=True
         )
-        if options.pick_rotate_upright is not None:
-            self._apply_configured_upright_rotation(
-                object_target_pose,
-                end_arm_xpos,
-                held_object.semantics.entity.get_local_pose(to_matrix=True),
-                options,
-            )
         object_to_eef = held_object.object_to_eef.to(
             device=self.device, dtype=torch.float32
         )
         if object_to_eef.shape == (4, 4):
-            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.n_envs, 1, 1)
+            object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
+        current_object_pose = torch.bmm(end_arm_xpos, pose_inv(object_to_eef))
+        if options.pick_rotate_upright is not None:
+            self._apply_configured_upright_rotation(
+                object_target_pose,
+                end_arm_xpos,
+                current_object_pose,
+                options,
+            )
         move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
 
         if options.pick_rotate_upright is None:
@@ -164,11 +181,11 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        success = result.success
+        success = result.success & eligible
         arm_traj = result.positions
 
         full = torch.empty(
-            (self.n_envs, arm_traj.shape[1], self.robot_dof),
+            (self.num_envs, arm_traj.shape[1], self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
@@ -228,7 +245,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         revert_flag = torch.where(end_arm_xpos[:, 2, 1] > 0, 1.0, -1.0)
         rotation_axis = torch.tensor(
             [1.0, 0.0, 0.0], device=self.device, dtype=torch.float32
-        ).repeat(self.n_envs, 1)
+        ).repeat(self.num_envs, 1)
         axis_angle = (
             (torch.pi * 0.5 - arm_dot_angle).unsqueeze(-1)
             * rotation_axis
@@ -239,12 +256,12 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
             device=self.device,
             dtype=torch.float32,
-        ).repeat(self.n_envs, 1, 1)
+        ).repeat(self.num_envs, 1, 1)
         template_rotation_b = torch.tensor(
             [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
             device=self.device,
             dtype=torch.float32,
-        ).repeat(self.n_envs, 1, 1)
+        ).repeat(self.num_envs, 1, 1)
         target_rotation_a = torch.bmm(template_rotation_a, rotation_offset)
         target_rotation_b = torch.bmm(template_rotation_b, rotation_offset)
         relative_rotation_a = get_relative_rotation(

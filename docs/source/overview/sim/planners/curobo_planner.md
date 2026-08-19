@@ -14,7 +14,14 @@ cuRobo, and constructing this planner requires a CUDA-capable NVIDIA GPU.
 
 cuRobo V2 is installed separately from EmbodiChain because public package
 indexes do not accept Git dependencies in published package metadata. Select
-exactly one CUDA-matched source requirement:
+exactly one source requirement that matches the CUDA runtime used by PyTorch:
+
+~~~bash
+python -c "import torch; print(torch.version.cuda)"
+~~~
+
+Use `cu12` for a `12.x` result and `cu13` for a `13.x` result. Do not select the
+extra from the maximum CUDA version displayed by `nvidia-smi`.
 
 ~~~bash
 # Recommended for the normal EmbodiChain environment, where PyTorch is present.
@@ -31,8 +38,9 @@ pytest --pyargs curobo.tests
 
 These commands follow [NVIDIA's official cuRobo installation
 guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html)
-and pin the source dependency to the cuRobo V2 `v0.8.0` release. Use a Python
-3.10--3.13 environment on Linux with a supported NVIDIA GPU and driver. The
+and pin the source dependency to the cuRobo V2 `v0.8.0` release. Although
+cuRobo supports Python 3.10--3.13, use EmbodiChain's supported Python 3.10 or
+3.11 environment on Linux with a supported NVIDIA GPU and driver. The
 non-`torch` variants are preferred for EmbodiChain because the simulation
 environment normally already provides PyTorch; the `-torch` variants delegate
 the PyTorch version requirement to cuRobo. Keep cuRobo in the same Python
@@ -44,7 +52,7 @@ The cuRobo robot model and the per-control-part profile are both auto-generated
 internally - no external cuRobo robot YAML (e.g. `franka.yml`) and no
 `robot_profiles` config are needed. On the first plan, the adapter fits collision
 spheres to each link of the robot's URDF and writes a cuRobo V2 robot YAML (see
-[Auto-generated robot YAML](curobo-auto-generated-robot-yaml). The tool frame, TCP
+[Auto-generated robot YAML](#auto-generated-robot-yaml)). The tool frame, TCP
 offset, and base link are read from the control part's IK solver, and the
 simulator->cuRobo joint mapping is identity (the generated YAML reuses the
 URDF's own joint names). The control part is selected at plan time through
@@ -59,6 +67,9 @@ locks both fingers at `0.04`, so use the same simulated finger state or include
 the fingers in the planned control part. A mismatch means cuRobo validates a
 different collision geometry from the one replayed in DexSim.
 
+Assuming the scene has been registered as shown in
+{doc}`../scene_registry`, construct the planner world from that catalog:
+
 ~~~python
 from embodichain.lab.sim.planners import (
     CuroboPlannerCfg,
@@ -66,13 +77,27 @@ from embodichain.lab.sim.planners import (
     MotionGenCfg,
     MotionGenerator,
 )
+from embodichain.lab.sim.skills import SceneCollisionWorldMode
+
+collision_mode = registry.resolve_collision_world_mode(
+    batch_size=robot.num_instances,
+)
 
 planner_cfg = CuroboPlannerCfg(
     robot_uid="my_franka",
     planner_type="curobo",
-    world=CuroboWorldCfg(rigid_objects=[demo_block]),
+    world=CuroboWorldCfg(
+        rigid_objects=registry.collision_geometry_by_id(),
+        obstacle_representation="cuboid",
+        dynamic_obstacle_names=list(registry.dynamic_collision_entity_ids),
+        multi_env=collision_mode is SceneCollisionWorldMode.PER_ENV,
+    ),
 )
 motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
+scene_provider = registry.make_planning_scene_provider(
+    motion_generator,
+    batch_size=robot.num_instances,
+)
 ~~~
 
 cuRobo's Python logger defaults to error-only output. Set
@@ -135,20 +160,55 @@ second one-time warmup and its graph-resident memory, but still no subprocess or
 second CUDA context.
 
 The collision world is always auto-generated from live `RigidObject` meshes via
-`CuroboWorldCfg.rigid_objects`: the adapter reads each object's mesh
-(`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and writes a
-cached cuRobo scene YAML on the first plan, using
+`CuroboWorldCfg.rigid_objects`. The canonical, registry-backed form is a mapping
+from authoritative registry ID to live object; the adapter reads each object's
+mesh (`get_vertices` / `get_triangles`) and world pose (`get_local_pose`) and
+writes a cached cuRobo scene YAML on the first plan, using
 `CuroboWorldCfg.obstacle_representation` (`"sphere"` by default for fast
 collision queries; use `"cuboid"` for a local-frame AABB placed as an OBB via
 the object pose, or `"mesh"` for the exact triangle mesh).
 Generated poses are authored in the cuRobo base/world frame, so this is exact
-when the robot base sits at the simulator world origin. For obstacles that move
-or live in an offset base frame, also declare their names in
+when the robot base sits at the simulator world origin. The mapping key, rather
+than `RigidObject.uid`, is the canonical logical/source ID used by cache
+identity and collision-world validation. For `"cuboid"` and `"mesh"`, that ID
+is also used unchanged as the physical YAML obstacle name and runtime update
+key. For obstacles that move or live in an offset base frame, also declare their
+canonical IDs in
 `CuroboWorldCfg.dynamic_obstacle_names` and update poses at plan time through
 `CuroboPlanOptions.dynamic_obstacle_poses` (provision
 `CuroboWorldCfg.collision_cache` before planning). Dynamic updates require the
 `"cuboid"` or `"mesh"` representation because sphere fitting expands one object
-into multiple independently named obstacles.
+into physical YAML obstacles named `<canonical_id>_0`, `<canonical_id>_1`, and
+so on; dynamic sphere configuration is rejected. These derived names are
+backend details. The cache and registry/planner full-world contract continue to
+use the unexpanded canonical source ID.
+
+Registry-backed mappings fail fast if a selected source has no mesh geometry
+required by the chosen representation. This prevents a canonical collision ID
+from being silently skipped during YAML generation. The advanced sequence form
+retains its lower-level behavior independently of this registry contract.
+
+`CuroboPlanner.collision_world_entity_ids` reports every configured logical
+source ID: each mapping key on the registry path, or each inferred name on the
+advanced sequence path. It deliberately does not expose sphere-expanded
+physical YAML names. `dynamic_collision_entity_ids` reports exactly the
+configured dynamic subset. Static entries therefore participate in
+construction-time identity validation even though they do not receive per-plan
+pose updates.
+
+`CuroboWorldCfg` validates this planner-local registration at construction:
+obstacle IDs must be unique, and every dynamic obstacle ID must match an entry
+in `rigid_objects`. A sequence of objects is retained only as an advanced
+direct-core path; it derives names from each `uid` or an `obstacle_<index>`
+fallback. Do not use that form for a registry-backed world.
+
+The {doc}`../scene_registry` integration performs two higher-level checks before
+execution. First, all registry `STATIC ∪ DYNAMIC` IDs must exactly equal
+`MotionGenerator.collision_world_entity_ids`. Second, registry, derived scene
+provider, and planner dynamic-ID subsets must exactly agree. The planner must
+also support pose updates and its shared/per-environment batch mode must agree
+with the registry. Aliases are normalized at the registry boundary; cuRobo
+never translates a canonical ID back to a simulator UID.
 
 ### Shared and per-environment collision worlds
 
@@ -182,21 +242,25 @@ pose differs by environment must also:
 3. Have its current `(B, 4, 4)` simulator-world poses passed through
    `CuroboPlanOptions.dynamic_obstacle_poses` when planning.
 
-For example:
+For a registry-backed world, derive both the geometry mapping and dynamic ID
+list from the same catalog:
 
 ```python
 world_cfg = CuroboWorldCfg(
-    rigid_objects=[block],
+    rigid_objects=registry.collision_geometry_by_id(),
     obstacle_representation="cuboid",
-    dynamic_obstacle_names=["block"],
+    dynamic_obstacle_names=list(registry.dynamic_collision_entity_ids),
     multi_env=True,
 )
 
+current_snapshot = scene_provider.snapshot(timestamp=now, env_ids=env_ids)
 plan_options = CuroboPlanOptions(
     control_part="arm",
-    dynamic_obstacle_poses={
-        "block": block.get_local_pose(to_matrix=True),  # (B, 4, 4)
-    },
+    dynamic_obstacle_poses=current_snapshot.collision_obstacle_poses(
+        batch_size=robot.num_instances,
+        device=robot.device,
+        dtype=robot.get_qpos().dtype,
+    ),
 )
 ```
 
@@ -206,6 +270,12 @@ still require the named geometry to already exist in every scene; the adapter
 does not insert new geometry at runtime. Independent worlds replicate scene
 data and collision caches across the batch, so retain the shared default when
 the rebased layouts are identical.
+
+For a registry-backed integration, a single-environment dynamic world may infer
+the registry's shared mode. A multi-environment registry with dynamic collision
+entities must explicitly choose shared or per-environment semantics, then set
+`multi_env=False` or `True` to match. The registry validator rejects a mismatch
+before planning.
 
 (curobo-auto-generated-robot-yaml)=
 ## Auto-generated robot YAML

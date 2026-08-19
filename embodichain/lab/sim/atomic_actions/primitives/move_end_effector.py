@@ -27,19 +27,19 @@ from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
+from ..requirements import CARTESIAN_POSE_CAPABILITY, SkillBindingContract
 from ..state import PlanningContext
 from ..trajectory_ops import (
     build_pose_plan_states,
     resolve_pose_target,
     to_full_robot_trajectory,
 )
+from ._binding_contracts import make_motion_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class EndEffectorPoseGoal:
     """End-effector pose goal with optional batched intermediate waypoints."""
-
-    goal_kind: ClassVar[str] = "end_effector_pose"
 
     xpos: PoseGoalValue
     """Homogeneous pose with shape ``(4,4)``, ``(B,4,4)`` or ``(B,N,4,4)``."""
@@ -58,14 +58,16 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
 
     skill_id: ClassVar[str] = "move_end_effector"
     GoalType: ClassVar[type] = EndEffectorPoseGoal
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+            ),
+        ),
+    )
     OptionsType: ClassVar[type] = MoveEndEffectorOptions
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-
-    def __init__(
-        self,
-        default_options: MoveEndEffectorOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
 
     def _plan(
         self,
@@ -73,13 +75,13 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan an end-effector pose goal from the observed joint state."""
-        goal = self.require_goal(request)
+        goal = request.goal
         manipulator = request.binding.manipulator("primary")
         control_part = manipulator.name
         joint_ids = list(manipulator.joint_ids)
         move_xpos = resolve_pose_target(
             resolve_pose_goal(goal.xpos, context, name="xpos"),
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
         )
         start_qpos = context.robot.qpos[:, joint_ids]

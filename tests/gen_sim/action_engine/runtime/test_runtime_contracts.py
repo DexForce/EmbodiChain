@@ -91,7 +91,6 @@ from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     AntipodalAffordance,
-    CoordinatedHeldObjectState,
     CoordinatedPickGoal,
     CoordinatedPlacementGoal,
     CoordinatedPlacementOptions,
@@ -892,17 +891,22 @@ def _coordinated_held_state(
     )
     left_eef, right_eef = env.get_current_xpos_agent()
     object_pose = entity.get_local_pose(to_matrix=True)
-    held = CoordinatedHeldObjectState(
-        semantics=semantics,
-        left_object_to_eef=torch.bmm(torch.linalg.inv(object_pose), left_eef),
-        right_object_to_eef=torch.bmm(torch.linalg.inv(object_pose), right_eef),
-        left_grasp_xpos=left_eef,
-        right_grasp_xpos=right_eef,
-        env_mask=torch.ones(env.num_envs, dtype=torch.bool),
-    )
     return ExecutionState(
         last_qpos=env.robot.get_qpos(),
-        coordinated_held_objects={("physical_left_arm", "physical_right_arm"): held},
+        held_objects={
+            "physical_left_arm": HeldObjectState(
+                semantics=semantics,
+                object_to_eef=torch.bmm(torch.linalg.inv(object_pose), left_eef),
+                grasp_xpos=left_eef,
+                env_mask=torch.ones(env.num_envs, dtype=torch.bool),
+            ),
+            "physical_right_arm": HeldObjectState(
+                semantics=semantics,
+                object_to_eef=torch.bmm(torch.linalg.inv(object_pose), right_eef),
+                grasp_xpos=right_eef,
+                env_mask=torch.ones(env.num_envs, dtype=torch.bool),
+            ),
+        },
     )
 
 
@@ -995,12 +999,10 @@ def test_explicit_dual_gripper_release_commits_only_after_both_hands_open(
     )
 
     released_state = executor._step_states[("task_01", "coordinated")]
-    held = released_state.get_coordinated_held_object(
-        "physical_left_arm",
-        "physical_right_arm",
-    )
+    left_held = released_state.get_held_object("physical_left_arm")
+    right_held = released_state.get_held_object("physical_right_arm")
     assert result.failed.tolist() == [expected_failed]
-    assert (held is not None) is expect_held
+    assert (left_held is not None and right_held is not None) is expect_held
 
 
 def _handover_held_state(
@@ -3409,6 +3411,20 @@ def test_object_held_predicate_checks_live_gripper_and_tcp_geometry() -> None:
             held_states={("can", "left_arm"): state},
         )[0]
     )
+
+
+def test_coordinated_held_predicate_uses_per_arm_held_relations() -> None:
+    entity = _FakeEntity("tray", _pose(0.0, 0.0, 0.75), _box_vertices(0.2))
+    env = _FakeEnv({"tray": entity})
+    env.robot._qpos[:, env.left_eef_joints] = env.close_state
+    env.robot._qpos[:, env.right_eef_joints] = env.close_state
+    state = _coordinated_held_state(env, entity)
+    predicate = {"type": "object_held_by_both_grippers", "object": "tray"}
+
+    assert bool(evaluate_predicate(env, predicate, coordinated_state=state)[0])
+
+    env.robot._qpos[:, env.right_eef_joints] = env.open_state
+    assert not bool(evaluate_predicate(env, predicate, coordinated_state=state)[0])
 
 
 def test_object_supported_by_requires_overlap_and_vertical_contact() -> None:

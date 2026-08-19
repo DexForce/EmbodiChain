@@ -147,9 +147,7 @@ def relation_offset(
     for component, axis in zip(components, axes):
         axis = axis.to(dtype=dtype, device=device)
         distance = (
-            forward_distance
-            if component in {"front", "back"}
-            else lateral_distance
+            forward_distance if component in {"front", "back"} else lateral_distance
         )
         offset[:, :2] += axis * float(distance)
     return offset

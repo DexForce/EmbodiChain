@@ -45,12 +45,7 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
-from .engine import (
-    AtomicActionEngine,
-    get_registered_actions,
-    register_action,
-    unregister_action,
-)
+from .engine import AtomicActionEngine
 from .execution import (
     EffectVerificationRequest,
     ExecutionEvent,
@@ -60,7 +55,7 @@ from .execution import (
     ExecutionTick,
     JointCommand,
 )
-from .goals import ActionGoal, ObjectActionGoal, PoseGoalValue, SceneEntityPose
+from .goals import ObjectActionGoal, PoseGoalValue, SceneEntityPose
 from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
 from .plans import (
     ActionPlan,
@@ -70,6 +65,20 @@ from .plans import (
     TrajectorySegment,
 )
 from .policies import DynamicCollisionMode, MotionPolicy, RecoveryPolicy
+from .requirements import (
+    ActionBindingRoute,
+    BATCH_INVERSE_KINEMATICS_CAPABILITY,
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointResourceSlots,
+    DisjointSlotEndpoints,
+    FORWARD_KINEMATICS_CAPABILITY,
+    GRASP_CAPABILITY,
+    INVERSE_KINEMATICS_CAPABILITY,
+    JOINT_POSITION_CAPABILITY,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+)
 from .runtime import ActionPlanningServices
 from .primitives import (
     AssembleGoal,
@@ -125,7 +134,6 @@ from .sim_adapter import (
     SimulationExecutionAdapter,
 )
 from .state import (
-    CoordinatedHeldObjectState,
     EntityState,
     HeldObjectState,
     PlanningContext,
@@ -136,8 +144,8 @@ from .state import (
 
 __all__ = [
     "ActionBinding",
+    "ActionBindingRoute",
     "ActionControlOverrides",
-    "ActionGoal",
     "ActionInvocation",
     "ActionOptions",
     "ActionPlan",
@@ -149,6 +157,8 @@ __all__ = [
     "AtomicAction",
     "AtomicActionEngine",
     "BUILTIN_ACTION_TYPES",
+    "BATCH_INVERSE_KINEMATICS_CAPABILITY",
+    "CARTESIAN_POSE_CAPABILITY",
     "CompiledTrajectory",
     "CommandAcknowledgement",
     "CommandAckStatus",
@@ -157,7 +167,6 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
-    "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
     "CoordinatedPickment",
     "CoordinatedPickmentOptions",
@@ -165,6 +174,8 @@ __all__ = [
     "CoordinatedPlacementGoal",
     "CoordinatedPlacementOptions",
     "DynamicCollisionMode",
+    "DisjointResourceSlots",
+    "DisjointSlotEndpoints",
     "EndEffectorPoseGoal",
     "EntityState",
     "EffectVerificationRequest",
@@ -178,15 +189,19 @@ __all__ = [
     "ExecutionStatus",
     "ExecutionTick",
     "GRASP_COMMAND",
+    "GRASP_CAPABILITY",
     "GraspGoal",
     "HandOver",
     "HandOverOptions",
     "HeldObjectPoseGoal",
     "HeldObjectState",
+    "FORWARD_KINEMATICS_CAPABILITY",
+    "INVERSE_KINEMATICS_CAPABILITY",
     "InteractionPoints",
     "JointPositionGoal",
     "JointCommand",
     "JointPositionCommand",
+    "JOINT_POSITION_CAPABILITY",
     "MotionPolicy",
     "MonotonicExecutionClock",
     "MoveEndEffector",
@@ -225,12 +240,12 @@ __all__ = [
     "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
+    "SkillBindingContract",
+    "SkillEndpointRequirement",
+    "SkillResourceSlot",
     "StateDelta",
     "SimulationExecutionAdapter",
     "TaskState",
     "TimedTrajectory",
     "TrajectorySegment",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
 ]

@@ -140,12 +140,12 @@ The animations below are the focused simulator demos under
 | `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` | none | none | none |
 | `move_joints` | `JointPositionGoal` | manipulator `primary` | named target only: command matching `target` | none | none |
 | `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
-| `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
-| `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
+| `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held exclusively by `primary` | preserve attachment |
+| `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | an active attachment must be exclusive to `primary`; `AssembleGoal` requires one | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | none | none |
-| `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | create coordinated attachment; clear individual attachments |
-| `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | one individually held object per arm | optionally detach placing object; preserve support attachment |
-| `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held by source arm | transfer attachment to destination arm |
+| `coordinated_pickment` | `CoordinatedPickGoal` | manipulator + end effector `left`, `right` | both: `open`, `grasp` | semantic object/entity | attach the shared object to both manipulators |
+| `coordinated_placement` | `CoordinatedPlacementGoal` | manipulator + end effector `placing`, `support` | placing: `open`, `grasp`; support: `grasp` | two distinct objects, each held exclusively by its arm | optionally detach placing object; preserve support attachment |
+| `hand_over` | `GraspGoal` | manipulator + end effector `source`, `destination` | both: `open`, `grasp` | object held exclusively by source arm | transfer attachment to destination arm |
 
 ### Binding role meanings
 
@@ -196,14 +196,45 @@ entity as a recovery dependency.
 | Skill / field | `SceneEntityPose` accepted | Automatic scene-motion replan |
 |---|---:|---:|
 | `MoveEndEffector.xpos` | yes | yes |
+| `MoveJoints.target` | no | no |
 | `MoveHeldObject.object_target_pose` | yes | yes |
 | `Place.xpos` | yes | yes |
 | `Press.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
 | `PickUp.grasp_xpos` | yes | yes |
-| `PickUp` / `HandOver` `ObjectSemantics.entity` lookup | not through `SceneEntityPose` | no automatic scene dependency |
-| `AssembleGoal` base entity lookup | not through `SceneEntityPose` | latest pose is used when replanning, but base movement alone does not trigger it |
+| `PickUp` `ObjectSemantics.entity_id` grounding | implicit snapshot reference | yes; always consumed for the object pose |
+| Coordinated pickup implicit initial pose via `ObjectSemantics.entity_id` | implicit snapshot reference | yes; only when `object_initial_pose` is omitted |
+| `AssembleGoal.base_pose` | yes | yes |
+| Deprecated `ObjectSemantics.entity` / `AssembleAffordance.base_object_entity` fallback | no | no |
+| `HandOver` current held-object pose | no scene lookup | no; derived from observed EEF pose and verified attachment state |
+
+### Object identity and grounding
+
+`ObjectSemantics.entity_id` is the canonical scene-snapshot key. It must be a
+non-empty string when set. An explicit ID is strict: object grounding reads only
+`PlanningContext.scene.entities[entity_id]`, and a missing entry is an error. It
+never falls back to `ObjectSemantics.entity` after an explicit lookup fails.
+
+The live `entity` field remains a deprecated direct-core compatibility path only
+when `entity_id` is absent. That read emits `DeprecationWarning` and cannot
+create a scene-motion dependency. `collect_scene_dependencies()` intentionally
+does not recurse into `ObjectSemantics`; each primitive declares a semantic ID
+only when its planner actually consumes that object's snapshot pose.
+
+Attachment and handover identity are not based on `label`. The core resolves an
+explicit `entity_id` only against another explicit ID. If either compared side
+has one, both sides must have the same explicit value; an equal legacy
+`entity.uid` does not match it. When both explicit IDs are absent, two non-empty
+legacy UIDs may match. Only when neither side has either ID form may comparison
+fall back to the same semantic object or live entity handle. Future
+`SceneRegistry` integration will own arbitrary alias normalization; this core
+bridge does not.
+
+`ObjectSemantics` is shallow-frozen. Its top-level fields, including
+`entity_id`, cannot be rebound after construction; create a new semantics value
+to change identity. Nested affordance and metadata objects remain mutable but
+do not participate in identity.
 
 ### Parameter ownership
 
@@ -307,8 +338,8 @@ bound manipulator.
 | Skill ID | `pick_up` |
 | Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
 | Binding | manipulator + end effector role `primary` |
-| Precondition | `ObjectSemantics.entity` is set; an `AntipodalAffordance` is required when no explicit grasp pose is supplied |
-| Effect | write `HeldObjectState` for the bound manipulator and clear overlapping coordinated attachment state |
+| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot, or the deprecated live `entity` fallback is available; an `AntipodalAffordance` is required when no explicit grasp pose is supplied |
+| Effect | write `HeldObjectState` for the bound manipulator |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
 `grasp_xpos` may be `(4, 4)`, `(B, 4, 4)`, or a `SceneEntityPose`. A scene
@@ -317,6 +348,12 @@ dependency, so material target motion invalidates and replans an executing
 `PickUp`. When omitted, the action samples valid affordance grasps, evaluates
 reachability, and stores the selected `object_to_eef` transform in the expected
 held-object state. Later object-centric skills reuse that transform.
+
+Set `ObjectSemantics.entity_id` to the same stable ID used by the scene
+snapshot. `PickUp` resolves that object pose once per planning attempt, uses the
+same tensor for grasp sampling, upright adjustment, and `object_to_eef`, and
+automatically records the ID as a scene dependency. An explicit ID never falls
+back to a live simulation entity when the snapshot entry is missing.
 
 `PickUp` requires `open` and `grasp` commands on the bound end-effector profile.
 Important `PickUpOptions` fields:
@@ -330,11 +367,13 @@ Important `PickUpOptions` fields:
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
 | `obj_upright_direction`, `rotate_upright` | Optional orientation-selection behavior |
 
-Reading `ObjectSemantics.entity` remains a live planning lookup rather than an
-automatic dependency. Use an explicit `SceneEntityPose` in `grasp_xpos` when
-object motion should trigger dynamic-goal replanning.
+`ObjectSemantics.entity` without an ID is a deprecated compatibility path. Its
+live pose does not create an automatic scene dependency.
 
-**Example:** `scripts/tutorials/atomic_action/pickup.py`
+**Example:** `scripts/tutorials/atomic_action/pickup.py` currently exercises the
+deprecated entity-only fallback. For canonical snapshot grounding and moving
+target recovery, see
+`scripts/tutorials/atomic_action/moving_target_recovery.py`.
 
 (builtin-move-held-object)=
 
@@ -343,13 +382,16 @@ object motion should trigger dynamic-goal replanning.
 Moves an already attached object to an object-frame target while keeping the
 hand closed. The caller specifies the desired **object pose**, not an EEF pose;
 the action derives `target_object_pose @ object_to_eef` from verified task state.
+When upright transport needs the current object orientation, it derives it from
+the observed EEF pose and verified `object_to_eef` relation rather than reading
+a live scene entity.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `move_held_object` |
 | Goal | `HeldObjectPoseGoal(object_target_pose=...)` |
 | Binding | manipulator + end effector role `primary` |
-| Precondition | a `HeldObjectState` exists for the bound manipulator, normally from `PickUp` |
+| Precondition | a `HeldObjectState` exists exclusively for the bound manipulator, normally from `PickUp` |
 | Motion | single object-centric transport segment with closed-hand qpos |
 | Effect | none; the existing attachment is preserved |
 | Dynamic target | explicit pose or `SceneEntityPose` |
@@ -357,7 +399,8 @@ the action derives `target_object_pose @ object_to_eef` from verified task state
 The bound end-effector profile must provide `grasp`; optional upright-transport
 settings belong to `MoveHeldObjectOptions`. The arm and hand are selected by
 `ActionBinding`; generic timing and trajectory sampling remain in
-`MotionPolicy`.
+`MotionPolicy`. In a vectorized batch, rows where another manipulator holds the
+same semantic object or live entity are marked unsuccessful and held in place.
 
 **Example:** `scripts/tutorials/atomic_action/move_held_object.py`
 
@@ -374,15 +417,16 @@ one.
 | Skill ID | `place` |
 | Goal | `PlaceGoal(xpos=..., tcp_symmetry="none")` |
 | Binding | manipulator + end effector role `primary` |
-| State | consumes the bound manipulator's attachment when present |
-| Effect | detach the object and clear overlapping coordinated attachment state |
+| State | consumes the bound manipulator's attachment when present and exclusive |
+| Effect | detach the object from the bound manipulator |
 | Verification | release must be verified during closed-loop execution |
 | Dynamic target | explicit pose/waypoints or `SceneEntityPose` |
 
 Set `tcp_symmetry="z_roll_180"` only if TCP x/y can be flipped while TCP z and
 translation remain physically equivalent. The action selects the closer
 orientation variant from the observed starting state and uses it consistently
-across all waypoints.
+across all waypoints. An ordinary `PlaceGoal` may still open an unattached
+gripper, but it will not release one side of a shared multi-manipulator object.
 
 The bound end-effector profile must provide `open` and `grasp`. Important
 `PlaceOptions` fields:
@@ -400,26 +444,28 @@ The bound end-effector profile must provide `open` and `grasp`. Important
 
 ### Assembly through `Place`
 
-`Place` also accepts `AssembleGoal(affordance=...)`. There is no separate
-assembly skill: it derives the assemble-object target from the base object's
-live pose and reuses the normal place/release segments.
+`Place` also accepts
+`AssembleGoal(affordance=..., base_pose=SceneEntityPose("base"))`. There is no
+separate assembly skill: it derives the assemble-object target from the base
+object's snapshot pose and reuses the normal place/release segments.
 
 ```text
 base_object_pose @ assemble_to_base_pose = assemble_object_target_pose
 assemble_object_target_pose @ held.object_to_eef = release_eef_pose
 ```
 
-The `AssembleAffordance` identifies the base and assemble objects, stores the
-relative pose, and must provide `base_object_entity`. A prior verified `PickUp`
-must have populated the held object's `object_to_eef` transform. Planning then
-declares the same detach effect as a normal place.
+The `AssembleAffordance` stores the relative assembly pose. A prior verified
+`PickUp` must have populated the held object's `object_to_eef` transform, and
+that attachment must be exclusive. `base_pose` is resolved from each planning
+snapshot and automatically becomes a recovery dependency. Omitting it
+temporarily falls back to the affordance's `base_object_entity` with a
+deprecation warning; that fallback is not a scene dependency. Planning declares
+the same detach effect as a normal place.
 
-The base entity's current pose is read each time `plan()` runs. Because the
-goal does not yet encode that entity through `SceneEntityPose`, base movement by
-itself does not invalidate an executing plan; another recovery trigger is
-required before the newer pose is resolved.
-
-**Example:** `scripts/tutorials/atomic_action/assemble.py`
+**Example:** `scripts/tutorials/atomic_action/assemble.py` currently exercises
+the legacy `base_object_entity` fallback and is not the canonical `base_pose`
+form. It remains a compatibility example until the registry-backed tutorial
+migration.
 
 (builtin-press)=
 
@@ -458,22 +504,29 @@ both hands -> lift -> move object -> hold**.
 | Skill ID | `coordinated_pickment` |
 | Goal | `CoordinatedPickGoal` |
 | Binding | manipulator + end effector roles `left` and `right` |
-| Precondition | `ObjectSemantics.entity` is set and the affordance is an `AntipodalAffordance` |
+| Precondition | an `AntipodalAffordance`; when `object_initial_pose` is omitted, `ObjectSemantics.entity_id` resolves in the snapshot or the deprecated no-ID live fallback is available |
 | Goal geometry | shared-object target pose and optional initial object pose; left/right grasps are sampled from the affordance |
-| Effect | clear individual left/right attachments and create `CoordinatedHeldObjectState[(left, right)]` |
+| Effect | write one `HeldObjectState` per bound manipulator; both entries share the same object semantics |
 | Verification | coordinated attachment must be externally verified |
 
 The left/right grasp poses are not supplied by the caller. At planning time the
 action calls `AntipodalAffordance.get_dual_arm_valid_grasp_poses` with the
 `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
 options to partition the object into left/right grasp regions and select the
-lowest-cost grasp on each side. The derived `object_to_eef` transforms are
-stored in the projected `CoordinatedHeldObjectState` and reused by later
-object-centric skills.
+lowest-cost grasp on each side. Each derived `object_to_eef` transform is stored
+in the corresponding projected `HeldObjectState`. Later object-centric skills
+can inspect those per-manipulator entries directly; sharing the same
+`ObjectSemantics` instance identifies the common object. Single-arm transport,
+release, and handover skills reject those shared rows rather than moving or
+detaching just one participant.
 
-The object target and optional initial pose may use `SceneEntityPose`. When no
-initial pose is supplied, `ObjectSemantics.entity` provides the object's current
-pose.
+The object target and optional initial pose may use `SceneEntityPose`. Those
+references declare their own scene dependencies. When `object_initial_pose` is
+omitted, the action grounds the initial pose from
+`ObjectSemantics.entity_id` and declares that ID as a dependency; the deprecated
+no-ID `entity` fallback is live and therefore cannot trigger scene-motion
+replanning. Supplying `object_initial_pose` disables this implicit semantic
+dependency because the explicit pose value is authoritative.
 
 Both bound end-effector profiles must provide `open` and `grasp`. Important
 `CoordinatedPickmentOptions` fields group into:
@@ -502,13 +555,15 @@ hold -> optionally release the placing hand -> retreat the placing arm**.
 | Skill ID | `coordinated_placement` |
 | Goal | `CoordinatedPlacementGoal` |
 | Binding | manipulator + end effector roles `placing` and `support` |
-| Precondition | separate `HeldObjectState` entries exist for both bound arms |
+| Precondition | each bound arm exclusively holds a different object |
 | Goal geometry | placing/support object target poses, optional height offsets, optional release override |
-| Effect | preserve support attachment; remove or preserve placing attachment according to `release`; clear overlapping coordinated state |
+| Effect | preserve support attachment; remove or preserve placing attachment according to `release` |
 
 Both object targets may use `SceneEntityPose`, so either can participate in
 dynamic-goal invalidation. Goal-level height/release values override
-`CoordinatedPlacementOptions` for that invocation.
+`CoordinatedPlacementOptions` for that invocation. Two entries that identify
+the same semantic object or live entity are a shared grasp, not a placing and
+support pair, and their environment rows are rejected.
 
 The placing profile must provide `open` and `grasp`; the support profile must
 provide `grasp`. Important `CoordinatedPlacementOptions` fields group into:
@@ -535,7 +590,7 @@ retreats -> destination delivers**.
 | Skill ID | `hand_over` |
 | Goal | `GraspGoal(semantics=...)` |
 | Binding | manipulator + end effector roles `source` and `destination` |
-| Precondition | source arm has a verified `HeldObjectState`; semantic object supports destination grasp selection |
+| Precondition | source arm exclusively has a verified `HeldObjectState`; goal semantics identify that object and support destination grasp selection |
 | Effect | remove source attachment and create destination `HeldObjectState` |
 | Verification | attachment transfer must be externally verified |
 
@@ -543,15 +598,18 @@ Both source and destination end-effector profiles must provide `open` and
 `grasp`. `HandOverOptions` owns the destination grasp region and approach
 direction, middle/final object poses, and segment distances/counts. The
 source/destination arm and hand control parts come exclusively from the
-corresponding `ActionBinding` roles.
+corresponding `ActionBinding` roles. The destination attachment reuses the
+source relation's canonical `ObjectSemantics` instance.
 
 The middle and final poses are currently option tensors rather than
 `SceneEntityPose` goal fields. Consequently, handover supports tracking-error
 and timeout recovery, but does not automatically invalidate a moving handover
 point. An application can submit a newer invocation revision with updated
-`HandOverOptions`; the action also queries the semantic object's live
-orientation when replanning and preserves it at the supplied middle/final
-positions.
+`HandOverOptions`. The action verifies that the goal and source attachment have
+the same stable object identity, then derives the current object orientation
+from the observed source EEF pose and verified `object_to_eef` relation.
+The reused `GraspGoal.grasp_xpos` field is not consumed by `HandOver` and does
+not create a scene dependency.
 
 As with the other coordinated primitive, cuRobo does not currently support its
 dual-arm `strategy="motion_gen"` path.

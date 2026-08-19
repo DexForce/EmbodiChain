@@ -22,6 +22,9 @@ import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    assemble_full_robot_trajectory,
+    repeat_qpos,
+    resolve_batched_pose,
     resolve_object_target,
 )
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import (
@@ -29,12 +32,58 @@ from embodichain.lab.sim.atomic_actions.primitives.pick_up import (
     _upright_yaw_pose_variants,
 )
 
+BATCH_SIZE = 2
+ROBOT_DOF = 6
+WAYPOINT_COUNT = 3
+
+
+def test_resolve_batched_pose_broadcasts_and_owns_global_pose() -> None:
+    source = torch.eye(4)
+
+    result = resolve_batched_pose(
+        source,
+        num_envs=BATCH_SIZE,
+        device=torch.device("cpu"),
+        name="target_pose",
+    )
+    result[0, 0, 0] = 2.0
+
+    assert result.shape == (BATCH_SIZE, 4, 4)
+    assert source[0, 0] == 1.0
+
+
+def test_assemble_full_robot_trajectory_overlays_control_parts() -> None:
+    base = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    first = torch.ones(BATCH_SIZE, WAYPOINT_COUNT, 2)
+    second = torch.full((BATCH_SIZE, WAYPOINT_COUNT, 1), 2.0)
+
+    result = assemble_full_robot_trajectory(
+        base,
+        (
+            ((0, 2), first),
+            ((5,), second),
+        ),
+    )
+
+    expected = repeat_qpos(base, WAYPOINT_COUNT)
+    expected[:, :, [0, 2]] = 1.0
+    expected[:, :, 5] = 2.0
+    assert torch.equal(result, expected)
+
+
+def test_assemble_full_robot_trajectory_rejects_empty_parts() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        assemble_full_robot_trajectory(
+            torch.zeros(BATCH_SIZE, ROBOT_DOF),
+            (),
+        )
+
 
 def test_resolve_object_target_uses_custom_name_in_shape_error() -> None:
     with pytest.raises(ValueError, match="placing_object_target_pose"):
         resolve_object_target(
             torch.zeros(2, 4, 4),
-            n_envs=3,
+            num_envs=3,
             device=torch.device("cpu"),
             name="placing_object_target_pose",
         )

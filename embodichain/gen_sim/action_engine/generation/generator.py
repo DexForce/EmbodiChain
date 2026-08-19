@@ -88,9 +88,7 @@ def generate_action_engine_config(
     if task_spec is not None and task_description:
         raise ValueError("task_spec cannot be combined with task_description.")
     if task_spec is None and not task_description:
-        raise ValueError(
-            "task_description is required when task_spec is not supplied."
-        )
+        raise ValueError("task_description is required when task_spec is not supplied.")
     if planning_mode not in {"offline", "ab"}:
         raise ValueError("planning_mode must be 'offline' or 'ab'.")
     _raise_if_outputs_exist(

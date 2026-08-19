@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
-from .core import AtomicAction
+from .core import AtomicAction, SkillDescriptor
 from .control import ControlPartCommandProfile
 from .invocation import ActionInvocation, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
@@ -32,51 +33,14 @@ from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.skills import (
+        BoundRobotSkillProfile,
+        ResourceEndpoint,
+        ResourceEndpointAdapter,
+        RobotSkillProfile,
+    )
 
     from .execution import ExecutionSession
-
-
-_global_extension_registry: dict[str, type[AtomicAction]] = {}
-
-
-def register_action(action_class: type[AtomicAction]) -> None:
-    """Register an extension action type for process-wide discovery.
-
-    This catalog does not bind the type to an engine or automatically load it.
-    Built-in types live in ``BUILTIN_ACTION_TYPES`` and are loaded separately
-    by each :class:`AtomicActionEngine`.
-
-    Args:
-        action_class: Concrete :class:`AtomicAction` subclass.
-
-    Raises:
-        TypeError: If ``action_class`` is not an AtomicAction subclass.
-        ValueError: If another class already owns the same skill identifier.
-    """
-    if not isinstance(action_class, type) or not issubclass(action_class, AtomicAction):
-        raise TypeError("action_class must be an AtomicAction subclass.")
-    descriptor = action_class.descriptor()
-    existing = _global_extension_registry.get(descriptor.skill_id)
-    if existing is not None and existing is not action_class:
-        raise ValueError(
-            f"Skill id {descriptor.skill_id!r} is already registered by "
-            f"{existing.__name__}."
-        )
-    _global_extension_registry[descriptor.skill_id] = action_class
-
-
-def unregister_action(skill_id: str) -> None:
-    """Remove a globally discoverable extension action type if present.
-
-    Args:
-        skill_id: Stable registered skill identifier.
-    """
-    _global_extension_registry.pop(skill_id, None)
-
-
-def get_registered_actions() -> dict[str, type[AtomicAction]]:
-    """Return a copy of the process-wide extension action-type registry."""
-    return dict(_global_extension_registry)
 
 
 class AtomicActionEngine:
@@ -88,6 +52,10 @@ class AtomicActionEngine:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         *,
         load_builtins: bool = True,
+        skill_profile: RobotSkillProfile | None = None,
+        endpoint_adapters: (
+            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
+        ) = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -96,14 +64,39 @@ class AtomicActionEngine:
             control_profiles: Semantic commands keyed by robot control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
+            skill_profile: Optional authoritative robot skill profile. Its
+                command profiles are installed automatically and validated
+                after built-in actions are loaded. ``control_profiles`` and
+                ``skill_profile`` are mutually exclusive.
+            endpoint_adapters: Optional exact-type endpoint adapters used when
+                binding ``skill_profile``. Invalid without a profile.
         """
+        if endpoint_adapters is not None and skill_profile is None:
+            raise ValueError("endpoint_adapters requires skill_profile.")
+        if skill_profile is not None:
+            from embodichain.lab.sim.skills import RobotSkillProfile
+
+            if not isinstance(skill_profile, RobotSkillProfile):
+                raise TypeError("skill_profile must be a RobotSkillProfile or None.")
+            if control_profiles is not None:
+                raise ValueError(
+                    "control_profiles and skill_profile are mutually exclusive; "
+                    "the profile is the authoritative semantic-command source."
+                )
+            control_profiles = skill_profile.action_control_profiles()
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
         )
         self._actions: dict[str, AtomicAction] = {}
+        self._skill_profile: BoundRobotSkillProfile | None = None
         if load_builtins:
             self._load_builtin_actions()
+        if skill_profile is not None:
+            self._skill_profile = skill_profile.bind(
+                self,
+                endpoint_adapters=endpoint_adapters,
+            )
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -135,6 +128,62 @@ class AtomicActionEngine:
         """Registered action instances keyed by stable skill identifier."""
         return dict(self._actions)
 
+    @property
+    def skills(self) -> Mapping[str, SkillDescriptor]:
+        """Return explicitly declared, agent-visible installed skill metadata.
+
+        Process-wide type discovery, engine installation, and semantic exposure
+        are separate boundaries. Only an action installed in this engine whose
+        concrete class explicitly declares a generic binding contract appears
+        here. Direct-core callers may continue to use every entry in
+        :attr:`actions`.
+        """
+        return MappingProxyType(
+            {
+                skill_id: descriptor
+                for skill_id, action in self._actions.items()
+                if (descriptor := action.descriptor()).agent_visible
+                and descriptor.binding_contract is not None
+            }
+        )
+
+    @property
+    def skill_profile(self) -> BoundRobotSkillProfile | None:
+        """Return the currently bound semantic robot profile, when configured."""
+        return self._skill_profile
+
+    def bind_skill_profile(
+        self,
+        profile: RobotSkillProfile,
+        *,
+        endpoint_adapters: (
+            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
+        ) = None,
+    ) -> BoundRobotSkillProfile:
+        """Validate and bind a profile after custom action installation.
+
+        The engine's immutable control-part profiles must already contain the
+        profile commands lowered into the current action core. Generic
+        non-core endpoint commands remain on resolved endpoints. Prefer the
+        constructor's ``skill_profile`` argument when no custom actions need
+        to be installed first.
+
+        Args:
+            profile: Authoritative robot resource and policy profile.
+            endpoint_adapters: Optional exact-type endpoint adapters used for
+                custom controller declarations.
+
+        Returns:
+            Validated profile bound to this engine and its installed actions.
+        """
+        from embodichain.lab.sim.skills import RobotSkillProfile
+
+        if not isinstance(profile, RobotSkillProfile):
+            raise TypeError("profile must be a RobotSkillProfile.")
+        bound = profile.bind(self, endpoint_adapters=endpoint_adapters)
+        self._skill_profile = bound
+        return bound
+
     def register(self, action: AtomicAction, *, replace: bool = False) -> None:
         """Register one action instance using its descriptor.
 
@@ -159,6 +208,7 @@ class AtomicActionEngine:
             )
         action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
+        self._skill_profile = None
 
     def _load_builtin_actions(self) -> None:
         """Create and bind fresh built-in action instances for this engine."""
@@ -169,41 +219,7 @@ class AtomicActionEngine:
         for action_type in BUILTIN_ACTION_TYPES:
             self.register(action_type())
 
-    def plan_action(
-        self,
-        action: AtomicAction,
-        invocation: ActionInvocation,
-        context: PlanningContext,
-    ) -> ActionPlan:
-        """Plan with a configured action using this engine's resources.
-
-        Unlike :meth:`plan`, the supplied action does not need to be in the
-        skill registry. This is an advanced extension and testing escape hatch;
-        built-in parameter variants should use ``ActionInvocation.skill_options``
-        with the engine's registered implementation.
-
-        Args:
-            action: Configured action implementation to invoke.
-            invocation: Grounded request matching the action's skill identifier.
-            context: Latest measured planning state.
-
-        Returns:
-            Validated side-effect-free action plan.
-
-        Raises:
-            TypeError: If ``action`` is not an :class:`AtomicAction`.
-            ValueError: If the action, invocation, context, or plan is invalid.
-        """
-        if not isinstance(action, AtomicAction):
-            raise TypeError("action must be an AtomicAction instance.")
-        self._validate_context(context)
-        action._bind(self._planning_services)
-        request = action.resolve_request(invocation)
-        plan = action.plan(request, context)
-        self._validate_plan(plan, context, request)
-        return plan
-
-    def resolve(
+    def _resolve(
         self,
         invocation: ActionInvocation,
     ) -> ResolvedActionRequest:
@@ -229,7 +245,7 @@ class AtomicActionEngine:
             )
         return action.resolve_request(invocation)
 
-    def plan_request(
+    def _plan_request(
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
@@ -241,7 +257,7 @@ class AtomicActionEngine:
         calls this method for every replan.
 
         Args:
-            request: Immutable request previously returned by :meth:`resolve`.
+            request: Immutable request previously returned by :meth:`_resolve`.
             context: Optional latest planning state; captured when omitted.
 
         Returns:
@@ -278,8 +294,8 @@ class AtomicActionEngine:
             KeyError: If the invocation references an unregistered skill.
         """
         current = self.initial_context() if context is None else context
-        request = self.resolve(invocation)
-        return self.plan_request(request, current)
+        request = self._resolve(invocation)
+        return self._plan_request(request, current)
 
     def initial_context(
         self,
@@ -454,9 +470,4 @@ class AtomicActionEngine:
             )
 
 
-__all__ = [
-    "AtomicActionEngine",
-    "get_registered_actions",
-    "register_action",
-    "unregister_action",
-]
+__all__ = ["AtomicActionEngine"]

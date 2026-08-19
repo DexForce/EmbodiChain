@@ -789,6 +789,7 @@ def test_e5_pick_and_hold_defaults_missing_direction_to_up() -> None:
         }
     ]
 
+
 @pytest.mark.parametrize(
     ("scene_update", "error"),
     (

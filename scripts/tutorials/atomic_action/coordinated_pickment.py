@@ -16,8 +16,8 @@
 
 """Demonstrate dual-arm coordinated pickment with selectable object meshes.
 
-The two UR5 arms pinch opposite sides of one object, lift it together, and move
-the object to an object-centric target pose while both grippers stay closed.
+The two selected arms pinch opposite sides of one object, lift it together, and
+move the object to an object-centric target pose while both grippers stay closed.
 """
 
 from __future__ import annotations
@@ -54,17 +54,17 @@ from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
 from embodichain.utils.math import matrix_from_euler
 from scripts.tutorials.atomic_action.scenario_utils import (
-    add_dual_ur5_robot,
+    add_dual_tutorial_robot,
     add_support_surface,
     compute_world_bounds,
     get_local_vertices,
     log_action_plan,
-    make_dual_ur5_solver_cfg,
     resolve_cached_data_path,
     rotate_pose_about_world_z,
     settle_object,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
@@ -189,15 +189,18 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    return add_dual_ur5_robot(
+def create_dual_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+) -> Robot:
+    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    return add_dual_tutorial_robot(
         sim,
-        uid="DualUR5CoordinatedPickment",
-        urdf_name="dual_ur5_coordinated_pickment",
-        arm_urdf_path=resolve_cached_data_path("UniversalRobots/UR5/UR5.urdf"),
-        gripper_urdf_path=resolve_cached_data_path("DH_PGI_140_80/DH_PGI_140_80.urdf"),
-        solver_cfg=make_dual_ur5_solver_cfg(GRIPPER_TCP_Z, solver="pytorch"),
+        robot_type=robot_type,
+        uid=f"Dual{robot_type.title()}CoordinatedPickment",
+        urdf_name=f"dual_{robot_type}_coordinated_pickment",
+        tcp_z=GRIPPER_TCP_Z,
+        solver="pytorch",
     )
 
 
@@ -278,12 +281,14 @@ def compute_left_to_right_arm_direction(
     Returns:
         A normalized ``(3,)`` direction vector.
     """
-    left_base = robot.get_link_pose(
-        link_name="left_base_link", env_ids=[0], to_matrix=True
-    )[0, :3, 3]
-    right_base = robot.get_link_pose(
-        link_name="right_base_link", env_ids=[0], to_matrix=True
-    )[0, :3, 3]
+    left_root = robot.cfg.solver_cfg["left_arm"].root_link_name
+    right_root = robot.cfg.solver_cfg["right_arm"].root_link_name
+    left_base = robot.get_link_pose(link_name=left_root, env_ids=[0], to_matrix=True)[
+        0, :3, 3
+    ]
+    right_base = robot.get_link_pose(link_name=right_root, env_ids=[0], to_matrix=True)[
+        0, :3, 3
+    ]
     direction = (right_base - left_base).to(device=device, dtype=torch.float32)
     return direction / direction.norm().clamp_min(1e-6)
 
@@ -372,7 +377,7 @@ def run_coordinated_pickment_demo(
     object_pose_batch = clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
     object_pose = object_pose_batch[0].to(device=sim.device, dtype=torch.float32)
-    n_envs = object_pose_batch.shape[0]
+    num_envs = object_pose_batch.shape[0]
     object_vertices = get_local_vertices(obj)
     object_semantics = create_antipodal_semantics(
         obj,
@@ -424,12 +429,12 @@ def run_coordinated_pickment_demo(
     )
     log_scene_targets(preset.label, object_pose, target_pose)
     if not args.no_vis_eef_axis:
-        draw_pickment_target_axes(sim, target_pose, num_envs=n_envs)
+        draw_pickment_target_axes(sim, target_pose, num_envs=num_envs)
 
     pickment_target = CoordinatedPickGoal(
         semantics=object_semantics,
-        object_target_pose=broadcast_pose_batch(target_pose, num_envs=n_envs),
-        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=n_envs),
+        object_target_pose=broadcast_pose_batch(target_pose, num_envs=num_envs),
+        object_initial_pose=broadcast_pose_batch(object_pose, num_envs=num_envs),
     )
 
     wait_for_user = prepare_tutorial_scene(
@@ -446,7 +451,10 @@ def run_coordinated_pickment_demo(
                     manipulators={"left": "left_arm", "right": "right_arm"},
                     end_effectors={"left": "left_hand", "right": "right_hand"},
                 ),
-                MotionPolicy(sample_count=PICKMENT_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICKMENT_SAMPLE_INTERVAL,
+                ),
                 skill_options=pickment_options,
             ),
         )
@@ -506,7 +514,7 @@ def main() -> None:
         arena_space=3.0,
         light_pos=(0.0, -0.4, 3.0),
     )
-    robot = create_dual_ur5_robot(sim)
+    robot = create_dual_robot(sim, args.robot)
     run_coordinated_pickment_demo(args, sim, robot)
 
 

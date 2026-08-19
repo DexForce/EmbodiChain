@@ -7,7 +7,6 @@ embodichain.lab.sim.atomic_actions
 
    .. autosummary::
 
-      ActionGoal
       ActionBinding
       ResolvedActionBinding
       ResolvedControlPart
@@ -31,6 +30,18 @@ embodichain.lab.sim.atomic_actions
       PlannerDiagnostics
       ActionPlan
       CompiledTrajectory
+
+   .. rubric:: Semantic resource contracts
+
+   .. autosummary::
+
+      SkillDescriptor
+      SkillBindingContract
+      SkillResourceSlot
+      SkillEndpointRequirement
+      ActionBindingRoute
+      DisjointSlotEndpoints
+      DisjointResourceSlots
 
    .. rubric:: Execution contracts
 
@@ -88,6 +99,45 @@ embodichain.lab.sim.atomic_actions
    embodichain.lab.sim.atomic_actions.primitives
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
+
+Semantic resource contracts
+---------------------------
+
+.. autoclass:: SkillDescriptor
+   :members:
+
+.. autoclass:: SkillBindingContract
+   :members:
+
+.. autoclass:: SkillResourceSlot
+   :members:
+
+.. autoclass:: SkillEndpointRequirement
+   :members:
+
+.. autoclass:: ActionBindingRoute
+   :members:
+
+.. autoclass:: DisjointSlotEndpoints
+   :members:
+
+.. autoclass:: DisjointResourceSlots
+   :members:
+
+Standard capability identifiers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autodata:: JOINT_POSITION_CAPABILITY
+
+.. autodata:: CARTESIAN_POSE_CAPABILITY
+
+.. autodata:: FORWARD_KINEMATICS_CAPABILITY
+
+.. autodata:: INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: BATCH_INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: GRASP_CAPABILITY
 
 Planning and state
 ------------------
@@ -228,7 +278,4 @@ Semantic objects and helpers
    :members:
 
 .. autoclass:: HeldObjectState
-   :members:
-
-.. autoclass:: CoordinatedHeldObjectState
    :members:

@@ -24,7 +24,6 @@ from typing import Mapping
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    CoordinatedHeldObjectState,
     HeldObjectState,
     TaskState,
 )
@@ -44,43 +43,22 @@ class ExecutionState:
 
     last_qpos: torch.Tensor
     held_objects: dict[str, HeldObjectState] = field(default_factory=dict)
-    coordinated_held_objects: dict[tuple[str, str], CoordinatedHeldObjectState] = field(
-        default_factory=dict
-    )
 
     def get_held_object(self, control_part: str) -> HeldObjectState | None:
         """Return the held-object relation for one control part."""
         return self.held_objects.get(control_part)
-
-    def get_coordinated_held_object(
-        self,
-        first_control_part: str,
-        second_control_part: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return the relation jointly owned by an ordered control-part pair."""
-        return self.coordinated_held_objects.get(
-            (first_control_part, second_control_part)
-        )
 
     def with_updates(
         self,
         *,
         last_qpos: torch.Tensor | None = None,
         held_objects: Mapping[str, HeldObjectState] | None = None,
-        coordinated_held_objects: (
-            Mapping[tuple[str, str], CoordinatedHeldObjectState] | None
-        ) = None,
     ) -> ExecutionState:
         """Return a detached successor state."""
         return ExecutionState(
             last_qpos=self.last_qpos if last_qpos is None else last_qpos,
             held_objects=dict(
                 self.held_objects if held_objects is None else held_objects
-            ),
-            coordinated_held_objects=dict(
-                self.coordinated_held_objects
-                if coordinated_held_objects is None
-                else coordinated_held_objects
             ),
         )
 
@@ -90,7 +68,6 @@ class ExecutionState:
             batch_size=int(self.last_qpos.shape[0]),
             device=self.last_qpos.device,
             held_objects=self.held_objects,
-            coordinated_held_objects=self.coordinated_held_objects,
         )
 
     @classmethod
@@ -104,5 +81,4 @@ class ExecutionState:
         return cls(
             last_qpos=last_qpos,
             held_objects=dict(task.held_objects),
-            coordinated_held_objects=dict(task.coordinated_held_objects),
         )

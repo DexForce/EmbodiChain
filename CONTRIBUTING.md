@@ -39,13 +39,13 @@ We welcome pull requests for bug fixes, new features, and documentation improvem
 
 ## Contribute specific robots
 
-To contribute a new robot, please check the documentation on [Adding a New Robot](https://dexforce.github.io/EmbodiChain/guides/add_robot.html).
+To contribute a new robot, please check the documentation on [Adding a New Robot](https://dexforce.github.io/EmbodiChain/main/guides/add_robot.html).
 
 ## Contribute specific environments
 
-To contribute a new environment, please check the documentation on [Embodied Environments](https://dexforce.github.io/EmbodiChain/overview/gym/env.html) and see the tutorial below:
-- [Creating a Basic Environment](https://dexforce.github.io/EmbodiChain/tutorial/basic_env.html) 
-- [Creating a Modular Environment](https://dexforce.github.io/EmbodiChain/tutorial/modular_env.html)
+To contribute a new environment, please check the documentation on [Embodied Environments](https://dexforce.github.io/EmbodiChain/main/overview/gym/env.html) and see the tutorial below:
+- [Creating a Basic Environment](https://dexforce.github.io/EmbodiChain/main/tutorial/basic_env.html)
+- [Creating a Modular Environment](https://dexforce.github.io/EmbodiChain/main/tutorial/modular_env.html)
 
 If you want to implement your tasks in a new repo and with some customized functors and utilities, you can also use the [Task Template Repo](https://github.com/DexForce/embodichain_task_template).
 

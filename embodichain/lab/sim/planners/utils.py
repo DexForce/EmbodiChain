@@ -41,15 +41,15 @@ __all__ = [
 def normalize_success_mask(
     success: bool | torch.Tensor,
     *,
-    n_envs: int,
+    num_envs: int,
     device: torch.device | str,
     name: str,
 ) -> torch.Tensor:
-    """Normalize a scalar or batched success value to ``(n_envs,)``.
+    """Normalize a scalar or batched success value to ``(num_envs,)``.
 
     Args:
         success: Scalar success or a boolean/binary-integer tensor.
-        n_envs: Required batch size.
+        num_envs: Required batch size.
         device: Device of the resulting tensor.
         name: Human-readable value name used in validation errors.
 
@@ -58,13 +58,22 @@ def normalize_success_mask(
 
     Raises:
         TypeError: If ``success`` is neither boolean nor binary integer data.
-        ValueError: If a tensor does not match the required batch shape.
+        ValueError: If a tensor does not match the required batch shape or a
+            CUDA device is requested while CUDA is unavailable.
     """
     resolved_device = torch.device(device)
-    if resolved_device.type == "cuda" and resolved_device.index is None:
-        resolved_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    if resolved_device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "CUDA device requested for success-mask normalization, but "
+                "torch.cuda.is_available() is False."
+            )
+        if resolved_device.index is None:
+            resolved_device = torch.device(f"cuda:{torch.cuda.current_device()}")
     if isinstance(success, bool):
-        return torch.full((n_envs,), success, dtype=torch.bool, device=resolved_device)
+        return torch.full(
+            (num_envs,), success, dtype=torch.bool, device=resolved_device
+        )
     if not isinstance(success, torch.Tensor):
         raise TypeError(
             f"{name} must be a bool or torch.Tensor, got {type(success).__name__}."
@@ -87,10 +96,10 @@ def normalize_success_mask(
             )
         success = success.to(dtype=torch.bool)
     if success.dim() == 0 or success.shape == (1,):
-        success = success.reshape(1).expand(n_envs)
-    if success.shape != (n_envs,):
+        success = success.reshape(1).expand(num_envs)
+    if success.shape != (num_envs,):
         raise ValueError(
-            f"{name} must have shape ({n_envs},), got {tuple(success.shape)}."
+            f"{name} must have shape ({num_envs},), got {tuple(success.shape)}."
         )
     return success.clone()
 

@@ -45,11 +45,11 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -117,9 +117,9 @@ def main() -> None:
     """Plan MoveEndEffector -> PickUp -> MoveHeldObject."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
 
     engine = AtomicActionEngine(
@@ -139,9 +139,9 @@ def main() -> None:
     )
     move_position = obj.get_local_pose(to_matrix=True)[0, :3, 3].clone()
     move_position[2] = 0.36
-    n_envs = robot.get_qpos().shape[0]
-    move_target = broadcast_pose_batch(make_eef_pose_at(robot, move_position), n_envs)
-    object_target = broadcast_pose_batch(make_object_target_pose(sim.device), n_envs)
+    num_envs = robot.get_qpos().shape[0]
+    move_target = broadcast_pose_batch(make_eef_pose_at(robot, move_position), num_envs)
+    object_target = broadcast_pose_batch(make_object_target_pose(sim.device), num_envs)
     if not args.no_vis_eef_axis:
         draw_axis_marker(sim, "move_held_object_target_axis", object_target)
     wait_for_user = prepare_tutorial_scene(
@@ -158,13 +158,19 @@ def main() -> None:
                 "move_end_effector",
                 EndEffectorPoseGoal(move_target),
                 binding,
-                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=MOVE_SAMPLE_INTERVAL,
+                ),
             ),
             ActionInvocation(
                 "pick_up",
                 GraspGoal(semantics),
                 binding,
-                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICK_SAMPLE_INTERVAL,
+                ),
                 skill_options=PickUpOptions(
                     pre_grasp_distance=0.15,
                     lift_height=0.16,
@@ -175,7 +181,10 @@ def main() -> None:
                 "move_held_object",
                 HeldObjectPoseGoal(object_target),
                 binding,
-                MotionPolicy(sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL),
+                MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
+                ),
             ),
         )
     )

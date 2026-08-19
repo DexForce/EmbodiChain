@@ -376,17 +376,19 @@ def _coordinated_held(
     result = _constant(env, False)
     if state is None:
         return result
-    held = state.get_coordinated_held_object(
-        arm_control_part(env, "left_arm"),
-        arm_control_part(env, "right_arm"),
+    held_relations = tuple(
+        state.get_held_object(arm_control_part(env, arm))
+        for arm in ("left_arm", "right_arm")
     )
-    if held is None:
+    if any(held is None for held in held_relations):
         return result
-    label = getattr(held.semantics, "label", None)
-    if not label and getattr(held.semantics, "entity", None) is not None:
-        label = getattr(held.semantics.entity, "uid", None)
-    if label != uid:
-        return result
+    for held in held_relations:
+        assert held is not None
+        label = getattr(held.semantics, "label", None)
+        if not label and getattr(held.semantics, "entity", None) is not None:
+            label = getattr(held.semantics.entity, "uid", None)
+        if label != uid:
+            return result
     eef_values = _arm_values(env, "xpos")
     gripper_values = _arm_values(env, "gripper_state")
     if eef_values is None or gripper_values is None:
@@ -394,16 +396,15 @@ def _coordinated_held(
 
     object_pose = _pose(env, uid)
     result = _constant(env, True)
-    if held.env_mask is not None:
-        result &= held.env_mask.to(device=env.device)
-    for arm_index, transform_name in enumerate(
-        ("left_object_to_eef", "right_object_to_eef")
-    ):
+    for arm_index, held in enumerate(held_relations):
+        assert held is not None
+        if held.env_mask is not None:
+            result &= held.env_mask.to(device=env.device)
         actual_eef = eef_values[arm_index]
         gripper = gripper_values[arm_index]
         if actual_eef is None or gripper is None:
             return _constant(env, False)
-        transform = getattr(held, transform_name).to(
+        transform = held.object_to_eef.to(
             device=env.device,
             dtype=object_pose.dtype,
         )

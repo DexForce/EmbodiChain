@@ -295,7 +295,7 @@ def test_curobo_generator_receives_generated_static_obstacles(
     assert generator is adapter._motion_generator
     planner = captured["cfg"].planner_cfg
     assert isinstance(planner, CuroboPlannerCfg)
-    assert planner.world.rigid_objects == [table, can]
+    assert planner.world.rigid_objects == {"table": table, "can": can}
     assert planner.world.dynamic_obstacle_names == ["can"]
     assert planner.world.obstacle_representation == "cuboid"
     assert planner.world.collision_cache == {"cuboid": 8, "mesh": 2}

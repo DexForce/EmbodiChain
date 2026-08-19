@@ -428,7 +428,6 @@ class AtomicActionAdapter:
             primary_rows,
         )
         held_keys = set(plan.expected_effects.held_object_updates)
-        coordinated_keys = set(plan.expected_effects.coordinated_held_object_updates)
         if fallback_plan is not None:
             fallback_rows = combined_success & use_fallback
             projected_task = fallback_plan.expected_effects.apply(
@@ -436,16 +435,9 @@ class AtomicActionAdapter:
                 fallback_rows,
             )
             held_keys.update(fallback_plan.expected_effects.held_object_updates)
-            coordinated_keys.update(
-                fallback_plan.expected_effects.coordinated_held_object_updates
-            )
         committed_effects = StateDelta(
             held_object_updates={
                 key: projected_task.held_objects.get(key) for key in held_keys
-            },
-            coordinated_held_object_updates={
-                key: projected_task.coordinated_held_objects.get(key)
-                for key in coordinated_keys
             },
         )
         next_state = ExecutionState.from_task_state(
@@ -924,8 +916,6 @@ class AtomicActionAdapter:
 
         for held in state.held_objects.values():
             include(held.semantics.label, held.env_mask)
-        for held in state.coordinated_held_objects.values():
-            include(held.semantics.label, held.env_mask)
         collision_exclusion_uids = grounded.motion_policy.get(
             "collision_exclusion_uids", ()
         )
@@ -1345,12 +1335,13 @@ class AtomicActionAdapter:
                         ]
                     )
                 )
-                rigid_objects = []
+                rigid_objects: dict[str, Any] = {}
                 for uid in obstacle_uids:
-                    entity = self.env.sim.get_rigid_object(str(uid))
+                    obstacle_uid = str(uid)
+                    entity = self.env.sim.get_rigid_object(obstacle_uid)
                     if entity is None:
                         raise ValueError(f"Unknown cuRobo obstacle {uid!r}.")
-                    rigid_objects.append(entity)
+                    rigid_objects[obstacle_uid] = entity
                 obstacle_representation = str(
                     options.get("obstacle_representation", "cuboid")
                 )

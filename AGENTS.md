@@ -234,7 +234,7 @@ Include:
 
 ### Adding a New Robot
 
-Refer to `docs/source/tutorial/add_robot.rst` for a detailed guide. The basic structure requires:
+Refer to `docs/source/guides/add_robot.rst` for a detailed guide. The basic structure requires:
 
 - A config class (inheriting from `RobotCfg`)
 - URDF configuration for the robot

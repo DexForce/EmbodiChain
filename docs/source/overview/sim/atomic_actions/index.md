@@ -6,6 +6,7 @@
 :hidden:
 
 builtin_actions
+robot_skill_profiles
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -33,8 +34,8 @@ and whole-body control are not implemented by this module yet.
 +---------------+----------------+    +---------------+----------------+
                 |                                     |
                 v                                     |
- agent adapter: schema validation,                    |
- scene grounding, capability binding                  |
+ semantic adapter: schema validation,                 |
+ SceneRegistry grounding, capability binding          |
                 |                                     |
                 +------------------+------------------+
                                    |
@@ -75,11 +76,11 @@ The boundary is deliberate:
 |---|---|---|
 | Task intent and sequencing | Action Agent, task graph, or user-authored application | Selects skills, goals, and execution order |
 | Invocation construction | Agent adapter or user-authored code/config loader | Produces the same typed `ActionInvocation`; the engine has no agent-only interface |
-| Perception and grounding | Agent adapter or user application | Builds scene snapshots and resource bindings, or supplies already-grounded values directly |
+| Perception and grounding | `SceneRegistry` on the canonical path; adapter or user application on the advanced path | Normalizes aliases to canonical typed references and publishes snapshots, or supplies already-grounded values directly |
 | Deterministic motion planning | Atomic action module | Produces an `ActionPlan` from an invocation and context |
 | Motion-generation resources | `AtomicActionEngine` | Owns one robot, motion generator, planner backend, device, trajectory builder, and control-part command profiles |
 | Recovery state | `ExecutionSession` | Consumes fresh contexts, emits at most one `JointCommand` per tick, and owns bounded recovery/revision state |
-| Scene observation | `SceneProvider` | Captures ordered entities plus monotonic global or per-environment collision-world revisions |
+| Scene observation | Registry-derived `SceneProvider` | Captures canonical ordered entities plus monotonic global or per-environment collision-world revisions |
 | Scheduling and controller lifecycle | `ExecutionRunner` | Observes only when due, dispatches timed commands, records acknowledgements, and performs safe stop |
 | Robot/simulator I/O | `ObservationProvider`, `CommandSink`, and `ExecutionClock` adapters | Isolates observation, command transport, and time/physics advancement from planning and session state |
 | Physical-effect verification | Application observer | Verifies grasp, release, handover, and other symbolic effects |
@@ -165,7 +166,7 @@ from leaking into an Action Agent schema.
 
 | Contract | Contains | Does not contain |
 |---|---|---|
-| `ActionGoal` | Action-specific desired outcome, such as an EEF pose or object pose | Arm names, planner instances, recovery counters |
+| Action-owned goal dataclass | Action-specific desired outcome, such as an EEF pose or object pose | Arm names, planner instances, recovery counters |
 | `ActionBinding` | Semantic-role mappings to keys from the engine robot's `control_parts`, such as `primary -> left_arm` and `primary -> left_hand` | Link/TCP names, arbitrary scene objects, motion settings, or task geometry |
 | `ActionOptions` / built-in `*Options` | Frozen invocation-varying skill behavior: segment counts, offsets, grasp-selection rules | Robot resource names, hand qpos, planner backend |
 | `ControlPartCommandProfile` | Embodiment-specific semantic commands such as `open`, `grasp`, and `ready`, keyed by actual control-part name | Action roles, task goals, recovery state |
@@ -179,11 +180,21 @@ from leaking into an Action Agent schema.
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
 
-Goals follow the structural `ActionGoal` protocol: each action owns one or more
-frozen dataclasses with a stable `goal_kind`. There is no shared `ActionTarget`
-base class and no closed union that must change whenever a skill is added.
+Each action owns one or more frozen goal dataclasses and declares the accepted
+type through `AtomicAction.GoalType`. The action validates that type when the
+engine resolves an invocation. There is no marker protocol, shared
+`ActionTarget` base class, or closed union that must change whenever a skill is
+added.
 
 ### Semantic resource binding
+
+The canonical semantic path uses a
+{doc}`RobotSkillProfile <robot_skill_profiles>` to match skill-local slots and
+endpoint capabilities against a generic robot resource graph. It validates
+participant pairing, typed commands, physical claims, complete defaults, and
+policy presets before lowering the selected endpoints to the current core
+binding. The `ActionBinding` description below is the resulting direct-core
+contract and remains available for advanced manual callers.
 
 A **role** is an action-owned semantic participant slot: it describes the job a
 robot resource performs in that action, not the identity of the resource. Each
@@ -219,11 +230,12 @@ manipulator's IK/TCP frame remains part of the robot and solver configuration.
 The engine validates every name and resolves its full-robot joint indices
 before calling the action planner.
 
-The validation boundary is intentionally narrow: the engine verifies required
-roles, `control_parts` membership, resolvable joint indices, command type, and
-command dimensions. The Agent adapter or application binder remains responsible
-for capability compatibility, such as pairing an arm with the hand mounted on
-it and choosing a semantic command supported by that tool.
+For a manually constructed `ActionBinding`, the validation boundary remains
+intentionally narrow: the engine verifies required roles, `control_parts`
+membership, resolvable joint indices, command type, and command dimensions. A
+bound `RobotSkillProfile` adds capability matching, participant endpoint
+pairing, command requirements, joint-claim checks, and deterministic
+disambiguation before it produces that same core value.
 
 Role names should describe action responsibilities rather than robot-specific
 joint, link, or model names. Single-resource skills use `primary`; handover uses
@@ -240,8 +252,14 @@ manipulator control-part name.
 
 ### Control-part semantic commands
 
-Register embodiment commands once when constructing the engine. The keys are
-concrete names from `robot.control_parts`; the command names remain semantic:
+On the canonical semantic path, declare embodiment commands on the
+{doc}`RobotSkillProfile <robot_skill_profiles>` and pass the profile through the
+engine's `skill_profile` argument. For a direct-core integration, register the
+same command profiles explicitly when constructing the engine. Profile command
+IDs are generic and selected by endpoint adapters; the built-in control-part
+adapter defaults them to concrete `robot.control_parts` names. Direct-core
+engine keys are always concrete control-part names. The command names remain
+semantic:
 
 ```python
 engine = AtomicActionEngine(
@@ -317,11 +335,17 @@ entity poses from the current `SceneSnapshot` into copied backend options, then
 calls the skill-specific `_plan()` hook. Individual skills therefore do not
 own dynamic-obstacle parameters or mutate caller-owned motion policies.
 
+For a canonical integration, construct the snapshot provider and collision
+world from one {doc}`SceneRegistry <../scene_registry>`. Direct use of
+`RigidObjectSceneProvider` remains an advanced-core path.
+
 Registration means that an implementation is installed, not that every robot
-can execute it. Required roles, control parts, profiles, and task-state
-preconditions are validated while an invocation is resolved and planned. Agent
-adapters must additionally filter the catalog by `agent_visible` and
-embodiment capability instead of exposing every `engine.actions` entry blindly.
+can execute it. `engine.actions` contains direct-core implementations;
+`engine.skills` contains installed, agent-visible implementations with an
+explicit generic binding contract; and `engine.skill_profile.skills` applies
+embodiment capability filtering. Required task-state preconditions remain
+runtime conditions and are validated while an invocation is resolved and
+planned.
 
 Use invocation `skill_options` whenever behavior varies per call. Two variants
 with the same stable skill ID therefore share one built-in implementation:
@@ -355,10 +379,9 @@ custom_engine.register(MyAction())
 engine.register(CustomPickUp(), replace=True)
 ```
 
-The module-level `register_action()` catalog is only for process-wide extension
-type discovery. It does not mutate existing engines or join their default
-built-in set; instantiate a discovered extension and pass it to
-`engine.register()` explicitly.
+Registration is deliberately engine-local. Construct an extension and pass it
+to `engine.register()` explicitly; there is no separate process-wide catalog
+whose contents can drift from the actions installed in an engine.
 
 ### Implementation and advanced APIs
 
@@ -366,11 +389,14 @@ The similarly named `AtomicAction.plan()` method is not a fourth application
 entry point. It is a framework-owned template method called by the engine after
 resolving an invocation; skill implementations provide `_plan()`:
 
+This is a deliberate hard extension boundary. Defining `plan()` on a subclass
+raises `TypeError` at class definition and has no compatibility adapter. Migrate
+an older custom action by renaming its implementation to `_plan()`.
+
 | API | Intended caller | Behavior |
 |---|---|---|
 | `AtomicAction.plan(request, context)` | `AtomicActionEngine` | Binds the current collision scene into a copied policy, then delegates to `_plan()` |
 | `AtomicAction._plan(request, context)` | Atomic-action implementer | Consumes the prepared immutable `ResolvedActionRequest` and returns an `ActionPlan` |
-| `engine.plan_action(action, invocation, context)` | Extension or isolated test | Temporarily binds and plans an unregistered action instance; built-in parameter variants should use invocation `skill_options` instead |
 | `session.revise_current(invocation)` | Runtime orchestrator or Action Agent | Replaces the active logical call with a newer revision and replans from the latest observed context |
 | `runner.step(effect_success=...)` | Non-blocking controller integration | Observes and dispatches only when the next timed command is due |
 | `runner.run_until_blocked(...)` | Simple blocking application or tutorial | Advances the injected clock until terminal or external effect verification is required |
@@ -508,7 +534,8 @@ while session.status is ExecutionStatus.RUNNING:
 ```
 
 For most applications, use `ExecutionRunner` to keep scheduling and controller
-acknowledgement handling outside the session:
+acknowledgement handling outside the session. The following snippet shows the
+advanced direct-core provider path:
 
 ```python
 scene_provider = RigidObjectSceneProvider({"moving_tray": moving_tray})
@@ -564,16 +591,37 @@ per-environment action scheduling belongs in a higher-level scheduler rather tha
 this atomic-action session.
 
 `SceneProvider.snapshot(timestamp=..., env_ids=...)` is the scene-observation
-boundary. `SceneSnapshot.collision_entity_ids` identifies obstacle poses
-consumed by a planner, while `collision_world_revision` can be global or
-per-environment. `RigidObjectSceneProvider` tracks live simulation objects,
-filters sub-threshold pose noise, and advances those revisions. Its threshold
-baseline is the last materially published pose for each entity/environment, so
-cumulative sub-threshold motion cannot remain hidden indefinitely. Backends opt
-in through `supports_collision_world_updates` and `with_collision_world()`;
+boundary. On the canonical planning path,
+`SceneRegistry.make_planning_scene_provider()` derives an independent provider
+and eagerly validates its collision contract against the motion generator.
+Its snapshots expose canonical registry IDs only.
+The registry owns static identity, aliases, geometry, affordances, hierarchy,
+and collision roles; `SceneSnapshot` owns versioned dynamic pose/confidence and
+collision revisions. Snapshot states are defensively copied on construction and
+public read.
+
+`SceneSnapshot.collision_entity_ids` identifies obstacle poses consumed by a
+planner, while `collision_world_revision` can be global or per-environment.
+Registry-derived providers filter sub-threshold pose noise and advance those
+revisions from the last materially published pose, so cumulative motion cannot
+remain hidden indefinitely. Backends opt in through
+`supports_collision_world_updates` and `with_collision_world()`;
 `MotionGenerator.bind_collision_world()` owns that backend boundary, and cuRobo
 maps the snapshot poses to `CuroboPlanOptions.dynamic_obstacle_poses`. A newer
 revision invalidates only affected rows before synchronized cohort replanning.
+
+`make_planning_scene_provider()` requires two exact canonical-ID agreements:
+the registry's complete `STATIC ∪ DYNAMIC` set must equal the planner's
+complete collision-world set, and the registry, derived provider, and planner
+dynamic subsets must equal one another. It also requires planner update support
+for a non-empty dynamic subset and matching shared or per-environment world
+semantics. A one-environment registry may infer `SHARED`; a multi-environment
+dynamic registry must choose `SHARED` or `PER_ENV` explicitly. External
+perception/hardware providers use
+`validate_collision_integration(..., scene_provider=...)` directly. Plain
+`make_scene_provider()` and `RigidObjectSceneProvider` are perception or
+advanced direct-core paths without eager planner agreement. See
+{doc}`../scene_registry` for setup.
 
 `MotionPolicy.dynamic_collision_mode` controls this live-scene path. `AUTO`
 (the default) consumes collision entities when the selected motion strategy and
@@ -624,10 +672,11 @@ resets the new revision's local recovery counters, emits
 
 ```{attention}
 Automatic dynamic-goal invalidation is dependency-driven. A goal must contain a
-`SceneEntityPose` for the session to track that scene entity. A primitive that
-directly queries a simulation entity during planning will use its latest pose
-when planning happens, but that query alone does not trigger scene-motion
-replanning.
+`SceneEntityPose`, or an object-centric primitive must explicitly declare the
+`ObjectSemantics.entity_id` whose snapshot pose it consumes. `PickUp` and the
+implicit-initial-pose path of coordinated pickup declare that dependency
+automatically. The deprecated live-entity fallback does not trigger
+scene-motion replanning.
 
 Dynamic collision invalidation is provider-driven. Only registered,
 pose-updatable collision entities are supported; adding/removing obstacles or
@@ -640,6 +689,13 @@ changing their geometry requires rebuilding the planner world.
 environment row. Pick, place, handover, and coordinated skills also return an
 uncommitted `StateDelta` describing the attachment state expected after
 execution.
+
+`TaskState.held_objects` uses one `HeldObjectState` per bound manipulator.
+Multi-arm grasps use multiple entries that share the same `ObjectSemantics`;
+there is no parallel coordinated-attachment representation to synchronize.
+Consumers query per-environment active and exclusive-hold masks from that one
+map. A single-arm transport, release, or handover row fails safely while a
+second manipulator still holds the same semantic object or live entity.
 
 At the terminal waypoint, an `ExecutionSession` requests an external
 per-environment verification mask before committing a non-empty effect:
@@ -688,7 +744,7 @@ decision without mutating an in-flight request implicitly.
 
 A new primitive should:
 
-1. define a frozen, action-owned goal dataclass with a stable `goal_kind`;
+1. define a frozen, action-owned goal dataclass;
 2. define a frozen `ActionOptions` subclass only for behavior that can vary per
    invocation;
 3. declare `skill_id`, `GoalType`, `OptionsType`, required semantic roles, and
@@ -696,7 +752,8 @@ A new primitive should:
 4. put reusable embodiment commands on control-part profiles and generic
    motion/recovery choices in invocation policies;
 5. implement side-effect-free `_plan(request, context)` using the engine-owned
-   planning services; do not override the framework-owned public `plan()`;
+   planning services; do not override the framework-owned public `plan()`—the
+   class definition is rejected if it does;
 6. return full-robot timed motion, per-environment planning success, optional
    named segment metadata, diagnostics, and uncommitted effects;
 7. add registration coverage, contract tests, execution/recovery tests, a
@@ -707,6 +764,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
 
 ## Further reading
 
+- {doc}`../scene_registry` — canonical scene identity, snapshots, and collision integration
 - {doc}`../planners/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
