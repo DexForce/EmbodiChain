@@ -4,14 +4,13 @@ Action Engine v2 uses a task-first protocol and executes a direct
 `AtomicAction` graph. The persisted graph is symbolic and coordinate-free;
 simulator geometry is resolved immediately before each action executes.
 
-The phase-one collaboration entry point wraps that existing pipeline with
-three narrow owners:
+The Task Engine entry point wraps that existing pipeline with three narrow
+owners:
 
 1. `TaskAgent` produces three scene-independent `TaskDraft` candidates and
    deterministically derives each `SceneRequest` and `SuccessSpec`.
-2. `SceneAdapter` binds one verified candidate to an existing scene or exact
-   content-addressed `ScenePackage`, producing `SceneManifest`, `RoleBindings`,
-   and a complete `BindingReport`.
+2. `SceneAdapter` binds one verified candidate to a read-only existing scene,
+   producing `SceneManifest`, `RoleBindings`, and a complete `BindingReport`.
 3. `ActionAgent` lowers the selected `GroundedTaskPlan` to the existing
    `action_engine_seed_graph_v3`, performs executable capability preflight,
    runs it through `ProgramExecutor`, and emits a tensor-free
@@ -19,40 +18,40 @@ three narrow owners:
    versions, Git commit/dirty state when available, and structured runtime
    arguments alongside the existing plan and graph hashes.
 
-The public CLI is
-`python -m embodichain.gen_sim.collaboration import-scene|prepare|run`. This
-layer does not modify Scene Engine and continues to publish all legacy bundle
-artifacts for existing runners.
+The public CLI is `embodichain task-engine prepare|run`, equivalently
+`python -m embodichain.gen_sim.task_engine prepare|run`. Source projects are
+referenced in place and integrity-hashed; Task Engine does not copy them into a
+scene package store.
 
 ## Package Ownership
 
-The collaboration workflow is split by ownership rather than nested under
+The cross-engine workflow is owned by Task Engine rather than nested under
 Action Engine:
 
 - `embodichain.gen_sim.task_engine` owns scene-independent interpretation,
   E1-E9 semantic ontology, `TaskDraft`, `SceneRequest`, `SuccessSpec`, and
   `TaskAgent`.
-- `embodichain.gen_sim.scene_engine` remains the existing scene generation
-  subsystem and is not modified by the collaboration workflow.
-- `embodichain.gen_sim.scene_bridge` is the anti-corruption boundary for Scene
-  Engine exports. It owns the richer static manifest and deterministic
-  scene/action feasibility report without changing Scene Engine schemas.
+- `embodichain.gen_sim.scene_engine` remains the scene generation subsystem and
+  exposes auditable image-understanding, materialization, edit-understanding,
+  and edit-materialization stages.
+- `embodichain.gen_sim.task_engine.scene` owns Scene Engine adaptation, the
+  richer static manifest, and deterministic scene/action feasibility reports.
 - `embodichain.gen_sim.action_engine.agent` owns `ActionAgent`; Action Engine's
   existing `domain`, `planning`, and `runtime` packages remain authoritative
   for graph compilation and execution.
-- `embodichain.gen_sim.collaboration` owns cross-engine contracts, scene
-  adaptation, the content-addressed scene store, orchestration, artifacts, and
-  the unified CLI.
+- `embodichain.gen_sim.task_engine.orchestration` owns cross-engine contracts,
+  read-only source references, scene adaptation, orchestration, and artifacts.
+  `embodichain.gen_sim.task_engine.cli` owns the unified CLI.
 
-The former `embodichain.gen_sim.action_engine.collaboration` namespace is a
-deprecated import bridge. It contains no workflow implementation and may be
-removed after downstream callers migrate to the owning packages above.
+The former `scene_bridge`, `collaboration`, and
+`action_engine.collaboration` namespaces were removed; there are no import
+bridges or fallback entry points.
 
 ## Data Flow
 
 1. `TaskFactory` or a caller creates a validated `TaskSpec`.
 2. Action Engine emits `SceneRequirements` for the external Scene Engine.
-3. After scene generation, Scene Bridge preserves geometry, physics,
+3. After scene generation, Task Engine's scene adapter preserves geometry, physics,
    articulation, affordance evidence, and provenance in a versioned
    `StaticSceneManifest` while the existing redacted manifest remains compatible.
 4. `FeasibilityBroker` intersects the selected task, role bindings, static scene,

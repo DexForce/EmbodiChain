@@ -80,6 +80,7 @@ class SceneEngineV1Adapter:
                 "source": {
                     "adapter": f"{type(self).__module__}.{type(self).__qualname__}",
                     "config_path": source_path.expanduser().resolve().as_posix(),
+                    "config_sha256": _file_hash(source_path),
                     "asset_hashes": asset_hashes,
                 },
                 "adapter_capabilities": {
@@ -232,3 +233,10 @@ def _canonical_hash(value: Any) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _file_hash(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        return ""
+    return hashlib.sha256(resolved.read_bytes()).hexdigest()

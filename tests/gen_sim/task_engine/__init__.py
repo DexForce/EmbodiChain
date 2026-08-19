@@ -14,6 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for the first collaboration workflow."""
+"""Tests for Task Engine semantics and orchestration."""
 
 from __future__ import annotations

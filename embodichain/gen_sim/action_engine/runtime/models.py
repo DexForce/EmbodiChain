@@ -236,10 +236,10 @@ class ExecutionResult(Sequence[torch.Tensor]):
 
 @dataclass(frozen=True)
 class ExecutionReport:
-    """JSON-safe collaboration result built from an ``ExecutionResult``.
+    """JSON-safe Task Engine result built from an ``ExecutionResult``.
 
     The runtime result deliberately keeps tensors because the legacy demo
-    runner consumes them.  The collaboration boundary instead exposes only a
+    runner consumes them.  The Task Engine boundary instead exposes only a
     compact, serializable audit view and never retains the action tensors.
     """
 

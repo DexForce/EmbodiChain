@@ -14,14 +14,4 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Module entry point for the Gen Sim collaboration workflow."""
-
-from __future__ import annotations
-
-from .cli import main
-
-__all__ = ["main"]
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+"""Tests for Task Engine cross-engine orchestration."""

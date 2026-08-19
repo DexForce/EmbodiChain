@@ -57,6 +57,11 @@ COMMANDS = (
         help="Generate a scene export from an input image using gen_sim/.env.",
     ),
     Command(
+        name="task-engine",
+        target="embodichain.gen_sim.task_engine.cli:main",
+        help="Prepare and run a cross-engine task workflow.",
+    ),
+    Command(
         name="preview-scene",
         target="embodichain.gen_sim.scene_engine.cli.preview:main",
         help="Preview a generated Scene Engine scene export.",

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""End-to-end orchestration for the first three-agent collaboration phase."""
+"""End-to-end Task Engine preparation for an existing scene source."""
 
 from __future__ import annotations
 
@@ -45,13 +45,13 @@ from embodichain.gen_sim.task_engine import (
     TaskCandidateSet,
     validate_task_candidate,
 )
-from embodichain.gen_sim.scene_bridge import FeasibilityBroker, FeasibilityReport
+from embodichain.gen_sim.task_engine.scene import FeasibilityBroker, FeasibilityReport
 
 from .artifacts import (
     ArtifactTransaction,
-    CollaborationArtifactPaths,
-    collaboration_artifact_paths,
-    write_collaboration_artifacts,
+    TaskEngineArtifactPaths,
+    task_engine_artifact_paths,
+    write_task_engine_artifacts,
     write_preparation_failure,
 )
 from .contracts import (
@@ -64,11 +64,10 @@ from .contracts import (
     validate_role_bindings,
 )
 from .scene_adapter import SceneAdaptation, SceneAdapter
-from .scene_store import ScenePackageRef, SceneSourceRef
+from .scene_source import SceneSourceRef
 
 __all__ = [
-    "CollaborationCoordinator",
-    "Coordinator",
+    "TaskEngineCoordinator",
     "PreparationResult",
     "build_grounded_task_plan",
     "lower_task_candidate",
@@ -120,7 +119,7 @@ class PreparationResult:
     output_dir: Path
     candidate_set: TaskCandidateSet
     adaptation: SceneAdaptation
-    collaboration_artifacts: CollaborationArtifactPaths
+    artifacts: TaskEngineArtifactPaths
     grounded_task_plan: GroundedTaskPlan | None = None
     action_graph: dict[str, Any] | None = None
     generated_paths: GeneratedConfigPaths | None = None
@@ -146,7 +145,7 @@ class _PlannedCandidate:
     action_graph: dict[str, Any]
 
 
-class CollaborationCoordinator:
+class TaskEngineCoordinator:
     """Run Task Agent, Scene Adapter, and Action Agent as one transaction."""
 
     def __init__(
@@ -168,7 +167,7 @@ class CollaborationCoordinator:
         self,
         task_id: str,
         instruction: str,
-        source: SceneSourceRef | ScenePackageRef | str | Path,
+        source: SceneSourceRef | str | Path,
         output_dir: str | Path,
         *,
         model: str | None = None,
@@ -181,7 +180,7 @@ class CollaborationCoordinator:
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
     ) -> PreparationResult:
-        """Prepare and atomically publish a collaboration-compatible bundle.
+        """Prepare and atomically publish a Task Engine bundle.
 
         Ambiguous and unsatisfied scene adaptations are valid terminal results.
         They publish the complete audit hand-off but never publish a TaskSpec,
@@ -201,13 +200,14 @@ class CollaborationCoordinator:
             status = str(adaptation.binding_report["status"])
 
             if status != "bound":
-                write_collaboration_artifacts(
+                write_task_engine_artifacts(
                     staging_dir,
                     candidate_set=candidate_set,
                     scene_manifest=None,
                     role_bindings=None,
                     binding_report=adaptation.binding_report,
                     static_scene_manifest=adaptation.static_scene_manifest,
+                    conservative_scene_graph=adaptation.conservative_scene_graph,
                 )
                 published = transaction.commit()
                 return PreparationResult(
@@ -215,7 +215,7 @@ class CollaborationCoordinator:
                     output_dir=published,
                     candidate_set=deepcopy(candidate_set),
                     adaptation=adaptation,
-                    collaboration_artifacts=collaboration_artifact_paths(published),
+                    artifacts=task_engine_artifact_paths(published),
                 )
 
             selected = adaptation.selected_candidate
@@ -247,13 +247,14 @@ class CollaborationCoordinator:
                 feasibility_report is not None
                 and feasibility_report["status"] == "contradicted"
             ):
-                write_collaboration_artifacts(
+                write_task_engine_artifacts(
                     staging_dir,
                     candidate_set=candidate_set,
                     scene_manifest=adaptation.scene_manifest,
                     role_bindings=raw_role_bindings,
                     binding_report=adaptation.binding_report,
                     static_scene_manifest=adaptation.static_scene_manifest,
+                    conservative_scene_graph=adaptation.conservative_scene_graph,
                     feasibility_report=feasibility_report,
                 )
                 published = transaction.commit()
@@ -262,7 +263,7 @@ class CollaborationCoordinator:
                     output_dir=published,
                     candidate_set=deepcopy(candidate_set),
                     adaptation=adaptation,
-                    collaboration_artifacts=collaboration_artifact_paths(published),
+                    artifacts=task_engine_artifact_paths(published),
                     feasibility_report=deepcopy(feasibility_report),
                 )
             robot_profile = str(adaptation.scene_manifest["robot_profile"])
@@ -275,13 +276,14 @@ class CollaborationCoordinator:
                 robot_profile=robot_profile,
             )
             if planned is None:
-                write_collaboration_artifacts(
+                write_task_engine_artifacts(
                     staging_dir,
                     candidate_set=candidate_set,
                     scene_manifest=adaptation.scene_manifest,
                     role_bindings=raw_role_bindings,
                     binding_report=adaptation.binding_report,
                     static_scene_manifest=adaptation.static_scene_manifest,
+                    conservative_scene_graph=adaptation.conservative_scene_graph,
                     feasibility_report=feasibility_report,
                 )
                 write_preparation_failure(
@@ -300,7 +302,7 @@ class CollaborationCoordinator:
                     output_dir=published,
                     candidate_set=deepcopy(candidate_set),
                     adaptation=adaptation,
-                    collaboration_artifacts=collaboration_artifact_paths(published),
+                    artifacts=task_engine_artifact_paths(published),
                     feasibility_report=deepcopy(feasibility_report),
                 )
 
@@ -331,7 +333,7 @@ class CollaborationCoordinator:
                 generator_kwargs["max_episodes"] = max_episodes
             if max_episode_steps is not None:
                 generator_kwargs["max_episode_steps"] = max_episode_steps
-            compatibility_input = staging_dir / ".collaboration_input"
+            compatibility_input = staging_dir / ".task_engine_input"
             compatibility_input.mkdir()
             task_spec_path = compatibility_input / "task_spec.json"
             requirements_path = compatibility_input / "scene_requirements.json"
@@ -350,7 +352,7 @@ class CollaborationCoordinator:
             finally:
                 shutil.rmtree(compatibility_input, ignore_errors=True)
             _require_matching_generated_graph(generated, action_graph)
-            write_collaboration_artifacts(
+            write_task_engine_artifacts(
                 staging_dir,
                 candidate_set=candidate_set,
                 scene_manifest=adaptation.scene_manifest,
@@ -358,6 +360,7 @@ class CollaborationCoordinator:
                 binding_report=adaptation.binding_report,
                 grounded_task_plan=grounded_plan,
                 static_scene_manifest=adaptation.static_scene_manifest,
+                conservative_scene_graph=adaptation.conservative_scene_graph,
                 feasibility_report=feasibility_report,
             )
             published = transaction.commit()
@@ -366,7 +369,7 @@ class CollaborationCoordinator:
                 output_dir=published,
                 candidate_set=deepcopy(candidate_set),
                 adaptation=adaptation,
-                collaboration_artifacts=collaboration_artifact_paths(published),
+                artifacts=task_engine_artifact_paths(published),
                 grounded_task_plan=grounded_plan,
                 action_graph=deepcopy(action_graph),
                 generated_paths=artifact_paths(
@@ -595,18 +598,11 @@ class CollaborationCoordinator:
 
     @staticmethod
     def _coerce_source(
-        source: SceneSourceRef | ScenePackageRef | str | Path,
-    ) -> SceneSourceRef | ScenePackageRef:
-        if isinstance(source, (SceneSourceRef, ScenePackageRef)):
+        source: SceneSourceRef | str | Path,
+    ) -> SceneSourceRef:
+        if isinstance(source, SceneSourceRef):
             return source
         path = Path(source).expanduser()
-        text = str(source).strip().lower()
-        if (
-            not path.exists()
-            and len(text) == 64
-            and all(char in "0123456789abcdef" for char in text)
-        ):
-            return ScenePackageRef(text)
         return SceneSourceRef(path)
 
 
@@ -666,9 +662,6 @@ def _candidate_failure(
 
 
 # Short public name used in the phase-one design document.
-Coordinator = CollaborationCoordinator
-
-
 def build_grounded_task_plan(
     *,
     candidate: Mapping[str, Any],
@@ -779,7 +772,7 @@ def _require_matching_generated_graph(
     graph_path = getattr(generated, "seed_task_graph", None)
     if graph_path is None or not Path(graph_path).is_file():
         # Injected generators used by API consumers may publish by other means.
-        # The Coordinator's independently planned graph remains authoritative.
+        # Task Engine's independently planned graph remains authoritative.
         return
     try:
         actual = json.loads(Path(graph_path).read_text(encoding="utf-8"))

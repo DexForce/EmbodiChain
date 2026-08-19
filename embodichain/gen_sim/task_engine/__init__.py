@@ -58,6 +58,24 @@ from .ontology import (
     task_contract,
     task_success_type,
 )
+from .config import TaskEngineWorkflowCfg
+from .state_machine import (
+    StageStatus,
+    TaskEngineState,
+    WorkflowStage,
+    complete_stage,
+    fail_stage,
+    initial_state,
+    skip_stage,
+    start_stage,
+)
+from .workflow_contracts import (
+    TASK_RUN_REQUEST_SCHEMA,
+    SceneInputKind,
+    TaskRunRequest,
+    scene_input_kind,
+    validate_task_run_request,
+)
 
 __all__ = [
     "INSTRUCTION_INTENT_SCHEMA",
@@ -80,16 +98,30 @@ __all__ = [
     "TaskContract",
     "TaskDraft",
     "TaskGenerationError",
+    "TASK_RUN_REQUEST_SCHEMA",
+    "SceneInputKind",
+    "StageStatus",
+    "TaskEngineState",
+    "TaskEngineWorkflowCfg",
+    "TaskRunRequest",
+    "WorkflowStage",
     "canonical_hash",
     "derive_scene_request",
     "derive_success_spec",
+    "complete_stage",
+    "fail_stage",
+    "initial_state",
     "interpret_instruction_draft",
     "task_contract",
     "task_success_type",
+    "scene_input_kind",
+    "skip_stage",
+    "start_stage",
     "validate_instruction_intent",
     "validate_scene_request",
     "validate_success_spec",
     "validate_task_candidate",
     "validate_task_candidate_set",
     "validate_task_draft",
+    "validate_task_run_request",
 ]

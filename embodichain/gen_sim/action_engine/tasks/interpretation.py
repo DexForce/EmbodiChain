@@ -117,7 +117,7 @@ def ground_instruction_draft(
     robot_profile: str,
     reference_bindings: Mapping[str, Sequence[str]],
 ) -> GroundedTaskSpec:
-    """Lower a Task Engine draft using verified collaboration bindings."""
+    """Lower a Task Engine draft using verified scene bindings."""
     normalized_task_id = str(task_id).strip()
     normalized_instruction = str(instruction).strip()
     if not normalized_task_id or not normalized_instruction:

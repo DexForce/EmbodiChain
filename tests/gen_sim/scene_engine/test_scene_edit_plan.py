@@ -115,6 +115,7 @@ def test_scene_edit_plan_accepts_add_without_a_position() -> None:
             "category": "cup",
             "name": "green cup",
             "description": "A small green ceramic cup.",
+            "orientation_state": None,
         }
     ]
 
@@ -159,6 +160,7 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
                 "category": "orange",
                 "name": "small_orange",
                 "description": "A small round orange with a textured peel.",
+                "orientation_state": None,
             },
             {
                 "op": "add",
@@ -169,6 +171,7 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
                 "category": "orange",
                 "name": "small_orange",
                 "description": "A small round orange with a textured peel.",
+                "orientation_state": None,
             },
         ]
     }

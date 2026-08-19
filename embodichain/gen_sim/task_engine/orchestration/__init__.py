@@ -14,21 +14,21 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Cross-engine orchestration for task, scene, and action owners."""
+"""Task-owned orchestration across task, scene, and action engines."""
 
 from __future__ import annotations
 
 from embodichain.gen_sim.action_engine.agent import ActionAgent, ActionGraph
 from embodichain.gen_sim.action_engine.runtime import ExecutionReport
-from embodichain.gen_sim.task_engine import TaskAgent, TaskGenerationError
 
 from .artifacts import (
     ArtifactTransaction,
-    CollaborationArtifactPaths,
+    CONSERVATIVE_SCENE_GRAPH_FILENAME,
+    TaskEngineArtifactPaths,
     FEASIBILITY_REPORT_FILENAME,
     PREPARATION_FAILURE_FILENAME,
     STATIC_SCENE_MANIFEST_FILENAME,
-    collaboration_artifact_paths,
+    task_engine_artifact_paths,
     write_execution_report,
     write_preparation_failure,
 )
@@ -44,37 +44,35 @@ from .contracts import (
     SceneManifest,
 )
 from .coordinator import (
-    CollaborationCoordinator,
-    Coordinator,
+    TaskEngineCoordinator,
     PreparationResult,
     build_grounded_task_plan,
     lower_task_candidate,
 )
 from .scene_adapter import SceneAdaptation, SceneAdapter, SceneAdapterProtocolError
-from .scene_store import (
-    ScenePackageCorruptError,
-    ScenePackageNotFoundError,
-    ScenePackageRef,
-    ScenePackageStore,
+from .scene_source import (
+    SceneSourceFingerprint,
     SceneSourceRef,
+    fingerprint_scene_source,
+    verify_scene_source_fingerprint,
 )
 
 __all__ = [
     "ActionAgent",
     "ActionGraph",
     "ArtifactTransaction",
+    "CONSERVATIVE_SCENE_GRAPH_FILENAME",
     "BINDING_REPORT_SCHEMA",
     "BindingReport",
-    "CollaborationArtifactPaths",
-    "CollaborationCoordinator",
-    "Coordinator",
+    "TaskEngineArtifactPaths",
+    "TaskEngineCoordinator",
     "EXECUTION_REPORT_SCHEMA",
     "ExecutionReport",
     "FEASIBILITY_REPORT_FILENAME",
     "GROUNDED_TASK_PLAN_SCHEMA",
     "GroundedTaskPlan",
-    "PreparationResult",
     "PREPARATION_FAILURE_FILENAME",
+    "PreparationResult",
     "ROLE_BINDINGS_SCHEMA",
     "RoleBindings",
     "SCENE_MANIFEST_SCHEMA",
@@ -83,15 +81,12 @@ __all__ = [
     "SceneAdapter",
     "SceneAdapterProtocolError",
     "SceneManifest",
-    "ScenePackageCorruptError",
-    "ScenePackageNotFoundError",
-    "ScenePackageRef",
-    "ScenePackageStore",
+    "SceneSourceFingerprint",
     "SceneSourceRef",
-    "TaskAgent",
-    "TaskGenerationError",
     "build_grounded_task_plan",
-    "collaboration_artifact_paths",
+    "task_engine_artifact_paths",
+    "fingerprint_scene_source",
+    "verify_scene_source_fingerprint",
     "lower_task_candidate",
     "write_execution_report",
     "write_preparation_failure",

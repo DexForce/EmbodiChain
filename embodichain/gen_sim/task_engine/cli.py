@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""CLI for collaboration preparation and execution."""
+"""CLI for Task Engine preparation and execution."""
 
 from __future__ import annotations
 
@@ -34,11 +34,16 @@ from embodichain.gen_sim.action_engine.protocol import (
 from embodichain.gen_sim.action_engine.runtime import ExecutionReport
 from embodichain.gen_sim.action_engine.agent import ActionAgent
 
-from .artifacts import GROUNDED_TASK_PLAN_FILENAME, write_execution_report
-from .contracts import validate_grounded_task_plan
-from .coordinator import CollaborationCoordinator
-from .scene_adapter import SceneAdapter
-from .scene_store import ScenePackageRef, ScenePackageStore, SceneSourceRef
+from .orchestration.artifacts import (
+    GROUNDED_TASK_PLAN_FILENAME,
+    STATIC_SCENE_MANIFEST_FILENAME,
+    write_execution_report,
+)
+from .orchestration.contracts import validate_grounded_task_plan
+from .orchestration.coordinator import TaskEngineCoordinator
+from .orchestration.scene_adapter import SceneAdapter
+from .orchestration.scene_source import SceneSourceRef
+from .orchestration.scene_source import verify_scene_source_fingerprint
 
 __all__ = ["build_parser", "main"]
 
@@ -55,20 +60,12 @@ _PREPARED_RUN_ARGS = ("--filter_dataset_saving", "--headless")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the Gen Sim collaboration parser."""
+    """Build the Task Engine parser."""
     parser = argparse.ArgumentParser(
-        prog="python -m embodichain.gen_sim.collaboration",
-        description="Prepare and run a three-agent collaboration task.",
+        prog="embodichain task-engine",
+        description="Prepare and run a Task Engine workflow.",
     )
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
-
-    import_parser = subparsers.add_parser(
-        "import-scene",
-        help="Import an exact scene and its assets into the local Data Bank.",
-    )
-    import_parser.add_argument("--scene", required=True)
-    import_parser.add_argument("--data-bank", default=None)
-    _add_scene_policy_arguments(import_parser)
 
     prepare_parser = subparsers.add_parser(
         "prepare",
@@ -78,11 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
     instruction = prepare_parser.add_mutually_exclusive_group(required=True)
     instruction.add_argument("--instruction")
     instruction.add_argument("--task-file", "--task_file")
-    source = prepare_parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--scene")
-    source.add_argument("--scene-package", "--scene_package")
+    prepare_parser.add_argument("--scene", required=True)
     prepare_parser.add_argument("--output", "--output-dir", required=True)
-    prepare_parser.add_argument("--data-bank", default=None)
     prepare_parser.add_argument("--model", default=None)
     prepare_parser.add_argument("--vlm-model", default=None)
     prepare_parser.add_argument("--candidate-count", type=int, default=3)
@@ -112,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch one collaboration command without retaining global argv state."""
+    """Dispatch one Task Engine command without retaining global argv state."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     if arguments and arguments[0] == "run":
@@ -120,35 +114,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.run_args.extend(forwarded)
     else:
         args = parser.parse_args(arguments)
-    if args.subcommand == "import-scene":
-        return _import_scene(args)
     if args.subcommand == "prepare":
         return _prepare(args)
     if args.subcommand == "run":
         return _run(args)
-    raise AssertionError(f"Unknown gen-sim-task command: {args.subcommand}")
-
-
-def _import_scene(args: argparse.Namespace) -> int:
-    store = ScenePackageStore(args.data_bank)
-    package = store.import_scene(
-        SceneSourceRef(
-            args.scene,
-            robot_profile=args.robot_profile,
-            z_rotation_degrees=args.source_scene_z_rotation_degrees,
-            body_scale_policy=args.body_scale_policy,
-            body_scale=tuple(args.body_scale),
-        )
-    )
-    _print_json(
-        {
-            "status": "imported",
-            "package_id": package.package_id,
-            "package_path": str(package.package_path),
-            "config_path": str(package.config_path),
-        }
-    )
-    return 0
+    raise AssertionError(f"Unknown Task Engine command: {args.subcommand}")
 
 
 def _prepare(args: argparse.Namespace) -> int:
@@ -159,26 +129,18 @@ def _prepare(args: argparse.Namespace) -> int:
     )
     if not instruction:
         raise ValueError("Task instruction must not be empty.")
-    store = ScenePackageStore(args.data_bank)
     adapter = SceneAdapter(
-        store=store,
         model=args.model,
         robot_profile=args.robot_profile,
     )
-    coordinator = CollaborationCoordinator(scene_adapter=adapter)
-    if args.scene_package:
-        source: SceneSourceRef | ScenePackageRef = ScenePackageRef(
-            args.scene_package,
-            robot_profile=args.robot_profile,
-        )
-    else:
-        source = SceneSourceRef(
-            args.scene,
-            robot_profile=args.robot_profile,
-            z_rotation_degrees=args.source_scene_z_rotation_degrees,
-            body_scale_policy=args.body_scale_policy,
-            body_scale=tuple(args.body_scale),
-        )
+    coordinator = TaskEngineCoordinator(scene_adapter=adapter)
+    source = SceneSourceRef(
+        args.scene,
+        robot_profile=args.robot_profile,
+        z_rotation_degrees=args.source_scene_z_rotation_degrees,
+        body_scale_policy=args.body_scale_policy,
+        body_scale=tuple(args.body_scale),
+    )
     result = coordinator.prepare(
         args.task_id,
         instruction,
@@ -201,13 +163,11 @@ def _prepare(args: argparse.Namespace) -> int:
             "selected_candidate_id": result.selected_candidate_id,
             "output_dir": str(result.output_dir),
             "grounded_task_plan": (
-                str(result.collaboration_artifacts.grounded_task_plan)
-                if result.bound
-                else None
+                str(result.artifacts.grounded_task_plan) if result.bound else None
             ),
             "preparation_failure": (
-                str(result.collaboration_artifacts.preparation_failure)
-                if result.collaboration_artifacts.preparation_failure.is_file()
+                str(result.artifacts.preparation_failure)
+                if result.artifacts.preparation_failure.is_file()
                 else None
             ),
             "run_command": (
@@ -257,7 +217,7 @@ def _run(args: argparse.Namespace) -> int:
         str(gym_config),
         "--agent_config",
         str(agent_config),
-        "--collaboration-report",
+        "--task-engine-report",
         *forwarded,
     ]
     from embodichain.gen_sim.action_engine.cli import run_agent
@@ -274,6 +234,14 @@ def _preflight_bundle(
     forwarded: Sequence[str],
 ) -> ExecutionReport | None:
     """Return a rejected report, or ``None`` when the graph is executable."""
+    static_manifest_path = bundle / STATIC_SCENE_MANIFEST_FILENAME
+    if static_manifest_path.is_file():
+        static_manifest = _read_json(static_manifest_path)
+        source = static_manifest.get("source", {})
+        if isinstance(source, dict) and isinstance(
+            source.get("source_fingerprint"), dict
+        ):
+            verify_scene_source_fingerprint(source["source_fingerprint"])
     grounded_path = bundle / GROUNDED_TASK_PLAN_FILENAME
     if not grounded_path.is_file():
         return None
@@ -333,12 +301,12 @@ def _bundle_task_id(bundle: Path, agent_config: Path) -> str:
 
 
 def _bundle_run_command(bundle: str | Path) -> str:
-    """Return a shell-safe command for the next collaboration stage."""
+    """Return a shell-safe command for the next Task Engine stage."""
     return shlex.join(
         [
             "python",
             "-m",
-            "embodichain.gen_sim.collaboration",
+            "embodichain.gen_sim.task_engine",
             "run",
             "--bundle",
             str(Path(bundle).expanduser().resolve()),

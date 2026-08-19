@@ -45,9 +45,12 @@ from embodichain.gen_sim.task_engine import TaskCandidate, TaskCandidateSet
 from embodichain.gen_sim.task_engine.interpretation import (
     _default_instruction_caller,
 )
-from embodichain.gen_sim.scene_bridge import (
+from embodichain.gen_sim.task_engine.scene import (
+    ConservativeSceneGraph,
     SceneEngineV1Adapter,
     StaticSceneManifest,
+    build_conservative_scene_graph,
+    validate_static_scene_manifest,
 )
 
 from .contracts import (
@@ -63,7 +66,7 @@ from .contracts import (
     validate_task_candidate,
     validate_task_candidate_set,
 )
-from .scene_store import ScenePackageRef, ScenePackageStore, SceneSourceRef
+from .scene_source import SceneSourceRef, fingerprint_scene_source
 
 __all__ = [
     "Adjudicator",
@@ -133,7 +136,7 @@ class SceneAdaptation:
     selected_candidate: TaskCandidate | None
     prepared_scene: PreparedScene
     source_config_path: Path
-    scene_package: ScenePackageRef | None = None
+    conservative_scene_graph: ConservativeSceneGraph
     static_scene_manifest: StaticSceneManifest | None = None
     candidate_bindings: dict[str, RoleBindings] = field(default_factory=dict)
 
@@ -158,31 +161,30 @@ class SceneAdapter:
     def __init__(
         self,
         *,
-        store: ScenePackageStore | None = None,
         model: str | None = None,
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,
         robot_profile: str = "franka",
-        scene_bridge: SceneEngineV1Adapter | None = None,
+        scene_engine_adapter: SceneEngineV1Adapter | None = None,
     ) -> None:
-        self.store = store or ScenePackageStore()
         self.model = model
         self.grounding_caller = grounding_caller
         self.adjudicator = adjudicator
         self.robot_profile = robot_profile
-        self.scene_bridge = scene_bridge or SceneEngineV1Adapter()
+        self.scene_engine_adapter = scene_engine_adapter or SceneEngineV1Adapter()
 
     def adapt(
         self,
         candidate_set: TaskCandidateSet | Sequence[Mapping[str, Any]],
-        source: SceneSourceRef | ScenePackageRef | str | Path,
+        source: SceneSourceRef | str | Path,
         *,
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,
     ) -> SceneAdaptation:
         """Ground all candidates, then deterministically choose a bindable one."""
         task_id, instruction, candidates = _coerce_candidates(candidate_set)
-        source_ref, package_ref = self._resolve_source(source)
+        source_ref = self._resolve_source(source)
+        source_fingerprint = fingerprint_scene_source(source_ref)
         prepared = prepare_scene(
             source_ref.path,
             z_rotation_degrees=source_ref.z_rotation_degrees,
@@ -199,11 +201,19 @@ class SceneAdapter:
             inventory,
             source_format=resolved_source.source_format,
         )
-        static_manifest = self.scene_bridge.adapt_prepared_scene(
+        static_manifest = self.scene_engine_adapter.adapt_prepared_scene(
             prepared,
             source_format=resolved_source.source_format,
             robot_profile=inventory.profile,
         )
+        static_manifest["source"]["source_fingerprint"] = source_fingerprint.to_dict()
+        static_manifest = validate_static_scene_manifest(static_manifest)
+        conservative_scene_graph = build_conservative_scene_graph(
+            prepared,
+            scene_id=static_manifest["scene_id"],
+        )
+        if fingerprint_scene_source(source_ref) != source_fingerprint:
+            raise RuntimeError("Source Gym project changed while it was being adapted.")
 
         invoke = grounding_caller or self.grounding_caller
         use_default_adjudicator = invoke is None
@@ -276,32 +286,18 @@ class SceneAdapter:
             selected_candidate=selected,
             prepared_scene=prepared,
             source_config_path=prepared.source_config_path,
-            scene_package=package_ref,
+            conservative_scene_graph=conservative_scene_graph,
             static_scene_manifest=static_manifest,
             candidate_bindings=candidate_bindings,
         )
 
     def _resolve_source(
         self,
-        source: SceneSourceRef | ScenePackageRef | str | Path,
-    ) -> tuple[SceneSourceRef, ScenePackageRef | None]:
-        if isinstance(source, ScenePackageRef):
-            loaded = self.store.load(source)
-            if loaded.config_path is None:
-                raise AssertionError("Verified scene package has no config path.")
-            return (
-                SceneSourceRef(
-                    loaded.config_path,
-                    robot_profile=loaded.robot_profile or self.robot_profile,
-                    z_rotation_degrees=loaded.z_rotation_degrees,
-                    body_scale_policy=loaded.body_scale_policy,
-                    body_scale=loaded.body_scale,
-                ),
-                loaded,
-            )
+        source: SceneSourceRef | str | Path,
+    ) -> SceneSourceRef:
         if isinstance(source, SceneSourceRef):
-            return source, None
-        return SceneSourceRef(source, robot_profile=self.robot_profile), None
+            return source
+        return SceneSourceRef(source, robot_profile=self.robot_profile)
 
 
 def _coerce_candidates(

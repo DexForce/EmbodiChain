@@ -14,8 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Guard ownership boundaries for the three-engine collaboration layout."""
-
 from __future__ import annotations
 
 import ast
@@ -23,28 +21,36 @@ from pathlib import Path
 
 import embodichain.gen_sim as gen_sim_package
 from embodichain.gen_sim.action_engine.agent import ActionAgent
-from embodichain.gen_sim.action_engine.collaboration.action_agent import (
-    ActionAgent as LegacyActionAgent,
-)
-from embodichain.gen_sim.action_engine.collaboration.task_agent import (
-    TaskAgent as LegacyTaskAgent,
-)
-from embodichain.gen_sim.collaboration.scene_adapter import SceneAdapter
-from embodichain.gen_sim.collaboration import __main__ as collaboration_main
-from embodichain.gen_sim.collaboration import cli as collaboration_cli
 from embodichain.gen_sim.task_engine import TaskAgent
+from embodichain.gen_sim.task_engine import __main__ as task_engine_main
+from embodichain.gen_sim.task_engine import cli as task_engine_cli
+from embodichain.gen_sim.task_engine.orchestration.coordinator import (
+    TaskEngineCoordinator,
+)
+from embodichain.gen_sim.task_engine.orchestration.scene_adapter import SceneAdapter
 
 _GEN_SIM_ROOT = Path(gen_sim_package.__file__).resolve().parent
+_PURE_TASK_MODULES = (
+    "agent.py",
+    "config.py",
+    "contracts.py",
+    "interpretation.py",
+    "ontology.py",
+    "state_machine.py",
+    "workflow_contracts.py",
+)
 
 
-def test_task_engine_has_no_action_scene_or_collaboration_imports() -> None:
+def test_task_semantic_core_does_not_import_scene_action_or_orchestration() -> None:
     forbidden = {
         "embodichain.gen_sim.action_engine",
         "embodichain.gen_sim.scene_engine",
-        "embodichain.gen_sim.collaboration",
+        "embodichain.gen_sim.task_engine.orchestration",
+        "embodichain.gen_sim.task_engine.scene",
     }
     offenders: list[str] = []
-    for path in sorted((_GEN_SIM_ROOT / "task_engine").glob("*.py")):
+    for filename in _PURE_TASK_MODULES:
+        path = _GEN_SIM_ROOT / "task_engine" / filename
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -58,21 +64,27 @@ def test_task_engine_has_no_action_scene_or_collaboration_imports() -> None:
                 for module in modules
                 for prefix in forbidden
             ):
-                offenders.append(path.name)
+                offenders.append(filename)
                 break
     assert offenders == []
 
 
-def test_public_agents_and_adapter_live_under_their_owning_packages() -> None:
+def test_cross_engine_owners_are_explicit() -> None:
     assert TaskAgent.__module__ == "embodichain.gen_sim.task_engine.agent"
     assert ActionAgent.__module__ == "embodichain.gen_sim.action_engine.agent"
-    assert SceneAdapter.__module__ == "embodichain.gen_sim.collaboration.scene_adapter"
+    assert SceneAdapter.__module__.startswith(
+        "embodichain.gen_sim.task_engine.orchestration"
+    )
+    assert TaskEngineCoordinator.__module__.startswith(
+        "embodichain.gen_sim.task_engine.orchestration"
+    )
 
 
-def test_legacy_collaboration_agent_imports_preserve_class_identity() -> None:
-    assert LegacyTaskAgent is TaskAgent
-    assert LegacyActionAgent is ActionAgent
+def test_task_engine_owns_its_module_entry_point() -> None:
+    assert task_engine_main.main is task_engine_cli.main
 
 
-def test_collaboration_owns_its_module_entry_point() -> None:
-    assert collaboration_main.main is collaboration_cli.main
+def test_legacy_cross_engine_packages_are_deleted() -> None:
+    assert not (_GEN_SIM_ROOT / "scene_bridge").exists()
+    assert not (_GEN_SIM_ROOT / "collaboration").exists()
+    assert not (_GEN_SIM_ROOT / "action_engine" / "collaboration").exists()

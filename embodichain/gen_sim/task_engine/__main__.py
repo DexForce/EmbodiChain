@@ -14,8 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Deprecated import bridge for the top-level scene package store."""
+"""Module entry point for Task Engine workflows."""
 
 from __future__ import annotations
 
-from embodichain.gen_sim.collaboration.scene_store import *  # noqa: F401,F403
+from .cli import main
+
+__all__ = ["main"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

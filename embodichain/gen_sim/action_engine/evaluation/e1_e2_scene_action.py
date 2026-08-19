@@ -40,7 +40,10 @@ from embodichain.gen_sim.action_engine.capabilities import (
 )
 from embodichain.gen_sim.action_engine.domain.task_contracts import TASK_CONTRACTS
 from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
-from embodichain.gen_sim.scene_bridge import FeasibilityBroker, SceneEngineV1Adapter
+from embodichain.gen_sim.task_engine.scene import (
+    FeasibilityBroker,
+    SceneEngineV1Adapter,
+)
 
 __all__ = ["BenchmarkResult", "run_benchmark"]
 

@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-import embodichain.gen_sim.collaboration.scene_adapter as scene_adapter_module
+import embodichain.gen_sim.task_engine.orchestration.scene_adapter as scene_adapter_module
 from embodichain.gen_sim.task_engine.contracts import (
     SCENE_REQUEST_SCHEMA,
     SUCCESS_SPEC_SCHEMA,
@@ -30,15 +30,14 @@ from embodichain.gen_sim.task_engine.contracts import (
     TASK_DRAFT_SCHEMA,
     canonical_hash,
 )
-from embodichain.gen_sim.collaboration.scene_adapter import (
+from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     SceneAdapter,
     SceneAdapterProtocolError,
 )
-from embodichain.gen_sim.collaboration.scene_store import (
-    ScenePackageCorruptError,
-    ScenePackageRef,
-    ScenePackageStore,
+from embodichain.gen_sim.task_engine.orchestration.scene_source import (
     SceneSourceRef,
+    fingerprint_scene_source,
+    verify_scene_source_fingerprint,
 )
 from embodichain.gen_sim.task_engine.agent import (
     derive_scene_request,
@@ -246,76 +245,15 @@ def _grounder(**kwargs) -> dict:
     }
 
 
-def test_scene_store_is_content_addressed_and_relocatable(
-    scene_export: Path,
-    tmp_path: Path,
-) -> None:
-    store = ScenePackageStore(tmp_path / "bank")
-    first = store.import_scene(scene_export)
-    second = store.import_scene(scene_export)
+def test_scene_source_fingerprint_reads_without_copying(scene_export: Path) -> None:
+    before = sorted(path.relative_to(scene_export) for path in scene_export.rglob("*"))
+    fingerprint = fingerprint_scene_source(SceneSourceRef(scene_export))
+    after = sorted(path.relative_to(scene_export) for path in scene_export.rglob("*"))
 
-    assert first.package_id == second.package_id
-    assert first.package_path == (
-        tmp_path
-        / "bank"
-        / "scene_packages"
-        / "sha256"
-        / first.package_id[:2]
-        / first.package_id
-    )
-    assert first.config_path is not None
-    packaged = json.loads(first.config_path.read_text(encoding="utf-8"))
-    asset_path = packaged["rigid_object"][0]["shape"]["fpath"]
-    assert not Path(asset_path).is_absolute()
-    assert (first.package_path / asset_path).is_file()
-
-    source = json.loads(
-        (scene_export / "scene_config.json").read_text(encoding="utf-8")
-    )
-    source["scene_id"] = "a-different-export-time"
-    (scene_export / "scene_config.json").write_text(
-        json.dumps(source), encoding="utf-8"
-    )
-    assert store.import_scene(scene_export).package_id == first.package_id
-
-    source["rigid_object"][0]["init_pos"][0] = 0.15
-    (scene_export / "scene_config.json").write_text(
-        json.dumps(source), encoding="utf-8"
-    )
-    moved = store.import_scene(scene_export)
-    assert moved.package_id != first.package_id
-
-    rotated = store.import_scene(SceneSourceRef(scene_export, z_rotation_degrees=90.0))
-    assert rotated.package_id != moved.package_id
-    assert rotated.z_rotation_degrees == 90.0
-    assert store.load(rotated.package_id).z_rotation_degrees == 90.0
-
-
-def test_scene_store_detects_asset_tampering_and_path_traversal(
-    scene_export: Path,
-    tmp_path: Path,
-) -> None:
-    store = ScenePackageStore(tmp_path / "bank")
-    package = store.import_scene(scene_export)
-    assert package.package_path is not None
-    manifest_path = package.package_path / "scene_package.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    asset = package.package_path / manifest["assets"][0]["path"]
-    asset.write_bytes(b"tampered")
-    with pytest.raises(ScenePackageCorruptError, match="unexpected size|SHA-256"):
-        store.load(package.package_id)
-
-    # A forged manifest is rejected before the referenced path is touched.
-    store = ScenePackageStore(tmp_path / "other-bank")
-    package = store.import_scene(scene_export)
-    assert package.package_path is not None
-    manifest_path = package.package_path / "scene_package.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["assets"][0]["path"] = "../outside.glb"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(ScenePackageCorruptError, match="normalized relative path"):
-        store.load(package.package_id)
+    assert fingerprint.config_path == scene_export / "scene_config.json"
+    assert len(fingerprint.config_sha256) == 64
+    assert len(fingerprint.asset_sha256) == 3
+    assert after == before
 
 
 def test_scene_adapter_selects_bindable_majority_and_redacts_manifest(
@@ -327,6 +265,12 @@ def test_scene_adapter_selects_bindable_majority_and_redacts_manifest(
         _candidate_set([red, blue]),
         scene_export,
     )
+
+    hierarchy_by_uid = {
+        node["uid"]: node for node in result.conservative_scene_graph["nodes"]
+    }
+    assert hierarchy_by_uid["red_can"]["parent_uid"] == "unknown"
+    assert hierarchy_by_uid["red_can"]["parent_relation"] == "unknown"
 
     assert result.binding_report["status"] == "bound"
     assert result.binding_report["candidates"][0]["status"] == "resolved"
@@ -340,6 +284,12 @@ def test_scene_adapter_selects_bindable_majority_and_redacts_manifest(
     assert (
         result.prepared_scene.source_config_path == scene_export / "scene_config.json"
     )
+    assert result.static_scene_manifest is not None
+    static_by_uid = {
+        item["uid"]: item for item in result.static_scene_manifest["objects"]
+    }
+    assert static_by_uid["red_can"]["physics"]["body_type"] == "dynamic"
+    assert static_by_uid["red_can"]["geometry"]["asset_sha256"]
 
 
 def test_scene_adapter_returns_report_for_business_level_non_binding(
@@ -439,22 +389,18 @@ def test_scene_adapter_runs_one_default_structured_adjudication(
     assert adjudications == 1
 
 
-def test_scene_adapter_accepts_verified_package_and_rejects_bad_protocol(
+def test_scene_adapter_accepts_direct_source_and_rejects_bad_protocol(
     scene_export: Path,
-    tmp_path: Path,
 ) -> None:
-    store = ScenePackageStore(tmp_path / "bank")
-    package = store.import_scene(scene_export)
     candidate = _candidate("red", "red can")
-    direct = SceneAdapter(store=store, grounding_caller=_grounder).adapt(
+    direct = SceneAdapter(grounding_caller=_grounder).adapt(
         _candidate_set([candidate]),
         scene_export,
     )
-    result = SceneAdapter(store=store, grounding_caller=_grounder).adapt(
+    result = SceneAdapter(grounding_caller=_grounder).adapt(
         _candidate_set([candidate]),
-        ScenePackageRef(package.package_id),
+        SceneSourceRef(scene_export),
     )
-    assert result.scene_package is not None
     assert result.scene_manifest == direct.scene_manifest
     assert result.role_bindings == direct.role_bindings
 
@@ -592,6 +538,9 @@ def test_scene_adapter_binds_all_matching_uids(
 
     assert result.binding_report["status"] == "bound"
     assert result.reference_bindings == {"upright.object": ["red_can", "blue_can"]}
+    assert result.candidate_bindings[candidate["candidate_id"]][
+        "reference_bindings"
+    ] == {"upright.object": ["red_can", "blue_can"]}
 
 
 def test_scene_adapter_rejects_step_result_object_matching_same_step_target(
@@ -654,37 +603,26 @@ def test_scene_adapter_rejects_step_result_object_matching_same_step_target(
     assert "same UID as object and target" in target_audit["reasons"][0]
 
 
-def test_scene_store_digest_covers_asset_scale_and_physics(
-    scene_export: Path,
-    tmp_path: Path,
-) -> None:
-    store = ScenePackageStore(tmp_path / "bank")
-    original = store.import_scene(scene_export)
+def test_scene_source_fingerprint_covers_assets_and_config(scene_export: Path) -> None:
+    original = fingerprint_scene_source(scene_export)
 
     asset_path = scene_export / "meshes" / "red_can.glb"
     asset_path.write_bytes(b"changed asset")
-    changed_asset = store.import_scene(scene_export)
-    assert changed_asset.package_id != original.package_id
+    changed_asset = fingerprint_scene_source(scene_export)
+    assert changed_asset.asset_sha256 != original.asset_sha256
 
     config_path = scene_export / "scene_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["rigid_object"][0]["body_scale"] = [1.1, 1.0, 1.0]
     config["rigid_object"][0]["physics"] = {"mass": 0.25}
     config_path.write_text(json.dumps(config), encoding="utf-8")
-    changed_physics = store.import_scene(scene_export)
-    assert changed_physics.package_id != changed_asset.package_id
+    changed_config = fingerprint_scene_source(scene_export)
+    assert changed_config.config_sha256 != changed_asset.config_sha256
 
 
-def test_scene_store_rejects_relative_source_asset_traversal(
-    scene_export: Path,
-    tmp_path: Path,
-) -> None:
-    outside = tmp_path / "outside.glb"
-    outside.write_bytes(b"private")
-    config_path = scene_export / "scene_config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["rigid_object"][0]["shape"]["fpath"] = "../outside.glb"
-    config_path.write_text(json.dumps(config), encoding="utf-8")
+def test_scene_source_verification_rejects_later_mutation(scene_export: Path) -> None:
+    expected = fingerprint_scene_source(scene_export).to_dict()
+    (scene_export / "meshes" / "red_can.glb").write_bytes(b"changed later")
 
-    with pytest.raises(ValueError, match="may not traverse"):
-        ScenePackageStore(tmp_path / "bank").import_scene(scene_export)
+    with pytest.raises(RuntimeError, match="changed after Task Engine preparation"):
+        verify_scene_source_fingerprint(expected)

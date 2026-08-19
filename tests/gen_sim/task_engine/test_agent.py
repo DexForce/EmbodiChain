@@ -36,7 +36,9 @@ from embodichain.gen_sim.task_engine.agent import (
     derive_success_spec,
 )
 from embodichain.gen_sim.task_engine.interpretation import InstructionDraftResult
-from embodichain.gen_sim.collaboration.coordinator import lower_task_candidate
+from embodichain.gen_sim.task_engine.orchestration.coordinator import (
+    lower_task_candidate,
+)
 
 
 def _selector(kind="none", *, step_id="", reference="", quantifier="one", count=0):

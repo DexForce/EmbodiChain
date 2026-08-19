@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Transactional publication for three-agent collaboration artifacts."""
+"""Transactional publication for Task Engine artifacts."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ from embodichain.gen_sim.action_engine.runtime import (
 
 __all__ = [
     "BINDING_REPORT_FILENAME",
+    "CONSERVATIVE_SCENE_GRAPH_FILENAME",
     "EXECUTION_REPORT_FILENAME",
     "GROUNDED_TASK_PLAN_FILENAME",
     "FEASIBILITY_REPORT_FILENAME",
@@ -46,9 +47,9 @@ __all__ = [
     "TASK_DRAFT_FILENAME",
     "SCENE_REQUEST_FILENAME",
     "ArtifactTransaction",
-    "CollaborationArtifactPaths",
-    "collaboration_artifact_paths",
-    "write_collaboration_artifacts",
+    "TaskEngineArtifactPaths",
+    "task_engine_artifact_paths",
+    "write_task_engine_artifacts",
     "write_execution_report",
     "write_preparation_failure",
 ]
@@ -60,6 +61,7 @@ SCENE_REQUEST_FILENAME = "scene_request.json"
 SUCCESS_SPEC_FILENAME = "success_spec.json"
 SCENE_MANIFEST_FILENAME = "scene_manifest.json"
 STATIC_SCENE_MANIFEST_FILENAME = "static_scene_manifest.json"
+CONSERVATIVE_SCENE_GRAPH_FILENAME = "conservative_scene_graph.json"
 ROLE_BINDINGS_FILENAME = "role_bindings.json"
 BINDING_REPORT_FILENAME = "binding_report.json"
 FEASIBILITY_REPORT_FILENAME = "feasibility_report.json"
@@ -68,8 +70,8 @@ PREPARATION_FAILURE_FILENAME = "preparation_failure.json"
 
 
 @dataclass(frozen=True)
-class CollaborationArtifactPaths:
-    """Canonical collaboration paths rooted at one published bundle."""
+class TaskEngineArtifactPaths:
+    """Canonical Task Engine paths rooted at one published bundle."""
 
     root: Path
     task_candidate_set: Path
@@ -78,6 +80,7 @@ class CollaborationArtifactPaths:
     success_spec: Path
     scene_manifest: Path
     static_scene_manifest: Path
+    conservative_scene_graph: Path
     role_bindings: Path
     binding_report: Path
     feasibility_report: Path
@@ -86,12 +89,12 @@ class CollaborationArtifactPaths:
     execution_report: Path
 
 
-def collaboration_artifact_paths(
+def task_engine_artifact_paths(
     output_dir: str | Path,
-) -> CollaborationArtifactPaths:
-    """Return all collaboration paths without creating the directory."""
+) -> TaskEngineArtifactPaths:
+    """Return all Task Engine paths without creating the directory."""
     root = Path(output_dir).expanduser().resolve()
-    return CollaborationArtifactPaths(
+    return TaskEngineArtifactPaths(
         root=root,
         task_candidate_set=root / TASK_CANDIDATE_SET_FILENAME,
         task_draft=root / TASK_DRAFT_FILENAME,
@@ -99,6 +102,7 @@ def collaboration_artifact_paths(
         success_spec=root / SUCCESS_SPEC_FILENAME,
         scene_manifest=root / SCENE_MANIFEST_FILENAME,
         static_scene_manifest=root / STATIC_SCENE_MANIFEST_FILENAME,
+        conservative_scene_graph=root / CONSERVATIVE_SCENE_GRAPH_FILENAME,
         role_bindings=root / ROLE_BINDINGS_FILENAME,
         binding_report=root / BINDING_REPORT_FILENAME,
         feasibility_report=root / FEASIBILITY_REPORT_FILENAME,
@@ -180,7 +184,7 @@ class ArtifactTransaction:
         return False
 
 
-def write_collaboration_artifacts(
+def write_task_engine_artifacts(
     output_dir: str | Path,
     *,
     candidate_set: Mapping[str, Any],
@@ -189,21 +193,24 @@ def write_collaboration_artifacts(
     binding_report: Mapping[str, Any],
     grounded_task_plan: Mapping[str, Any] | None = None,
     static_scene_manifest: Mapping[str, Any] | None = None,
+    conservative_scene_graph: Mapping[str, Any] | None = None,
     feasibility_report: Mapping[str, Any] | None = None,
-) -> CollaborationArtifactPaths:
-    """Write collaboration protocols into an unpublished staging directory.
+) -> TaskEngineArtifactPaths:
+    """Write Task Engine protocols into an unpublished staging directory.
 
     An unsuccessful adaptation can omit SceneManifest and RoleBindings rather
     than publishing protocol filenames whose payloads do not satisfy their
     schemas.
     """
-    paths = collaboration_artifact_paths(output_dir)
+    paths = task_engine_artifact_paths(output_dir)
     paths.root.mkdir(parents=True, exist_ok=True)
     _write_json(paths.task_candidate_set, candidate_set)
     if scene_manifest is not None:
         _write_json(paths.scene_manifest, scene_manifest)
     if static_scene_manifest is not None:
         _write_json(paths.static_scene_manifest, static_scene_manifest)
+    if conservative_scene_graph is not None:
+        _write_json(paths.conservative_scene_graph, conservative_scene_graph)
     if role_bindings is not None:
         _write_json(paths.role_bindings, role_bindings)
     _write_json(paths.binding_report, binding_report)
@@ -231,7 +238,7 @@ def write_execution_report(output_dir: str | Path, value: Any) -> Path:
 
 def write_preparation_failure(output_dir: str | Path, value: Any) -> Path:
     """Write a strict-JSON audit for a failed candidate planning transaction."""
-    path = collaboration_artifact_paths(output_dir).preparation_failure
+    path = task_engine_artifact_paths(output_dir).preparation_failure
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_json(path, value)
     return path

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from embodichain.gen_sim.scene_bridge import (
+from embodichain.gen_sim.task_engine.scene import (
     FeasibilityBroker,
     SceneEngineV1Adapter,
 )

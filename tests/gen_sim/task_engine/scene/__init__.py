@@ -14,8 +14,4 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Deprecated import bridge for the top-level Scene Adapter."""
-
-from __future__ import annotations
-
-from embodichain.gen_sim.collaboration.scene_adapter import *  # noqa: F401,F403
+"""Tests for Task Engine scene adaptation boundaries."""

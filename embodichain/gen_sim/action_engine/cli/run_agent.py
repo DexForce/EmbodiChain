@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional runtime override for A/B visual facts and online planning.",
     )
     parser.add_argument(
-        "--collaboration-report",
+        "--task-engine-report",
         action="store_true",
         help=argparse.SUPPRESS,
     )
@@ -157,7 +157,7 @@ def cli() -> int | None:
             gym_config=gym_config,
             agent_config=agent_config,
         )
-        return 0 if args.collaboration_report else None
+        return 0 if args.task_engine_report else None
     if planning_mode != "offline":
         raise ValueError(f"Unsupported Action Engine planning_mode {planning_mode!r}.")
     execution_program = load_agent_execution_program(
@@ -248,7 +248,7 @@ def cli() -> int | None:
         env.reset(options={"final": True})
     except KeyboardInterrupt:
         log_warning("Action Engine run interrupted by user.")
-        return 130 if args.collaboration_report else None
+        return 130 if args.task_engine_report else None
     except Exception as exc:
         if action_reporter is not None and isinstance(seed_graph, Mapping):
             report = action_reporter.abortion_report(
@@ -266,7 +266,7 @@ def cli() -> int | None:
             )
 
             write_execution_report(Path(args.agent_config).resolve().parent, report)
-        if args.collaboration_report:
+        if args.task_engine_report:
             log_warning(f"Action Engine execution aborted: {type(exc).__name__}: {exc}")
             return 3
         raise
@@ -274,11 +274,11 @@ def cli() -> int | None:
         close = getattr(env, "close", None) if env is not None else None
         if callable(close):
             close()
-    return int(any_failed) if args.collaboration_report else None
+    return int(any_failed) if args.task_engine_report else None
 
 
 def _load_grounded_task_plan(agent_config_path: str | Path) -> dict[str, Any] | None:
-    """Load the optional collaboration hand-off beside a legacy agent config."""
+    """Load the optional Task Engine hand-off beside an agent config."""
     path = (
         Path(agent_config_path).expanduser().resolve().parent
         / "grounded_task_plan.json"
@@ -291,7 +291,7 @@ def _load_grounded_task_plan(agent_config_path: str | Path) -> dict[str, Any] | 
         raise ValueError(f"Unable to read GroundedTaskPlan at {path}: {exc}") from exc
     if not isinstance(value, Mapping):
         raise ValueError("grounded_task_plan.json must contain a JSON object.")
-    from embodichain.gen_sim.collaboration.contracts import (
+    from embodichain.gen_sim.task_engine.orchestration.contracts import (
         validate_grounded_task_plan,
     )
 

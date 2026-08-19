@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Scene-independent Task Agent for the first collaboration workflow."""
+"""Scene-independent semantic candidate generation for Task Engine."""
 
 from __future__ import annotations
 

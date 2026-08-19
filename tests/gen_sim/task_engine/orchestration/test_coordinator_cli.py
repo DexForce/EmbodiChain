@@ -26,11 +26,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from embodichain.gen_sim.collaboration import cli
-from embodichain.gen_sim.collaboration.artifacts import (
+from embodichain.gen_sim.task_engine import cli
+from embodichain.gen_sim.task_engine.orchestration.artifacts import (
     ArtifactTransaction,
 )
-from embodichain.gen_sim.collaboration.contracts import (
+from embodichain.gen_sim.task_engine.orchestration.contracts import (
     BINDING_REPORT_SCHEMA,
     ROLE_BINDINGS_SCHEMA,
     SCENE_MANIFEST_SCHEMA,
@@ -40,10 +40,10 @@ from embodichain.gen_sim.collaboration.contracts import (
     TASK_DRAFT_SCHEMA,
     canonical_hash,
 )
-from embodichain.gen_sim.collaboration.coordinator import (
-    CollaborationCoordinator,
+from embodichain.gen_sim.task_engine.orchestration.coordinator import (
+    TaskEngineCoordinator,
 )
-from embodichain.gen_sim.collaboration.scene_adapter import (
+from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     SceneAdaptation,
 )
 from embodichain.gen_sim.action_engine.generation.artifacts import artifact_paths
@@ -56,7 +56,7 @@ from embodichain.gen_sim.action_engine.runtime import (
     ExecutionReport,
     build_execution_provenance,
 )
-from embodichain.gen_sim.scene_bridge import SceneEngineV1Adapter
+from embodichain.gen_sim.task_engine.scene import SceneEngineV1Adapter
 
 
 def _candidate_set() -> dict:
@@ -251,6 +251,20 @@ def _adaptation(tmp_path: Path, *, status: str = "bound") -> SceneAdaptation:
         selected_candidate=deepcopy(candidate) if status == "bound" else None,
         prepared_scene=_prepared_scene(tmp_path),
         source_config_path=tmp_path / "scene_config.json",
+        conservative_scene_graph={
+            "schema_version": "embodichain.conservative-scene-graph/v1",
+            "scene_id": "scene",
+            "nodes": [
+                {
+                    "uid": "red_can",
+                    "parent_uid": "unknown",
+                    "parent_relation": "unknown",
+                    "orientation": "unknown",
+                    "source": "test",
+                }
+            ],
+            "relations": [],
+        },
     )
 
 
@@ -305,7 +319,7 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     action_agent = SimpleNamespace(
         plan=lambda *_args, **_kwargs: pytest.fail("Action Agent must not run")
     )
-    coordinator = CollaborationCoordinator(
+    coordinator = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
         action_agent=action_agent,
@@ -363,7 +377,7 @@ def test_contradicted_feasibility_publishes_audit_without_planning(
         plan=lambda *_args, **_kwargs: pytest.fail("Action Agent must not plan"),
     )
 
-    result = CollaborationCoordinator(
+    result = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
         action_agent=action_agent,
@@ -381,9 +395,9 @@ def test_contradicted_feasibility_publishes_audit_without_planning(
     assert result.status == "infeasible"
     assert result.feasibility_report is not None
     assert result.feasibility_report["status"] == "contradicted"
-    assert result.collaboration_artifacts.static_scene_manifest.is_file()
-    assert result.collaboration_artifacts.feasibility_report.is_file()
-    assert not result.collaboration_artifacts.grounded_task_plan.exists()
+    assert result.artifacts.static_scene_manifest.is_file()
+    assert result.artifacts.feasibility_report.is_file()
+    assert not result.artifacts.grounded_task_plan.exists()
 
 
 def test_feasibility_contradiction_falls_back_to_next_resolved_candidate(
@@ -424,7 +438,7 @@ def test_feasibility_contradiction_falls_back_to_next_resolved_candidate(
             }
 
     registry = SimpleNamespace(catalog=lambda: {})
-    coordinator = CollaborationCoordinator(
+    coordinator = TaskEngineCoordinator(
         action_agent=SimpleNamespace(registry=registry),
         feasibility_broker=_Broker(),
     )
@@ -477,7 +491,7 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
         paths.seed_task_graph_png.write_bytes(b"png")
         return paths
 
-    result = CollaborationCoordinator(
+    result = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
         action_agent=action_agent,
@@ -492,7 +506,7 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
 
     assert result.bound
     assert generator_calls
-    assert not (result.output_dir / ".collaboration_input").exists()
+    assert not (result.output_dir / ".task_engine_input").exists()
     grounded = json.loads(
         (result.output_dir / "grounded_task_plan.json").read_text(encoding="utf-8")
     )
@@ -535,7 +549,7 @@ def test_prepare_falls_back_after_candidate_action_planning_failure(
         paths.seed_task_graph_png.write_bytes(b"png")
         return paths
 
-    result = CollaborationCoordinator(
+    result = TaskEngineCoordinator(
         task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
         scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
         action_agent=SimpleNamespace(plan=plan),
@@ -555,7 +569,7 @@ def test_prepare_falls_back_after_candidate_action_planning_failure(
         "candidate_01 failed action_planning"
         in result.adaptation.binding_report["selection_reason"]
     )
-    assert not result.collaboration_artifacts.preparation_failure.exists()
+    assert not result.artifacts.preparation_failure.exists()
 
 
 def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
@@ -567,7 +581,7 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
     output.mkdir()
     (output / "stale.txt").write_text("old", encoding="utf-8")
 
-    result = CollaborationCoordinator(
+    result = TaskEngineCoordinator(
         task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
         scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
         action_agent=SimpleNamespace(
@@ -592,10 +606,10 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
 
     assert result.status == "planning_failed"
     assert not result.bound
-    assert result.collaboration_artifacts.preparation_failure.is_file()
+    assert result.artifacts.preparation_failure.is_file()
     assert not (result.output_dir / "stale.txt").exists()
     failure = json.loads(
-        result.collaboration_artifacts.preparation_failure.read_text(encoding="utf-8")
+        result.artifacts.preparation_failure.read_text(encoding="utf-8")
     )
     assert failure["schema_version"] == "action_engine_preparation_failure_v1"
     assert failure["task_id"] == "upright_can"
@@ -659,7 +673,7 @@ def test_prepare_prints_the_next_run_command(
         bound=True,
         selected_candidate_id="candidate_01",
         output_dir=output_dir,
-        collaboration_artifacts=SimpleNamespace(
+        artifacts=SimpleNamespace(
             grounded_task_plan=output_dir / "grounded_task_plan.json",
             preparation_failure=output_dir / "preparation_failure.json",
         ),
@@ -672,9 +686,8 @@ def test_prepare_prints_the_next_run_command(
         def prepare(self, *_args, **_kwargs):
             return result
 
-    monkeypatch.setattr(cli, "ScenePackageStore", lambda *_args: object())
     monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
-    monkeypatch.setattr(cli, "CollaborationCoordinator", FakeCoordinator)
+    monkeypatch.setattr(cli, "TaskEngineCoordinator", FakeCoordinator)
 
     assert (
         cli.main(
@@ -699,7 +712,7 @@ def test_prepare_prints_the_next_run_command(
     assert command[:3] == [
         "python",
         "-m",
-        "embodichain.gen_sim.collaboration",
+        "embodichain.gen_sim.task_engine",
     ]
     assert command[-4:] == [
         "--bundle",
@@ -719,7 +732,7 @@ def test_prepare_can_run_the_bound_bundle_immediately(
         bound=True,
         selected_candidate_id="candidate_01",
         output_dir=output_dir,
-        collaboration_artifacts=SimpleNamespace(
+        artifacts=SimpleNamespace(
             grounded_task_plan=output_dir / "grounded_task_plan.json",
             preparation_failure=output_dir / "preparation_failure.json",
         ),
@@ -733,9 +746,8 @@ def test_prepare_can_run_the_bound_bundle_immediately(
             return result
 
     run_args: list[argparse.Namespace] = []
-    monkeypatch.setattr(cli, "ScenePackageStore", lambda *_args: object())
     monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
-    monkeypatch.setattr(cli, "CollaborationCoordinator", FakeCoordinator)
+    monkeypatch.setattr(cli, "TaskEngineCoordinator", FakeCoordinator)
     monkeypatch.setattr(cli, "_run", lambda args: run_args.append(args) or 0)
 
     assert (

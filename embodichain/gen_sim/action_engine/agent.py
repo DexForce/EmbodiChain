@@ -454,11 +454,11 @@ class ActionAgent:
 def _validate_grounded_plan(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError("GroundedTaskPlan must be a mapping.")
-    # GroundedTaskPlan is a cross-engine protocol owned by Collaboration.
+    # GroundedTaskPlan is a cross-engine protocol owned by Task Engine.
     # Import lazily so Action Engine remains importable without initializing
     # the coordinator or Scene Adapter.
     try:
-        from embodichain.gen_sim.collaboration.contracts import (
+        from embodichain.gen_sim.task_engine.orchestration.contracts import (
             validate_grounded_task_plan,
         )
     except (ImportError, AttributeError):
