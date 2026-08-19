@@ -141,6 +141,7 @@ class Camera(BaseSensor):
         world: dexsim.World | None = None,
         arenas: Sequence[dexsim.environment.Arena] | None = None,
         parent_node_resolver: Callable[[str], Sequence[object]] | None = None,
+        defer_parent_attachment: bool = False,
     ) -> None:
         if world is None or arenas is None:
             raise ValueError(
@@ -155,6 +156,8 @@ class Camera(BaseSensor):
         self._camera_names: list[tuple[dexsim.environment.Arena, str]] = []
         self._is_destroyed = False
         super().__init__(config, device, num_instances=len(self._arenas))
+        if config.extrinsics.parent is not None and not defer_parent_attachment:
+            self.attach_to_parent()
 
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
@@ -214,8 +217,6 @@ class Camera(BaseSensor):
                 )
 
         self.cfg: CameraCfg = config
-        if self.cfg.extrinsics.parent is not None:
-            self._attach_to_entity()
 
     @cached_property
     def group_id(self) -> int:
@@ -296,6 +297,15 @@ class Camera(BaseSensor):
             )
         for entity, parent in zip(self._entities, parents):
             entity.attach_node(parent)
+
+    def attach_to_parent(self) -> None:
+        """Resolve and attach a deferred parent after Spawn materialization."""
+        if self.cfg.extrinsics.parent is None:
+            return
+        self._attach_to_entity()
+        # Extrinsics are expressed in the parent frame. Reapply them after
+        # reparenting because the camera was initially reset in Arena space.
+        self.reset()
 
     def set_local_pose(
         self, pose: torch.Tensor, env_ids: Sequence[int] | None = None

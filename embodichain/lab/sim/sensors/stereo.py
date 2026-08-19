@@ -159,6 +159,7 @@ class StereoCamera(Camera):
         world: dexsim.World | None = None,
         arenas: Sequence[dexsim.environment.Arena] | None = None,
         parent_node_resolver: Callable[[str], Sequence[object]] | None = None,
+        defer_parent_attachment: bool = False,
     ) -> None:
         super().__init__(
             config,
@@ -166,6 +167,7 @@ class StereoCamera(Camera):
             world=world,
             arenas=arenas,
             parent_node_resolver=parent_node_resolver,
+            defer_parent_attachment=defer_parent_attachment,
         )
 
         # check valid config
@@ -282,8 +284,6 @@ class StereoCamera(Camera):
                 ][:, :, config.width :, :]
 
         self.cfg: CameraCfg = config
-        if self.cfg.extrinsics.parent is not None:
-            self._attach_to_entity()
 
     def update(self, **kwargs) -> None:
         """Update the sensor data.

@@ -478,6 +478,7 @@ class SimulationManager:
         self._robots: Dict[str, Robot] = dict()
 
         self._sensors: Dict[str, BaseSensor] = dict()
+        self._pending_sensor_attachments: list[Camera] = []
         self._lights: Dict[str, Light] = dict()
 
         self._spawn_scene = SpawnScene(
@@ -485,6 +486,7 @@ class SimulationManager:
             num_envs=sim_config.num_envs,
             spacing=(sim_config.arena_space, sim_config.arena_space, 0.0),
         )
+        self._arenas = list(self._spawn_scene.builder.prepare_arenas())
 
         self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
@@ -924,22 +926,20 @@ class SimulationManager:
         self._default_resources = SimResources()
 
     def prepare(self) -> None:
-        """Materialize pending Spawn declarations and prepare their runtime."""
+        """Materialize physical declarations, then resolve sensor parents."""
         scene = self._spawn_scene
         result = scene.result
-        if (
-            result is not None
-            and not result.needs_rebuild
-            and not scene.builder.has_pending_changes
-        ):
-            return
+        if result is None or result.needs_rebuild or scene.builder.has_pending_changes:
+            result = scene.commit()
+            result.prepare_runtime()
+            self._env = result.get_arena("default")
+            self._arenas = [result.get_arena(name) for name in scene.arena_names]
+            self.__dict__.pop("arena_offsets", None)
+            scene.bind()
 
-        result = scene.commit()
-        result.prepare_runtime()
-        self._env = result.get_arena("default")
-        self._arenas = [result.get_arena(name) for name in scene.arena_names]
-        self.__dict__.pop("arena_offsets", None)
-        scene.bind()
+        for sensor in self._pending_sensor_attachments:
+            sensor.attach_to_parent()
+        self._pending_sensor_attachments.clear()
 
     def enable_physics(self, enable: bool) -> None:
         """Enable or disable physics simulation.
@@ -1095,10 +1095,6 @@ class SimulationManager:
         Returns:
             dexsim.environment.Arena: The arena or global env.
         """
-        # Native Arenas do not exist during the declaration phase. Treat
-        # explicit Arena access as a runtime boundary for compatibility.
-        self.prepare()
-
         if arena_index >= 0:
             if arena_index > len(self._arenas) - 1:
                 logger.log_error(
@@ -1440,9 +1436,6 @@ class SimulationManager:
                 f"(width={cfg.rect_width}, height={cfg.rect_height})."
             )
 
-        # Lights are render resources. Materialize pending physical assets so
-        # their Arenas exist, then use DexSim's native render API directly.
-        self.prepare()
         if cfg.light_type in self._GLOBAL_LIGHT_TYPES:
             batch_lights = Light(
                 cfg=cfg,
@@ -2632,12 +2625,12 @@ class SimulationManager:
             gizmo.set_visible(visible)
 
     def add_sensor(self, sensor_cfg: SensorCfg) -> BaseSensor:
-        """Create a render-only sensor on the materialized Spawn Arenas.
+        """Create a sensor on the pre-created simulation Arenas.
 
-        Camera topology is deliberately owned by DexSim's render runtime, not
-        by the physical Spawn scene. Calling this method is therefore
-        a runtime boundary: pending physical declarations are prepared before
-        the CameraGroup and its per-Arena views are created.
+        Cameras keep EmbodiChain's native CameraGroup implementation. A camera
+        attached to an articulation link is created immediately and attached
+        after the physical Spawn scene is prepared. ContactSensor still
+        requires the Default/PhysX scene and therefore prepares physics first.
 
         Args:
             sensor_cfg (SensorCfg): configuration for the sensor.
@@ -2665,13 +2658,11 @@ class SimulationManager:
                 "Newton needs a public backend-neutral contact query API in DexSim."
             )
 
-        self.prepare()
-
         if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
                     "Camera creation requires all Spawn Arenas to be "
-                    f"materialized ({len(self._arenas)} of {self.num_envs} ready)."
+                    f"prepared ({len(self._arenas)} of {self.num_envs} ready)."
                 )
             sensor = sensor_factory(
                 sensor_cfg,
@@ -2679,8 +2670,22 @@ class SimulationManager:
                 world=self._world,
                 arenas=self._arenas,
                 parent_node_resolver=self._resolve_spawn_sensor_parent_nodes,
+                defer_parent_attachment=True,
             )
+            if sensor_cfg.extrinsics.parent is not None:
+                scene = self._spawn_scene
+                if (
+                    scene.result is not None
+                    and not scene.result.needs_rebuild
+                    and not scene.builder.has_pending_changes
+                ):
+                    sensor.attach_to_parent()
+                else:
+                    self._pending_sensor_attachments.append(sensor)
         else:
+            # ContactSensor and custom native sensors require a prepared
+            # physics scene; cameras only depend on the pre-created Arenas.
+            self.prepare()
             # Preserve custom test/plugin factories whose two-argument
             # constructor predates the manager-owned render context.
             sensor = sensor_factory(sensor_cfg, self.device)
@@ -2787,6 +2792,8 @@ class SimulationManager:
         """
         if uid in self._sensors:
             sensor = self._sensors.pop(uid)
+            if sensor in self._pending_sensor_attachments:
+                self._pending_sensor_attachments.remove(sensor)
             destroy = getattr(sensor, "destroy", None)
             if callable(destroy):
                 destroy()
