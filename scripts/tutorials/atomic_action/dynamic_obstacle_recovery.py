@@ -453,6 +453,7 @@ def main() -> None:
     adapter = SimulationExecutionAdapter(
         sim,
         robot,
+        control_dt=COMMAND_CYCLE_TIME,
         scene_provider=scene_provider,
     )
 
@@ -479,7 +480,6 @@ def main() -> None:
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=SAMPLE_COUNT,
-            control_dt=COMMAND_CYCLE_TIME,
         ),
         recovery_policy=RecoveryPolicy(
             max_replans=2,
@@ -511,7 +511,7 @@ def main() -> None:
         adapter,
         clock=adapter,
         # cuRobo can supply a trajectory duration, which takes precedence over
-        # MotionPolicy.control_dt. Keep a runner-side floor so the simulated
+        # engine fallback timing. Keep a runner-side floor so the simulated
         # controller receives enough feedback cycles to follow every waypoint.
         cfg=ExecutionRunnerCfg(minimum_cycle_time=COMMAND_CYCLE_TIME),
     )

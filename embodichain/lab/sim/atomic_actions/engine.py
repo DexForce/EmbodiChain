@@ -390,6 +390,7 @@ class AtomicActionEngine:
         task: TaskState | None = None,
         scene: SceneSnapshot | None = None,
         timestamp: float = 0.0,
+        control_dt: float | None = None,
     ) -> PlanningContext:
         """Capture the robot state needed to start offline compilation.
 
@@ -397,6 +398,7 @@ class AtomicActionEngine:
             task: Optional symbolic task state; an empty state is used otherwise.
             scene: Optional scene snapshot; an empty snapshot is used otherwise.
             timestamp: Timestamp assigned to the captured robot observation.
+            control_dt: Explicit command period for action-owned interpolation.
 
         Returns:
             Planning context containing owned robot tensors.
@@ -419,6 +421,7 @@ class AtomicActionEngine:
             task=task,
             scene=scene,
             env_ids=torch.arange(batch_size, dtype=torch.long, device=self.device),
+            control_dt=control_dt,
         )
 
     def compile(

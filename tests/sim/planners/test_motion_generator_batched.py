@@ -30,6 +30,25 @@ from embodichain.lab.sim.planners.utils import PlanState, PlanResult, MoveType
 BATCH_SIZE = 2
 CONTROLLED_DOF = 6
 SAMPLE_COUNT = 8
+STEP_DT = 0.05
+
+
+def _timed_result(
+    positions: torch.Tensor,
+    *,
+    success: bool | torch.Tensor = True,
+    step_dt: float = STEP_DT,
+) -> PlanResult:
+    """Build a planner result that satisfies the explicit timing contract."""
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    if positions.shape[1] > 1:
+        dt[:, 1:] = step_dt
+    return PlanResult(
+        success=success,
+        positions=positions,
+        dt=dt,
+        duration=dt.sum(dim=1),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -81,9 +100,9 @@ class _DirectCartesianPlanner:
 
     def plan(self, target_states, options):
         self.target_states = target_states
-        return PlanResult(
+        return _timed_result(
+            torch.zeros(1, 3, 2),
             success=torch.tensor([True]),
-            positions=torch.zeros(1, 3, 2),
         )
 
 
@@ -334,9 +353,9 @@ def _mock_planner(b=3, n=15, dofs=6):
     )
     planner.robot.num_instances = b
     planner.robot.device = torch.device("cpu")
-    planner.plan.return_value = PlanResult(
+    planner.plan.return_value = _timed_result(
+        torch.zeros(b, n, dofs),
         success=torch.ones(b, dtype=torch.bool),
-        positions=torch.zeros(b, n, dofs),
     )
     planner.preserve_plan_samples = False
     planner.default_plan_options.return_value = PlanOptions()
@@ -375,9 +394,9 @@ def _mock_generator(
     planner.with_motion_context.side_effect = (
         lambda options, *, start_qpos, control_part: options
     )
-    planner.plan.return_value = result or PlanResult(
+    planner.plan.return_value = result or _timed_result(
+        torch.zeros(batch_size, 5, controlled_dof),
         success=torch.ones(batch_size, dtype=torch.bool),
-        positions=torch.zeros(batch_size, 5, controlled_dof),
     )
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
@@ -450,6 +469,21 @@ class TestMotionStrategy:
         assert MotionGenOptions(strategy="ik_interp").strategy == "ik_interp"
         with pytest.raises(ValueError, match="strategy"):
             MotionGenOptions(strategy="planner")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="interpolation_dt"):
+            MotionGenOptions(interpolation_dt=0.0)
+
+    def test_ik_interp_rejects_missing_timing(self):
+        generator = _mock_generator()
+        with pytest.raises(ValueError, match="explicit interpolation_dt"):
+            generator.generate(
+                [PlanState.from_qpos(torch.ones(BATCH_SIZE, CONTROLLED_DOF))],
+                MotionGenOptions(
+                    strategy="ik_interp",
+                    sample_count=SAMPLE_COUNT,
+                    start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                    control_part="arm",
+                ),
+            )
 
     def test_ik_interp_solves_batched_poses_without_calling_backend(self):
         generator = _mock_generator()
@@ -468,6 +502,7 @@ class TestMotionStrategy:
                 sample_count=SAMPLE_COUNT,
                 start_qpos=start,
                 control_part="arm",
+                interpolation_dt=STEP_DT,
             ),
         )
 
@@ -488,9 +523,8 @@ class TestMotionStrategy:
     def test_motion_gen_delegates_and_resamples_backend_result(self):
         raw_sample_count = 5
         generator = _mock_generator(
-            result=PlanResult(
-                success=True,
-                positions=torch.zeros(
+            result=_timed_result(
+                torch.zeros(
                     BATCH_SIZE,
                     raw_sample_count,
                     CONTROLLED_DOF,
@@ -515,15 +549,20 @@ class TestMotionStrategy:
             SAMPLE_COUNT,
             CONTROLLED_DOF,
         )
+        assert result.dt is not None
+        assert result.duration is not None
+        assert result.dt.shape == (BATCH_SIZE, SAMPLE_COUNT)
+        assert result.duration.tolist() == pytest.approx(
+            [STEP_DT * (raw_sample_count - 1)] * BATCH_SIZE
+        )
         generator.planner.plan.assert_called_once()
 
     def test_motion_gen_preserves_backend_samples_when_required(self):
         raw_sample_count = 5
         generator = _mock_generator(
             preserve_plan_samples=True,
-            result=PlanResult(
-                success=True,
-                positions=torch.zeros(
+            result=_timed_result(
+                torch.zeros(
                     BATCH_SIZE,
                     raw_sample_count,
                     CONTROLLED_DOF,
@@ -556,6 +595,7 @@ class TestMotionStrategy:
                 sample_count=SAMPLE_COUNT,
                 start_qpos=start,
                 control_part="arm",
+                interpolation_dt=STEP_DT,
             ),
         )
 
@@ -594,9 +634,7 @@ class TestNormalizedPlanResult:
     def test_non_finite_positions_are_rejected(self):
         positions = torch.zeros(BATCH_SIZE, 5, CONTROLLED_DOF)
         positions[0, 0, 0] = float("nan")
-        generator = _mock_generator(
-            result=PlanResult(success=True, positions=positions)
-        )
+        generator = _mock_generator(result=_timed_result(positions))
 
         with pytest.raises(ValueError, match="non-finite"):
             generator.generate(
@@ -628,9 +666,9 @@ class TestNormalizedPlanResult:
         positions = torch.zeros(BATCH_SIZE, 5, CONTROLLED_DOF)
         positions[1] = 1.0
         generator = _mock_generator(
-            result=PlanResult(
+            result=_timed_result(
+                positions,
                 success=torch.tensor([True, False]),
-                positions=positions,
             )
         )
         start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)

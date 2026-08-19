@@ -357,13 +357,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 f"Skill {self.skill_id!r} expects options "
                 f"{self.OptionsType.__name__}, got {type(options).__name__}."
             )
-        required_planner = invocation.motion_policy.planner
-        configured_planner_name = self.planning_services.planner_name
-        if required_planner is not None and required_planner != configured_planner_name:
-            raise ValueError(
-                f"Motion policy requires planner {required_planner!r}, but this "
-                f"action uses {configured_planner_name!r}."
-            )
         return ResolvedActionRequest(
             skill_id=invocation.skill_id,
             goal=invocation.goal,
@@ -503,7 +496,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
         *,
         success: bool | torch.Tensor,
-        trajectory: TimedTrajectory | torch.Tensor,
+        trajectory: TimedTrajectory,
         expected_effects: StateDelta | None = None,
         replannable: bool = True,
         diagnostics: PlannerDiagnostics | None = None,
@@ -515,7 +508,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request: Resolved invocation snapshot being planned.
             context: Planning input used for the plan.
             success: Per-environment planning success or scalar planner result.
-            trajectory: Full-robot timed trajectory or position tensor.
+            trajectory: Full-robot trajectory with explicit timing.
             expected_effects: Symbolic effects to verify after execution.
             replannable: Whether the execution runtime may replan this action.
             diagnostics: Optional retained planner diagnostics.
@@ -532,16 +525,12 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             name="Planning success",
         )
 
-        if isinstance(trajectory, torch.Tensor):
-            timed = TimedTrajectory.from_positions(
-                trajectory,
-                env_ids=context.env_ids,
-                control_dt=request.motion_policy.control_dt,
+        if not isinstance(trajectory, TimedTrajectory):
+            raise TypeError(
+                "trajectory must be a TimedTrajectory with explicit dt; atomic "
+                "actions may not return untimed position tensors."
             )
-        elif isinstance(trajectory, TimedTrajectory):
-            timed = trajectory
-        else:
-            raise TypeError("trajectory must be TimedTrajectory or torch.Tensor.")
+        timed = trajectory
         if timed.batch_size != context.batch_size:
             raise ValueError("Trajectory and planning context batch sizes must match.")
         if timed.robot_dof != context.robot.robot_dof:

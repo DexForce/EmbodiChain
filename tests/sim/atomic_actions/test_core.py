@@ -64,6 +64,7 @@ from embodichain.lab.sim.atomic_actions.goals import (
     resolve_pose_goal,
 )
 from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim.planners import ToppraPlanOptions
 
 
 def _semantics(
@@ -96,13 +97,18 @@ def _held(
     )
 
 
-def _context(scene: SceneSnapshot | None = None) -> PlanningContext:
+def _context(
+    scene: SceneSnapshot | None = None,
+    *,
+    control_dt: float | None = None,
+) -> PlanningContext:
     qpos = torch.zeros(2, 4)
     return PlanningContext(
         robot=RobotObservation(timestamp=1.0, qpos=qpos, qvel=torch.zeros_like(qpos)),
         task=TaskState.empty(batch_size=2, device="cpu"),
         scene=scene or SceneSnapshot.empty(),
         env_ids=torch.tensor([4, 7], dtype=torch.long),
+        control_dt=control_dt,
     )
 
 
@@ -337,9 +343,8 @@ def test_object_semantics_identity_fields_are_frozen() -> None:
 
 
 def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
-    policy = MotionPolicy(sample_count=24, control_dt=0.01)
+    policy = MotionPolicy(sample_count=24)
     assert policy.sample_count == 24
-    assert policy.control_dt == 0.01
     assert policy.dynamic_collision_mode is DynamicCollisionMode.AUTO
     with pytest.raises(ValueError, match="sample_count"):
         MotionPolicy(sample_count=1)
@@ -361,18 +366,22 @@ def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
 
 
 def test_motion_policy_maps_to_motion_generator_strategy() -> None:
+    planner_options = ToppraPlanOptions(
+        constraints={"velocity": 0.2, "acceleration": 0.5}
+    )
     policy = MotionPolicy(
         strategy="ik_interp",
         sample_count=24,
-        velocity_limit=0.2,
-        acceleration_limit=0.5,
+        plan_opts=planner_options,
     )
+    planner_options.constraints["velocity"] = 1.0
     start_qpos = torch.zeros(2, 6)
 
     options = policy.to_motion_gen_options(
         start_qpos=start_qpos,
         control_part="arm",
         sample_count=12,
+        interpolation_dt=0.02,
     )
 
     assert options.strategy == "ik_interp"
@@ -380,8 +389,11 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     assert options.start_qpos is not start_qpos
     assert torch.equal(options.start_qpos, start_qpos)
     assert options.control_part == "arm"
-    assert options.velocity_limit == 0.2
-    assert options.acceleration_limit == 0.5
+    assert options.interpolation_dt == pytest.approx(0.02)
+    assert options.velocity_limit is None
+    assert options.acceleration_limit is None
+    assert isinstance(options.plan_opts, ToppraPlanOptions)
+    assert options.plan_opts.constraints == {"velocity": 0.2, "acceleration": 0.5}
 
 
 def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
@@ -702,6 +714,14 @@ def test_build_plan_uses_action_scene_dependency_hook() -> None:
         skill_options=ActionOptions(),
     )
 
+    with pytest.raises(TypeError, match="TimedTrajectory with explicit dt"):
+        action.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=context.robot.qpos.unsqueeze(1),  # type: ignore[arg-type]
+        )
+
     plan = action.build_command_plan(
         request,
         context,
@@ -854,10 +874,10 @@ def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
         ),
         dim=1,
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         trajectory_positions,
         env_ids=env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
     plan_success = torch.tensor([True, False])
 
@@ -929,10 +949,10 @@ def test_action_plan_validates_joint_trajectory_against_commands(
         env_ids=torch.tensor([4], dtype=torch.long),
         frame_count=1,
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.ones(1, trajectory_frame_count, 2),
         env_ids=trajectory_env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
 
     with pytest.raises(ValueError, match=message):
@@ -999,10 +1019,10 @@ def test_action_plan_requires_stable_destination_set(
         ),
     )
     trajectory = (
-        TimedTrajectory.from_positions(
+        TimedTrajectory.from_uniform_step(
             torch.tensor([[[1.0, 1.0], [2.0, 2.0]]]),
             env_ids=env_ids,
-            control_dt=0.1,
+            step_dt=0.1,
         )
         if feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
         else None
@@ -1053,10 +1073,10 @@ def test_joint_position_plan_rejects_joint_ids_outside_trajectory() -> None:
         frame_count=1,
         targets=(JointPositionTarget("arm", (0, 2)),),
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.ones(1, 1, 2),
         env_ids=env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
 
     with pytest.raises(ValueError, match="outside joint_trajectory robot_dof"):
@@ -1070,10 +1090,10 @@ def test_joint_position_plan_rejects_joint_ids_outside_trajectory() -> None:
 def test_joint_position_plan_rejects_payload_position_mismatch() -> None:
     env_ids = torch.tensor([4], dtype=torch.long)
     commands = _command_sequence(env_ids=env_ids, frame_count=1)
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.zeros(1, 1, 2),
         env_ids=env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
 
     with pytest.raises(ValueError, match="positions.*exactly match"):
@@ -1091,10 +1111,10 @@ def test_joint_position_plan_rejects_payload_velocity_presence_mismatch() -> Non
         frame_count=1,
         velocities=(torch.zeros(1, 2),),
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.ones(1, 1, 2),
         env_ids=env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
 
     with pytest.raises(ValueError, match="same presence"):
@@ -1112,11 +1132,11 @@ def test_joint_position_plan_rejects_payload_velocity_value_mismatch() -> None:
         frame_count=1,
         velocities=(torch.zeros(1, 2),),
     )
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.ones(1, 1, 2),
         velocities=torch.ones(1, 1, 2),
         env_ids=env_ids,
-        control_dt=0.1,
+        step_dt=0.1,
     )
 
     with pytest.raises(ValueError, match="velocities.*exactly match"):
@@ -1203,12 +1223,12 @@ def test_scene_snapshot_rejects_unknown_collision_entity() -> None:
         )
 
 
-def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
+def test_timed_trajectory_uses_explicit_uniform_timing_and_holds_rows() -> None:
     positions = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         positions,
         env_ids=torch.tensor([4, 7]),
-        control_dt=0.02,
+        step_dt=0.02,
     )
     held = trajectory.hold_rows(
         torch.tensor([True, False]),
@@ -1252,15 +1272,24 @@ def test_timed_trajectory_rejects_duplicate_environment_ids() -> None:
         TimedTrajectory.from_positions(
             torch.zeros(2, 1, 2),
             env_ids=torch.tensor([4, 4], dtype=torch.long),
-            control_dt=0.1,
+            dt=torch.zeros(2, 1),
         )
 
 
+def test_planning_context_requires_explicit_interpolation_period() -> None:
+    with pytest.raises(ValueError, match="explicit PlanningContext.control_dt"):
+        _context().require_control_dt()
+
+    assert _context(control_dt=0.02).require_control_dt() == pytest.approx(0.02)
+    with pytest.raises(ValueError, match="finite and greater than zero"):
+        _context(control_dt=0.0)
+
+
 def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         torch.arange(12, dtype=torch.float32).reshape(1, 3, 4),
         env_ids=torch.tensor([4]),
-        control_dt=0.02,
+        step_dt=0.02,
     )
 
     snapshot = trajectory.snapshot()
@@ -1276,15 +1305,15 @@ def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
 
 
 def test_timed_trajectory_concatenates_metadata() -> None:
-    first = TimedTrajectory.from_positions(
+    first = TimedTrajectory.from_uniform_step(
         torch.zeros(2, 2, 4),
         env_ids=torch.tensor([0, 1]),
-        control_dt=0.1,
+        step_dt=0.1,
     )
-    second = TimedTrajectory.from_positions(
+    second = TimedTrajectory.from_uniform_step(
         torch.ones(2, 3, 4),
         env_ids=torch.tensor([0, 1]),
-        control_dt=0.2,
+        step_dt=0.2,
     )
 
     result = TimedTrajectory.concatenate((first, second))

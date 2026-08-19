@@ -39,7 +39,7 @@ from ..goals import (
     validate_pose_goal,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
+from ..plans import ActionPlan, TimedTrajectory, normalize_success_mask
 from ..requirements import (
     DisjointResourceSlots,
     INVERSE_KINEMATICS_CAPABILITY,
@@ -997,7 +997,11 @@ class CoordinatedPickment(
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
                     resources.left_arm.control_part: left_held_object,

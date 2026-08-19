@@ -46,7 +46,7 @@ from ..goals import (
     validate_pose_goal,
 )
 from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, normalize_success_mask
+from ..plans import ActionPlan, TimedTrajectory, normalize_success_mask
 from ..policies import MotionPolicy
 from ..requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -200,6 +200,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         end_effector: JointPositionTarget,
         hand_open_qpos: torch.Tensor,
         hand_grasp_qpos: torch.Tensor,
+        interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
@@ -218,6 +219,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 start_qpos=start_arm_qpos,
                 control_part=manipulator.control_part,
                 sample_count=n_approach,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(approach_result.success, torch.Tensor)
@@ -236,6 +238,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 start_qpos=grasp_arm_qpos,
                 control_part=manipulator.control_part,
                 sample_count=n_lift,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(lift_result.success, torch.Tensor)
@@ -377,6 +380,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             end_effector,
             hand_open_qpos,
             hand_grasp_qpos,
+            context.require_control_dt(),
         )
         success_mask = grasp_success & normalize_success_mask(
             trajectory_success,
@@ -393,7 +397,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(held_object_updates={control_part: held}),
             segment_lengths=segment_lengths,
         )

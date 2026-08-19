@@ -558,6 +558,7 @@ def _timed_atomic_run(
     atomic_engine: AtomicActionEngine,
     move_target: torch.Tensor,
     press_target: torch.Tensor,
+    control_dt: float,
 ) -> tuple[float, dict[str, float], float, bool, torch.Tensor]:
     """Run a timed atomic-action sequence and return timing/memory/results."""
     move_binding = atomic_engine.bind_control_parts(
@@ -590,7 +591,8 @@ def _timed_atomic_run(
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-        )
+        ),
+        atomic_engine.initial_context(control_dt=control_dt),
     )
     is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions
@@ -636,6 +638,7 @@ def _run_press_case(
             atomic_engine=atomic_engine,
             move_target=move_target,
             press_target=press_target,
+            control_dt=sim.sim_config.physics_dt,
         )
         video_path = None
         if should_record_case(args, recorded_count, bool(planning_success)):

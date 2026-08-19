@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -520,6 +521,8 @@ class PlanningContext:
     task: TaskState
     scene: SceneSnapshot
     env_ids: torch.Tensor
+    control_dt: float | None = None
+    """Explicit command period used by action-owned interpolation."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.robot, RobotObservation):
@@ -552,6 +555,14 @@ class PlanningContext:
             raise ValueError("env_ids and robot tensors must share a device.")
         if torch.unique(self.env_ids).numel() != self.env_ids.numel():
             raise ValueError("env_ids must be unique.")
+        if self.control_dt is not None:
+            if isinstance(self.control_dt, bool) or not isinstance(
+                self.control_dt, (int, float)
+            ):
+                raise TypeError("control_dt must be a real number or None.")
+            if not math.isfinite(self.control_dt) or self.control_dt <= 0.0:
+                raise ValueError("control_dt must be finite and greater than zero.")
+            object.__setattr__(self, "control_dt", float(self.control_dt))
         object.__setattr__(self, "env_ids", self.env_ids.clone())
 
     @property
@@ -573,6 +584,19 @@ class PlanningContext:
         """Return the object held by ``resource``, if any."""
         return self.task.get_held_object(resource)
 
+    def require_control_dt(self) -> float:
+        """Return the explicit command period required for interpolation.
+
+        Raises:
+            ValueError: If the caller did not provide ``control_dt``.
+        """
+        if self.control_dt is None:
+            raise ValueError(
+                "This action performs interpolation and requires an explicit "
+                "PlanningContext.control_dt."
+            )
+        return self.control_dt
+
     def project(
         self,
         *,
@@ -593,6 +617,7 @@ class PlanningContext:
             task=task,
             scene=self.scene,
             env_ids=self.env_ids,
+            control_dt=self.control_dt,
         )
 
 

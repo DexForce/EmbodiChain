@@ -348,7 +348,8 @@ def run_assemble_demo(
                 ),
                 skill_options=place_options,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions

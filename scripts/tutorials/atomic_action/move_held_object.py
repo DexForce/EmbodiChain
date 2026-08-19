@@ -195,7 +195,8 @@ def main() -> None:
                     sample_count=MOVE_HELD_OBJECT_SAMPLE_INTERVAL,
                 ),
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveHeldObject demo trajectory.")

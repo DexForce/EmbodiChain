@@ -93,11 +93,12 @@ sessions, or verifiers.
 
 ## 4. Baseline on current `main`
 
-This plan is updated against committed `main@f4ffb660`. PR #517 simplified the
-atomic-action core, and PR #487 landed the complete Phase 1 foundation. The
-scene registry and robot skill profile APIs are available, but official task
-environments have not adopted them yet; that rollout starts only after the
-semantic compiler and runtime exist.
+This plan is updated against committed `main@dbc6553f`. PR #517 simplified the
+atomic-action core, PR #487 landed the complete Phase 1 foundation, and PR #523
+simplified that foundation without changing its contracts. The scene registry
+and robot skill profile APIs are available, but official task environments have
+not adopted them yet; that rollout starts only after the semantic compiler and
+runtime exist.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -106,10 +107,10 @@ semantic compiler and runtime exist.
 | Closed-loop `ExecutionRunner` and simulator ports (#449) | Available | `SkillRuntime` wraps/reuses the runner rather than scheduling commands itself. |
 | Dynamic scene recovery and `DynamicCollisionMode` (#450) | Available | Profiles select precise collision semantics and fail early when required capabilities are unavailable. |
 | Refined planning architecture (#475) | `MotionGenerator.generate()` is the single planning facade; each `ActionPlan` owns one trajectory and one recovery boundary; named `TrajectorySegment`s are metadata | Do not reintroduce `TrajectoryBuilder`, `MotionPlanningAdapter`, or trajectory-segment recovery. |
-| Environment cadence through `BaseEnv.step_dt` (#472) | Available | Expert configuration does not expose a separate control period. |
+| Environment cadence through `BaseEnv.step_dt` (#472) | Available; planner and action trajectories now require explicit timing | Expert configuration, `MotionPolicy`, and the engine do not own a fallback period. Environment integrations put `BaseEnv.step_dt` on `PlanningContext` only for action-owned interpolation. |
 | Adaptive dynamic-object settling (#470) | Reset/event implementation exists | Extract a reusable monitor; demo post-policies must advance through `env.step()`. |
 | Authoritative scene registry (#487) | Foundation available; official environments not migrated | Reuse it from the semantic compiler and opt in task scenes explicitly. |
-| Declarative robot skill profiles (#487) | Foundation available; official profiles not yet installed | Bind reusable embodiment profiles through the semantic integration layer. |
+| Declarative robot skill profiles (#487) | Foundation available; official profiles not yet installed | Bind reusable embodiment profiles through the semantic integration layer; put optional backend compatibility in `SkillPolicyPreset.required_planner`, not `MotionPolicy`. |
 | Repeated cube pick/place demo | Manually constructs invocations and transform math | First configuration-only vertical slice. |
 | Open Drawer task (#473) | Manually builds approach, grasp, pull, and command trajectories | Evidence that the semantic layer needs articulation/link/affordance references and a reusable articulation skill. |
 | Action Bank | Configuration plus task-specific Python node/edge functions | Keep only as a compatibility path while semantic coverage is built. |
@@ -408,7 +409,8 @@ an `arm + tool` schema. It contains a generic resource DAG:
   embodiment data owned by generic profile IDs selected by each endpoint
   adapter; only the current core bridge lowers applicable profiles to robot
   control-part keys;
-- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy;
+- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy,
+  plus an optional required-planner compatibility constraint;
 - per-skill defaults map every skill-local slot to one resource ID.
 
 Resource and endpoint declarations are owned snapshots. A custom endpoint with
@@ -712,7 +714,15 @@ normally, then resume with a fresh observation.
 ### 9.2 Timing
 
 `BaseEnv.step_dt` is the authoritative control cadence. Semantic task
-configuration does not expose `control_dt`.
+configuration, `MotionPolicy`, and `AtomicActionEngine` do not expose or own a
+fallback `control_dt`. Environment integrations copy `BaseEnv.step_dt` into
+`PlanningContext.control_dt` when an action performs deterministic interpolation.
+
+Timing is a strict producer contract. A planner result with positions includes
+per-waypoint `dt` and a matching per-environment `duration`; an atomic action
+passes a complete `TimedTrajectory` to `build_plan()`. Missing or inconsistent
+timing is rejected at construction. No layer repairs an untimed planner result
+or raw action position tensor with a default period.
 
 Version 1 should require every emitted
 `RuntimeCommandFrame.hold_duration` to be representable by an integer number
