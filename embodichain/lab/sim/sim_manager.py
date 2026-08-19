@@ -440,7 +440,7 @@ class SimulationManager:
 
         Args:
             renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
-                ``"fast-rt"``, or ``"offline-rt"``. When ``"auto"``, the renderer is
+                ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
                 resolved immediately from the detected GPU via
                 :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
             gpu_id: The CUDA device index to query when ``renderer="auto"``.
@@ -451,7 +451,7 @@ class SimulationManager:
         from embodichain.lab.sim import cfg
         from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
-        valid = {"auto", "hybrid", "fast-rt", "offline-rt"}
+        valid = {"auto", "hybrid", "fast-rt", "rt"}
         if renderer not in valid:
             logger.log_error(
                 f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."

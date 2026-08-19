@@ -28,7 +28,8 @@
                         "eye": [-1.4, 1.4, 2.0],
                         "target": [0, 0, 0],
                         "up": [0, 0, 1],
-                        "intrinsics": [600, 600, 320, 240]
+                        "intrinsics": [600, 600, 320, 240],
+                        "save_path": "./outputs/videos_ppo1/eval"
                     }
                 }
             }

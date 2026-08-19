@@ -46,7 +46,8 @@
                             600,
                             320,
                             240
-                        ]
+                        ],
+                        "save_path": "./outputs/videos/eval"
                     }
                 }
             }

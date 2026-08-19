@@ -159,7 +159,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--num_envs`` | ``1`` | Number of parallel environments |
 | ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
 | ``--headless`` | ``False`` | Run in headless mode |
-| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``offline-rt`` |
+| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
 | ``--arena_space`` | ``5.0`` | Arena space size |
 | ``--gpu_id`` | ``0`` | GPU ID to use |
 | ``--preview`` | ``False`` | Enter interactive preview mode |
@@ -383,56 +383,6 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
 
 See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
-
----
-
-## Policy Evaluation
-
-Evaluate the latest checkpoint from an EmbodiChain training run:
-
-```bash
-embodichain eval-policy outputs/my_policy_<timestamp>
-```
-
-Open a simulator task in the Viewer:
-
-```bash
-embodichain eval-policy outputs/my_policy_<timestamp> \
-    --checkpoint best \
-    --viewer \
-    --renderer hybrid
-```
-
-Evaluate an explicit EmbodiChain checkpoint:
-
-```bash
-embodichain eval-policy \
-    --checkpoint /path/to/policy.pt \
-    --config /path/to/train.yaml \
-    --gym-config /path/to/gym.yaml
-```
-
-### Main arguments
-
-| Argument | Default | Description |
-|---|---|---|
-| ``RUN`` | *(optional)* | Training run containing ``run-manifest.json`` |
-| ``--checkpoint`` | ``latest`` with RUN | ``latest``, ``best``, or a checkpoint path |
-| ``--config`` | RUN manifest | Training configuration override |
-| ``--gym-config`` | RUN manifest | Simulator task configuration override |
-| ``--episodes`` | Training configuration | Number of completed task episodes |
-| ``--num-envs`` | Training configuration | Number of parallel Headless environments |
-| ``--viewer`` | Headless | Open the original simulator task in the DexSim Viewer |
-| ``--control-steps`` | Viewer runs continuously | Exact number of Policy actions |
-| ``--duration`` | *(optional)* | Duration converted to integer control steps |
-| ``--renderer`` | Training configuration or ``hybrid`` | Viewer renderer |
-| ``--device`` | Training configuration | PyTorch inference device |
-| ``--sim-device`` | Inference device | Simulation device |
-| ``--output`` | RUN or checkpoint evaluations | Evaluation output parent directory |
-
-External Motion Profiles use the same command with `--profile`. See
-{doc}`policy_evaluation` for training-run layout, execution paths, Viewer
-controls, output reports, and the complete ANYmal-C example.
 
 ---
 
