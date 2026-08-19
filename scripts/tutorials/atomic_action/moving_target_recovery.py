@@ -59,8 +59,8 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
-    create_toppra_motion_generator,
+    add_tutorial_robot,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -243,7 +243,7 @@ def main() -> None:
     """Replan a late-bound PickUp request and lift the relocated cube."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     target = _create_moving_target(sim)
     sim.update(step=10)
     target_scene = _MovingTargetScene(target, MOVED_TARGET_POSITION)
@@ -252,7 +252,7 @@ def main() -> None:
         robot,
         scene_supplier=target_scene.snapshot,
     )
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, target, hand_open)
     if args.no_target_motion:
@@ -301,6 +301,7 @@ def main() -> None:
         ),
         binding=binding,
         motion_policy=MotionPolicy(
+            strategy="motion_gen",
             sample_count=PICK_SAMPLE_COUNT,
             control_dt=2.0 * sim_runtime.physics_dt,
         ),
