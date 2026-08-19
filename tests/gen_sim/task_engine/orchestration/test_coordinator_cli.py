@@ -311,6 +311,26 @@ def test_artifact_transaction_rolls_back_and_preserves_existing_output(
     assert not (output / "partial.txt").exists()
 
 
+def test_prepare_rejects_output_overlapping_read_only_source(tmp_path: Path) -> None:
+    source = tmp_path / "gym_project"
+    source.mkdir()
+    coordinator = TaskEngineCoordinator(
+        task_agent=object(),
+        scene_adapter=object(),
+        action_agent=object(),
+        feasibility_broker=object(),
+    )
+
+    with pytest.raises(ValueError, match="must not overlap"):
+        coordinator.prepare(
+            "task",
+            "Pick up the object.",
+            source,
+            source / "task_run",
+            overwrite=True,
+        )
+
+
 def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path, status="ambiguous")

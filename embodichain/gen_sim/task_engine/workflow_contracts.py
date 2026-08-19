@@ -29,6 +29,7 @@ __all__ = [
     "SceneInputKind",
     "TaskRunRequest",
     "scene_input_kind",
+    "validate_scene_output_separation",
     "validate_task_run_request",
 ]
 
@@ -83,6 +84,8 @@ def validate_task_run_request(value: Mapping[str, Any]) -> TaskRunRequest:
         )
     result["image_path"] = image_path
     result["gym_project"] = gym_project
+    if gym_project is not None:
+        validate_scene_output_separation(gym_project, result["output_dir"])
 
     edit_prompt = result.get("scene_edit_prompt")
     if edit_prompt is not None:
@@ -96,6 +99,27 @@ def scene_input_kind(request: Mapping[str, Any]) -> SceneInputKind:
     """Return the selected scene input kind after validating ``request``."""
     normalized = validate_task_run_request(request)
     return "image" if normalized["image_path"] is not None else "gym_project"
+
+
+def validate_scene_output_separation(
+    gym_project: str | Path,
+    output_dir: str | Path,
+) -> None:
+    """Reject output paths that could replace or modify a read-only source.
+
+    Args:
+        gym_project: Existing Gym project directory or configuration path.
+        output_dir: Transactional output directory for the Task Engine run.
+
+    Raises:
+        ValueError: If either path contains the other or both paths are equal.
+    """
+    source = Path(gym_project).expanduser().resolve()
+    output = Path(output_dir).expanduser().resolve()
+    if source == output or source in output.parents or output in source.parents:
+        raise ValueError(
+            "Task Engine output_dir and source Gym project must not overlap."
+        )
 
 
 def _path(value: Any, field_name: str) -> str:

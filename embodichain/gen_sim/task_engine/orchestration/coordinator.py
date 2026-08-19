@@ -43,6 +43,7 @@ from embodichain.gen_sim.task_engine import (
     TaskAgent,
     TaskCandidate,
     TaskCandidateSet,
+    validate_scene_output_separation,
     validate_task_candidate,
 )
 from embodichain.gen_sim.task_engine.scene import FeasibilityBroker, FeasibilityReport
@@ -187,6 +188,7 @@ class TaskEngineCoordinator:
         SeedGraph, Gym configuration, or GroundedTaskPlan.
         """
         normalized_source = self._coerce_source(source)
+        validate_scene_output_separation(normalized_source.path, output_dir)
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging_dir = transaction.staging_dir
             assert staging_dir is not None

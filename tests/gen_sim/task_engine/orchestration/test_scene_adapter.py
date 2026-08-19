@@ -95,6 +95,59 @@ def scene_export(tmp_path: Path) -> Path:
     return export
 
 
+def _legacy_gym_project(tmp_path: Path, filename: str) -> Path:
+    project = tmp_path / filename.removesuffix(".json")
+    assets = project / "assets"
+    assets.mkdir(parents=True)
+    for name in ("table.glb", "red_can.glb", "cabinet.urdf"):
+        (assets / name).write_bytes(f"asset:{name}".encode())
+    config = {
+        "background": [
+            {
+                "uid": "table_0",
+                "name": "table",
+                "description": "A work table.",
+                "category": "table",
+                "shape": {"shape_type": "Mesh", "fpath": "assets/table.glb"},
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "body_scale": [1.0, 1.0, 1.0],
+            }
+        ],
+        "rigid_object": [
+            {
+                "uid": "red_can_0",
+                "name": "red can",
+                "description": "A red soda can.",
+                "category": "can",
+                "affordances": ["graspable", "orientable", "placeable"],
+                "initial_state": {"orientation": "fallen"},
+                "shape": {
+                    "shape_type": "Mesh",
+                    "fpath": "assets/red_can.glb",
+                },
+                "init_pos": [0.0, 0.2, 0.7],
+                "init_rot": [0.0, 0.0, 90.0],
+                "body_scale": [1.0, 1.0, 1.0],
+            }
+        ],
+        "articulation": [
+            {
+                "uid": "cabinet_0",
+                "name": "cabinet",
+                "description": "A fixed articulated cabinet.",
+                "category": "cabinet",
+                "fpath": "assets/cabinet.urdf",
+                "init_pos": [0.4, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+                "body_scale": [1.0, 1.0, 1.0],
+            }
+        ],
+    }
+    (project / filename).write_text(json.dumps(config), encoding="utf-8")
+    return project
+
+
 def _selector(reference: str) -> dict:
     return {
         "kind": "scene_ref",
@@ -254,6 +307,43 @@ def test_scene_source_fingerprint_reads_without_copying(scene_export: Path) -> N
     assert len(fingerprint.config_sha256) == 64
     assert len(fingerprint.asset_sha256) == 3
     assert after == before
+
+
+@pytest.mark.parametrize("filename", ["gym_config.json", "gym_config_merged.json"])
+def test_scene_adapter_supports_legacy_gym_configs(
+    tmp_path: Path,
+    filename: str,
+) -> None:
+    project = _legacy_gym_project(tmp_path, filename)
+    result = SceneAdapter(grounding_caller=_grounder).adapt(
+        _candidate_set([_candidate("legacy", "red can")]),
+        project,
+    )
+
+    assert result.selected_candidate_id == "legacy"
+    assert result.static_scene_manifest["source_format"] == "legacy_gym_config"
+    assert any(
+        item["role"] == "articulation"
+        for item in result.static_scene_manifest["objects"]
+    )
+    assert (
+        result.prepared_scene.articulations[0]["fpath"]
+        == (project / "assets" / "cabinet.urdf").resolve().as_posix()
+    )
+
+
+def test_scene_source_fingerprint_covers_articulation_fpath(tmp_path: Path) -> None:
+    project = _legacy_gym_project(tmp_path, "gym_config.json")
+    original = fingerprint_scene_source(project)
+    articulation_path = project / "assets" / "cabinet.urdf"
+
+    articulation_path.write_bytes(b"changed articulation")
+    changed = fingerprint_scene_source(project)
+
+    assert articulation_path.resolve().as_posix() in original.asset_sha256
+    assert changed.asset_sha256 != original.asset_sha256
+    with pytest.raises(RuntimeError, match="changed after Task Engine preparation"):
+        verify_scene_source_fingerprint(original.to_dict())
 
 
 def test_scene_adapter_selects_bindable_majority_and_redacts_manifest(

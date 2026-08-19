@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 from .workflow_contracts import TaskRunRequest, validate_task_run_request
@@ -32,6 +34,7 @@ __all__ = [
     "complete_stage",
     "fail_stage",
     "initial_state",
+    "replay_events",
     "skip_stage",
     "start_stage",
 ]
@@ -87,14 +90,33 @@ _DEPENDENCIES: dict[WorkflowStage, frozenset[WorkflowStage]] = {
     WorkflowStage.EXECUTION: frozenset({WorkflowStage.GROUNDED_ACTION}),
 }
 
+_SKIPPABLE_STAGES = frozenset({WorkflowStage.SCENE_EDIT})
+
 
 @dataclass(frozen=True)
 class TaskEngineState:
     """Immutable state snapshot plus an append-only transition audit."""
 
-    request: TaskRunRequest
-    stages: dict[WorkflowStage, StageStatus]
-    events: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    request: Mapping[str, Any]
+    stages: Mapping[WorkflowStage, StageStatus]
+    events: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "request",
+            MappingProxyType(deepcopy(dict(self.request))),
+        )
+        object.__setattr__(
+            self,
+            "stages",
+            MappingProxyType(dict(self.stages)),
+        )
+        object.__setattr__(
+            self,
+            "events",
+            tuple(MappingProxyType(deepcopy(dict(event))) for event in self.events),
+        )
 
     @property
     def terminal(self) -> bool:
@@ -107,11 +129,11 @@ class TaskEngineState:
     def to_dict(self) -> dict[str, Any]:
         """Return one JSON-safe audit snapshot."""
         return {
-            "request": deepcopy(self.request),
+            "request": deepcopy(dict(self.request)),
             "stages": {
                 stage.value: self.stages[stage].value for stage in WorkflowStage
             },
-            "events": deepcopy(list(self.events)),
+            "events": deepcopy([dict(event) for event in self.events]),
         }
 
 
@@ -183,9 +205,63 @@ def fail_stage(
 
 def skip_stage(state: TaskEngineState, stage: WorkflowStage) -> TaskEngineState:
     """Skip one optional pending stage."""
+    if stage not in _SKIPPABLE_STAGES:
+        raise ValueError("Only the optional scene_edit stage can be skipped.")
     if state.stages[stage] != StageStatus.PENDING:
         raise ValueError(f"Stage {stage.value!r} is not pending.")
     return _transition(state, stage, StageStatus.SKIPPED)
+
+
+def replay_events(
+    request: TaskRunRequest,
+    events: Sequence[Mapping[str, Any]],
+) -> TaskEngineState:
+    """Rebuild a state by validating and applying its transition audit.
+
+    Args:
+        request: Original workflow request used to create the state.
+        events: Complete ordered event audit to validate and replay.
+
+    Returns:
+        The immutable state reconstructed from the supplied audit.
+
+    Raises:
+        TypeError: If the audit is not a sequence of event mappings.
+        ValueError: If any event is missing, altered, or not a valid transition.
+    """
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+        raise TypeError("Task Engine events must be a sequence of mappings.")
+    recorded = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            raise TypeError("Each Task Engine event must be a mapping.")
+        recorded.append(deepcopy(dict(event)))
+
+    state = initial_state(request)
+    initial_events = [dict(event) for event in state.events]
+    if recorded[: len(initial_events)] != initial_events:
+        raise ValueError("Replay event does not match the canonical initial state.")
+
+    for expected in recorded[len(initial_events) :]:
+        try:
+            stage = WorkflowStage(expected["stage"])
+            target = StageStatus(expected["to"])
+            if target == StageStatus.RUNNING:
+                replayed = start_stage(state, stage)
+            elif target == StageStatus.SUCCEEDED:
+                replayed = complete_stage(state, stage)
+            elif target == StageStatus.FAILED:
+                replayed = fail_stage(state, stage, reason=expected["reason"])
+            elif target == StageStatus.SKIPPED:
+                replayed = skip_stage(state, stage)
+            else:
+                raise ValueError(f"Unsupported replay target: {target.value!r}.")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Replay event does not match a valid transition.") from exc
+        if dict(replayed.events[-1]) != expected:
+            raise ValueError("Replay event does not match the generated transition.")
+        state = replayed
+    return state
 
 
 def _transition(
@@ -207,7 +283,7 @@ def _transition(
     if details:
         event.update(deepcopy(details))
     return TaskEngineState(
-        request=deepcopy(state.request),
+        request=dict(state.request),
         stages=stages,
         events=(*state.events, event),
     )

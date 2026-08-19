@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
@@ -167,6 +168,8 @@ def materialize_blueprint(
     geometry_generation_client: GeometryGenerationClient | None = None,
 ) -> SceneMaterialization:
     """Generate assets and layout for one image-derived blueprint."""
+    scene = deepcopy(blueprint.scene)
+    scene_graph = deepcopy(blueprint.scene_graph)
     effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
     geometry = geometry_generation_client or GeometryGenerationClient.from_dotenv()
     owns_geometry = geometry_generation_client is None
@@ -176,8 +179,8 @@ def materialize_blueprint(
         scene = generate_scene_and_refine(
             image_path=blueprint.image_path,
             output_root=blueprint.output_root,
-            scene=blueprint.scene,
-            scene_graph=blueprint.scene_graph,
+            scene=scene,
+            scene_graph=scene_graph,
             geometry_generation_client=geometry,
             vlm_client=effective_vlm,
         )
@@ -187,7 +190,7 @@ def materialize_blueprint(
     log_info("Completed Objects + Coarse Layout Generation")
     return _export_materialization(
         scene=scene,
-        scene_graph=blueprint.scene_graph,
+        scene_graph=scene_graph,
         output_root=blueprint.output_root,
     )
 
@@ -243,6 +246,8 @@ def materialize_edit(
     image_segmentation_client: ImageSegmentationClient | None = None,
 ) -> SceneMaterialization:
     """Generate added assets, apply layout edits, and export the new revision."""
+    scene_edit_plan = deepcopy(blueprint.scene_edit_plan)
+    updated_scene_graph = deepcopy(blueprint.updated_scene_graph)
     effective_vlm = vlm_client or OpenAICompatibleVLM.from_dotenv()
     image_generation = image_generation_client or ImageGenerationClient.from_dotenv()
     geometry = geometry_generation_client or GeometryGenerationClient.from_dotenv()
@@ -257,7 +262,7 @@ def materialize_edit(
         for client, _ in owned_clients:
             client.check_health()
         added_assets = prepare_scene_edit_assets(
-            scene_edit_plan=blueprint.scene_edit_plan,
+            scene_edit_plan=scene_edit_plan,
             output_root=blueprint.output_root,
             image_generation_client=image_generation,
             geometry_generation_client=geometry,
@@ -271,16 +276,16 @@ def materialize_edit(
     log_info("Completed Objects Preparation")
     log_info("Starting Layout Generation")
     scene = edit_layout(
-        scene=blueprint.scene_edit_plan.scene,
-        scene_edit_plan=blueprint.scene_edit_plan,
-        updated_scene_graph=blueprint.updated_scene_graph,
+        scene=scene_edit_plan.scene,
+        scene_edit_plan=scene_edit_plan,
+        updated_scene_graph=updated_scene_graph,
         added_assets=added_assets,
         output_root=blueprint.output_root,
     )
     log_info("Completed Layout Generation")
     return _export_materialization(
         scene=scene,
-        scene_graph=blueprint.updated_scene_graph,
+        scene_graph=updated_scene_graph,
         output_root=blueprint.output_root,
     )
 

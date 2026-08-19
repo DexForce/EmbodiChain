@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -35,6 +36,20 @@ class _HealthyClient:
 
     def check_health(self) -> None:
         self.health_checks += 1
+
+
+def _materialization(
+    *,
+    scene: Scene,
+    scene_graph: SceneGraph,
+    output_root: Path,
+) -> api.SceneMaterialization:
+    return api.SceneMaterialization(
+        scene=scene,
+        scene_graph=scene_graph,
+        output_root=output_root,
+        scene_config_path=output_root / "scene_export" / "scene_config.json",
+    )
 
 
 def _table_scene() -> tuple[Scene, SceneGraph]:
@@ -114,3 +129,107 @@ def test_analyze_edit_persists_post_edit_blueprint(
     assert document["blueprint_id"] == package.blueprint_id
     assert document["scene_edit_plan"] == plan.to_dict()
     assert document["updated_scene_graph"] == graph.to_dict()
+
+
+def test_materialize_blueprint_does_not_mutate_audited_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene, graph = _table_scene()
+    manifest_path = tmp_path / "scene_blueprint.json"
+    manifest_path.write_text("audited blueprint\n", encoding="utf-8")
+    package = api.SceneBlueprintPackage(
+        blueprint_id="blueprint",
+        image_path=tmp_path / "input.png",
+        output_root=tmp_path,
+        manifest_path=manifest_path,
+        scene=scene,
+        scene_graph=graph,
+    )
+    original_scene = deepcopy(scene.to_dict())
+    original_graph = deepcopy(graph.to_dict())
+
+    def fake_generate_scene_and_refine(**kwargs):
+        assert kwargs["scene"] is not package.scene
+        assert kwargs["scene_graph"] is not package.scene_graph
+        kwargs["scene"].objects[0].name = "materialized table"
+        return kwargs["scene"]
+
+    monkeypatch.setattr(
+        api,
+        "generate_scene_and_refine",
+        fake_generate_scene_and_refine,
+    )
+    monkeypatch.setattr(
+        api,
+        "_export_materialization",
+        lambda *, scene, scene_graph, output_root: _materialization(
+            scene=scene,
+            scene_graph=scene_graph,
+            output_root=output_root,
+        ),
+    )
+
+    result = api.materialize_blueprint(
+        package,
+        vlm_client=object(),
+        geometry_generation_client=_HealthyClient(),
+    )
+
+    assert result.scene.objects[0].name == "materialized table"
+    assert package.scene.to_dict() == original_scene
+    assert package.scene_graph.to_dict() == original_graph
+    assert manifest_path.read_text(encoding="utf-8") == "audited blueprint\n"
+
+
+def test_materialize_edit_does_not_mutate_audited_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene, graph = _table_scene()
+    plan = SceneEditPlan(scene=scene, scene_graph=graph, operations=[])
+    manifest_path = tmp_path / "scene_edit_blueprint.json"
+    manifest_path.write_text("audited edit blueprint\n", encoding="utf-8")
+    package = api.SceneEditBlueprintPackage(
+        blueprint_id="edit-blueprint",
+        edit_prompt="Keep the scene unchanged.",
+        output_root=tmp_path,
+        manifest_path=manifest_path,
+        scene_edit_plan=plan,
+        updated_scene_graph=graph,
+    )
+    original_plan = deepcopy(plan.to_dict())
+    original_graph = deepcopy(graph.to_dict())
+
+    monkeypatch.setattr(api, "prepare_scene_edit_assets", lambda **_: [])
+
+    def fake_edit_layout(**kwargs):
+        assert kwargs["scene_edit_plan"] is not package.scene_edit_plan
+        assert kwargs["updated_scene_graph"] is not package.updated_scene_graph
+        kwargs["scene"].objects[0].name = "edited table"
+        return kwargs["scene"]
+
+    monkeypatch.setattr(api, "edit_layout", fake_edit_layout)
+    monkeypatch.setattr(
+        api,
+        "_export_materialization",
+        lambda *, scene, scene_graph, output_root: _materialization(
+            scene=scene,
+            scene_graph=scene_graph,
+            output_root=output_root,
+        ),
+    )
+    clients = [_HealthyClient(), _HealthyClient(), _HealthyClient()]
+
+    result = api.materialize_edit(
+        package,
+        vlm_client=object(),
+        image_generation_client=clients[0],
+        geometry_generation_client=clients[1],
+        image_segmentation_client=clients[2],
+    )
+
+    assert result.scene.objects[0].name == "edited table"
+    assert package.scene_edit_plan.to_dict() == original_plan
+    assert package.updated_scene_graph.to_dict() == original_graph
+    assert manifest_path.read_text(encoding="utf-8") == "audited edit blueprint\n"

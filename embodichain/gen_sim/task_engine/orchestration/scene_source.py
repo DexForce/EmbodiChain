@@ -94,19 +94,23 @@ def fingerprint_scene_source(
         for index, entry in enumerate(entries):
             if not isinstance(entry, Mapping):
                 continue
+            references: list[tuple[str, Any]] = []
             shape = entry.get("shape")
-            if not isinstance(shape, Mapping) or not shape.get("fpath"):
-                continue
-            asset_path = Path(str(shape["fpath"])).expanduser()
-            if not asset_path.is_absolute():
-                asset_path = resolved.path.parent / asset_path
-            asset_path = asset_path.resolve()
-            if not asset_path.is_file():
-                raise FileNotFoundError(
-                    f"Scene asset does not exist: {asset_path} "
-                    f"({section}[{index}])."
-                )
-            asset_hashes[asset_path.as_posix()] = _sha256(asset_path.read_bytes())
+            if isinstance(shape, Mapping) and shape.get("fpath"):
+                references.append(("shape.fpath", shape["fpath"]))
+            if section == "articulation" and entry.get("fpath"):
+                references.append(("fpath", entry["fpath"]))
+            for field_name, reference in references:
+                asset_path = Path(str(reference)).expanduser()
+                if not asset_path.is_absolute():
+                    asset_path = resolved.path.parent / asset_path
+                asset_path = asset_path.resolve()
+                if not asset_path.is_file():
+                    raise FileNotFoundError(
+                        f"Scene asset does not exist: {asset_path} "
+                        f"({section}[{index}].{field_name})."
+                    )
+                asset_hashes[asset_path.as_posix()] = _sha256(asset_path.read_bytes())
     return SceneSourceFingerprint(
         source_format=resolved.source_format,
         config_path=resolved.path,
