@@ -13,4 +13,5 @@ Practical guides for common tasks in EmbodiChain.
    add_robot
    preview_asset
    run_env
+   policy_evaluation
    cli
