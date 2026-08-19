@@ -99,6 +99,9 @@ from embodichain.lab.sim.atomic_actions import (
     HeldObjectState,
     ObjectSemantics,
     PickUpOptions,
+    PressAffordance,
+    PressGoal,
+    PressOptions,
 )
 from embodichain.lab.sim.solvers import URSolverCfg
 
@@ -295,6 +298,52 @@ def _pose(x: float, y: float, z: float) -> torch.Tensor:
     result = torch.eye(4).unsqueeze(0)
     result[:, :3, 3] = torch.tensor([x, y, z])
     return result
+
+
+def test_press_grounding_adapts_top_surface_and_depth_to_mainline_contract() -> None:
+    entity = _FakeEntity("button", _pose(0.1, -0.2, 0.75), _box_vertices(0.03))
+    env = _FakeEnv({"button": entity})
+    program = load_execution_program(
+        compile_task_agent(
+            _task_agent(
+                {
+                    "id": "press",
+                    "operator": "press",
+                    "object": "button",
+                    "actor": {"mode": "required", "arm": "left_arm"},
+                    "goal": {},
+                    "depends_on": [],
+                }
+            )
+        )
+    )
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="button",
+        entity=entity,
+    )
+    step = program.semantic_steps[0]
+    action = program.edges[0].actions[0]
+
+    grounded = ActionGrounder(program, env, lambda _uid: semantics).ground(
+        action,
+        step,
+        arm="left_arm",
+        state=ExecutionState(last_qpos=env.robot.get_qpos()),
+    )
+
+    assert isinstance(grounded.target, PressGoal)
+    assert isinstance(grounded.target.semantics.affordance, PressAffordance)
+    contact = grounded.target.semantics.affordance.get_press_pose(
+        grounded.target.target_pose
+    )
+    assert torch.allclose(contact[0, :3, 3], torch.tensor([0.1, -0.2, 0.78]))
+    assert torch.allclose(contact[0, :3, 2], torch.tensor([0.0, 0.0, -1.0]))
+
+    options = AtomicActionAdapter(env)._build_config(grounded, PressOptions)
+
+    assert options.press_distance == pytest.approx(0.004)
 
 
 def test_loader_regenerates_in_memory_without_execution_artifact(

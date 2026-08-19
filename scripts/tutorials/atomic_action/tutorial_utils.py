@@ -69,7 +69,6 @@ DEFAULT_AXIS_SIZE = 0.003
 
 GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
-GRIPPER_TCP_Z = 0.15
 GRIPPER_MAX_OPEN_WIDTH = 0.100
 GRIPPER_MIN_OPEN_WIDTH = 0.003
 GRIPPER_FINGER_LENGTH = 0.10
@@ -78,10 +77,11 @@ GRIPPER_Y_THICKNESS = 0.040
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.024
 DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
+_DEFAULT_GRIPPER_TCP_Z = 0.17
 _GRIPPER_TCP = (
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 1.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, GRIPPER_TCP_Z),
+    (0.0, 0.0, 1.0, _DEFAULT_GRIPPER_TCP_Z),
     (0.0, 0.0, 0.0, 1.0),
 )
 TOP_DOWN_EEF_ROTATION = (
@@ -246,6 +246,7 @@ def add_ur5_gripper_robot(
     sim: SimulationManager,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
 ) -> Robot:
     """Add the standard UR5 plus PGI gripper tutorial robot.
 
@@ -257,7 +258,11 @@ def add_ur5_gripper_robot(
         The added robot instance.
     """
     return sim.add_robot(
-        cfg=create_ur5_gripper_robot_cfg(init_pos=init_pos, init_qpos=init_qpos)
+        cfg=create_ur5_gripper_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            tcp_z=tcp_z,
+        )
     )
 
 
@@ -840,6 +845,7 @@ def clone_local_pose_from_first_env(entity) -> torch.Tensor:
 def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
@@ -895,7 +901,16 @@ def create_ur5_gripper_robot_cfg(
                     GRIPPER_HAND_JOINT_PATTERN: 1e4,
                 },
             },
-            "solver_cfg": {"arm": {"tcp": _GRIPPER_TCP}},
+            "solver_cfg": {
+                "arm": {
+                    "tcp": [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, tcp_z],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ]
+                }
+            },
             "init_qpos": qpos,
             "init_pos": init_pos,
         }
@@ -1004,7 +1019,6 @@ __all__ = [
     "DEFAULT_GRIPPER_CLOSE_QPOS",
     "DEFAULT_TUTORIAL_LIGHT_POS",
     "GRIPPER_HAND_JOINT_PATTERN",
-    "GRIPPER_TCP_Z",
     "GRIPPER_URDF_PATH",
     "TOP_DOWN_EEF_ROTATION",
     "TutorialCliFeature",

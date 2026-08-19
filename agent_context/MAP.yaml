@@ -5,6 +5,61 @@ defaults:
     - conventions/naming.md
     - conventions/topic-lifecycle.md
 topics:
+  - id: simulation-system
+    title: Simulation System
+    aliases:
+      - simulation system
+      - simulation core
+      - sim system
+      - lab sim
+      - simulation manager
+      - 仿真系统
+      - 仿真核心
+      - 仿真管理器
+    keywords:
+      - sim
+      - simulation
+      - SimulationManager
+      - SimulationManagerCfg
+      - DexSim
+      - world
+      - arena
+      - physics step
+      - sim update
+      - scene object
+      - asset registry
+      - manual update
+      - GPU physics
+      - simulation lifecycle
+    paths:
+      - topics/simulation-system/simulation-system.md
+    source_of_truth:
+      - embodichain/lab/sim/__init__.py
+      - embodichain/lab/sim/sim_manager.py
+      - embodichain/lab/sim/cfg.py
+      - embodichain/lab/sim/common.py
+      - embodichain/lab/sim/material.py
+      - embodichain/lab/sim/profiler.py
+      - embodichain/lab/sim/objects/__init__.py
+      - embodichain/lab/sim/sensors/__init__.py
+      - embodichain/lab/sim/solvers/__init__.py
+      - embodichain/lab/sim/planners/__init__.py
+      - embodichain/lab/sim/skills/__init__.py
+      - embodichain/lab/sim/workspace/__init__.py
+      - embodichain/lab/gym/envs/base_env.py
+      - embodichain/lab/gym/envs/embodied_env.py
+    related_topics:
+      - env-framework
+      - robot-system
+      - sensor-system
+      - sim-visualization
+      - ik-solvers
+      - motion-planning
+      - atomic-actions
+      - rl-learning
+      - configclass-pattern
+    status: active
+
   - id: env-framework
     title: Environment Framework
     aliases:
@@ -47,6 +102,7 @@ topics:
       - embodichain_tasks/embodichain_tasks/
       - embodichain/lab/gym/utils/
     related_topics:
+      - simulation-system
       - manager-functor
       - sim-visualization
     status: active
@@ -143,6 +199,7 @@ topics:
       - embodichain/lab/sim/solvers/pytorch_solver.py
       - embodichain/lab/sim/solvers/differential_solver.py
     related_topics:
+      - simulation-system
       - robot-system
       - motion-planning
     status: active
@@ -179,6 +236,7 @@ topics:
       - embodichain/lab/sim/robots/
       - embodichain/lab/sim/cfg.py
     related_topics:
+      - simulation-system
       - ik-solvers
       - motion-planning
       - sensor-system
@@ -215,6 +273,7 @@ topics:
       - embodichain/lab/sim/sensors/stereo.py
       - embodichain/lab/sim/sensors/contact_sensor.py
     related_topics:
+      - simulation-system
       - robot-system
       - env-framework
       - sim-visualization
@@ -236,7 +295,6 @@ topics:
     keywords:
       - visualization
       - viser
-      - SimulationManager
       - VisualizationCfg
       - ViserServerCfg
       - VisualizationRuntime
@@ -266,6 +324,7 @@ topics:
       - embodichain/lab/sim/objects/soft_object.py
       - embodichain/lab/sim/objects/cloth_object.py
     related_topics:
+      - simulation-system
       - env-framework
       - sensor-system
       - robot-system
@@ -318,6 +377,7 @@ topics:
       - embodichain/lab/sim/planners/motion_generator.py
       - embodichain/lab/sim/skills/scene.py
     related_topics:
+      - simulation-system
       - robot-system
       - ik-solvers
       - atomic-actions
@@ -329,6 +389,10 @@ topics:
       - rl learning
       - learning rl
       - rl training
+      - rl pipeline
+      - rl config
+      - train rl
+      - train-rl
       - reinforcement learning
       - ppo
       - apg
@@ -339,6 +403,7 @@ topics:
       - rollout buffer
       - 强化学习
       - RL训练
+      - 强化学习训练
     keywords:
       - rl
       - reinforcement
@@ -354,23 +419,42 @@ topics:
       - collector
       - policy
       - reward
+      - RolloutKind
+      - DifferentiableTrainer
+      - SyncCollector
+      - learning_env
+      - gym_config
+      - checkpoint
+      - evaluation
+      - distributed
     paths:
       - topics/rl-learning/rl-learning.md
     source_of_truth:
+      - embodichain/__main__.py
+      - embodichain/learning/rl/train.py
       - embodichain/learning/rl/env.py
       - embodichain/learning/rl/evaluation.py
       - embodichain/learning/rl/routing.py
       - embodichain/learning/rl/differentiable_trainer.py
-      - embodichain/learning/rl/experimental/newton/
-      - embodichain/learning/rl/train.py
+      - embodichain/learning/rl/utils/config.py
+      - embodichain/learning/rl/utils/helper.py
+      - embodichain/learning/rl/utils/optimizer.py
+      - embodichain/learning/rl/utils/trainer.py
       - embodichain/learning/rl/algo/
       - embodichain/learning/rl/buffer/
       - embodichain/learning/rl/models/
       - embodichain/learning/rl/collector/
-      - embodichain_tasks/embodichain_tasks/rl/basic/point_mass.py
+      - embodichain/learning/rl/experimental/newton/
+      - embodichain/lab/gym/utils/gym_utils.py
+      - embodichain/lab/gym/utils/registration.py
+      - embodichain/utils/utility.py
+      - embodichain_tasks/configs/agents/rl/
+      - embodichain_tasks/embodichain_tasks/rl/
     related_topics:
+      - simulation-system
       - env-framework
       - manager-functor
+      - configclass-pattern
     status: active
 
   - id: configclass-pattern
@@ -396,6 +480,7 @@ topics:
     source_of_truth:
       - embodichain/utils/configclass.py
     related_topics:
+      - simulation-system
       - env-framework
       - manager-functor
       - robot-system
@@ -545,6 +630,11 @@ topics:
       - whole body resource
       - leaf resource claim
       - SceneEntityPose
+      - PressGoal.target_pose
+      - SlideGoal.target_pose
+      - TwistGoal.target_pose
+      - open_loop
+      - axis_translation_keyframes
       - dynamic goal
       - error recovery
       - ActionOptions
@@ -595,6 +685,7 @@ topics:
       - embodichain/lab/sim/skills/profiles.py
       - embodichain/lab/sim/skills/__init__.py
     related_topics:
+      - simulation-system
       - motion-planning
       - robot-system
       - ik-solvers

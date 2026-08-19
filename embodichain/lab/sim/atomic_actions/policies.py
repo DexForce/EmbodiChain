@@ -117,6 +117,7 @@ class MotionPolicy:
         start_qpos: "torch.Tensor",
         control_part: str,
         sample_count: int | None = None,
+        cartesian_linear: bool = False,
     ) -> "MotionGenOptions":
         """Translate this atomic policy into motion-generator options.
 
@@ -124,6 +125,8 @@ class MotionPolicy:
             start_qpos: Observed controlled-joint start positions.
             control_part: Bound robot control-part name.
             sample_count: Optional segment-local sample-count override.
+            cartesian_linear: Whether every supplied Cartesian keyframe is a
+                required linear-path sample rather than a sparse endpoint.
 
         Returns:
             Independently owned options for :class:`MotionGenerator`.
@@ -139,6 +142,8 @@ class MotionPolicy:
             control_part=control_part,
             plan_opts=self.plan_opts,
             is_interpolate=True,
+            is_linear=cartesian_linear,
+            preserve_cartesian_samples=cartesian_linear,
         )
 
 

@@ -1076,6 +1076,10 @@ class AtomicActionAdapter:
             config_type = ExactTargetMoveHeldObjectOptions
             if int(action.cfg.get("upright_yaw_samples", 1)) > 1:
                 policy["allow_automatic_transport_rotation"] = False
+        if capability.target_materializer == "press":
+            press_depth = policy.pop("press_depth", None)
+            if press_depth is not None and "press_distance" not in policy:
+                policy["press_distance"] = press_depth
         approach_mode = policy.pop("approach_direction_mode", None)
         if approach_mode == "handover_transfer":
             from .frames import robot_frame_axes

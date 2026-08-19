@@ -47,6 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionGoal,
     ObjectSemantics,
     PlaceGoal,
+    PressAffordance,
     PressGoal,
 )
 from .frames import arm_base_poses, relation_offset, robot_frame_axes
@@ -768,13 +769,10 @@ class ActionGrounder:
                 )
             elif capability.target_materializer == "press":
                 target_object_pose = object_pose.clone()
-                target = PressGoal(
-                    xpos=self._press_pose(
-                        arm,
-                        step.object_uid,
-                        object_pose,
-                        policy,
-                    )
+                target = self._press_goal(
+                    step.object_uid,
+                    object_pose,
+                    semantics=semantics,
                 )
             else:
                 raise ValueError(
@@ -802,13 +800,9 @@ class ActionGrounder:
                 # live pose as the postcondition reference while grounding a
                 # downward contact point from its current surface geometry.
                 target_object_pose = object_pose.clone()
-                target = PressGoal(
-                    xpos=self._press_pose(
-                        arm,
-                        step.object_uid,
-                        object_pose,
-                        policy,
-                    )
+                target = self._press_goal(
+                    step.object_uid,
+                    object_pose,
                 )
             elif capability.target_materializer == "semantic_held_object":
                 target = HeldObjectPoseGoal(object_target_pose=target_object_pose)
@@ -2162,22 +2156,40 @@ class ActionGrounder:
             self.env,
         )
 
-    def _press_pose(
+    def _press_goal(
         self,
-        arm: str,
         uid: str,
         object_pose: torch.Tensor,
-        policy: Mapping[str, Any],
-    ) -> torch.Tensor:
-        """Ground a top-surface contact while retaining the live TCP rotation."""
-        target = self._current_eef_pose(arm).clone()
-        target[:, :2, 3] = object_pose[:, :2, 3]
+        *,
+        semantics: ObjectSemantics | None = None,
+    ) -> PressGoal:
+        """Ground the live top surface into the typed press-affordance contract."""
+        if semantics is None:
+            semantics = self.semantics_factory(uid)
         entity = _object(self.env, uid)
-        depth = float(self._policy_value(policy, "press_depth"))
-        for env_id in range(int(self.env.num_envs)):
-            top = _world_vertices(entity, self.env, env_id)[:, 2].max()
-            target[env_id, 2, 3] = top - depth
-        return target
+        reference_pose = object_pose[0]
+        world_position = reference_pose[:3, 3].clone()
+        world_position[2] = _world_vertices(entity, self.env, 0)[:, 2].max()
+        rotation = reference_pose[:3, :3]
+        local_position = rotation.transpose(0, 1) @ (
+            world_position - reference_pose[:3, 3]
+        )
+        local_axis = rotation.transpose(0, 1) @ torch.tensor(
+            [0.0, 0.0, -1.0],
+            dtype=rotation.dtype,
+            device=rotation.device,
+        )
+        press_semantics = replace(
+            semantics,
+            affordance=PressAffordance(
+                press_axis=local_axis,
+                press_position=tuple(float(value) for value in local_position),
+            ),
+        )
+        return PressGoal(
+            semantics=press_semantics,
+            target_pose=object_pose.clone(),
+        )
 
     def _retreat_pose(
         self,

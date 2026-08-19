@@ -152,6 +152,8 @@ class SkillDescriptor:
     manipulator_roles: tuple[str, ...] = ()
     end_effector_roles: tuple[str, ...] = ()
     agent_visible: bool = True
+    open_loop: bool = False
+    """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by the semantic skill layer."""
 
@@ -169,6 +171,8 @@ class SkillDescriptor:
             raise TypeError(
                 "SkillDescriptor.options_type must be an ActionOptions subclass."
             )
+        if not isinstance(self.open_loop, bool):
+            raise TypeError("SkillDescriptor.open_loop must be a bool.")
         for field_name in ("manipulator_roles", "end_effector_roles"):
             roles = tuple(getattr(self, field_name))
             if len(set(roles)) != len(roles) or not all(
@@ -213,6 +217,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
+
+    open_loop: ClassVar[bool] = False
+    """Whether the skill intentionally declares no verified physical effect."""
 
     binding_contract: ClassVar[SkillBindingContract | None] = None
     """Explicit robot-independent requirements for semantic discovery.
@@ -319,6 +326,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             manipulator_roles=cls.manipulator_roles,
             end_effector_roles=cls.end_effector_roles,
             agent_visible=cls.agent_visible,
+            open_loop=cls.open_loop,
             binding_contract=cls.__dict__.get("binding_contract"),
         )
 
