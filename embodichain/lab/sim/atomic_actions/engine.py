@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
-from .core import AtomicAction
+from .core import AtomicAction, SkillDescriptor
 from .control import ControlPartCommandProfile
 from .invocation import ActionInvocation, ResolvedActionRequest
 from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
@@ -32,6 +33,12 @@ from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
     from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.skills import (
+        BoundRobotSkillProfile,
+        ResourceEndpoint,
+        ResourceEndpointAdapter,
+        RobotSkillProfile,
+    )
 
     from .execution import ExecutionSession
 
@@ -45,6 +52,10 @@ class AtomicActionEngine:
         control_profiles: Mapping[str, ControlPartCommandProfile] | None = None,
         *,
         load_builtins: bool = True,
+        skill_profile: RobotSkillProfile | None = None,
+        endpoint_adapters: (
+            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
+        ) = None,
     ) -> None:
         """Initialize one engine and bind its built-in action implementations.
 
@@ -53,14 +64,39 @@ class AtomicActionEngine:
             control_profiles: Semantic commands keyed by robot control-part name.
             load_builtins: Whether to instantiate and register every built-in
                 action. Disable this for isolated tests or fully custom engines.
+            skill_profile: Optional authoritative robot skill profile. Its
+                command profiles are installed automatically and validated
+                after built-in actions are loaded. ``control_profiles`` and
+                ``skill_profile`` are mutually exclusive.
+            endpoint_adapters: Optional exact-type endpoint adapters used when
+                binding ``skill_profile``. Invalid without a profile.
         """
+        if endpoint_adapters is not None and skill_profile is None:
+            raise ValueError("endpoint_adapters requires skill_profile.")
+        if skill_profile is not None:
+            from embodichain.lab.sim.skills import RobotSkillProfile
+
+            if not isinstance(skill_profile, RobotSkillProfile):
+                raise TypeError("skill_profile must be a RobotSkillProfile or None.")
+            if control_profiles is not None:
+                raise ValueError(
+                    "control_profiles and skill_profile are mutually exclusive; "
+                    "the profile is the authoritative semantic-command source."
+                )
+            control_profiles = skill_profile.action_control_profiles()
         self._planning_services = ActionPlanningServices(
             motion_generator,
             control_profiles=control_profiles,
         )
         self._actions: dict[str, AtomicAction] = {}
+        self._skill_profile: BoundRobotSkillProfile | None = None
         if load_builtins:
             self._load_builtin_actions()
+        if skill_profile is not None:
+            self._skill_profile = skill_profile.bind(
+                self,
+                endpoint_adapters=endpoint_adapters,
+            )
 
     @property
     def motion_generator(self) -> MotionGenerator:
@@ -92,6 +128,62 @@ class AtomicActionEngine:
         """Registered action instances keyed by stable skill identifier."""
         return dict(self._actions)
 
+    @property
+    def skills(self) -> Mapping[str, SkillDescriptor]:
+        """Return explicitly declared, agent-visible installed skill metadata.
+
+        Process-wide type discovery, engine installation, and semantic exposure
+        are separate boundaries. Only an action installed in this engine whose
+        concrete class explicitly declares a generic binding contract appears
+        here. Direct-core callers may continue to use every entry in
+        :attr:`actions`.
+        """
+        return MappingProxyType(
+            {
+                skill_id: descriptor
+                for skill_id, action in self._actions.items()
+                if (descriptor := action.descriptor()).agent_visible
+                and descriptor.binding_contract is not None
+            }
+        )
+
+    @property
+    def skill_profile(self) -> BoundRobotSkillProfile | None:
+        """Return the currently bound semantic robot profile, when configured."""
+        return self._skill_profile
+
+    def bind_skill_profile(
+        self,
+        profile: RobotSkillProfile,
+        *,
+        endpoint_adapters: (
+            Mapping[type[ResourceEndpoint], ResourceEndpointAdapter] | None
+        ) = None,
+    ) -> BoundRobotSkillProfile:
+        """Validate and bind a profile after custom action installation.
+
+        The engine's immutable control-part profiles must already contain the
+        profile commands lowered into the current action core. Generic
+        non-core endpoint commands remain on resolved endpoints. Prefer the
+        constructor's ``skill_profile`` argument when no custom actions need
+        to be installed first.
+
+        Args:
+            profile: Authoritative robot resource and policy profile.
+            endpoint_adapters: Optional exact-type endpoint adapters used for
+                custom controller declarations.
+
+        Returns:
+            Validated profile bound to this engine and its installed actions.
+        """
+        from embodichain.lab.sim.skills import RobotSkillProfile
+
+        if not isinstance(profile, RobotSkillProfile):
+            raise TypeError("profile must be a RobotSkillProfile.")
+        bound = profile.bind(self, endpoint_adapters=endpoint_adapters)
+        self._skill_profile = bound
+        return bound
+
     def register(self, action: AtomicAction, *, replace: bool = False) -> None:
         """Register one action instance using its descriptor.
 
@@ -116,6 +208,7 @@ class AtomicActionEngine:
             )
         action._bind(self._planning_services)
         self._actions[descriptor.skill_id] = action
+        self._skill_profile = None
 
     def _load_builtin_actions(self) -> None:
         """Create and bind fresh built-in action instances for this engine."""

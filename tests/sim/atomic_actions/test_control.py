@@ -27,9 +27,22 @@ from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionControlOverrides,
     ActionPlanningServices,
+    ControlCommand,
     ControlPartCommandProfile,
     JointPositionCommand,
 )
+
+
+class _BrokenSnapshotCommand(ControlCommand):
+    """Command double whose snapshot violates the public command contract."""
+
+    def snapshot(self) -> ControlCommand:
+        """Return an invalid snapshot for validation coverage."""
+        return "invalid"  # type: ignore[return-value]
+
+    def equivalent_to(self, other: ControlCommand) -> bool:
+        """Return whether another command has this test-only type."""
+        return isinstance(other, _BrokenSnapshotCommand)
 
 
 def _services() -> ActionPlanningServices:
@@ -71,6 +84,18 @@ def test_joint_position_command_rejects_incompatible_control_part() -> None:
 
     with pytest.raises(ValueError, match="resolved control part has 3"):
         command.resolve(num_envs=1, control_dof=3, device="cpu")
+
+
+def test_control_profile_rejects_invalid_command_snapshot_type() -> None:
+    with pytest.raises(TypeError, match="snapshot.*ControlCommand"):
+        ControlPartCommandProfile(commands={"stop": _BrokenSnapshotCommand()})
+
+
+def test_control_profile_rejects_command_name_outer_whitespace() -> None:
+    with pytest.raises(ValueError, match="outer whitespace"):
+        ControlPartCommandProfile(
+            commands={" stop ": JointPositionCommand(torch.zeros(1))}
+        )
 
 
 def test_control_profile_is_resolved_from_robot_control_part() -> None:
