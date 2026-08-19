@@ -106,7 +106,7 @@ Configuration
 - Use `cfg.init_solver()` to instantiate the solver, or assign to `robot_cfg.solver_cfg` for automatic integration.
 
 Notes & Best Practices
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 - Always ensure URDF and joint/link names match your robot model.
 - For IK, providing a good `qpos_seed` improves convergence and solution quality.
 - Use `set_iteration_params` (if available) to tune solver performance for your application.
@@ -115,4 +115,4 @@ Notes & Best Practices
 See Also
 ~~~~~~~~
 - :ref:`tutorial_motion_generator` — Motion Generator
-- :ref:`tutorial_basic_env` — Basic Environment Setup
+- :ref:`tutorial_create_basic_env` — Basic Environment Setup

@@ -124,7 +124,7 @@ The {class}`~cfg.RigidBodyAttributesCfg` class defines physical properties for r
 | `dynamic_friction` | `float` | `0.5` | Dynamic friction coefficient. |
 | `static_friction` | `float` | `0.5` | Static friction coefficient. |
 
-For Rigid Object tutorial, please refer to the [Create Scene](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html) tutorial.
+For a runnable rigid-object example, see the {doc}`Create Scene </tutorial/create_scene>` tutorial.
 
 ## Rigid Object Groups
 

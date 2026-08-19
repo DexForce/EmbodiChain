@@ -166,7 +166,7 @@ API Reference
 - (Reserved) Plan trajectory with collision checking (not yet implemented).
 
 Notes & Best Practices
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 - Only collision-free planning is currently supported; collision checking is a placeholder.
 - Input/outputs are numpy arrays or torch tensors; ensure type consistency.

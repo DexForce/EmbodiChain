@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 
 
 project = "EmbodiChain"
-copyright = "2025, The EmbodiChain Project Developers"
+copyright = "2021-2026, The EmbodiChain Project Developers"
 author = "The EmbodiChain Project Developers"
 
 # Read version from VERSION file if it exists
@@ -59,6 +59,7 @@ autodoc_default_options = {
 
 # If using MyST and writing .md API stubs:
 myst_enable_extensions = ["colon_fence", "deflist", "html_admonition"]
+myst_heading_anchors = 4
 
 
 templates_path = ["_templates"]
@@ -98,12 +99,8 @@ html_context = {
 }
 
 html_theme_options = {
-    "title": "EmbodiChain",
-    "logo_only": False,
     "show_toc_level": 2,
-    "collapse_navigation": True,
-    "sticky_navigation": True,
-    "navigation_depth": 4,
-    "includehidden": True,
-    "prev_next_buttons_location": "bottom",
+    "show_navbar_depth": 1,
+    "max_navbar_depth": 4,
+    "collapse_navbar": True,
 }

@@ -13,7 +13,7 @@ Overview
 The embodichain RL module is used to train agents to accomplish tasks in simulation environments. It mainly includes algorithm implementations, policy networks, data buffers, training processes, and utility tools.
 
 Architecture Diagram Example
----------------------------
+----------------------------
 
 .. code-block:: text
 
@@ -51,7 +51,7 @@ Extension and Customization
 - It is recommended to manage all parameters via config files for reproducibility and batch experiments.
 
 Common Issues and Best Practices
--------------------------------
+--------------------------------
 - Config files may use JSON or YAML for easy management and reproducibility.
 - Parallel environment sampling can significantly improve training efficiency.
 - The event-driven mechanism allows flexible insertion of custom logic (such as evaluation, saving, callbacks).

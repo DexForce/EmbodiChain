@@ -1,6 +1,6 @@
 # ToppraPlanner
 
-`ToppraPlanner` is a trajectory planner based on the [TOPPRA](https://toppra.readthedocs.io/) (Time-Optimal Path Parameterization via Reachability Analysis) library. It generates time-optimal joint trajectories under velocity and acceleration constraints.
+`ToppraPlanner` is a trajectory planner based on the [TOPPRA](https://github.com/hungpham2511/toppra) (Time-Optimal Path Parameterization via Reachability Analysis) library. It generates time-optimal joint trajectories under velocity and acceleration constraints.
 
 ## Features
 

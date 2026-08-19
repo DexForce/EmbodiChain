@@ -82,7 +82,7 @@ APG and PPO. Launch either config with the same CLI:
    embodichain train-rl --config embodichain_tasks/configs/agents/rl/basic/point_mass/train_ppo.yaml
 
 Configuration Sections
----------------------
+----------------------
 
 Runtime Settings
 ^^^^^^^^^^^^^^^^
@@ -134,7 +134,7 @@ Example:
    }
 
 Policy Configuration
-^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
 
 The ``policy`` section defines the neural network policy:
 
@@ -266,7 +266,7 @@ All outputs are written to ``./outputs/<exp_name>_<timestamp>/``:
 - **checkpoints/**: Model checkpoints
 
 Training Process
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 The training process follows this sequence:
 
@@ -326,7 +326,7 @@ Available Algorithms
 - **GRPO**: Group Relative Policy Optimization (no Critic, step-wise returns, masked group normalization). Use ``actor_only`` policy. Set ``kl_coef=0`` for from-scratch training (CartPole, dense reward); ``kl_coef=0.02`` for VLA/LLM fine-tuning.
 
 Adding a New Algorithm
----------------------
+----------------------
 
 To add a new algorithm:
 

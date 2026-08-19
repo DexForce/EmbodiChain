@@ -242,7 +242,7 @@ This will:
 
 1. Load the mesh file via ``trimesh``.
 2. Launch a browser-based annotator (default port ``15531``).
-3. Open http://localhost:15531 in your browser, use *Rect Select Region* to highlight the graspable area, then click *Confirm Selection*.
+3. Open ``http://localhost:15531`` in your browser, use *Rect Select Region* to highlight the graspable area, then click *Confirm Selection*.
 4. Compute antipodal point pairs on the selected region and cache them to disk.
 
 Common options::

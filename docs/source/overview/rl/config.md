@@ -78,5 +78,3 @@ GRPO example (for Embodied AI / from-scratch training):
 ## Practical Tips
 - It is recommended to manage all experiment parameters via JSON or YAML config files for reproducibility and tuning.
 - Supports multi-algorithm config for easy comparison and automation.
-
----

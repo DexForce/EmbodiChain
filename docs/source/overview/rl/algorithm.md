@@ -97,5 +97,3 @@ algo.begin_update()
 algo.accumulate_segment(segment_rollout)  # repeated until update_horizon
 metrics = algo.finish_update()
 ```
-
----

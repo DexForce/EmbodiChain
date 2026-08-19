@@ -26,7 +26,7 @@ def batched_mask_to_box(masks: torch.Tensor) -> torch.Tensor:
 
     Returns:
         torch.Tensor: A tensor of shape (..., 4) containing the bounding boxes
-        in XYXY format.
+            in XYXY format.
     """
     # torch.max below raises an error on empty inputs, just skip in this case
     if torch.numel(masks) == 0:
@@ -70,55 +70,23 @@ def batched_mask_to_box(masks: torch.Tensor) -> torch.Tensor:
 
 
 def gen_disp_colormap(inputs, normalize=True, torch_transpose=True):
-    """
-    Generate an RGB visualization using the "plasma" colormap for 2D/3D/4D scalar image inputs.
+    """Generate a color visualization with the ``plasma`` colormap.
 
-    This utility maps scalar image(s) to an RGB colormap suitable for display or further processing.
-    It accepts either a NumPy array or a torch.Tensor (torch tensors are detached, moved to CPU and
-    converted to NumPy). The matplotlib "plasma" colormap with 256 entries is used.
+    Args:
+        inputs: NumPy array or tensor with shape ``(H, W)``, ``(N, H, W)``,
+            or ``(N, C, H, W)``. Four-dimensional inputs use the first channel.
+        normalize: Whether to scale the input linearly to ``[0, 1]`` before
+            applying the colormap. Defaults to True.
+        torch_transpose: Whether to transpose the generated array to
+            channel-first order. Defaults to True.
 
-    Parameters
-    - inputs (numpy.ndarray or torch.Tensor):
-        Scalar image data with one of the following dimensionalities:
-          * 2D: (H, W)               -> a single image
-          * 3D: (N, H, W)            -> a batch of N single-channel images
-          * 4D: (N, C, H, W)         -> a batch with channel dimension; expected C==1 (first channel used)
-        The function will convert torch.Tensor input to numpy internally.
-    - normalize (bool, default True):
-        If True, input values are linearly scaled to [0, 1] using (x - min) / (max - min).
-        If the input is constant (min == max), a small divisor (1e5) is used to avoid division
-        by zero, which effectively maps values near 0. If False, values are assumed to already be
-        in the [0, 1] range (no scaling is performed).
-    - torch_transpose (bool, default True):
-        Controls the output channel ordering to match common PyTorch conventions:
-          * If True: outputs are transposed to channel-first form:
-              - 2D input  -> (3, H, W)
-              - 3D input  -> (N, 3, H, W)
-              - 4D input  -> (N, 3, H, W)  (uses the first channel)
-          * If False: outputs keep channel-last ordering:
-              - 2D input  -> (H, W, 3)
-              - 3D input  -> (N, H, W, 3)
-              - 4D input  -> (N, H, W, 3)
+    Returns:
+        A NumPy array containing the colormapped values. Its shape depends on
+        the input dimensionality and ``torch_transpose``.
 
-    Returns
-    - numpy.ndarray:
-        RGB image(s) with float values in [0, 1]. The exact output shape depends on the input
-        dimensionality and the value of torch_transpose (see above). The alpha channel produced by
-        the colormap is discarded; only the RGB channels are returned.
-
-    Notes and behavior
-    - The function uses matplotlib.pyplot.get_cmap("plasma", 256).
-    - For 4D inputs the code selects the first channel (index 0) before applying the colormap.
-    - Inputs with dimensionality other than 2, 3, or 4 are not supported and will likely raise
-      an error or produce unintended results.
-    - This function is non-destructive: it returns a new NumPy array and does not modify the input.
-    - Typical use cases: visualizing depth maps, single-channel activation maps, or other scalar
-      images as colored RGB images for inspection or logging.
-
-    Examples
-    - 2D array (H, W) -> returns (3, H, W) if torch_transpose=True
-    - 3D array (N, H, W) -> returns (N, 3, H, W) if torch_transpose=True
-    - 4D array (N, 1, H, W) -> returns (N, 3, H, W) if torch_transpose=True
+    Note:
+        Tensor inputs are detached and moved to CPU. The returned array is a
+        new value and does not modify the input.
     """
     import matplotlib.pyplot as plt
     import torch

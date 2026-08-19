@@ -61,9 +61,8 @@ class SamplerFactory:
     the sampling strategy. It uses the singleton pattern to ensure only
     one instance exists throughout the application.
 
-    The factory comes pre-registered with built-in samplers:
-        - UNIFORM: UniformSampler
-        - RANDOM: RandomSampler
+    The factory comes pre-registered with the strategies defined by
+    ``SamplingStrategy``.
 
     Additional samplers can be registered using register_sampler().
 
@@ -159,11 +158,8 @@ class SamplerFactory:
             strategy: The sampling strategy to use. Can be a SamplingStrategy enum
                 or a string identifier. If None, defaults to RANDOM.
             **kwargs: Additional keyword arguments to pass to the sampler constructor.
-                Common arguments include:
-                    - seed: Random seed for reproducibility
-                    - samples_per_dim: For UniformSampler
-                    - device: PyTorch device for tensor operations
-                Note: constraint parameter is temporarily disabled
+                Common options include ``seed``, ``device``, and
+                ``samples_per_dim`` for ``UniformSampler``.
 
         Returns:
             An instance of the requested sampler.
@@ -177,7 +173,8 @@ class SamplerFactory:
             >>> sampler = factory.create_sampler(SamplingStrategy.UNIFORM, seed=42)
             >>> sampler = factory.create_sampler("random", seed=123)
 
-            Note: Constraint-based sampling examples are temporarily disabled
+        Note:
+            Constraint-based sampling is temporarily disabled.
         """
         # Default to RANDOM if no strategy specified
         if strategy is None:
@@ -267,7 +264,8 @@ def create_sampler(
         >>> sampler = create_sampler(SamplingStrategy.UNIFORM, seed=42)
         >>> sampler = create_sampler("random", seed=123)
 
-        Note: Constraint-based sampling is temporarily disabled
+    Note:
+        Constraint-based sampling is temporarily disabled.
     """
     factory = SamplerFactory()
     return factory.create_sampler(strategy, **kwargs)

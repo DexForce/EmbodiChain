@@ -45,10 +45,10 @@ def _flatten_dict(
     """Traverse a dictionary and return all keys including nested ones.
 
     Args:
-        src (Dict): an instance of :class:`Dict`.
-    prefix (str | None, optional): [description]. Defaults to prefix.
-    sep (str | None, optional): [description]. Defaults to sep.
-    dct (Dict | None, optional): [description]. Defaults to {}.
+        src: Dictionary to flatten.
+        prefix: Prefix added to each flattened key.
+        sep: Separator between nested key components.
+        dct: Reserved compatibility argument.
 
     Returns:
         Dict: flatten dictionary with all keys.
@@ -481,50 +481,43 @@ def _called_with_cfg(*args, **kwargs):
 
 
 def configurable(init_func=None, *, from_config=None):
-    """
-    Decorate a function or a class's method so that it can be called
-    with a :class:`CfgNode` object using a :func:`from_config` function that translates
-    :class:`CfgNode` to arguments.
-    Examples:
-    ::
-        # Usage 1: Decorator on __init__:
-        class A:
-            @configurable
-            def __init__(self, a, b=2, c=3):
-                pass
-            @classmethod
-            def from_config(cls, cfg):   # 'cfg' must be the first argument
-                # Returns kwargs to be passed to __init__
-                return {"a": cfg.A, "b": cfg.B}
-        a1 = A(a=1, b=2)  # regular construction
-        a2 = A(cfg)       # construct with a cfg
-        a3 = A(cfg, b=3, c=4)  # construct with extra overwrite
+    """Decorate a callable so it can receive a :class:`CfgNode`.
 
-        # Usage 2: Decorator on any function. Needs an extra from_config argument:
-        @configurable(from_config=lambda cfg: {"a": cfg.A, "b": cfg.B})
-        def a_func(a, b=2, c=3):
-            pass
-        a1 = a_func(a=1, b=2)  # regular call
-        a2 = a_func(cfg)       # call with a cfg
-        a3 = a_func(cfg, b=3, c=4)  # call with extra overwrite
-
-        # Usage 3: Decorator on any method of class. Needs an extra from_config argument:
-        class A:
-            @configurable(from_config=lambda cfg: {"a": cfg.A, "b": cfg.B})
-            def a_func(self, a, b=2, c=3):
-                pass
-        insA = A()
-        cfg = CfgNode.load_cfg('{"A": "2", "B": "3"}')
-        a1 = insA.a_func(a=1, b=2)  # regular call
-        a2 = insA.a_func(cfg)       # call with a cfg
-        a3 = insA.a_func(cfg, b=3, c=4)  # call with extra overwrite
+    The associated ``from_config`` callable translates a configuration object
+    into explicit keyword arguments.
 
     Args:
-        init_func (callable): a class's ``__init__`` method in usage 1. The
-            class must have a ``from_config`` classmethod which takes `cfg` as
+        init_func: A class's ``__init__`` method. The class must have a
+            ``from_config`` classmethod that takes ``cfg`` as
             the first argument.
-        from_config (callable): the from_config function in usage 2 and 3. It must take `cfg`
-            as its first argument.
+        from_config: Translation function for decorated functions or methods.
+            It must take ``cfg`` as its first argument.
+
+    Examples:
+        Decorate a class constructor that supplies its own translator:
+
+        .. code-block:: python
+
+            class A:
+                @configurable
+                def __init__(self, a, b=2):
+                    pass
+
+                @classmethod
+                def from_config(cls, cfg):
+                    return {"a": cfg.A, "b": cfg.B}
+
+            instance = A(cfg)
+
+        Pass a translator directly when decorating a function:
+
+        .. code-block:: python
+
+            @configurable(from_config=lambda cfg: {"a": cfg.A, "b": cfg.B})
+            def a_func(a, b=2):
+                pass
+
+            result = a_func(cfg)
     """
     if init_func is not None:
         assert (

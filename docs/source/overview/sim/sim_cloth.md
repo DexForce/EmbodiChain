@@ -48,7 +48,7 @@ Cloth bodies require both voxelization and physical attributes.
 | `min_position_iters` | `int` | `4` | Minimum solver iterations for position correction. |
 | `min_velocity_iters` | `int` | `1` | Minimum solver iterations for velocity updates. |
 
-For Cloth Object tutorial, please refer to the [Cloth Body Simulation](https://dexforce.github.io/EmbodiChain/tutorial/create_cloth.html).
+For a runnable example, see the {doc}`Cloth Body Simulation </tutorial/create_cloth>` tutorial.
 
 
 ### Setup & Initialization

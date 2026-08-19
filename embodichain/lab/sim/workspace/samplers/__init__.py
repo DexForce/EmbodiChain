@@ -14,9 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Workspace configuration samplers deriving from ``BaseSampler``.
+"""Workspace sampling strategies deriving from ``BaseSampler``.
 
-Built-in samplers: uniform, random, Halton, Sobol, and Latin-hypercube, plus a ``SamplerFactory`` and ``create_sampler`` helper.
+The package exports uniform, random, Halton, Sobol, and Latin-hypercube
+samplers. ``SamplerFactory`` and ``create_sampler`` additionally construct the
+Gaussian and importance strategies.
 """
 
 from embodichain.lab.sim.workspace.samplers.base_sampler import (

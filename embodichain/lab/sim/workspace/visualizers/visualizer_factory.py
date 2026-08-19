@@ -160,12 +160,9 @@ class VisualizerFactory:
             viz_type: The visualization type to use. Can be a VisualizationType enum
                 or a string identifier. If None, defaults to POINT_CLOUD.
             **kwargs: Additional keyword arguments to pass to the visualizer constructor.
-                Common arguments include:
-                    - backend: Visualization backend ('open3d', 'matplotlib', 'data')
-                              'data' backend returns processed data without visualization
-                    - voxel_size: For VoxelVisualizer
-                    - sphere_radius: For SphereVisualizer
-                    - point_size: For PointCloudVisualizer
+                Common options include ``backend``, ``voxel_size`` for
+                ``VoxelVisualizer``, ``sphere_radius`` for ``SphereVisualizer``,
+                and ``point_size`` for ``PointCloudVisualizer``.
 
         Returns:
             An instance of the requested visualizer.
