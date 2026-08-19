@@ -25,8 +25,13 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
     SceneGraphNode,
+    SceneGraphRelation,
 )
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optimizer import (
+    ParentSurfaceLayoutOptimizer,
+    ParentSurfaceLayoutProblem,
+)
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor import (
     SceneLayoutConstructor,
 )
@@ -44,6 +49,7 @@ _TABLE_BOUNDS = [
 ]
 _OVERLAPPING_CENTER_XY = [0.0, 0.0]
 _ASSET_SIDE_LENGTH_M = 0.2
+_RELATION_CLEARANCE_M = 0.03
 
 
 def _asset(
@@ -145,8 +151,8 @@ def test_layout_constructor_places_new_child_on_parent_top(
         asset for asset in post_edit_scene.assets if asset.id == "cup_001"
     )
     assert placed_cup.center_xy == [0.0, 0.0]
-    # book top is z=0.62 m; cup half-height is 0.1 m and clearance is 0.02 m.
-    assert np.allclose(placed_cup.pos, [0.0, 0.74, 0.0])
+    # Book top is z=0.62 m; cup half-height is 0.1 m with zero support clearance.
+    assert np.allclose(placed_cup.pos, [0.0, 0.72, 0.0])
 
 
 def test_table_optimizer_ignores_fixed_sibling_overlap(tmp_path: Path) -> None:
@@ -227,3 +233,39 @@ def test_table_optimizer_separates_variable_sibling_from_fixed_sibling(
 
     assert solved_xy_by_id[fixed_id] == _OVERLAPPING_CENTER_XY
     assert np.max(np.abs(solved_xy_by_id[variable_id])) >= _ASSET_SIDE_LENGTH_M - 1e-6
+
+
+def test_parent_optimizer_applies_sibling_planar_relation(tmp_path: Path) -> None:
+    asset_glb = tmp_path / "asset.glb"
+    trimesh.creation.box(extents=[_ASSET_SIDE_LENGTH_M] * 3).export(asset_glb)
+    left_id, right_id = "left_001", "right_001"
+
+    solved_xy_by_id = ParentSurfaceLayoutOptimizer().optimize(
+        ParentSurfaceLayoutProblem(
+            assets_by_id={
+                left_id: _asset(object_id=left_id, glb_path=asset_glb),
+                right_id: _asset(object_id=right_id, glb_path=asset_glb),
+            },
+            child_ids=[left_id, right_id],
+            child_seed_xy_by_id={
+                left_id: _OVERLAPPING_CENTER_XY,
+                right_id: _OVERLAPPING_CENTER_XY,
+            },
+            imported_child_ids=set(),
+            fixed_child_xy_by_id={left_id: None, right_id: None},
+            parent_aabb_xy=_TABLE_BOUNDS,
+            parent_top_z=0.0,
+            child_relations=[
+                SceneGraphRelation(
+                    source_id=left_id,
+                    relation="left_of",
+                    target_id=right_id,
+                )
+            ],
+        )
+    )
+
+    assert (
+        solved_xy_by_id[right_id][0] - solved_xy_by_id[left_id][0]
+        >= _ASSET_SIDE_LENGTH_M + _RELATION_CLEARANCE_M - 1e-6
+    )
