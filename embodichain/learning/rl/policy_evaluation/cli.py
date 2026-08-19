@@ -99,7 +99,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--physics-backend")
     parser.add_argument(
         "--renderer",
-        choices=("raster", "hybrid", "fastrt", "offlinert"),
+        choices=("hybrid", "fast-rt", "offline-rt"),
     )
     parser.add_argument("--gpu-id", type=int, default=0)
     parser.add_argument("--scene-config")

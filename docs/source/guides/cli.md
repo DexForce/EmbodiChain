@@ -145,7 +145,7 @@ embodichain run-env --gym_config config.yaml \
 | ``--num_envs`` | ``1`` | Number of parallel environments |
 | ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
 | ``--headless`` | ``False`` | Run in headless mode |
-| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
+| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``offline-rt`` |
 | ``--arena_space`` | ``5.0`` | Arena space size |
 | ``--gpu_id`` | ``0`` | GPU ID to use |
 | ``--preview`` | ``False`` | Enter interactive preview mode |

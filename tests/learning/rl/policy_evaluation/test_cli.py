@@ -95,6 +95,13 @@ def test_explicit_checkpoint_requires_training_config(tmp_path):
         _resolve_input(parse_args(("--checkpoint", str(checkpoint))))
 
 
+@pytest.mark.parametrize("renderer", ("hybrid", "fast-rt", "offline-rt"))
+def test_cli_accepts_dexsim_renderer_names(renderer):
+    args = parse_args(("--renderer", renderer))
+
+    assert args.renderer == renderer
+
+
 def test_native_options_keep_profile_and_viewer_inputs_explicit():
     profile_args = parse_args(
         (

@@ -83,7 +83,7 @@ embodichain eval-policy outputs/<experiment>_<timestamp> \
 
 The Viewer uses one environment and keeps running until the window closes. Use
 `--episodes`, `--control-steps`, or `--duration` to select another stopping
-condition.
+condition. `--renderer` accepts `hybrid`, `fast-rt`, and `offline-rt`.
 
 For a checkpoint created before `run-manifest.json` was introduced, provide
 its training configuration directly:
