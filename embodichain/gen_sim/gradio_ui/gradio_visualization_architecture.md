@@ -71,7 +71,7 @@ conda run -n embodichain python gradio_app.py
 | Engine | 输入 | 预览/下载 | 实际产物 | 是否启动 DexSim |
 | --- | --- | --- | --- | --- |
 | Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
-| Asset engine / Articulation | 文字、可选参考图 | USDZ 下载和 run 摘要 | `.gen_sim/articraft/runs/` | 否 |
+| Asset engine / Articulation | 文字、可选参考图 | USDZ 下载和 Articraft 交互预览 | `.gen_sim/articraft/runs/` | 否 |
 | Scene engine | 一张图片，或已保存场景 + 文本编辑指令 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
@@ -121,11 +121,13 @@ description + optional image
   → runs/<run-id>/record.json + result/model.json
   → runs/<run-id>/result/usdz/<version>.usdz
   → Gradio 校验 success record 并提供 USDZ 下载
+  → articraft view <run-dir>
+  → Gradio iframe
 ```
 
-产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下。当前产物是 Articraft 原生 USDZ，不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义转换/导入流程。
+产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下。生成成功后，Gradio 使用同一 Articraft Conda 环境启动其原生 USDZ Viewer，并将随机本地端口嵌入当前页面。当前产物不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义转换/导入流程。
 
-`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，并终止该会话的 Articraft 命令进程组。
+`Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，并终止该会话的 Articraft 生成和 Viewer 进程组。
 
 ## 独立 Scene engine、文本编辑和 Viser
 

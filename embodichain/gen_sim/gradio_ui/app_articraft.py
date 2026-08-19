@@ -34,6 +34,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import gradio as gr
 
@@ -66,9 +67,10 @@ __all__ = [
 _ARTICRAFT_ENVIRONMENT_SETUP_TIMEOUT_SECONDS = 1_200
 _articraft_environment_lock = threading.Lock()
 _articraft_runs = SessionProcessRegistry()
+_articraft_viewers = SessionProcessRegistry()
 _ARTICRAFT_IDLE_PREVIEW = (
     "<div style='padding: 1rem; color: #6b7280;'>"
-    "The generated Articraft USDZ summary will appear here."
+    "The interactive Articraft USDZ viewer will appear here after generation."
     "</div>"
 )
 
@@ -102,6 +104,7 @@ def cleanup_articraft_session(session_id: str) -> None:
         session_id: Stable Gradio session identifier.
     """
     _articraft_runs.reset(session_id, force=True)
+    _articraft_viewers.reset(session_id, force=True)
 
 
 def _command_path(name: str) -> str | None:
@@ -501,6 +504,69 @@ def _articraft_result_preview(run_dir: Path, artifact: Path) -> str:
     )
 
 
+def _articraft_viewer_port(line: str) -> int | None:
+    """Return the local port announced by Articraft's native viewer."""
+    prefix = "Viewer URL: "
+    if not line.startswith(prefix):
+        return None
+    try:
+        parsed = urlsplit(line.removeprefix(prefix).strip())
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
+        return None
+    return port
+
+
+def _articraft_viewer_iframe(run_id: str, port: int) -> str:
+    """Embed Articraft's native viewer through the Gradio page hostname."""
+    srcdoc = (
+        "<script>window.location.replace(window.top.location.protocol + '//' + "
+        f"window.top.location.hostname + ':{port}');</script>"
+    )
+    escaped_run_id = html.escape(run_id)
+    return (
+        "<div style='margin-top:0.5rem'><strong>Articraft preview: "
+        f"{escaped_run_id}</strong>"
+        f"<iframe title='Articraft preview {escaped_run_id}' "
+        f'srcdoc="{html.escape(srcdoc, quote=True)}" '
+        "style='width:100%; height:680px; border:1px solid #d1d5db; "
+        "border-radius:8px; margin-top:0.5rem;'></iframe></div>"
+    )
+
+
+def _start_articraft_viewer(session_id: str, run_dir: Path) -> str:
+    """Start Articraft's native USDZ viewer for one Gradio session."""
+    token = _articraft_viewers.begin(session_id)
+    environment = build_codex_env()
+    environment.update({"BROWSER": "true", "PYTHONUNBUFFERED": "1"})
+    process = register_managed_process(
+        subprocess.Popen(
+            _articraft_cli_command("view", str(run_dir)),
+            cwd=ARTICRAFT_ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+            env=environment,
+        )
+    )
+    if not _articraft_viewers.attach(session_id, token, process):
+        terminate_process_group(process)
+        raise RuntimeError("Articraft viewer request was superseded.")
+
+    if process.stdout is not None:
+        for line in process.stdout:
+            if port := _articraft_viewer_port(line):
+                return _articraft_viewer_iframe(run_dir.name, port)
+
+    terminate_process_group(process)
+    _articraft_viewers.finish(session_id, token, process)
+    raise RuntimeError("Articraft viewer did not start.")
+
+
 def generate_articraft_asset(
     prompt_value: str,
     image_value: Any,
@@ -631,12 +697,20 @@ def generate_articraft_asset(
         f"- Run: `{run_dir}`\n"
         f"- USDZ: `{artifact}`"
     )
+    try:
+        preview_html = _start_articraft_viewer(session_id, run_dir)
+        status += "\n- Interactive Articraft preview: ready"
+    except (OSError, RuntimeError) as exc:
+        preview_html = _articraft_result_preview(run_dir, artifact)
+        status += f"\n- Interactive preview could not start: `{exc}`"
+    if not _articraft_runs.is_active(session_id, token):
+        return
     yield (
         artifact.as_posix(),
         run_dir.as_posix(),
         status,
         "\n".join(log_lines[-300:]),
-        _articraft_result_preview(run_dir, artifact),
+        preview_html,
     )
 
 
