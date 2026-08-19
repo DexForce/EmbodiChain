@@ -25,31 +25,48 @@ import torch
 
 from embodichain.utils import logger
 
-from ..bindings import JointPositionTarget
-from ..control import GRASP_COMMAND, OPEN_COMMAND, JointPositionCommand
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, TimedTrajectory, normalize_success_mask
-from ..requirements import (
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
     SkillBindingContract,
 )
-from ..state import HeldObjectState, PlanningContext
-from ..trajectory_ops import (
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     interpolate_hand_qpos,
     translate_pose_world,
 )
-from ._helpers import (
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
     plan_named_arm_trajectory,
     repeat_qpos,
     resolve_batched_pose,
     resolve_object_target,
 )
-from ._binding_contracts import make_manipulation_slot
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)

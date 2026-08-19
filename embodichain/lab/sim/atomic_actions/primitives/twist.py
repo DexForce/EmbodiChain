@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Press atomic action implementation."""
+"""Twist atomic action implementation."""
 
 from __future__ import annotations
 
@@ -24,11 +24,17 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
-from embodichain.lab.sim.atomic_actions.affordance import PressAffordance
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+    pose_inv,
+    get_relative_rotation,
+)
+
+from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
+    OPEN_COMMAND,
     JointPositionCommand,
 )
 from embodichain.lab.sim.atomic_actions.core import AtomicAction, ObjectSemantics
@@ -44,30 +50,29 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
+from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
-from embodichain.utils.math import get_relative_rotation
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
-    axis_translation_keyframes,
     build_pose_plan_states,
     interpolate_hand_qpos,
     resolve_pose_target,
     translate_pose_world,
 )
-from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
-    make_manipulation_slot,
-)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class PressGoal(ObjectActionGoal):
-    """Target object described by a press affordance."""
+class TwistGoal(ObjectActionGoal):
+    """Target object described by a twist affordance."""
 
-    goal_kind: ClassVar[str] = "press"
+    goal_kind: ClassVar[str] = "twist"
 
     target_pose: PoseGoalValue
     """Target pose snapshot or late-bound stable scene-entity reference."""
@@ -78,49 +83,40 @@ class PressGoal(ObjectActionGoal):
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class PressOptions(ActionOptions):
-    """Per-invocation pressing behavior."""
+class TwistOptions(ActionOptions):
+    """Per-invocation twisting behavior."""
 
     hand_interp_steps: int = 5
-    """Number of waypoints used to close the hand."""
+    """Number of waypoints used for each close/open hand segment."""
 
-    approach_distance: float = 0.1
-    """Distance from the press position opposite the press direction."""
+    twist_waypoint_count: int = 8
+    """Number of Cartesian keyframes along the target's circular twist arc."""
 
-    press_distance: float = 0.05
-    """Distance traveled into the target along its press axis."""
+    pre_grasp_distance: float = 0.1
+    """Distance from the grasp pose along its negative z-axis."""
 
-    press_position: tuple[float, float, float] | None = None
-    """Optional local-frame position overriding the affordance press position."""
+    twist_angle: float = math.pi / 4
+    """Requested twist rotation in radians."""
 
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
-        if not math.isfinite(self.approach_distance):
-            raise ValueError("approach_distance must be finite.")
-        if self.approach_distance < 0.0:
-            raise ValueError("approach_distance must be non-negative.")
-        if not math.isfinite(self.press_distance):
-            raise ValueError("press_distance must be finite.")
-        if self.press_distance <= 0.0:
-            raise ValueError("press_distance must be positive.")
-        if self.press_position is not None:
-            position = torch.as_tensor(self.press_position, dtype=torch.float32)
-            if position.shape != (3,) or not torch.isfinite(position).all():
-                raise ValueError("press_position must be a finite (x, y, z) tuple.")
-            object.__setattr__(
-                self,
-                "press_position",
-                tuple(float(component) for component in position),
-            )
+        if self.twist_waypoint_count < 1:
+            raise ValueError("twist_waypoint_count must be at least 1.")
+        if not math.isfinite(self.pre_grasp_distance):
+            raise ValueError("pre_grasp_distance must be finite.")
+        if self.pre_grasp_distance < 0.0:
+            raise ValueError("pre_grasp_distance must be non-negative.")
+        if not math.isfinite(self.twist_angle):
+            raise ValueError("twist_angle must be finite.")
 
 
-class Press(AtomicAction[PressGoal, PressOptions]):
-    """Open-loop motion primitive that approaches, presses, and retracts."""
+class Twist(AtomicAction[TwistGoal, TwistOptions]):
+    """Open-loop approach, grasp, twist, release, and retract motion."""
 
-    skill_id: ClassVar[str] = "press"
-    GoalType: ClassVar[type] = PressGoal
-    OptionsType: ClassVar[type] = PressOptions
+    skill_id: ClassVar[str] = "twist"
+    GoalType: ClassVar[type] = TwistGoal
+    OptionsType: ClassVar[type] = TwistOptions
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
@@ -132,12 +128,15 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                         FORWARD_KINEMATICS_CAPABILITY,
                     }
                 ),
-                grasp_commands={GRASP_COMMAND: JointPositionCommand},
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
         ),
     )
 
-    def __init__(self, default_options: PressOptions | None = None) -> None:
+    def __init__(self, default_options: TwistOptions | None = None) -> None:
         super().__init__(default_options)
 
     def _on_bind(self) -> None:
@@ -164,12 +163,12 @@ class Press(AtomicAction[PressGoal, PressOptions]):
 
     def _plan(
         self,
-        request: ResolvedActionRequest[PressGoal, PressOptions],
+        request: ResolvedActionRequest[TwistGoal, TwistOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan close, approach, press, and retract without stepping simulation."""
+        """Plan all six twisting segments without stepping simulation."""
         target = self.require_goal(request)
-        affordance = self._require_press_affordance(target.semantics)
+        affordance = self._require_twist_affordance(target.semantics)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
         binding = request.binding
@@ -182,7 +181,12 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         arm_joint_ids = list(motion_target.joint_ids)
         hand_joint_ids = list(grasp_target.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        start_hand_qpos = context.last_qpos[:, hand_joint_ids]
+        hand_open_qpos = grasp.joint_positions(
+            OPEN_COMMAND,
+            num_envs=context.batch_size,
+            device=self.device,
+            dtype=context.robot.qpos.dtype,
+        )
         hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
@@ -190,94 +194,90 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             dtype=context.robot.qpos.dtype,
         )
 
-        target_pose = resolve_pose_target(
+        link_pose = resolve_pose_target(
             resolve_pose_goal(target.target_pose, context, name="target_pose"),
             num_envs=self.num_envs,
             device=self.device,
         )
-        contact_xpos = affordance.get_press_pose(
-            target_pose,
-            press_position=options.press_position,
-        ).to(device=self.device, dtype=torch.float32)
-        contact_xpos = self._find_symmetric_nearest_xpos(
-            contact_xpos,
+        grasp_xpos = affordance.get_grasp_pose(link_pose).to(
+            device=self.device, dtype=torch.float32
+        )
+        grasp_xpos = self._find_symmetric_nearest_xpos(
+            grasp_xpos,
             reference_xpos=self.robot.compute_fk(
                 qpos=start_arm_qpos, name=control_part, to_matrix=True
             ),
         )
-        approach_xpos = translate_pose_world(
-            contact_xpos,
-            -contact_xpos[:, :3, 2] * options.approach_distance,
+        pre_grasp_xpos = translate_pose_world(
+            grasp_xpos,
+            -grasp_xpos[:, :3, 2] * options.pre_grasp_distance,
         )
-        pressed_xpos = translate_pose_world(
-            contact_xpos,
-            contact_xpos[:, :3, 2] * options.press_distance,
+        twist_xpos = self._twisted_grasp_poses(
+            link_pose,
+            grasp_xpos,
+            affordance.twist_axis,
+            affordance.axis_origin,
+            options.twist_angle,
+            options.twist_waypoint_count,
         )
-        n_approach, n_contact, n_press, n_retract = self._motion_segment_lengths(
+
+        n_approach, n_reach, n_twist, n_retract = self._motion_segment_lengths(
             request.motion_policy.sample_count,
             options.hand_interp_steps,
         )
-        hand_close = interpolate_hand_qpos(
-            start_hand_qpos,
-            hand_grasp_qpos,
-            n_waypoints=options.hand_interp_steps,
-        )
+
         approach_success, approach_arm = self._plan_pose_segment(
-            approach_xpos,
+            pre_grasp_xpos,
             start_arm_qpos,
             control_part,
             request,
             n_approach,
             interpolation_dt=interpolation_dt,
         )
-        contact_keyframes = axis_translation_keyframes(
-            approach_xpos,
-            contact_xpos,
-            contact_xpos[:, :3, 2],
-            n_waypoints=n_contact - 1,
-        )
-        contact_success, contact_arm = self._plan_pose_segment(
-            contact_keyframes,
+        reach_success, reach_arm = self._plan_pose_segment(
+            grasp_xpos,
             approach_arm[:, -1],
             control_part,
             request,
-            n_contact,
+            n_reach,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
         )
-        press_keyframes = axis_translation_keyframes(
-            contact_xpos,
-            pressed_xpos,
-            contact_xpos[:, :3, 2],
-            n_waypoints=n_press - 1,
-        )
-        press_success, press_arm = self._plan_pose_segment(
-            press_keyframes,
-            contact_arm[:, -1],
+        twist_success, twist_arm = self._plan_pose_segment(
+            twist_xpos,
+            reach_arm[:, -1],
             control_part,
             request,
-            n_press,
+            n_twist,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
-        )
-        retract_keyframes = axis_translation_keyframes(
-            pressed_xpos,
-            approach_xpos,
-            contact_xpos[:, :3, 2],
-            n_waypoints=n_retract - 1,
         )
         retract_success, retract_arm = self._plan_pose_segment(
-            retract_keyframes,
-            press_arm[:, -1],
+            pre_grasp_xpos,
+            twist_arm[:, -1],
             control_part,
             request,
             n_retract,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
         )
-        success = approach_success & contact_success & press_success & retract_success
+        success = approach_success & reach_success & twist_success & retract_success
 
-        parts = (hand_close, approach_arm, contact_arm, press_arm, retract_arm)
+        hand_close = interpolate_hand_qpos(
+            hand_open_qpos,
+            hand_grasp_qpos,
+            n_waypoints=options.hand_interp_steps,
+        )
+        hand_open = interpolate_hand_qpos(
+            hand_grasp_qpos,
+            hand_open_qpos,
+            n_waypoints=options.hand_interp_steps,
+        )
+        parts = (
+            approach_arm,
+            reach_arm,
+            hand_close,
+            twist_arm,
+            hand_open,
+            retract_arm,
+        )
         lengths = tuple(part.shape[1] for part in parts)
         full = torch.empty(
             (self.num_envs, sum(lengths), self.robot_dof),
@@ -286,17 +286,32 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         )
         full[:] = context.last_qpos.unsqueeze(1)
         offset = 0
-
-        stop = offset + hand_close.shape[1]
-        full[:, offset:stop, arm_joint_ids] = start_arm_qpos.unsqueeze(1)
-        full[:, offset:stop, hand_joint_ids] = hand_close
-        offset = stop
-
-        for arm in (approach_arm, contact_arm, press_arm, retract_arm):
+        arm_parts = (approach_arm, reach_arm, twist_arm, retract_arm)
+        arm_hands = (
+            hand_open_qpos,
+            hand_open_qpos,
+            hand_grasp_qpos,
+            hand_open_qpos,
+        )
+        for arm, hand in zip(arm_parts[:2], arm_hands[:2]):
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+            full[:, offset:stop, hand_joint_ids] = hand.unsqueeze(1)
             offset = stop
+        stop = offset + hand_close.shape[1]
+        full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
+        full[:, offset:stop, hand_joint_ids] = hand_close
+        offset = stop
+        stop = offset + twist_arm.shape[1]
+        full[:, offset:stop, arm_joint_ids] = twist_arm
+        full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        offset = stop
+        stop = offset + hand_open.shape[1]
+        full[:, offset:stop, arm_joint_ids] = twist_arm[:, -1].unsqueeze(1)
+        full[:, offset:stop, hand_joint_ids] = hand_open
+        offset = stop
+        full[:, offset:, arm_joint_ids] = retract_arm
+        full[:, offset:, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
 
         return self.build_plan(
             request,
@@ -309,21 +324,22 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             ),
             expected_effects=StateDelta(),
             segment_lengths={
-                "close": lengths[0],
-                "approach": lengths[1],
-                "contact": lengths[2],
-                "press": lengths[3],
-                "retract": lengths[4],
+                "approach": lengths[0],
+                "reach": lengths[1],
+                "close": lengths[2],
+                "twist": lengths[3],
+                "open": lengths[4],
+                "retract": lengths[5],
             },
         )
 
     @staticmethod
-    def _require_press_affordance(
+    def _require_twist_affordance(
         semantics: ObjectSemantics,
-    ) -> PressAffordance:
+    ) -> TwistAffordance:
         affordance = semantics.affordance
-        if not isinstance(affordance, PressAffordance):
-            raise ValueError("Press requires a PressAffordance.")
+        if not isinstance(affordance, TwistAffordance):
+            raise ValueError("Twist requires a TwistAffordance.")
         return affordance
 
     @staticmethod
@@ -331,10 +347,10 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         sample_count: int,
         hand_interp_steps: int,
     ) -> tuple[int, int, int, int]:
-        motion_count = sample_count - hand_interp_steps
+        motion_count = sample_count - 2 * hand_interp_steps
         if motion_count < 8:
             raise ValueError(
-                "Not enough waypoints for Press. Increase sample_count or "
+                "Not enough waypoints for Twist. Increase sample_count or "
                 "decrease hand_interp_steps."
             )
         base, remainder = divmod(motion_count, 4)
@@ -346,11 +362,10 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         target_pose: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
-        request: ResolvedActionRequest[PressGoal, PressOptions],
+        request: ResolvedActionRequest[TwistGoal, TwistOptions],
         sample_count: int,
         *,
         interpolation_dt: float,
-        cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -359,12 +374,50 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 control_part=control_part,
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
-                cartesian_linear=cartesian_linear,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
         return result.success, result.positions
 
+    def _twisted_grasp_poses(
+        self,
+        link_pose: torch.Tensor,
+        grasp_xpos: torch.Tensor,
+        twist_axis: torch.Tensor,
+        axis_origin: tuple[float, float, float],
+        twist_angle: float,
+        waypoint_count: int,
+    ) -> torch.Tensor:
+        """Build Cartesian EEF keyframes that follow the target's twist arc."""
+        axis = twist_axis.to(device=self.device, dtype=torch.float32)
+        axis = axis / torch.linalg.vector_norm(axis)
+        angles = torch.linspace(
+            twist_angle / waypoint_count,
+            twist_angle,
+            waypoint_count,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        rotations = (
+            torch.eye(4, dtype=torch.float32, device=self.device)
+            .reshape(1, 4, 4)
+            .repeat(waypoint_count, 1, 1)
+        )
+        rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
+        link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)
+        origin = torch.tensor(axis_origin, dtype=torch.float32, device=self.device)
+        to_origin = torch.eye(4, dtype=torch.float32, device=self.device)
+        from_origin = torch.eye(4, dtype=torch.float32, device=self.device)
+        to_origin[:3, 3] = origin
+        from_origin[:3, 3] = -origin
+        local_rotations = torch.matmul(
+            torch.matmul(to_origin[None], rotations), from_origin[None]
+        )
+        return torch.matmul(
+            torch.matmul(link_pose[:, None], local_rotations[None]),
+            link_to_eef[:, None],
+        )
 
-__all__ = ["Press", "PressGoal", "PressOptions"]
+
+__all__ = ["Twist", "TwistGoal", "TwistOptions"]

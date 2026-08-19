@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate Press on an articulation link or rigid object."""
+"""Demonstrate Twist on an articulation link or rigid object."""
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ from embodichain.lab.sim.atomic_actions import (
     EntityState,
     MotionPolicy,
     ObjectSemantics,
-    PressAffordance,
-    PressGoal,
-    PressOptions,
+    TwistAffordance,
+    TwistGoal,
+    TwistOptions,
     SceneEntityPose,
     SceneSnapshot,
 )
@@ -62,36 +62,29 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 )
 
 MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-BUTTON_LINK_NAME = "button_cap"
+KNOB_LINK_NAME = "cap_1"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
-PRESS_SAMPLE_INTERVAL = 140
+TWIST_SAMPLE_INTERVAL = 140
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
-RIGID_BUTTON_POSITION = (-0.7, -0.00, 0.70)
-RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
-BUTTON_SCENE_ENTITY_ID = "press-target"
+RIGID_KNOB_POSITION = (-0.7, -0.00, 0.70)
+RIGID_KNOB_SIZE = (0.05, 0.05, 0.05)
+KNOB_SCENE_ENTITY_ID = "twist-target"
+KNOB_AXIS_ORIGIN = (0.0, 0.0, 0.0)
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the Press tutorial."""
+    """Parse command-line arguments for the Twist tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate Press on an articulation-link or rigid button.",
+        "Demonstrate Twist on an articulation-link or rigid knob.",
         features=("visualize_axes",),
     )
-    parser.add_argument("--press_distance", type=float, default=0.03)
-    parser.add_argument(
-        "--press_position",
-        type=float,
-        nargs=3,
-        default=None,
-        metavar=("X", "Y", "Z"),
-        help="Optional target-local press position overriding the affordance.",
-    )
+    parser.add_argument("--twist_angle", type=float, default=-0.7853981634)
     parser.add_argument(
         "--rigid_object",
         action="store_true",
-        help="Use a standalone rigid button instead of the microwave link.",
+        help="Use a standalone rigid knob instead of the microwave link.",
     )
     return parser.parse_args()
 
@@ -103,7 +96,6 @@ def create_microwave(sim) -> Articulation:
             uid="microwave",
             fpath=get_data_path(MICROWAVE_ASSET),
             init_pos=MICROWAVE_POSITION,
-            init_qpos=(0, 0, 0, 0),
             init_rot=MICROWAVE_ORIENTATION,
             drive_pros=JointDrivePropertiesCfg(
                 stiffness=1e-3, damping=1e2, max_effort=1e-2
@@ -115,82 +107,71 @@ def create_microwave(sim) -> Articulation:
     return microwave
 
 
-def create_rigid_button(sim) -> RigidObject:
-    """Create the standalone static rigid button used by the optional demo."""
-    button = sim.add_rigid_object(
+def create_rigid_knob(sim) -> RigidObject:
+    """Create the standalone static rigid knob used by the optional demo."""
+    knob = sim.add_rigid_object(
         cfg=RigidObjectCfg(
-            uid="rigid_button",
-            shape=CubeCfg(size=list(RIGID_BUTTON_SIZE)),
+            uid="rigid_knob",
+            shape=CubeCfg(size=list(RIGID_KNOB_SIZE)),
             body_type="static",
-            init_pos=RIGID_BUTTON_POSITION,
+            init_pos=RIGID_KNOB_POSITION,
         )
     )
     sim.update(step=10)
-    return button
+    return knob
 
 
-def create_button_semantics(
+def create_knob_semantics(
     target: Articulation | RigidObject,
 ) -> tuple[ObjectSemantics, torch.Tensor]:
-    """Create press semantics for an articulation-link or rigid button."""
+    """Create twist semantics for an articulation-link or rigid knob."""
     if isinstance(target, Articulation):
-        vertices, _ = target.get_link_vert_face(BUTTON_LINK_NAME)
-        target_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
-        press_axis = torch.tensor([0.0, 0.0, -1.0], device=target.device)
-        affordance = PressAffordance(
-            # button_cap's local -z direction matches the prismatic joint's
-            # inward press direction in this asset.
-            press_axis=press_axis,
-            press_position=_surface_center(vertices, press_axis),
+        vertices, _ = target.get_link_vert_face(KNOB_LINK_NAME)
+        target_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
+        affordance = TwistAffordance(
+            grasp_position=_mesh_center(vertices),
+            # The cap_1 revolute axis passes through its link-frame origin.
+            axis_origin=KNOB_AXIS_ORIGIN,
+            twist_axis=torch.tensor([0.0, 0.0, -1.0], device=target.device),
         )
-        label = "microwave_start_button"
+        label = "microwave_power_knob"
     else:
         vertices = target.get_vertices(env_ids=[0], scale=True)[0]
         target_pose = target.get_local_pose(to_matrix=True)
-        press_axis = torch.tensor([-1.0, 0.0, 0.0], device=target.device)
-        affordance = PressAffordance(
-            press_axis=press_axis,
-            press_position=_surface_center(vertices, press_axis),
+        affordance = TwistAffordance(
+            grasp_position=_mesh_center(vertices),
+            axis_origin=KNOB_AXIS_ORIGIN,
+            twist_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
         )
-        label = "rigid_button"
+        label = "rigid_knob"
     return (
         ObjectSemantics(
             label=label,
             geometry={},
-            entity_id=BUTTON_SCENE_ENTITY_ID,
+            entity_id=KNOB_SCENE_ENTITY_ID,
             affordance=affordance,
         ),
         target_pose,
     )
 
 
-def _surface_center(
-    vertices: torch.Tensor,
-    inward_axis: torch.Tensor,
-) -> tuple[float, float, float]:
-    """Return the center of the outermost mesh face opposite inward travel."""
-    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=inward_axis.device)
-    axis = inward_axis.to(dtype=torch.float32)
-    axis = axis / torch.linalg.vector_norm(axis)
-    projection = torch.matmul(vertices, axis)
-    surface = vertices[torch.isclose(projection, projection.min(), atol=1.0e-5)]
-    point = surface.mean(dim=0)
-    return tuple(float(value) for value in point)
+def _mesh_center(vertices: torch.Tensor) -> tuple[float, float, float]:
+    """Return an explicit local gripper-center point for a knob mesh."""
+    center = torch.as_tensor(vertices, dtype=torch.float32).mean(dim=0)
+    return tuple(float(value) for value in center)
 
 
 def main() -> None:
-    """Plan and replay Press for the selected target object type."""
+    """Plan and replay Twist for the selected target object type."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
-    target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
-    hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
+    target = create_rigid_knob(sim) if args.rigid_object else create_microwave(sim)
+    hand_open, hand_close = get_hand_open_close_qpos(robot)
     motion_gen = create_toppra_motion_generator(robot)
-    semantics, target_pose = create_button_semantics(target)
-    affordance = semantics.affordance
-    assert isinstance(affordance, PressAffordance)
+    semantics, target_pose = create_knob_semantics(target)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -204,32 +185,27 @@ def main() -> None:
     wait_for_user = prepare_tutorial_scene(
         sim,
         args,
-        "Inspect the button target, then press Enter to plan Press...",
+        "Inspect the knob target, then press Enter to plan Twist...",
     )
-
-    press_binding = engine.bind_control_parts(
-        "press",
+    twist_binding = engine.bind_control_parts(
+        "twist",
         {"primary": {"motion": "arm", "grasp": "hand"}},
     )
+
     compiled = engine.compile(
         (
             ActionInvocation(
-                skill_id="press",
-                goal=PressGoal(
+                skill_id="twist",
+                goal=TwistGoal(
                     semantics,
-                    SceneEntityPose(BUTTON_SCENE_ENTITY_ID),
+                    SceneEntityPose(KNOB_SCENE_ENTITY_ID),
                 ),
-                binding=press_binding,
-                motion_policy=MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
-                skill_options=PressOptions(
+                binding=twist_binding,
+                motion_policy=MotionPolicy(sample_count=TWIST_SAMPLE_INTERVAL),
+                skill_options=TwistOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
-                    approach_distance=0.12,
-                    press_distance=args.press_distance,
-                    press_position=(
-                        None
-                        if args.press_position is None
-                        else tuple(args.press_position)
-                    ),
+                    pre_grasp_distance=0.12,
+                    twist_angle=args.twist_angle,
                 ),
             ),
         ),
@@ -237,39 +213,39 @@ def main() -> None:
             scene=SceneSnapshot(
                 timestamp=0.0,
                 version=0,
-                entities={BUTTON_SCENE_ENTITY_ID: EntityState(target_pose)},
+                entities={KNOB_SCENE_ENTITY_ID: EntityState(target_pose)},
             ),
             control_dt=sim.sim_config.physics_dt,
         ),
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan the Press demo trajectory.")
+        logger.log_warning("Failed to plan the Twist demo trajectory.")
         return
 
     if isinstance(target, RigidObject):
         focus_pose = target.get_local_pose(to_matrix=True)
     elif isinstance(target, Articulation):
-        focus_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
+        focus_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
     else:
         raise ValueError("Unsupported target type for Press demo.")
     focus_position = [focus_pose[0, 0, 3], focus_pose[0, 1, 3], focus_pose[0, 2, 3]]
     camera_position = [
-        focus_position[0] + 0.0,
+        focus_position[0] + 0.3,
         focus_position[1] + 0.3,
-        focus_position[2] + 0.2,
+        focus_position[2] + 0.3,
     ]
     look_at = [camera_position, focus_position, [0, 0, 1]]
     if wait_for_user:
-        input("Press Enter to replay the Press demo...")
+        input("Press Enter to replay the Twist demo...")
     replay_trajectory(
         sim,
         robot,
         compiled.trajectory,
         args,
         video_prefix=(
-            "press_rigid_button_auto_play"
+            "twist_rigid_knob_auto_play"
             if args.rigid_object
-            else "press_microwave_button_auto_play"
+            else "twist_microwave_knob_auto_play"
         ),
         hold_steps=POST_TRAJECTORY_STEPS,
         look_at=look_at,

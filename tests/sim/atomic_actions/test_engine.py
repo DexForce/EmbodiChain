@@ -40,7 +40,9 @@ from embodichain.lab.sim.atomic_actions import (
     JointPositionTarget,
     JOINT_POSITION_CAPABILITY,
     MotionPolicy,
+    ObjectSemantics,
     PlanningContext,
+    PressAffordance,
     PressGoal,
     PressOptions,
     ResolvedActionRequest,
@@ -206,9 +208,13 @@ def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
         },
     )
     options = PressOptions(hand_interp_steps=7)
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
+        geometry={},
+    )
     invocation = ActionInvocation(
         skill_id="press",
-        goal=PressGoal(torch.eye(4)),
+        goal=PressGoal(semantics, torch.eye(4)),
         binding=engine.bind_control_parts(
             "press",
             {"primary": {"motion": "arm", "grasp": "hand"}},

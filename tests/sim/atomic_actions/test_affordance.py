@@ -28,6 +28,9 @@ from embodichain.lab.sim.atomic_actions.affordance import (
     AntipodalAffordance,
     AssembleAffordance,
     InteractionPoints,
+    PressAffordance,
+    SlideAffordance,
+    TwistAffordance,
 )
 
 
@@ -116,6 +119,186 @@ class TestAntipodalAffordance:
         _, approach_direction = generator.get_grasp_poses.call_args.args
         assert approach_direction.dtype == torch.float32
         assert approach_direction.device == generator.device
+
+
+class TestTwistAffordance:
+    def test_requires_explicit_grasp_position_and_axis_origin(self):
+        with pytest.raises(TypeError, match="grasp_position"):
+            TwistAffordance()  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "twist_axis",
+        (
+            torch.tensor([1.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, -1.0]),
+        ),
+    )
+    def test_builds_right_handed_orthonormal_grasp_frame(self, twist_axis):
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = TwistAffordance(
+            grasp_position=(0.25, -0.5, 0.75),
+            axis_origin=(0.1, 0.2, 0.3),
+            twist_axis=twist_axis,
+        )
+
+        grasp_pose = affordance.get_grasp_pose(link_pose)
+        rotation = grasp_pose[:, :3, :3]
+
+        assert torch.allclose(
+            grasp_pose[:, :3, 3],
+            link_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+        assert torch.allclose(
+            torch.matmul(rotation.transpose(1, 2), rotation),
+            torch.eye(3).expand(2, -1, -1),
+            atol=1.0e-6,
+        )
+        assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
+
+
+class TestSlideAffordance:
+    def test_uses_local_antipodal_mesh_with_batched_directions(self):
+        vertices = torch.tensor(
+            [
+                [-1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ]
+        )
+        triangles = torch.tensor([[0, 1, 2]])
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = SlideAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+            translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+        )
+        generator = Mock()
+        generator.device = torch.device("cpu")
+        first_grasp = torch.eye(4)
+        first_grasp[:3, 3] = torch.tensor([1.0, 2.0, 3.0])
+        second_grasp = torch.eye(4)
+        second_grasp[:3, 3] = torch.tensor([4.0, 5.0, 6.0])
+        generator.get_grasp_poses.side_effect = (
+            (True, first_grasp, 0.03),
+            (True, second_grasp, 0.04),
+        )
+        affordance._generator = generator
+        approach_directions = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0]])
+
+        success, grasp_poses, open_lengths = affordance.get_best_grasp_poses(
+            link_pose,
+            approach_direction=approach_directions,
+        )
+
+        assert isinstance(affordance, AntipodalAffordance)
+        assert success.tolist() == [True, True]
+        assert torch.allclose(grasp_poses, torch.stack([first_grasp, second_grasp]))
+        assert torch.allclose(open_lengths, torch.tensor([0.03, 0.04]))
+        assert torch.equal(
+            generator.get_grasp_poses.call_args_list[0].args[1],
+            approach_directions[0],
+        )
+        assert torch.equal(
+            generator.get_grasp_poses.call_args_list[1].args[1],
+            approach_directions[1],
+        )
+
+    def test_requires_local_antipodal_geometry(self):
+        with pytest.raises(TypeError, match="mesh_vertices"):
+            SlideAffordance()
+
+    @pytest.mark.parametrize(
+        "translation_axis",
+        (
+            torch.zeros(3),
+            torch.tensor([float("nan"), 0.0, 0.0]),
+            torch.zeros(2),
+        ),
+    )
+    def test_rejects_invalid_translation_axis(self, translation_axis):
+        with pytest.raises(ValueError, match="translation_axis"):
+            SlideAffordance(
+                mesh_vertices=torch.ones(3, 3),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                translation_axis=translation_axis,
+            )
+
+
+class TestPressAffordance:
+    def test_requires_explicit_surface_press_position(self):
+        with pytest.raises(TypeError, match="press_position"):
+            PressAffordance()  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize(
+        "press_axis",
+        (
+            torch.tensor([1.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, 1.0]),
+            torch.tensor([0.0, 0.0, -1.0]),
+        ),
+    )
+    def test_builds_right_handed_orthonormal_press_frame(self, press_axis):
+        link_pose = torch.eye(4).repeat(2, 1, 1)
+        link_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = PressAffordance(
+            press_axis=press_axis,
+            press_position=(0.25, -0.5, 0.75),
+        )
+
+        press_pose = affordance.get_press_pose(link_pose)
+        rotation = press_pose[:, :3, :3]
+
+        assert torch.allclose(
+            press_pose[:, :3, 3],
+            link_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+        assert torch.allclose(
+            torch.matmul(rotation.transpose(1, 2), rotation),
+            torch.eye(3).expand(2, -1, -1),
+            atol=1.0e-6,
+        )
+        assert torch.allclose(torch.linalg.det(rotation), torch.ones(2), atol=1.0e-6)
+
+    def test_rejects_zero_press_axis(self):
+        with pytest.raises(ValueError, match="press_axis must be non-zero"):
+            PressAffordance(
+                press_axis=torch.zeros(3),
+                press_position=(0.0, 0.0, 0.0),
+            )
+
+    def test_uses_configured_press_position(self):
+        object_pose = torch.eye(4).repeat(2, 1, 1)
+        object_pose[:, :3, 3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        affordance = PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(0.25, -0.5, 0.75),
+        )
+
+        press_pose = affordance.get_press_pose(object_pose)
+
+        assert torch.allclose(
+            press_pose[:, :3, 3],
+            object_pose[:, :3, 3] + torch.tensor([0.25, -0.5, 0.75]).expand(2, -1),
+        )
+
+    def test_per_call_press_position_overrides_affordance_position(self):
+        affordance = PressAffordance(
+            press_axis=torch.tensor([1.0, 0.0, 0.0]),
+            press_position=(1.0, 1.0, 1.0),
+        )
+
+        press_pose = affordance.get_press_pose(
+            torch.eye(4).unsqueeze(0),
+            press_position=(0.1, 0.2, 0.3),
+        )
+
+        assert torch.allclose(
+            press_pose[0, :3, 3],
+            torch.tensor([0.1, 0.2, 0.3]),
+        )
 
 
 class TestInteractionPoints:

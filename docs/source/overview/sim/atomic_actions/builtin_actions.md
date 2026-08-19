@@ -5,12 +5,12 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships nine built-in action implementations with stable skill IDs;
+EmbodiChain ships eleven built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
 `Place` additionally accepts an `AssembleGoal`, so assembly reuses the same
-release primitive instead of introducing a tenth skill ID.
+release primitive instead of introducing another skill ID.
 
 All built-ins implement
 `plan(request, context) -> ActionPlan`, where `request` is the engine-resolved
@@ -100,9 +100,28 @@ The animations below are the focused simulator demos under
 :link: builtin-press
 :link-type: ref
 
-`press` · close, contact, and return
+`press` · close, approach, press, and retract
 
 <img src="../../../_static/atomic_actions/press.gif" alt="Press demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `Slide`
+:link: builtin-slide
+:link-type: ref
+
+`slide` · grasped translation along a constrained axis
+
+<img src="../../../_static/atomic_actions/slide_pull.gif" alt="Slide pull demo" width="480" style="max-width: 100%;" />
+<img src="../../../_static/atomic_actions/slide_push.gif" alt="Slide push demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `Twist`
+:link: builtin-twist
+:link-type: ref
+
+`twist` · grasped rotation about a configured axis
+
+<img src="../../../_static/atomic_actions/twist.gif" alt="Twist demo" width="480" style="max-width: 100%;" />
 :::
 
 :::{grid-item-card} `CoordinatedPickment`
@@ -143,7 +162,9 @@ The animations below are the focused simulator demos under
 | `pick_up` | `GraspGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | semantic object/entity | attach object to the `primary.motion` target |
 | `move_held_object` | `HeldObjectPoseGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | object held exclusively by the `primary.motion` target | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | any active attachment must be exclusive to `primary.motion`; `AssembleGoal` requires one | detach object |
-| `press` | `PressGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | none | none |
+| `press` | `PressGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
+| `slide` | `SlideGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
+| `twist` | `TwistGoal` | `primary.motion`, `primary.grasp` | `primary.grasp`: `open`, `grasp` | `TwistAffordance` + target pose | open-loop motion; application verifies joint travel/grasp |
 | `coordinated_pickment` | `CoordinatedPickGoal` | `left.motion`, `left.grasp`, `right.motion`, `right.grasp` | both grasp endpoints: `open`, `grasp` | semantic object/entity | attach the shared object to both motion targets |
 | `coordinated_placement` | `CoordinatedPlacementGoal` | `placing.motion`, `placing.grasp`, `support.motion`, `support.grasp` | `placing.grasp`: `open`, `grasp`; `support.grasp`: `grasp` | two distinct objects, each held exclusively by its motion target | optionally detach placing object; preserve support attachment |
 | `hand_over` | `GraspGoal` | `source.motion`, `source.grasp`, `destination.motion`, `destination.grasp` | both grasp endpoints: `open`, `grasp` | object held exclusively by the source motion target | transfer attachment to the destination motion target |
@@ -202,7 +223,6 @@ entity as a recovery dependency.
 | `MoveJoints.target` | no | no |
 | `MoveHeldObject.object_target_pose` | yes | yes |
 | `Place.xpos` | yes | yes |
-| `Press.xpos` | yes | yes |
 | `CoordinatedPickGoal.object_target_pose` / `object_initial_pose` | yes | yes |
 | `CoordinatedPlacementGoal` placing/support poses | yes | yes |
 | `PickUp.grasp_xpos` | yes | yes |
@@ -484,26 +504,110 @@ migration.
 
 ## `Press`
 
-Plans **close hand -> move to contact pose -> return to the observed starting
-arm qpos**. It is intended for button-like or contact interactions where the
-arm should retreat along its planned path after reaching the target.
+Plans **close hand -> approach target -> contact -> press along axis -> return
+to the approach pose**. `PressAffordance` is entity-free and stores an explicit
+target-local surface `press_position` and `press_axis`. `PressGoal.target_pose`
+is either a pose snapshot or `SceneEntityPose`, which resolves through the
+current `PlanningContext.scene` and participates in dynamic-goal recovery.
+
+The contact, press, and retract segments use axis-aligned Cartesian keyframes;
+each output sample is grounded with IK instead of being interpolated only in
+joint space. The generated tool frame uses an adaptive reference axis and is a
+right-handed orthonormal rotation even for vertical or oblique press axes.
 
 | Contract | Value |
 |---|---|
 | Skill ID | `press` |
-| Goal | `PressGoal(xpos=...)` |
+| Goal | `PressGoal(semantics=..., target_pose=...)` |
 | Binding contract | `primary.motion` plus disjoint `primary.grasp` |
-| Motion | close, press, joint-space return |
-| Effect | none; existing attachment state is unchanged |
+| Motion | close, approach, contact, axis-constrained press, axis-constrained retract |
+| Effect | explicitly open-loop; no physical button/contact effect is claimed |
 | Dynamic target | explicit pose or `SceneEntityPose` |
 
-The bound `primary.grasp` endpoint must provide `grasp`, while
-`PressOptions.hand_interp_steps` controls the close interpolation. Both
-endpoints come from the generic `ActionBinding`. Contact detection is not
-itself a symbolic effect in the current action; applications that require
-force/contact confirmation should verify it externally.
+`PressOptions` controls hand-close interpolation, approach distance,
+press distance, and an optional target-local `press_position`. An options-level
+position overrides the affordance's explicit surface point. The bound
+`primary.grasp` endpoint must provide `grasp`; both endpoints come from the
+generic `ActionBinding`, and the action keeps the gripper closed for all arm
+motion segments. Applications that require force/contact confirmation must
+verify it externally.
 
 **Example:** `scripts/tutorials/atomic_action/press.py`
+
+(builtin-slide)=
+
+## `Slide`
+
+Plans a grasped linear interaction for one articulation link. The entity-free
+`SlideAffordance` stores the link-local grasp mesh, `translation_axis`, and
+optional joint name/limits. `SlideGoal.target_pose` supplies the link pose as a
+snapshot or `SceneEntityPose`. The positive axis direction means approach and
+push/close; pull/open uses its negative direction. The affordance inherits
+`AntipodalAffordance` and selects a grasp with `get_best_grasp_poses()`. The grasp
+approach direction is the link-frame translation axis transformed by the
+current link rotation.
+
+With `direction="pull"`, the sequence is **approach -> reach -> close -> pull ->
+open**. With `direction="push"`, it is **approach -> reach -> close -> push -> open
+-> return**, where `return` moves the open gripper back to the original approach
+pose.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `slide` |
+| Goal | `SlideGoal(semantics=..., target_pose=...)` |
+| Binding contract | `primary.motion` plus disjoint `primary.grasp` |
+| Motion | pull: approach, reach, close, pull, open; push adds return to approach |
+| Effect | explicitly open-loop; no articulation travel or grasp success is claimed |
+
+`SlideOptions` controls `direction`, hand close/open
+interpolation, approach distance, and translation distance. The link-frame
+translation axis belongs to `SlideAffordance`; the bound `primary.grasp`
+endpoint must provide `open` and `grasp`. Reach, pull/push, and push-return use
+axis-aligned Cartesian samples rather than sparse joint-space endpoints.
+
+**Example:** `scripts/tutorials/atomic_action/slide.py`
+plans and replays a pull first, then replans a push from the drawer's measured
+post-pull link pose.
+
+(builtin-twist)=
+
+## `Twist`
+
+Plans **approach -> reach -> close -> twist -> open -> retract** for an
+articulation link or a rigid object. The entity-free `TwistAffordance` stores an
+explicit local `grasp_position`, `twist_axis`, and `axis_origin`, plus optional
+joint name/limits. `TwistGoal.target_pose` supplies the grounded target pose.
+
+The grasp frame's z-axis follows the world-transformed twist axis; an adaptive
+reference completes a right-handed orthonormal frame. Twist keyframes rotate
+around the full 3D axis defined by `axis_origin + twist_axis`, not implicitly
+around the target link origin.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `twist` |
+| Goal | `TwistGoal(semantics=..., target_pose=...)` |
+| Binding contract | `primary.motion` plus disjoint `primary.grasp` |
+| Motion | approach, reach, close, rotate about the target-local axis, open, retract |
+| Effect | explicitly open-loop; no articulation travel or grasp success is claimed |
+
+`TwistOptions` controls the pre-grasp distance, close/open interpolation,
+Cartesian twist keyframes, and twist angle. The pre-grasp pose is offset along
+the grasp pose's negative z-axis; the target-local twist axis belongs to
+`TwistAffordance`. The bound `primary.grasp` endpoint must provide `open` and
+`grasp`.
+
+`Twist` is intentionally a pure-rotation primitive. Thread pitch, coupled axial
+translation, and regrasping are outside its contract; an `Unscrew` action should
+model those behaviors separately.
+
+For all three primitives, `SkillDescriptor.open_loop` is `True`. Trajectory
+completion therefore means commanded motion completion only. Applications that
+need semantic success must observe button/contact or articulation state and
+verify it outside the side-effect-free planner.
+
+**Example:** `scripts/tutorials/atomic_action/twist.py`
 
 (builtin-coordinated-pickment)=
 

@@ -72,7 +72,7 @@ Agent-facing development context lives in [`agent_context/`](agent_context/). Th
 Reference the project context for manager-functor before implementing this change.
 ```
 
-Both agents are instructed to read `agent_context/MAP.yaml` first, resolve the requested topic, and load only the matching context files. The files under `docs/source/` remain the human-facing Sphinx documentation and should be consulted only when explicitly requested.
+Both agents are instructed to read `agent_context/MAP.yaml` first, resolve the requested topic, and load only the matching context files. For codebase-navigation questions they also verify mapped paths against the current source tree and fall back to live search when no topic matches. The files under `docs/source/` remain the human-facing Sphinx documentation and should be consulted only when explicitly requested.
 
 ### Shared project skills
 
@@ -80,7 +80,7 @@ Canonical skills live in [`.agents/skills/`](.agents/skills/). Claude Code uses 
 
 | Skill | Purpose |
 |-------|---------|
-| `/project-dev-context` | Resolve or update agent development context |
+| `/project-dev-context` | Navigate, resolve, or update agent development context |
 | `/add-functor`, `/add-task-env`, `/add-robot`, `/add-solver`, `/add-atomic-action` | Scaffold project components following repository conventions |
 | `/add-test`, `/benchmark` | Add validation or performance benchmarks |
 | `/pre-commit-check` | Run proportional checks before committing |

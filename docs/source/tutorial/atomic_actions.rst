@@ -126,6 +126,8 @@ Focused examples live under ``scripts/tutorials/atomic_action``:
 * ``place.py``
 * ``assemble.py``
 * ``press.py``
+* ``slide.py``
+* ``twist.py``
 * ``coordinated_pickment.py``
 * ``coordinated_placement.py``
 * ``hand_over.py``

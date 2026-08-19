@@ -87,6 +87,14 @@ embodichain.lab.sim.atomic_actions
       PlaceGoal
       AssembleGoal
       PressGoal
+      PressOptions
+      PressAffordance
+      SlideGoal
+      SlideOptions
+      SlideAffordance
+      TwistGoal
+      TwistOptions
+      TwistAffordance
       CoordinatedPickGoal
       CoordinatedPlacementGoal
       MoveEndEffector
@@ -95,6 +103,8 @@ embodichain.lab.sim.atomic_actions
       MoveHeldObject
       Place
       Press
+      Slide
+      Twist
       CoordinatedPickment
       CoordinatedPlacement
       HandOver
