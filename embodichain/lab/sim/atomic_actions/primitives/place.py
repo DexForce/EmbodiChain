@@ -40,14 +40,9 @@ from ..goals import (
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
-    DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from ..state import PlanningContext
 from ..trajectory_ops import (
@@ -56,6 +51,7 @@ from ..trajectory_ops import (
     resolve_pose_target,
     split_three_segments,
 )
+from ._binding_contracts import make_manipulation_slot
 
 TcpSymmetry = Literal["none", "z_roll_180"]
 
@@ -169,30 +165,18 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                CARTESIAN_POSE_CAPABILITY,
-                                FORWARD_KINEMATICS_CAPABILITY,
-                            }
-                        ),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "primary"),
-                    ),
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
                 ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
         ),
     )

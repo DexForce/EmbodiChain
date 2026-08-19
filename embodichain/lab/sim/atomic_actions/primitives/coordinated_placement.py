@@ -33,14 +33,9 @@ from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan, normalize_success_mask
 from ..requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
     DisjointResourceSlots,
-    DisjointSlotEndpoints,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from ..state import HeldObjectState, PlanningContext
 from ..trajectory_ops import (
@@ -54,6 +49,7 @@ from ._helpers import (
     resolve_batched_pose,
     resolve_object_target,
 )
+from ._binding_contracts import make_manipulation_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -146,42 +142,18 @@ class CoordinatedPlacement(
     end_effector_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="placing",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "placing"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "placing"),
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                "placing",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
-            SkillResourceSlot(
-                slot_id="support",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "support"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={GRASP_COMMAND: JointPositionCommand},
-                        route=ActionBindingRoute("end_effector", "support"),
-                    ),
-                ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+            make_manipulation_slot(
+                "support",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
             ),
         ),
         constraints=(DisjointResourceSlots(("placing", "support")),),

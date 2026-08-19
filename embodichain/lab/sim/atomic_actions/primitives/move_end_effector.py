@@ -27,19 +27,14 @@ from ..core import AtomicAction
 from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
 from ..invocation import ActionOptions, ResolvedActionRequest
 from ..plans import ActionPlan
-from ..requirements import (
-    ActionBindingRoute,
-    CARTESIAN_POSE_CAPABILITY,
-    SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
-)
+from ..requirements import CARTESIAN_POSE_CAPABILITY, SkillBindingContract
 from ..state import PlanningContext
 from ..trajectory_ops import (
     build_pose_plan_states,
     resolve_pose_target,
     to_full_robot_trajectory,
 )
+from ._binding_contracts import make_motion_slot
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -65,15 +60,9 @@ class MoveEndEffector(AtomicAction[EndEffectorPoseGoal, MoveEndEffectorOptions])
     GoalType: ClassVar[type] = EndEffectorPoseGoal
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                ),
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
             ),
         ),
     )
