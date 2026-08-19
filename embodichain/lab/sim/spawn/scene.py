@@ -139,7 +139,7 @@ class SpawnScene:
                 raise KeyError(f"Spawn asset is absent from SceneBuilder: {uid!r}.")
         del self._assets[uid]
 
-    def materialize(self) -> Any:
+    def commit(self) -> Any:
         """Finalize once or let ``SpawnResult`` consume pending changes."""
         if self.result is None:
             self.result = self.builder.finalize()

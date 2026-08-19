@@ -20,7 +20,13 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 
-from dexsim.spawn import ArticulationDesc, MaterialDesc, ObjectDesc, RenderDesc
+from dexsim.spawn import (
+    ArticulationDesc,
+    MaterialDesc,
+    NewtonJointDesc,
+    ObjectDesc,
+    RenderDesc,
+)
 from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import ArticulationCfg, RigidObjectCfg
@@ -110,6 +116,14 @@ def articulation_desc_from_usd(
         desc.fixed_base = bool(cfg.fix_base)
         desc.enable_self_collision = not bool(cfg.disable_self_collision)
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+        target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
+        if target_mode is not None:
+            for joint in desc.joints:
+                joint.newton = (
+                    NewtonJointDesc(target_mode=target_mode)
+                    if joint.newton is None
+                    else replace(joint.newton, target_mode=target_mode)
+                )
     return desc, materials
 
 

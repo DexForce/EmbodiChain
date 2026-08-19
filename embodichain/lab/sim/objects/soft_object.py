@@ -451,28 +451,38 @@ class SoftObject(BatchEntity):
         arena_offsets = sim.arena_offsets
         for i, env_idx in enumerate(local_env_ids):
             # TODO: soft body cannot directly set by `set_local_pose` currently.
-            rest_collision_vertices = self.body_data.rest_collision_vertices[i]
-            rest_sim_vertices = self.body_data.rest_sim_vertices[i]
+            soft_body: SoftBody = self._entities[env_idx].get_physical_body()
+            rest_collision_vertices = self.body_data.rest_collision_vertices[env_idx]
+            rest_sim_vertices = self.body_data.rest_sim_vertices[env_idx]
+            initial_transform = torch.as_tensor(
+                soft_body.get_initial_transform(),
+                dtype=torch.float32,
+                device=self.device,
+            )
+            initial_rotation = initial_transform[:3, :3]
+            initial_translation = initial_transform[:3, 3]
+            rest_collision_vertices_local = (
+                rest_collision_vertices - initial_translation
+            ) @ initial_rotation
+            rest_sim_vertices_local = (
+                rest_sim_vertices - initial_translation
+            ) @ initial_rotation
             rotation = pose4x4[i][:3, :3]
             translation = pose4x4[i][:3, 3]
 
-            # apply transformation to local rest vertices and back
-            rest_collision_vertices_local = rest_collision_vertices - arena_offsets[i]
             transformed_collision_vertices = (
                 rest_collision_vertices_local @ rotation.T + translation
             )
             transformed_collision_vertices = (
-                transformed_collision_vertices + arena_offsets[i]
+                transformed_collision_vertices + arena_offsets[env_idx]
             )
 
-            rest_sim_vertices_local = rest_sim_vertices - arena_offsets[i]
             transformed_sim_vertices = (
                 rest_sim_vertices_local @ rotation.T + translation
             )
-            transformed_sim_vertices = transformed_sim_vertices + arena_offsets[i]
+            transformed_sim_vertices = transformed_sim_vertices + arena_offsets[env_idx]
 
             # apply vertices to soft body
-            soft_body: SoftBody = self._entities[env_idx].get_physical_body()
             collision_position_buffer = soft_body.get_position_inv_mass_buffer()
             sim_position_buffer = soft_body.get_sim_position_inv_mass_buffer()
             sim_velocity_buffer = soft_body.get_sim_velocity_buffer()

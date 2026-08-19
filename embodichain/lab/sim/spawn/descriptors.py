@@ -46,6 +46,7 @@ from dexsim.spawn import (
     GeometryDesc,
     MaterialDesc,
     NewtonCollisionDesc,
+    NewtonJointDesc,
     ObjectDesc,
     RenderDesc,
     RigidBodyPhysicsDesc,
@@ -199,6 +200,7 @@ def articulation_desc_from_cfg(
             "backend-neutral Spawn facade and were not applied."
         )
 
+    target_mode = {"force": 3, "none": 0}.get(cfg.drive_pros.drive_type)
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -209,6 +211,9 @@ def articulation_desc_from_cfg(
         urdf_fix_root_link=bool(cfg.fix_base),
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
+        newton_drive=(
+            None if target_mode is None else NewtonJointDesc(target_mode=target_mode)
+        ),
         newton_collision=_compile_newton_collision(cfg.attrs),
     )
 

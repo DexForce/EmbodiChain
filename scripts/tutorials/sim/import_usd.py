@@ -113,6 +113,7 @@ def main():
     )
 
     # Open window when the scene has been set up
+    sim.prepare()
     if not args.headless:
         sim.open_window()
 

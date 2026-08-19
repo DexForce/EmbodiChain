@@ -55,7 +55,7 @@ def _rows(
 
 
 def _spawn_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert EmbodiChain ``xyz+xyzw`` poses to Spawn ``xyzw+xyz``."""
+    """Convert rigid-body ``xyz+xyzw`` poses to Spawn ``xyzw+xyz``."""
     result = torch.empty_like(data, dtype=torch.float32)
     result[..., 0:4] = data[..., 3:7]
     result[..., 4:7] = data[..., 0:3]
@@ -63,10 +63,28 @@ def _spawn_pose(data: torch.Tensor) -> torch.Tensor:
 
 
 def _embodichain_pose(data: torch.Tensor) -> torch.Tensor:
-    """Convert Spawn ``xyzw+xyz`` poses to EmbodiChain ``xyz+xyzw``."""
+    """Convert Spawn ``xyzw+xyz`` poses to rigid-body ``xyz+xyzw``."""
     result = torch.empty_like(data, dtype=torch.float32)
     result[..., 0:3] = data[..., 4:7]
     result[..., 3:7] = data[..., 0:4]
+    return result
+
+
+def _spawn_articulation_pose(data: torch.Tensor) -> torch.Tensor:
+    """Convert articulation ``xyz+wxyz`` poses to Spawn ``xyzw+xyz``."""
+    result = torch.empty_like(data, dtype=torch.float32)
+    result[..., 0:3] = data[..., 4:7]
+    result[..., 3] = data[..., 3]
+    result[..., 4:7] = data[..., 0:3]
+    return result
+
+
+def _embodichain_articulation_pose(data: torch.Tensor) -> torch.Tensor:
+    """Convert Spawn ``xyzw+xyz`` poses to articulation ``xyz+wxyz``."""
+    result = torch.empty_like(data, dtype=torch.float32)
+    result[..., 0:3] = data[..., 4:7]
+    result[..., 3] = data[..., 3]
+    result[..., 4:7] = data[..., 0:3]
     return result
 
 
@@ -407,7 +425,7 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
     def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
         spawn = torch.empty_like(data, dtype=torch.float32, device=self.device)
         self.batch.fetch_root_pose(spawn)
-        data.copy_(_embodichain_pose(spawn).to(data.device, data.dtype))
+        data.copy_(_embodichain_articulation_pose(spawn).to(data.device, data.dtype))
         return data
 
     def fetch_root_linear_velocity(self, data: torch.Tensor) -> torch.Tensor:
@@ -445,7 +463,7 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
     def fetch_link_pose(self, data: torch.Tensor) -> torch.Tensor:
         spawn = torch.empty_like(data, dtype=torch.float32, device=self.device)
         self.batch.fetch_link_pose(spawn)
-        data.copy_(_embodichain_pose(spawn).to(data.device, data.dtype))
+        data.copy_(_embodichain_articulation_pose(spawn).to(data.device, data.dtype))
         return data
 
     def fetch_link_velocity(
@@ -465,7 +483,7 @@ class SpawnArticulationView(_SpawnSelectionAdapter, ArticulationViewBase):
     ) -> None:
         self._apply_rows(
             "apply_root_pose",
-            _spawn_pose(pose.to(self.device, torch.float32)),
+            _spawn_articulation_pose(pose.to(self.device, torch.float32)),
             env_ids,
             (7,),
             fetch_method_name="fetch_root_pose",

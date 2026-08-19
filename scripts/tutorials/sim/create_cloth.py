@@ -123,7 +123,7 @@ def main():
                 mass=0.01,
                 youngs=1e9,
                 poissons=0.4,
-                thickness=0.04,
+                thickness=0.004,
                 bending_stiffness=0.01,
                 bending_damping=0.1,
                 dynamic_friction=0.95,
@@ -151,6 +151,8 @@ def main():
     padding_box = sim.add_rigid_object(cfg=padding_box_cfg)
     print("[INFO]: Add soft object complete!")
 
+    sim.prepare()
+
     # Open window when the scene has been set up
     if not args.headless:
         sim.open_window()
@@ -169,9 +171,6 @@ def run_simulation(sim: SimulationManager, cloth: ClothObject) -> None:
         sim: The SimulationManager instance to run
         soft_obj: soft object
     """
-
-    # Initialize GPU physics
-    sim.init_gpu_physics()
 
     step_count = 0
 

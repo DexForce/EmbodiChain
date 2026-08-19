@@ -101,6 +101,7 @@ def main():
         )
     )
 
+    sim.prepare()
     if sim.is_use_gpu_physics:
         sim.init_gpu_physics()
 

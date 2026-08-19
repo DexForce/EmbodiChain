@@ -53,6 +53,9 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     sim.set_manual_update(False)
 
     robot: Robot = sim.add_robot(cfg=DexforceW1Cfg.from_dict({"uid": "dexforce_w1"}))
+
+    sim.prepare()
+
     arm_name = "left_arm"
     # Set initial joint positions for left arm
     qpos_fk_list = [

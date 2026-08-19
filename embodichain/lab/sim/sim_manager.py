@@ -934,7 +934,7 @@ class SimulationManager:
         ):
             return
 
-        result = scene.materialize()
+        result = scene.commit()
         result.prepare_runtime()
         self._env = result.get_arena("default")
         self._arenas = [result.get_arena(name) for name in scene.arena_names]
@@ -1220,7 +1220,8 @@ class SimulationManager:
             RigidBodyPhysicsDesc,
         )
 
-        geometry = GeometryDesc.plane(1000.0)
+        default_length = 1000.0
+        geometry = GeometryDesc.plane(default_length)
         collision = CollisionDesc.from_geometry(
             geometry,
             approximation=CollisionApproximation.NONE,
@@ -1246,6 +1247,12 @@ class SimulationManager:
 
         def bind_default_plane(_result, handles) -> None:
             self._default_plane = handles[0]
+            self._default_plane.get_render_body().repeat_uv(
+                np.asarray(
+                    [default_length / 2.0, default_length / 2.0],
+                    dtype=np.float32,
+                )
+            )
             self._default_plane.set_visible(self._spawn_default_plane_visibility)
 
         self._spawn_scene.declare(
@@ -2725,9 +2732,9 @@ class SimulationManager:
                 if render_body is None:
                     raise RuntimeError(
                         f"Articulation {uid!r} link {link_name!r} has no public "
-                        "render body for camera attachment."
+                        "render node for camera attachment."
                     )
-                nodes.append(render_body.get_node())
+                nodes.append(render_body.render_node())
             matches.append((uid, nodes))
 
         if len(matches) == 1:
