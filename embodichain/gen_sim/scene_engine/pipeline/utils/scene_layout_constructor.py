@@ -170,7 +170,7 @@ class SceneLayoutConstructor:
                     scene_object=assets_by_id[root_id],
                     support_region_z=table.support_surface_z,
                     center_xy=solved_xy,
-                    clearance_m=0.00, # Directly place on the support surface.
+                    clearance_m=0.00,  # Directly place on the support surface.
                 )
                 self._updated_object_ids.add(root_id)
             self._propagate_descendant_delta(
@@ -242,6 +242,7 @@ class SceneLayoutConstructor:
                     scene_object=parent_surface_problem.assets_by_id[child_id],
                     support_region_z=parent_surface_problem.parent_top_z,
                     center_xy=solved_xy,
+                    clearance_m=0.00,  # Directly place on the parent's top surface.
                 )
                 self._updated_object_ids.add(child_id)
             self._propagate_descendant_delta(
