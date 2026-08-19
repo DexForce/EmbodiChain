@@ -47,7 +47,8 @@ def select_default_renderer(gpu_id: int = 0) -> str:
         gpu_id: The CUDA device index to query for selecting the renderer.
 
     Returns:
-        The resolved renderer name, one of ``"hybrid"``, ``"fast-rt"``, or ``"rt"``.
+        The resolved renderer name, one of ``"hybrid"``, ``"fast-rt"``, or
+        ``"offline-rt"``.
     """
     from embodichain.lab.sim import cfg
 

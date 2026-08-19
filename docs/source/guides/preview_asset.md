@@ -149,7 +149,7 @@ asset.set_local_pose(pose)
 | `--use_usd_properties` | disabled | Use physical properties stored in the USD file. |
 | `--fix_base` / `--no-fix_base` | fixed | Fix or unfix articulation bases. |
 | `--sim_device` | `cpu` | Simulation device. |
-| `--renderer` | `hybrid` | Renderer: `hybrid`, `fast-rt`, or `rt`. |
+| `--renderer` | `hybrid` | Renderer: `hybrid`, `fast-rt`, or `offline-rt`. |
 | `--env_map` | none | Built-in IBL resource name or absolute `.hdr`, `.png`, or `.exr` path. |
 | `--headless` | disabled | Run without the native window. |
 | `--preview` | disabled | Enter the interactive terminal after loading. |
