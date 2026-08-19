@@ -117,6 +117,7 @@ def test_summary_includes_runtime_metadata_and_every_manager_functor() -> None:
     assert "Control                0.02 s (50 Hz, 4 physics steps)" in rendered
     assert "├─ Metadata" in rendered
     assert "dataset                2 keys (instruction, robot_meta)" in rendered
+    assert "render_fps" not in rendered
     assert "Pick up the red cube" not in rendered
     assert "├─ Managers (4/5 active, 8 functors)" in rendered
     assert "EventManager           3 functors" in rendered
@@ -134,15 +135,30 @@ def test_summary_includes_runtime_metadata_and_every_manager_functor() -> None:
     assert rendered.endswith("╰─ Ready")
 
 
-def test_summary_logs_each_tree_line_as_a_separate_record(
+def test_summary_omits_metadata_section_for_render_fps_only() -> None:
+    """Gym's internal render cadence does not create a metadata section."""
+    env = _make_summary_env()
+    env.metadata = {"render_fps": 50.0}
+
+    rendered = "\n".join(env._initialization_summary_lines())
+
+    assert "├─ Metadata" not in rendered
+
+
+def test_summary_logs_tree_as_one_record_without_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every tree line retains the timestamp and log columns from the logger."""
+    """The complete tree is emitted once without standard log columns."""
     env = _make_summary_env()
-    messages: list[str] = []
-    monkeypatch.setattr(base_env_module.logger, "log_info", messages.append)
+    calls: list[tuple[object, dict[str, object]]] = []
+
+    def capture(message: object, **kwargs: object) -> None:
+        calls.append((message, kwargs))
+
+    monkeypatch.setattr(base_env_module.logger, "log_info", capture)
 
     env._log_initialization_summary()
 
-    assert messages == env._initialization_summary_lines()
-    assert all("\n" not in message for message in messages)
+    assert calls == [
+        ("\n".join(env._initialization_summary_lines()), {"prefix": False})
+    ]

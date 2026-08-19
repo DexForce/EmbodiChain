@@ -57,6 +57,12 @@ class _UTCFormatter(logging.Formatter):
 
     converter = time.gmtime
 
+    def format(self, record: logging.LogRecord) -> str:
+        """Format a record, optionally omitting the standard log prefix."""
+        if getattr(record, "embodichain_plain", False):
+            return record.getMessage()
+        return super().format(record)
+
 
 _DEFAULT_FORMATTER = _UTCFormatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
 _DEFAULT_HANDLER = logging.StreamHandler()
@@ -116,13 +122,19 @@ def format_message(
 def log_info(
     message: object,
     color: str | None = _DEFAULT_LEVEL_COLORS["INFO"],
+    *,
+    prefix: bool = True,
 ) -> None:
     """Log an info message.
 
     Args:
         message: Log message payload.
         color: Level color override, or ``None`` to disable coloring.
+        prefix: Whether to include the timestamp, level, and component columns.
     """
+    if not prefix:
+        logger.info(message, extra={"embodichain_plain": True})
+        return
     logger.info(format_message("INFO", message, color))
 
 
@@ -147,9 +159,11 @@ def log_warning(
 
     Args:
         message: Log message payload.
-        color: Level color override, or ``None`` to disable coloring.
+        color: Level and message color override, or ``None`` to disable coloring.
     """
-    logger.warning(format_message("WARNING", message, color))
+    logger.warning(
+        format_message("WARNING", decorate_str_color(str(message), color), color)
+    )
 
 
 def log_error(
@@ -162,9 +176,11 @@ def log_error(
     Args:
         message: Error message payload.
         error_type: Exception class to raise.
-        color: Level color override, or ``None`` to disable coloring.
+        color: Level and message color override, or ``None`` to disable coloring.
 
     Raises:
         Exception: An instance of ``error_type`` containing the formatted message.
     """
-    raise error_type(format_message("ERROR", message, color))
+    raise error_type(
+        format_message("ERROR", decorate_str_color(str(message), color), color)
+    )

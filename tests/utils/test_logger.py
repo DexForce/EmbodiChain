@@ -25,9 +25,9 @@ from embodichain.utils import logger as logger_module
 
 _RESET_COLOR = "\033[0m"
 _LEVEL_CASES = (
-    (logger_module.log_debug, "debug", "DEBUG", "\033[96m"),
-    (logger_module.log_info, "info", "INFO", "\033[92m"),
-    (logger_module.log_warning, "warning", "WARNING", "\033[93m"),
+    (logger_module.log_debug, "debug", "DEBUG", "\033[96m", False),
+    (logger_module.log_info, "info", "INFO", "\033[92m", False),
+    (logger_module.log_warning, "warning", "WARNING", "\033[93m", True),
 )
 
 
@@ -52,8 +52,24 @@ def test_default_formatter_uses_utc_datetime_and_aligned_layout():
     )
 
 
+def test_default_formatter_can_omit_prefix():
+    message = "╭─ Environment initialized\n╰─ Ready"
+    record = logging.LogRecord(
+        name="embodichain.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg=message,
+        args=(),
+        exc_info=None,
+    )
+    record.embodichain_plain = True
+
+    assert logger_module._DEFAULT_FORMATTER.format(record) == message
+
+
 @pytest.mark.parametrize(
-    ("log_function", "logger_method", "level", "color_code"),
+    ("log_function", "logger_method", "level", "color_code", "colors_message"),
     _LEVEL_CASES,
 )
 def test_log_methods_use_default_level_colors(
@@ -62,35 +78,41 @@ def test_log_methods_use_default_level_colors(
     logger_method: str,
     level: str,
     color_code: str,
+    colors_message: bool,
 ):
     messages: list[str] = []
     monkeypatch.setattr(logger_module.logger, logger_method, messages.append)
 
     log_function("Test message")
 
+    message = (
+        f"{color_code}Test message{_RESET_COLOR}" if colors_message else "Test message"
+    )
     assert messages == [
-        f"{color_code}{level:<8}{_RESET_COLOR} │ EmbodiChain │ Test message"
+        f"{color_code}{level:<8}{_RESET_COLOR} │ EmbodiChain │ {message}"
     ]
 
 
 @pytest.mark.parametrize(
-    ("log_function", "logger_method", "level"),
-    tuple(case[:3] for case in _LEVEL_CASES),
+    ("log_function", "logger_method", "level", "colors_message"),
+    tuple((*case[:3], case[4]) for case in _LEVEL_CASES),
 )
 def test_log_methods_allow_custom_level_color(
     monkeypatch: pytest.MonkeyPatch,
     log_function: Callable[..., None],
     logger_method: str,
     level: str,
+    colors_message: bool,
 ):
     messages: list[str] = []
     monkeypatch.setattr(logger_module.logger, logger_method, messages.append)
 
     log_function("Test message", color="purple")
 
-    assert messages == [
-        f"\033[95m{level:<8}{_RESET_COLOR} │ EmbodiChain │ Test message"
-    ]
+    message = (
+        f"\033[95mTest message{_RESET_COLOR}" if colors_message else "Test message"
+    )
+    assert messages == [f"\033[95m{level:<8}{_RESET_COLOR} │ EmbodiChain │ {message}"]
 
 
 def test_log_color_can_be_disabled(monkeypatch: pytest.MonkeyPatch):
@@ -102,12 +124,28 @@ def test_log_color_can_be_disabled(monkeypatch: pytest.MonkeyPatch):
     assert messages == ["INFO     │ EmbodiChain │ Test message"]
 
 
+def test_log_info_can_omit_prefix(monkeypatch: pytest.MonkeyPatch):
+    calls: list[tuple[object, dict[str, object]]] = []
+
+    def capture(message: object, **kwargs: object) -> None:
+        calls.append((message, kwargs))
+
+    monkeypatch.setattr(logger_module.logger, "info", capture)
+
+    logger_module.log_info("Environment initialized", prefix=False)
+
+    assert calls == [
+        ("Environment initialized", {"extra": {"embodichain_plain": True}})
+    ]
+
+
 def test_log_error_uses_default_color_and_preserves_error_type():
     with pytest.raises(ValueError) as error:
         logger_module.log_error("Test message", ValueError)
 
     assert str(error.value) == (
-        f"\033[91mERROR   {_RESET_COLOR} │ EmbodiChain │ Test message"
+        f"\033[91mERROR   {_RESET_COLOR} │ EmbodiChain │ "
+        f"\033[91mTest message{_RESET_COLOR}"
     )
 
 
@@ -116,5 +154,6 @@ def test_log_error_allows_custom_level_color():
         logger_module.log_error("Test message", color="purple")
 
     assert str(error.value) == (
-        f"\033[95mERROR   {_RESET_COLOR} │ EmbodiChain │ Test message"
+        f"\033[95mERROR   {_RESET_COLOR} │ EmbodiChain │ "
+        f"\033[95mTest message{_RESET_COLOR}"
     )

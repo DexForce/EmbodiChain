@@ -198,9 +198,8 @@ class BaseEnv(gym.Env):
             self._log_initialization_summary()
 
     def _log_initialization_summary(self) -> None:
-        """Log the environment initialization summary one record per line."""
-        for line in self._initialization_summary_lines():
-            logger.log_info(line)
+        """Log the environment initialization summary without log prefixes."""
+        logger.log_info("\n".join(self._initialization_summary_lines()), prefix=False)
 
     def _initialization_summary_lines(self) -> list[str]:
         """Build a compact, structured summary of the initialized environment."""
@@ -250,11 +249,14 @@ class BaseEnv(gym.Env):
             self._format_initialization_summary_row("Episode limit", episode_limit),
         ]
 
-        if self.metadata:
+        summary_metadata = [
+            (name, value)
+            for name, value in self.metadata.items()
+            if name != "render_fps"
+        ]
+        if summary_metadata:
             lines.append("├─ Metadata")
-            for name, value in sorted(
-                self.metadata.items(), key=lambda item: str(item[0])
-            ):
+            for name, value in sorted(summary_metadata, key=lambda item: str(item[0])):
                 lines.append(
                     self._format_initialization_summary_row(
                         str(name), self._format_initialization_metadata_value(value)
