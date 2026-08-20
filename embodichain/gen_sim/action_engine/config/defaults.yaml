@@ -26,6 +26,10 @@ generation:
   environment:
     viewer_camera_uid: cam_high
     ignore_terminations_during_agent: true
+    recording:
+      enabled: true
+      resolution: [640, 360]
+      interval_step: 1
     arm_aim_yaw_offset:
       left: 0.0
       right: 0.0

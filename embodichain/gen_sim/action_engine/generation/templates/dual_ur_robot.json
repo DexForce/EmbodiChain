@@ -16,7 +16,13 @@
       },
       {
         "component_type": "left_hand",
-        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf",
+        "transform": [
+          [0.0, 1.0, 0.0, 0.0],
+          [-1.0, 0.0, 0.0, 0.0],
+          [0.0, 0.0, 1.0, 0.0],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
       },
       {
         "component_type": "right_arm",
@@ -30,7 +36,13 @@
       },
       {
         "component_type": "right_hand",
-        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+        "urdf_path": "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf",
+        "transform": [
+          [0.0, 1.0, 0.0, 0.0],
+          [-1.0, 0.0, 0.0, 0.0],
+          [0.0, 0.0, 1.0, 0.0],
+          [0.0, 0.0, 0.0, 1.0]
+        ]
       }
     ]
   },
@@ -90,8 +102,8 @@
       "root_link_name": "left_base_link",
       "ik_nearest_weight": [1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
       "tcp": [
-        [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.2],
         [0.0, 0.0, 0.0, 1.0]
       ]
@@ -104,8 +116,8 @@
       "root_link_name": "right_base_link",
       "ik_nearest_weight": [1.0, 4.0, 1.0, 1.0, 1.0, 1.0],
       "tcp": [
-        [0.0, -1.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.2],
         [0.0, 0.0, 0.0, 1.0]
       ]

@@ -41,6 +41,9 @@ from embodichain.gen_sim.action_engine.generation.artifacts import (
     artifact_paths,
     write_generation_artifacts,
 )
+from embodichain.gen_sim.action_engine.generation import (
+    config_builder as config_builder_module,
+)
 from embodichain.gen_sim.action_engine.generation.config_builder import (
     build_agent_config,
     build_fast_gym_config,
@@ -337,6 +340,12 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert [entry["entity_cfg"]["uid"] for entry in registry] == ["interact_can"]
     assert "randomize_interact_can_pose" in config["env"]["events"]
     assert "randomize_table_height" in config["env"]["events"]
+    recorder = config["env"]["events"]["record_camera"]
+    assert recorder["interval_step"] == 5
+    assert recorder["params"]["resolution"] == [640, 360]
+    assert recorder["params"]["intrinsics"] == pytest.approx(
+        [280.0, 280.0, 320.0, 180.0]
+    )
     object_length = config["env"]["events"]["prepare_extra_attr"]["params"]["attrs"][0]
     assert object_length["func_kwargs"]["sample_points"] == 5000
     assert (
@@ -346,6 +355,81 @@ def test_fast_gym_config_has_runnable_franka_contract(gym_export: Path) -> None:
     assert config["env"]["observations"]["norm_robot_eef_joint"]["params"][
         "joint_ids"
     ] == list(range(14, 26))
+
+
+def test_offline_recording_can_be_disabled_but_ab_keeps_audience_recorder(
+    gym_export: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = dict(config_builder_module._GENERATION_DEFAULTS)
+    environment = dict(defaults["environment"])
+    recording = dict(environment["recording"])
+    recording["enabled"] = False
+    environment["recording"] = recording
+    defaults["environment"] = environment
+    monkeypatch.setattr(config_builder_module, "_GENERATION_DEFAULTS", defaults)
+    scene = prepare_scene(gym_export)
+
+    offline = build_fast_gym_config(
+        scene,
+        task_name="offline_task",
+        task_description="Offline recording policy.",
+        robot_profile="franka",
+        execution_program_hash="a" * 64,
+        max_episodes=1,
+        max_episode_steps=100,
+    )
+    ab = build_fast_gym_config(
+        scene,
+        task_name="ab_task",
+        task_description="A/B recording policy.",
+        robot_profile="franka",
+        execution_program_hash="b" * 64,
+        max_episodes=1,
+        max_episode_steps=100,
+        planning_mode="ab",
+        seed_task_graph_path="offline/seed_task_graph.json",
+    )
+
+    assert "record_camera" not in offline["env"]["events"]
+    assert ab["env"]["events"]["record_camera"]["params"]["name"] == (
+        "record_cam_audience_view"
+    )
+    assert ab["env"]["events"]["record_camera"]["interval_step"] == 5
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"enabled": "yes"}, "enabled must be a boolean"),
+        ({"resolution": [640]}, "resolution must contain two positive integers"),
+        ({"interval_step": 0}, "interval_step must be positive"),
+    ],
+)
+def test_recording_policy_rejects_invalid_generation_defaults(
+    gym_export: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    override: dict[str, object],
+    message: str,
+) -> None:
+    defaults = dict(config_builder_module._GENERATION_DEFAULTS)
+    environment = dict(defaults["environment"])
+    recording = dict(environment["recording"])
+    recording.update(override)
+    environment["recording"] = recording
+    defaults["environment"] = environment
+    monkeypatch.setattr(config_builder_module, "_GENERATION_DEFAULTS", defaults)
+
+    with pytest.raises(ValueError, match=message):
+        build_fast_gym_config(
+            prepare_scene(gym_export),
+            task_name="invalid_recording",
+            task_description="Invalid recording policy.",
+            robot_profile="franka",
+            execution_program_hash="c" * 64,
+            max_episodes=1,
+            max_episode_steps=100,
+        )
 
 
 def test_fast_gym_config_uses_task_name_for_lerobot_directory_label(
@@ -531,6 +615,18 @@ def test_fast_gym_config_supports_all_robot_profiles(
     robot_uid: str,
     solver_type: str | None,
 ) -> None:
+    expected_tcp = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.2],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    expected_hand_mount = [
+        [0.0, 1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
     scene = prepare_scene(gym_export)
     config = build_fast_gym_config(
         scene,
@@ -544,6 +640,14 @@ def test_fast_gym_config_supports_all_robot_profiles(
 
     assert config["robot"]["uid"] == robot_uid
     assert config["env"]["extensions"]["agent_robot_profile"] == profile
+    for arm in ("left_arm", "right_arm"):
+        assert config["robot"]["solver_cfg"][arm]["tcp"] == expected_tcp
+    components = {
+        component["component_type"]: component
+        for component in config["robot"]["urdf_cfg"]["components"]
+    }
+    for hand in ("left_hand", "right_hand"):
+        assert components[hand]["transform"] == expected_hand_mount
     if solver_type is not None:
         assert config["robot"]["solver_cfg"]["left_arm"]["ur_type"] == solver_type
 

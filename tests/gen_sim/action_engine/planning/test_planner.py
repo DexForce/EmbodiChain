@@ -621,6 +621,84 @@ def test_process_environment_and_model_argument_override_dotenv(
     assert settings["model"] == "argument-model"
 
 
+def test_partial_process_transport_does_not_mix_with_dotenv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "\n".join(
+            (
+                "OPENAI_API_KEY=dotenv-key",
+                "OPENAI_BASE_URL=https://dotenv.example/v1",
+                "OPENAI_MODEL=dotenv-model",
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(planner_module, "_GEN_SIM_ENV_PATH", env_path)
+    monkeypatch.setattr(
+        planner_module,
+        "_GEN_CONFIG_PATH",
+        tmp_path / "missing.json",
+    )
+    for name in (
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "OPENAI_MODEL",
+        "LLM_MODEL",
+        "LLM_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-process-key")
+
+    settings = planner_module._load_llm_settings(model=None)
+
+    assert settings["api_key"] == "dotenv-key"
+    assert settings["base_url"] == "https://dotenv.example/v1"
+    assert settings["model"] == "dotenv-model"
+
+
+def test_default_llm_caller_disables_custom_socket_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import langchain_openai
+
+    captured: dict[str, Any] = {}
+
+    class FakeRunnable:
+        def invoke(self, _messages: Any) -> dict[str, list[Any]]:
+            return {"semantic_steps": [], "allocation_groups": []}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def with_structured_output(
+            self,
+            _schema: dict[str, Any],
+            **_kwargs: Any,
+        ) -> FakeRunnable:
+            return FakeRunnable()
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr(
+        planner_module,
+        "_load_llm_settings",
+        lambda *, model: {
+            "api_key": "test-key",
+            "model": model or "test-model",
+            "base_url": "https://example.test/v1",
+            "default_query": {},
+        },
+    )
+
+    planner_module._default_llm_caller(prompt="plan", model="test-model")
+
+    assert captured["http_socket_options"] == ()
+
+
 def test_structured_output_transport_selects_json_mode_only_for_mimo() -> None:
     calls: list[dict[str, Any]] = []
 

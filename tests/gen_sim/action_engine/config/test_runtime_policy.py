@@ -100,6 +100,11 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         "left": pytest.approx(0.0),
         "right": pytest.approx(0.0),
     }
+    assert generation["environment"]["recording"] == {
+        "enabled": True,
+        "resolution": [640, 360],
+        "interval_step": 5,
+    }
     assert generation["scene"]["object_length_sample_points"] == 5000
     assert generation["dataset"]["control_frequency"] == 25
     assert generation["randomization"]["table_height_delta_range"] == [

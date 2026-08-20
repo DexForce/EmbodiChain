@@ -1674,6 +1674,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
     assert len(calls) == 3
     for call in calls:
         assert call["structured_kwargs"] == {"method": "json_mode"}
+        assert call["kwargs"]["http_socket_options"] == ()
         assert call["kwargs"]["max_completion_tokens"] == 4096
         assert call["kwargs"]["extra_body"] == {"thinking": {"type": "disabled"}}
     repair_messages = calls[1]["messages"]

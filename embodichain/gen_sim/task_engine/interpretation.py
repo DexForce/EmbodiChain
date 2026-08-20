@@ -887,6 +887,7 @@ def _default_instruction_caller(
         "api_key": settings["api_key"],
         "model": settings["model"],
         "temperature": 0,
+        "http_socket_options": (),
     }
     for key in ("base_url", "default_query"):
         if settings[key]:
@@ -988,10 +989,7 @@ def _load_llm_settings(*, model: str | None) -> dict[str, Any]:
                 configured = llm.get("openai_compatible", {})
                 if isinstance(configured, Mapping):
                     config = dict(configured)
-    api_key = (
-        _first_env_value(local_env, "OPENAI_API_KEY")
-        or str(config.get("api_key", "")).strip()
-    )
+    api_key, base_url = _resolve_transport_settings(local_env, config)
     selected_model = (
         (model.strip() if isinstance(model, str) else "")
         or _first_env_value(
@@ -1003,15 +1001,6 @@ def _load_llm_settings(*, model: str | None) -> dict[str, Any]:
         )
         or str(config.get("model", "")).strip()
     )
-    base_url = (
-        _first_env_value(
-            local_env,
-            "OPENAI_BASE_URL",
-            "OPENAI_API_BASE",
-            "LLM_URL",
-        )
-        or str(config.get("base_url", "")).strip()
-    ).rstrip("/")
     default_query = config.get("default_query", {}) or {}
     if not api_key:
         raise ValueError(
@@ -1031,6 +1020,52 @@ def _load_llm_settings(*, model: str | None) -> dict[str, Any]:
         "base_url": base_url,
         "default_query": dict(default_query),
     }
+
+
+def _resolve_transport_settings(
+    local_env: Mapping[str, str],
+    config: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Resolve an API key and endpoint from one configuration source."""
+    transports = (
+        (
+            _mapping_value(os.environ, "OPENAI_API_KEY"),
+            _mapping_value(
+                os.environ,
+                "OPENAI_BASE_URL",
+                "OPENAI_API_BASE",
+                "LLM_URL",
+            ),
+        ),
+        (
+            _mapping_value(local_env, "OPENAI_API_KEY"),
+            _mapping_value(
+                local_env,
+                "OPENAI_BASE_URL",
+                "OPENAI_API_BASE",
+                "LLM_URL",
+            ),
+        ),
+        (
+            _mapping_value(config, "api_key"),
+            _mapping_value(config, "base_url"),
+        ),
+    )
+    for api_key, base_url in transports:
+        if api_key and base_url:
+            return api_key, base_url.rstrip("/")
+    for api_key, base_url in transports:
+        if api_key:
+            return api_key, base_url.rstrip("/")
+    return "", ""
+
+
+def _mapping_value(source: Mapping[str, Any], *names: str) -> str:
+    for name in names:
+        value = source.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _load_env_file(path: Path) -> dict[str, str]:

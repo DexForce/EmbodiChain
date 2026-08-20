@@ -265,6 +265,7 @@ def build_fast_gym_config(
             "events": _make_events(
                 sensors[0],
                 rigid_uids,
+                planning_mode=planning_mode,
                 randomize_scene=randomize_scene,
                 randomize_table_material=randomize_table_material,
             ),
@@ -438,6 +439,7 @@ def _make_events(
     camera: dict[str, Any],
     rigid_uids: list[str],
     *,
+    planning_mode: str,
     randomize_scene: bool = False,
     randomize_table_material: bool = False,
 ) -> dict[str, Any]:
@@ -450,15 +452,37 @@ def _make_events(
         2.0 * float(target[1]) - float(eye[1]),
         float(eye[2]),
     ]
+    recording_enabled, recording_resolution, recording_interval = _recording_policy(
+        planning_mode
+    )
+    source_width = int(camera["width"])
+    source_height = int(camera["height"])
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError("Recording source camera resolution must be positive.")
+    intrinsics = camera.get("intrinsics")
+    if (
+        not isinstance(intrinsics, Sequence)
+        or isinstance(intrinsics, (str, bytes, bytearray))
+        or len(intrinsics) != 4
+    ):
+        raise ValueError("Recording source camera intrinsics must be a 4-vector.")
+    scale_x = recording_resolution[0] / source_width
+    scale_y = recording_resolution[1] / source_height
+    recording_intrinsics = [
+        float(intrinsics[0]) * scale_x,
+        float(intrinsics[1]) * scale_y,
+        float(intrinsics[2]) * scale_x,
+        float(intrinsics[3]) * scale_y,
+    ]
     events = {
         "record_camera": {
             "func": "record_camera_data",
             "mode": "interval",
-            "interval_step": 1,
+            "interval_step": recording_interval,
             "params": {
                 "name": "record_cam_audience_view",
-                "resolution": [int(camera["width"]), int(camera["height"])],
-                "intrinsics": list(camera["intrinsics"]),
+                "resolution": list(recording_resolution),
+                "intrinsics": recording_intrinsics,
                 "eye": audience_eye,
                 "target": target,
                 "up": [
@@ -515,6 +539,8 @@ def _make_events(
             },
         },
     }
+    if not recording_enabled:
+        events.pop("record_camera")
     if randomize_table_material:
         material = _GENERATION_DEFAULTS["randomization"]["table_material"]
         events["randomize_table_material"] = {
@@ -557,6 +583,48 @@ def _make_events(
             },
         }
     return events
+
+
+def _recording_policy(planning_mode: str) -> tuple[bool, tuple[int, int], int]:
+    """Resolve the bounded GenSim audience-recording policy."""
+    value = _GENERATION_DEFAULTS["environment"].get("recording")
+    required = {"enabled", "resolution", "interval_step"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError(
+            "generation.environment.recording must define enabled, resolution, "
+            "and interval_step."
+        )
+    enabled = value["enabled"]
+    if not isinstance(enabled, bool):
+        raise ValueError("generation.environment.recording.enabled must be a boolean.")
+    resolution = value["resolution"]
+    if (
+        not isinstance(resolution, Sequence)
+        or isinstance(resolution, (str, bytes, bytearray))
+        or len(resolution) != 2
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) for item in resolution
+        )
+        or any(int(item) <= 0 for item in resolution)
+    ):
+        raise ValueError(
+            "generation.environment.recording.resolution must contain two "
+            "positive integers."
+        )
+    interval_step = value["interval_step"]
+    if (
+        isinstance(interval_step, bool)
+        or not isinstance(interval_step, int)
+        or interval_step <= 0
+    ):
+        raise ValueError(
+            "generation.environment.recording.interval_step must be positive."
+        )
+    return (
+        bool(enabled or planning_mode == "ab"),
+        (int(resolution[0]), int(resolution[1])),
+        int(interval_step),
+    )
 
 
 def _make_observations(robot: dict[str, Any]) -> dict[str, Any]:

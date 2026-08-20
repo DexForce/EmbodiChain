@@ -566,6 +566,7 @@ def _default_structured_caller(
         "api_key": settings["api_key"],
         "model": settings["model"],
         "temperature": 0,
+        "http_socket_options": (),
     }
     for key in ("base_url", "default_query"):
         if settings[key]:

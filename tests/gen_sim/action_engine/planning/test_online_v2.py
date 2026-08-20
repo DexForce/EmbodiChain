@@ -23,6 +23,7 @@ import pytest
 import torch
 
 import embodichain.gen_sim.action_engine.planning.online as online_module
+import embodichain.gen_sim.action_engine.planning.planner as planner_module
 import embodichain.gen_sim.action_engine.planning.vision as vision_module
 from embodichain.gen_sim.action_engine.domain import public_task_spec
 from embodichain.gen_sim.action_engine.planning import (
@@ -339,6 +340,46 @@ def test_production_online_graph_caller_receives_reset_time_multiview_evidence(
     assert result == {"nodes": [], "task_groups": [], "success": {}}
     assert captured["model"] == "resolved:mimo"
     assert len(captured["images"]) == 2
+
+
+def test_default_vision_caller_disables_custom_socket_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import langchain_openai
+
+    captured = {}
+
+    class FakeRunnable:
+        def invoke(self, _messages):
+            return {"facts": []}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def with_structured_output(self, _schema, **_kwargs):
+            return FakeRunnable()
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr(
+        planner_module,
+        "_load_llm_settings",
+        lambda *, model: {
+            "api_key": "test-key",
+            "model": model or "test-model",
+            "base_url": "https://example.test/v1",
+            "default_query": {},
+        },
+    )
+
+    vision_module._default_structured_caller(
+        prompt="inspect",
+        images=(),
+        schema={"type": "object"},
+        model="test-model",
+    )
+
+    assert captured["http_socket_options"] == ()
 
 
 def test_visual_facts_reject_unstructured_entity_fields() -> None:
