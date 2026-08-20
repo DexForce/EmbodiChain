@@ -37,7 +37,7 @@ def test_default_formatter_uses_utc_datetime_and_aligned_layout():
         level=logging.INFO,
         pathname=__file__,
         lineno=1,
-        msg="INFO     │ EmbodiChain │ Simulation initialized",
+        msg="INFO    │ EmbodiChain │ Simulation initialized",
         args=(),
         exc_info=None,
     )
@@ -48,7 +48,7 @@ def test_default_formatter_uses_utc_datetime_and_aligned_layout():
 
     assert formatted == (
         "1970-01-01 00:00:00.123 UTC "
-        "│ INFO     │ EmbodiChain │ Simulation initialized"
+        "│ INFO    │ EmbodiChain │ Simulation initialized"
     )
 
 
@@ -89,7 +89,7 @@ def test_log_methods_use_default_level_colors(
         f"{color_code}Test message{_RESET_COLOR}" if colors_message else "Test message"
     )
     assert messages == [
-        f"{color_code}{level:<8}{_RESET_COLOR} │ EmbodiChain │ {message}"
+        f"{color_code}{level:<7}{_RESET_COLOR} │ EmbodiChain │ {message}"
     ]
 
 
@@ -112,7 +112,7 @@ def test_log_methods_allow_custom_level_color(
     message = (
         f"\033[95mTest message{_RESET_COLOR}" if colors_message else "Test message"
     )
-    assert messages == [f"\033[95m{level:<8}{_RESET_COLOR} │ EmbodiChain │ {message}"]
+    assert messages == [f"\033[95m{level:<7}{_RESET_COLOR} │ EmbodiChain │ {message}"]
 
 
 def test_log_color_can_be_disabled(monkeypatch: pytest.MonkeyPatch):
@@ -121,7 +121,7 @@ def test_log_color_can_be_disabled(monkeypatch: pytest.MonkeyPatch):
 
     logger_module.log_info("Test message", color=None)
 
-    assert messages == ["INFO     │ EmbodiChain │ Test message"]
+    assert messages == ["INFO    │ EmbodiChain │ Test message"]
 
 
 def test_log_info_can_omit_prefix(monkeypatch: pytest.MonkeyPatch):
@@ -144,7 +144,7 @@ def test_log_error_uses_default_color_and_preserves_error_type():
         logger_module.log_error("Test message", ValueError)
 
     assert str(error.value) == (
-        f"\033[91mERROR   {_RESET_COLOR} │ EmbodiChain │ "
+        f"\033[91mERROR  {_RESET_COLOR} │ EmbodiChain │ "
         f"\033[91mTest message{_RESET_COLOR}"
     )
 
@@ -154,6 +154,6 @@ def test_log_error_allows_custom_level_color():
         logger_module.log_error("Test message", color="purple")
 
     assert str(error.value) == (
-        f"\033[95mERROR   {_RESET_COLOR} │ EmbodiChain │ "
+        f"\033[95mERROR  {_RESET_COLOR} │ EmbodiChain │ "
         f"\033[95mTest message{_RESET_COLOR}"
     )

@@ -115,7 +115,7 @@ def format_message(
     Returns:
         A formatted message containing the level, component, and payload.
     """
-    decorated_level = decorate_str_color(f"{level:<8}", color)
+    decorated_level = decorate_str_color(f"{level:<7}", color)
     return f"{decorated_level} │ EmbodiChain │ {message}"
 
 
