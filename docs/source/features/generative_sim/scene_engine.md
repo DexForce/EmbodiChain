@@ -90,6 +90,8 @@ SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH="/generate_multiple_objects"
 - **Scene understanding**: analyzes the image and segments the table and visible objects.
 - **Scene generation**: generates meshes, prepares SimReady geometry, detects the table support surface, and refines the table-top layout.
 - **Scene export**: copies the final GLBs and writes a portable z-up scene export.
+  By default, it rotates the complete z-up scene 180 degrees around the table
+  center; poses and persisted XY layout metadata are transformed together.
 
 ## Output and Preview
 

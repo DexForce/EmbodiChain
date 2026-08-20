@@ -128,7 +128,9 @@ def test_object_physics_rejects_invalid_values(
         )
 
 
-def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> None:
+def test_scene_export_rotates_the_complete_z_up_scene_by_default(
+    tmp_path: Path,
+) -> None:
     table_glb = tmp_path / "table.glb"
     asset_glb = tmp_path / "cup.glb"
     table_glb.write_bytes(b"glTF-table")
@@ -139,6 +141,14 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
         glb_path=table_glb,
         physics=_physics("kinematic"),
     )
+    table.pos = [0.0, 0.0, 0.0]
+    table.support_contour_xy = [[-1.0, -0.5], [1.0, -0.5], [1.0, 0.5]]
+    table.support_optimization_rect_xy = [
+        [-0.8, -0.3],
+        [0.8, -0.3],
+        [0.8, 0.3],
+        [-0.8, 0.3],
+    ]
     asset = _scene_object(
         object_id="cup",
         kind="asset",
@@ -164,10 +174,26 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert entry["category"] == "asset"
     assert entry["name"] == "cup"
     assert entry["body_type"] == "dynamic"
-    assert entry["init_pos"] == [1.0, -3.0, 2.0]
+    assert np.allclose(entry["init_pos"], [-1.0, 3.0, 2.0])
     assert entry["body_scale"] == [1.0, 2.0, 3.0]
-    assert entry["center_xy"] == [0.25, -0.5]
-    assert np.allclose(entry["init_rot"], [0.0, 0.0, 0.0])
+    assert np.allclose(entry["center_xy"], [-0.25, 0.5])
+    assert np.allclose(
+        entry["init_rot"],
+        [0.0, 0.0, 180.0],
+    )
+    exported_table = exported["background"][0]
+    assert np.allclose(
+        exported_table["support_contour_xy"],
+        [[1.0, 0.5], [-1.0, 0.5], [-1.0, -0.5]],
+    )
+    assert np.allclose(
+        exported_table["support_optimization_rect_xy"],
+        [[0.8, 0.3], [-0.8, 0.3], [-0.8, -0.3], [0.8, -0.3]],
+    )
+    exported_scene_json = json.loads((export_path.parent / "scene.json").read_text())
+    exported_asset_json = exported_scene_json["objects"][1]
+    assert np.allclose(exported_asset_json["pos"], [-1.0, 2.0, -3.0])
+    assert np.allclose(exported_asset_json["center_xy"], [-0.25, 0.5])
     assert json.loads((export_path.parent / "scene_graph.json").read_text()) == {
         "nodes": [
             {
@@ -194,7 +220,45 @@ def test_scene_export_copies_meshes_and_converts_y_up_pose(tmp_path: Path) -> No
     assert [asset.id for asset in imported_scene.assets] == ["cup"]
     assert imported_scene.assets[0].category == "asset"
     assert imported_scene.assets[0].name == "cup"
+    assert np.allclose(imported_scene.assets[0].pos, [-1.0, 2.0, -3.0])
+    assert np.allclose(imported_scene.assets[0].center_xy, [-0.25, 0.5])
+    assert np.allclose(
+        imported_scene.table.support_contour_xy,
+        [[1.0, 0.5], [-1.0, 0.5], [-1.0, -0.5]],
+    )
     assert imported_graph.to_dict() == _scene_graph(scene).to_dict()
+
+
+def test_scene_export_can_disable_the_default_z_up_rotation(tmp_path: Path) -> None:
+    table_glb = tmp_path / "table.glb"
+    asset_glb = tmp_path / "cup.glb"
+    table_glb.write_bytes(b"glTF-table")
+    asset_glb.write_bytes(b"glTF-cup")
+    table = _scene_object(
+        object_id="table",
+        kind="table",
+        glb_path=table_glb,
+        physics=_physics("kinematic"),
+    )
+    table.pos = [0.0, 0.0, 0.0]
+    asset = _scene_object(
+        object_id="cup",
+        kind="asset",
+        glb_path=asset_glb,
+        physics=_physics("dynamic"),
+    )
+
+    scene = Scene(objects=[table, asset])
+    export_path = SceneExporter(
+        scene=scene,
+        scene_graph=_scene_graph(scene),
+        output_root=tmp_path / "output",
+        rotate_z_up_180=False,
+    ).export()
+    exported = json.loads(export_path.read_text(encoding="utf-8"))
+
+    assert exported["rigid_object"][0]["init_pos"] == [1.0, -3.0, 2.0]
+    assert np.allclose(exported["rigid_object"][0]["init_rot"], [0.0, 0.0, 0.0])
 
 
 def test_scene_graph_importer_restores_node_orientation_state() -> None:
