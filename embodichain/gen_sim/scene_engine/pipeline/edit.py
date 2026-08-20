@@ -18,26 +18,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
     OpenAICompatibleVLM,
 )
 from embodichain.gen_sim.scene_engine.pipeline.api import (
-    analyze_image,
-    materialize_blueprint,
+    analyze_edit,
+    materialize_edit,
 )
 
 
-def generate_scene_from_image(
-    image_path: str | Path,
+def edit_scene(
+    *,
     output_root: str | Path,
-) -> Scene:
-    """Generate the initial core scene state from an input image."""
+    edit_prompt: str,
+) -> None:
+    """Apply one text edit instruction to an existing Scene Engine output."""
     resolved_output_root = Path(output_root).expanduser().resolve()
     vlm_client = OpenAICompatibleVLM.from_dotenv()
-    blueprint = analyze_image(
-        image_path,
-        resolved_output_root,
+    blueprint = analyze_edit(
+        output_root=resolved_output_root,
+        edit_prompt=edit_prompt,
         vlm_client=vlm_client,
     )
-    return materialize_blueprint(blueprint, vlm_client=vlm_client).scene
+    materialize_edit(blueprint, vlm_client=vlm_client)
+    return None
