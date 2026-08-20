@@ -541,6 +541,7 @@ def run_coordinated_placement_demo(
     create_table(sim)
     bread = create_bread(sim)
     pan = create_pan(sim)
+    sim.prepare()
     settle_object(sim, bread, step=0)
     settle_object(sim, pan, step=0)
     bread_pose_batch = clone_local_pose_from_first_env(bread)

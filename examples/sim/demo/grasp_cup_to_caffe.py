@@ -428,6 +428,7 @@ def main():
     caffe = create_caffe(sim)
     cup = create_cup(sim)
 
+    sim.prepare()
     sim.update(step=1)
 
     # apply random perturbation

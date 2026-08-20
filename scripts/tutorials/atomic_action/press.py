@@ -152,8 +152,7 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(sim)
     block = create_wooden_block(sim, [*args.block_pos, 0.5 * BLOCK_SIZE[2]])
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
+    sim.prepare()
     block.reset()
     sim.update(step=5)
     block.clear_dynamics()

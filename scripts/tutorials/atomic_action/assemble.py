@@ -242,6 +242,7 @@ def run_assemble_demo(
     create_support_surface(sim)
     can = create_assemble_object(sim)
     cube = create_base_object(sim)
+    sim.prepare()
 
     settle_object(sim, can, step=0)
     clone_local_pose_from_first_env(can)

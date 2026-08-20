@@ -236,8 +236,6 @@ def add_support_surface(
 
 def settle_object(sim: SimulationManager, obj: RigidObject, step: int = 5) -> None:
     """Reset, settle, and freeze an object before tutorial planning."""
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
     obj.reset()
     if step > 0:
         sim.update(step=step)

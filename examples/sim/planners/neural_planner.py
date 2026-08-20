@@ -221,8 +221,7 @@ def main() -> None:
         arm_name = "arm"
         device = robot.device
 
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
+        sim.prepare()
         if not args.headless:
             sim.open_window()
 

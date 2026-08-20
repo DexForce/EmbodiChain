@@ -82,6 +82,7 @@ def main(
     }
 
     robot: Robot = sim.add_robot(cfg=RobotCfg.from_dict(cfg_dict))
+    sim.prepare()
 
     # Prepare initial joint positions for all environments
     rad = torch.deg2rad(torch.tensor(45.0))

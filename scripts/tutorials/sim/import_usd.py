@@ -131,10 +131,6 @@ def run_simulation(sim: SimulationManager):
         sim: The SimulationManager instance to run
     """
 
-    # Initialize GPU physics if using CUDA
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     step_count = 0
 
     try:

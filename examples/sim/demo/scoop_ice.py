@@ -309,6 +309,7 @@ def create_ice_cubes(sim: SimulationManager):
             material_type="BSDF",
         )
     )
+    sim.prepare()
     ice_cubes.set_visual_material(mat=ice_mat)
 
     return ice_cubes

@@ -458,11 +458,6 @@ def _build_scene(
     if robot is None:
         raise RuntimeError(f"Failed to add robot '{robot_type}' to the cuRobo demo.")
     target_xpos = _resolve_batched_target(target_xpos, robot.num_instances)
-    if robot_type == "w1":
-        # Keep the W1-specific IK diagnostic batched so it remains useful when
-        # checking solver and cuRobo reachability across multiple environments.
-        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
-        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
 
     # This object is also exported into the cuRobo collision world below via
     # CuroboWorldCfg.rigid_objects, so the simulator and planner share geometry
@@ -477,6 +472,13 @@ def _build_scene(
             init_rot=(0.0, 0.0, 0.0),
         )
     )
+    sim.prepare()
+
+    if robot_type == "w1":
+        # Keep the W1-specific IK diagnostic batched so it remains useful when
+        # checking solver and cuRobo reachability across multiple environments.
+        is_success, ik_qpos = robot.compute_ik(pose=target_xpos, name=control_part)
+        print(f"robot compute ik success: {is_success}, ik_qpos: {ik_qpos}")
 
     return sim, robot, demo_block, target_xpos, control_part
 
@@ -699,8 +701,6 @@ def main() -> None:
             effective_gpu_id,
             visualization_cfg_from_args(args),
         )
-        if sim.is_use_gpu_physics:
-            sim.init_gpu_physics()
 
         obstacles = [demo_block]
         obstacle_poses = _perturb_obstacles(

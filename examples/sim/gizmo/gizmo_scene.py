@@ -126,12 +126,6 @@ def main():
         device="cpu",
     )
 
-    left_joint_ids = robot.get_joint_ids("left_arm")
-    right_joint_ids = robot.get_joint_ids("right_arm")
-
-    robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
-    robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
-
     # Create a rigid object (cube) positioned to the side of the robot
     cube_cfg = RigidObjectCfg(
         uid="interactive_cube",
@@ -163,6 +157,12 @@ def main():
         ),
     )
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
+    sim.prepare()
+
+    left_joint_ids = robot.get_joint_ids("left_arm")
+    right_joint_ids = robot.get_joint_ids("right_arm")
+    robot.set_qpos(qpos=left_arm_qpos, joint_ids=left_joint_ids)
+    robot.set_qpos(qpos=right_arm_qpos, joint_ids=right_joint_ids)
 
     native_window_opened = False
     if not args.headless:

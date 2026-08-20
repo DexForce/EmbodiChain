@@ -68,6 +68,7 @@ def main() -> None:
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(sim)
+    sim.prepare()
     motion_gen = create_toppra_motion_generator(robot)
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
