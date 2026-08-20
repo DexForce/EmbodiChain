@@ -301,6 +301,38 @@ def test_table_optimizer_ignores_fixed_sibling_overlap(tmp_path: Path) -> None:
     }
 
 
+def test_table_optimizer_keeps_fixed_sibling_partly_outside_table(
+    tmp_path: Path,
+) -> None:
+    asset_glb = tmp_path / "asset.glb"
+    trimesh.creation.box(extents=[_ASSET_SIDE_LENGTH_M] * 3).export(asset_glb)
+    fixed_id, variable_id = "fixed_001", "variable_001"
+    fixed_xy = [1.95, 0.0]  # Its 0.2 m AABB extends beyond the x=2 m table edge.
+
+    solved_xy_by_id = TableSurfaceLayoutOptimizer().optimize(
+        TableSurfaceLayoutProblem(
+            assets_by_id={
+                fixed_id: _asset(
+                    object_id=fixed_id,
+                    glb_path=asset_glb,
+                    center_xy=fixed_xy,
+                ),
+                variable_id: _asset(object_id=variable_id, glb_path=asset_glb),
+            },
+            root_ids=[fixed_id, variable_id],
+            root_seed_xy_by_id={fixed_id: fixed_xy, variable_id: [0.0, 0.0]},
+            imported_root_ids={fixed_id},
+            fixed_root_xy_by_id={fixed_id: fixed_xy, variable_id: None},
+            root_table_regions_by_id={fixed_id: None, variable_id: None},
+            table_optimization_rect_xy=_TABLE_BOUNDS,
+            root_relations=[],
+        )
+    )
+
+    assert solved_xy_by_id[fixed_id] == fixed_xy
+    assert np.all(np.abs(solved_xy_by_id[variable_id]) <= 1.9 + 1e-6)
+
+
 def test_table_optimizer_separates_variable_sibling_from_fixed_sibling(
     tmp_path: Path,
 ) -> None:

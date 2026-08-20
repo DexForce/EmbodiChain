@@ -196,7 +196,7 @@ def _build_constraints(
     root_half_extents_xy: dict[str, np.ndarray],
     config: TableSurfaceLayoutOptimizerConfig,
 ) -> tuple[list[tuple[np.ndarray, float]], list[tuple[np.ndarray, float]]]:
-    """Build hard table-region, planar-relation, and fixed-root constraints."""
+    """Build variable table-region, planar-relation, and fixed-root constraints."""
     # Objects which need to be optimized.
     root_index = {root_id: index for index, root_id in enumerate(problem.root_ids)}
     table_bounds = _bounds_from_points(problem.table_optimization_rect_xy)
@@ -204,12 +204,21 @@ def _build_constraints(
     inequality_constraints: list[tuple[np.ndarray, float]] = []
     equality_constraints: list[tuple[np.ndarray, float]] = []
     for root_id in problem.root_ids:
-        # Get the table region bound for this root asset.
+        fixed_xy = problem.fixed_root_xy_by_id[root_id]
+        if fixed_xy is not None:
+            # Imported, unedited roots retain their pose even when partly off-table.
+            _append_fixed_root_constraints(
+                constraints=equality_constraints,
+                root_index=root_index,
+                root_id=root_id,
+                fixed_xy=fixed_xy,
+            )
+            continue
+        # Only layout variables must keep their complete AABB inside the table region.
         region_bounds = _table_region_bounds(
             table_bounds=table_bounds,
             table_region=problem.root_table_regions_by_id[root_id],
         )
-        # Add AABB constraints for each root's center inside the table region.
         _append_aabb_center_bounds(
             constraints=inequality_constraints,
             root_index=root_index,
@@ -217,15 +226,6 @@ def _build_constraints(
             bounds=region_bounds,
             half_extents_xy=root_half_extents_xy[root_id],
         )
-        fixed_xy = problem.fixed_root_xy_by_id[root_id]
-        if fixed_xy is not None:
-            # Add fixed-root constraints for each root with a fixed XY center.
-            _append_fixed_root_constraints(
-                constraints=equality_constraints,
-                root_index=root_index,
-                root_id=root_id,
-                fixed_xy=fixed_xy,
-            )
     for relation in problem.root_relations:
         # Add planar-relation constraints for each sibling relation in this group.
         _append_planar_relation_constraint(
