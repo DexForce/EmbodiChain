@@ -32,6 +32,8 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optim
     ParentSurfaceLayoutOptimizer,
     ParentSurfaceLayoutProblem,
 )
+import embodichain.gen_sim.scene_engine.pipeline.utils.parent_surface_layout_optimizer as parent_surface_layout_optimizer_module
+import embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor as scene_layout_constructor_module
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor import (
     SceneLayoutConstructor,
 )
@@ -54,6 +56,8 @@ _COLLISION_MARGIN_M = 0.02
 _BOARD_XY_SIZE_M = 0.6
 _CAN_XY_SIZE_M = 0.1
 _PENCIL_XY_SIZE_M = [0.04, 0.2]
+_SETTLED_DYNAMIC_POS_Y_UP = [0.25, 0.5, -0.4]
+_SETTLED_DYNAMIC_ROT_Y_UP = [0.0, 0.0, 0.0]
 
 
 def _asset(
@@ -98,6 +102,7 @@ def test_table_regions_put_front_at_larger_y() -> None:
 
 def test_layout_constructor_places_new_child_on_parent_top(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     book_glb = tmp_path / "book.glb"
     cup_glb = tmp_path / "cup.glb"
@@ -142,6 +147,25 @@ def test_layout_constructor_places_new_child_on_parent_top(
             ),
         ]
     )
+    settler_inputs: dict[str, object] = {}
+
+    class _FakeGravitySettler:
+        def __init__(self, **kwargs: object) -> None:
+            settler_inputs.update(kwargs)
+
+        def settle(self) -> dict[str, dict[str, list[float]]]:
+            return {
+                "cup_001": {
+                    "pos": [0.0, 0.74, 0.0],
+                    "rot": [0.0, 0.0, 0.0],
+                }
+            }
+
+    monkeypatch.setattr(
+        parent_surface_layout_optimizer_module,
+        "GravitySettler",
+        _FakeGravitySettler,
+    )
 
     post_edit_scene = SceneLayoutConstructor(
         formal_scene=Scene(objects=[table, book]),
@@ -155,8 +179,84 @@ def test_layout_constructor_places_new_child_on_parent_top(
         asset for asset in post_edit_scene.assets if asset.id == "cup_001"
     )
     assert placed_cup.center_xy == [0.0, 0.0]
-    # Book top is z=0.62 m; cup half-height is 0.1 m with zero support clearance.
-    assert np.allclose(placed_cup.pos, [0.0, 0.72, 0.0])
+    # Book top is z=0.62 m; cup half-height plus support clearance is 0.12 m.
+    assert np.allclose(placed_cup.pos, [0.0, 0.74, 0.0])
+    assert settler_inputs["dynamic_asset_ids"] == {"cup_001"}
+    assert settler_inputs["static_asset_ids"] == {"book_001"}
+
+
+def test_layout_constructor_settles_dynamic_table_roots(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    asset_glb = tmp_path / "asset.glb"
+    trimesh.creation.box(extents=[_ASSET_SIDE_LENGTH_M] * 3).export(asset_glb)
+    table = SceneObject(
+        id="table",
+        kind="table",
+        category="table",
+        name="table",
+        description="table",
+        rot=[0.0, 0.0, 0.0],
+        pos=[0.0, 0.0, 0.0],
+        scale=[1.0, 1.0, 1.0],
+        support_surface_z=0.0,
+        support_optimization_rect_xy=_TABLE_BOUNDS,
+    )
+    fixed_asset = _asset(
+        object_id="fixed_001",
+        glb_path=asset_glb,
+        center_xy=[-0.5, 0.0],
+    )
+    dynamic_asset = _asset(object_id="dynamic_001", glb_path=asset_glb)
+    graph = SceneGraph(
+        nodes=[
+            SceneGraphNode(object_id="table", parent_id=None),
+            SceneGraphNode(
+                object_id="fixed_001", parent_id="table", parent_relation="on"
+            ),
+            SceneGraphNode(
+                object_id="dynamic_001", parent_id="table", parent_relation="on"
+            ),
+        ]
+    )
+    settler_inputs: dict[str, object] = {}
+
+    class _FakeGravitySettler:
+        def __init__(self, **kwargs: object) -> None:
+            settler_inputs.update(kwargs)
+
+        def settle(self) -> dict[str, dict[str, list[float]]]:
+            return {
+                "dynamic_001": {
+                    "pos": _SETTLED_DYNAMIC_POS_Y_UP,
+                    "rot": _SETTLED_DYNAMIC_ROT_Y_UP,
+                }
+            }
+
+    monkeypatch.setattr(
+        scene_layout_constructor_module,
+        "GravitySettler",
+        _FakeGravitySettler,
+    )
+
+    post_edit_scene = SceneLayoutConstructor(
+        formal_scene=Scene(objects=[table, fixed_asset]),
+        goal_scene_graph=graph,
+        layout_variable_ids={"dynamic_001"},
+        generated_scene_objects=[dynamic_asset],
+        output_root=tmp_path,
+    ).construct()
+
+    settled_dynamic_asset = next(
+        asset for asset in post_edit_scene.assets if asset.id == "dynamic_001"
+    )
+    assert settler_inputs["dynamic_asset_ids"] == {"dynamic_001"}
+    assert settler_inputs["static_asset_ids"] == {"fixed_001"}
+    assert settled_dynamic_asset.pos == _SETTLED_DYNAMIC_POS_Y_UP
+    assert settled_dynamic_asset.rot == _SETTLED_DYNAMIC_ROT_Y_UP
+    # y-up [x, y, z] maps to z-up tabletop XY [x, -z].
+    assert settled_dynamic_asset.center_xy == [0.25, 0.4]
 
 
 def test_table_optimizer_ignores_fixed_sibling_overlap(tmp_path: Path) -> None:
