@@ -238,7 +238,8 @@ def _prepare_held_state(
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-        )
+        ),
+        atomic_engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     is_success = bool(result.plan_success.all().item())
     traj = result.trajectory.positions

@@ -93,12 +93,13 @@ from embodichain.lab.sim.planners import (
     PlanOptions,
     PlanResult,
 )
-from embodichain.utils.math import pose_inv
+from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 NUM_ENVS = 2
 ARM_DOF = 6
 HAND_DOF = 2
 ROBOT_DOF = ARM_DOF + HAND_DOF
+CONTROL_DT = 1.0 / 60.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 
@@ -248,6 +249,7 @@ def _context(
         task=task or TaskState.empty(batch_size=NUM_ENVS, device="cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
 
@@ -396,6 +398,7 @@ def _dual_context(
         task=task or TaskState.empty(NUM_ENVS, "cpu"),
         scene=SceneSnapshot.empty() if scene is None else scene,
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
 
@@ -539,6 +542,7 @@ def test_move_joints_uses_binding_and_preserves_uncontrolled_joints() -> None:
         task=TaskState.empty(NUM_ENVS, "cpu"),
         scene=SceneSnapshot.empty(),
         env_ids=torch.arange(NUM_ENVS),
+        control_dt=CONTROL_DT,
     )
 
     plan = _plan_action(
@@ -575,6 +579,7 @@ def test_pick_and_place_declare_effects_without_mutating_context() -> None:
         task=picked_task,
         scene=initial.scene,
         env_ids=initial.env_ids,
+        control_dt=initial.control_dt,
     )
     place_plan = _plan_action(
         place,
@@ -901,7 +906,7 @@ def test_axis_align_plans_seven_segments_and_aligns_the_object_axis() -> None:
     action = _bind_action(generator, AxisAlign())
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     semantics = ObjectSemantics(
-        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([0.0, 0.0, 1.0])),
         geometry={},
         label="axis-object",
         entity_id="target",
@@ -917,7 +922,7 @@ def test_axis_align_plans_seven_segments_and_aligns_the_object_axis() -> None:
             binding=_binding(),
             motion_policy=MotionPolicy(sample_count=20),
             skill_options=AxisAlignOptions(
-                target_axis=torch.tensor([0.0, 0.0, 1.0]),
+                target_axis=torch.tensor([1.0, 0.0, 0.0]),
                 lift_height=0.1,
                 lower_distance=0.03,
             ),
@@ -944,14 +949,74 @@ def test_axis_align_plans_seven_segments_and_aligns_the_object_axis() -> None:
     final_object_rotation = solved_poses[-1][:, :3, :3]
     final_world_axis = torch.matmul(
         final_object_rotation,
-        torch.tensor([1.0, 0.0, 0.0]),
+        torch.tensor([0.0, 0.0, 1.0]),
     )
     assert torch.allclose(
         final_world_axis,
-        torch.tensor([0.0, 0.0, 1.0]).expand(NUM_ENVS, -1),
+        torch.tensor([1.0, 0.0, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
     assert solved_poses[-1][:, 2, 3].tolist() == pytest.approx([0.07, 0.07])
+
+
+def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> None:
+    generator = _motion_generator()
+    solved_poses: list[torch.Tensor] = []
+
+    def compute_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        solved_poses.append(pose.clone())
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = compute_ik
+    action = _bind_action(generator, AxisAlign())
+    parallel_grasp = torch.eye(4)
+    parallel_grasp[:3, :3] = torch.tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    perpendicular_grasp = torch.eye(4)
+    candidates = torch.stack([parallel_grasp, perpendicular_grasp])
+    affordance = AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0]))
+    affordance.get_valid_grasp_poses = Mock(
+        return_value=[
+            (candidates.clone(), torch.tensor([0.0, 10.0])) for _ in range(NUM_ENVS)
+        ]
+    )
+    semantics = ObjectSemantics(
+        affordance=affordance,
+        geometry={},
+        label="upright-axis-object",
+        entity_id="target",
+    )
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="axis_align",
+            goal=AxisAlignGoal(semantics=semantics),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=20),
+            skill_options=AxisAlignOptions(
+                target_axis=torch.tensor([0.0, 0.0, 1.0]),
+            ),
+        ),
+        _context(scene=_target_scene(object_pose, timestamp=0.0, version=0)),
+    )
+
+    assert plan.plan_success.all()
+    expected_rotation = axis_angle_to_rotation_matrix(
+        torch.tensor([0.0, math.pi / 4.0, 0.0])
+    )
+    assert torch.allclose(
+        solved_poses[1][:, :3, :3],
+        expected_rotation.expand(NUM_ENVS, -1, -1),
+        atol=1.0e-6,
+    )
 
 
 def test_axis_align_holds_only_failed_environment_rows() -> None:
@@ -2035,7 +2100,9 @@ def test_handover_does_not_mutate_cached_final_pose(
         target_poses: torch.Tensor,
         n_waypoints: int,
         motion_policy: MotionPolicy,
+        interpolation_dt: float | None,
     ) -> tuple[bool, torch.Tensor]:
+        del interpolation_dt
         return True, start_qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
     monkeypatch.setattr(

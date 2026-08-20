@@ -275,7 +275,8 @@ def main() -> None:
                     entities={
                         HANDLE_SCENE_ENTITY_ID: EntityState(handle_pose),
                     },
-                )
+                ),
+                control_dt=sim.sim_config.physics_dt,
             ),
         )
         if not compiled.plan_success.all():

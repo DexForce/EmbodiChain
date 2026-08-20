@@ -147,6 +147,11 @@ profile = RobotSkillProfile(
 )
 ```
 
+Set `SkillPolicyPreset.required_planner` only when a preset depends on one
+planner backend, typically because it carries backend-specific typed planning
+options. Profile binding checks that requirement against the engine's configured
+backend and fails early on a mismatch. Leave it as `None` for portable presets.
+
 Every `ControlPartEndpoint.control_part` must be a key in
 `robot.control_parts`. A composite endpoint may reuse a member's control part,
 but all joints controlled directly by the composite must already be covered by

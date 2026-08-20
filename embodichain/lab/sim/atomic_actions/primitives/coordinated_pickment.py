@@ -46,7 +46,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     DisjointResourceSlots,
     INVERSE_KINEMATICS_CAPABILITY,
@@ -1007,7 +1011,11 @@ class CoordinatedPickment(
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
                     resources.left_arm.name: left_held_object,

@@ -42,7 +42,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
 from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
     ActionBindingRoute,
@@ -165,6 +169,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         target = self.require_goal(request)
         affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
+        interpolation_dt = context.require_control_dt()
         manipulator = request.binding.manipulator()
         end_effector = request.binding.end_effector()
         arm_joint_ids = list(manipulator.joint_ids)
@@ -231,6 +236,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             manipulator.name,
             request,
             motion_lengths[0],
+            interpolation_dt=interpolation_dt,
         )
         reach_keyframes = axis_translation_keyframes(
             approach_xpos,
@@ -244,6 +250,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             manipulator.name,
             request,
             motion_lengths[1],
+            interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
         translate_keyframes = axis_translation_keyframes(
@@ -258,6 +265,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             manipulator.name,
             request,
             motion_lengths[2],
+            interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
         success = grasp_success & approach_success & reach_success & translate_success
@@ -276,6 +284,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 manipulator.name,
                 request,
                 motion_lengths[3],
+                interpolation_dt=interpolation_dt,
                 cartesian_linear=True,
             )
             success = success & return_success
@@ -338,7 +347,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=interpolation_dt,
+            ),
             expected_effects=StateDelta(),
             segment_lengths=segment_lengths,
         )
@@ -382,6 +395,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         ],
         sample_count: int,
         *,
+        interpolation_dt: float,
         cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
@@ -390,6 +404,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 start_qpos=start_qpos,
                 control_part=control_part,
                 sample_count=sample_count,
+                interpolation_dt=interpolation_dt,
                 cartesian_linear=cartesian_linear,
             ),
         )

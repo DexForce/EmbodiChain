@@ -5,7 +5,7 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships twelve built-in action implementations with stable skill IDs;
+EmbodiChain ships eleven built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
@@ -166,7 +166,6 @@ The animations below are the focused simulator demos under
 | `move_end_effector` | `EndEffectorPoseGoal` | manipulator `primary` | none | none | none |
 | `move_joints` | `JointPositionGoal` | manipulator `primary` | named target only: command matching `target` | none | none |
 | `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
-| `axis_align` | `AxisAlignGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AxisAlignAffordance` + semantic object/entity | open-loop motion; application verifies final object pose |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
@@ -278,8 +277,12 @@ Use this rule when configuring a built-in or adding a new one:
   invocation; an action may provide defaults;
 - the engine's **control-part profiles** carry embodiment-specific semantic
   commands such as `open`, `grasp`, and named postures;
-- `MotionPolicy` carries sample count, timing, motion strategy, limits,
-  collision choice, and planner options;
+- `MotionPolicy` carries sample count, motion strategy, collision choice, and
+  typed planner options;
+- planner-backed segments preserve explicit planner timing, while action-owned
+  interpolation reads the environment cadence from `PlanningContext.control_dt`;
+- missing planner or action timing is an error; the engine has no fallback
+  control period;
 - `RecoveryPolicy` carries all replan/retry thresholds and budgets.
 
 All built-ins resolve participating arm and hand names exclusively from
@@ -427,11 +430,15 @@ derives every end-effector keyframe through the fixed grasp transform.
 | Effect | explicitly open-loop; no final object-pose success is claimed |
 
 An explicit `grasp_xpos` accepts the same pose forms as `GraspGoal`; omitting it
-selects the lowest-cost valid antipodal affordance grasp. `AxisAlignOptions`
-extends `PickUpOptions` with `target_axis` and `lower_distance`. Shared and
-per-environment target axes use shapes `(3,)` and `(B, 3)` respectively. Zero
-or non-finite axes are rejected, and exactly opposite axes use a deterministic
-180-degree rotation rather than an unstable cross-product direction.
+prefers valid antipodal grasps whose TCP x-axis is perpendicular to the object
+rotation axis, using grasp cost as the tie-breaker. When a currently horizontal
+object axis is aligned to world-up, the initial grasp orientation is pre-rotated
+45 degrees opposite the alignment rotation. This reduces the arm's table-side
+sweep during upright manipulation. `AxisAlignOptions` extends `PickUpOptions`
+with `target_axis` and `lower_distance`. Shared and per-environment target axes
+use shapes `(3,)` and `(B, 3)` respectively. Zero or non-finite axes are
+rejected, and exactly opposite axes use a deterministic 180-degree rotation
+rather than an unstable cross-product direction.
 
 **Example:** `scripts/tutorials/atomic_action/axis_align.py` provides
 `--alignment upright` (align object-local X to world Z) and
@@ -460,8 +467,9 @@ a live scene entity.
 
 The bound end-effector profile must provide `grasp`; optional upright-transport
 settings belong to `MoveHeldObjectOptions`. The arm and hand are selected by
-`ActionBinding`; generic timing and trajectory sampling remain in
-`MotionPolicy`. In a vectorized batch, rows where another manipulator holds the
+`ActionBinding`; trajectory sampling remains in `MotionPolicy`, while timing is
+explicit on the planner result or planning context. In a vectorized batch, rows
+where another manipulator holds the
 same semantic object or live entity are marked unsuccessful and held in place.
 
 **Example:** `scripts/tutorials/atomic_action/move_held_object.py`

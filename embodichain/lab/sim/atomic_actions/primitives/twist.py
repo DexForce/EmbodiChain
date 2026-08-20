@@ -48,7 +48,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
     ActionBindingRoute,
@@ -185,6 +185,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         target = self.require_goal(request)
         affordance = self._require_twist_affordance(target.semantics)
         options = request.skill_options
+        interpolation_dt = context.require_control_dt()
         manipulator = request.binding.manipulator()
         end_effector = request.binding.end_effector()
         arm_joint_ids = list(manipulator.joint_ids)
@@ -241,6 +242,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             manipulator.name,
             request,
             n_approach,
+            interpolation_dt=interpolation_dt,
         )
         reach_success, reach_arm = self._plan_pose_segment(
             grasp_xpos,
@@ -248,6 +250,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             manipulator.name,
             request,
             n_reach,
+            interpolation_dt=interpolation_dt,
         )
         twist_success, twist_arm = self._plan_pose_segment(
             twist_xpos,
@@ -255,6 +258,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             manipulator.name,
             request,
             n_twist,
+            interpolation_dt=interpolation_dt,
         )
         retract_success, retract_arm = self._plan_pose_segment(
             pre_grasp_xpos,
@@ -262,6 +266,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             manipulator.name,
             request,
             n_retract,
+            interpolation_dt=interpolation_dt,
         )
         success = approach_success & reach_success & twist_success & retract_success
 
@@ -322,7 +327,11 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=interpolation_dt,
+            ),
             expected_effects=StateDelta(),
             segment_lengths={
                 "approach": lengths[0],
@@ -365,6 +374,8 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         control_part: str,
         request: ResolvedActionRequest[TwistGoal, TwistOptions],
         sample_count: int,
+        *,
+        interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -372,6 +383,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 start_qpos=start_qpos,
                 control_part=control_part,
                 sample_count=sample_count,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(result.success, torch.Tensor)

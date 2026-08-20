@@ -41,7 +41,7 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
@@ -172,6 +172,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         target = self.require_goal(request)
         affordance = self._require_press_affordance(target.semantics)
         options = request.skill_options
+        interpolation_dt = context.require_control_dt()
         manipulator = request.binding.manipulator()
         end_effector = request.binding.end_effector()
         arm_joint_ids = list(manipulator.joint_ids)
@@ -223,6 +224,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             manipulator.name,
             request,
             n_approach,
+            interpolation_dt=interpolation_dt,
         )
         contact_keyframes = axis_translation_keyframes(
             approach_xpos,
@@ -236,6 +238,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             manipulator.name,
             request,
             n_contact,
+            interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
         press_keyframes = axis_translation_keyframes(
@@ -250,6 +253,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             manipulator.name,
             request,
             n_press,
+            interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
         retract_keyframes = axis_translation_keyframes(
@@ -264,6 +268,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             manipulator.name,
             request,
             n_retract,
+            interpolation_dt=interpolation_dt,
             cartesian_linear=True,
         )
         success = approach_success & contact_success & press_success & retract_success
@@ -293,7 +298,11 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=interpolation_dt,
+            ),
             expected_effects=StateDelta(),
             segment_lengths={
                 "close": lengths[0],
@@ -336,6 +345,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         request: ResolvedActionRequest[PressGoal, PressOptions],
         sample_count: int,
         *,
+        interpolation_dt: float,
         cartesian_linear: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
@@ -344,6 +354,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 start_qpos=start_qpos,
                 control_part=control_part,
                 sample_count=sample_count,
+                interpolation_dt=interpolation_dt,
                 cartesian_linear=cartesian_linear,
             ),
         )

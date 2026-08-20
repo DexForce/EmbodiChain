@@ -105,7 +105,7 @@ manual_invocation = ActionInvocation(
     skill_id="move_end_effector",
     goal=EndEffectorPoseGoal(xpos=target_pose),
     binding=ActionBinding(manipulators={"primary": "left_arm"}),
-    motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+    motion_policy=MotionPolicy(sample_count=80),
     recovery_policy=RecoveryPolicy(max_replans=2),
 )
 
@@ -171,14 +171,22 @@ from leaking into an Action Agent schema.
 | `ActionOptions` / built-in `*Options` | Frozen invocation-varying skill behavior: segment counts, offsets, grasp-selection rules | Robot resource names, hand qpos, planner backend |
 | `ControlPartCommandProfile` | Embodiment-specific semantic commands such as `open`, `grasp`, and `ready`, keyed by actual control-part name | Action roles, task goals, recovery state |
 | `ActionControlOverrides` | Optional role-scoped command replacements for one invocation revision | Persistent robot configuration |
-| `MotionPolicy` | Motion strategy, sample count, timing, limits, dynamic-collision mode, typed planner options | Skill semantics or robot-resource names |
+| `MotionPolicy` | Motion strategy, sample count, dynamic-collision mode, typed planner options | Execution cadence, skill semantics, or robot-resource names |
 | `RecoveryPolicy` | Action replan/retry budgets, tracking and dynamic-goal thresholds, action-attempt timeout | Controller state or mutable counters |
 | `ExecutionRunnerCfg` | Runner-level acknowledgement deadlines, minimum feedback cadence, and completion hold policy | Skill behavior, planning resources, or invocation revision data |
-| `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs | Hypothetical simulator mutation |
+| `PlanningContext` | Measured `RobotObservation`, verified `TaskState`, versioned `SceneSnapshot`, stable environment IDs, and optional explicit control cadence for action-owned interpolation | Hypothetical simulator mutation or a planner timing fallback |
 | `ActionPlan` | Per-environment result, one scene-bound timed trajectory, named segments, action-level recovery metadata, diagnostics, expected `StateDelta` | Proof that a grasp/release/contact physically succeeded; independently recoverable segment boundaries |
 
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
+Every planner result that contains positions must also contain per-waypoint
+`dt` and a matching per-environment `duration`. Every action passes a
+`TimedTrajectory` to `build_plan()`; raw position tensors are rejected. For
+action-owned deterministic interpolation, the integration supplies its
+authoritative cadence as `PlanningContext.control_dt` (normally
+`BaseEnv.step_dt`). The engine never supplies or guesses missing timing.
+Planner-backend compatibility is a profile-level concern expressed by
+`SkillPolicyPreset.required_planner`, not a per-invocation motion choice.
 
 Each action owns one or more frozen goal dataclasses and declares the accepted
 type through `AtomicAction.GoalType`. The action validates that type when the
@@ -316,7 +324,7 @@ instances to the engine's planning services:
 ```python
 engine = AtomicActionEngine(motion_generator, control_profiles=profiles)
 
-# All twelve built-ins are immediately usable by stable skill ID.
+# All eleven built-ins are immediately usable by stable skill ID.
 assert "move_end_effector" in engine.actions
 assert "pick_up" in engine.actions
 ```
@@ -415,7 +423,7 @@ invocation = ActionInvocation(
     skill_id="move_end_effector",
     goal=EndEffectorPoseGoal(xpos=target_pose),
     binding=ActionBinding(manipulators={"primary": "left_arm"}),
-    motion_policy=MotionPolicy(sample_count=80, control_dt=1.0 / 60.0),
+    motion_policy=MotionPolicy(sample_count=80),
 )
 
 plan = engine.plan(invocation, latest_context)
@@ -433,6 +441,9 @@ of manually reproducing its state projection rules.
 and replaces unsuccessful rows with the context's observed joint position.
 Primitive implementations therefore preserve row-local failures in
 `plan_success`; they do not need to duplicate failure-row hold logic.
+It accepts only `TimedTrajectory`. Interpolation code can construct one with
+`TimedTrajectory.from_uniform_step(..., step_dt=context.require_control_dt())`;
+planner-backed code should preserve the planner's explicit `dt`.
 
 `TrajectorySegment.start` and `.stop` form an action-local half-open waypoint
 range. `plan.segment(name)` resolves that local metadata, while
@@ -460,7 +471,7 @@ from embodichain.lab.sim.atomic_actions import (
 
 engine = AtomicActionEngine(motion_generator)
 binding = ActionBinding(manipulators={"primary": "left_arm"})
-motion_policy = MotionPolicy(sample_count=80, control_dt=1.0 / 60.0)
+motion_policy = MotionPolicy(sample_count=80)
 
 approach = ActionInvocation(
     skill_id="move_end_effector",

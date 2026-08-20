@@ -52,7 +52,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
@@ -211,6 +215,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         end_effector: ResolvedControlPart,
         hand_open_qpos: torch.Tensor,
         hand_grasp_qpos: torch.Tensor,
+        interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, int]]:
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
@@ -229,6 +234,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 start_qpos=start_arm_qpos,
                 control_part=manipulator.name,
                 sample_count=n_approach,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(approach_result.success, torch.Tensor)
@@ -247,6 +253,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
                 start_qpos=grasp_arm_qpos,
                 control_part=manipulator.name,
                 sample_count=n_lift,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(lift_result.success, torch.Tensor)
@@ -386,6 +393,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             end_effector,
             hand_open_qpos,
             hand_grasp_qpos,
+            context.require_control_dt(),
         )
         success_mask = grasp_success & normalize_success_mask(
             trajectory_success,
@@ -402,7 +410,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             request,
             context,
             success=success_mask,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(held_object_updates={control_part: held}),
             segment_lengths=segment_lengths,
         )

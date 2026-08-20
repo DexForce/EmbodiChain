@@ -238,7 +238,8 @@ def main() -> None:
                 timestamp=0.0,
                 version=0,
                 entities={BUTTON_SCENE_ENTITY_ID: EntityState(target_pose)},
-            )
+            ),
+            control_dt=sim.sim_config.physics_dt,
         ),
     )
     if not compiled.plan_success.all():

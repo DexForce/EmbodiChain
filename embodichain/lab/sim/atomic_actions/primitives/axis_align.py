@@ -44,7 +44,11 @@ from embodichain.lab.sim.atomic_actions.goals import (
     validate_pose_goal,
 )
 from embodichain.lab.sim.atomic_actions.invocation import ResolvedActionRequest
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, normalize_success_mask
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
@@ -116,6 +120,9 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
     manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     open_loop: ClassVar[bool] = True
+    _UPRIGHT_HORIZONTAL_MAX_ABS_Z: ClassVar[float] = 0.5
+    _UPRIGHT_TARGET_MIN_Z: ClassVar[float] = math.cos(math.pi / 6.0)
+    _UPRIGHT_GRASP_PRE_ROTATION: ClassVar[float] = math.pi / 4.0
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -185,12 +192,21 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             context,
             name="axis_align_object_pose",
         )
+        source_axis, target_axis, rotation_axis, rotation_angle = (
+            self._axis_alignment_parameters(
+                object_pose,
+                affordance.internal_axis,
+                options.target_axis,
+            )
+        )
         grasp_success, grasp_xpos = self._resolve_grasp_pose(
             target,
             affordance,
             object_pose,
             context,
             approach_direction,
+            rotation_axis,
+            rotation_angle,
             object_part=options.pick_object_part,
         )
         grasp_success = normalize_success_mask(
@@ -204,6 +220,15 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             return self.failed_plan(
                 request, context, message="Failed to resolve a grasp pose."
             )
+
+        upright_mask = (
+            source_axis[:, 2].abs() <= self._UPRIGHT_HORIZONTAL_MAX_ABS_Z
+        ) & (target_axis[:, 2] >= self._UPRIGHT_TARGET_MIN_Z)
+        grasp_xpos = self._apply_upright_grasp_pre_rotation(
+            grasp_xpos,
+            rotation_axis,
+            upright_mask,
+        )
 
         pre_grasp_xpos = translate_pose_world(
             grasp_xpos, -approach_direction * options.pre_grasp_distance
@@ -223,6 +248,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             request.motion_policy.sample_count,
             options.hand_interp_steps,
         )
+        interpolation_dt = context.require_control_dt()
         align_xpos = self._axis_alignment_eef_keyframes(
             lifted_object_pose,
             object_to_eef,
@@ -245,6 +271,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             manipulator,
             request,
             n_approach,
+            interpolation_dt,
         )
         reach_success, reach_arm = self._plan_pose_segment(
             grasp_xpos,
@@ -252,6 +279,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             manipulator,
             request,
             n_reach,
+            interpolation_dt,
         )
         lift_success, lift_arm = self._plan_pose_segment(
             lift_xpos,
@@ -259,6 +287,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             manipulator,
             request,
             n_lift,
+            interpolation_dt,
         )
         align_success, align_arm = self._plan_pose_segment(
             align_xpos,
@@ -266,6 +295,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             manipulator,
             request,
             n_align,
+            interpolation_dt,
         )
         lower_success, lower_arm = self._plan_pose_segment(
             lower_xpos,
@@ -273,6 +303,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             manipulator,
             request,
             n_lower,
+            interpolation_dt,
         )
         success = grasp_success & normalize_success_mask(
             approach_success
@@ -336,7 +367,11 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             request,
             context,
             success=success,
-            trajectory=full,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=interpolation_dt,
+            ),
             expected_effects=StateDelta(),
             segment_lengths=segment_lengths,
         )
@@ -348,6 +383,8 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         object_pose: torch.Tensor,
         context: PlanningContext,
         approach_direction: torch.Tensor,
+        rotation_axis: torch.Tensor,
+        rotation_angle: torch.Tensor,
         *,
         object_part: str,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -370,12 +407,34 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         )
         poses: list[torch.Tensor] = []
         success: list[bool] = []
-        for candidates, costs in sampled:
+        for env_index, (candidates, costs) in enumerate(sampled):
             candidates = candidates.to(device=self.device, dtype=torch.float32)
             costs = costs.to(device=self.device, dtype=torch.float32)
             valid = candidates.shape[0] > 0 and bool(torch.isfinite(costs).any())
             if valid:
-                best_index = int(torch.argmin(costs).item())
+                finite_cost = torch.isfinite(costs)
+                if rotation_angle[env_index] > 1.0e-6:
+                    grasp_x_axis = torch.nn.functional.normalize(
+                        candidates[:, :3, 0], dim=1
+                    )
+                    perpendicularity_error = torch.abs(
+                        torch.matmul(grasp_x_axis, rotation_axis[env_index])
+                    )
+                    best_error = perpendicularity_error[finite_cost].min()
+                    preferred = finite_cost & torch.isclose(
+                        perpendicularity_error,
+                        best_error,
+                        atol=1.0e-6,
+                        rtol=1.0e-5,
+                    )
+                    ranked_costs = torch.where(
+                        preferred,
+                        costs,
+                        torch.full_like(costs, torch.inf),
+                    )
+                    best_index = int(torch.argmin(ranked_costs).item())
+                else:
+                    best_index = int(torch.argmin(costs).item())
                 poses.append(candidates[best_index])
             else:
                 poses.append(torch.eye(4, device=self.device, dtype=torch.float32))
@@ -392,6 +451,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         manipulator: ResolvedControlPart,
         request: ResolvedActionRequest[AxisAlignGoal, AxisAlignOptions],
         sample_count: int,
+        interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -399,6 +459,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 start_qpos=start_qpos,
                 control_part=manipulator.name,
                 sample_count=sample_count,
+                interpolation_dt=interpolation_dt,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
@@ -415,6 +476,36 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         waypoint_count: int,
     ) -> torch.Tensor:
         """Rotate the object in place along the shortest axis-alignment arc."""
+        _, _, axis, angle = self._axis_alignment_parameters(
+            object_pose,
+            internal_axis,
+            target_axis,
+        )
+
+        fractions = torch.linspace(
+            1.0 / waypoint_count,
+            1.0,
+            waypoint_count,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        rotation_vectors = (
+            axis[:, None, :] * angle[:, None, None] * fractions[None, :, None]
+        )
+        delta_rotation = axis_angle_to_rotation_matrix(rotation_vectors)
+        object_keyframes = object_pose[:, None].repeat(1, waypoint_count, 1, 1)
+        object_keyframes[:, :, :3, :3] = torch.matmul(
+            delta_rotation, object_pose[:, None, :3, :3]
+        )
+        return torch.matmul(object_keyframes, object_to_eef[:, None])
+
+    def _axis_alignment_parameters(
+        self,
+        object_pose: torch.Tensor,
+        internal_axis: torch.Tensor,
+        target_axis: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return normalized source/target axes and the shortest rotation."""
         internal = internal_axis.to(device=self.device, dtype=torch.float32)
         internal = internal / torch.linalg.vector_norm(internal)
         source = torch.matmul(object_pose[:, :3, :3], internal)
@@ -434,30 +525,31 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         axis = cross / sin_angle.clamp_min(1.0e-8).unsqueeze(1)
         basis = torch.eye(3, dtype=torch.float32, device=self.device)
         reference = basis[torch.argmin(torch.abs(source), dim=1)]
-        opposite_axis = torch.nn.functional.normalize(
+        fallback_axis = torch.nn.functional.normalize(
             torch.linalg.cross(source, reference, dim=1), dim=1
         )
-        opposite = (sin_angle <= 1.0e-6) & (cos_angle < 0.0)
-        axis = torch.where(opposite.unsqueeze(1), opposite_axis, axis)
+        degenerate = sin_angle <= 1.0e-6
+        axis = torch.where(degenerate.unsqueeze(1), fallback_axis, axis)
         angle = torch.atan2(sin_angle, cos_angle)
+        opposite = degenerate & (cos_angle < 0.0)
         angle = torch.where(opposite, torch.full_like(angle, torch.pi), angle)
+        return source, target, axis, angle
 
-        fractions = torch.linspace(
-            1.0 / waypoint_count,
-            1.0,
-            waypoint_count,
-            dtype=torch.float32,
-            device=self.device,
+    def _apply_upright_grasp_pre_rotation(
+        self,
+        grasp_xpos: torch.Tensor,
+        rotation_axis: torch.Tensor,
+        upright_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Pre-rotate upright grasps to reduce the arm's table-side sweep."""
+        if not upright_mask.any():
+            return grasp_xpos
+        delta = axis_angle_to_rotation_matrix(
+            -rotation_axis * self._UPRIGHT_GRASP_PRE_ROTATION
         )
-        rotation_vectors = (
-            axis[:, None, :] * angle[:, None, None] * fractions[None, :, None]
-        )
-        delta_rotation = axis_angle_to_rotation_matrix(rotation_vectors)
-        object_keyframes = object_pose[:, None].repeat(1, waypoint_count, 1, 1)
-        object_keyframes[:, :, :3, :3] = torch.matmul(
-            delta_rotation, object_pose[:, None, :3, :3]
-        )
-        return torch.matmul(object_keyframes, object_to_eef[:, None])
+        rotated = grasp_xpos.clone()
+        rotated[:, :3, :3] = torch.matmul(delta, grasp_xpos[:, :3, :3])
+        return torch.where(upright_mask[:, None, None], rotated, grasp_xpos)
 
     @staticmethod
     def _motion_segment_lengths(
