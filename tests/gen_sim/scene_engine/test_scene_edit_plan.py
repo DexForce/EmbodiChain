@@ -190,6 +190,35 @@ def test_scene_edit_parser_assigns_ids_to_same_category_adds_in_order() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "unsafe_category",
+    ["../outside", "cup/../outside", r"cup\\outside"],
+)
+def test_scene_edit_parser_rejects_path_traversal_add_categories(
+    unsafe_category: str,
+) -> None:
+    """Reject unsafe categories before generated IDs reach asset output paths."""
+    scene, _ = _scene_and_graph()
+    draft = {
+        "operations": [
+            {
+                "op": "add",
+                "object_id": None,
+                "target_id": None,
+                "relation": None,
+                "table_region": None,
+                "category": unsafe_category,
+                "name": "unsafe cup",
+                "description": "A small cup.",
+                "orientation_state": None,
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="category must be lower-case"):
+        _parse_scene_edit_operations(draft, scene=scene)
+
+
 def test_scene_edit_plan_rejects_a_changed_move_orientation_state() -> None:
     scene, scene_graph = _scene_and_graph()
     scene_graph.node_by_id()["book_001"].orientation_state = "lying"
