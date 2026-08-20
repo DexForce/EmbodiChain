@@ -24,9 +24,10 @@ from pathlib import Path
 import sys
 from typing import Any, Final, Sequence
 
+from .config import load_task_engine_config
 from .orchestration.scene_adapter import SceneAdapter
 from .run_directory import reserve_run_directory
-from .workflow import TaskEngineWorkflow
+from .workflow import SubprocessActionExecutor, TaskEngineWorkflow
 from .workflow_contracts import (
     TASK_RUN_REQUEST_SCHEMA,
     validate_scene_history_root,
@@ -51,8 +52,30 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the Task Engine parser."""
     parser = argparse.ArgumentParser(
         prog="embodichain task-engine",
-        description="Run one complete Scene and Action workflow.",
+        description="Prepare, run, or complete one Scene and Action workflow.",
     )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    prepare_parser = subparsers.add_parser(
+        "prepare", help="Prepare a bundle without simulator execution."
+    )
+    _add_workflow_arguments(prepare_parser)
+    run_all_parser = subparsers.add_parser(
+        "run-all", help="Prepare and execute one complete workflow."
+    )
+    _add_workflow_arguments(run_all_parser)
+    run_parser = subparsers.add_parser(
+        "run", help="Execute an already prepared Task Engine bundle."
+    )
+    run_parser.add_argument("--bundle", required=True)
+    run_parser.add_argument("--output-root", required=True)
+    run_parser.add_argument("--config", default=None)
+    run_parser.add_argument("--seed", type=int, default=0)
+    run_parser.add_argument("--num-envs", type=int, default=None)
+    run_parser.add_argument("--dataset-saving", action="store_true")
+    return parser
+
+
+def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--mode", choices=_MODES, required=True)
     parser.add_argument("--task-id", "--task_id", required=True)
     instruction = parser.add_mutually_exclusive_group(required=True)
@@ -76,13 +99,36 @@ def build_parser() -> argparse.ArgumentParser:
         choices=_ROBOT_PROFILES,
         default="franka",
     )
-    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one complete workflow and publish it under a new timestamped run."""
+    """Dispatch one Task Engine workflow command."""
     parser = build_parser()
-    args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] not in {
+        "prepare",
+        "run",
+        "run-all",
+        "-h",
+        "--help",
+    }:
+        arguments.insert(0, "run-all")
+    args = parser.parse_args(arguments)
+    if args.command == "run":
+        return _run_prepared_bundle(args)
+    return _run_workflow(
+        args,
+        execute=args.command == "run-all",
+        parser=parser,
+    )
+
+
+def _run_workflow(
+    args: argparse.Namespace,
+    *,
+    execute: bool,
+    parser: argparse.ArgumentParser,
+) -> int:
     try:
         image, scene, edit = _mode_inputs(args)
     except ValueError as exc:
@@ -112,6 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_saving=args.dataset_saving,
             run_id=allocation.run_id,
             created_at=allocation.created_at,
+            execute=execute,
         )
     _print_json(
         {
@@ -125,7 +172,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         }
     )
-    return 0 if result.succeeded else 2
+    accepted = result.succeeded if execute else result.status == "prepared"
+    return 0 if accepted else 2
+
+
+def _run_prepared_bundle(args: argparse.Namespace) -> int:
+    _, _, execution_cfg = load_task_engine_config(args.config)
+    num_envs = execution_cfg.num_envs if args.num_envs is None else int(args.num_envs)
+    if num_envs < 1:
+        raise ValueError("num_envs must be positive.")
+    with reserve_run_directory(args.output_root) as allocation:
+        report = SubprocessActionExecutor()(
+            args.bundle,
+            allocation.path,
+            seed=int(args.seed),
+            num_envs=num_envs,
+            dataset_saving=bool(args.dataset_saving),
+        )
+    environments = report.get("environments", ())
+    successes = [
+        bool(item.get("success")) for item in environments if isinstance(item, dict)
+    ]
+    accepted = (
+        str(report.get("status")) not in {"rejected", "aborted"}
+        and len(successes) == num_envs
+        and sum(successes) >= execution_cfg.required_successes
+    )
+    _print_json(
+        {
+            "run_id": allocation.run_id,
+            "status": "succeeded" if accepted else "failed",
+            "output_dir": allocation.path.as_posix(),
+            "execution_report": report,
+        }
+    )
+    return 0 if accepted else 2
 
 
 def _instruction(args: argparse.Namespace) -> str:

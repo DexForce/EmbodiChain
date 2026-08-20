@@ -466,6 +466,10 @@ def test_semantic_blueprint_selection_forces_ranked_low_confidence_uid() -> None
     assert reference["confidence"] == 0.2
     assert reference["candidate_uids"] == ["red_can", "blue_can"]
     assert reference["selected_uids"] == ["red_can"]
+    assert reference["reasons"] == [
+        "Forced the highest-ranked structurally compatible UID from an "
+        "ambiguous low-confidence response."
+    ]
 
 
 def test_scene_adapter_uses_unique_bindable_then_injected_adjudication(

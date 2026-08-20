@@ -238,6 +238,7 @@ def test_e2_feasibility_requires_runtime_probe_for_geometry(tmp_path: Path) -> N
     )
 
     assert report["status"] == "runtime_probe"
+    assert report["remediation_class"] == "none"
     assert report["blockers"] == []
     assert report["summary"]["proven"] > 0
     assert report["summary"]["runtime_probe"] > 0
@@ -258,7 +259,29 @@ def test_planning_only_action_is_reported_as_contradicted(tmp_path: Path) -> Non
     )
 
     assert report["status"] == "contradicted"
+    assert report["remediation_class"] == "action_capability"
     assert any("planning-only" in blocker for blocker in report["blockers"])
+
+
+def test_final_orientation_conflict_is_scene_remediable(tmp_path: Path) -> None:
+    manifest = SceneEngineV1Adapter().adapt_prepared_scene(
+        _prepared_scene(tmp_path),
+        source_format="test",
+        robot_profile="dual_franka",
+    )
+    can = next(item for item in manifest["objects"] if item["uid"] == "red_can")
+    can["initial_state"]["orientation"] = "upright"
+
+    report = FeasibilityBroker().assess(
+        _candidate("E2", ["graspable", "orientable"]),
+        {"step_01.object": ["red_can"]},
+        manifest,
+        capability_catalog=_catalog(),
+        task_actions={"E2": ("PickUp", "MoveHeldObject", "Place")},
+    )
+
+    assert report["status"] == "contradicted"
+    assert report["remediation_class"] == "scene_remediable"
 
 
 def test_missing_affordance_remains_unknown_instead_of_becoming_supported(

@@ -27,6 +27,7 @@ from typing import Any, TypeAlias
 __all__ = [
     "ASSESSMENT_STATUSES",
     "FEASIBILITY_REPORT_SCHEMA",
+    "REMEDIATION_CLASSES",
     "STATIC_SCENE_MANIFEST_SCHEMA",
     "FeasibilityReport",
     "StaticSceneManifest",
@@ -36,8 +37,11 @@ __all__ = [
 
 
 STATIC_SCENE_MANIFEST_SCHEMA = "embodichain.static-scene-manifest/v1"
-FEASIBILITY_REPORT_SCHEMA = "embodichain.scene-action-feasibility/v1"
+FEASIBILITY_REPORT_SCHEMA = "embodichain.scene-action-feasibility/v2"
 ASSESSMENT_STATUSES = frozenset({"proven", "runtime_probe", "unknown", "contradicted"})
+REMEDIATION_CLASSES = frozenset(
+    {"none", "scene_remediable", "action_capability", "input_conflict", "terminal"}
+)
 _EVIDENCE_STATUSES = frozenset({"declared", "inferred", "verified", "contradicted"})
 
 StaticSceneManifest: TypeAlias = dict[str, Any]
@@ -139,6 +143,7 @@ def validate_feasibility_report(value: Mapping[str, Any]) -> FeasibilityReport:
             "candidate_id",
             "scene_id",
             "status",
+            "remediation_class",
             "checks",
             "blockers",
             "summary",
@@ -149,6 +154,17 @@ def validate_feasibility_report(value: Mapping[str, Any]) -> FeasibilityReport:
     for key in ("task_id", "candidate_id", "scene_id"):
         result[key] = _nonempty(result.get(key), f"FeasibilityReport.{key}")
     result["status"] = _status(result.get("status"), "FeasibilityReport.status")
+    remediation_class = result.get("remediation_class")
+    if remediation_class not in REMEDIATION_CLASSES:
+        raise ValueError(
+            "FeasibilityReport.remediation_class must be one of "
+            f"{sorted(REMEDIATION_CLASSES)}."
+        )
+    result["remediation_class"] = str(remediation_class)
+    if result["status"] != "contradicted" and remediation_class != "none":
+        raise ValueError(
+            "A non-contradicted FeasibilityReport requires remediation_class=none."
+        )
     checks: list[dict[str, Any]] = []
     for index, raw in enumerate(_sequence(result.get("checks"), "checks")):
         context = f"FeasibilityReport.checks[{index}]"

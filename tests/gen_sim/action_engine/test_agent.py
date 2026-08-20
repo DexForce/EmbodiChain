@@ -136,6 +136,12 @@ def test_execution_report_is_strictly_json_serializable(tmp_path: Path) -> None:
         json.loads((tmp_path / "execution_report.json").read_text(encoding="utf-8"))
         == payload
     )
+    trajectory = torch.load(tmp_path / "executed_trajectory.pt", weights_only=True)
+    assert torch.equal(trajectory["actions"][0], torch.ones((2, 3)))
+    trajectory_manifest = json.loads(
+        (tmp_path / "executed_trajectory.json").read_text(encoding="utf-8")
+    )
+    assert trajectory_manifest["actions"][0]["shape"] == [2, 3]
 
 
 def test_existing_execution_result_can_be_reported_without_reexecution() -> None:

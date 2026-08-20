@@ -21,6 +21,7 @@ from copy import deepcopy
 import pytest
 
 from embodichain.gen_sim.action_engine.agent import ActionAgent
+import embodichain.gen_sim.action_engine.agent as action_agent_module
 from embodichain.gen_sim.action_engine.unbound import validate_unbound_action_plan
 
 
@@ -71,3 +72,40 @@ def test_unbound_plan_rejects_noncanonical_action_recipe() -> None:
 
     with pytest.raises(ValueError, match="task contract"):
         validate_unbound_action_plan(draft)
+
+
+def test_action_agent_rejects_missing_atomic_action_during_draft() -> None:
+    class Registry:
+        def names(self):
+            return ()
+
+        def executable_names(self):
+            return ()
+
+    with pytest.raises(ValueError, match="AtomicAction is not registered"):
+        ActionAgent(registry=Registry()).draft(_candidate())
+
+
+def test_bind_and_plan_requires_the_exact_unbound_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = ActionAgent(registry=object())
+    unbound = agent.draft(_candidate())
+    grounded = {
+        "selected_candidate_id": "candidate_01",
+        "task_draft": deepcopy(_candidate()["draft"]),
+    }
+    monkeypatch.setattr(
+        action_agent_module,
+        "_validate_grounded_plan",
+        lambda value: deepcopy(value),
+    )
+    monkeypatch.setattr(agent, "plan", lambda value: {"task": value["task_draft"]})
+
+    graph = agent.bind_and_plan(unbound, grounded)
+    assert graph["task"] == grounded["task_draft"]
+
+    altered = deepcopy(unbound)
+    altered["instruction"] = "A different instruction."
+    with pytest.raises(ValueError, match="does not match"):
+        agent.bind_and_plan(altered, grounded)

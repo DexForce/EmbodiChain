@@ -166,6 +166,7 @@ def materialize_blueprint(
     *,
     vlm_client: OpenAICompatibleVLM | None = None,
     geometry_generation_client: GeometryGenerationClient | None = None,
+    seed: int | None = None,
 ) -> SceneMaterialization:
     """Generate assets and layout for one image-derived blueprint."""
     scene = deepcopy(blueprint.scene)
@@ -183,6 +184,7 @@ def materialize_blueprint(
             scene_graph=scene_graph,
             geometry_generation_client=geometry,
             vlm_client=effective_vlm,
+            seed=seed,
         )
     finally:
         if owns_geometry:
@@ -244,6 +246,7 @@ def materialize_edit(
     image_generation_client: ImageGenerationClient | None = None,
     geometry_generation_client: GeometryGenerationClient | None = None,
     image_segmentation_client: ImageSegmentationClient | None = None,
+    seed: int | None = None,
 ) -> SceneMaterialization:
     """Generate added assets, apply layout edits, and export the new revision."""
     scene_edit_plan = deepcopy(blueprint.scene_edit_plan)
@@ -268,6 +271,7 @@ def materialize_edit(
             geometry_generation_client=geometry,
             image_segmentation_client=segmentation,
             vlm_client=effective_vlm,
+            seed=seed,
         )
     finally:
         for client, owned in owned_clients:

@@ -20,6 +20,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import (
     SceneGraph,
@@ -123,6 +125,22 @@ def test_existing_scene_edit_creates_revision_and_never_writes_source(
 ) -> None:
     project = _scene_export(tmp_path)
     source_config = project / "scene_export" / "scene_config.json"
+    source_value = json.loads(source_config.read_text(encoding="utf-8"))
+    articulation_path = project / "scene_export" / "cabinet.urdf"
+    articulation_path.write_text(
+        '<robot name="cabinet"><link name="base"/></robot>\n',
+        encoding="utf-8",
+    )
+    source_value["articulation"] = [
+        {
+            "uid": "cabinet",
+            "name": "cabinet",
+            "description": "A fixed cabinet.",
+            "category": "cabinet",
+            "fpath": "cabinet.urdf",
+        }
+    ]
+    source_config.write_text(json.dumps(source_value), encoding="utf-8")
     original = source_config.read_bytes()
     prompts: list[str] = []
 
@@ -135,7 +153,8 @@ def test_existing_scene_edit_creates_revision_and_never_writes_source(
             ),
         )
 
-    def fake_materialize_edit(blueprint):
+    def fake_materialize_edit(blueprint, *, seed=None):
+        assert seed == 7
         return SceneMaterialization(
             scene=Scene(),
             scene_graph=SceneGraph(nodes=[SceneGraphNode("table", None)]),
@@ -161,12 +180,35 @@ def test_existing_scene_edit_creates_revision_and_never_writes_source(
     assert prompts == ["Move the cup left."]
     assert revision.source != source_config
     assert revision.source.is_file()
+    assert len(revision.revision_id) == 64
     assert revision.edit_plan == {"operations": [{"op": "move", "object_id": "cup"}]}
     assert source_config.read_bytes() == original
+    revision_config = json.loads(revision.source.read_text(encoding="utf-8"))
+    assert revision_config["articulation"][0]["uid"] == "cabinet"
     audit = json.loads(
         (tmp_path / "revision" / "scene_revision_attempt.json").read_text(
             encoding="utf-8"
         )
     )
     assert audit["seed"] == 7
+    assert audit["revision_id"] == revision.revision_id
     assert audit["edit_plan"] == revision.edit_plan
+
+
+def test_final_inspection_rejects_scene_changed_after_revision(tmp_path: Path) -> None:
+    project = _scene_export(tmp_path)
+    backend = SceneEngineBackend()
+    request = _request(tmp_path, project, edit=None)
+    revision = backend.materialize(
+        backend.analyze(request, tmp_path / "analysis"),
+        request,
+        tmp_path / "unused",
+        seed=0,
+    )
+    config_path = project / "scene_export" / "scene_config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["rigid_object"][0]["init_pos"] = [0.25, 0.0, 0.0]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="changed before geometry inspection"):
+        backend.inspect(revision, tmp_path / "inspection.json")

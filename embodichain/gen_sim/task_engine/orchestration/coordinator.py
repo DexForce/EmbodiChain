@@ -32,6 +32,7 @@ from embodichain.gen_sim.action_engine.generation import (
 )
 from embodichain.gen_sim.action_engine.generation.artifacts import artifact_paths
 from embodichain.gen_sim.action_engine.agent import ActionAgent
+from embodichain.gen_sim.action_engine.unbound import ActionCapabilityError
 from embodichain.gen_sim.action_engine.domain.task_contracts import (
     TASK_CONTRACTS as ACTION_TASK_CONTRACTS,
 )
@@ -127,6 +128,7 @@ class PreparationResult:
     generated_paths: GeneratedConfigPaths | None = None
     feasibility_report: FeasibilityReport | None = None
     planning_attempts: tuple[dict[str, Any], ...] = ()
+    unbound_action_plan: dict[str, Any] | None = None
 
     @property
     def bound(self) -> bool:
@@ -146,6 +148,7 @@ class _PlannedCandidate:
     grounded: GroundedTaskSpec
     grounded_plan: GroundedTaskPlan
     action_graph: dict[str, Any]
+    unbound_action_plan: dict[str, Any] | None
 
 
 class TaskEngineCoordinator:
@@ -184,6 +187,8 @@ class TaskEngineCoordinator:
         randomize_table_material: bool = False,
         candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
         force_most_likely: bool = False,
+        final_inspection: Mapping[str, Any] | None = None,
+        unbound_action_plan: Mapping[str, Any] | None = None,
     ) -> PreparationResult:
         """Prepare and atomically publish a Task Engine bundle.
 
@@ -212,10 +217,13 @@ class TaskEngineCoordinator:
                         "TaskCandidateSet.instruction must match instruction."
                     )
             candidate_set = normalized_candidates
+            adaptation_kwargs: dict[str, Any] = {"force_most_likely": force_most_likely}
+            if final_inspection is not None:
+                adaptation_kwargs["final_inspection"] = final_inspection
             adaptation = self.scene_adapter.adapt(
                 candidate_set,
                 normalized_source,
-                force_most_likely=force_most_likely,
+                **adaptation_kwargs,
             )
             status = str(adaptation.binding_report["status"])
 
@@ -228,6 +236,7 @@ class TaskEngineCoordinator:
                     binding_report=adaptation.binding_report,
                     static_scene_manifest=adaptation.static_scene_manifest,
                     conservative_scene_graph=adaptation.conservative_scene_graph,
+                    final_scene_inspection=final_inspection,
                 )
                 published = transaction.commit()
                 return PreparationResult(
@@ -254,6 +263,7 @@ class TaskEngineCoordinator:
             if (
                 feasibility_report is not None
                 and feasibility_report["status"] == "contradicted"
+                and feasibility_report["remediation_class"] != "action_capability"
             ):
                 adaptation, selected, raw_role_bindings, feasibility_report = (
                     self._fallback_feasible_candidate(
@@ -277,6 +287,7 @@ class TaskEngineCoordinator:
                     static_scene_manifest=adaptation.static_scene_manifest,
                     conservative_scene_graph=adaptation.conservative_scene_graph,
                     feasibility_report=feasibility_report,
+                    final_scene_inspection=final_inspection,
                 )
                 published = transaction.commit()
                 return PreparationResult(
@@ -296,6 +307,7 @@ class TaskEngineCoordinator:
                 raw_role_bindings,
                 feasibility_report,
                 robot_profile=robot_profile,
+                unbound_action_plan=unbound_action_plan,
             )
             if planned is None:
                 write_task_engine_artifacts(
@@ -307,6 +319,7 @@ class TaskEngineCoordinator:
                     static_scene_manifest=adaptation.static_scene_manifest,
                     conservative_scene_graph=adaptation.conservative_scene_graph,
                     feasibility_report=feasibility_report,
+                    final_scene_inspection=final_inspection,
                 )
                 write_preparation_failure(
                     staging_dir,
@@ -385,6 +398,7 @@ class TaskEngineCoordinator:
                 static_scene_manifest=adaptation.static_scene_manifest,
                 conservative_scene_graph=adaptation.conservative_scene_graph,
                 feasibility_report=feasibility_report,
+                final_scene_inspection=final_inspection,
             )
             published = transaction.commit()
             return PreparationResult(
@@ -401,6 +415,7 @@ class TaskEngineCoordinator:
                 ),
                 feasibility_report=deepcopy(feasibility_report),
                 planning_attempts=tuple(deepcopy(planning_failures)),
+                unbound_action_plan=deepcopy(planned.unbound_action_plan),
             )
 
     def _plan_with_candidate_fallback(
@@ -412,6 +427,7 @@ class TaskEngineCoordinator:
         feasibility_report: FeasibilityReport | None,
         *,
         robot_profile: str,
+        unbound_action_plan: Mapping[str, Any] | None,
     ) -> tuple[_PlannedCandidate | None, list[dict[str, Any]]]:
         """Treat lowering and Action planning failures as candidate-local."""
         candidates = {
@@ -467,6 +483,8 @@ class TaskEngineCoordinator:
             )
             grounded: GroundedTaskSpec | None = None
             grounded_plan: GroundedTaskPlan | None = None
+            candidate_unbound: Mapping[str, Any] | None = None
+            action_graph: Mapping[str, Any] | None = None
             stage = "lowering"
             try:
                 grounded = lower_task_candidate(
@@ -495,7 +513,17 @@ class TaskEngineCoordinator:
                     binding_report=candidate_adaptation.binding_report,
                 )
                 stage = "action_planning"
-                action_graph = self.action_agent.plan(grounded_plan)
+                bind_and_plan = getattr(self.action_agent, "bind_and_plan", None)
+                if callable(bind_and_plan):
+                    candidate_unbound = (
+                        unbound_action_plan
+                        if unbound_action_plan is not None
+                        and str(unbound_action_plan.get("candidate_id")) == candidate_id
+                        else self.action_agent.draft(candidate)
+                    )
+                    action_graph = bind_and_plan(candidate_unbound, grounded_plan)
+                else:
+                    action_graph = self.action_agent.plan(grounded_plan)
                 stage = "preflight"
                 preflight = getattr(self.action_agent, "preflight", None)
                 if callable(preflight):
@@ -503,6 +531,8 @@ class TaskEngineCoordinator:
                         action_graph,
                         scene_manifest=adaptation.scene_manifest,
                     )
+            except ActionCapabilityError:
+                raise
             except (TypeError, ValueError, OSError) as error:
                 failures.append(
                     _candidate_failure(
@@ -513,6 +543,8 @@ class TaskEngineCoordinator:
                         error_message=str(error),
                         feasibility_report=report,
                         grounded_task_plan=grounded_plan,
+                        unbound_action_plan=candidate_unbound,
+                        action_graph=action_graph,
                     )
                 )
                 continue
@@ -527,6 +559,11 @@ class TaskEngineCoordinator:
                     grounded=grounded,
                     grounded_plan=grounded_plan,
                     action_graph=deepcopy(action_graph),
+                    unbound_action_plan=(
+                        None
+                        if candidate_unbound is None
+                        else deepcopy(dict(candidate_unbound))
+                    ),
                 ),
                 failures,
             )
@@ -669,6 +706,8 @@ def _candidate_failure(
     error_message: str,
     feasibility_report: Mapping[str, Any] | None = None,
     grounded_task_plan: Mapping[str, Any] | None = None,
+    unbound_action_plan: Mapping[str, Any] | None = None,
+    action_graph: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "candidate_id": str(candidate["candidate_id"]),
@@ -678,6 +717,10 @@ def _candidate_failure(
         "grounded_task_plan": (
             None if grounded_task_plan is None else deepcopy(dict(grounded_task_plan))
         ),
+        "unbound_action_plan": (
+            None if unbound_action_plan is None else deepcopy(dict(unbound_action_plan))
+        ),
+        "action_graph": None if action_graph is None else deepcopy(dict(action_graph)),
         "feasibility_report": (
             None if feasibility_report is None else deepcopy(dict(feasibility_report))
         ),

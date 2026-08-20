@@ -453,24 +453,29 @@ class AtomicActionAdapter:
             grounded=grounded,
             prior_state=state,
             expected_effects=committed_effects,
-            planner_trace=self._planner_trace(
-                grounded=grounded,
-                invocation=invocation,
-                context=context,
-                state=state,
-                primary_success=primary_success,
-                fallback_allowed=fallback_allowed,
-                fallback_strategy=(
-                    str(fallback_strategy)
-                    if invocation.motion_policy.strategy == "motion_gen"
-                    and fallback_strategy in {"ik_interp"}
-                    else None
+            planner_trace={
+                **self._planner_trace(
+                    grounded=grounded,
+                    invocation=invocation,
+                    context=context,
+                    state=state,
+                    primary_success=primary_success,
+                    fallback_allowed=fallback_allowed,
+                    fallback_strategy=(
+                        str(fallback_strategy)
+                        if invocation.motion_policy.strategy == "motion_gen"
+                        and fallback_strategy in {"ik_interp"}
+                        else None
+                    ),
+                    fallback_attempted=fallback_attempted,
+                    fallback_success=fallback_success,
+                    fallback_used=use_fallback,
+                    reachability_search=reachability_search,
                 ),
-                fallback_attempted=fallback_attempted,
-                fallback_success=fallback_success,
-                fallback_used=use_fallback,
-                reachability_search=reachability_search,
-            ),
+                # Auditability takes precedence over compactness here: every
+                # selected planner route retains its complete joint path.
+                "planned_trajectory": selected_positions.detach().clone(),
+            },
         )
 
     def _search_reachable_retreat(

@@ -150,6 +150,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
     original_graph = deepcopy(graph.to_dict())
 
     def fake_generate_scene_and_refine(**kwargs):
+        assert kwargs["seed"] == 31
         assert kwargs["scene"] is not package.scene
         assert kwargs["scene_graph"] is not package.scene_graph
         kwargs["scene"].objects[0].name = "materialized table"
@@ -174,6 +175,7 @@ def test_materialize_blueprint_does_not_mutate_audited_snapshot(
         package,
         vlm_client=object(),
         geometry_generation_client=_HealthyClient(),
+        seed=31,
     )
 
     assert result.scene.objects[0].name == "materialized table"
@@ -201,7 +203,13 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
     original_plan = deepcopy(plan.to_dict())
     original_graph = deepcopy(graph.to_dict())
 
-    monkeypatch.setattr(api, "prepare_scene_edit_assets", lambda **_: [])
+    def fake_prepare_scene_edit_assets(**kwargs):
+        assert kwargs["seed"] == 32
+        return []
+
+    monkeypatch.setattr(
+        api, "prepare_scene_edit_assets", fake_prepare_scene_edit_assets
+    )
 
     def fake_edit_layout(**kwargs):
         assert kwargs["scene_edit_plan"] is not package.scene_edit_plan
@@ -227,6 +235,7 @@ def test_materialize_edit_does_not_mutate_audited_snapshot(
         image_generation_client=clients[0],
         geometry_generation_client=clients[1],
         image_segmentation_client=clients[2],
+        seed=32,
     )
 
     assert result.scene.objects[0].name == "edited table"

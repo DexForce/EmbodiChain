@@ -21,6 +21,8 @@ from typing import Any
 
 import requests
 
+from embodichain.gen_sim.scene_engine.errors import SceneServiceError
+
 from embodichain.gen_sim.scene_engine.configs.environment import (
     read_scene_engine_env_values,
 )
@@ -73,7 +75,7 @@ class ImageGenerationClient:
                 last_error = exc
 
         assert last_error is not None
-        raise RuntimeError(
+        raise SceneServiceError(
             "Image Generation Server health check failed after "
             f"{self._max_attempts} attempts."
         ) from last_error
@@ -86,6 +88,7 @@ class ImageGenerationClient:
         *,
         prompt: str,
         output_path: str | Path,
+        seed: int | None = None,
     ) -> Path:
         """Generate one PNG image from ``prompt`` and save it to ``output_path``."""
         prompt = prompt.strip()
@@ -100,10 +103,27 @@ class ImageGenerationClient:
             try:
                 response = self._session.post(
                     self._url(self._generate_image_by_prompt_path),
-                    json={"prompt": prompt},
+                    json={
+                        "prompt": prompt,
+                        **({} if seed is None else {"seed": int(seed)}),
+                    },
                     timeout=self._timeout_s,
                 )
                 response.raise_for_status()
+                if seed is not None:
+                    acknowledged = response.headers.get(
+                        "x-generation-seed",
+                        response.headers.get("x-seed"),
+                    )
+                    try:
+                        acknowledged_seed = int(acknowledged)
+                    except (TypeError, ValueError):
+                        acknowledged_seed = None
+                    if acknowledged_seed != int(seed):
+                        raise RuntimeError(
+                            "Image Generation Server did not acknowledge the "
+                            f"requested seed {int(seed)}."
+                        )
                 content_type = response.headers.get("content-type", "").split(";")[0]
                 if content_type != "image/png":
                     raise RuntimeError(
@@ -115,7 +135,7 @@ class ImageGenerationClient:
                 last_error = exc
 
         assert last_error is not None
-        raise RuntimeError(
+        raise SceneServiceError(
             "Image Generation Server request failed after "
             f"{self._max_attempts} attempts."
         ) from last_error

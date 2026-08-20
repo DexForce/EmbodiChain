@@ -26,6 +26,7 @@ from typing import Any, Final, TypeAlias
 from embodichain.gen_sim.action_engine.domain.task_contracts import TASK_CONTRACTS
 
 __all__ = [
+    "ActionCapabilityError",
     "UNBOUND_ACTION_PLAN_SCHEMA",
     "UnboundActionPlan",
     "build_unbound_action_plan",
@@ -34,6 +35,11 @@ __all__ = [
 
 UNBOUND_ACTION_PLAN_SCHEMA: Final = "embodichain.unbound-action-plan/v1"
 UnboundActionPlan: TypeAlias = dict[str, Any]
+
+
+class ActionCapabilityError(ValueError):
+    """A required AtomicAction is missing or not executable."""
+
 
 _PLAN_KEYS = frozenset(
     {

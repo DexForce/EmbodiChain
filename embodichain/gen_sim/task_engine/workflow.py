@@ -31,10 +31,12 @@ import sys
 from typing import Any, Final
 
 from embodichain.gen_sim.action_engine.agent import ActionAgent
+from embodichain.gen_sim.action_engine.unbound import ActionCapabilityError
 from embodichain.gen_sim.action_engine.runtime import (
     EXECUTION_REPORT_FILENAME,
     validate_execution_report,
 )
+from embodichain.gen_sim.scene_engine.errors import SceneServiceError
 
 from .agent import TaskAgent
 from .config import (
@@ -43,10 +45,16 @@ from .config import (
     TaskEngineWorkflowCfg,
     load_task_engine_config,
 )
+from .contracts import canonical_hash
 from .orchestration.artifacts import ArtifactTransaction
 from .orchestration.coordinator import PreparationResult, TaskEngineCoordinator
 from .orchestration.scene_adapter import CandidateSelection, SceneAdapter
-from .scene_backend import SceneAnalysis, SceneEngineBackend, SceneRevision
+from .scene_backend import (
+    SceneAnalysis,
+    SceneEngineBackend,
+    SceneRemediableError,
+    SceneRevision,
+)
 from .state_machine import (
     TaskEngineState,
     WorkflowStage,
@@ -282,6 +290,7 @@ class TaskEngineWorkflow:
         run_id: str | None = None,
         created_at: datetime | None = None,
         overwrite: bool = False,
+        execute: bool = True,
     ) -> TaskEngineRunResult:
         """Run all stages and publish success only after simulator acceptance.
 
@@ -298,6 +307,7 @@ class TaskEngineWorkflow:
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
             overwrite: Whether to atomically replace an existing run directory.
+            execute: Whether to execute the prepared bundle in the simulator.
 
         Returns:
             Published run status, manifest, state audit, and final bundle path.
@@ -474,6 +484,7 @@ class TaskEngineWorkflow:
             unbound_failures: list[dict[str, Any]] = []
             unbound_error: Exception | None = None
             scene_error: Exception | None = None
+            inspection_error = False
             preparation_error: Exception | None = None
             preparation: PreparationResult | None = None
             scene_attempt_limit = (
@@ -483,6 +494,7 @@ class TaskEngineWorkflow:
                 else workflow_cfg.max_scene_attempts
             )
             for scene_index in range(1, scene_attempt_limit + 1):
+                inspection_error = False
                 scene_seed = int(base_seed) + scene_index - 1
                 attempt_root = staging / "attempts" / f"scene_{scene_index:04d}"
                 attempt_root.mkdir(parents=True)
@@ -491,7 +503,10 @@ class TaskEngineWorkflow:
                     "scene_seed": scene_seed,
                     "status": "running",
                     "scene_revision": None,
+                    "final_inspection": None,
                     "unbound_action_plan": None,
+                    "final_unbound_action_plan": None,
+                    "unbound_transition": None,
                     "unbound_failures": [],
                     "preparation": None,
                     "planning_attempts": [],
@@ -571,7 +586,10 @@ class TaskEngineWorkflow:
                     attempt["status"] = "scene_failed"
                     attempt["error"] = _error_record(exc)
                     _write_json(attempt_root / "attempt.json", attempt)
-                    if scene_index < scene_attempt_limit:
+                    if (
+                        scene_index < scene_attempt_limit
+                        and _is_scene_remediable_error(exc)
+                    ):
                         continue
                     break
 
@@ -583,6 +601,28 @@ class TaskEngineWorkflow:
                     state,
                     has_edit=normalized["scene_edit_prompt"] is not None,
                 )
+                if state.stages[WorkflowStage.FINAL_INSPECTION].value == "pending":
+                    state = start_stage(state, WorkflowStage.FINAL_INSPECTION)
+                try:
+                    final_inspection = self.scene_backend.inspect(
+                        revision,
+                        attempt_root / "final_scene_inspection.json",
+                    )
+                except Exception as exc:
+                    scene_error = exc
+                    inspection_error = True
+                    attempt["status"] = "scene_inspection_failed"
+                    attempt["error"] = _error_record(exc)
+                    _write_json(attempt_root / "attempt.json", attempt)
+                    if (
+                        scene_index < scene_attempt_limit
+                        and _is_scene_remediable_error(exc)
+                    ):
+                        continue
+                    break
+                attempt["final_inspection"] = deepcopy(dict(final_inspection))
+                if state.stages[WorkflowStage.FINAL_INSPECTION].value == "running":
+                    state = complete_stage(state, WorkflowStage.FINAL_INSPECTION)
 
                 bundle_root = attempt_root / "bundle"
                 try:
@@ -599,6 +639,8 @@ class TaskEngineWorkflow:
                         max_episode_steps=planning_cfg.max_episode_steps,
                         candidate_set=candidate_set,
                         force_most_likely=True,
+                        final_inspection=final_inspection,
+                        unbound_action_plan=unbound_plan,
                     )
                 except Exception as exc:
                     preparation_error = exc
@@ -621,7 +663,7 @@ class TaskEngineWorkflow:
                 }
                 _write_json(attempt_root / "attempt.json", attempt)
                 if not _scene_remediable(
-                    preparation.status,
+                    preparation,
                     analysis=analysis,
                     request=normalized,
                 ):
@@ -631,6 +673,7 @@ class TaskEngineWorkflow:
                 failure_class = (
                     "action_capability"
                     if unbound_error is not None
+                    or isinstance(preparation_error, ActionCapabilityError)
                     else (
                         "preparation_error"
                         if preparation_error is not None
@@ -643,11 +686,19 @@ class TaskEngineWorkflow:
                     )
                 )
                 failed_stage = (
-                    WorkflowStage.UNBOUND_ACTION
-                    if unbound_error is not None
-                    else _failure_stage(failure_class, normalized)
+                    WorkflowStage.FINAL_INSPECTION
+                    if inspection_error
+                    else (
+                        WorkflowStage.UNBOUND_ACTION
+                        if unbound_error is not None
+                        else _failure_stage(failure_class, normalized)
+                    )
                 )
-                if state.stages[failed_stage].value in {"pending", "running"}:
+                if state.stages[failed_stage].value in {
+                    "pending",
+                    "running",
+                    "succeeded",
+                }:
                     state = fail_stage(
                         state,
                         failed_stage,
@@ -692,31 +743,88 @@ class TaskEngineWorkflow:
                 raise ValueError(
                     "A bound preparation must select one non-empty candidate ID."
                 )
-            if final_candidate_id != unbound_plan["candidate_id"]:
+            selected_attempt = attempts[-1]
+            final_unbound = getattr(preparation, "unbound_action_plan", None)
+            if (
+                final_unbound is None
+                and final_candidate_id != unbound_plan["candidate_id"]
+            ):
                 final_candidate = next(
                     item
                     for item in candidate_set["candidates"]
                     if item["candidate_id"] == final_candidate_id
                 )
                 final_unbound = self.action_agent.draft(final_candidate)
-                _write_json(
-                    preparation.output_dir.parent / "final_unbound_action_plan.json",
-                    final_unbound,
+            elif final_unbound is None:
+                final_unbound = unbound_plan
+            if str(final_unbound.get("candidate_id")) != final_candidate_id:
+                raise ValueError(
+                    "Final UnboundActionPlan candidate does not match preparation."
                 )
+            selected_attempt["final_unbound_action_plan"] = deepcopy(
+                dict(final_unbound)
+            )
+            selected_attempt["unbound_transition"] = {
+                "initial_candidate_id": str(unbound_plan["candidate_id"]),
+                "initial_hash": canonical_hash(unbound_plan),
+                "final_candidate_id": final_candidate_id,
+                "final_hash": canonical_hash(final_unbound),
+                "changed": final_unbound != unbound_plan,
+            }
+            _write_json(
+                preparation.output_dir.parent / "final_unbound_action_plan.json",
+                final_unbound,
+            )
+            _write_json(
+                preparation.output_dir.parent / "attempt.json",
+                selected_attempt,
+            )
 
             for stage in (
-                WorkflowStage.FINAL_INSPECTION,
                 WorkflowStage.FINAL_BINDING,
                 WorkflowStage.STATIC_FEASIBILITY,
                 WorkflowStage.GROUNDED_ACTION,
             ):
                 state = start_stage(state, stage)
                 state = complete_stage(state, stage)
+            if not execute:
+                final_root = staging / "final"
+                final_bundle = final_root / "bundle"
+                final_root.mkdir()
+                shutil.copytree(preparation.output_dir, final_bundle)
+                selected_attempt["status"] = "prepared"
+                _write_json(
+                    preparation.output_dir.parent / "attempt.json",
+                    selected_attempt,
+                )
+                _write_json(
+                    final_root / "selection.json",
+                    {
+                        "scene_attempt": selected_attempt["scene_attempt"],
+                        "candidate_id": final_candidate_id,
+                        "action_attempt": None,
+                        "execution_report": None,
+                    },
+                )
+                return self._publish(
+                    transaction,
+                    staging,
+                    normalized,
+                    workflow_cfg,
+                    planning_cfg,
+                    execution_cfg,
+                    run_metadata,
+                    state,
+                    attempts,
+                    status="prepared",
+                    failure_class=None,
+                    final_bundle=final_bundle,
+                )
             state = start_stage(state, WorkflowStage.EXECUTION)
 
             successful_report: Mapping[str, Any] | None = None
             successful_action_root: Path | None = None
-            selected_attempt = attempts[-1]
+            success_terms = _bundle_success_terms(preparation.output_dir)
             for action_index in range(1, workflow_cfg.max_action_attempts + 1):
                 action_seed = int(base_seed) + action_index - 1
                 action_root = (
@@ -740,7 +848,10 @@ class TaskEngineWorkflow:
                         num_envs=execution_cfg.num_envs,
                         dataset_saving=bool(dataset_saving),
                     )
-                    successes = _environment_successes(report)
+                    successes = _environment_successes(
+                        report,
+                        required_semantic_steps=success_terms,
+                    )
                     if len(successes) != execution_cfg.num_envs:
                         raise ValueError(
                             "Execution report environment count does not match "
@@ -808,6 +919,7 @@ class TaskEngineWorkflow:
                     "candidate_id": final_candidate_id,
                     "action_attempt": int(successful_action_root.name.split("_")[-1]),
                     "execution_report": successful_report,
+                    "success_spec_steps": list(success_terms),
                 },
             )
             return self._publish(
@@ -851,6 +963,8 @@ class TaskEngineWorkflow:
             )
             try:
                 return self.action_agent.draft(candidate), failures
+            except ActionCapabilityError:
+                raise
             except (TypeError, ValueError) as exc:
                 failures.append(
                     {
@@ -946,16 +1060,26 @@ def _complete_materialized_scene(
 
 
 def _scene_remediable(
-    status: str,
+    preparation: PreparationResult,
     *,
     analysis: SceneAnalysis,
     request: Mapping[str, Any],
 ) -> bool:
-    if status != "infeasible":
+    if preparation.status != "infeasible":
+        return False
+    report = preparation.feasibility_report
+    if not isinstance(report, Mapping) or report.get("remediation_class") != (
+        "scene_remediable"
+    ):
         return False
     if analysis.input_kind == "image":
         return True
     return request["scene_edit_prompt"] is not None
+
+
+def _is_scene_remediable_error(error: Exception) -> bool:
+    """Return whether one typed Scene failure may create a new attempt."""
+    return isinstance(error, (SceneRemediableError, SceneServiceError))
 
 
 def _preparation_failure_class(
@@ -974,6 +1098,18 @@ def _preparation_failure_class(
     if preparation.status in {"ambiguous", "unsatisfied"}:
         return "input_conflict"
     if preparation.status == "infeasible":
+        report = preparation.feasibility_report
+        remediation = (
+            str(report.get("remediation_class"))
+            if isinstance(report, Mapping)
+            else "terminal"
+        )
+        if remediation == "action_capability":
+            return "action_capability"
+        if remediation == "input_conflict":
+            return "input_conflict"
+        if remediation != "scene_remediable":
+            return "terminal_feasibility"
         if (
             analysis.input_kind == "gym_project"
             and request["scene_edit_prompt"] is None
@@ -993,7 +1129,11 @@ def _failure_stage(
         return WorkflowStage.FINAL_BINDING
     if failure_class == "input_conflict":
         return WorkflowStage.FINAL_BINDING
-    if failure_class in {"scene_infeasible", "read_only_scene_infeasible"}:
+    if failure_class in {
+        "scene_infeasible",
+        "read_only_scene_infeasible",
+        "terminal_feasibility",
+    }:
         return WorkflowStage.STATIC_FEASIBILITY
     if failure_class == "scene_materialization":
         return (
@@ -1004,7 +1144,11 @@ def _failure_stage(
     return WorkflowStage.GROUNDED_ACTION
 
 
-def _environment_successes(report: Mapping[str, Any]) -> list[bool]:
+def _environment_successes(
+    report: Mapping[str, Any],
+    *,
+    required_semantic_steps: Sequence[str] = (),
+) -> list[bool]:
     environments = report.get("environments")
     if not isinstance(environments, Sequence) or isinstance(environments, (str, bytes)):
         raise ValueError("Execution report environments must be a sequence.")
@@ -1012,10 +1156,47 @@ def _environment_successes(report: Mapping[str, Any]) -> list[bool]:
     for item in environments:
         if not isinstance(item, Mapping) or not isinstance(item.get("success"), bool):
             raise ValueError("Every execution environment requires boolean success.")
-        values.append(bool(item["success"]))
+        success = bool(item["success"])
+        if required_semantic_steps:
+            semantics = item.get("semantic_success")
+            if not isinstance(semantics, Mapping):
+                success = False
+            else:
+                success = success and all(
+                    semantics.get(step_id) is True
+                    for step_id in required_semantic_steps
+                )
+        values.append(success)
     if not values:
         raise ValueError("Execution report must contain at least one environment.")
     return values
+
+
+def _bundle_success_terms(bundle: Path) -> tuple[str, ...]:
+    path = bundle / "grounded_task_plan.json"
+    if not path.is_file():
+        return ()
+    try:
+        value = _read_json(path)
+        success_spec = value.get("success_spec")
+        terms = success_spec.get("terms") if isinstance(success_spec, Mapping) else None
+        strict = isinstance(value.get("schema_version"), str)
+        if not isinstance(terms, Sequence) or isinstance(terms, (str, bytes)):
+            if strict:
+                raise ValueError("GroundedTaskPlan has no valid SuccessSpec terms.")
+            return ()
+        result = tuple(
+            str(item["step_id"])
+            for item in terms
+            if isinstance(item, Mapping) and isinstance(item.get("step_id"), str)
+        )
+        if len(result) != len(terms) or (strict and not result):
+            if strict:
+                raise ValueError("GroundedTaskPlan SuccessSpec terms are invalid.")
+            return ()
+        return result
+    except OSError:
+        return ()
 
 
 def _highest_vote_candidate(candidate_set: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -1054,6 +1235,7 @@ def _revision_record(revision: SceneRevision) -> dict[str, Any]:
         "output_root": (
             None if revision.output_root is None else revision.output_root.as_posix()
         ),
+        "revision_id": revision.revision_id,
         "seed": revision.seed,
         "edit_plan": deepcopy(revision.edit_plan),
         "source_fingerprint": (
@@ -1065,7 +1247,13 @@ def _revision_record(revision: SceneRevision) -> dict[str, Any]:
 
 
 def _error_record(error: Exception) -> dict[str, str]:
-    return {"type": type(error).__name__, "message": str(error)}
+    return {
+        "type": type(error).__name__,
+        "failure_type": (
+            "scene_remediable" if _is_scene_remediable_error(error) else "terminal"
+        ),
+        "message": str(error),
+    }
 
 
 def _read_json(path: Path) -> dict[str, Any]:

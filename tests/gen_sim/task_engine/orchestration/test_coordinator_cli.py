@@ -441,6 +441,7 @@ def test_contradicted_feasibility_publishes_audit_without_planning(
     assert result.status == "infeasible"
     assert result.feasibility_report is not None
     assert result.feasibility_report["status"] == "contradicted"
+    assert result.feasibility_report["remediation_class"] == "action_capability"
     assert result.artifacts.static_scene_manifest.is_file()
     assert result.artifacts.feasibility_report.is_file()
     assert not result.artifacts.grounded_task_plan.exists()
@@ -670,6 +671,8 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
         assert attempt["draft"] == candidates["candidates"][index]["draft"]
         assert attempt["bindings"]["candidate_id"] == candidate_id
         assert attempt["grounded_task_plan"]["selected_candidate_id"] == candidate_id
+        assert "unbound_action_plan" in attempt
+        assert "action_graph" in attempt
         assert attempt["error"]["type"] == "ValueError"
         assert "arm_free" in attempt["error"]["message"]
 
@@ -777,6 +780,7 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert request["scene_edit_prompt"] == edit
     assert captured["kwargs"]["base_seed"] == 9
     assert captured["kwargs"]["dataset_saving"] is (mode == "image")
+    assert captured["kwargs"]["execute"] is True
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "succeeded"
     assert payload["run_id"].replace("_", "").isdigit()
@@ -892,17 +896,17 @@ def test_unified_cli_rejects_mode_input_mismatch(tmp_path: Path) -> None:
         )
 
 
-def test_public_cli_has_no_prepare_run_or_overwrite_modes() -> None:
+def test_public_cli_exposes_prepare_run_and_run_all_modes() -> None:
     parser = cli.build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(["prepare"])
     help_text = parser.format_help()
+    assert "prepare" in help_text
+    assert "run-all" in help_text
+    assert "run" in help_text
     assert "--overwrite" not in help_text
     assert "--run-after-prepare" not in help_text
-    assert "--dataset-saving" not in help_text
-    assert "--dataset_saving" in help_text
     arguments = parser.parse_args(
         [
+            "prepare",
             "--mode",
             "image",
             "--task-id",
@@ -916,7 +920,89 @@ def test_public_cli_has_no_prepare_run_or_overwrite_modes() -> None:
             "--dataset_saving",
         ]
     )
+    assert arguments.command == "prepare"
     assert arguments.dataset_saving is True
+
+
+def test_prepare_cli_stops_before_simulator_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    class FakeWorkflow:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def run(self, request, **kwargs):
+            captured.update(kwargs)
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status="prepared",
+                succeeded=False,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=output / "final" / "bundle",
+            )
+
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
+
+    result = cli.main(
+        [
+            "prepare",
+            "--mode",
+            "image",
+            "--task-id",
+            "task",
+            "--instruction",
+            "place the cup",
+            "--image",
+            str(tmp_path / "input.png"),
+            "--output-root",
+            str(tmp_path / "history"),
+        ]
+    )
+
+    assert result == 0
+    assert captured["execute"] is False
+
+
+def test_run_cli_executes_an_existing_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+
+    class Executor:
+        def __call__(self, _bundle, output, **kwargs):
+            Path(output).mkdir()
+            assert kwargs["num_envs"] == 2
+            return {
+                "status": "failed",
+                "environments": [
+                    {"success": True},
+                    {"success": False},
+                ],
+            }
+
+    monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+
+    result = cli.main(
+        [
+            "run",
+            "--bundle",
+            str(bundle),
+            "--output-root",
+            str(tmp_path / "history"),
+            "--num-envs",
+            "2",
+        ]
+    )
+
+    assert result == 0
 
 
 def test_private_bundle_runner_publishes_rejected_preflight_report(

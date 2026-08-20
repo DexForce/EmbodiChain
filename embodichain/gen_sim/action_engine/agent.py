@@ -54,8 +54,10 @@ from embodichain.gen_sim.action_engine.runtime import (
 )
 from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
 from embodichain.gen_sim.action_engine.unbound import (
+    ActionCapabilityError,
     UnboundActionPlan,
     build_unbound_action_plan,
+    validate_unbound_action_plan,
 )
 
 __all__ = ["ActionAgent", "ActionGraph"]
@@ -110,7 +112,49 @@ class ActionAgent:
         Returns:
             A scene-independent action plan whose selectors contain no UIDs.
         """
-        return build_unbound_action_plan(candidate)
+        plan = build_unbound_action_plan(candidate)
+        names = getattr(self.registry, "names", None)
+        executable_names = getattr(self.registry, "executable_names", None)
+        if callable(names):
+            missing = sorted(set(plan["required_actions"]) - set(names()))
+            if missing:
+                raise ActionCapabilityError(
+                    "Required AtomicAction is not registered: " + ", ".join(missing)
+                )
+        if callable(executable_names):
+            unavailable = sorted(
+                set(plan["required_actions"]) - set(executable_names())
+            )
+            if unavailable:
+                raise ActionCapabilityError(
+                    "Required AtomicAction is not executable: " + ", ".join(unavailable)
+                )
+        return plan
+
+    def bind_and_plan(
+        self,
+        unbound_plan: Mapping[str, Any],
+        grounded_plan: Mapping[str, Any],
+    ) -> ActionGraph:
+        """Bind one audited unbound plan through a final GroundedTaskPlan.
+
+        The grounded task draft must reproduce the exact unbound IR. This
+        prevents the final planner from silently reinterpreting a candidate
+        after Scene Engine work has run concurrently.
+        """
+        unbound = validate_unbound_action_plan(unbound_plan)
+        grounded = _validate_grounded_plan(grounded_plan)
+        expected = build_unbound_action_plan(
+            {
+                "candidate_id": grounded["selected_candidate_id"],
+                "draft": grounded["task_draft"],
+            }
+        )
+        if unbound != expected:
+            raise ValueError(
+                "UnboundActionPlan does not match the final GroundedTaskPlan."
+            )
+        return self.plan(grounded)
 
     def preflight(
         self,
@@ -377,6 +421,7 @@ class ActionAgent:
         episode_index: int,
         provenance: Mapping[str, Any],
     ) -> ExecutionReport:
+        _persist_executed_trajectory(result)
         success = _bool_vector(result.success)
         semantics = {
             str(step_id): _bool_vector(mask)
@@ -485,6 +530,37 @@ def _validated_report(report: ExecutionReport) -> ExecutionReport:
     payload = report.as_mapping()
     validate_execution_report(payload)
     return report
+
+
+def _persist_executed_trajectory(result: ExecutionResult) -> None:
+    """Persist every emitted control tensor beside the runtime graph audit."""
+    if not result.record_dir:
+        return
+    root = Path(result.record_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    actions = [action.detach().cpu() for action in result.actions]
+    temporary = root / ".executed_trajectory.pt.tmp"
+    destination = root / "executed_trajectory.pt"
+    torch.save({"actions": actions}, temporary)
+    temporary.replace(destination)
+    manifest = {
+        "schema_version": "action_engine_executed_trajectory/v1",
+        "path": destination.name,
+        "action_count": len(actions),
+        "actions": [
+            {
+                "index": index,
+                "shape": list(action.shape),
+                "dtype": str(action.dtype),
+            }
+            for index, action in enumerate(actions)
+        ],
+    }
+    manifest_path = root / "executed_trajectory.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
