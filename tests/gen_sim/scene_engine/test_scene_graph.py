@@ -276,6 +276,51 @@ def test_scene_graph_materializes_inverse_planar_relations() -> None:
     ]
 
 
+def test_scene_graph_batch_planar_updates_preserve_chained_constraints() -> None:
+    """Keep both requested relations when one update targets another source."""
+    graph = SceneGraph(
+        nodes=[
+            SceneGraphNode(object_id="table", parent_id=None),
+            SceneGraphNode(
+                object_id="plate",
+                parent_id="table",
+                parent_relation="on",
+            ),
+            SceneGraphNode(
+                object_id="cup",
+                parent_id="table",
+                parent_relation="on",
+            ),
+            SceneGraphNode(
+                object_id="spoon",
+                parent_id="table",
+                parent_relation="on",
+            ),
+        ]
+    )
+
+    graph.apply_updates(
+        deleted_object_ids=set(),
+        added_object_ids=[],
+        added_orientation_states_by_id={},
+        on_parent_updates=[],
+        planar_relation_updates=[
+            ("plate", "left_of", "cup"),
+            ("cup", "in_front_of", "spoon"),
+        ],
+    )
+
+    assert {
+        (relation.source_id, relation.relation, relation.target_id)
+        for relation in graph.relations
+    } == {
+        ("plate", "left_of", "cup"),
+        ("cup", "right_of", "plate"),
+        ("cup", "in_front_of", "spoon"),
+        ("spoon", "behind", "cup"),
+    }
+
+
 def test_scene_graph_to_dict_serializes_graph_state() -> None:
     graph = SceneGraph(
         nodes=[
