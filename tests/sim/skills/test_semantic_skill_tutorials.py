@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import cast, TYPE_CHECKING
 from unittest.mock import Mock
 
+import pytest
 import torch
 
 from embodichain.lab.sim import SimulationManager
@@ -38,6 +39,8 @@ from embodichain.lab.sim.skills import (
     RegisteredSemanticCall,
     SceneRegistry,
 )
+import scripts.tutorials.semantic_skill.hand_over as handover_tutorial
+import scripts.tutorials.semantic_skill.place as place_tutorial
 from scripts.tutorials.semantic_skill.hand_over import (
     FINAL_OBJECT_POSITION,
     HANDOVER_CALL_ID,
@@ -45,7 +48,7 @@ from scripts.tutorials.semantic_skill.hand_over import (
     TRACKING_ERROR_THRESHOLD as HANDOVER_TRACKING_ERROR_THRESHOLD,
     TutorialHandOverLowerer,
     create_handover_effect_verifier,
-    create_handover_workflow,
+    create_handover_task,
     create_robot_profile as create_dual_arm_profile,
 )
 from scripts.tutorials.semantic_skill.place import (
@@ -53,7 +56,7 @@ from scripts.tutorials.semantic_skill.place import (
     TARGET_OBJECT_POSITION,
     TRACKING_ERROR_THRESHOLD as PLACE_TRACKING_ERROR_THRESHOLD,
     create_place_effect_verifier,
-    create_place_workflow,
+    create_place_task,
     create_robot_profile as create_single_arm_profile,
 )
 from scripts.tutorials.semantic_skill.tutorial_utils import (
@@ -64,6 +67,9 @@ from scripts.tutorials.semantic_skill.tutorial_utils import (
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import RigidObject, Robot
     from embodichain.lab.sim.skills.integration import BoundSemanticCall
+
+_TEST_PHYSICS_DT = 0.01
+_TEST_GRASP_SAMPLE_COUNT = 8
 
 
 class _PhysicalObject:
@@ -160,8 +166,8 @@ def test_graspable_registry_maps_simulation_identity_to_semantic_identity() -> N
     assert type(semantics.affordance) is AntipodalAffordance
 
 
-def test_place_tutorial_workflow_contains_no_robot_resource_names() -> None:
-    calls = create_place_workflow()
+def test_place_tutorial_task_contains_no_robot_resource_names() -> None:
+    calls = create_place_task()
 
     assert tuple(type(call) for call in calls) == (Pick, Place)
     assert calls[0].object == calls[1].object
@@ -201,6 +207,55 @@ def test_place_tutorial_profile_owns_single_arm_binding_and_policies() -> None:
     )
 
 
+def test_place_application_installs_default_effect_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    simulation = Mock()
+    simulation.sim_config.physics_dt = _TEST_PHYSICS_DT
+    simulation.get_rigid_object.return_value = Mock()
+    robot = Mock()
+    obj = _PhysicalObject(_pose_at((0.0, 0.0, 0.0)))
+    semantics = Mock(affordance=AntipodalAffordance())
+    motion_generator = Mock()
+    runtime = Mock()
+    runtime_factory = Mock(return_value=runtime)
+
+    monkeypatch.setattr(
+        place_tutorial,
+        "create_antipodal_semantics",
+        Mock(return_value=semantics),
+    )
+    monkeypatch.setattr(
+        place_tutorial,
+        "create_curobo_motion_generator",
+        Mock(return_value=motion_generator),
+    )
+    monkeypatch.setattr(
+        place_tutorial.SemanticSkillRuntime,
+        "from_simulation",
+        runtime_factory,
+    )
+
+    result = place_tutorial.create_place_application(
+        cast(SimulationManager, simulation),
+        cast("Robot", robot),
+        cast("RigidObject", obj),
+        hand_open=torch.zeros(1),
+        hand_grasp=torch.ones(1),
+        n_sample=_TEST_GRASP_SAMPLE_COUNT,
+        force_reannotate=False,
+    )
+
+    assert result is runtime
+    assert type(runtime_factory.call_args.kwargs["scene_registry"]) is SceneRegistry
+    assert (
+        runtime_factory.call_args.kwargs["robot_profile"].profile_id
+        == "tutorial.single_arm"
+    )
+    assert runtime_factory.call_args.kwargs["motion_generator"] is motion_generator
+    assert callable(runtime_factory.call_args.kwargs["effect_verifier"])
+
+
 def test_place_tutorial_verifies_observed_pick_lift_and_eef_proximity() -> None:
     physical_object = _PhysicalObject(_pose_at((0.0, 0.0, 0.0)))
     physical_robot = _PhysicalRobot()
@@ -216,7 +271,7 @@ def test_place_tutorial_verifies_observed_pick_lift_and_eef_proximity() -> None:
     physical_robot.eef_pose["arm"] = lifted_pose
 
     success = verifier(
-        create_place_workflow()[0],
+        create_place_task()[0],
         _request("pick_up", held_control_part="arm"),
         _verification_context(),
     )
@@ -238,7 +293,7 @@ def test_place_tutorial_rejects_lift_with_wrong_grasp_relation() -> None:
     physical_robot.eef_pose["arm"] = _pose_at((0.2, 0.0, MINIMUM_PICK_LIFT + 0.01))
 
     success = verifier(
-        create_place_workflow()[0],
+        create_place_task()[0],
         _request("pick_up", held_control_part="arm"),
         _verification_context(),
     )
@@ -259,7 +314,7 @@ def test_place_tutorial_verifies_release_at_requested_position() -> None:
     physical_object.pose = _pose_at(TARGET_OBJECT_POSITION)
 
     success = verifier(
-        create_place_workflow()[1],
+        create_place_task()[1],
         _request("place"),
         _verification_context(),
     )
@@ -268,7 +323,7 @@ def test_place_tutorial_verifies_release_at_requested_position() -> None:
 
 
 def test_handover_tutorial_registers_tuned_atomic_lowering() -> None:
-    calls = create_handover_workflow()
+    calls = create_handover_task()
     context = Mock()
     context.robot.qpos = torch.zeros(1, 1)
     lowerer = TutorialHandOverLowerer(_graspable_registry())
@@ -321,6 +376,63 @@ def test_handover_tutorial_profile_binds_disjoint_arms() -> None:
     )
 
 
+def test_handover_application_installs_extension_and_default_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    simulation = Mock()
+    simulation.sim_config.physics_dt = _TEST_PHYSICS_DT
+    simulation.get_rigid_object.return_value = Mock()
+    robot = Mock()
+    obj = _PhysicalObject(_pose_at((0.0, 0.0, 0.0)))
+    semantics = Mock(affordance=AntipodalAffordance())
+    motion_generator = Mock()
+    runtime = Mock()
+    runtime_factory = Mock(return_value=runtime)
+
+    monkeypatch.setattr(
+        handover_tutorial,
+        "create_antipodal_semantics",
+        Mock(return_value=semantics),
+    )
+    monkeypatch.setattr(
+        handover_tutorial,
+        "create_toppra_motion_generator",
+        Mock(return_value=motion_generator),
+    )
+    monkeypatch.setattr(
+        handover_tutorial.SemanticSkillRuntime,
+        "from_simulation",
+        runtime_factory,
+    )
+
+    result = handover_tutorial.create_handover_application(
+        cast(SimulationManager, simulation),
+        cast("Robot", robot),
+        cast("RigidObject", obj),
+        left_open=torch.zeros(1),
+        left_grasp=torch.ones(1),
+        right_open=torch.zeros(1),
+        right_grasp=torch.ones(1),
+        n_sample=_TEST_GRASP_SAMPLE_COUNT,
+        force_reannotate=False,
+    )
+
+    assert result is runtime
+    assert type(runtime_factory.call_args.kwargs["scene_registry"]) is SceneRegistry
+    assert (
+        runtime_factory.call_args.kwargs["robot_profile"].profile_id
+        == "tutorial.dual_arm"
+    )
+    assert runtime_factory.call_args.kwargs["motion_generator"] is motion_generator
+    assert (
+        HANDOVER_CALL_ID in runtime_factory.call_args.kwargs["call_catalog"].descriptors
+    )
+    assert callable(runtime_factory.call_args.kwargs["effect_verifier"])
+    assert type(runtime_factory.call_args.kwargs["registered_lowerers"][0]) is (
+        TutorialHandOverLowerer
+    )
+
+
 def test_handover_tutorial_verifies_receiver_ownership_at_final_target() -> None:
     physical_object = _PhysicalObject(_pose_at((0.0, 0.0, 0.0)))
     physical_robot = _PhysicalRobot()
@@ -340,7 +452,7 @@ def test_handover_tutorial_verifies_receiver_ownership_at_final_target() -> None
     physical_robot.eef_pose["right_arm"] = final_pose
 
     success = verifier(
-        create_handover_workflow()[1],
+        create_handover_task()[1],
         _request("hand_over", held_control_part="right_arm"),
         _verification_context(),
     )

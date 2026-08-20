@@ -380,10 +380,12 @@ the robot, then applies a short horizontal force pulse so physics and friction
 slide it sideways during one ``PickUp`` invocation whose
 ``GraspGoal.grasp_xpos`` is a ``SceneEntityPose``. The session observes
 ``dynamic_goal_changed`` and ``replanned`` events, discards the entire stale
-approach/close/lift plan, and rebuilds it from the cube's new location. The
-replanned action closes the gripper, verifies the physical lift, and finishes
-while holding the cube. The original and regenerated goal axes remain visible
-for comparison:
+approach/close/lift plan, and rebuilds it from the cube's new location while the
+approach segment is active. After approach is dispatched, Pick stops monitoring
+that object dependency so contact-, close-, and lift-induced movement does not
+trigger a false dynamic-goal update. The replanned action closes the gripper,
+verifies the physical lift, and finishes while holding the cube. The original
+and regenerated goal axes remain visible for comparison:
 
 .. code-block:: bash
 
@@ -460,7 +462,9 @@ dependencies. Object-centric skills may additionally declare an explicit
 ``ObjectSemantics.entity_id`` when they ground an object pose from the same
 scene snapshot; for example, ``PickUp`` automatically tracks that ID. The
 legacy ``ObjectSemantics.entity`` live-pose fallback is deprecated and does not
-create a scene dependency.
+create a scene dependency. An ``ActionPlan`` may bound dependency monitoring
+with ``scene_dependency_end_segment``. ``PickUp`` uses ``approach`` as that
+boundary; joint tracking and collision-world revision checks are unaffected.
 
 Task-state effects
 ------------------

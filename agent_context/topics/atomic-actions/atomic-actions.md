@@ -425,7 +425,7 @@ Scene dependencies must match the poses each primitive actually consumes:
 | `Slide` | `SlideGoal.target_pose` when it is a `SceneEntityPose`; the local grasp mesh does not own the link. |
 | `Twist` | `TwistGoal.target_pose` when it is a `SceneEntityPose`; affordance data is entity-free. |
 | `CoordinatedPlacement` | `SceneEntityPose` values in the placing or support object target pose. |
-| `HandOver` | No semantic-object scene dependency. It verifies stable attachment identity and derives current pose from held state; its middle/final option poses are tensors, and the reused `GraspGoal.grasp_xpos` field is ignored. |
+| `HandOver` | `SceneEntityPose` values in `HandOverOptions.middle_object_pose` or `final_object_pose`. Its current held-object pose is derived from verified attachment state and observed EEF pose; the reused `GraspGoal.grasp_xpos` field is ignored. |
 
 `collect_scene_dependencies()` deliberately stops at `ObjectSemantics`.
 Therefore, a custom action that consumes a snapshot pose through semantic data
@@ -632,15 +632,23 @@ Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 structured invalidation/replan events, and requires terminal completion.
 
 Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
-`place.py` executes `Pick -> Place` through `SemanticSkillRuntime`, verifying
-the observed lift, planned object-to-EEF relation, release pose, and open hand.
-`hand_over.py` demonstrates disjoint dual-arm resources plus an explicit
-`RegisteredSemanticLowerer`, then verifies source release and receiver
-ownership at the final target. Both report structured recovery events and use
-`--diagnose_plan` only for a separate offline compile that projects
-hypothetical effects without executing them. Release and ownership-transfer
-presets disable whole-action effect retries because those physical changes are
-not safely repeatable without state reconciliation.
+Both examples separate `create_*_application()` (scene/profile/runtime and
+default verifier wiring), `create_*_task()` (robot-independent semantic calls),
+and the application-facing `app.run(task, ...)` entry. `app` remains a
+`SemanticSkillRuntime`; there is no tutorial-specific facade. `place.py`
+executes `Pick -> Place`, verifying the observed lift, planned object-to-EEF
+relation, release pose, and open hand. `hand_over.py` demonstrates disjoint
+dual-arm resources plus an explicit `RegisteredSemanticLowerer`, then verifies
+source release and receiver ownership at the final target. Both report
+structured recovery events and use `--diagnose_plan` only for a separate
+offline compile that projects hypothetical effects without executing them.
+Release and ownership-transfer presets disable whole-action effect retries
+because those physical changes are not safely repeatable without state
+reconciliation.
+
+Human-facing architecture and lifecycle documentation lives in
+`docs/source/overview/sim/semantic_skills.md`; the runnable walkthrough is
+indexed at `docs/source/tutorial/semantic_skills.rst`.
 
 The latest validated session context is retained for safe hold if the first
 live observation fails. Environment IDs must remain stable and ordered for the

@@ -35,6 +35,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EffectVerificationRequest,
@@ -171,8 +172,8 @@ def create_robot_profile(
     )
 
 
-def create_place_workflow() -> tuple[Pick, Place]:
-    """Describe a robot-independent pick-and-place workflow."""
+def create_place_task() -> tuple[Pick, Place]:
+    """Declare the robot-independent calls submitted at the application entry."""
     object_ref = SceneObjectRef(OBJECT_ID)
     return (
         Pick(object=object_ref),
@@ -267,6 +268,58 @@ def create_place_effect_verifier(
     return verify
 
 
+def create_place_application(
+    simulation: SimulationManager,
+    robot: Robot,
+    obj: RigidObject,
+    *,
+    hand_open: torch.Tensor,
+    hand_grasp: torch.Tensor,
+    n_sample: int,
+    force_reannotate: bool,
+) -> SemanticSkillRuntime:
+    """Assemble the application-facing runtime for the Place tutorial.
+
+    The returned runtime owns the scene/profile/compiler binding and the
+    default physical-effect verifier. Task code only needs to submit semantic
+    calls through :meth:`SemanticSkillRuntime.run`.
+
+    Args:
+        simulation: Simulation containing the robot and workpiece.
+        robot: Robot executing the semantic calls.
+        obj: Workpiece registered under :data:`OBJECT_ID`.
+        hand_open: Joint target for the semantic ``open`` command.
+        hand_grasp: Joint target for the semantic ``grasp`` command.
+        n_sample: Number of grasp candidates generated during annotation.
+        force_reannotate: Whether to regenerate cached grasp annotations.
+
+    Returns:
+        A fully bound semantic runtime with a default effect verifier.
+    """
+    object_semantics = create_antipodal_semantics(
+        obj,
+        label="cube",
+        n_sample=n_sample,
+        force_reannotate=force_reannotate,
+    )
+    registry, _ = create_graspable_object_registry(
+        simulation,
+        object_id=OBJECT_ID,
+        simulation_uid=OBJECT_SIMULATION_UID,
+        semantic_type="cube",
+        affordance=object_semantics.affordance,
+    )
+    return SemanticSkillRuntime.from_simulation(
+        simulation=simulation,
+        robot=robot,
+        motion_generator=create_curobo_motion_generator(robot),
+        scene_registry=registry,
+        robot_profile=create_robot_profile(hand_open, hand_grasp),
+        effect_verifier=create_place_effect_verifier(obj, robot, hand_open),
+        control_dt=TRAJECTORY_SIM_STEPS * simulation.sim_config.physics_dt,
+    )
+
+
 def main() -> None:
     """Execute and physically verify the semantic Pick-to-Place workflow."""
     args = parse_arguments()
@@ -275,30 +328,16 @@ def main() -> None:
     obj = create_pick_object(sim)
     hand_open, hand_grasp = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-
-    object_semantics = create_antipodal_semantics(
+    app = create_place_application(
+        sim,
+        robot,
         obj,
-        label="cube",
+        hand_open=hand_open,
+        hand_grasp=hand_grasp,
         n_sample=args.n_sample,
         force_reannotate=args.force_reannotate,
     )
-    registry, _ = create_graspable_object_registry(
-        sim,
-        object_id=OBJECT_ID,
-        simulation_uid=OBJECT_SIMULATION_UID,
-        semantic_type="cube",
-        affordance=object_semantics.affordance,
-    )
-    profile = create_robot_profile(hand_open, hand_grasp)
-    runtime = SemanticSkillRuntime.from_simulation(
-        simulation=sim,
-        robot=robot,
-        motion_generator=create_curobo_motion_generator(robot),
-        scene_registry=registry,
-        robot_profile=profile,
-        control_dt=TRAJECTORY_SIM_STEPS * sim.sim_config.physics_dt,
-    )
-    calls = create_place_workflow()
+    calls = create_place_task()
 
     target_pose = calls[1].at
     assert target_pose is not None
@@ -319,7 +358,7 @@ def main() -> None:
     if args.diagnose_plan:
         try:
             trajectory, skill_ids = compile_semantic_workflow_for_diagnostics(
-                runtime,
+                app,
                 calls,
                 workflow_id="tutorial.semantic_pick_place",
             )
@@ -338,10 +377,9 @@ def main() -> None:
         video_prefix="semantic_place_auto_play",
     )
     try:
-        result = runtime.run(
+        result = app.run(
             calls,
             task_id="tutorial.semantic_pick_place",
-            effect_verifier=create_place_effect_verifier(obj, robot, hand_open),
             on_step=create_runtime_step_observer(
                 obj,
                 robot,
@@ -351,7 +389,7 @@ def main() -> None:
         )
         result.require_all_succeeded()
         for _ in range(POST_EXECUTION_UPDATES):
-            runtime.clock.sleep(sim.sim_config.physics_dt)
+            app.clock.sleep(sim.sim_config.physics_dt)
     finally:
         stop_auto_play_recording(sim, recording_started)
     logger.log_info(

@@ -38,6 +38,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
+from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     EffectVerificationRequest,
@@ -274,8 +275,8 @@ def create_robot_profile(
     )
 
 
-def create_handover_workflow() -> tuple[Pick, RegisteredSemanticCall]:
-    """Describe a robot-independent pickup and transfer workflow."""
+def create_handover_task() -> tuple[Pick, RegisteredSemanticCall]:
+    """Declare the robot-independent calls submitted at the application entry."""
     object_ref = SceneObjectRef(OBJECT_ID)
     return (
         Pick(object=object_ref),
@@ -397,6 +398,82 @@ def create_handover_effect_verifier(
     return verify
 
 
+def create_handover_application(
+    simulation: SimulationManager,
+    robot: Robot,
+    obj: RigidObject,
+    *,
+    left_open: torch.Tensor,
+    left_grasp: torch.Tensor,
+    right_open: torch.Tensor,
+    right_grasp: torch.Tensor,
+    n_sample: int,
+    force_reannotate: bool,
+) -> SemanticSkillRuntime:
+    """Assemble the application-facing runtime for the HandOver tutorial.
+
+    The returned runtime owns the registered call extension, robot binding,
+    scene catalog, and default physical-effect verifier. Task code only needs
+    to submit semantic calls through :meth:`SemanticSkillRuntime.run`.
+
+    Args:
+        simulation: Simulation containing the robot and workpiece.
+        robot: Dual-arm robot executing the semantic calls.
+        obj: Workpiece registered under :data:`OBJECT_ID`.
+        left_open: Left-hand target for the semantic ``open`` command.
+        left_grasp: Left-hand target for the semantic ``grasp`` command.
+        right_open: Right-hand target for the semantic ``open`` command.
+        right_grasp: Right-hand target for the semantic ``grasp`` command.
+        n_sample: Number of grasp candidates generated during annotation.
+        force_reannotate: Whether to regenerate cached grasp annotations.
+
+    Returns:
+        A fully bound semantic runtime with a default effect verifier.
+    """
+    object_semantics = create_antipodal_semantics(
+        obj,
+        label="handover object",
+        n_sample=n_sample,
+        force_reannotate=force_reannotate,
+    )
+    registry, _ = create_graspable_object_registry(
+        simulation,
+        object_id=OBJECT_ID,
+        simulation_uid=OBJECT_SIMULATION_UID,
+        semantic_type="handover object",
+        affordance=object_semantics.affordance,
+    )
+    profile = create_robot_profile(
+        left_open,
+        left_grasp,
+        right_open,
+        right_grasp,
+    )
+    call_catalog = builtin_semantic_call_catalog().with_descriptor(
+        SemanticCallDescriptor(
+            call_id=HANDOVER_CALL_ID,
+            spec_type=RegisteredSemanticCall,
+            target_descriptor=AtomicHandOver.descriptor(),
+        )
+    )
+    return SemanticSkillRuntime.from_simulation(
+        simulation=simulation,
+        robot=robot,
+        motion_generator=create_toppra_motion_generator(robot),
+        scene_registry=registry,
+        robot_profile=profile,
+        call_catalog=call_catalog,
+        effect_verifier=create_handover_effect_verifier(
+            obj,
+            robot,
+            left_open=left_open,
+            right_grasp=right_grasp,
+        ),
+        registered_lowerers=(TutorialHandOverLowerer(registry),),
+        control_dt=TRAJECTORY_SIM_STEPS * simulation.sim_config.physics_dt,
+    )
+
+
 def main() -> None:
     """Execute and physically verify the semantic dual-arm workflow."""
     args = parse_arguments()
@@ -412,20 +489,6 @@ def main() -> None:
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
     publish_tutorial_scene(sim, args)
-
-    object_semantics = create_antipodal_semantics(
-        obj,
-        label="handover object",
-        n_sample=args.n_sample,
-        force_reannotate=args.force_reannotate,
-    )
-    registry, _ = create_graspable_object_registry(
-        sim,
-        object_id=OBJECT_ID,
-        simulation_uid=OBJECT_SIMULATION_UID,
-        semantic_type="handover object",
-        affordance=object_semantics.affordance,
-    )
     left_open, left_grasp = get_hand_open_close_qpos(
         robot,
         hand_control_part="left_hand",
@@ -436,30 +499,18 @@ def main() -> None:
         hand_control_part="right_hand",
         close_qpos=HAND_CLOSE_QPOS,
     )
-    profile = create_robot_profile(
-        left_open,
-        left_grasp,
-        right_open,
-        right_grasp,
-    )
-    call_catalog = builtin_semantic_call_catalog().with_descriptor(
-        SemanticCallDescriptor(
-            call_id=HANDOVER_CALL_ID,
-            spec_type=RegisteredSemanticCall,
-            target_descriptor=AtomicHandOver.descriptor(),
-        )
-    )
-    runtime = SemanticSkillRuntime.from_simulation(
-        simulation=sim,
+    app = create_handover_application(
+        sim,
         robot=robot,
-        motion_generator=create_toppra_motion_generator(robot),
-        scene_registry=registry,
-        robot_profile=profile,
-        call_catalog=call_catalog,
-        registered_lowerers=(TutorialHandOverLowerer(registry),),
-        control_dt=TRAJECTORY_SIM_STEPS * sim.sim_config.physics_dt,
+        obj=obj,
+        left_open=left_open,
+        left_grasp=left_grasp,
+        right_open=right_open,
+        right_grasp=right_grasp,
+        n_sample=args.n_sample,
+        force_reannotate=args.force_reannotate,
     )
-    calls = create_handover_workflow()
+    calls = create_handover_task()
 
     wait_for_user = prepare_tutorial_scene(
         sim,
@@ -472,7 +523,7 @@ def main() -> None:
     if args.diagnose_plan:
         try:
             trajectory, skill_ids = compile_semantic_workflow_for_diagnostics(
-                runtime,
+                app,
                 calls,
                 workflow_id="tutorial.semantic_pick_handover",
             )
@@ -492,15 +543,9 @@ def main() -> None:
         look_at=HANDOVER_RECORD_LOOK_AT,
     )
     try:
-        result = runtime.run(
+        result = app.run(
             calls,
             task_id="tutorial.semantic_pick_handover",
-            effect_verifier=create_handover_effect_verifier(
-                obj,
-                robot,
-                left_open=left_open,
-                right_grasp=right_grasp,
-            ),
             on_step=create_runtime_step_observer(
                 obj,
                 robot,
@@ -510,7 +555,7 @@ def main() -> None:
         )
         result.require_all_succeeded()
         for _ in range(POST_EXECUTION_UPDATES):
-            runtime.clock.sleep(sim.sim_config.physics_dt)
+            app.clock.sleep(sim.sim_config.physics_dt)
     finally:
         stop_auto_play_recording(sim, recording_started)
     logger.log_info(
