@@ -657,14 +657,17 @@ class TaskEngineCoordinator:
             },
         )
 
-    @staticmethod
     def _coerce_source(
+        self,
         source: SceneSourceRef | str | Path,
     ) -> SceneSourceRef:
         if isinstance(source, SceneSourceRef):
             return source
         path = Path(source).expanduser()
-        return SceneSourceRef(path)
+        return SceneSourceRef(
+            path,
+            robot_profile=self.scene_adapter.robot_profile,
+        )
 
 
 def _select_candidate_adaptation(

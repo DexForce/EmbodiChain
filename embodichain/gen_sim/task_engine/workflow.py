@@ -49,6 +49,7 @@ from .contracts import canonical_hash
 from .orchestration.artifacts import ArtifactTransaction
 from .orchestration.coordinator import PreparationResult, TaskEngineCoordinator
 from .orchestration.scene_adapter import CandidateSelection, SceneAdapter
+from .orchestration.scene_source import SceneSourceRef
 from .scene_backend import (
     SceneAnalysis,
     SceneEngineBackend,
@@ -629,7 +630,10 @@ class TaskEngineWorkflow:
                     preparation = self.coordinator.prepare(
                         normalized["task_id"],
                         normalized["task_instruction"],
-                        revision.source,
+                        SceneSourceRef(
+                            revision.source,
+                            robot_profile=self.scene_adapter.robot_profile,
+                        ),
                         bundle_root,
                         model=model,
                         candidate_count=effective_candidate_count,

@@ -41,6 +41,7 @@ from embodichain.gen_sim.task_engine.config import (
 from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     CandidateSelection,
 )
+from embodichain.gen_sim.task_engine.orchestration.scene_source import SceneSourceRef
 from embodichain.gen_sim.task_engine.scene_backend import SceneAnalysis, SceneRevision
 from embodichain.gen_sim.task_engine.workflow import (
     SubprocessActionExecutor,
@@ -215,11 +216,13 @@ class _Coordinator:
         self.infeasible_remediation = infeasible_remediation
         self.calls = 0
         self.kwargs: list[dict] = []
+        self.sources: list[object] = []
 
     def prepare(self, _task_id, _instruction, _source, output_dir, **_kwargs):
         status = self.statuses[min(self.calls, len(self.statuses) - 1)]
         self.calls += 1
         self.kwargs.append(dict(_kwargs))
+        self.sources.append(_source)
         root = Path(output_dir)
         root.mkdir(parents=True)
         for name in (
@@ -329,6 +332,29 @@ def test_parallel_workflow_supports_all_four_scene_inputs(
     )
 
     assert result.succeeded
+
+
+def test_parallel_workflow_preserves_requested_robot_profile(tmp_path: Path) -> None:
+    candidates = _candidate_set()
+    coordinator = _Coordinator(["bound"])
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_adapter=SimpleNamespace(robot_profile="ur10"),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        action_agent=_ActionAgent(),
+        coordinator=coordinator,
+        action_executor=_Executor([[True]]),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(),
+        execution_cfg=TaskEngineExecutionCfg(num_envs=1),
+    )
+
+    assert result.succeeded
+    assert isinstance(coordinator.sources[0], SceneSourceRef)
+    assert coordinator.sources[0].robot_profile == "ur10"
 
 
 def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(

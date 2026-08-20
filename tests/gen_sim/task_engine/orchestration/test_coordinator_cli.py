@@ -45,6 +45,7 @@ from embodichain.gen_sim.task_engine.orchestration.coordinator import (
 from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     SceneAdaptation,
 )
+from embodichain.gen_sim.task_engine.orchestration.scene_source import SceneSourceRef
 from embodichain.gen_sim.action_engine.generation.artifacts import artifact_paths
 from embodichain.gen_sim.action_engine.generation.models import PreparedScene
 from embodichain.gen_sim.action_engine.protocol import (
@@ -315,7 +316,7 @@ def test_prepare_rejects_output_overlapping_read_only_source(tmp_path: Path) -> 
     source.mkdir()
     coordinator = TaskEngineCoordinator(
         task_agent=object(),
-        scene_adapter=object(),
+        scene_adapter=SimpleNamespace(robot_profile="franka"),
         action_agent=object(),
         feasibility_broker=object(),
     )
@@ -334,7 +335,10 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path, status="ambiguous")
     task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
-    scene_adapter = SimpleNamespace(adapt=lambda *args, **kwargs: adaptation)
+    scene_adapter = SimpleNamespace(
+        robot_profile="franka",
+        adapt=lambda *args, **kwargs: adaptation,
+    )
     action_agent = SimpleNamespace(
         plan=lambda *_args, **_kwargs: pytest.fail("Action Agent must not run")
     )
@@ -374,7 +378,10 @@ def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
     )
     coordinator = TaskEngineCoordinator(
         task_agent=task_agent,
-        scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
+        scene_adapter=SimpleNamespace(
+            robot_profile="franka",
+            adapt=lambda *args, **kwargs: adaptation,
+        ),
         action_agent=object(),
     )
 
@@ -389,6 +396,38 @@ def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
 
     assert result.status == "ambiguous"
     assert result.candidate_set == candidates
+
+
+def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    adaptation = _adaptation(tmp_path, status="ambiguous")
+    captured: dict[str, object] = {}
+
+    def adapt(_candidates, source, **_kwargs):
+        captured["source"] = source
+        return adaptation
+
+    coordinator = TaskEngineCoordinator(
+        task_agent=SimpleNamespace(
+            generate=lambda *args, **kwargs: pytest.fail("Task Agent must not rerun")
+        ),
+        scene_adapter=SimpleNamespace(robot_profile="ur10", adapt=adapt),
+        action_agent=object(),
+    )
+
+    result = coordinator.prepare(
+        "upright_can",
+        "扶正红色易拉罐。",
+        tmp_path / "scene_config.json",
+        tmp_path / "ur10-bundle",
+        candidate_set=candidates,
+    )
+
+    assert result.status == "ambiguous"
+    assert isinstance(captured["source"], SceneSourceRef)
+    assert captured["source"].robot_profile == "ur10"
 
 
 def test_contradicted_feasibility_publishes_audit_without_planning(
@@ -406,7 +445,10 @@ def test_contradicted_feasibility_publishes_audit_without_planning(
         static_scene_manifest=static_manifest,
     )
     task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
-    scene_adapter = SimpleNamespace(adapt=lambda *args, **kwargs: adaptation)
+    scene_adapter = SimpleNamespace(
+        robot_profile="franka",
+        adapt=lambda *args, **kwargs: adaptation,
+    )
     registry = SimpleNamespace(
         catalog=lambda: {
             name: {
@@ -514,7 +556,10 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
     candidates = _candidate_set()
     adaptation = _adaptation(tmp_path)
     task_agent = SimpleNamespace(generate=lambda *args, **kwargs: candidates)
-    scene_adapter = SimpleNamespace(adapt=lambda *args, **kwargs: adaptation)
+    scene_adapter = SimpleNamespace(
+        robot_profile="franka",
+        adapt=lambda *args, **kwargs: adaptation,
+    )
     graph = {"graph": "planned"}
     action_agent = SimpleNamespace(plan=lambda _plan: deepcopy(graph))
     generator_calls = []
@@ -598,7 +643,10 @@ def test_prepare_falls_back_after_candidate_action_planning_failure(
 
     result = TaskEngineCoordinator(
         task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
-        scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
+        scene_adapter=SimpleNamespace(
+            robot_profile="franka",
+            adapt=lambda *args, **kwargs: adaptation,
+        ),
         action_agent=SimpleNamespace(plan=plan),
         bundle_generator=generator,
     ).prepare(
@@ -630,7 +678,10 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
 
     result = TaskEngineCoordinator(
         task_agent=SimpleNamespace(generate=lambda *args, **kwargs: candidates),
-        scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
+        scene_adapter=SimpleNamespace(
+            robot_profile="franka",
+            adapt=lambda *args, **kwargs: adaptation,
+        ),
         action_agent=SimpleNamespace(
             plan=lambda _plan: (_ for _ in ()).throw(
                 ValueError(
