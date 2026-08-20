@@ -30,7 +30,7 @@ app_workflows.py ────► EmbodiChain Scene Engine CLI + Viser
 | `gradio_app.py` | 唯一启动入口；校验 `EMBODICHAIN_ROOT`，创建 Blocks，设置队列和本地文件访问路径。 |
 | `app_ui.py` | 顶部图标、引擎面板切换和回调绑定；不实现 pipeline。 |
 | `app_asset_engine.py` | SimReady 上传适配、输入/输出 GLB 预览、处理日志，以及 Asset engine 的 Articraft 标签页。 |
-| `app_articraft.py` | Articraft fork checkout/来源检查、Conda 环境调用、Codex provider 生成、USDZ 结果校验和下载。 |
+| `app_articraft.py` | Articraft fork checkout/来源检查、Conda 环境调用、Codex provider 生成、原生 USDZ 校验以及 EmbodiChain USDC 下载。 |
 | `app_workflows.py` | Scene Engine 工作流、Action Engine 的会话状态、Viser 预览和 DexSim。 |
 | `app_processes.py` | 子进程环境、进程组终止、stdout 读取和 pipeline 阶段检测。 |
 | `app_state.py` | `RuntimeState`、互斥锁、进度阶段、运行 token 和耗时统计。 |
@@ -71,7 +71,7 @@ conda run -n embodichain python gradio_app.py
 | Engine | 输入 | 预览/下载 | 实际产物 | 是否启动 DexSim |
 | --- | --- | --- | --- | --- |
 | Asset engine / SimReady | 一个网格、可选材质附件、类别 | 输入 GLB、SimReady GLB、原始输出下载 | `.gen_sim/assets/runs/<token>/` | 否 |
-| Asset engine / Articulation | 文字、可选参考图 | USDZ 下载和 Articraft 交互预览 | `.gen_sim/articraft/runs/` | 否 |
+| Asset engine / Articulation | 文字、可选参考图 | EmbodiChain USDC 下载和 Articraft USDZ 交互预览 | `.gen_sim/articraft/runs/` | 否 |
 | Scene engine | 一张图片，或已保存场景 + 文本编辑指令 | Scene Engine 的 Viser | `.gen_sim/scenes/<image-sha256-前16位>/` | 否 |
 | Action engine | 已生成场景列表、任务、机器人 | 选中场景的 Viser 和 DexSim 视频 | 场景预览来自 `.gen_sim/scenes/`；DexSim 暂沿用现有命令 | 是 |
 
@@ -109,7 +109,7 @@ python -m embodichain.gen_sim.simready_pipeline.cli.start \
 
 ### Articulation：Articraft + Codex
 
-Articulation 标签页根据文本和可选参考图生成可下载的 USDZ。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会从 `ARTICRAFT_REPOSITORY_URL` 的 `main` 分支 clone；已存在时只校验 `origin` 是否指向配置的 fork。随后检查 `ARTICRAFT_CONDA_ENV` 和其中的 Codex CLI。现有的其他 Git checkout 不会被覆盖。运行时通过 `conda run` 激活该环境，并把新版 checkout 的 `src` 作为 `PYTHONPATH`，因此复用既有依赖但不会回退到旧版 Articraft 源码。
+Articulation 标签页根据文本和可选参考图生成原生 USDZ 和可下载的 EmbodiChain USDC。先点击环境检查：若 `ARTICRAFT_ROOT` 不存在，应用会从 `ARTICRAFT_REPOSITORY_URL` 的 `main` 分支 clone；已存在时只校验 `origin` 是否指向配置的 fork。随后检查 `ARTICRAFT_CONDA_ENV` 和其中的 Codex CLI。现有的其他 Git checkout 不会被覆盖。运行时通过 `conda run` 激活该环境，并把新版 checkout 的 `src` 作为 `PYTHONPATH`，因此复用既有依赖但不会回退到旧版 Articraft 源码。
 
 生成流程：
 
@@ -120,12 +120,13 @@ description + optional image
   → workspace/main.py 编辑、compile 反馈和校验
   → runs/<run-id>/record.json + result/model.json
   → runs/<run-id>/result/usdz/<version>.usdz
-  → Gradio 校验 success record 并提供 USDZ 下载
+  → Articraft 后处理生成 result/usdc/<version>/model.usdc
+  → Gradio 校验 success record 和 model.json，提供 EmbodiChain USDC 下载
   → articraft view <run-dir>
   → Gradio iframe
 ```
 
-产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下。生成成功后，Gradio 使用同一 Articraft Conda 环境启动其原生 USDZ Viewer，并将随机本地端口嵌入当前页面。当前产物不能直接当作 Action engine 的 Gym 场景或 SimReady 资产；若要进入后续仿真，需要另行定义转换/导入流程。
+产物、记录和参考图均在 `ARTICRAFT_OUTPUT_ROOT` 下。原生 USDZ 保持 Articraft 的 `/World` 结构供其 viewer 使用；USDC sidecar 将单个 assembly 设为 `defaultPrim` 和 articulation root，供 EmbodiChain/DexSim 直接按 articulation 导入。生成成功后，Gradio 使用同一 Articraft Conda 环境启动原生 USDZ Viewer，并将随机本地端口嵌入当前页面。
 
 `Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，并终止该会话的 Articraft 生成和 Viewer 进程组。
 

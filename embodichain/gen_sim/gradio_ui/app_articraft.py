@@ -17,8 +17,9 @@
 """Codex-backed Articraft generation for the Asset engine.
 
 The integration runs the configured Articraft fork with its ``codex-cli``
-provider and exposes the native USDZ result produced by Articraft. All mutable
-run data is kept under ``ARTICRAFT_OUTPUT_ROOT``.
+provider, keeps its native USDZ viewer, and exposes the EmbodiChain-compatible
+USDC sidecar produced by Articraft. All mutable run data is kept under
+``ARTICRAFT_OUTPUT_ROOT``.
 """
 
 from __future__ import annotations
@@ -461,8 +462,8 @@ def _generation_run_path(log_lines: list[str]) -> Path:
     raise FileNotFoundError("Articraft completed without reporting its run directory.")
 
 
-def _generation_result(log_lines: list[str]) -> tuple[Path, Path]:
-    """Validate an Articraft run record and return its native USDZ artifact."""
+def _generation_result(log_lines: list[str]) -> tuple[Path, Path, Path]:
+    """Return the run, native USDZ, and EmbodiChain-compatible USDC."""
     run_dir = _generation_run_path(log_lines)
     output_runs = (ARTICRAFT_OUTPUT_ROOT / "runs").resolve()
     try:
@@ -483,21 +484,48 @@ def _generation_result(log_lines: list[str]) -> tuple[Path, Path]:
     result_value = str(record.get("result") or "").strip()
     if not result_value:
         raise ValueError("Successful Articraft run has no result artifact.")
-    artifact = (run_dir / result_value).resolve()
+    native_artifact = (run_dir / result_value).resolve()
     try:
-        artifact.relative_to(run_dir)
+        native_artifact.relative_to(run_dir)
     except ValueError as exc:
         raise ValueError("Articraft result points outside its run directory.") from exc
-    if not artifact.is_file() or artifact.suffix.lower() != ".usdz":
-        raise FileNotFoundError(f"Articraft USDZ result is unavailable: {artifact}")
-    return run_dir, artifact
+    if not native_artifact.is_file() or native_artifact.suffix.lower() != ".usdz":
+        raise FileNotFoundError(
+            f"Articraft USDZ result is unavailable: {native_artifact}"
+        )
+
+    manifest_path = run_dir / "result" / "model.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        files = manifest["files"]
+        compatible_value = str(files["embodichain_usdc"]).strip()
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(
+            f"Articraft EmbodiChain artifact is unavailable: {manifest_path}"
+        ) from exc
+    compatible_artifact = (manifest_path.parent / compatible_value).resolve()
+    try:
+        compatible_artifact.relative_to(run_dir)
+    except ValueError as exc:
+        raise ValueError(
+            "Articraft EmbodiChain result points outside its run directory."
+        ) from exc
+    if (
+        not compatible_artifact.is_file()
+        or compatible_artifact.suffix.lower() != ".usdc"
+    ):
+        raise FileNotFoundError(
+            "Articraft EmbodiChain USDC result is unavailable: "
+            f"{compatible_artifact}"
+        )
+    return run_dir, native_artifact, compatible_artifact
 
 
 def _articraft_result_preview(run_dir: Path, artifact: Path) -> str:
-    """Render a compact summary for the native Articraft artifact."""
+    """Render a compact summary for the EmbodiChain-compatible artifact."""
     return (
         "<div style='padding:1rem; border:1px solid #d1d5db; border-radius:8px;'>"
-        "<strong>Articraft USDZ generated successfully.</strong><br>"
+        "<strong>EmbodiChain-compatible USDC generated successfully.</strong><br>"
         f"Artifact: <code>{html.escape(artifact.name)}</code><br>"
         f"Run: <code>{html.escape(run_dir.name)}</code>"
         "</div>"
@@ -572,7 +600,7 @@ def generate_articraft_asset(
     image_value: Any,
     request: gr.Request,
 ) -> Iterator[tuple[Any, ...]]:
-    """Generate one native Articraft USDZ with the fork's Codex provider."""
+    """Generate native USDZ and EmbodiChain-compatible USDC artifacts."""
     session_id = get_request_session_id(request)
     token = _articraft_runs.begin(session_id)
     prompt = (prompt_value or "").strip()
@@ -681,7 +709,7 @@ def generate_articraft_asset(
         return
 
     try:
-        run_dir, artifact = _generation_result(log_lines)
+        run_dir, native_artifact, artifact = _generation_result(log_lines)
     except (OSError, ValueError) as exc:
         yield (
             None,
@@ -695,7 +723,8 @@ def generate_articraft_asset(
     status = (
         "**Articraft generation completed.**\n\n"
         f"- Run: `{run_dir}`\n"
-        f"- USDZ: `{artifact}`"
+        f"- Native USDZ: `{native_artifact}`\n"
+        f"- EmbodiChain USDC: `{artifact}`"
     )
     try:
         preview_html = _start_articraft_viewer(session_id, run_dir)
@@ -718,9 +747,9 @@ def build_articraft_panel() -> None:
     """Render the Articraft tab inside the Asset engine."""
     gr.Markdown(
         "### Articulation\n"
-        "Generate an articulated USDZ from text and an optional reference image. "
-        "The Articraft fork runs its Codex provider, compiler, and validation loop; "
-        "only submit trusted requests."
+        "Generate an EmbodiChain-compatible articulated USDC from text and an optional "
+        "reference image. The Articraft fork also keeps its native USDZ for interactive "
+        "preview; only submit trusted requests."
     )
     with gr.Row():
         configure_button = gr.Button("Configure Articulation & check Codex")
@@ -744,7 +773,7 @@ def build_articraft_panel() -> None:
         )
     with gr.Row():
         output_file = gr.File(
-            label="Compiled Articulation result (.usdz)", interactive=False
+            label="EmbodiChain Articulation result (.usdc)", interactive=False
         )
         record_folder = gr.Textbox(label="Articulation run folder", interactive=False)
     articulation_preview = gr.HTML(_ARTICRAFT_IDLE_PREVIEW)
