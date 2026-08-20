@@ -61,19 +61,23 @@ def test_image_object_analysis_parses_code_fence_and_assigns_stable_ids() -> Non
     assert [asset.id for asset in scene.assets] == ["cup_001"]
 
 
-def test_image_object_analysis_rejects_location_words_in_object_names() -> None:
-    with pytest.raises(ValueError, match="must not contain location"):
-        scene_understanding._parse_image_object_analysis_response(
-            _response(asset_name="left cup")
-        )
+def test_image_object_analysis_accepts_name_with_spatial_words() -> None:
+    scene = scene_understanding._parse_image_object_analysis_response(
+        _response(asset_name="left cup")
+    )
+
+    assert scene.assets[0].name == "left cup"
 
 
-def test_image_object_analysis_rejects_location_words_in_object_descriptions() -> None:
+def test_image_object_analysis_accepts_description_with_structural_words() -> None:
     response = json.loads(_response())
-    response["assets"][0]["description"] = "A small ceramic cup on the table."
+    response["assets"][0]["description"] = "A small ceramic cup with a lid on top."
 
-    with pytest.raises(ValueError, match="description must not contain location"):
-        scene_understanding._parse_image_object_analysis_response(json.dumps(response))
+    scene = scene_understanding._parse_image_object_analysis_response(
+        json.dumps(response)
+    )
+
+    assert scene.assets[0].description == "A small ceramic cup with a lid on top."
 
 
 def test_image_object_analysis_retries_then_updates_scene(tmp_path: Path) -> None:
@@ -153,7 +157,6 @@ def test_initial_scene_graph_places_every_asset_on_table(tmp_path: Path) -> None
             return json.dumps(
                 {
                     "orientation_states": [
-                        {"object_id": "table", "orientation_state": None},
                         {"object_id": "cup_001", "orientation_state": "lying"},
                     ]
                 }
@@ -200,7 +203,7 @@ def test_initial_scene_graph_places_every_asset_on_table(tmp_path: Path) -> None
                 "parent_id": "table",
                 "parent_relation": "on",
                 "table_region": None,
-                "orientation_state": None,
+                "orientation_state": "lying",
             },
         ],
         "relations": [],
@@ -215,7 +218,6 @@ def test_scene_graph_initialization_uses_container_orientation_states(
             return json.dumps(
                 {
                     "orientation_states": [
-                        {"object_id": "table", "orientation_state": None},
                         {
                             "object_id": "bottle_001",
                             "orientation_state": "standing",
@@ -260,7 +262,7 @@ def test_scene_graph_initialization_uses_container_orientation_states(
     )
 
     assert scene_graph.node_by_id()["bottle_001"].orientation_state == "standing"
-    assert scene_graph.node_by_id()["book_001"].orientation_state is None
+    assert scene_graph.node_by_id()["book_001"].orientation_state == "lying"
 
 
 def test_scene_graph_initialization_requires_asset_mask_id_overlay(
@@ -320,5 +322,5 @@ def test_scene_graph_initialization_info_lists_existing_object_ids() -> None:
     )
 
     assert simplified_scene_info == {
-        "existing_object_ids": ["table", "bottle_001", "book_001"],
+        "asset_ids": ["bottle_001", "book_001"],
     }

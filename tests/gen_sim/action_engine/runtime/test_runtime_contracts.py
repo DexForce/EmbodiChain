@@ -589,6 +589,9 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
                 "primary_strategy": "motion_gen",
                 "primary_success": torch.tensor([True, False]),
                 "fallback_used": torch.tensor([False, True]),
+                "planned_trajectory": torch.arange(24, dtype=torch.float32).reshape(
+                    2, 3, 4
+                ),
             }
         ],
     )
@@ -624,6 +627,11 @@ def test_runtime_recorder_writes_checkpoints_and_rendered_env_graphs(
             "primary_strategy": "motion_gen",
             "primary_success": True,
             "fallback_used": False,
+            "planned_trajectory": [
+                [0.0, 1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0, 7.0],
+                [8.0, 9.0, 10.0, 11.0],
+            ],
         }
     ]
     assert checkpoint["events"][1]["assigned_arm"] == "left_arm"

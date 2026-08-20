@@ -1257,7 +1257,7 @@ def test_agent_config_uses_relative_program_paths(gym_export: Path) -> None:
     assert config["runtime_policy"]["motion_defaults"]["PickUp"][
         "lift_height"
     ] == pytest.approx(0.30)
-    assert config["runtime_policy"]["grasp"]["max_open_length"] == pytest.approx(0.115)
+    assert config["runtime_policy"]["grasp"]["max_open_length"] == pytest.approx(0.15)
     assert len(config["runtime_policy_hash"]) == 64
 
 

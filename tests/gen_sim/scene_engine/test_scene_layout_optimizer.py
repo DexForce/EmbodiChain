@@ -30,7 +30,7 @@ from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor import (
     SceneLayoutConstructor,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_optimizer import (
+from embodichain.gen_sim.scene_engine.pipeline.utils.table_surface_layout_optimizer import (
     _table_region_bounds,
 )
 
@@ -134,5 +134,5 @@ def test_layout_constructor_places_new_child_on_parent_top(
         asset for asset in post_edit_scene.assets if asset.id == "cup_001"
     )
     assert placed_cup.center_xy == [0.0, 0.0]
-    # book top is z=0.62 m; cup half-height is 0.1 m and clearance is 0.02 m.
-    assert np.allclose(placed_cup.pos, [0.0, 0.74, 0.0])
+    # Book top is z=0.62 m and the cup is placed directly on it.
+    assert np.allclose(placed_cup.pos, [0.0, 0.72, 0.0])
