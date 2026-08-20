@@ -67,6 +67,9 @@ from embodichain.lab.sim.atomic_actions import (
     Place,
     PlaceGoal,
     PlaceOptions,
+    Pour,
+    PourGoal,
+    PourOptions,
     PlanningContext,
     Press,
     PressAffordance,
@@ -440,6 +443,7 @@ def test_builtin_descriptors_expose_goals_not_legacy_targets() -> None:
     assert AxisAlign.GoalType is AxisAlignGoal
     assert MoveHeldObject.GoalType is HeldObjectPoseGoal
     assert Place.GoalType == (PlaceGoal, AssembleGoal)
+    assert Pour.GoalType is PourGoal
     assert Press.GoalType is PressGoal
     assert Slide.GoalType is SlideGoal
     assert Twist.GoalType is TwistGoal
@@ -463,6 +467,7 @@ def test_interaction_primitives_use_motion_centric_skill_ids() -> None:
         AxisAlignOptions(),
         MoveHeldObjectOptions(),
         PlaceOptions(),
+        PourOptions(),
         PressOptions(),
         SlideOptions(),
         TwistOptions(),
@@ -688,6 +693,178 @@ def test_move_held_object_requires_projected_attachment() -> None:
         torch.bmm(eef_pose, pose_inv(held.object_to_eef)),
     )
     semantics.entity.get_local_pose.assert_not_called()
+
+
+def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
+    generator = _motion_generator()
+    solved_poses: list[torch.Tensor] = []
+
+    def compute_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        solved_poses.append(pose.clone())
+        return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
+
+    generator.robot.compute_ik.side_effect = compute_ik
+    current_eef_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    current_eef_pose[:, 0, 3] = torch.tensor([0.4, 0.7])
+    generator.robot.compute_fk.return_value = current_eef_pose
+    generator.robot.compute_fk.side_effect = None
+    action = _bind_action(generator, Pour())
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        label="pourable-object",
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"arm": _held(semantics)},
+    )
+    context = _context(task)
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="pour",
+            goal=PourGoal(),
+            binding=_binding(),
+            motion_policy=MotionPolicy(sample_count=10),
+            skill_options=PourOptions(rotate_angle=math.pi / 2.0),
+        ),
+        context,
+    )
+
+    expected_rotation = axis_angle_to_rotation_matrix(
+        torch.tensor([math.pi / 2.0, 0.0, 0.0])
+    )
+    assert plan.plan_success.tolist() == [True, True]
+    assert plan.trajectory.positions.shape == (NUM_ENVS, 10, ROBOT_DOF)
+    assert plan.trajectory.duration.tolist() == pytest.approx([9.0 / 60.0] * NUM_ENVS)
+    assert [segment.name for segment in plan.segments] == ["pour"]
+    assert torch.allclose(
+        solved_poses[0][:, :3, :3],
+        expected_rotation.expand(NUM_ENVS, -1, -1),
+        atol=1.0e-6,
+    )
+    assert torch.allclose(
+        solved_poses[0][:, :3, 3],
+        current_eef_pose[:, :3, 3],
+    )
+    assert len(solved_poses) == 2
+    assert torch.allclose(solved_poses[1], current_eef_pose, atol=1.0e-6)
+    assert torch.all(plan.trajectory.positions[:, :, ARM_DOF:] == 1.0)
+    assert plan.expected_effects.is_empty
+    assert context.task is task
+
+
+def test_engine_compiles_pickup_followed_by_pour() -> None:
+    generator = _motion_generator()
+    engine = AtomicActionEngine(
+        generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(
+                open=torch.zeros(HAND_DOF),
+                grasp=torch.ones(HAND_DOF),
+            )
+        },
+    )
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0])),
+        geometry={},
+        label="pourable-object",
+        entity_id="target",
+    )
+    context = _context(
+        scene=_target_scene(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            timestamp=0.0,
+            version=0,
+        )
+    )
+
+    compiled = engine.compile(
+        (
+            ActionInvocation(
+                skill_id="pick_up",
+                goal=GraspGoal(semantics, grasp_xpos=torch.eye(4)),
+                binding=_binding(),
+                motion_policy=MotionPolicy(sample_count=20),
+            ),
+            ActionInvocation(
+                skill_id="pour",
+                goal=PourGoal(),
+                binding=_binding(),
+                motion_policy=MotionPolicy(sample_count=10),
+                skill_options=PourOptions(rotate_angle=math.pi / 2.0),
+            ),
+        ),
+        context,
+    )
+
+    assert compiled.plan_success.tolist() == [True, True]
+    assert [plan.skill_id for plan in compiled.action_plans] == ["pick_up", "pour"]
+    assert compiled.projected_context.get_held_object("arm") is not None
+
+
+def test_pour_requires_exclusively_held_axis_align_affordance() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, Pour())
+    invocation = ActionInvocation(
+        skill_id="pour",
+        goal=PourGoal(),
+        binding=_binding(),
+        motion_policy=MotionPolicy(sample_count=10),
+    )
+
+    with pytest.raises(ValueError, match="run PickUp first"):
+        _plan_action(action, invocation, _context())
+
+    invalid_task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"arm": _held(_semantics())},
+    )
+    with pytest.raises(ValueError, match="AxisAlignAffordance"):
+        _plan_action(action, invocation, _context(invalid_task))
+
+    semantics = ObjectSemantics(
+        affordance=AxisAlignAffordance(),
+        geometry={},
+        label="shared-pourable-object",
+    )
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={
+            "arm": _held(semantics),
+            "alternate_arm": _held(
+                semantics,
+                env_mask=torch.tensor([True, False]),
+            ),
+        },
+    )
+
+    plan = _plan_action(action, invocation, _context(task))
+
+    assert plan.plan_success.tolist() == [False, True]
+    assert torch.allclose(
+        plan.trajectory.positions[0],
+        _context(task)
+        .robot.qpos[0]
+        .unsqueeze(0)
+        .expand(plan.trajectory.waypoint_count, -1),
+    )
+
+
+def test_pour_options_only_contain_rotate_angle_and_require_finite_value() -> None:
+    assert set(PourOptions.__dataclass_fields__) == {"rotate_angle"}
+    assert PourOptions().rotate_angle == pytest.approx(math.pi / 4.0)
+    with pytest.raises(ValueError, match="rotate_angle must be finite"):
+        PourOptions(rotate_angle=float("nan"))
 
 
 def test_strategy_and_sample_count_are_not_action_config_fields() -> None:

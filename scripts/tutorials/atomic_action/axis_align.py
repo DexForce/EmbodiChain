@@ -44,7 +44,7 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_tutorial_robot,
+    add_ur5_gripper_robot,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
     create_curobo_motion_generator,
@@ -88,8 +88,14 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_align_object(sim) -> RigidObject:
+def create_align_object(
+    sim,
+    obj_position=None,
+) -> RigidObject:
     """Create the same settled cube used by the PickUp tutorial."""
+    init_pos = (
+        [*OBJECT_XY, OBJECT_SIZE[2]] if obj_position is None else list(obj_position)
+    )
     obj = sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="cube",
@@ -100,7 +106,7 @@ def create_align_object(sim) -> RigidObject:
                 static_friction=0.99,
             ),
             max_convex_hull_num=16,
-            init_pos=[*OBJECT_XY, OBJECT_SIZE[2]],
+            init_pos=init_pos,
         )
     )
     sim.update(step=10)
@@ -141,7 +147,7 @@ def main() -> None:
     """Plan and replay a grasp, axis alignment, lowering, and release."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot)
+    robot = add_ur5_gripper_robot(sim, tcp_z=0.15)
     obj = create_align_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)

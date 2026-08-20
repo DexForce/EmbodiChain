@@ -45,6 +45,7 @@ from .move_joints import JointPositionGoal, MoveJoints, MoveJointsOptions
 from .pick_up import GraspGoal, PickUp, PickUpOptions
 from .place import AssembleGoal, Place, PlaceGoal, PlaceOptions
 from .press import Press, PressGoal, PressOptions
+from .pour import Pour, PourGoal, PourOptions
 from .slide import (
     Slide,
     SlideGoal,
@@ -59,6 +60,7 @@ BUILTIN_ACTION_TYPES: tuple[type[AtomicAction], ...] = (
     AxisAlign,
     MoveHeldObject,
     Place,
+    Pour,
     Press,
     Slide,
     Twist,
@@ -97,6 +99,9 @@ __all__ = [
     "Place",
     "PlaceGoal",
     "PlaceOptions",
+    "Pour",
+    "PourGoal",
+    "PourOptions",
     "Press",
     "PressGoal",
     "PressOptions",

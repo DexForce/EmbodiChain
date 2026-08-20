@@ -27,6 +27,8 @@ full-robot timed trajectory and uncommitted expected effects.
       AxisAlignOptions
       MoveHeldObject
       MoveHeldObjectOptions
+      Pour
+      PourOptions
       Place
       PlaceOptions
       Press
@@ -51,6 +53,7 @@ full-robot timed trajectory and uncommitted expected effects.
       GraspGoal
       AxisAlignGoal
       HeldObjectPoseGoal
+      PourGoal
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -97,6 +100,14 @@ MoveHeldObject
 --------------
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.move_held_object
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+Pour
+----
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.pour
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict

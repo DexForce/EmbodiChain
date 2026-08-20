@@ -5,7 +5,7 @@
 ```{currentmodule} embodichain.lab.sim.atomic_actions
 ```
 
-EmbodiChain ships eleven built-in action implementations with stable skill IDs;
+EmbodiChain ships thirteen built-in action implementations with stable skill IDs;
 `AtomicActionEngine` creates and registers a fresh instance of every built-in by
 default. Applications select them by stable skill ID rather than registering
 routine instances themselves.
@@ -82,6 +82,13 @@ The animations below are the focused simulator demos under
 `move_held_object` · object-centric transport
 
 <img src="../../../_static/atomic_actions/move_held_object.gif" alt="MoveHeldObject demo" width="480" style="max-width: 100%;" />
+:::
+
+:::{grid-item-card} `Pour`
+:link: builtin-pour
+:link-type: ref
+
+`pour` · rotate an already-held object about its local internal axis
 :::
 
 :::{grid-item-card} `Place`
@@ -167,6 +174,7 @@ The animations below are the focused simulator demos under
 | `move_joints` | `JointPositionGoal` | manipulator `primary` | named target only: command matching `target` | none | none |
 | `pick_up` | `GraspGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | semantic object/entity | attach object to `primary` manipulator |
 | `move_held_object` | `HeldObjectPoseGoal` | manipulator + end effector `primary` | primary: `grasp` | object held by `primary` | preserve attachment |
+| `pour` | `PourGoal` | manipulator + end effector `primary` | primary: `grasp` | exclusively held object with `AxisAlignAffordance` | preserve attachment; open-loop rotate and return |
 | `place` | `PlaceGoal`, `AssembleGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `AssembleGoal` requires an object held by `primary`; ordinary `PlaceGoal` has no planner-enforced attachment precondition | detach object |
 | `press` | `PressGoal` | manipulator + end effector `primary` | primary: `grasp` | `PressAffordance` + target pose | open-loop motion; application verifies contact/actuation |
 | `slide` | `SlideGoal` | manipulator + end effector `primary` | primary: `open`, `grasp` | `SlideAffordance` + link pose | open-loop motion; application verifies joint travel/grasp |
@@ -449,7 +457,7 @@ rather than an unstable cross-product direction.
 
 **Example:** `scripts/tutorials/atomic_action/axis_align.py` provides
 `--alignment upright` (align object-local X to world Z) and
-`--alignment horizontal_align` (align object-local Z to world Y).
+`--alignment horizontal_align` (align object-local X to world Y).
 
 (builtin-move-held-object)=
 
@@ -480,6 +488,38 @@ where another manipulator holds the
 same semantic object or live entity are marked unsuccessful and held in place.
 
 **Example:** `scripts/tutorials/atomic_action/move_held_object.py`
+
+(builtin-pour)=
+
+## `Pour`
+
+Rotates the object already held by the bound `primary` manipulator. `PourGoal`
+contains no object pose because the action consumes the verified
+`HeldObjectState` created by `PickUp`. `PourOptions` contains only the signed
+`rotate_angle` in radians.
+
+The held object's semantics must use `AxisAlignAffordance`. The action obtains
+the current EEF pose from FK at the observed starting arm qpos, reconstructs
+the current object pose using `eef_pose @ inverse(object_to_eef)`, transforms
+the affordance's object-local `internal_axis` into world space, and applies the
+requested rotation while keeping the object origin fixed. The resulting EEF
+target is `target_object_pose @ object_to_eef`. A second target then returns to
+the EEF pose observed by FK, thereby reversing the rotation by the same angle.
+Both targets are submitted in one motion-generation call so a collision-aware
+planner can chain the outbound and return legs.
+
+| Contract | Value |
+|---|---|
+| Skill ID | `pour` |
+| Goal | `PourGoal()` |
+| Options | `PourOptions(rotate_angle=...)` |
+| Binding | manipulator + end effector role `primary` |
+| Precondition | an exclusive `HeldObjectState` whose semantics use `AxisAlignAffordance` |
+| Motion | rotate by `rotate_angle`, then reverse by the same angle, with the hand held at `grasp` |
+| Effect | none; the existing attachment is preserved |
+
+**Example:** `scripts/tutorials/atomic_action/pour.py` compiles a horizontal
+`PickUp` followed by `Pour`.
 
 (builtin-place)=
 

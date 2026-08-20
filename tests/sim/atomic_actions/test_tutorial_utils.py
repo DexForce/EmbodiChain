@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 from argparse import Namespace
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
@@ -424,9 +425,23 @@ def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:
         (0.0, 0.0, 1.0),
     )
     assert module.ALIGNMENT_AXES["horizontal_align"] == (
-        (0.0, 0.0, 1.0),
+        (1.0, 0.0, 0.0),
         (0.0, 1.0, 0.0),
     )
+
+
+def test_pour_tutorial_uses_configured_pickup_and_local_rotation_axis() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.pour")
+
+    with patch("sys.argv", ["pour.py"]):
+        default_args = module.parse_arguments()
+    with patch("sys.argv", ["pour.py", "--rotate_angle", "-1.25"]):
+        configured_args = module.parse_arguments()
+
+    assert default_args.rotate_angle == pytest.approx(math.pi / 4.0)
+    assert configured_args.rotate_angle == pytest.approx(-1.25)
+    assert module.APPROACH_DIRECTION == pytest.approx((-0.707, 0.0, -0.707))
+    assert module.POUR_INTERNAL_AXIS == (1.0, 0.0, 0.0)
 
 
 def test_replay_timed_trajectory_uses_arrival_intervals() -> None:

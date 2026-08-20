@@ -80,6 +80,8 @@ embodichain.lab.sim.atomic_actions
       AxisAlignOptions
       AxisAlignAffordance
       HeldObjectPoseGoal
+      PourGoal
+      PourOptions
       PlaceGoal
       AssembleGoal
       PressGoal
@@ -98,6 +100,7 @@ embodichain.lab.sim.atomic_actions
       PickUp
       AxisAlign
       MoveHeldObject
+      Pour
       Place
       Press
       Slide
