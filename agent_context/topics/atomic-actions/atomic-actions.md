@@ -231,52 +231,6 @@ runtime payload, and the target's transport is registered with the
 `EndpointCommandRouter`. Successful binding or a non-conflicting claim alone is
 not proof that a planner/controller path or safe concurrent execution exists.
 
-## Semantic call integration and compilation
-
-`embodichain.lab.sim.skills` adds a side-effect-free semantic layer above
-`AtomicActionEngine`:
-
-- `calls.py` owns immutable, robot-independent call values: `Pick`, `Place`,
-  `HandOver`, and the data-only `RegisteredSemanticCall`. `SemanticCallCatalog`
-  is a discovery catalog; it neither installs actions nor executes providers.
-- `SceneRegistry` indexes typed/versioned affordance capabilities and
-  capability-scoped defaults. `SceneManifest` is its provider-free projection.
-  `SemanticIntegrationManifest.link_call()` resolves canonical scene references,
-  affordances, declared resources, and policy presets without observing state or
-  running a planner.
-- `SemanticIntegrationManifest.bind()` requires the live registry to match the
-  static scene manifest, binds the robot profile to the exact engine, and returns
-  a `BoundSemanticIntegration`. Its `link_call()` additionally verifies the
-  installed skill descriptor, physical resource binding, and preset.
-- `SemanticSkillCompiler.analyze()` links an ordered workflow, validates all
-  reachable lowerers/grounders/providers, tracks attach/release/transfer
-  dependencies, and records downstream object targets. It is provider-free.
-- `SemanticSkillCompiler.ground()` lowers exactly one analyzed call against the
-  latest `PlanningContext` into an `ActionInvocation` plus an eligibility mask.
-  It does not plan, execute, or commit effects; pass the invocation to the
-  ordinary engine lifecycle.
-
-Relation targets dispatch through an exact
-`(capability, affordance type, revision)` `RelationTargetGrounder`.
-Hand-over poses dispatch through the provider ID selected by
-`RobotSkillProfile.grounding_providers`. Registered calls require both a catalog
-descriptor and an explicitly installed `RegisteredSemanticLowerer`; Version 1
-treats them as opaque workflow effect boundaries.
-
-The compiler preserves object-space intent. Pick look-ahead targets remain
-late-bound when they depend on scene relations, while Place and HandOver lower
-only from verified held-object state and compose the observed
-`object_to_eef` transform. A lowering has no common goal discriminator contract:
-registered lowerers are checked against the target `SkillDescriptor`, and the
-installed action validates its concrete goal/options types.
-
-Workflows are owned by one compiler, engine binding owner, and monotonic
-`skill_catalog_revision`. Registering or replacing an agent-visible action
-invalidates bound profiles and analyzed workflows even when the replacement has
-an equal descriptor; rebind the profile and analyze again. Static and live
-integration failures use `SemanticValidationError` with a stable code, full
-path, and canonical candidates.
-
 ## Object identity and pose grounding
 
 `ObjectSemantics.entity_id` is the typed core's canonical snapshot-key lowering

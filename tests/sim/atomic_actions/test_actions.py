@@ -192,6 +192,7 @@ def _motion_generator() -> MotionGenerator:
     generator.device = torch.device("cpu")
     generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
+    generator.planner.collision_world_info = None
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
     generator.planner.default_plan_options.return_value = PlanOptions()
@@ -432,6 +433,7 @@ def _dual_motion_generator() -> MotionGenerator:
     generator.device = torch.device("cpu")
     generator.planner = Mock()
     generator.planner.cfg.planner_type = "stub"
+    generator.planner.collision_world_info = None
     generator.planner.preserve_plan_samples = False
     generator.planner.supports_move_type.return_value = False
     generator.planner.default_plan_options.return_value = PlanOptions()
