@@ -1,0 +1,624 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Simulation ports for :class:`~.runner.ExecutionRunner`."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+import math
+from typing import TYPE_CHECKING
+
+import torch
+
+from embodichain.utils import configclass
+
+from .bindings import JointPositionTarget, RuntimeEndpointTarget
+from .runner import (
+    CommandAcknowledgement,
+    CommandAckStatus,
+)
+from .runtime_commands import JointPositionPayload, RuntimeCommandFrame
+from .scene import SceneProvider
+from .state import (
+    EntityState,
+    PlanningContext,
+    RobotObservation,
+    SceneSnapshot,
+    TaskState,
+)
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import RigidObject, Robot
+    from embodichain.lab.sim.sim_manager import SimulationManager
+
+
+@configclass
+class RigidObjectSceneProviderCfg:
+    """Material-pose thresholds used to advance scene revisions."""
+
+    translation_threshold: float = 1.0e-4
+    """Minimum translation in metres considered a scene change."""
+
+    rotation_threshold: float = 1.0e-3
+    """Minimum rotation in radians considered a scene change."""
+
+    def __post_init__(self) -> None:
+        thresholds = (
+            ("translation_threshold", self.translation_threshold),
+            ("rotation_threshold", self.rotation_threshold),
+        )
+        for name, value in thresholds:
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative.")
+
+
+class RigidObjectSceneProvider:
+    """Observe simulation rigid objects and maintain scene revisions.
+
+    The provider increments the general scene version when any tracked entity
+    moves materially. For IDs declared as collision entities it additionally
+    increments a per-environment collision-world revision, allowing one batch
+    row to invalidate its trajectory without failing unrelated rows.
+
+    Args:
+        entities: Stable entity IDs mapped to live simulation rigid objects.
+        collision_entity_ids: Tracked IDs consumed as dynamic planner obstacles.
+        cfg: Optional material-change thresholds.
+    """
+
+    def __init__(
+        self,
+        entities: Mapping[str, RigidObject],
+        *,
+        collision_entity_ids: Sequence[str] = (),
+        cfg: RigidObjectSceneProviderCfg | None = None,
+    ) -> None:
+        normalized = dict(entities)
+        if not normalized:
+            raise ValueError("entities must contain at least one rigid object.")
+        if not all(
+            isinstance(entity_id, str) and entity_id for entity_id in normalized
+        ):
+            raise ValueError("Scene entity IDs must be non-empty strings.")
+        collision_ids = tuple(collision_entity_ids)
+        if len(set(collision_ids)) != len(collision_ids):
+            raise ValueError("collision_entity_ids must be unique.")
+        missing = set(collision_ids).difference(normalized)
+        if missing:
+            raise ValueError(
+                "collision_entity_ids reference untracked objects: "
+                f"{sorted(missing)}."
+            )
+        self.entities = normalized
+        self.collision_entity_ids = collision_ids
+        self.cfg = cfg if cfg is not None else RigidObjectSceneProviderCfg()
+        self._last_timestamp: float | None = None
+        self._env_ids: torch.Tensor | None = None
+        self._published_poses: dict[str, torch.Tensor] = {}
+        self._scene_version = 0
+        self._collision_revisions: list[int] = []
+
+    def snapshot(
+        self,
+        *,
+        timestamp: float,
+        env_ids: torch.Tensor,
+    ) -> SceneSnapshot:
+        """Capture object poses and advance material-change revisions.
+
+        Args:
+            timestamp: Current simulation observation time.
+            env_ids: Stable correlation IDs whose order matches object rows.
+
+        Returns:
+            Versioned scene snapshot with per-environment collision revisions.
+        """
+        if not math.isfinite(timestamp) or timestamp < 0.0:
+            raise ValueError("timestamp must be finite and non-negative.")
+        if self._last_timestamp is not None and timestamp < self._last_timestamp:
+            raise ValueError("Scene provider timestamps must be monotonic.")
+        if (
+            not isinstance(env_ids, torch.Tensor)
+            or env_ids.dtype != torch.long
+            or env_ids.dim() != 1
+            or env_ids.numel() == 0
+        ):
+            raise ValueError("env_ids must be a non-empty 1D int64 tensor.")
+        stable_ids = env_ids.detach().to("cpu")
+        if self._env_ids is None:
+            self._env_ids = stable_ids.clone()
+            self._collision_revisions = [0] * int(env_ids.numel())
+        elif not torch.equal(stable_ids, self._env_ids):
+            raise ValueError("Scene provider env_ids must remain stable and ordered.")
+
+        poses = {
+            entity_id: self._read_pose(entity_id, entity, int(env_ids.numel()))
+            for entity_id, entity in self.entities.items()
+        }
+        if self._published_poses:
+            changed_by_entity = {
+                entity_id: self._pose_change_mask(
+                    self._published_poses[entity_id], current_pose
+                )
+                for entity_id, current_pose in poses.items()
+            }
+            if any(mask.any().item() for mask in changed_by_entity.values()):
+                self._scene_version += 1
+            collision_changed = torch.zeros(env_ids.numel(), dtype=torch.bool)
+            for entity_id in self.collision_entity_ids:
+                collision_changed |= changed_by_entity[entity_id]
+            for row in collision_changed.nonzero(as_tuple=False).flatten().tolist():
+                self._collision_revisions[row] += 1
+
+            # Noise is measured against the last materially published pose,
+            # not the immediately preceding sample. Otherwise a slowly moving
+            # object can remain invisible forever when every individual step
+            # stays below the configured threshold.
+            for entity_id, changed in changed_by_entity.items():
+                if changed.any():
+                    changed_on_pose_device = changed.to(poses[entity_id].device)
+                    self._published_poses[entity_id][changed_on_pose_device] = poses[
+                        entity_id
+                    ][changed_on_pose_device]
+        else:
+            self._published_poses = {
+                entity_id: pose.clone() for entity_id, pose in poses.items()
+            }
+
+        self._last_timestamp = timestamp
+        return SceneSnapshot(
+            timestamp=timestamp,
+            version=self._scene_version,
+            entities={
+                entity_id: EntityState(pose) for entity_id, pose in poses.items()
+            },
+            collision_world_revision=tuple(self._collision_revisions),
+            collision_entity_ids=self.collision_entity_ids,
+        )
+
+    @staticmethod
+    def _read_pose(
+        entity_id: str,
+        entity: RigidObject,
+        batch_size: int,
+    ) -> torch.Tensor:
+        """Read and validate one rigid-object pose batch."""
+        pose = entity.get_local_pose(to_matrix=True)
+        if not isinstance(pose, torch.Tensor):
+            raise TypeError(
+                f"Scene entity {entity_id!r} get_local_pose() must return a tensor."
+            )
+        if pose.shape == (4, 4):
+            return pose.unsqueeze(0).expand(batch_size, -1, -1).clone()
+        if pose.shape != (batch_size, 4, 4):
+            raise ValueError(
+                f"Scene entity {entity_id!r} pose must have shape "
+                f"({batch_size}, 4, 4)."
+            )
+        return pose.clone()
+
+    def _pose_change_mask(
+        self,
+        previous: torch.Tensor,
+        current: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return a CPU mask of rows with material pose changes."""
+        current = current.to(device=previous.device, dtype=previous.dtype)
+        translation = torch.linalg.vector_norm(
+            current[:, :3, 3] - previous[:, :3, 3], dim=1
+        )
+        relative_rotation = torch.bmm(
+            previous[:, :3, :3].transpose(1, 2),
+            current[:, :3, :3],
+        )
+        cosine = (
+            (relative_rotation.diagonal(dim1=1, dim2=2).sum(dim=1) - 1.0) / 2.0
+        ).clamp(-1.0, 1.0)
+        rotation = torch.acos(cosine)
+        return (
+            (
+                (translation > self.cfg.translation_threshold)
+                | (rotation > self.cfg.rotation_threshold)
+            )
+            .detach()
+            .to("cpu")
+        )
+
+
+SceneSnapshotSupplier = Callable[[float], SceneSnapshot]
+"""Callback that returns the latest scene snapshot for a simulation timestamp."""
+
+
+class SimulationExecutionAdapter:
+    """Adapt a simulation robot to observation, command, and clock protocols.
+
+    The adapter writes joint targets synchronously. Time advances only through
+    :meth:`sleep`, which converts the requested runner interval to an integral
+    number of physics updates. This makes :meth:`ExecutionRunner.run_until_blocked`
+    deterministic and avoids wall-clock sleeps in headless simulation.
+
+    Args:
+        simulation: Simulation manager advanced by the execution clock.
+        robot: Robot observed and commanded by the adapter.
+        physics_dt: Optional physics period. Defaults to the simulation config.
+        control_dt: Optional command period exposed to action interpolation.
+            Defaults to ``physics_dt`` because that is the adapter's minimum
+            executable command cadence.
+        env_ids: Optional stable correlation IDs matching every robot row. They
+            are not used as simulator indices; row order maps to robot instances.
+        scene_provider: Optional provider for versioned scene observations.
+        scene_supplier: Optional callback for versioned scene observations.
+            It is mutually exclusive with ``scene_provider``.
+        initial_time: Initial elapsed simulation time in seconds.
+    """
+
+    transport_id = JointPositionTarget.TRANSPORT_ID
+    payload_type = JointPositionPayload
+
+    def __init__(
+        self,
+        simulation: SimulationManager,
+        robot: Robot,
+        *,
+        physics_dt: float | None = None,
+        control_dt: float | None = None,
+        env_ids: torch.Tensor | None = None,
+        scene_provider: SceneProvider | None = None,
+        scene_supplier: SceneSnapshotSupplier | None = None,
+        initial_time: float = 0.0,
+    ) -> None:
+        if not math.isfinite(initial_time) or initial_time < 0.0:
+            raise ValueError("initial_time must be finite and non-negative.")
+        resolved_physics_dt = (
+            float(simulation.sim_config.physics_dt)
+            if physics_dt is None
+            else float(physics_dt)
+        )
+        if not math.isfinite(resolved_physics_dt) or resolved_physics_dt <= 0.0:
+            raise ValueError("physics_dt must be finite and greater than zero.")
+        resolved_control_dt = (
+            resolved_physics_dt if control_dt is None else float(control_dt)
+        )
+        if not math.isfinite(resolved_control_dt) or resolved_control_dt <= 0.0:
+            raise ValueError("control_dt must be finite and greater than zero.")
+        qpos = robot.get_qpos()
+        if not isinstance(qpos, torch.Tensor) or qpos.dim() != 2:
+            raise ValueError("robot.get_qpos() must return shape (B, robot_dof).")
+        if env_ids is None:
+            env_ids = torch.arange(qpos.shape[0], dtype=torch.long, device=qpos.device)
+        if (
+            not isinstance(env_ids, torch.Tensor)
+            or env_ids.dtype != torch.long
+            or env_ids.shape != (qpos.shape[0],)
+        ):
+            raise ValueError("env_ids must be int64 with one ID per robot row.")
+        if env_ids.device != qpos.device:
+            raise ValueError("env_ids and robot state must share a device.")
+        if torch.unique(env_ids).numel() != env_ids.numel():
+            raise ValueError("env_ids must be unique.")
+
+        self.simulation = simulation
+        self.robot = robot
+        self.physics_dt = resolved_physics_dt
+        self.control_dt = resolved_control_dt
+        self.env_ids = env_ids.clone()
+        self._robot_env_indices = list(range(qpos.shape[0]))
+        if scene_provider is not None and scene_supplier is not None:
+            raise ValueError(
+                "scene_provider and scene_supplier are mutually exclusive."
+            )
+        if scene_provider is not None and not isinstance(scene_provider, SceneProvider):
+            raise TypeError("scene_provider must implement SceneProvider.")
+        self.scene_provider = scene_provider
+        if scene_supplier is not None and not callable(scene_supplier):
+            raise TypeError("scene_supplier must be callable.")
+        self.scene_supplier = scene_supplier
+        self._elapsed_time = float(initial_time)
+
+    def now(self) -> float:
+        """Return elapsed simulation time in seconds.
+
+        Returns:
+            Elapsed simulation time in seconds.
+        """
+        return self._elapsed_time
+
+    def sleep(self, duration: float) -> None:
+        """Advance physics by at least the requested duration.
+
+        Args:
+            duration: Requested simulated duration in seconds.
+        """
+        if not math.isfinite(duration) or duration < 0.0:
+            raise ValueError("duration must be finite and non-negative.")
+        if duration == 0.0:
+            return
+        step_ratio = duration / self.physics_dt
+        nearest_step_count = round(step_ratio)
+        step_count = max(
+            1,
+            (
+                nearest_step_count
+                if math.isclose(
+                    step_ratio,
+                    nearest_step_count,
+                    rel_tol=1.0e-6,
+                    abs_tol=1.0e-9,
+                )
+                else math.ceil(step_ratio)
+            ),
+        )
+        self.simulation.update(physics_dt=self.physics_dt, step=step_count)
+        self._elapsed_time += step_count * self.physics_dt
+
+    def observe(self, task_state: TaskState) -> PlanningContext:
+        """Capture full-robot state and the latest supplied scene snapshot.
+
+        Args:
+            task_state: Verified symbolic state owned by the execution session.
+
+        Returns:
+            Planning context timestamped with elapsed simulation time.
+        """
+        qpos = self.robot.get_qpos()
+        qvel = self._read_optional_tensor("get_qvel")
+        if qvel is None:
+            qvel = torch.zeros_like(qpos)
+        qeffort = self._read_optional_tensor("get_qf")
+        if qeffort is None:
+            qeffort = self._read_optional_proprioception_tensor("qf")
+        if self.scene_provider is not None:
+            scene = self.scene_provider.snapshot(
+                timestamp=self._elapsed_time,
+                env_ids=self.env_ids,
+            )
+            scene_source = "scene_provider"
+        elif self.scene_supplier is not None:
+            scene = self.scene_supplier(self._elapsed_time)
+            scene_source = "scene_supplier"
+        else:
+            scene = SceneSnapshot(timestamp=self._elapsed_time, version=0)
+            scene_source = "default scene"
+        if not isinstance(scene, SceneSnapshot):
+            raise TypeError(f"{scene_source} must return a SceneSnapshot.")
+        return PlanningContext(
+            robot=RobotObservation(
+                timestamp=self._elapsed_time,
+                qpos=qpos,
+                qvel=qvel,
+                qeffort=qeffort,
+            ),
+            task=task_state,
+            scene=scene,
+            env_ids=self.env_ids,
+            control_dt=self.control_dt,
+        )
+
+    def send(
+        self,
+        command: RuntimeCommandFrame,
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
+        """Write joint endpoint targets and neutralize inactive rows.
+
+        Args:
+            command: Joint-position endpoint frame. Inactive rows are replaced
+                with observed positions by this transport.
+            timeout: Positive acknowledgement deadline. Simulation writes are
+                synchronous, so this is validated but otherwise unused.
+
+        Returns:
+            Accepted acknowledgement or a rejected diagnostic.
+        """
+        self._validate_timeout(timeout)
+        try:
+            self._validate_command_frame(command)
+            observed_positions = self.robot.get_qpos()
+            for endpoint_command in command.commands:
+                target = endpoint_command.target
+                payload = endpoint_command.payload
+                assert isinstance(target, JointPositionTarget)
+                assert isinstance(payload, JointPositionPayload)
+                joint_ids = list(target.joint_ids)
+                positions = torch.where(
+                    command.active_mask[:, None],
+                    payload.positions,
+                    observed_positions[:, joint_ids],
+                )
+                self.robot.set_qpos(
+                    positions,
+                    joint_ids=joint_ids,
+                    env_ids=self._robot_env_indices,
+                )
+                velocities = payload.velocities
+                if velocities is None and not command.active_mask.all().item():
+                    observed_velocities = self._read_optional_tensor("get_qvel")
+                    velocities = (
+                        torch.zeros_like(observed_positions[:, joint_ids])
+                        if observed_velocities is None
+                        else observed_velocities[:, joint_ids]
+                    )
+                if velocities is not None:
+                    velocities = torch.where(
+                        command.active_mask[:, None],
+                        velocities,
+                        torch.zeros_like(velocities),
+                    )
+                    self.robot.set_qvel(
+                        velocities,
+                        joint_ids=joint_ids,
+                        env_ids=self._robot_env_indices,
+                    )
+            return CommandAcknowledgement.accepted_ack()
+        except Exception as exc:
+            return CommandAcknowledgement(
+                CommandAckStatus.REJECTED,
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    def hold(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        context: PlanningContext,
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
+        """Set every represented joint endpoint to an observed-position hold.
+
+        Args:
+            targets: Joint-position destinations to place in a safe hold.
+            context: Latest observed positions and stable environment IDs.
+            timeout: Positive acknowledgement deadline.
+
+        Returns:
+            Accepted acknowledgement or a rejected diagnostic.
+        """
+        self._validate_timeout(timeout)
+        try:
+            self._validate_targets(targets)
+            if not isinstance(context, PlanningContext):
+                raise TypeError("context must be a PlanningContext.")
+            if not torch.equal(context.env_ids, self.env_ids):
+                raise ValueError("Hold context env_ids must match the adapter.")
+            if context.robot.qpos.shape != self.robot.get_qpos().shape:
+                raise ValueError("Hold context qpos shape must match the robot.")
+            for target in targets:
+                assert isinstance(target, JointPositionTarget)
+                joint_ids = list(target.joint_ids)
+                observed_positions = context.robot.qpos[:, joint_ids]
+                self.robot.set_qpos(
+                    observed_positions,
+                    joint_ids=joint_ids,
+                    env_ids=self._robot_env_indices,
+                )
+                self.robot.set_qvel(
+                    torch.zeros_like(observed_positions),
+                    joint_ids=joint_ids,
+                    env_ids=self._robot_env_indices,
+                )
+            return CommandAcknowledgement.accepted_ack()
+        except Exception as exc:
+            return CommandAcknowledgement(
+                CommandAckStatus.REJECTED,
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    def cancel(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
+        """Acknowledge cancellation of synchronous simulation target writes.
+
+        Args:
+            targets: Joint-position destinations whose queued work is cancelled.
+            timeout: Positive acknowledgement deadline.
+
+        Returns:
+            Accepted acknowledgement. The following ``hold`` call installs the
+            actual safe target.
+        """
+        self._validate_timeout(timeout)
+        try:
+            self._validate_targets(targets)
+        except Exception as exc:
+            return CommandAcknowledgement(
+                CommandAckStatus.REJECTED,
+                f"{type(exc).__name__}: {exc}",
+            )
+        return CommandAcknowledgement.accepted_ack(
+            "Simulation commands are synchronous; no queued command remained."
+        )
+
+    def _read_optional_tensor(self, method_name: str) -> torch.Tensor | None:
+        """Read an optional full-robot tensor from the robot API."""
+        method = getattr(self.robot, method_name, None)
+        if not callable(method):
+            return None
+        try:
+            value = method()
+        except (AttributeError, NotImplementedError):
+            return None
+        return value if isinstance(value, torch.Tensor) else None
+
+    def _read_optional_proprioception_tensor(
+        self,
+        field_name: str,
+    ) -> torch.Tensor | None:
+        """Read an optional tensor from the robot proprioception mapping."""
+        method = getattr(self.robot, "get_proprioception", None)
+        if not callable(method):
+            return None
+        try:
+            value = method()[field_name]
+        except (AttributeError, KeyError, NotImplementedError, TypeError):
+            return None
+        return value if isinstance(value, torch.Tensor) else None
+
+    def _validate_command_frame(self, command: RuntimeCommandFrame) -> None:
+        """Validate one joint-position frame against the attached robot."""
+        if not isinstance(command, RuntimeCommandFrame):
+            raise TypeError("command must be a RuntimeCommandFrame.")
+        if not torch.equal(command.env_ids, self.env_ids):
+            raise ValueError("Command env_ids must match the simulation adapter.")
+        self._validate_targets(command.targets)
+        for endpoint_command in command.commands:
+            if not isinstance(endpoint_command.payload, JointPositionPayload):
+                raise TypeError(
+                    "SimulationExecutionAdapter accepts JointPositionPayload only."
+                )
+
+    def _validate_targets(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+    ) -> None:
+        """Validate joint target ownership and robot dimensions."""
+        if isinstance(targets, (str, bytes)):
+            raise TypeError("targets must be an iterable of runtime targets.")
+        qpos = self.robot.get_qpos()
+        seen_joints: set[int] = set()
+        for target in targets:
+            if not isinstance(target, JointPositionTarget):
+                raise TypeError(
+                    "SimulationExecutionAdapter accepts JointPositionTarget only."
+                )
+            if target.transport_id != self.transport_id:
+                raise ValueError("Target transport does not match this adapter.")
+            if max(target.joint_ids) >= qpos.shape[1]:
+                raise ValueError(
+                    f"Target {target.target_id!r} references a joint outside robot DOF."
+                )
+            overlaps = seen_joints.intersection(target.joint_ids)
+            if overlaps:
+                raise ValueError(f"Joint targets overlap on IDs {sorted(overlaps)}.")
+            seen_joints.update(target.joint_ids)
+
+    @staticmethod
+    def _validate_timeout(timeout: float) -> None:
+        """Validate an acknowledgement timeout."""
+        if not math.isfinite(timeout) or timeout <= 0.0:
+            raise ValueError("timeout must be finite and greater than zero.")
+
+
+__all__ = [
+    "RigidObjectSceneProvider",
+    "RigidObjectSceneProviderCfg",
+    "SceneSnapshotSupplier",
+    "SimulationExecutionAdapter",
+]

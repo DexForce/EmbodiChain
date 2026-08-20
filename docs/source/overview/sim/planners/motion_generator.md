@@ -1,10 +1,21 @@
 # MotionGenerator
 
-`MotionGenerator` provides a unified interface for robot trajectory planning, supporting both joint space and Cartesian space interpolation. It dispatches to the selected backend: TOPPRA and NeuralPlanner retain their existing behavior, while the optional cuRobo V2 backend performs collision-aware planning against an explicit cuRobo world.
+`MotionGenerator` is the single stateful interface for robot trajectory
+planning. `MotionGenOptions.strategy` selects the configured planner backend
+(`"motion_gen"`) or deterministic waypoint IK/joint interpolation
+(`"ik_interp"`). TOPPRA and NeuralPlanner retain their existing behavior, while
+the optional cuRobo V2 backend performs collision-aware planning against an
+explicit cuRobo world.
 
 ## Features
 
 * **Unified planning interface**: Supports interpolation-oriented planners and collision-aware cuRobo V2 planning through one `generate()` API.
+* **Explicit strategy**: Accepts only `"motion_gen"` or `"ik_interp"`; no
+  planner bypass is inferred from a missing backend-options object.
+* **Strict timed results**: A planner result with positions must include
+  per-waypoint `dt`; `duration` is derived from it. The generator validates that
+  contract, preserves total duration when resampling, and holds failed rows at
+  `start_qpos`.
 * **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CuroboPlanner backend, which plans on CUDA with either CPU or CUDA physics simulation.
 * **Automatic constraint handling**: Retrieves velocity and acceleration limits from the robot or uses user-specified/default values.
 * **Backend-aware target handling**: Generates discrete trajectories using joint or Cartesian interpolation where appropriate; cuRobo receives original Cartesian goals so it can perform collision-aware IK itself.
@@ -19,6 +30,9 @@ through `supported_move_types` and exposes them through
 * forward native EEF or joint targets unchanged;
 * convert EEF targets into joint waypoints only for joint-only backends such as
   TOPPRA when `MotionGenOptions.is_interpolate=True`;
+* fall back to deterministic joint interpolation when a backend cannot consume
+  a `JOINT_MOVE` target and explicit `start_qpos`/`sample_count`/
+  `interpolation_dt` are available;
 * reject unsupported target types before entering the backend.
 
 The built-in declarations are:
@@ -112,6 +126,7 @@ plan_opts = ToppraPlanOptions(
 
 # Create motion generation options
 motion_opts = MotionGenOptions(
+    strategy="motion_gen",
     plan_opts=plan_opts,
     control_part="arm",
     is_interpolate=False,
@@ -126,6 +141,23 @@ result = motion_gen.generate(
     options=motion_opts
 )
 ```
+
+For deterministic interpolation, select the timing explicitly:
+
+```python
+motion_opts = MotionGenOptions(
+    strategy="ik_interp",
+    sample_count=50,
+    interpolation_dt=0.02,
+    start_qpos=start_qpos,
+    control_part="arm",
+)
+```
+
+Missing interpolation timing is an error; it is never inferred from an engine
+or global default. Custom planners likewise must return `PlanResult.dt` with
+shape `(B, N)` whenever they return positions; `duration` is exposed as the
+derived value `dt.sum(dim=1)`.
 
 #### Cartesian Space Planning
 
@@ -145,6 +177,7 @@ plan_opts = ToppraPlanOptions(
 
 # Create motion generation options with interpolation for smoother Cartesian motion
 motion_opts = MotionGenOptions(
+    strategy="motion_gen",
     plan_opts=plan_opts,
     control_part="arm",
     is_interpolate=True,  # Enable pre-interpolation for Cartesian moves
@@ -172,6 +205,11 @@ result = motion_gen.generate(
 )
 ```
 
+For deterministic planning without invoking the configured backend, pass
+`strategy="ik_interp"` together with explicit batched `start_qpos` and
+`sample_count`. EEF waypoints are solved sequentially with the previous solution
+as the next IK seed; joint waypoints are interpolated directly.
+
 
 ### Estimating Trajectory Sample Count
 
@@ -198,7 +236,7 @@ print(f"Estimated sample count: {sample_count}")
 * The planner type can be specified as a string or `PlannerType` enum.
 * If the robot provides its own joint limits, those will be used; otherwise, default or user-specified limits are applied.
 * For Cartesian interpolation, inverse kinematics (IK) is used to compute joint configurations for each interpolated pose.
-* Backends declare whether pre-interpolation is safe and whether their returned samples must be preserved. cuRobo V2 disables EmbodiChain Cartesian pre-interpolation and (by default) is resampled to the action's `sample_interval`; set `CuroboPlannerCfg.preserve_plan_samples=True` to keep its raw collision-checked samples.
+* Backends declare whether pre-interpolation is safe and whether their returned samples must be preserved. cuRobo V2 disables EmbodiChain Cartesian pre-interpolation and (by default) is resampled to `MotionGenOptions.sample_count`; set `CuroboPlannerCfg.preserve_plan_samples=True` to keep its raw collision-checked samples.
 * CuroboPlanner is optional and requires CUDA plus a matching cuRobo V2 installation; see [the cuRobo planner page](curobo_planner.md) and [NVIDIA's installation guide](https://nvlabs.github.io/curobo/latest/getting-started/installation.html).
 * Run the collision-aware Panda demo with `python examples/sim/planners/curobo_planner.py --headless --hold-steps 1 --step-repeat 1`.
 * The sample count estimation is useful for predicting computational load and memory requirements.

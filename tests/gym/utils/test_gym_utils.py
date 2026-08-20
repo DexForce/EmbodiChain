@@ -37,6 +37,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
 )
+from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.utils.utility import load_config, save_config
 
 
@@ -533,6 +534,29 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    def test_robot_class_type_preserves_ur_variant(self):
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "env": {},
+            "robot": {
+                "class_type": "URRobot",
+                "robot_type": "ur5",
+                "uid": "TestUR5",
+            },
+        }
+
+        cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+        assert isinstance(cfg.robot, URRobotCfg)
+        assert cfg.robot.robot_type == "ur5"
+        assert cfg.robot.uid == "TestUR5"
+        assert cfg.robot.solver_cfg["arm"].ur_type == "ur5"
+        assert config["robot"] == {
+            "class_type": "URRobot",
+            "robot_type": "ur5",
+            "uid": "TestUR5",
+        }
+
     def test_yaml_gym_config_parses_to_cfg(self, tmp_path):
         config = {
             "id": "EmbodiedEnv-v1",
@@ -814,6 +838,7 @@ def test_build_trajectory_buffer_shapes():
     assert tuple(buf.batch_size) == (num_envs, 10)
     assert tuple(buf["states"]["robot"]["root_pose"].shape) == (num_envs, 10, 7)
     assert tuple(buf["states"]["robot"]["qpos"].shape) == (num_envs, 10, 6)
+    assert tuple(buf["states"]["robot"]["qvel"].shape) == (num_envs, 10, 6)
     assert tuple(buf["states"]["articulations"]["drawer"]["qpos"].shape) == (
         num_envs,
         10,
@@ -823,6 +848,11 @@ def test_build_trajectory_buffer_shapes():
         num_envs,
         10,
         7,
+    )
+    assert tuple(buf["states"]["rigid_objects"]["cube"]["lin_vel"].shape) == (
+        num_envs,
+        10,
+        3,
     )
     assert tuple(buf["actions"].shape) == (num_envs, 10, 6)
 
@@ -846,7 +876,7 @@ def test_load_trajectory_validates_and_returns_dict(tmp_path):
     data = {
         "states": TensorDict({"a": torch.zeros(1, 4)}, batch_size=[1, 4]),
         "actions": torch.zeros(1, 4, 3),
-        "meta": {"num_steps": 4, "num_envs": 1},
+        "meta": {"num_steps": 4, "num_envs": 1, "lengths": [4]},
     }
     p = tmp_path / "traj.pt"
     torch.save(data, p)
@@ -855,6 +885,27 @@ def test_load_trajectory_validates_and_returns_dict(tmp_path):
 
     with pytest.raises(ValueError):
         load_trajectory({"states": torch.zeros(1)})
+
+
+def test_load_trajectory_rejects_misaligned_state_action_steps():
+    num_envs = 1
+    num_steps = 2
+    states = TensorDict(
+        {"robot": {"qpos": torch.zeros(num_envs, num_steps, 3)}},
+        batch_size=[num_envs, num_steps],
+    )
+    data = {
+        "states": states,
+        "actions": torch.zeros(num_envs, num_steps + 1, 3),
+        "meta": {
+            "num_steps": num_steps,
+            "num_envs": num_envs,
+            "lengths": [num_steps],
+        },
+    }
+
+    with pytest.raises(ValueError, match="actions shape"):
+        load_trajectory(data)
 
 
 if __name__ == "__main__":

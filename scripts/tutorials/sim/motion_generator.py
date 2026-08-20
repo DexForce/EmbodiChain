@@ -265,6 +265,7 @@ def main() -> None:
         )
 
         options = MotionGenOptions(
+            strategy="motion_gen",
             control_part=arm_name,
             start_qpos=qpos_list[0],
             is_interpolate=True,

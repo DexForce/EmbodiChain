@@ -16,258 +16,402 @@
 
 from __future__ import annotations
 
-import torch
-import numpy as np
+from collections.abc import Iterable
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+import torch
+
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.sim.planners import (
-    MotionGenerator,
-    MotionGenCfg,
-    MotionGenOptions,
-    ToppraPlannerCfg,
-    ToppraPlanOptions,
-    PlanState,
-    MoveType,
-    MovePart,
-)
-from embodichain.lab.sim.planners.utils import TrajectorySampleMethod
 from embodichain.utils import logger
 
+if TYPE_CHECKING:
+    from embodichain.lab.sim.atomic_actions import (
+        AtomicActionEngine,
+        ObjectSemantics,
+    )
+    from embodichain.lab.sim.objects import RigidObject
+
 __all__ = ["BlocksRankingRGBEnv"]
+
+REFERENCE_BLOCK_UID = "block_2"
+PICK_SAMPLE_INTERVAL = 90
+PLACE_SAMPLE_INTERVAL = 90
+HAND_INTERP_STEPS = 10
+GRASP_HOLD_STEPS = 45
+FREE_FALL_RELEASE_HEIGHT = 0.08
+SETTLE_MIN_STEPS = 15
+SETTLE_MAX_STEPS = 60
+SETTLE_STABLE_STEPS = 5
+LINEAR_VELOCITY_THRESHOLD = 0.03
+ANGULAR_VELOCITY_THRESHOLD = 0.20
+PLACEMENT_XY_TOLERANCE = (0.035, 0.03)
+
+BLOCK_PLANS = (
+    {
+        "uid": "block_1",
+        "color": "red",
+        "arm": "right_arm",
+        "hand": "right_eef",
+        "x_offset": -0.08,
+    },
+    {
+        "uid": "block_3",
+        "color": "blue",
+        "arm": "left_arm",
+        "hand": "left_eef",
+        "x_offset": 0.08,
+    },
+)
 
 
 @register_env("BlocksRankingRGB-v1", max_episode_steps=600)
 class BlocksRankingRGBEnv(EmbodiedEnv):
-    def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
+    """Arrange the red and blue blocks around the stationary green block."""
+
+    def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
         super().__init__(cfg, **kwargs)
 
         action_config = kwargs.get("action_config", None)
         if action_config is not None:
             self.action_config = action_config
+        self._blocks = self._get_required_blocks()
+        self._initialize_atomic_actions()
 
-    def create_demo_action_list(self, *args, **kwargs):
+    def _get_required_blocks(self) -> dict[str, RigidObject]:
+        """Resolve the three blocks required by the ranking task."""
+        blocks = {
+            uid: self.sim.get_rigid_object(uid)
+            for uid in ("block_1", REFERENCE_BLOCK_UID, "block_3")
+        }
+        missing = [uid for uid, block in blocks.items() if block is None]
+        if missing:
+            raise RuntimeError(f"BlocksRankingRGB requires objects {missing}.")
+        return blocks
+
+    def _initialize_atomic_actions(self) -> None:
+        """Create the dual-arm atomic-action engine and object semantics."""
+        from embodichain.lab.sim.atomic_actions import (
+            Affordance,
+            AtomicActionEngine,
+            ControlPartCommandProfile,
+            ObjectSemantics,
+        )
+        from embodichain.lab.sim.planners import (
+            MotionGenCfg,
+            MotionGenerator,
+            ToppraPlannerCfg,
+        )
+
+        motion_generator = MotionGenerator(
+            cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
+        )
+        self._object_semantics: dict[str, ObjectSemantics] = {}
+        control_profiles: dict[str, ControlPartCommandProfile] = {}
+
+        for plan in BLOCK_PLANS:
+            uid = str(plan["uid"])
+            hand = str(plan["hand"])
+            hand_limits = self.robot.get_qpos_limits(name=hand)[0].to(
+                device=self.device, dtype=torch.float32
+            )
+            hand_close_qpos = hand_limits[:, 0]
+            hand_open_qpos = hand_limits[:, 1]
+            control_profiles[hand] = ControlPartCommandProfile.joint_positions(
+                open=hand_open_qpos,
+                grasp=hand_close_qpos,
+            )
+            self._object_semantics[uid] = ObjectSemantics(
+                label=uid,
+                geometry={},
+                affordance=Affordance(),
+                entity=self._blocks[uid],
+            )
+        self._action_engine: AtomicActionEngine = AtomicActionEngine(
+            motion_generator,
+            control_profiles=control_profiles,
+        )
+
+    def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
+        """Lazily plan one atomic pick/place segment per manipulated block.
+
+        The green block is deliberately kept stationary as the ranking reference.
+        Planning is lazy so the blue-block target uses the reference pose measured
+        after the red-block segment has completed.
+
+        Args:
+            **kwargs: Reserved for future expert-planning options.
+
+        Yields:
+            A red-block segment followed by a blue-block segment.
         """
-        Create a demonstration action list for ranking three blocks in RGB order from left to right.
-
-        Now the expert trajectory follows the following strategy:
-        - Do not move the green block block_2 (as the middle reference)
-        - Right hand (right_arm + right_eef) takes the red block block_1 and places it on the left of the green block
-        - Left hand (left_arm + left_eef) takes the blue block block_3 and places it on the right of the green block
-
-        Returns:
-            list: A list of demo actions (torch.Tensor) to be executed by env.step().
-        """
-        try:
-            block1 = self.sim.get_rigid_object("block_1")  # Red
-            block2 = self.sim.get_rigid_object("block_2")  # Green
-            block3 = self.sim.get_rigid_object("block_3")  # Blue
-        except Exception as e:
-            logger.log_warning(f"Blocks not found: {e}, returning empty action list.")
-            return []
-
-        # Get block poses and positions
-        b1_pose = block1.get_local_pose(to_matrix=True)
-        b2_pose = block2.get_local_pose(to_matrix=True)
-        b3_pose = block3.get_local_pose(to_matrix=True)
-        b1_pos = b1_pose[:, :3, 3]
-        b2_pos = b2_pose[:, :3, 3]
-        b3_pos = b3_pose[:, :3, 3]
-
-        # Construct the target line centered on the green block (Red < Green < Blue)
-        base_x = b2_pos[:, 0]
-        base_y = b2_pos[:, 1]
-        base_z = b2_pos[:, 2]
-
-        tgt_green = b2_pos  # not moved, kept for reference
-        tgt_red = torch.stack([base_x - 0.12, base_y, base_z], dim=1)
-        tgt_blue = torch.stack([base_x + 0.10, base_y, base_z], dim=1)
-
-        # Right arm / right hand
-        right_arm_ids = self.robot.get_joint_ids(name="right_arm")
-        right_eef_ids = self.robot.get_joint_ids(name="right_eef")
-        # Left arm / left hand
-        left_arm_ids = self.robot.get_joint_ids(name="left_arm")
-        left_eef_ids = self.robot.get_joint_ids(name="left_eef")
-
-        init_qpos = self.robot.get_qpos()
-        init_right_arm_qpos = init_qpos[:, right_arm_ids]
-        init_right_arm_xpos = self.robot.compute_fk(
-            qpos=init_right_arm_qpos, name="right_arm", to_matrix=True
-        )
-        init_left_arm_qpos = init_qpos[:, left_arm_ids]
-        init_left_arm_xpos = self.robot.compute_fk(
-            qpos=init_left_arm_qpos, name="left_arm", to_matrix=True
-        )
-
-        motion_cfg = MotionGenCfg(
-            planner_cfg=ToppraPlannerCfg(
-                robot_uid=self.robot.uid,
+        del kwargs
+        for segment_index, plan in enumerate(BLOCK_PLANS):
+            uid = str(plan["uid"])
+            color = str(plan["color"])
+            target_position = self._target_position(float(plan["x_offset"]))
+            plan_success, actions, source_pose = self._plan_block_segment(
+                uid=uid,
+                arm=str(plan["arm"]),
+                hand=str(plan["hand"]),
+                target_position=target_position,
             )
-        )
-        self.motion_generator = MotionGenerator(cfg=motion_cfg)
-
-        gripper_open = torch.tensor(
-            [0.05, 0.05], dtype=torch.float32, device=self.device
-        )
-        gripper_close = torch.tensor(
-            [0.0, 0.0], dtype=torch.float32, device=self.device
-        )
-
-        action_list = []
-
-        def _ik_to_qpos(
-            target_xpos: torch.Tensor, seed: torch.Tensor, arm_name: str, name: str
-        ):
-            is_success, qpos = self.robot.compute_ik(
-                pose=target_xpos, joint_seed=seed, name=arm_name
+            logger.log_info(
+                f"Planned RGB ranking segment {segment_index + 1}/"
+                f"{len(BLOCK_PLANS)} for {uid}."
             )
-            success_flag = (
-                is_success.all() if isinstance(is_success, torch.Tensor) else is_success
-            )
-            if not success_flag:
-                logger.log_warning(f"IK failed for {name}, using previous qpos.")
-                qpos = seed
-            return qpos
-
-        def _append_hold(
-            qpos: torch.Tensor,
-            num_steps: int,
-            gripper_state: torch.Tensor,
-            arm_ids,
-            eef_ids,
-        ):
-            for _ in range(num_steps):
-                action = init_qpos.clone()
-                action[:, arm_ids] = qpos
-                action[:, eef_ids] = gripper_state.unsqueeze(0).expand(
-                    self.num_envs, -1
-                )
-                action_list.append(action)
-
-        def _append_move_for_arm(
-            qpos_start: torch.Tensor,
-            qpos_end: torch.Tensor,
-            num_steps: int,
-            gripper_state: torch.Tensor,
-            arm_ids,
-            eef_ids,
-            control_part: str,
-        ):
-            options = MotionGenOptions(
-                control_part=control_part,
-                plan_opts=ToppraPlanOptions(
-                    constraints={
-                        "velocity": 0.2,
-                        "acceleration": 0.5,
-                    },
-                    sample_method=TrajectorySampleMethod.QUANTITY,
-                    sample_interval=num_steps,
+            yield DemoSegment(
+                actions=actions,
+                name=f"place_{color}_block",
+                target_uid=uid,
+                instruction=(
+                    f"Pick up the {color} block and place it "
+                    f"{'left' if float(plan['x_offset']) < 0 else 'right'} "
+                    "of the green block."
+                ),
+                metadata={
+                    "segment_index": segment_index,
+                    "segment_count": len(BLOCK_PLANS),
+                    "color": color,
+                    "arm": str(plan["arm"]),
+                    "hand": str(plan["hand"]),
+                    "reference_uid": REFERENCE_BLOCK_UID,
+                    "atomic_actions": ["pick_up", "place"],
+                    "free_fall_release_height": FREE_FALL_RELEASE_HEIGHT,
+                    "free_fall_settle": True,
+                    "planning_success": plan_success.detach().cpu().tolist(),
+                    "planned_source_poses": source_pose.detach().cpu().tolist(),
+                    "target_position": target_position.detach().cpu().tolist(),
+                },
+                validator=partial(
+                    self._validate_block_placement,
+                    uid,
+                    plan_success.detach().clone(),
+                    target_position.detach().clone(),
                 ),
             )
-            # Joint space trajectory
-            target_states = [
-                PlanState.single(qpos=qpos_start[0], move_type=MoveType.JOINT_MOVE),
-                PlanState.single(
-                    qpos=qpos_end[0],
-                    move_type=MoveType.JOINT_MOVE,
+
+    def _target_position(self, x_offset: float) -> torch.Tensor:
+        """Return one placement position per environment around the green block."""
+        reference_pose = self._blocks[REFERENCE_BLOCK_UID].get_local_pose(
+            to_matrix=True
+        )
+        target_position = reference_pose[:, :3, 3].clone()
+        target_position[:, 0] += x_offset
+        return target_position
+
+    def _plan_block_segment(
+        self,
+        *,
+        uid: str,
+        arm: str,
+        hand: str,
+        target_position: torch.Tensor,
+    ) -> tuple[torch.Tensor, Iterable[torch.Tensor], torch.Tensor]:
+        """Plan an atomic PickUp followed by Place for one block."""
+        from embodichain.lab.sim.atomic_actions import (
+            ActionInvocation,
+            GraspGoal,
+            MotionPolicy,
+            PickUpOptions,
+            PlaceGoal,
+            PlaceOptions,
+        )
+
+        block = self._blocks[uid]
+        source_pose = block.get_local_pose(to_matrix=True).to(
+            device=self.device, dtype=torch.float32
+        )
+        arm_ids = self.robot.get_joint_ids(name=arm)
+        grasp_pose = self.robot.compute_fk(
+            qpos=self.robot.get_qpos()[:, arm_ids], name=arm, to_matrix=True
+        )
+        local_grasp_offset = self._block_grasp_offset(block)
+        world_grasp_offset = torch.bmm(
+            source_pose[:, :3, :3], local_grasp_offset.unsqueeze(-1)
+        ).squeeze(-1)
+        grasp_pose[:, :3, 3] = source_pose[:, :3, 3] + world_grasp_offset
+        endpoints = {
+            "primary": {
+                "motion": arm,
+                "grasp": hand,
+            }
+        }
+        pick_binding = self._action_engine.bind_control_parts(
+            "pick_up",
+            endpoints,
+        )
+        place_binding = self._action_engine.bind_control_parts(
+            "place",
+            endpoints,
+        )
+        pick_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="pick_up",
+                    goal=GraspGoal(
+                        self._object_semantics[uid],
+                        grasp_xpos=grasp_pose,
+                    ),
+                    binding=pick_binding,
+                    motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                    skill_options=PickUpOptions(
+                        pre_grasp_distance=0.12,
+                        lift_height=0.15,
+                        hand_interp_steps=HAND_INTERP_STEPS,
+                    ),
                 ),
-            ]
-            plan_result = self.motion_generator.generate(
-                target_states=target_states, options=options
+            ),
+            self._action_engine.initial_context(control_dt=self.step_dt),
+        )
+        pick_success = pick_compiled.plan_success
+        pick_trajectory = pick_compiled.trajectory.positions
+        picked_context = pick_compiled.projected_context
+        pick_trajectory = self._insert_grasp_hold(pick_trajectory)
+        held = picked_context.get_held_object(arm)
+        if held is None or not bool(pick_success.all().item()):
+            trajectory = self._ensure_nonempty_trajectory(pick_trajectory)
+            return (
+                torch.zeros_like(pick_success, dtype=torch.bool),
+                self._iter_segment_actions(block, trajectory),
+                source_pose,
             )
 
-            for qpos_item in plan_result.positions[0]:
-                qpos = torch.as_tensor(
-                    qpos_item, dtype=torch.float32, device=self.device
-                )
-                qpos = qpos.flatten()
-                if qpos.shape[0] != len(arm_ids):
-                    logger.log_warning(
-                        f"Qpos shape mismatch: got {qpos.shape[0]}, expected {len(arm_ids)}"
-                    )
-                    continue
-                qpos = qpos.unsqueeze(0).expand(self.num_envs, -1)
-                action = init_qpos.clone()
-                action[:, arm_ids] = qpos
-                action[:, eef_ids] = gripper_state.unsqueeze(0).expand(
-                    self.num_envs, -1
-                )
-                action_list.append(action)
-
-        def _pick_and_place(
-            block_pos: torch.Tensor,
-            place_pos: torch.Tensor,
-            seed_qpos: torch.Tensor,
-            init_arm_xpos: torch.Tensor,
-            arm_ids,
-            eef_ids,
-            arm_name: str,
-            tag: str,
-        ):
-            pick = init_arm_xpos.clone()
-            pick[:, :3, 3] = block_pos + torch.tensor(
-                [0.02, 0.0, -0.025], dtype=torch.float32, device=self.device
-            ).unsqueeze(0)
-
-            lift = pick.clone()
-            lift[:, 2, 3] += 0.15
-
-            place = init_arm_xpos.clone()
-            place[:, :3, 3] = place_pos + torch.tensor(
-                [0.025, 0.0, 0.02], dtype=torch.float32, device=self.device
-            ).unsqueeze(0)
-
-            # inverse kinematics for three key poses
-            q_pick = _ik_to_qpos(pick, seed_qpos, arm_name, f"{tag}_pick")
-            q_lift = _ik_to_qpos(lift, q_pick, arm_name, f"{tag}_lift")
-            q_place = _ik_to_qpos(place, q_lift, arm_name, f"{tag}_place")
-
-            # execution segments: seed -> pick(open gripper) -> lift -> place(close gripper)
-            _append_move_for_arm(
-                seed_qpos, q_pick, 20, gripper_open, arm_ids, eef_ids, arm_name
-            )
-            _append_hold(q_pick, 5, gripper_close, arm_ids, eef_ids)  # close gripper
-            _append_move_for_arm(
-                q_pick, q_lift, 20, gripper_close, arm_ids, eef_ids, arm_name
-            )
-            _append_move_for_arm(
-                q_lift, q_place, 30, gripper_close, arm_ids, eef_ids, arm_name
-            )
-            _append_hold(q_place, 5, gripper_open, arm_ids, eef_ids)  # open gripper
-
-            return q_place
-
-        # 1. Right hand handles the red block
-        current_seed_right = init_right_arm_qpos
-        current_seed_right = _pick_and_place(
-            b1_pos,
-            tgt_red,
-            current_seed_right,
-            init_right_arm_xpos,
-            right_arm_ids,
-            right_eef_ids,
-            "right_arm",
-            "red",
+        desired_object_pose = source_pose.clone()
+        desired_object_pose[:, :3, 3] = target_position
+        desired_object_pose[:, 2, 3] += FREE_FALL_RELEASE_HEIGHT
+        place_eef_pose = torch.bmm(desired_object_pose, held.object_to_eef)
+        place_compiled = self._action_engine.compile(
+            (
+                ActionInvocation(
+                    skill_id="place",
+                    goal=PlaceGoal(place_eef_pose),
+                    binding=place_binding,
+                    motion_policy=MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                    skill_options=PlaceOptions(
+                        lift_height=0.15,
+                        hand_interp_steps=HAND_INTERP_STEPS,
+                    ),
+                ),
+            ),
+            picked_context,
+        )
+        place_success = place_compiled.plan_success
+        place_trajectory = place_compiled.trajectory.positions
+        trajectory = self._ensure_nonempty_trajectory(
+            torch.cat((pick_trajectory, place_trajectory), dim=1)
+        )
+        return (
+            pick_success & place_success,
+            self._iter_segment_actions(block, trajectory),
+            source_pose,
         )
 
-        init_qpos[:, right_arm_ids] = current_seed_right
+    def _block_grasp_offset(self, block: RigidObject) -> torch.Tensor:
+        """Return a size-aware local TCP offset at the block's lower edge.
 
-        # 2. Left hand handles the blue block
-        current_seed_left = init_left_arm_qpos
-        current_seed_left = _pick_and_place(
-            b3_pos,
-            tgt_blue,
-            current_seed_left,
-            init_left_arm_xpos,
-            left_arm_ids,
-            left_eef_ids,
-            "left_arm",
-            "blue",
+        The CobotMagic gripper calibration places the TCP at the lower edge of
+        the grasped cube.  Deriving the offset from the scaled mesh keeps that
+        point on the object instead of below small or randomized cubes.
+        """
+        vertices = block.get_vertices(scale=True).to(
+            device=self.device, dtype=torch.float32
+        )
+        extents = vertices.amax(dim=1) - vertices.amin(dim=1)
+        offset = torch.zeros_like(extents)
+        offset[:, 0] = extents[:, 0] * 0.5
+        offset[:, 2] = extents[:, 2] * -0.5
+        return offset
+
+    def _insert_grasp_hold(self, trajectory: torch.Tensor) -> torch.Tensor:
+        """Dwell at the closed grasp pose before beginning the lift phase."""
+        close_end_step = (
+            round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
+        )
+        if trajectory.shape[1] < close_end_step:
+            return trajectory
+        grasp_action = trajectory[:, close_end_step - 1 : close_end_step]
+        grasp_hold = grasp_action.repeat(1, GRASP_HOLD_STEPS, 1)
+        return torch.cat(
+            (
+                trajectory[:, :close_end_step],
+                grasp_hold,
+                trajectory[:, close_end_step:],
+            ),
+            dim=1,
         )
 
-        logger.log_info(f"Generated {len(action_list)} demo actions for RGB ranking")
-        return action_list
+    def _ensure_nonempty_trajectory(self, trajectory: torch.Tensor) -> torch.Tensor:
+        """Return at least one hold command so a failed plan is recordable."""
+        if trajectory.shape[1] > 0:
+            return trajectory
+        return self.robot.get_qpos().clone().unsqueeze(1)
+
+    def _iter_segment_actions(
+        self, block: RigidObject, trajectory: torch.Tensor
+    ) -> Iterable[torch.Tensor]:
+        """Replay one pick/place trajectory and allow the released block to settle."""
+        clear_dynamics_step = (
+            round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6)
+            + HAND_INTERP_STEPS
+            + GRASP_HOLD_STEPS
+        )
+        for step_index, action in enumerate(trajectory.unbind(dim=1), start=1):
+            yield action
+            if step_index == clear_dynamics_step:
+                block.clear_dynamics()
+
+        hold_action = trajectory[:, -1].clone()
+        stable_steps = 0
+        for settle_step in range(SETTLE_MAX_STEPS):
+            yield hold_action
+            if settle_step + 1 < SETTLE_MIN_STEPS:
+                continue
+            if bool(self._block_is_stable(block).all().item()):
+                stable_steps += 1
+                if stable_steps >= SETTLE_STABLE_STEPS:
+                    break
+            else:
+                stable_steps = 0
+
+    @staticmethod
+    def _block_is_stable(block: RigidObject) -> torch.Tensor:
+        """Return whether block linear and angular speeds are below thresholds."""
+        linear_speed = torch.linalg.vector_norm(block.body_data.lin_vel, dim=-1)
+        angular_speed = torch.linalg.vector_norm(block.body_data.ang_vel, dim=-1)
+        return (linear_speed <= LINEAR_VELOCITY_THRESHOLD) & (
+            angular_speed <= ANGULAR_VELOCITY_THRESHOLD
+        )
+
+    def _validate_block_placement(
+        self,
+        uid: str,
+        plan_success: torch.Tensor,
+        target_position: torch.Tensor,
+    ) -> torch.Tensor:
+        """Validate planning and the final XY placement for one segment."""
+        actual_position = self._blocks[uid].get_local_pose(to_matrix=True)[:, :3, 3]
+        position_error = torch.abs(actual_position[:, :2] - target_position[:, :2])
+        is_stable = self._block_is_stable(self._blocks[uid])
+        tolerance = torch.tensor(
+            PLACEMENT_XY_TOLERANCE,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        success = (
+            plan_success & torch.all(position_error < tolerance, dim=1) & is_stable
+        )
+        if not bool(success.all().item()):
+            logger.log_warning(
+                f"Segment placement validation failed for {uid}: "
+                f"planning_success={plan_success.detach().cpu().tolist()}, "
+                f"stable={is_stable.detach().cpu().tolist()}, "
+                f"actual_xy={actual_position[:, :2].detach().cpu().tolist()}, "
+                f"target_xy={target_position[:, :2].detach().cpu().tolist()}, "
+                f"error_xy={position_error.detach().cpu().tolist()}."
+            )
+        return success
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         """Determine if the task is successfully completed.

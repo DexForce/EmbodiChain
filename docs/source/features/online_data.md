@@ -22,19 +22,54 @@ These components live under `embodichain/data_pipeline/` and are designed to wor
 
 Key ideas:
 
-- **Shared buffer**: multiple producers (simulation workers) and multiple consumers (training workers) can read/write concurrently.
+- **Shared buffer**: the simulation producer and training consumers can read/write concurrently.
 - **GPU-friendly**: buffer is designed for efficient sampling and minimal copying.
 - **Chunked sampling**: training samples fixed-length or dynamically sized chunks.
+- **Transactional rows**: the current write window is locked until a complete,
+  successful episode replaces it. Failed generation attempts never become
+  sampleable.
+- **Variable lengths**: every frame has a `valid` flag. Sampling constructs
+  windows only from real frames and never reads zero padding or a stale tail.
+- **Episode-uniform sampling**: an eligible episode row is selected uniformly,
+  then a valid start offset is selected within that row. Longer episodes do
+  not receive extra probability merely because they contain more windows.
+- **Explicit lifecycle**: the engine progresses through `CREATED`, `STARTING`,
+  `READY`, and a terminal `FAILED` or `STOPPED` state. Sampling is allowed only
+  in `READY`, and a stopped or failed instance cannot be restarted.
+- **Fail-fast errors**: initial-fill timeouts, rollout failures, hard worker
+  exits, and shutdown/recorder failures are raised to the owner. The same
+  stable error snapshot is visible to every forked or spawned data consumer.
+
+Each row stores one complete task episode. A row may contain multiple semantic
+segments. In addition to observations, actions, and rewards, the shared buffer
+contains:
+
+```text
+valid, episode_step, segment_id, segment_step,
+segment_start, segment_end, terminated, truncated
+```
+
+Tasks use the same `create_demo_segments()` protocol as `run-env`; legacy
+`create_demo_action_list()` tasks are treated as one segment. The worker checks
+termination after every action and retries a failed episode up to
+`max_generation_attempts` before reporting an error.
+
+`start()` blocks until the initial fill is complete and is bounded by
+`initialization_timeout`. If the worker exits or generation fails, `start()`
+raises the worker error instead of waiting indefinitely. A later worker failure
+is reported on the next `sample_batch()` call rather than silently serving a
+permanently stale buffer.
 
 ### Minimal setup
 
 ```python
-from embodichain.data_pipeline.engine.data import OnlineDataEngine, OnlineDataEngineCfg
+from embodichain.data_pipeline.engine import OnlineDataEngine, OnlineDataEngineCfg
 
 cfg = OnlineDataEngineCfg(
-    buffer_size=2,           # number of trajectories kept in the ring buffer
-    state_dim=6,             # example state dimension
-    gym_config=your_gym_cfg, # parsed gym config for the task (JSON or YAML)
+    buffer_size=2,              # trajectories kept in the shared buffer
+    state_dim=6,                # example state dimension
+    gym_config=your_gym_cfg,    # parsed gym config for the task
+    initialization_timeout=300, # maximum seconds for the initial fill
 )
 engine = OnlineDataEngine(cfg)
 engine.start()
@@ -42,9 +77,38 @@ engine.start()
 
 ### Shutdown
 
+Prefer a context manager so cleanup runs on both success and failure:
+
 ```python
-engine.stop()
+with OnlineDataEngine(cfg) as engine:
+    batch = engine.sample_batch(batch_size=32, chunk_size=64)
+    train_step(batch)
 ```
+
+For an explicitly managed lifecycle, call `stop()` in the process that created
+the engine:
+
+```python
+engine = OnlineDataEngine(cfg)
+engine.start()
+try:
+    train(engine)
+finally:
+    engine.stop()
+```
+
+`stop()` is idempotent after a successful cleanup. It waits for the producer
+and raises any failure reported while the worker closes its environment or
+flushes committed data. If graceful shutdown times out and the worker requires
+`terminate()` or `kill()`, durability cannot be confirmed: the engine remains
+`FAILED` and `stop()` raises instead of reporting a false `STOPPED` state. When
+a `with` body and cleanup both fail, the body exception remains primary and the
+cleanup failure is attached as a note.
+
+Start the engine before constructing multiprocessing `DataLoader` workers.
+Forked and spawned copies may call `sample_batch()`, but only the original
+owner process may call `start()` or `stop()`; consumer destructors never signal
+the shared producer.
 
 ---
 
@@ -102,6 +166,25 @@ dataset = OnlineDataset(engine, chunk_size=sampler)
 ```
 
 In batch mode, the sampler is called once per step so all trajectories in the batch share the same chunk length.
+
+### Segment-aware sampling
+
+Set `sampling_mode` according to the training objective:
+
+```python
+# Chunks may span adjacent subtasks (default).
+episode_dataset = OnlineDataset(engine, chunk_size=64, sampling_mode="episode")
+
+# Every chunk stays inside one pick/place segment.
+segment_dataset = OnlineDataset(engine, chunk_size=32, sampling_mode="segment")
+
+# Every chunk contains an internal transition between two segments.
+boundary_dataset = OnlineDataset(engine, chunk_size=32, sampling_mode="boundary")
+```
+
+All three modes still require every sampled frame to be valid. `boundary`
+requires a chunk size of at least two and raises a clear error when no internal
+boundary can satisfy the requested length.
 
 ---
 

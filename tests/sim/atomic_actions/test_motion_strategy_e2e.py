@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Reach-equivalence e2e test for MoveEndEffector across motion sources."""
+"""Reach-equivalence e2e test for MoveEndEffector across supported strategies."""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
 from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg, ToppraPlannerCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
@@ -35,7 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
 
 @pytest.mark.requires_sim
 @pytest.mark.slow
-class TestMotionSourceReachEquivalence:
+class TestMotionStrategyReachEquivalence:
     """Verify MoveEndEffector reaches a reachable pose for ik_interp and motion_gen."""
 
     CONTROL_PART = "left_arm"
@@ -43,8 +42,8 @@ class TestMotionSourceReachEquivalence:
     SAMPLE_INTERVAL = 80
     POS_TOL = 0.02
 
-    def _setup(self, motion_source: str):
-        sim = SimulationManager(SimulationManagerCfg(headless=True, device="cpu"))
+    def _setup(self):
+        sim = SimulationManager(SimulationManagerCfg(headless=True, sim_device="cpu"))
         robot = sim.add_robot(
             cfg=CobotMagicCfg.from_dict(
                 {
@@ -75,34 +74,38 @@ class TestMotionSourceReachEquivalence:
         target[2, 3] += 0.05
         return target, arm_ids
 
-    def _run_reach_test(self, motion_source: str):
-        sim, robot, engine = self._setup(motion_source)
+    def _run_reach_test(self, strategy: str):
+        sim, robot, engine = self._setup()
         try:
             target, arm_ids = self._reachable_target(robot)
+            binding = engine.bind_control_parts(
+                "move_end_effector",
+                {"primary": {"motion": self.CONTROL_PART}},
+            )
             result = engine.compile(
                 (
                     ActionInvocation(
                         skill_id="move_end_effector",
                         goal=EndEffectorPoseGoal(xpos=target),
-                        binding=ActionBinding(
-                            manipulators={"primary": self.CONTROL_PART}
-                        ),
+                        binding=binding,
                         motion_policy=MotionPolicy(
-                            motion_source=motion_source,
+                            strategy=strategy,
                             sample_count=self.SAMPLE_INTERVAL,
                         ),
                     ),
-                )
+                ),
+                engine.initial_context(control_dt=sim.sim_config.physics_dt),
             )
-            assert result.plan_success.all().item(), f"{motion_source} reported failure"
-            final_q = result.trajectory.positions[0, -1, arm_ids]
+            assert result.plan_success.all().item(), f"{strategy} reported failure"
+            plan = result.action_plans[0]
+            assert plan.joint_trajectory is not None
+            assert plan.commands.frame_count == plan.joint_trajectory.waypoint_count
+            final_q = plan.joint_trajectory.positions[0, -1, arm_ids]
             fk = robot.compute_fk(
                 qpos=final_q[None], name=self.CONTROL_PART, to_matrix=True
             )[0]
             err = torch.norm(fk[:3, 3] - target[:3, 3])
-            assert (
-                err < self.POS_TOL
-            ), f"{motion_source} EE pos error {err.item():.4f} m"
+            assert err < self.POS_TOL, f"{strategy} EE pos error {err.item():.4f} m"
         finally:
             self._teardown(sim)
 

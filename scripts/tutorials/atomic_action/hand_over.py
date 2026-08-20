@@ -35,8 +35,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     GraspGoal,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -50,12 +48,12 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
-    add_dual_ur5_robot,
+    add_dual_tutorial_robot,
     add_support_surface,
-    make_dual_ur5_solver_cfg,
     settle_object,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    TutorialRobot,
     create_antipodal_semantics,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
@@ -65,6 +63,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     prepare_tutorial_scene,
     publish_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
     serve_tutorial_scene,
 )
 
@@ -81,7 +80,7 @@ SUPPORT_SURFACE_CENTER = (
 # --- Adjustable scene placeholders -----------------------------------------
 # The object starts on the left side, is handed over at a lifted middle pose,
 # and is delivered to the right side. Tweak these to match the mesh geometry
-# and the dual-UR5 reach.
+# and the selected dual-arm robot's reach.
 OBJECT_INIT_XY = (0.0, 0.02)
 MIDDLE_OBJECT_XYZ = (0.0, 0.02, 0.82)
 MIDDLE_OBJECT_YAW_DEG = 0.0
@@ -119,16 +118,18 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    return add_dual_ur5_robot(
+def create_dual_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+) -> Robot:
+    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    return add_dual_tutorial_robot(
         sim,
-        uid="DualUR5HandOver",
-        urdf_name="dual_ur5_hand_over",
-        solver_cfg=make_dual_ur5_solver_cfg(
-            GRIPPER_TCP_Z,
-            ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
-        ),
+        robot_type=robot_type,
+        uid=f"Dual{robot_type.title()}HandOver",
+        urdf_name=f"dual_{robot_type}_hand_over",
+        tcp_z=GRIPPER_TCP_Z,
+        ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
         hand_stiffness=1e2,
         hand_damping=1e1,
         hand_max_effort=1e3,
@@ -221,9 +222,6 @@ def run_handover_demo(
         pre_grasp_distance=PICKUP_PRE_GRASP_DISTANCE,
         lift_height=PICKUP_LIFT_HEIGHT,
         hand_interp_steps=PICKUP_HAND_INTERP_STEPS,
-        approach_direction=torch.as_tensor(
-            [0.0, -707106781, -707106781], dtype=torch.float32
-        ),
     )
     # Step 2 - hand the object from the left arm to the right arm.
     handover_options = HandOverOptions(
@@ -260,33 +258,34 @@ def run_handover_demo(
         sim.update(step=10)
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(object_semantics),
-                ActionBinding(
-                    manipulators={"primary": "left_arm"},
-                    end_effectors={"primary": "left_hand"},
+                control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICKUP_SAMPLE_INTERVAL,
                 ),
-                MotionPolicy(sample_count=PICKUP_SAMPLE_INTERVAL),
                 skill_options=pick_up_options,
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "hand_over",
                 GraspGoal(object_semantics),
-                ActionBinding(
-                    manipulators={
-                        "source": "left_arm",
-                        "destination": "right_arm",
+                control_parts={
+                    "source": {"motion": "left_arm", "grasp": "left_hand"},
+                    "destination": {
+                        "motion": "right_arm",
+                        "grasp": "right_hand",
                     },
-                    end_effectors={
-                        "source": "left_hand",
-                        "destination": "right_hand",
-                    },
+                },
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=HANDOVER_SAMPLE_INTERVAL,
                 ),
-                MotionPolicy(sample_count=HANDOVER_SAMPLE_INTERVAL),
                 skill_options=handover_options,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions
@@ -305,7 +304,7 @@ def run_handover_demo(
     replay_trajectory(
         sim,
         robot,
-        traj,
+        compiled.trajectory,
         args,
         video_prefix="handover_auto_play",
         hold_steps=0,
@@ -324,13 +323,10 @@ def main() -> None:
         arena_space=3.0,
         light_pos=(0.0, -0.4, 3.0),
     )
-    robot = create_dual_ur5_robot(sim)
-    try:
-        run_handover_demo(args, sim, robot)
-        serve_tutorial_scene(sim, args)
-    finally:
-        sim.destroy()
+    robot = create_dual_robot(sim, args.robot)
+    run_handover_demo(args, sim, robot)
+    serve_tutorial_scene(sim, args)
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

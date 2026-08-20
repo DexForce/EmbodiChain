@@ -85,7 +85,7 @@ class TestToppraWorker:
         )
         assert out["success"] is True
         assert out["n"] == 2
-        assert out["duration"] == 0.0
+        assert out["dt"].sum() == 0.0
 
     def test_solve_one_env_duplicate_plateau(self):
         # Long plateaus of identical waypoints (e.g. from interpolating a

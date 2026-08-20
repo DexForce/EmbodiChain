@@ -298,38 +298,10 @@ In this mode, the physics simulation stepping is automatically handling by the p
 > Currently, multiple instances are not supported for ray tracing rendering backend. Good news is that we are working on adding this feature in future releases.
 
 
-## Newton Physics Backend
+For more methods and details, see the {doc}`SimulationManager API </api_reference/embodichain/embodichain.lab.sim.sim_manager>`.
 
-EmbodiChain supports the DexSim Newton physics backend as an alternative to the default PhysX backend. Select the Newton backend by passing a `NewtonPhysicsCfg` to `physics_cfg`:
+### Related Documentation
 
-```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import NewtonPhysicsCfg
-
-sim_config = SimulationManagerCfg(
-    physics_cfg=NewtonPhysicsCfg(),
-)
-```
-
-### Supported Runtime Operations
-
-The Newton backend supports runtime mutation of the following physical properties on rigid objects:
-
-| Property | `get_*` | `set_*` | Notes |
-| :--- | :---: | :---: | :--- |
-| Mass | ✅ | ✅ | Per-body mass via batch GPU API |
-| Friction | ✅ | ✅ | Dynamic friction coefficient |
-| Inertia | ✅ | ✅ | Diagonal inertia tensor (3-vector) |
-| Restitution | ✅ | ✅ | Bounce coefficient |
-| Damping | ✅ | ❌ | Read from initial metadata only |
-| Body Type | ✅ | ❌ | Cannot change dynamic ↔ kinematic at runtime |
-| Bulk `set_attrs` | — | ❌ | Use individual setters instead |
-
-
-For more methods and details, refer to the [SimulationManager](https://dexforce.github.io/EmbodiChain/api_reference/embodichain/embodichain.lab.sim.html#embodichain.lab.sim.SimulationManager) documentation.
-
-### Related Tutorials
-
-- [Basic scene creation](https://dexforce.github.io/EmbodiChain/tutorial/create_scene.html)
-- [Interactive simulation with Gizmo](https://dexforce.github.io/EmbodiChain/tutorial/gizmo.html)
+- {doc}`Basic scene creation </tutorial/create_scene>`
+- {doc}`Interactive Gizmos </features/interaction/gizmo>`
 - {doc}`Viser browser visualization <viser_visualization>`

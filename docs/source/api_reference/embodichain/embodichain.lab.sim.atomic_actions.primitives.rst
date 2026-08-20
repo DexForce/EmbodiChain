@@ -29,6 +29,10 @@ full-robot timed trajectory and uncommitted expected effects.
       PlaceOptions
       Press
       PressOptions
+      Slide
+      SlideOptions
+      Twist
+      TwistOptions
       CoordinatedPickment
       CoordinatedPickmentOptions
       CoordinatedPlacement
@@ -47,6 +51,8 @@ full-robot timed trajectory and uncommitted expected effects.
       PlaceGoal
       AssembleGoal
       PressGoal
+      SlideGoal
+      TwistGoal
       CoordinatedPickGoal
       CoordinatedPlacementGoal
 
@@ -96,6 +102,22 @@ Press
 -----
 
 .. automodule:: embodichain.lab.sim.atomic_actions.primitives.press
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+Slide
+-----
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.slide
+   :members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict
+
+Twist
+-----
+
+.. automodule:: embodichain.lab.sim.atomic_actions.primitives.twist
    :members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict

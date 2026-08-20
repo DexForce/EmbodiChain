@@ -37,15 +37,28 @@ from embodichain.lab.sim.atomic_actions import (
     ControlPartCommandProfile,
     JointPositionCommand,
     JointPositionGoal,
+    JointPositionTarget,
+    JOINT_POSITION_CAPABILITY,
     MotionPolicy,
+    ObjectSemantics,
     PlanningContext,
+    PressAffordance,
     PressGoal,
     PressOptions,
     ResolvedActionRequest,
-    register_action,
-    get_registered_actions,
-    unregister_action,
+    SkillBindingContract,
+    SkillEndpointRequirement,
+    SkillResourceSlot,
+    TimedTrajectory,
 )
+from embodichain.lab.sim.skills import (
+    ControlPartEndpoint,
+    ResourceBinding,
+    RobotResource,
+    RobotSkillProfile,
+)
+
+ACTION_DT = 0.02
 
 
 class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
@@ -53,9 +66,21 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
 
     skill_id: ClassVar[str] = "stub"
     GoalType: ClassVar[type] = JointPositionGoal
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            SkillResourceSlot(
+                slot_id="primary",
+                endpoints=(
+                    SkillEndpointRequirement(
+                        endpoint_id="motion",
+                        capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                    ),
+                ),
+            ),
+        ),
+    )
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
         context: PlanningContext,
@@ -71,7 +96,11 @@ class StubAction(AtomicAction[JointPositionGoal, ActionOptions]):
         if torch.isnan(target).any(dim=1).any():
             success &= ~torch.isnan(target).any(dim=1)
             target = torch.nan_to_num(target)
-        trajectory = torch.stack([context.robot.qpos, target], dim=1)
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack([context.robot.qpos, target], dim=1),
+            env_ids=context.env_ids,
+            step_dt=ACTION_DT,
+        )
         return self.build_plan(
             request,
             context,
@@ -119,24 +148,40 @@ def _engine(
 
 
 def _invocation(
+    engine: AtomicActionEngine,
     qpos: torch.Tensor,
 ) -> ActionInvocation[JointPositionGoal, ActionOptions]:
     return ActionInvocation(
         skill_id="stub",
         goal=JointPositionGoal(qpos),
-        binding=ActionBinding(manipulators={"primary": "all"}),
+        binding=engine.bind_control_parts(
+            "stub",
+            {"primary": {"motion": "all"}},
+        ),
         motion_policy=MotionPolicy(sample_count=2),
     )
 
 
-def test_global_registry_uses_stable_skill_id() -> None:
-    unregister_action("stub")
-    register_action(StubAction)
-    try:
-        assert get_registered_actions()["stub"] is StubAction
-        register_action(StubAction)
-    finally:
-        unregister_action("stub")
+def test_action_subclass_cannot_override_framework_plan() -> None:
+    with pytest.raises(TypeError, match="must implement _plan"):
+
+        class InvalidAction(AtomicAction[JointPositionGoal, ActionOptions]):
+            skill_id: ClassVar[str] = "invalid"
+            GoalType: ClassVar[type] = JointPositionGoal
+
+            def plan(
+                self,
+                request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+                context: PlanningContext,
+            ) -> ActionPlan:
+                raise NotImplementedError
+
+            def _plan(
+                self,
+                request: ResolvedActionRequest[JointPositionGoal, ActionOptions],
+                context: PlanningContext,
+            ) -> ActionPlan:
+                raise NotImplementedError
 
 
 def test_engine_loads_fresh_builtin_instances_by_default() -> None:
@@ -157,20 +202,34 @@ def test_engine_can_disable_builtin_loading() -> None:
 
 
 def test_auto_registered_builtin_accepts_per_invocation_options() -> None:
-    engine = _engine(load_builtins=True)
+    generator = _motion_generator(robot_dof=3)
+    generator.robot.control_parts = {"arm": object(), "hand": object()}
+    generator.robot.get_joint_ids.side_effect = lambda name: (
+        [0, 1] if name == "arm" else [2]
+    )
+    engine = AtomicActionEngine(
+        generator,
+        control_profiles={
+            "hand": ControlPartCommandProfile.joint_positions(grasp=torch.ones(1))
+        },
+    )
     options = PressOptions(hand_interp_steps=7)
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
+        geometry={},
+    )
     invocation = ActionInvocation(
         skill_id="press",
-        goal=PressGoal(torch.eye(4)),
-        binding=ActionBinding(
-            manipulators={"primary": "all"},
-            end_effectors={"primary": "all"},
+        goal=PressGoal(semantics, torch.eye(4)),
+        binding=engine.bind_control_parts(
+            "press",
+            {"primary": {"motion": "arm", "grasp": "hand"}},
         ),
         motion_policy=MotionPolicy(sample_count=20),
         skill_options=options,
     )
 
-    request = engine.resolve(invocation)
+    request = engine.actions["press"].resolve_request(invocation)
 
     assert request.skill_options.hand_interp_steps == 7
     assert request.skill_options is not options
@@ -182,13 +241,18 @@ def test_engine_compile_projects_terminal_state_between_actions() -> None:
     first = torch.ones(2, 3)
     second = torch.full((2, 3), 2.0)
 
-    compiled = engine.compile((_invocation(first), _invocation(second)))
+    compiled = engine.compile((_invocation(engine, first), _invocation(engine, second)))
 
     assert compiled.plan_success.tolist() == [True, True]
     assert compiled.trajectory.positions.shape == (2, 4, 3)
-    assert torch.equal(compiled.action_plans[1].trajectory.positions[:, 0], first)
+    second_trajectory = compiled.action_plans[1].joint_trajectory
+    assert second_trajectory is not None
+    assert torch.equal(second_trajectory.positions[:, 0], first)
     assert torch.equal(compiled.projected_context.robot.qpos, second)
     assert torch.count_nonzero(engine.robot.get_qpos()) == 0
+    assert compiled.action_waypoint_offset(1) == 2
+    assert compiled.segment(1, "stub").start == 2
+    assert compiled.segment(1, "stub").stop == 4
 
 
 def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
@@ -197,11 +261,14 @@ def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
     first = torch.tensor([[1.0, 1.0, 1.0], [float("nan"), 2.0, 2.0]])
     second = torch.full((2, 3), 4.0)
 
-    compiled = engine.compile((_invocation(first), _invocation(second)))
+    compiled = engine.compile((_invocation(engine, first), _invocation(engine, second)))
 
     assert compiled.plan_success.tolist() == [True, False]
     assert torch.all(compiled.projected_context.robot.qpos[0] == 4.0)
     assert torch.all(compiled.projected_context.robot.qpos[1] == 0.0)
+    first_trajectory = compiled.action_plans[0].joint_trajectory
+    assert first_trajectory is not None
+    assert torch.all(first_trajectory.positions[1] == 0.0)
     assert torch.all(compiled.trajectory.positions[1] == 0.0)
 
 
@@ -218,8 +285,14 @@ def test_engine_compile_empty_sequence_is_successful_noop() -> None:
 
 def test_engine_rejects_unknown_skill() -> None:
     engine = _engine()
+    invocation = ActionInvocation(
+        skill_id="stub",
+        goal=JointPositionGoal(torch.zeros(2, 3)),
+        binding=ActionBinding(owner_id=engine.binding_owner_id),
+        motion_policy=MotionPolicy(sample_count=2),
+    )
     with pytest.raises(KeyError, match="stub"):
-        engine.compile((_invocation(torch.zeros(2, 3)),))
+        engine.compile((invocation,))
 
 
 def test_engine_rejects_duplicate_instance_registration() -> None:
@@ -253,20 +326,133 @@ def test_engine_binds_one_planning_service_to_every_action() -> None:
 
     assert first.motion_generator is engine.motion_generator
     assert second.motion_generator is engine.motion_generator
-    assert first.builder is engine.planning_services.trajectory_builder
-    assert second.builder is first.builder
+    assert first.planning_services is engine.planning_services
+    assert second.planning_services is engine.planning_services
+
+
+def test_engine_preserves_custom_action_timing() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    plan = engine.plan(_invocation(engine, torch.ones(2, 3)))
+
+    assert plan.joint_trajectory is not None
+    assert torch.allclose(
+        plan.joint_trajectory.dt,
+        torch.tensor([[0.0, ACTION_DT], [0.0, ACTION_DT]]),
+    )
 
 
 def test_engine_resolves_action_binding_from_robot_control_parts() -> None:
     engine = _engine(robot_dof=3)
+    engine.register(StubAction())
 
-    resolved = engine.planning_services.resolve_binding(
-        ActionBinding(manipulators={"primary": "all"})
+    resolved = engine.bind_control_parts(
+        "stub",
+        {"primary": {"motion": "all"}},
+    )
+    target = resolved.endpoint("primary", "motion").require_target(JointPositionTarget)
+
+    assert target.control_part == "all"
+    assert target.joint_ids == (0, 1, 2)
+
+
+def test_engine_make_invocation_binds_direct_control_parts() -> None:
+    engine = _engine(robot_dof=3)
+    engine.register(StubAction())
+    goal = JointPositionGoal(torch.ones(2, 3))
+    motion_policy = MotionPolicy(sample_count=2)
+
+    invocation = engine.make_invocation(
+        "stub",
+        goal,
+        control_parts={"primary": {"motion": "all"}},
+        motion_policy=motion_policy,
+        invocation_id="direct-call",
+        revision=1,
+    )
+    target = invocation.binding.endpoint("primary", "motion").require_target(
+        JointPositionTarget
     )
 
-    assert resolved.manipulator().name == "all"
-    assert resolved.manipulator().joint_ids == (0, 1, 2)
-    assert resolved.manipulator().dof == 3
+    assert invocation.skill_id == "stub"
+    assert invocation.goal is goal
+    assert invocation.motion_policy is motion_policy
+    assert invocation.invocation_id == "direct-call"
+    assert invocation.revision == 1
+    assert target.control_part == "all"
+    assert engine.plan(invocation).plan_success.tolist() == [True, True]
+
+
+def test_engine_make_invocation_uses_profile_default_binding() -> None:
+    engine = _engine(robot_dof=3)
+    engine.register(StubAction())
+    engine.bind_skill_profile(
+        RobotSkillProfile(
+            profile_id="stub-profile",
+            resources={
+                "whole_robot": RobotResource(
+                    "whole_robot",
+                    endpoints={
+                        "motion": ControlPartEndpoint(
+                            "all",
+                            capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                        )
+                    },
+                )
+            },
+            defaults={
+                "stub": ResourceBinding({"primary": "whole_robot"}),
+            },
+        )
+    )
+
+    invocation = engine.make_invocation(
+        "stub",
+        JointPositionGoal(torch.ones(2, 3)),
+        motion_policy=MotionPolicy(sample_count=2),
+    )
+    endpoint = invocation.binding.endpoint("primary", "motion")
+
+    assert endpoint.resource_id == "whole_robot"
+    assert endpoint.require_target(JointPositionTarget).control_part == "all"
+    assert engine.plan(invocation).plan_success.tolist() == [True, True]
+
+
+def test_engine_make_invocation_requires_direct_binding_without_profile() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(ValueError, match="control_parts is required"):
+        engine.make_invocation(
+            "stub",
+            JointPositionGoal(torch.ones(2, 3)),
+        )
+
+
+def test_engine_make_invocation_rejects_resources_without_profile() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(ValueError, match="requires a bound RobotSkillProfile"):
+        engine.make_invocation(
+            "stub",
+            JointPositionGoal(torch.ones(2, 3)),
+            resources={"primary": "whole_robot"},
+        )
+
+
+def test_engine_make_invocation_rejects_conflicting_binding_sources() -> None:
+    engine = _engine()
+    engine.register(StubAction())
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        engine.make_invocation(
+            "stub",
+            JointPositionGoal(torch.ones(2, 3)),
+            control_parts={"primary": {"motion": "all"}},
+            resources={"primary": "whole_robot"},
+        )
 
 
 def test_engine_resolves_invocation_control_override_into_request() -> None:
@@ -278,20 +464,24 @@ def test_engine_resolves_invocation_control_override_into_request() -> None:
     )
     engine.register(StubAction())
     invocation = replace(
-        _invocation(torch.ones(2, 3)),
+        _invocation(engine, torch.ones(2, 3)),
         control_overrides=ActionControlOverrides(
-            manipulators={
-                "primary": {"ready": JointPositionCommand(torch.full((3,), 0.4))}
+            endpoints={
+                "primary": {
+                    "motion": {"ready": JointPositionCommand(torch.full((3,), 0.4))}
+                }
             }
         ),
         revision=2,
     )
 
-    request = engine.resolve(invocation)
+    request = engine.actions["stub"].resolve_request(invocation)
 
     assert request.revision == 2
     assert torch.allclose(
-        request.binding.manipulator().joint_positions("ready", n_envs=2, device="cpu"),
+        request.binding.endpoint("primary", "motion").joint_positions(
+            "ready", num_envs=2, device="cpu"
+        ),
         torch.full((2, 3), 0.4),
     )
 
@@ -299,15 +489,12 @@ def test_engine_resolves_invocation_control_override_into_request() -> None:
 def test_engine_rejects_binding_outside_robot_control_parts() -> None:
     engine = _engine()
     engine.register(StubAction())
-    invocation = ActionInvocation(
-        skill_id="stub",
-        goal=JointPositionGoal(torch.zeros(2, 3)),
-        binding=ActionBinding(manipulators={"primary": "missing_arm"}),
-        motion_policy=MotionPolicy(sample_count=2),
-    )
 
     with pytest.raises(ValueError, match="Robot.control_parts"):
-        engine.plan(invocation)
+        engine.bind_control_parts(
+            "stub",
+            {"primary": {"motion": "missing_arm"}},
+        )
 
 
 def test_engine_motion_generator_is_read_only() -> None:
@@ -320,16 +507,38 @@ def test_engine_motion_generator_is_read_only() -> None:
 def test_engine_plan_action_supports_unregistered_configured_instance() -> None:
     engine = _engine()
     action = StubAction()
+    binding = engine.bind_control_parts(
+        action,
+        {"primary": {"motion": "all"}},
+    )
+    invocation = ActionInvocation(
+        skill_id="stub",
+        goal=JointPositionGoal(torch.ones(2, 3)),
+        binding=binding,
+        motion_policy=MotionPolicy(sample_count=2),
+    )
 
     plan = engine.plan_action(
         action,
-        _invocation(torch.ones(2, 3)),
+        invocation,
         engine.initial_context(),
     )
 
     assert plan.plan_success.tolist() == [True, True]
     assert action.is_bound
     assert engine.actions == {}
+
+
+def test_engine_cannot_build_binding_for_action_owned_by_another_engine() -> None:
+    action = StubAction()
+    first = _engine()
+    first.register(action)
+
+    with pytest.raises(ValueError, match="belongs to another engine"):
+        _engine().bind_control_parts(
+            action,
+            {"primary": {"motion": "all"}},
+        )
 
 
 def test_action_cannot_be_rebound_to_another_engine() -> None:
@@ -340,11 +549,21 @@ def test_action_cannot_be_rebound_to_another_engine() -> None:
         _engine().register(action)
 
 
+def test_bound_action_exposes_num_envs_property() -> None:
+    engine = _engine(batch_size=3)
+    action = StubAction()
+    engine.register(action)
+
+    assert action.num_envs == 3
+
+
 def test_unbound_action_rejects_direct_planning() -> None:
     action = StubAction()
+    donor_engine = _engine()
+    donor_engine.register(StubAction())
 
     with pytest.raises(RuntimeError, match="not bound"):
-        action.resolve_request(_invocation(torch.ones(2, 3)))
+        action.resolve_request(_invocation(donor_engine, torch.ones(2, 3)))
 
 
 def test_engine_rejects_plan_for_a_different_skill() -> None:
@@ -362,4 +581,4 @@ def test_engine_rejects_plan_for_a_different_skill() -> None:
     engine.register(action)
 
     with pytest.raises(ValueError, match="must match its request"):
-        engine.compile((_invocation(torch.zeros(2, 3)),))
+        engine.compile((_invocation(engine, torch.zeros(2, 3)),))

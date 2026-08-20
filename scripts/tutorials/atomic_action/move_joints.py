@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     JointPositionGoal,
@@ -38,8 +36,8 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
-    create_toppra_motion_generator,
+    add_tutorial_robot,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -65,17 +63,22 @@ def main() -> None:
     """Move the robot arm through a named target and two explicit waypoints."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
-    motion_gen = create_toppra_motion_generator(robot)
+    robot = add_tutorial_robot(sim, args.robot)
+    motion_gen = create_curobo_motion_generator(robot)
 
-    ready, mid, home = (
-        torch.tensor(qpos, dtype=torch.float32, device=sim.device)
-        for qpos in (
-            [0.35, -1.20, 1.30, -1.65, -1.57, 0.20],
-            [0.15, -1.40, 1.45, -1.60, -1.57, 0.10],
-            [0.0, -1.57, 1.57, -1.57, -1.57, 0.0],
+    home = robot.get_qpos(name="arm")[0].clone()
+    limits = robot.get_qpos_limits(name="arm")[0]
+
+    def offset_from_home(offsets: tuple[float, ...]) -> torch.Tensor:
+        target = home.clone()
+        count = min(target.numel(), len(offsets))
+        target[:count] += torch.tensor(
+            offsets[:count], dtype=target.dtype, device=target.device
         )
-    )
+        return torch.minimum(torch.maximum(target, limits[:, 0]), limits[:, 1])
+
+    ready = offset_from_home((0.35, 0.37, -0.27, -0.08, 0.0, 0.20))
+    mid = offset_from_home((0.15, 0.17, -0.12, -0.03, 0.0, 0.10))
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -95,17 +98,27 @@ def main() -> None:
     waypoints = (
         torch.stack([mid, home]).unsqueeze(0).repeat(robot.get_qpos().shape[0], 1, 1)
     )
-    binding = ActionBinding(manipulators={"primary": "arm"})
-    policy = MotionPolicy(sample_count=MOVE_JOINTS_SAMPLE_INTERVAL)
+    control_parts = {"primary": {"motion": "arm"}}
+    policy = MotionPolicy(
+        strategy="motion_gen",
+        sample_count=MOVE_JOINTS_SAMPLE_INTERVAL,
+    )
     compiled = engine.compile(
         (
-            ActionInvocation(
-                "move_joints", JointPositionGoal("ready"), binding, policy
+            engine.make_invocation(
+                "move_joints",
+                JointPositionGoal("ready"),
+                control_parts=control_parts,
+                motion_policy=policy,
             ),
-            ActionInvocation(
-                "move_joints", JointPositionGoal(waypoints), binding, policy
+            engine.make_invocation(
+                "move_joints",
+                JointPositionGoal(waypoints),
+                control_parts=control_parts,
+                motion_policy=policy,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan MoveJoints demo trajectory.")
@@ -116,7 +129,7 @@ def main() -> None:
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory.positions,
+        compiled.trajectory,
         args,
         video_prefix="move_joints_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

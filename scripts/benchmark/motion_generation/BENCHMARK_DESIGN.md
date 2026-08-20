@@ -107,14 +107,14 @@ one Markdown report with exactly three tables:
 
 ### 2.3 Atomic Action integration
 
-`MotionPolicy.motion_source` defaults to `"ik_interp"`. Existing Atomic Action
+`MotionPolicy.strategy` defaults to `"ik_interp"`. Existing Atomic Action
 benchmarks construct a TOPPRA `MotionGenerator`, but invocations that do not
-explicitly change `motion_source` still use local IK plus interpolation.
+explicitly change `strategy` still use local IK plus interpolation.
 
 NMG and cuRobo Atomic Action evaluation must explicitly set:
 
 ```python
-motion_policy = MotionPolicy(motion_source="motion_gen")
+motion_policy = MotionPolicy(strategy="motion_gen")
 ```
 
 The NMG checkpoint must remain confined to `NeuralPlannerCfg`. Atomic Action
@@ -371,9 +371,9 @@ replace total-latency ranking with per-segment latency.
   native collision-checked samples and `dt`.
 - Common path metrics: resample derived copies from both planners by the same
   arc-length procedure.
-- Atomic Action/common execution: use the same action `sample_interval` and let
-  `TrajectoryBuilder` perform common resampling, but do not call the resampled
-  result a native-timing trajectory.
+- Atomic Action/common execution: use the same action `sample_count` and let
+  `MotionGenerator` perform common resampling, but do not call the
+  resampled result a native-timing trajectory.
 
 #### Collision worlds
 
@@ -431,7 +431,7 @@ For Atomic Action tracks, separate `action_planning_ms`,
 Distinguish three evaluation views:
 
 1. **path-only**: resample by arc length and compare geometry;
-2. **native-timing**: use each planner's own `dt/duration`;
+2. **native-timing**: use each planner's own `dt` and derived duration;
 3. **common-execution**: use the same controller, control dt, and simulator.
 
 Do not directly compare NMG's fixed nominal `dt=0.01` against IK interpolation
@@ -533,9 +533,9 @@ task success.
 
 Backend fairness:
 
-- NMG and primary baseline cuRobo use `motion_source="motion_gen"`;
-- optional TOPPRA diagnostics use `motion_source="motion_gen"`;
-- optional IK-interpolation diagnostics use `motion_source="ik_interp"`;
+- NMG and primary baseline cuRobo use `strategy="motion_gen"`;
+- optional TOPPRA diagnostics use `strategy="motion_gen"`;
+- optional IK-interpolation diagnostics use `strategy="ik_interp"`;
 - grasp generator, object preset, start state, target, controller, sample
   interval, seed, and physics parameters are identical;
 - do not execute a fabricated trajectory after planning failure;
@@ -561,7 +561,6 @@ Suggested coverage:
 | PickUp | Approach/lift plan succeeds, `held_object` is created, minimum object lift is reached, no drop |
 | MoveHeldObject | Object reaches target pose, grasp remains stable, object drift/tilt stays within threshold |
 | Place | Place pose reached, release succeeds, final object pose is correct and stable |
-| Press | Press depth and valid contact/force reached, retract succeeds, no abnormal object motion |
 | Pick-Move-Place | Every stage succeeds in sequence; final object pose and release state are correct |
 
 Record:
@@ -675,7 +674,6 @@ tracks:
       - pick_up
       - move_held_object
       - place
-      - press
       - pick_move_place
 
 scenario_overrides:
@@ -942,7 +940,7 @@ Minimum tests:
 - planner-only smoke test with a fake NMG checkpoint;
 - graceful skip when the optional cuRobo runtime is unavailable;
 - cuRobo empty-world, shared-world, and multi-env dynamic-world configuration;
-- Atomic Action integration with `motion_source="motion_gen"`.
+- Atomic Action integration with `strategy="motion_gen"`.
 
 ### Phase 1: core motion
 
@@ -960,7 +958,7 @@ Minimum tests:
 - Parameterize planner construction in Atomic Action benchmarks.
 - Explicitly separate `ik_interp` and `motion_gen`.
 - Reuse current object/position/approach profiles and physical-success rules.
-- Add MoveEndEffector, PickUp, MoveHeldObject, Place, Press, and
+- Add MoveEndEffector, PickUp, MoveHeldObject, Place, and
   Pick-Move-Place.
 - Add controller tracking, collision/contact, and stable-hold metrics.
 
@@ -981,7 +979,7 @@ Minimum tests:
 - Free-space, collision-deployment, and Atomic Action tracks use correct,
   traceable cuRobo world configurations.
 - NMG enters supported Atomic Action cases through
-  `motion_source="motion_gen"`.
+  `strategy="motion_gen"`.
 - Planning, motion, execution, and task success remain distinct.
 - New planners and metrics register without runner changes.
 - Every baseline replays the same fixed manifest.

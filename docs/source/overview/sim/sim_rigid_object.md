@@ -224,7 +224,7 @@ Rigid objects integrate with sensors (cameras, contact sensors) and gizmos. You 
 
 ## Related Topics
 
-- Soft bodies: see the Soft Object documentation for deformable object interfaces. ([Soft Body Simulation Tutorial](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html))
+- Soft bodies: see the {doc}`Soft Body Simulation Tutorial </tutorial/create_softbody>` for deformable object interfaces.
 - Examples: check `scripts/tutorials/sim/create_scene.py` and `examples/sim` for more usage patterns.
 
 

@@ -37,14 +37,15 @@ from embodichain.utils import logger
 __all__ = ["StayStillSaveEnv"]
 
 
-@register_env("StayStillSave-v1", max_episode_steps=100)
+@register_env("StayStillSave-v1", max_episode_steps=101)
 class StayStillSaveEnv(EmbodiedEnv):
     """Robot holds still for 100 steps while a camera records.
 
     The demo action list is the initial joint configuration repeated for
-    ``num_steps`` frames, so the robot does not move. Episode length is fixed
-    at 100 steps via the ``register_env`` ``max_episode_steps`` argument and
-    truncates automatically.
+    ``num_steps`` frames, so the robot does not move. The time limit is one
+    step longer than the 100-action expert plan so the shared demonstration
+    executor can commit those frames explicitly instead of classifying the
+    final action as a truncation.
 
     The camera sensor, robot, scene and LeRobot dataset are configured through
     the gym config JSON (see

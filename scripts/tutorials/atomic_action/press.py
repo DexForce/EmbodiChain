@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate Press on the center of a regular wooden block."""
+"""Demonstrate Press on an articulation link or rigid object."""
 
 from __future__ import annotations
 
@@ -28,138 +28,169 @@ if str(_REPO_ROOT) not in sys.path:
 
 import torch
 
+from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
-    EndEffectorPoseGoal,
-    PressOptions,
-    PressGoal,
+    EntityState,
     MotionPolicy,
+    ObjectSemantics,
+    PressAffordance,
+    PressGoal,
+    PressOptions,
+    SceneEntityPose,
+    SceneSnapshot,
 )
 from embodichain.lab.sim.cfg import (
-    RigidBodyAttributesCfg,
+    ArticulationCfg,
+    JointDrivePropertiesCfg,
     RigidObjectCfg,
 )
-from embodichain.lab.sim.material import VisualMaterialCfg
-from embodichain.lab.sim.objects import RigidObject
+from embodichain.lab.sim.objects import Articulation, RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
-    broadcast_pose_batch,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
-    draw_axis_marker,
-    format_tensor,
     get_hand_open_close_qpos,
-    make_top_down_eef_pose,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
 )
 
-MOVE_SAMPLE_INTERVAL = 60
-PRESS_SAMPLE_INTERVAL = 90
+MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
+BUTTON_LINK_NAME = "button_cap"
+MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
+MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
+PRESS_SAMPLE_INTERVAL = 140
 HAND_INTERP_STEPS = 12
-POST_TRAJECTORY_STEPS = 180
-BLOCK_SIZE = (0.12, 0.12, 0.06)
-PRESS_CLEARANCE = 0.13
-PRESS_SURFACE_OFFSET = 0.003
-DEFAULT_PRESS_TOLERANCE = 0.01
+POST_TRAJECTORY_STEPS = 240
+RIGID_BUTTON_POSITION = (-0.7, -0.00, 0.70)
+RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
+BUTTON_SCENE_ENTITY_ID = "press-target"
 
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Press tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate Press on a wooden block.",
-        features=("debug_state", "visualize_axes"),
+        "Demonstrate Press on an articulation-link or rigid button.",
+        features=("visualize_axes",),
+    )
+    parser.add_argument("--press_distance", type=float, default=0.03)
+    parser.add_argument(
+        "--press_position",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("X", "Y", "Z"),
+        help="Optional target-local press position overriding the affordance.",
     )
     parser.add_argument(
-        "--press_tolerance", type=float, default=DEFAULT_PRESS_TOLERANCE
+        "--rigid_object",
+        action="store_true",
+        help="Use a standalone rigid button instead of the microwave link.",
     )
-    parser.add_argument("--block_pos", type=float, nargs=2, default=(-0.30, -0.12))
     return parser.parse_args()
 
 
-def create_wooden_block(sim, center: list[float]) -> RigidObject:
-    """Create the static block used as a press target."""
-    return sim.add_rigid_object(
-        cfg=RigidObjectCfg(
-            uid="wooden_block",
-            shape=CubeCfg(
-                size=list(BLOCK_SIZE),
-                visual_material=VisualMaterialCfg(
-                    uid="wooden_block_mat",
-                    base_color=[0.58, 0.32, 0.14, 1.0],
-                    roughness=0.85,
-                ),
+def create_microwave(sim) -> Articulation:
+    """Create the fixed-base microwave articulation used by the demo."""
+    microwave = sim.add_articulation(
+        cfg=ArticulationCfg(
+            uid="microwave",
+            fpath=get_data_path(MICROWAVE_ASSET),
+            init_pos=MICROWAVE_POSITION,
+            init_qpos=(0, 0, 0, 0),
+            init_rot=MICROWAVE_ORIENTATION,
+            drive_pros=JointDrivePropertiesCfg(
+                stiffness=1e-3, damping=1e2, max_effort=1e-2
             ),
-            body_type="static",
-            attrs=RigidBodyAttributesCfg(dynamic_friction=0.8, static_friction=0.9),
-            init_pos=center,
+            fix_base=True,
         )
     )
+    sim.update(step=10)
+    return microwave
 
 
-def compute_press_center_check(
-    robot,
-    trajectory: torch.Tensor,
-    block: RigidObject,
-    tolerance: float,
-) -> tuple[bool, float, int, torch.Tensor, torch.Tensor]:
-    """Return whether the press trajectory reaches the block center tolerance."""
-    arm_joint_ids = robot.get_joint_ids(name="arm")
-    start = MOVE_SAMPLE_INTERVAL + HAND_INTERP_STEPS
-    arm_traj = trajectory[
-        :, start : MOVE_SAMPLE_INTERVAL + PRESS_SAMPLE_INTERVAL, arm_joint_ids
-    ]
-    fk_pose = torch.stack(
-        [
-            robot.compute_fk(qpos=qpos, name="arm", to_matrix=True)
-            for qpos in arm_traj.unbind(dim=1)
-        ],
-        dim=1,
+def create_rigid_button(sim) -> RigidObject:
+    """Create the standalone static rigid button used by the optional demo."""
+    button = sim.add_rigid_object(
+        cfg=RigidObjectCfg(
+            uid="rigid_button",
+            shape=CubeCfg(size=list(RIGID_BUTTON_SIZE)),
+            body_type="static",
+            init_pos=RIGID_BUTTON_POSITION,
+        )
     )
-    block_center = block.get_local_pose(to_matrix=True)[:, :3, 3]
-    target_z = block_center[:, 2] + 0.5 * BLOCK_SIZE[2] + PRESS_SURFACE_OFFSET
-    xy_error = torch.linalg.norm(
-        fk_pose[:, :, :2, 3] - block_center[:, None, :2], dim=2
-    )
-    z_error = torch.abs(fk_pose[:, :, 2, 3] - target_z[:, None])
-    best_idx = (xy_error + z_error).argmin(dim=1)
-    env_idx = torch.arange(trajectory.shape[0], device=trajectory.device)
-    best_pos = fk_pose[env_idx, best_idx, :3, 3]
-    center_error = torch.linalg.norm(best_pos[:, :2] - block_center[:, :2], dim=1)
-    worst_env = int(center_error.argmax().item())
-    expected = torch.stack(
-        [block_center[worst_env, 0], block_center[worst_env, 1], target_z[worst_env]]
-    )
+    sim.update(step=10)
+    return button
+
+
+def create_button_semantics(
+    target: Articulation | RigidObject,
+) -> tuple[ObjectSemantics, torch.Tensor]:
+    """Create press semantics for an articulation-link or rigid button."""
+    if isinstance(target, Articulation):
+        vertices, _ = target.get_link_vert_face(BUTTON_LINK_NAME)
+        target_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
+        press_axis = torch.tensor([0.0, 0.0, -1.0], device=target.device)
+        affordance = PressAffordance(
+            # button_cap's local -z direction matches the prismatic joint's
+            # inward press direction in this asset.
+            press_axis=press_axis,
+            press_position=_surface_center(vertices, press_axis),
+        )
+        label = "microwave_start_button"
+    else:
+        vertices = target.get_vertices(env_ids=[0], scale=True)[0]
+        target_pose = target.get_local_pose(to_matrix=True)
+        press_axis = torch.tensor([-1.0, 0.0, 0.0], device=target.device)
+        affordance = PressAffordance(
+            press_axis=press_axis,
+            press_position=_surface_center(vertices, press_axis),
+        )
+        label = "rigid_button"
     return (
-        bool(torch.all(center_error <= tolerance)),
-        float(center_error[worst_env].item()),
-        start + int(best_idx[worst_env].item()),
-        best_pos[worst_env],
-        expected,
+        ObjectSemantics(
+            label=label,
+            geometry={},
+            entity_id=BUTTON_SCENE_ENTITY_ID,
+            affordance=affordance,
+        ),
+        target_pose,
     )
+
+
+def _surface_center(
+    vertices: torch.Tensor,
+    inward_axis: torch.Tensor,
+) -> tuple[float, float, float]:
+    """Return the center of the outermost mesh face opposite inward travel."""
+    vertices = torch.as_tensor(vertices, dtype=torch.float32, device=inward_axis.device)
+    axis = inward_axis.to(dtype=torch.float32)
+    axis = axis / torch.linalg.vector_norm(axis)
+    projection = torch.matmul(vertices, axis)
+    surface = vertices[torch.isclose(projection, projection.min(), atol=1.0e-5)]
+    point = surface.mean(dim=0)
+    return tuple(float(value) for value in point)
 
 
 def main() -> None:
-    """Plan, verify, and replay MoveEndEffector followed by Press."""
+    """Plan and replay Press for the selected target object type."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
-    block = create_wooden_block(sim, [*args.block_pos, 0.5 * BLOCK_SIZE[2]])
-    if sim.device.type == "cuda":
-        sim.init_gpu_physics()
-    block.reset()
-    sim.update(step=5)
-    block.clear_dynamics()
-
+    robot = add_ur5_gripper_robot(
+        sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
+    )
+    target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
+    hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
     motion_gen = create_toppra_motion_generator(robot)
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    semantics, target_pose = create_button_semantics(target)
+    affordance = semantics.affordance
+    assert isinstance(affordance, PressAffordance)
+
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -169,81 +200,74 @@ def main() -> None:
             )
         },
     )
-    block_center = block.get_local_pose(to_matrix=True)[0, :3, 3]
-    press_position = block_center.clone()
-    press_position[2] += 0.5 * BLOCK_SIZE[2] + PRESS_SURFACE_OFFSET
-    move_position = press_position.clone()
-    move_position[2] += PRESS_CLEARANCE - PRESS_SURFACE_OFFSET
-    n_envs = robot.get_qpos().shape[0]
-    move_target = broadcast_pose_batch(make_top_down_eef_pose(move_position), n_envs)
-    press_target = broadcast_pose_batch(make_top_down_eef_pose(press_position), n_envs)
-    if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "press_target_axis", press_target)
     wait_for_user = prepare_tutorial_scene(
-        sim, args, "Inspect the wooden block, then press Enter to plan..."
+        sim,
+        args,
+        "Inspect the button target, then press Enter to plan Press...",
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
     compiled = engine.compile(
         (
-            ActionInvocation(
-                "move_end_effector",
-                EndEffectorPoseGoal(move_target),
-                binding,
-                MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
-            ),
-            ActionInvocation(
+            engine.make_invocation(
                 "press",
-                PressGoal(press_target),
-                binding,
-                MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                PressGoal(
+                    semantics,
+                    SceneEntityPose(BUTTON_SCENE_ENTITY_ID),
+                ),
+                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+                motion_policy=MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
+                    approach_distance=0.12,
+                    press_distance=args.press_distance,
+                    press_position=(
+                        None
+                        if args.press_position is None
+                        else tuple(args.press_position)
+                    ),
                 ),
             ),
-        )
+        ),
+        context=engine.initial_context(
+            scene=SceneSnapshot(
+                timestamp=0.0,
+                version=0,
+                entities={BUTTON_SCENE_ENTITY_ID: EntityState(target_pose)},
+            ),
+            control_dt=sim.sim_config.physics_dt,
+        ),
     )
     if not compiled.plan_success.all():
-        logger.log_warning("Failed to plan Press demo trajectory.")
-        return
-    trajectory = compiled.trajectory.positions
-    is_center_hit, center_error, hit_step, hit_pos, expected_pos = (
-        compute_press_center_check(robot, trajectory, block, args.press_tolerance)
-    )
-    logger.log_info(
-        "Press center check: "
-        f"success={is_center_hit}, xy_error={center_error:.4f} m, hit_step={hit_step}, "
-        f"hit_pos={format_tensor(hit_pos)}, expected={format_tensor(expected_pos)}"
-    )
-    if not is_center_hit:
-        logger.log_warning(
-            "Press trajectory did not reach the block center within tolerance."
-        )
+        logger.log_warning("Failed to plan the Press demo trajectory.")
         return
 
+    if isinstance(target, RigidObject):
+        focus_pose = target.get_local_pose(to_matrix=True)
+    elif isinstance(target, Articulation):
+        focus_pose = target.get_link_pose(BUTTON_LINK_NAME, to_matrix=True)
+    else:
+        raise ValueError("Unsupported target type for Press demo.")
+    focus_position = [focus_pose[0, 0, 3], focus_pose[0, 1, 3], focus_pose[0, 2, 3]]
+    camera_position = [
+        focus_position[0] + 0.0,
+        focus_position[1] + 0.3,
+        focus_position[2] + 0.2,
+    ]
+    look_at = [camera_position, focus_position, [0, 0, 1]]
     if wait_for_user:
         input("Press Enter to replay the Press demo...")
-
-    def log_state(step_idx: int, total_steps: int) -> None:
-        if args.debug_state and (
-            step_idx % max(1, total_steps // 10) == 0 or step_idx == total_steps - 1
-        ):
-            logger.log_info(
-                f"replay step {step_idx}/{total_steps - 1}: "
-                f"pos={format_tensor(block.get_local_pose(to_matrix=True)[0, :3, 3])}"
-            )
-
     replay_trajectory(
         sim,
         robot,
-        trajectory,
+        compiled.trajectory,
         args,
-        video_prefix="press_auto_play",
+        video_prefix=(
+            "press_rigid_button_auto_play"
+            if args.rigid_object
+            else "press_microwave_button_auto_play"
+        ),
         hold_steps=POST_TRAJECTORY_STEPS,
-        on_trajectory_step=log_state,
+        look_at=look_at,
     )
     if wait_for_user:
         input("Press Enter to exit the simulation...")
