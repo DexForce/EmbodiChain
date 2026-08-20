@@ -47,6 +47,7 @@ def rigid_desc_from_usd(
     cfg: RigidObjectCfg,
     *,
     per_env: bool = True,
+    newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Select the sole rigid object in a USD stage."""
     uid = _required_uid(cfg.uid, "Rigid object")
@@ -74,7 +75,10 @@ def rigid_desc_from_usd(
     for collision in desc.collisions:
         collision.enable_collision = bool(cfg.attrs.enable_collision)
         collision.dexsim = _compile_dexsim_collision(cfg.attrs)
-        collision.newton = _compile_newton_collision(cfg.attrs)
+        collision.newton = _compile_newton_collision(
+            cfg.attrs,
+            newton_solver_type=newton_solver_type,
+        )
 
     material_ref, material_entry = _compile_visual_material(
         uid,

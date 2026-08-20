@@ -92,7 +92,7 @@ class PhysicsBackend(ABC):
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         """Perform backend setup immediately after the dexsim World is created.
 
-        Default configures the native PhysX globals. Newton is already
+        Default configures the native DexSim globals. Newton is already
         registered from ``WorldConfig.newton_cfg`` and therefore has no
         additional activation work.
         """

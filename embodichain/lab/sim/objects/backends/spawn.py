@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------------
 """EmbodiChain tensor-layout adapters for :mod:`dexsim.spawn` batches.
 
-The classes in this module deliberately know nothing about PhysX scenes or
+The classes in this module deliberately know nothing about Default backend scenes or
 Newton runtime objects. Backend selection, handle rebinding, and topology
 revision tracking remain owned by DexSim's ``SpawnResult`` and batch classes.
 EmbodiChain only adapts logical row selections and its public pose convention

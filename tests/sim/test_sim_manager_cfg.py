@@ -16,11 +16,14 @@
 
 from __future__ import annotations
 
-import torch
+from types import SimpleNamespace
+
 import pytest
+import torch
 
 from embodichain.lab.sim import SimulationManagerCfg
 from embodichain.lab.sim.cfg import NewtonPhysicsCfg, WindowCameraPoseCfg
+from embodichain.lab.sim.physics import NewtonPhysicsBackend
 
 
 def test_physics_runtime_fields_are_stored_on_physics_cfg() -> None:
@@ -89,6 +92,22 @@ def test_newton_physics_cfg_uses_mujoco_warp_solver_by_default() -> None:
 
     assert isinstance(dexsim_cfg.solver_cfg, MJWarpSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "mujoco_warp"
+
+
+def test_newton_backend_exposes_resolved_solver_type() -> None:
+    backend = NewtonPhysicsBackend(SimpleNamespace())
+    world_config = SimpleNamespace(newton_cfg=None)
+    sim_config = SimulationManagerCfg(
+        physics_cfg=NewtonPhysicsCfg(
+            device="cpu",
+            solver_cfg={"solver_type": "xpbd"},
+        ),
+    )
+
+    backend.configure_world(world_config, sim_config)
+
+    assert backend.solver_type == "xpbd"
+    assert world_config.newton_cfg.solver_cfg.solver_type == "xpbd"
 
 
 def test_newton_physics_cfg_converts_mapping_solver_cfg_to_dexsim_cfg() -> None:

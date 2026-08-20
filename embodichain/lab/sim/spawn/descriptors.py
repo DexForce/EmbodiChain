@@ -15,11 +15,12 @@
 # ----------------------------------------------------------------------------
 """Translate EmbodiChain asset configurations into DexSim Spawn descriptors.
 
-This module is deliberately independent of the active physics backend.  It
-translates one EmbodiChain configuration into a canonical descriptor carrying
-both the common physics values and the optional backend extension blocks.  The
-selected :mod:`dexsim.spawn` adapter remains the only component that chooses
-between PhysX and Newton.
+This module translates one EmbodiChain configuration into a canonical
+descriptor carrying both the common physics values and the optional backend
+extension blocks. The selected :mod:`dexsim.spawn` adapter remains the only
+component that chooses between DexSim and Newton. When supplied, the active
+Newton solver type only prevents common contact values from being authored to
+a solver that cannot consume them.
 
 Articulation joint and link names are resolved by the normal DexSim adapter
 finalization, not by a second source parser in EmbodiChain. Configuration that
@@ -52,6 +53,7 @@ from dexsim.spawn import (
     RigidBodyPhysicsDesc,
     SoftObjectDesc,
 )
+from dexsim.spawn.descs import NEWTON_CONTACT_SOLVER_FIELDS
 from dexsim.types import ActorType
 
 from embodichain.lab.sim.cfg import (
@@ -79,6 +81,7 @@ def rigid_desc_from_cfg(
     cfg: RigidObjectCfg,
     *,
     per_env: bool = True,
+    newton_solver_type: str | None = None,
 ) -> tuple[ObjectDesc, dict[str, MaterialDesc]]:
     """Translate a rigid-object config into a DexSim Spawn descriptor."""
     uid = _required_uid(cfg.uid, "Rigid object")
@@ -101,6 +104,7 @@ def rigid_desc_from_cfg(
     collision.dexsim = _compile_dexsim_collision(cfg.attrs)
     collision.newton = _compile_newton_collision(
         cfg.attrs,
+        newton_solver_type=newton_solver_type,
         sdf_resolution=(
             _resolved_mesh_collision_settings(cfg)[2]
             if isinstance(cfg.shape, MeshCfg)
@@ -176,6 +180,7 @@ def articulation_desc_from_cfg(
     *,
     per_env: bool = True,
     source_path: str | None = None,
+    newton_solver_type: str | None = None,
 ) -> ArticulationDesc:
     """Translate an articulation config into a DexSim Spawn descriptor."""
     path = source_path if source_path is not None else cfg.fpath
@@ -214,7 +219,10 @@ def articulation_desc_from_cfg(
         newton_drive=(
             None if target_mode is None else NewtonJointDesc(target_mode=target_mode)
         ),
-        newton_collision=_compile_newton_collision(cfg.attrs),
+        newton_collision=_compile_newton_collision(
+            cfg.attrs,
+            newton_solver_type=newton_solver_type,
+        ),
     )
 
 
@@ -280,6 +288,7 @@ def _compile_newton_collision(
     attrs: RigidBodyAttributesCfg,
     *,
     sdf_resolution: int = 0,
+    newton_solver_type: str | None = None,
 ) -> NewtonCollisionDesc:
     # ``None`` means "leave the backend default untouched". Initializing every
     # field avoids accidentally authoring NewtonCollisionDesc's convenience
@@ -291,7 +300,10 @@ def _compile_newton_collision(
                 values[name] = getattr(attrs.newton, name)
     if "mu" in values:
         values["mu"] = float(attrs.dynamic_friction)
-    if "restitution" in values:
+    solver_contact_fields = NEWTON_CONTACT_SOLVER_FIELDS.get(newton_solver_type)
+    if "restitution" in values and (
+        solver_contact_fields is None or "restitution" in solver_contact_fields
+    ):
         values["restitution"] = float(attrs.restitution)
     if sdf_resolution > 0:
         if "force_sdf" in values:
@@ -343,7 +355,7 @@ def _compile_geometry(
         if sdf_resolution > 0:
             logger.log_warning(
                 "CollisionApproximation.SDF is preserved and Newton receives "
-                "sdf_max_resolution, but the PhysX descriptor does not expose "
+                "sdf_max_resolution, but the DexSim descriptor does not expose "
                 "its cooking resolution."
             )
         return (

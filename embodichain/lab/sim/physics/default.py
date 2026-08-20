@@ -32,7 +32,7 @@ __all__ = ["DefaultPhysicsBackend"]
 
 
 class DefaultPhysicsBackend(PhysicsBackend):
-    """DexSim's default PhysX backend (GPU or CPU)."""
+    """DexSim's default backend (GPU or CPU)."""
 
     name = "default"
 
@@ -54,7 +54,7 @@ class DefaultPhysicsBackend(PhysicsBackend):
 
     # -- scene ---------------------------------------------------------- #
     def get_scene(self):
-        """Return PhysX's compatibility scene after Spawn is prepared."""
+        """Return the Default backend's compatibility scene after Spawn is prepared."""
         self._manager.prepare()
         return self._manager._world.get_physics_scene()
 

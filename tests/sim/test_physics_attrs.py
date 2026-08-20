@@ -164,7 +164,7 @@ def test_warn_ignored_contact_fields_restitution_on_mujoco_warp(
 
 
 def test_warn_backend_mismatched_fields_newton(caplog) -> None:
-    # PhysX-only fields deviating from defaults on Newton -> warn
+    # Default-only fields deviating from defaults on Newton -> warn
     cfg = RigidBodyAttributesCfg(enable_ccd=True, linear_damping=0.9)
     with caplog.at_level(logging.WARNING):
         warn_backend_mismatched_fields(cfg, "newton")

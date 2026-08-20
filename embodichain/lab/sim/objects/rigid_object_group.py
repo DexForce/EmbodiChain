@@ -260,7 +260,7 @@ class RigidObjectGroup(BatchEntity):
         filter_data: torch.Tensor,
         env_ids: Sequence[int] | None = None,
     ) -> None:
-        """Set one PhysX collision filter value for every member in each env."""
+        """Set one Default-backend collision filter value for every member in each env."""
         env, _, _ = self._selected_indices(env_ids)
         values = np.asarray(filter_data.detach().cpu(), dtype=np.uint32).reshape(-1, 4)
         if len(values) != len(env):

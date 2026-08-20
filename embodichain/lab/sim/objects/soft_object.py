@@ -157,7 +157,7 @@ class SoftBodyData:
     def collision_surface_triangles(self) -> torch.Tensor:
         """Build a stable surface approximation for collision vertices.
 
-        DexSim exposes live PhysX collision vertices but not their triangle
+        DexSim exposes live collision vertices but not their triangle
         connectivity. The convex hull provides a stable topology whose indices
         continue to reference the live collision-vertex buffer.
 

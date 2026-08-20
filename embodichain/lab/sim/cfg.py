@@ -78,10 +78,7 @@ class RenderCfg:
     - 'rt' is an offline ray-traced renderer for maximum visual fidelity, suitable for high-quality rendering tasks.
     """
 
-    enable_denoiser: bool = True
-    """Whether to enable denoising. Only valid when renderer is 'hybrid' or 'fast-rt'."""
-
-    spp: int = 64
+    spp: int = 1
     """Samples per pixel for ray tracing rendering. This parameter is only valid when renderer is 'hybrid' or 'fast-rt' and enable_denoiser is False."""
 
     tone_mapping_enabled: bool = False
@@ -128,9 +125,7 @@ class RenderCfg:
         """
         world_config.renderer = self.to_dexsim_flags()
         world_config.raytrace_config.render_iterations_per_frame = self.spp
-        world_config.raytrace_config.open_denoise = self.enable_denoiser
-        if self.enable_denoiser:
-            world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
+        world_config.raytrace_config.open_denoise = True
         world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
         world_config.postprocess_config.tone_mapping_type = (
             ToneMappingType.MODIFIED_REINHARD
@@ -166,7 +161,7 @@ class GPUMemoryCfg:
 
 @configclass
 class PhysicsCfg:
-    """Configuration for the DexSim default (PhysX) physics backend.
+    """Configuration for the DexSim default physics backend.
 
     ``DefaultPhysicsCfg`` is the explicit backend-selecting subclass used by
     new code. This base name remains concrete for compatibility with existing
@@ -620,7 +615,7 @@ class RigidBodyAttributesCfg:
     3. The physics material properties.
 
     The ``newton`` sub-config carries Newton-specific per-shape contact/shape
-    knobs (``ke``/``kd``/``margin``/...) that have no PhysX equivalent; it is
+    knobs (``ke``/``kd``/``margin``/...) that have no default-backend equivalent; it is
     ignored on the default backend and applied via the Newton desc-native
     registration path when set.
     """
@@ -687,7 +682,7 @@ class RigidBodyAttributesCfg:
     def attr(self) -> PhysicalAttr:
         """Convert to dexsim PhysicalAttr.
 
-        This is the legacy PhysX-oriented projection used by the default
+        This is the legacy default-backend projection used by the default
         backend. Newton-native fields (``self.newton``) are not representable
         here; the Newton path uses
         :func:`embodichain.lab.sim.physics_attrs.resolve_newton_shape` instead.
@@ -761,7 +756,7 @@ class RigidBodyAttributesOverrideCfg:
         """Build a :class:`~dexsim.types.PhysicalAttr` from base values and overrides.
 
         .. note::
-            This returns the legacy PhysX projection and therefore drops the
+            This returns the legacy default-backend projection and therefore drops the
             Newton sub-config. For a Newton-aware merge that preserves
             ``newton``, use :meth:`merged_cfg` and pass it to the Newton
             resolver.

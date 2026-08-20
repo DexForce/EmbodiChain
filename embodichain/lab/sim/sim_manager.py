@@ -94,7 +94,7 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
     RigidConstraintCfg,
 )
-from embodichain.lab.sim.physics import make_physics_backend
+from embodichain.lab.sim.physics import NewtonPhysicsBackend, make_physics_backend
 from embodichain.lab.sim.spawn.descriptors import (
     articulation_desc_from_cfg,
     cloth_desc_from_cfg,
@@ -652,6 +652,13 @@ class SimulationManager:
         return self.physics.name == "newton"
 
     @property
+    def _active_newton_solver_type(self) -> str | None:
+        """Return the resolved Newton solver without widening the base contract."""
+        if isinstance(self.physics, NewtonPhysicsBackend):
+            return self.physics.solver_type
+        return None
+
+    @property
     def newton_manager(self):
         """Compatibility accessor for the removed NewtonManager API.
 
@@ -941,7 +948,8 @@ class SimulationManager:
         result = scene.result
         if result is None or result.needs_rebuild or scene.builder.has_pending_changes:
             result = scene.commit()
-            result.prepare_runtime()
+            if self.is_newton_backend or self.device.type == "cuda":
+                result.prepare_runtime()
             self._env = result.get_arena("default")
             self._arenas = [result.get_arena(name) for name in scene.arena_names]
             self.__dict__.pop("arena_offsets", None)
@@ -1118,7 +1126,7 @@ class SimulationManager:
         return self._world
 
     def get_physics_scene(self) -> "PhysicsScene":
-        """Return PhysX's compatibility scene after Spawn preparation.
+        """Return the Default backend's compatibility scene after Spawn preparation.
 
         Newton has no ``PhysicsScene`` facade and raises with guidance to use
         :attr:`spawn_result` instead.
@@ -1640,9 +1648,17 @@ class SimulationManager:
             raise ValueError(f"Rigid object {uid!r} already exists.")
         source_path = getattr(cfg.shape, "fpath", None)
         if _is_usd_path(source_path):
-            descriptor, materials = rigid_desc_from_usd(cfg, per_env=True)
+            descriptor, materials = rigid_desc_from_usd(
+                cfg,
+                per_env=True,
+                newton_solver_type=self._active_newton_solver_type,
+            )
         else:
-            descriptor, materials = rigid_desc_from_cfg(cfg, per_env=True)
+            descriptor, materials = rigid_desc_from_cfg(
+                cfg,
+                per_env=True,
+                newton_solver_type=self._active_newton_solver_type,
+            )
         self._spawn_scene.builder.materials.update(materials)
 
         rigid_obj = RigidObject(
@@ -1884,7 +1900,7 @@ class SimulationManager:
     ) -> RigidConstraint:
         """Create a fixed constraint between two rigid objects.
 
-        Constraints are native Default/PhysX resources owned by each Arena.
+        Constraints are native Default-backend resources owned by each Arena.
         Spawn owns the two actors; this method only borrows their native actor
         handles while creating the constraint.
 
@@ -1898,7 +1914,7 @@ class SimulationManager:
         """
         if hasattr(self, "physics") and not self.is_default_backend:
             raise NotImplementedError(
-                "Rigid constraints are currently supported only by the Default/PhysX "
+                "Rigid constraints are currently supported only by the Default "
                 "backend."
             )
         if cfg.constraint_type != "fixed":
@@ -2109,9 +2125,17 @@ class SimulationManager:
             member_cfg.body_type = cfg.body_type
             source_path = getattr(member_cfg.shape, "fpath", None)
             if _is_usd_path(source_path):
-                descriptor, materials = rigid_desc_from_usd(member_cfg, per_env=True)
+                descriptor, materials = rigid_desc_from_usd(
+                    member_cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
             else:
-                descriptor, materials = rigid_desc_from_cfg(member_cfg, per_env=True)
+                descriptor, materials = rigid_desc_from_cfg(
+                    member_cfg,
+                    per_env=True,
+                    newton_solver_type=self._active_newton_solver_type,
+                )
             if descriptor.physics is None:
                 raise ValueError(
                     f"Rigid object group member {index} has no rigid-body physics."
@@ -2318,7 +2342,11 @@ class SimulationManager:
             )
             self._spawn_scene.builder.materials.update(materials)
         else:
-            descriptor = articulation_desc_from_cfg(cfg, per_env=True)
+            descriptor = articulation_desc_from_cfg(
+                cfg,
+                per_env=True,
+                newton_solver_type=self._active_newton_solver_type,
+            )
         if self.is_newton_backend and cfg.qpos_limits is not None:
             # Reject before mutating SceneBuilder. Applying this after bind
             # would immediately make Newton's immutable model stale.
@@ -2640,7 +2668,7 @@ class SimulationManager:
         Cameras keep EmbodiChain's native CameraGroup implementation. A camera
         attached to an articulation link is created immediately and attached
         after the physical Spawn scene is prepared. ContactSensor still
-        requires the Default/PhysX scene and therefore prepares physics first.
+        requires the Default backend scene and therefore prepares physics first.
 
         Args:
             sensor_cfg (SensorCfg): configuration for the sensor.
@@ -2664,7 +2692,7 @@ class SimulationManager:
             )
         if sensor_type == "ContactSensor" and self.is_newton_backend:
             raise NotImplementedError(
-                "ContactSensor currently requires the Default/PhysX PhysicsScene. "
+                "ContactSensor currently requires the Default backend PhysicsScene. "
                 "Newton needs a public backend-neutral contact query API in DexSim."
             )
 

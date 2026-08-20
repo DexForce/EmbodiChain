@@ -33,14 +33,19 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     name = "newton"
 
+    #: Resolved Newton solver type after world configuration.
+    solver_type: str | None = None
+
     # -- construction / world-config activation ------------------------- #
     def configure_world(self, world_config, sim_config: "SimulationManagerCfg") -> None:
         importlib.import_module("dexsim.engine.newton_physics")
 
         newton_physics_cfg = sim_config.physics_cfg
-        world_config.newton_cfg = newton_physics_cfg.to_dexsim_cfg(
+        newton_cfg = newton_physics_cfg.to_dexsim_cfg(
             gpu_id=sim_config.gpu_id,
         )
+        self.solver_type = newton_cfg.solver_cfg.solver_type
+        world_config.newton_cfg = newton_cfg
 
     def activate(self, sim_config: "SimulationManagerCfg") -> None:
         del sim_config

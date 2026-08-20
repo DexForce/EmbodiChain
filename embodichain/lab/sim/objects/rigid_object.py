@@ -957,7 +957,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(local_env_ids):
             if is_newton_scene(self._ps):
                 # Not finalized: mirror to meta (consumed at next finalize). The
-                # PhysX-bound set_mass is not patched for Newton entities.
+                # Default-backend set_mass is not patched for Newton entities.
                 attr = self._get_newton_attr_or_none(env_idx)
                 if attr is not None:
                     attr.mass = float(mass_np[i])
@@ -1019,7 +1019,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(local_env_ids):
             if is_newton_scene(self._ps):
                 # Not finalized: mirror to meta (Newton has a single mu; consumed
-                # at next finalize). The PhysX-bound friction setters are not
+                # at next finalize). The Default-backend friction setters are not
                 # patched for Newton entities.
                 attr = self._get_newton_attr_or_none(env_idx)
                 if attr is not None:
@@ -1167,7 +1167,7 @@ class RigidObject(BatchEntity):
         for i, env_idx in enumerate(local_env_ids):
             if is_newton_scene(self._ps):
                 # Not finalized: mirror to meta (consumed at next finalize). The
-                # PhysX-bound inertia setter is not patched for Newton entities.
+                # Default-backend inertia setter is not patched for Newton entities.
                 attr = self._get_newton_attr_or_none(env_idx)
                 if attr is not None:
                     attr.inertia = np.asarray(inertia_np[i], dtype=np.float32)
@@ -1728,13 +1728,13 @@ class RigidObject(BatchEntity):
     def _apply_initial_state(self) -> None:
         """Apply cfg initial pose after construction.
 
-        PhysX/default backends run a full reset. Newton applies init pose in
+        The Default (DexSim) backend runs a full reset. Newton applies init pose in
         ``BUILDER`` via the scene batch API; velocities are cleared after
         finalization through :meth:`SimulationManager.finalize_newton_physics`.
         """
         if self.is_spawn_bound:
             if self._spawn_result.backend == "dexsim":
-                # PhysX Direct GPU readiness performs native warm-up updates.
+                # DexSim Direct GPU readiness performs native warm-up updates.
                 # Re-apply the authored state after the batch becomes usable
                 # so prepare() itself is not an observable simulation step.
                 self.reset()
