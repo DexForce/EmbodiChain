@@ -25,6 +25,8 @@ from typing import Any
 
 import requests
 
+from embodichain.gen_sim.scene_engine.errors import SceneServiceError
+
 from embodichain.gen_sim.scene_engine.configs.environment import (
     read_scene_engine_env_values,
 )
@@ -77,7 +79,7 @@ class GeometryGenerationClient:
                 last_error = exc
 
         assert last_error is not None
-        raise RuntimeError(
+        raise SceneServiceError(
             "Geometry Generation Server health check failed after "
             f"{self._max_attempts} attempts."
         ) from last_error
@@ -91,6 +93,7 @@ class GeometryGenerationClient:
         image_path: str | Path,
         object_masks: list[tuple[str, Path]],
         output_root: str | Path,
+        seed: int | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Generate objects through the geometry server's mask-list endpoint.
 
@@ -125,6 +128,7 @@ class GeometryGenerationClient:
         response_data, response_objects = self._request_objects(
             image_path=resolved_image_path,
             object_masks=resolved_object_masks,
+            seed=seed,
         )
 
         resolved_output_root = Path(output_root).expanduser().resolve()
@@ -158,6 +162,7 @@ class GeometryGenerationClient:
         *,
         image_path: Path,
         object_masks: list[tuple[str, Path]],
+        seed: int | None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         last_error: Exception | None = None
         for _ in range(self._max_attempts):
@@ -171,6 +176,7 @@ class GeometryGenerationClient:
                     ]
                     response = self._session.post(
                         self._url(self._generate_objects_path),
+                        data=(None if seed is None else {"seed": str(int(seed))}),
                         files=[
                             (
                                 "image",
@@ -201,6 +207,11 @@ class GeometryGenerationClient:
                         "Geometry Generation Server response is not valid JSON."
                     ) from exc
                 response_data = self._wait_for_task_if_needed(response_data)
+                if seed is not None and _response_seed(response_data) != int(seed):
+                    raise RuntimeError(
+                        "Geometry Generation Server did not acknowledge the "
+                        f"requested seed {int(seed)}."
+                    )
                 response_objects = _parse_objects_response(
                     response_data,
                     object_ids=[object_id for object_id, _ in object_masks],
@@ -210,7 +221,7 @@ class GeometryGenerationClient:
                 last_error = exc
 
         assert last_error is not None
-        raise RuntimeError(
+        raise SceneServiceError(
             "Geometry Generation Server request failed after "
             f"{self._max_attempts} attempts."
         ) from last_error
@@ -294,7 +305,7 @@ class GeometryGenerationClient:
                 last_error = exc
 
         assert last_error is not None
-        raise RuntimeError(
+        raise SceneServiceError(
             "Geometry Generation Server GLB download failed after "
             f"{self._max_attempts} attempts: {mesh_path}"
         ) from last_error
@@ -372,6 +383,25 @@ def _parse_objects_response(
             }
         )
     return parsed_objects
+
+
+def _response_seed(value: object) -> int | None:
+    """Return a seed acknowledged by a geometry response envelope."""
+    if not isinstance(value, dict):
+        return None
+    candidates = [value.get("seed")]
+    for key in ("result", "metadata"):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested.get("seed"))
+    for candidate in candidates:
+        if candidate is None or isinstance(candidate, bool):
+            continue
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _parse_numeric_list(

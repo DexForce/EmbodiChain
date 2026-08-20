@@ -28,6 +28,7 @@ from embodichain.gen_sim.task_engine.orchestration.legacy_scene import (
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_source import (
     fingerprint_scene_source,
+    scene_revision_id,
 )
 from embodichain.gen_sim.task_engine.scene import build_conservative_scene_graph
 
@@ -42,8 +43,12 @@ def _legacy_project(tmp_path: Path) -> Path:
     trimesh.creation.cylinder(radius=0.03, height=0.12).export(
         assets / "can.glb", file_type="glb"
     )
+    trimesh.creation.box(extents=[0.3, 0.2, 0.4]).export(
+        assets / "cabinet.glb", file_type="glb"
+    )
     (assets / "cabinet.urdf").write_text(
-        '<robot name="cabinet"><link name="base"/></robot>\n',
+        '<robot name="cabinet"><link name="base"><visual><geometry>'
+        '<mesh filename="cabinet.glb"/></geometry></visual></link></robot>\n',
         encoding="utf-8",
     )
     config = {
@@ -142,3 +147,18 @@ def test_legacy_conversion_separates_audit_and_operational_hierarchy(
     assert conservative_can["parent_uid"] == "unknown"
     assert conservative_can["parent_relation"] == "unknown"
     assert conservative_can["source"] == "conservative_import"
+
+
+def test_scene_identity_covers_transitive_urdf_meshes(tmp_path: Path) -> None:
+    project = _legacy_project(tmp_path)
+    original_fingerprint = fingerprint_scene_source(project)
+    original_revision = scene_revision_id(project)
+
+    trimesh.creation.box(extents=[0.6, 0.2, 0.4]).export(
+        project / "assets" / "cabinet.glb",
+        file_type="glb",
+    )
+
+    changed_fingerprint = fingerprint_scene_source(project)
+    assert changed_fingerprint.asset_sha256 != original_fingerprint.asset_sha256
+    assert scene_revision_id(project) != original_revision

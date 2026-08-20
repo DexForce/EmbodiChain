@@ -71,6 +71,7 @@ def generate_scene_and_refine(
     *,
     geometry_generation_client: GeometryGenerationClient,
     vlm_client: OpenAICompatibleVLM,
+    seed: int | None = None,
 ) -> Scene:
 
     resolved_image_path = _validate_image_path(image_path)
@@ -102,6 +103,7 @@ def generate_scene_and_refine(
         coarse_geometry_output_root=coarse_geometry_output_root,
         scene=scene,  # Use the masks which are kept in the scene data structure.
         geometry_generation_client=geometry_generation_client,
+        seed=seed,
     )
 
     # Simready all the assets(includes table).
@@ -163,6 +165,7 @@ def _generate_coarse_results_from_masks(
     scene: Scene,
     *,
     geometry_generation_client: GeometryGenerationClient,
+    seed: int | None = None,
 ) -> None:
 
     # Parse whether the scene has each assets' binary masks.
@@ -189,10 +192,15 @@ def _generate_coarse_results_from_masks(
         )  # id + mask, for avoiding the download glbs order confusion.
 
     # Sent the request, wait, then save the intermediate results.
+    generation_kwargs = {
+        "image_path": image_path,
+        "object_masks": object_masks,
+        "output_root": coarse_geometry_output_root,
+    }
+    if seed is not None:
+        generation_kwargs["seed"] = seed
     response_data, response_objects = geometry_generation_client.generate_objects(
-        image_path=image_path,
-        object_masks=object_masks,
-        output_root=coarse_geometry_output_root,  # Keep the coarse geometries
+        **generation_kwargs
     )
     # Write the response JSON which contains all the layout info the server gave us.
     # Keep original response for getting the sam3d coarse layout matrix.

@@ -38,6 +38,7 @@ __all__ = [
     "EXECUTION_REPORT_FILENAME",
     "GROUNDED_TASK_PLAN_FILENAME",
     "FEASIBILITY_REPORT_FILENAME",
+    "FINAL_SCENE_INSPECTION_FILENAME",
     "PREPARATION_FAILURE_FILENAME",
     "ROLE_BINDINGS_FILENAME",
     "SCENE_MANIFEST_FILENAME",
@@ -65,6 +66,7 @@ CONSERVATIVE_SCENE_GRAPH_FILENAME = "conservative_scene_graph.json"
 ROLE_BINDINGS_FILENAME = "role_bindings.json"
 BINDING_REPORT_FILENAME = "binding_report.json"
 FEASIBILITY_REPORT_FILENAME = "feasibility_report.json"
+FINAL_SCENE_INSPECTION_FILENAME = "final_scene_inspection.json"
 GROUNDED_TASK_PLAN_FILENAME = "grounded_task_plan.json"
 PREPARATION_FAILURE_FILENAME = "preparation_failure.json"
 
@@ -84,6 +86,7 @@ class TaskEngineArtifactPaths:
     role_bindings: Path
     binding_report: Path
     feasibility_report: Path
+    final_scene_inspection: Path
     grounded_task_plan: Path
     preparation_failure: Path
     execution_report: Path
@@ -106,6 +109,7 @@ def task_engine_artifact_paths(
         role_bindings=root / ROLE_BINDINGS_FILENAME,
         binding_report=root / BINDING_REPORT_FILENAME,
         feasibility_report=root / FEASIBILITY_REPORT_FILENAME,
+        final_scene_inspection=root / FINAL_SCENE_INSPECTION_FILENAME,
         grounded_task_plan=root / GROUNDED_TASK_PLAN_FILENAME,
         preparation_failure=root / PREPARATION_FAILURE_FILENAME,
         execution_report=root / EXECUTION_REPORT_FILENAME,
@@ -195,6 +199,7 @@ def write_task_engine_artifacts(
     static_scene_manifest: Mapping[str, Any] | None = None,
     conservative_scene_graph: Mapping[str, Any] | None = None,
     feasibility_report: Mapping[str, Any] | None = None,
+    final_scene_inspection: Mapping[str, Any] | None = None,
 ) -> TaskEngineArtifactPaths:
     """Write Task Engine protocols into an unpublished staging directory.
 
@@ -216,6 +221,8 @@ def write_task_engine_artifacts(
     _write_json(paths.binding_report, binding_report)
     if feasibility_report is not None:
         _write_json(paths.feasibility_report, feasibility_report)
+    if final_scene_inspection is not None:
+        _write_json(paths.final_scene_inspection, final_scene_inspection)
 
     if grounded_task_plan is not None:
         _write_json(paths.grounded_task_plan, grounded_task_plan)

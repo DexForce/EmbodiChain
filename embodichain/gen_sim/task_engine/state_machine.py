@@ -188,10 +188,14 @@ def fail_stage(
     *,
     reason: str,
 ) -> TaskEngineState:
-    """Fail a pending or running stage with one auditable reason."""
+    """Fail a stage, including a later retry of a previously successful stage."""
     if state.terminal:
         raise ValueError("A terminal TaskEngineState cannot fail another stage.")
-    if state.stages[stage] not in {StageStatus.PENDING, StageStatus.RUNNING}:
+    if state.stages[stage] not in {
+        StageStatus.PENDING,
+        StageStatus.RUNNING,
+        StageStatus.SUCCEEDED,
+    }:
         raise ValueError(f"Stage {stage.value!r} cannot be failed now.")
     normalized_reason = str(reason).strip()
     if not normalized_reason:

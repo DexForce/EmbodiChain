@@ -56,6 +56,16 @@ def build_conservative_scene_graph(
         uid = str(raw.get("uid", ""))
         source_uid = str(raw.get("source_uid", uid))
         known = exported_nodes.get(source_uid) or exported_nodes.get(uid)
+        attributes = raw.get("attributes", {})
+        final_support = (
+            attributes.get("final_support") if isinstance(attributes, Mapping) else None
+        )
+        initial_state = raw.get("initial_state", {})
+        final_orientation = (
+            initial_state.get("orientation")
+            if isinstance(initial_state, Mapping)
+            else None
+        )
         if uid == "table":
             node = {
                 "uid": uid,
@@ -63,6 +73,24 @@ def build_conservative_scene_graph(
                 "parent_relation": "root",
                 "orientation": "unknown",
                 "source": "structural_root",
+            }
+        elif isinstance(final_support, Mapping):
+            relation = str(final_support.get("relation", "unknown"))
+            parent_uid = final_support.get("parent_uid", "unknown")
+            node = {
+                "uid": uid,
+                "parent_uid": (
+                    str(parent_uid)
+                    if isinstance(parent_uid, str) and parent_uid
+                    else "unknown"
+                ),
+                "parent_relation": relation if relation == "on" else "unknown",
+                "orientation": (
+                    "standing"
+                    if final_orientation == "upright"
+                    else ("lying" if final_orientation == "fallen" else "unknown")
+                ),
+                "source": "final_inspection",
             }
         elif (
             known is None

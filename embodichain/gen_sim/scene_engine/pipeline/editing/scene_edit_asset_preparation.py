@@ -71,6 +71,7 @@ def prepare_scene_edit_assets(
     geometry_generation_client: GeometryGenerationClient,
     image_segmentation_client: ImageSegmentationClient,
     vlm_client: OpenAICompatibleVLM | None = None,
+    seed: int | None = None,
 ) -> list[SceneObject]:
     """Prepare and return SimReady assets required by add operations."""
     # Prepare descriptions for all newly added objects.
@@ -91,6 +92,7 @@ def prepare_scene_edit_assets(
         added_asset_descriptions=added_asset_descriptions,
         stage_output_root=stage_output_root,
         image_generation_client=image_generation_client,
+        seed=seed,
     )
     generated_asset_masks = _segment_generated_added_asset_images(
         added_asset_descriptions=added_asset_descriptions,
@@ -104,6 +106,7 @@ def prepare_scene_edit_assets(
         generated_asset_masks=generated_asset_masks,
         stage_output_root=stage_output_root,
         geometry_generation_client=geometry_generation_client,
+        seed=seed,
     )
     # Build a list of added SceneObjects.
     added_assets = _build_added_scene_objects(
@@ -222,6 +225,7 @@ def _generate_added_asset_images(
     added_asset_descriptions: list[_AddedAssetInfo],
     stage_output_root: Path,
     image_generation_client: ImageGenerationClient,
+    seed: int | None,
 ) -> list[tuple[str, Path]]:
     """Generate one stable PNG for each new object description."""
     # Prepare a list.
@@ -230,12 +234,17 @@ def _generate_added_asset_images(
     image_output_root = stage_output_root / "generated_images"
     image_output_root.mkdir(parents=True, exist_ok=True)
 
-    for asset_info in added_asset_descriptions:
+    for index, asset_info in enumerate(added_asset_descriptions):
         object_id = asset_info.object_id
         # Stable object IDs preserve the image-to-asset mapping across later stages.
+        generation_kwargs = {
+            "prompt": asset_info.description,
+            "output_path": image_output_root / f"{object_id}.png",
+        }
+        if seed is not None:
+            generation_kwargs["seed"] = int(seed) + index
         image_path = image_generation_client.generate_image_by_prompt(
-            prompt=asset_info.description,
-            output_path=image_output_root / f"{object_id}.png",
+            **generation_kwargs
         )
         generated_asset_images.append((object_id, image_path))
     return generated_asset_images
@@ -299,6 +308,7 @@ def _generate_added_assets_coarse_geometry(
     generated_asset_masks: list[tuple[str, Path]],
     stage_output_root: Path,
     geometry_generation_client: GeometryGenerationClient,
+    seed: int | None,
 ) -> list[tuple[str, Path]]:
     """Generate one coarse GLB for each generated image and binary mask."""
     masks_by_id = dict(generated_asset_masks)
@@ -312,13 +322,16 @@ def _generate_added_assets_coarse_geometry(
     geometry_output_root = stage_output_root / "coarse_geometry"
     geometry_output_root.mkdir(parents=True, exist_ok=True)
     generated_asset_glbs: list[tuple[str, Path]] = []
-    for object_id, image_path in generated_asset_images:
+    for index, (object_id, image_path) in enumerate(generated_asset_images):
         # Each generated object has its own color image, so it needs an individual request.
-        geometry_generation_client.generate_objects(
-            image_path=image_path,
-            object_masks=[(object_id, masks_by_id[object_id])],
-            output_root=geometry_output_root,
-        )
+        generation_kwargs = {
+            "image_path": image_path,
+            "object_masks": [(object_id, masks_by_id[object_id])],
+            "output_root": geometry_output_root,
+        }
+        if seed is not None:
+            generation_kwargs["seed"] = int(seed) + index
+        geometry_generation_client.generate_objects(**generation_kwargs)
         glb_path = geometry_output_root / f"{object_id}.glb"
         if not glb_path.is_file():
             raise FileNotFoundError(

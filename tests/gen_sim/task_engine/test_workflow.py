@@ -183,6 +183,21 @@ def test_state_replay_preserves_failure_reason(tmp_path: Path) -> None:
     assert replayed.to_dict() == state.to_dict()
 
 
+def test_later_retry_can_fail_a_previously_successful_stage(tmp_path: Path) -> None:
+    request = _request(tmp_path, image=True, edit=False)
+    state = initial_state(request)
+    state = start_stage(state, WorkflowStage.SCENE_PREPARATION)
+    state = complete_stage(state, WorkflowStage.SCENE_PREPARATION)
+    state = fail_stage(
+        state,
+        WorkflowStage.SCENE_PREPARATION,
+        reason="later scene attempt failed",
+    )
+
+    assert state.terminal
+    assert replay_events(request, state.events).to_dict() == state.to_dict()
+
+
 def test_state_snapshot_mappings_are_immutable(tmp_path: Path) -> None:
     state = initial_state(_request(tmp_path, image=True, edit=False))
 

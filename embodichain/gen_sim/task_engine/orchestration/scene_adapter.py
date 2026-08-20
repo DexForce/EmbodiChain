@@ -51,6 +51,10 @@ from embodichain.gen_sim.task_engine.scene import (
     build_conservative_scene_graph,
     validate_static_scene_manifest,
 )
+from embodichain.gen_sim.task_engine.scene.final_inspection import (
+    apply_final_inspection,
+    validate_final_scene_inspection,
+)
 
 from .contracts import (
     BINDING_REPORT_SCHEMA,
@@ -65,7 +69,11 @@ from .contracts import (
     validate_task_candidate,
     validate_task_candidate_set,
 )
-from .scene_source import SceneSourceRef, fingerprint_scene_source
+from .scene_source import (
+    SceneSourceRef,
+    fingerprint_scene_source,
+    scene_revision_id,
+)
 
 __all__ = [
     "Adjudicator",
@@ -201,6 +209,7 @@ class SceneAdapter:
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,
         force_most_likely: bool = False,
+        final_inspection: Mapping[str, Any] | None = None,
     ) -> SceneAdaptation:
         """Ground all candidates, then deterministically choose a bindable one."""
         task_id, instruction, candidates = _coerce_candidates(candidate_set)
@@ -212,6 +221,15 @@ class SceneAdapter:
             body_scale_policy=source_ref.body_scale_policy,
             body_scale=source_ref.body_scale,
         )
+        if final_inspection is not None:
+            normalized_inspection = validate_final_scene_inspection(final_inspection)
+            if normalized_inspection["scene_revision_id"] != scene_revision_id(
+                source_ref
+            ):
+                raise ValueError(
+                    "FinalSceneInspection does not describe the adapted scene revision."
+                )
+            prepared = apply_final_inspection(prepared, normalized_inspection)
         inventory = SceneInventory(
             prepared.planner_objects,
             robot_profile=source_ref.robot_profile,
@@ -537,32 +555,40 @@ def _ground_candidate(
     self_reference_reasons = _self_reference_reasons(candidate["draft"], raw_bindings)
     reference_audits = []
     incompatible: set[str] = set()
-    reasons_by_reference: dict[str, list[str]] = {}
     request_by_id = {
         str(request["reference_id"]): request
         for request in candidate["scene_request"]["references"]
     }
     for reference_id, uids in raw_bindings.items():
-        reasons = _compatibility_reasons(
+        compatibility_reasons = _compatibility_reasons(
             request_by_id[reference_id],
             uids,
             inventory=inventory,
             draft=candidate["draft"],
         )
-        reasons.extend(self_reference_reasons.get(reference_id, ()))
-        reasons = sorted(set(reasons))
-        if reasons:
+        compatibility_reasons.extend(self_reference_reasons.get(reference_id, ()))
+        compatibility_reasons = sorted(set(compatibility_reasons))
+        if compatibility_reasons:
             incompatible.add(reference_id)
-            reasons_by_reference[reference_id] = reasons
         response = response_by_id[reference_id]
+        audit_reasons = list(compatibility_reasons)
+        if (
+            force_most_likely
+            and response.get("status") == "ambiguous"
+            and response.get("uids")
+        ):
+            audit_reasons.append(
+                "Forced the highest-ranked structurally compatible UID from an "
+                "ambiguous low-confidence response."
+            )
         reference_audits.append(
             {
                 "reference_id": reference_id,
-                "status": "incompatible" if reasons else "resolved",
+                "status": ("incompatible" if compatibility_reasons else "resolved"),
                 "confidence": float(response["confidence"]),
                 "candidate_uids": list(response["uids"]),
-                "selected_uids": [] if reasons else list(uids),
-                "reasons": reasons,
+                "selected_uids": ([] if compatibility_reasons else list(uids)),
+                "reasons": audit_reasons,
             }
         )
     if incompatible:

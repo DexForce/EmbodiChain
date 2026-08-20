@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 import json
 from pathlib import Path
 import sys
@@ -26,10 +27,12 @@ from threading import Barrier
 import pytest
 
 from embodichain.gen_sim.action_engine.unbound import build_unbound_action_plan
+from embodichain.gen_sim.action_engine.unbound import ActionCapabilityError
 from embodichain.gen_sim.action_engine.runtime import (
     ExecutionReport,
     build_execution_provenance,
 )
+from embodichain.gen_sim.scene_engine.errors import SceneServiceError
 from embodichain.gen_sim.task_engine.config import (
     TaskEngineExecutionCfg,
     TaskEnginePlanningCfg,
@@ -42,6 +45,7 @@ from embodichain.gen_sim.task_engine.scene_backend import SceneAnalysis, SceneRe
 from embodichain.gen_sim.task_engine.workflow import (
     SubprocessActionExecutor,
     TaskEngineWorkflow,
+    _environment_successes,
     _run_streaming_process,
 )
 from embodichain.gen_sim.task_engine.workflow_contracts import TASK_RUN_REQUEST_SCHEMA
@@ -133,7 +137,7 @@ class _ActionAgent:
 
 class _FailingActionAgent:
     def draft(self, _candidate: Mapping[str, object]) -> dict:
-        raise ValueError("missing AtomicAction")
+        raise ActionCapabilityError("missing AtomicAction")
 
 
 class _SceneBackend:
@@ -175,21 +179,40 @@ class _SceneBackend:
         root.mkdir(parents=True)
         self.seeds.append(seed)
         if len(self.seeds) <= self.materialize_failures:
-            raise RuntimeError("scene service failed")
+            raise SceneServiceError("scene service failed")
         source = root / "scene_config.json"
         source.write_text("{}\n", encoding="utf-8")
         return SceneRevision(
             source=source,
             output_root=root,
+            revision_id="0" * 64,
             seed=seed,
             edit_plan=None,
             source_fingerprint=None,
         )
 
+    def inspect(self, revision, output_path):
+        value = {
+            "schema_version": "embodichain.final-scene-inspection/v1",
+            "scene_revision_id": revision.revision_id,
+            "source_config_path": revision.source.as_posix(),
+            "contact_tolerance_m": 0.03,
+            "objects": [],
+        }
+        path = Path(output_path)
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return value
+
 
 class _Coordinator:
-    def __init__(self, statuses: list[str]) -> None:
+    def __init__(
+        self,
+        statuses: list[str],
+        *,
+        infeasible_remediation: str = "scene_remediable",
+    ) -> None:
         self.statuses = list(statuses)
+        self.infeasible_remediation = infeasible_remediation
         self.calls = 0
         self.kwargs: list[dict] = []
 
@@ -209,6 +232,11 @@ class _Coordinator:
             status=status,
             output_dir=root,
             planning_attempts=(),
+            feasibility_report=(
+                {"remediation_class": self.infeasible_remediation}
+                if status == "infeasible"
+                else None
+            ),
             selected_candidate_id="candidate_01" if status == "bound" else None,
         )
 
@@ -216,6 +244,24 @@ class _Coordinator:
 class _FailingCoordinator:
     def prepare(self, *_args, **_kwargs):
         raise RuntimeError("grounding service unavailable")
+
+
+class _RebindingCoordinator(_Coordinator):
+    def __init__(self, final_candidate: Mapping[str, object]) -> None:
+        super().__init__(["bound"])
+        self.final_candidate = final_candidate
+
+    def prepare(self, *args, **kwargs):
+        result = super().prepare(*args, **kwargs)
+        result.selected_candidate_id = str(self.final_candidate["candidate_id"])
+        result.unbound_action_plan = build_unbound_action_plan(self.final_candidate)
+        return result
+
+
+class _InvalidSceneBackend(_SceneBackend):
+    def materialize(self, *_args, **kwargs):
+        self.seeds.append(int(kwargs["seed"]))
+        raise ValueError("invalid deterministic scene input")
 
 
 class _Executor:
@@ -335,7 +381,80 @@ def test_parallel_workflow_accepts_one_success_and_publishes_all_graphs(
     }
     assert manifest["configuration"]["execution"]["dataset_saving"] is False
     assert coordinator.kwargs[0]["max_episode_steps"] == 4000
+    assert coordinator.kwargs[0]["final_inspection"]["scene_revision_id"] == "0" * 64
+    assert (
+        coordinator.kwargs[0]["unbound_action_plan"]["candidate_id"] == "candidate_01"
+    )
     assert manifest["attempts"][0]["action_attempts"][0]["status"] == "succeeded"
+    assert manifest["attempts"][0]["final_unbound_action_plan"]["candidate_id"] == (
+        "candidate_01"
+    )
+    assert manifest["attempts"][0]["unbound_transition"]["changed"] is False
+    state = json.loads(result.state_path.read_text(encoding="utf-8"))
+    succeeded = [
+        event["stage"] for event in state["events"] if event["to"] == "succeeded"
+    ]
+    assert (
+        succeeded.index("scene_finalization")
+        < succeeded.index("final_inspection")
+        < succeeded.index("final_binding")
+    )
+
+
+def test_prepare_only_publishes_bundle_without_action_execution(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+
+    def fail_execution(*_args, **_kwargs):
+        pytest.fail("prepare-only workflow must not execute Action Engine")
+
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=fail_execution,
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(),
+        execution_cfg=TaskEngineExecutionCfg(),
+        execute=False,
+    )
+
+    assert result.status == "prepared"
+    assert result.final_bundle is not None
+    assert result.final_bundle.is_dir()
+
+
+def test_final_candidate_rebinding_updates_attempt_unbound_audit(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    final_candidate = deepcopy(candidates["candidates"][0])
+    final_candidate["candidate_id"] = "candidate_02"
+    candidates["candidates"].append(final_candidate)
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        action_agent=_ActionAgent(),
+        coordinator=_RebindingCoordinator(final_candidate),
+        action_executor=_Executor([[True, False, False, False]]),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(),
+        execution_cfg=TaskEngineExecutionCfg(num_envs=4),
+    )
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    attempt = manifest["attempts"][0]
+    assert attempt["unbound_action_plan"]["candidate_id"] == "candidate_01"
+    assert attempt["final_unbound_action_plan"]["candidate_id"] == "candidate_02"
+    assert attempt["unbound_transition"]["changed"] is True
 
 
 @pytest.mark.parametrize(
@@ -478,6 +597,30 @@ def test_scene_remediation_changes_seed_before_action_execution(tmp_path: Path) 
     ]
 
 
+def test_input_conflict_feasibility_does_not_regenerate_scene(tmp_path: Path) -> None:
+    candidates = _candidate_set()
+    scene = _SceneBackend(_selection(candidates))
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=scene,
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(
+            ["infeasible", "bound"],
+            infeasible_remediation="input_conflict",
+        ),
+        action_executor=_Executor([[True, False, False, False]]),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(max_scene_attempts=2),
+        execution_cfg=TaskEngineExecutionCfg(num_envs=4),
+    )
+
+    assert result.failure_class == "input_conflict"
+    assert scene.seeds == [0]
+
+
 def test_scene_service_retry_keeps_completed_unbound_plan(tmp_path: Path) -> None:
     candidates = _candidate_set()
     scene = _SceneBackend(_selection(candidates), materialize_failures=1)
@@ -502,6 +645,50 @@ def test_scene_service_retry_keeps_completed_unbound_plan(tmp_path: Path) -> Non
     assert manifest["attempts"][0]["unbound_action_plan"] is not None
 
 
+def test_nonremediable_scene_error_does_not_change_scene_attempt_seed(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    scene = _InvalidSceneBackend(_selection(candidates))
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=scene,
+        action_agent=_ActionAgent(),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True, False, False, False]]),
+    )
+
+    result = workflow.run(
+        _request(tmp_path),
+        workflow_cfg=TaskEngineWorkflowCfg(max_scene_attempts=3),
+        execution_cfg=TaskEngineExecutionCfg(),
+        base_seed=9,
+    )
+
+    assert not result.succeeded
+    assert scene.seeds == [9]
+
+
+def test_execution_acceptance_requires_every_success_spec_term() -> None:
+    report = {
+        "environments": [
+            {
+                "success": True,
+                "semantic_success": {"step_01": True, "step_02": False},
+            },
+            {
+                "success": True,
+                "semantic_success": {"step_01": True, "step_02": True},
+            },
+        ]
+    }
+
+    assert _environment_successes(
+        report,
+        required_semantic_steps=("step_01", "step_02"),
+    ) == [False, True]
+
+
 def test_unbound_failure_retains_completed_parallel_scene(tmp_path: Path) -> None:
     candidates = _candidate_set()
     scene = _SceneBackend(_selection(candidates))
@@ -521,6 +708,7 @@ def test_unbound_failure_retains_completed_parallel_scene(tmp_path: Path) -> Non
 
     assert not result.succeeded
     assert result.failure_class == "action_capability"
+    assert scene.seeds == [0]
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["attempts"][0]["scene_revision"] is not None
     state = json.loads(result.state_path.read_text(encoding="utf-8"))

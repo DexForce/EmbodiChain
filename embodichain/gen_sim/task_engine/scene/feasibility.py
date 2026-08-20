@@ -171,6 +171,7 @@ class FeasibilityBroker:
                 "candidate_id": str(candidate.get("candidate_id", "")),
                 "scene_id": manifest["scene_id"],
                 "status": status,
+                "remediation_class": _remediation_class(checks),
                 "checks": checks,
                 "blockers": blockers,
                 "summary": {
@@ -633,6 +634,23 @@ def _check(
         "reason": reason,
         "evidence": dict(evidence or {}),
     }
+
+
+def _remediation_class(checks: Sequence[Mapping[str, Any]]) -> str:
+    """Classify contradictions by the subsystem capable of changing them."""
+    contradicted = [check for check in checks if check.get("status") == "contradicted"]
+    if not contradicted:
+        return "none"
+    kinds = {str(check.get("kind", "")) for check in contradicted}
+    if kinds.intersection({"task_capability", "atomic_capability"}):
+        return "action_capability"
+    # A new materialization seed can change observed pose/orientation, but it
+    # cannot change task semantics, entity roles, bindings, or declared affordances.
+    if kinds <= {"initial_state"}:
+        return "scene_remediable"
+    if kinds.intersection({"binding", "structure", "affordance", "attributes"}):
+        return "input_conflict"
+    return "terminal"
 
 
 def _mapping(value: Any, context: str) -> dict[str, Any]:
