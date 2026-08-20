@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import PlannerSpecCfg, SuiteCfg, load_suite
+from .video import VideoRecordCfg, video_cfg_from_args
 
 if TYPE_CHECKING:
     from .runner import BenchmarkRunResult
@@ -109,6 +110,36 @@ def add_parser_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-headless", action="store_false", dest="headless", help="Open a viewer."
+    )
+    parser.add_argument(
+        "--record-video",
+        action="store_true",
+        help="Record Atomic Task measured physics-replay videos after evaluation.",
+    )
+    parser.add_argument(
+        "--record-failed-video",
+        action="store_true",
+        help="With --record-video, also record failed cases as static debug scenes.",
+    )
+    parser.add_argument(
+        "--video-case-limit",
+        type=int,
+        default=0,
+        help="Maximum recorded videos. Use 0 to record every selected case.",
+    )
+    parser.add_argument(
+        "--video-dir",
+        default=None,
+        help="Override video directory. Default is <run_dir>/videos.",
+    )
+    parser.add_argument("--video-fps", type=int, default=20)
+    parser.add_argument("--video-width", type=int, default=640)
+    parser.add_argument("--video-height", type=int, default=480)
+    parser.add_argument(
+        "--video-max-memory",
+        type=int,
+        default=2048,
+        help="Maximum recorder frame-buffer memory in MB.",
     )
 
 
@@ -218,6 +249,7 @@ def run_all_benchmarks(
     nmg_pos_eps: float | None = None,
     nmg_rot_eps: float | None = None,
     output_root: str | Path = "outputs/benchmarks",
+    video: VideoRecordCfg | None = None,
 ) -> BenchmarkRunResult:
     """Resolve configuration and run all selected benchmark tracks."""
     from .runner import BenchmarkRunner
@@ -247,6 +279,7 @@ def run_all_benchmarks(
         device=sim_device,
         headless=headless,
         output_root=output_root,
+        video=video,
     ).run()
 
 
@@ -273,6 +306,7 @@ def run_from_args(args: argparse.Namespace) -> BenchmarkRunResult:
         nmg_pos_eps=args.nmg_pos_eps,
         nmg_rot_eps=args.nmg_rot_eps,
         output_root=args.output_root,
+        video=video_cfg_from_args(args),
     )
 
 

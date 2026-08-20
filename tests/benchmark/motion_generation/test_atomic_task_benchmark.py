@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -36,14 +38,26 @@ from scripts.benchmark.motion_generation.models import (
     TrialRecord,
 )
 from scripts.benchmark.motion_generation.registry import create_robot_provider
+from scripts.benchmark.motion_generation.runner import BenchmarkRunner
 from scripts.benchmark.motion_generation import robots as _robots  # noqa: F401
 from scripts.benchmark.motion_generation.scenarios.atomic_objects import (
     atomic_object_kind_names,
     create_atomic_object,
 )
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
+    AtomicTaskScenario,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
+)
+from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
+from scripts.benchmark.motion_generation.scenarios.free_space import FreeSpaceScenario
+from scripts.benchmark.motion_generation.video import (
+    VideoRecordCfg,
+    build_video_path,
+    record_with_window,
+    should_record_case,
+    summarize_video_recording,
+    video_cfg_from_args,
 )
 
 
@@ -219,3 +233,184 @@ def test_atomic_case_manifest_retains_robot_skill_object_and_parameters(tmp_path
     assert serialized["primary_success"] == "task_success"
     assert serialized["case_parameters"]["sample_count"] == 80
     assert serialized["validity_evidence"]["method"] == "independent_sequential_ik"
+
+
+def test_should_record_case_respects_enable_failure_and_limit():
+    disabled = VideoRecordCfg()
+    enabled = VideoRecordCfg(enabled=True)
+    with_failed = VideoRecordCfg(enabled=True, record_failed=True)
+    limited = VideoRecordCfg(enabled=True, case_limit=1)
+
+    assert should_record_case(disabled, 0, True) is False
+    assert should_record_case(enabled, 0, True) is True
+    assert should_record_case(enabled, 0, False) is False
+    assert should_record_case(with_failed, 0, False) is True
+    assert should_record_case(limited, 0, True) is True
+    assert should_record_case(limited, 1, True) is False
+
+
+def test_build_video_path_sanitizes_case_id(tmp_path):
+    path = build_video_path(
+        tmp_path,
+        "curobo",
+        "pick_up",
+        "atomic-task:pick_up:cube_top_center:s11",
+    )
+
+    assert path.parent == tmp_path
+    assert path.name == "curobo_pick_up_atomic-task_pick_up_cube_top_center_s11.mp4"
+    assert tmp_path.is_dir()
+
+
+def test_default_scenario_record_replay_is_noop(tmp_path):
+    provider = FreeSpaceScenario()
+    path = provider.record_replay(
+        None,
+        _atomic_case(),
+        None,
+        output_dir=tmp_path,
+        algorithm_id="curobo",
+        video=VideoRecordCfg(enabled=True),
+    )
+
+    assert path is None
+    assert isinstance(provider, ScenarioProvider)
+
+
+def test_atomic_record_replay_without_runtime_returns_none(tmp_path):
+    scenario = AtomicTaskScenario()
+    path = scenario.record_replay(
+        None,
+        _atomic_case(),
+        None,
+        output_dir=tmp_path,
+        algorithm_id="curobo",
+        video=VideoRecordCfg(enabled=True),
+    )
+    assert path is None
+
+
+def test_record_with_window_swallows_exceptions_and_does_not_raise(tmp_path):
+    sim = Mock()
+    sim.sim_config.width = 64
+    sim.sim_config.height = 64
+    sim.start_window_record.side_effect = RuntimeError("recorder failed")
+    sim.is_window_recording.return_value = False
+
+    path = record_with_window(
+        sim,
+        VideoRecordCfg(enabled=True),
+        tmp_path / "failed.mp4",
+        lambda: None,
+    )
+
+    assert path is None
+    sim.wait_window_record_saves.assert_called()
+
+
+def test_atomic_record_replay_swallows_recorder_errors(tmp_path):
+    scenario = AtomicTaskScenario()
+    sim = Mock()
+    sim.sim_config.width = 64
+    sim.sim_config.height = 64
+    sim.start_window_record.side_effect = RuntimeError("boom")
+    sim.is_window_recording.return_value = False
+    scenario.simulation = sim
+    scenario.robot = Mock()
+    scenario.reset_case = Mock()
+
+    path = scenario.record_replay(
+        None,
+        _atomic_case(),
+        None,
+        output_dir=tmp_path,
+        algorithm_id="curobo",
+        video=VideoRecordCfg(enabled=True, record_failed=True),
+    )
+
+    assert path is None
+    scenario.reset_case.assert_called_once()
+
+
+def test_atomic_failed_plan_records_static_hold(tmp_path):
+    scenario = AtomicTaskScenario()
+    sim = Mock()
+    sim.sim_config.width = 64
+    sim.sim_config.height = 64
+    sim.start_window_record.return_value = True
+    sim.is_window_recording.return_value = True
+    sim.stop_window_record.return_value = True
+    scenario.simulation = sim
+    scenario.robot = Mock()
+    scenario.track = Mock(
+        config={
+            "physics": {"hold_steps": 2, "hold_sim_steps": 1, "steps_per_waypoint": 4}
+        }
+    )
+    scenario.reset_case = Mock()
+
+    path = scenario.record_replay(
+        None,
+        _atomic_case(),
+        None,
+        output_dir=tmp_path,
+        algorithm_id="curobo",
+        video=VideoRecordCfg(enabled=True, record_failed=True),
+    )
+
+    assert path is not None
+    assert path.name.startswith("curobo_move_end_effector_")
+    assert sim.update.call_count == 2
+
+
+def test_video_cfg_from_args_and_summary_notes():
+    args = argparse.Namespace(
+        record_video=True,
+        record_failed_video=False,
+        video_case_limit=0,
+        video_fps=20,
+        video_width=640,
+        video_height=480,
+        video_max_memory=2048,
+        video_dir=None,
+    )
+    cfg = video_cfg_from_args(args)
+    notes = summarize_video_recording(cfg, ())
+
+    assert cfg.enabled is True
+    assert cfg.record_failed is False
+    assert cfg.output_dir is None
+    assert "Video policy: disabled." not in notes
+    assert "videos=0" in notes
+    assert summarize_video_recording(VideoRecordCfg(), ()) == [
+        "Video policy: disabled."
+    ]
+    with pytest.raises(ValueError, match="case_limit"):
+        VideoRecordCfg(enabled=True, case_limit=-1)
+
+
+def test_runner_skips_video_outside_measured_phase(tmp_path):
+    suite = load_suite("atomic_franka_pgi_curobo")
+    specs = [spec for spec in suite.planners if spec.enabled]
+    runner = BenchmarkRunner(
+        suite,
+        specs,
+        device="cpu",
+        output_root=tmp_path,
+        video=VideoRecordCfg(enabled=True, record_failed=True),
+    )
+    runner._run_dir = tmp_path
+    provider = Mock()
+    provider.record_replay.return_value = tmp_path / "should_not_write.mp4"
+
+    path = runner._maybe_record_replay(
+        provider,
+        None,
+        _atomic_case(),
+        None,
+        "curobo",
+        TrialPhase.WARMUP,
+    )
+
+    assert path is None
+    provider.record_replay.assert_not_called()

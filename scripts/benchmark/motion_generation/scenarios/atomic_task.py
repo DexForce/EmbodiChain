@@ -23,6 +23,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -46,6 +47,7 @@ from ..config import SuiteCfg, TrackCfg
 from ..metrics.trajectory import compute_case_outcomes
 from ..models import BenchmarkCase, CaseOutcome
 from ..registry import register_scenario_provider
+from ..video import VideoRecordCfg, build_video_path, record_with_window
 from .atomic_objects import AtomicObjectHandle, create_atomic_object
 from .base import ScenarioEvaluation, ScenarioProvider
 
@@ -81,6 +83,16 @@ class _ExecutionObservation:
     execution_time_ms: float
     task_completion_time_s: float
     object_lift_delta_m: torch.Tensor | None = None
+
+
+@dataclass(frozen=True)
+class _PhysicsReplaySettings:
+    """Shared physics-step counts for timed evaluation and video replay."""
+
+    steps_per_waypoint: int
+    hold_steps: int
+    hold_sim_steps: int
+    joint_tracking_tolerance_rad: float
 
 
 class AtomicSkillCaseProvider(ABC):
@@ -891,6 +903,36 @@ class AtomicTaskScenario(ScenarioProvider):
             },
         )
 
+    def record_replay(
+        self,
+        result: object,
+        case: BenchmarkCase,
+        evaluation: ScenarioEvaluation | None,
+        *,
+        output_dir: Path,
+        algorithm_id: str,
+        video: VideoRecordCfg,
+    ) -> Path | None:
+        """Reset the case and record a second untimed physics replay."""
+        del evaluation
+        if self.simulation is None or self.robot is None:
+            return None
+        self.reset_case(self.simulation, self.robot, case, self.control_part)
+        compiled = result if isinstance(result, CompiledTrajectory) else None
+        replayable = compiled is not None and self._is_replayable(compiled)
+        provider = self._case_providers.get(case.case_id)
+        video_path = build_video_path(
+            output_dir, algorithm_id, case.skill_id, case.case_id
+        )
+
+        def _replay() -> None:
+            if replayable and compiled is not None:
+                self._replay_physics(compiled, case, provider, collect_metrics=False)
+            else:
+                self._hold_static()
+
+        return record_with_window(self.simulation, video, video_path, _replay)
+
     def _execute(
         self,
         compiled: CompiledTrajectory,
@@ -900,12 +942,7 @@ class AtomicTaskScenario(ScenarioProvider):
         """Replay a successful full-robot trajectory under common physics."""
         if self.simulation is None or self.robot is None or self.track is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
-        trajectory = compiled.trajectory.positions
-        if (
-            trajectory.shape[1] == 0
-            or not bool(compiled.plan_success.all().item())
-            or not bool(torch.isfinite(trajectory).all().item())
-        ):
+        if not self._is_replayable(compiled):
             return None
         object_handle = (
             None if case.object_id is None else self.object_handle(case.object_id)
@@ -915,51 +952,23 @@ class AtomicTaskScenario(ScenarioProvider):
             if object_handle is None
             else object_handle.entity.get_local_pose(to_matrix=True)[:, :3, 3].clone()
         )
-        physics = dict(self.track.config.get("physics", {}))
-        steps_per_waypoint = int(physics.get("steps_per_waypoint", 4))
-        hold_steps = int(physics.get("hold_steps", 80))
-        hold_sim_steps = int(physics.get("hold_sim_steps", 2))
-        tracking_tolerance = float(physics.get("joint_tracking_tolerance_rad", 0.05))
-        if steps_per_waypoint < 1 or hold_steps < 0 or hold_sim_steps < 1:
-            raise ValueError("Atomic Task physics step counts are invalid.")
-
-        lift_start = provider.lift_segment_start(compiled)
-        dynamics_cleared = False
-        squared_tracking_error = torch.zeros(
-            case.batch_size, dtype=trajectory.dtype, device=trajectory.device
-        )
-        tracking_value_count = 0
+        settings = self._physics_settings()
         self._synchronize()
         started = time.perf_counter()
-        for waypoint_index in range(trajectory.shape[1]):
-            positions = trajectory[:, waypoint_index]
-            self.robot.set_qpos(positions, target=True)
-            self.simulation.update(step=steps_per_waypoint)
-            observed = self.robot.get_qpos()
-            squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
-            tracking_value_count += observed.shape[1]
-            if (
-                object_handle is not None
-                and lift_start is not None
-                and not dynamics_cleared
-                and waypoint_index + 1 >= lift_start
-            ):
-                object_handle.entity.clear_dynamics()
-                dynamics_cleared = True
-        final_command = trajectory[:, -1]
-        for _ in range(hold_steps):
-            self.robot.set_qpos(final_command, target=True)
-            self.simulation.update(step=hold_sim_steps)
-            observed = self.robot.get_qpos()
-            squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
-            tracking_value_count += observed.shape[1]
+        tracking_parts = self._replay_physics(
+            compiled, case, provider, collect_metrics=True
+        )
         self._synchronize()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-
+        if tracking_parts is None:
+            raise RuntimeError("Timed Atomic Task replay did not return metrics.")
+        squared_tracking_error, tracking_value_count = tracking_parts
         observed = self.robot.get_qpos()
         tracking = torch.sqrt(squared_tracking_error / max(tracking_value_count, 1))
+        trajectory = compiled.trajectory.positions
         simulated_execution_time = (
-            trajectory.shape[1] * steps_per_waypoint + hold_steps * hold_sim_steps
+            trajectory.shape[1] * settings.steps_per_waypoint
+            + settings.hold_steps * settings.hold_sim_steps
         ) * float(self.simulation.sim_config.physics_dt)
         final_tcp = self.robot.compute_fk(
             self.robot.get_qpos(name=self.control_part),
@@ -974,13 +983,106 @@ class AtomicTaskScenario(ScenarioProvider):
             object_lift = final_object_position[:, 2] - initial_object_position[:, 2]
         return _ExecutionObservation(
             execution_success=torch.isfinite(observed).all(dim=1)
-            & (tracking <= tracking_tolerance),
+            & (tracking <= settings.joint_tracking_tolerance_rad),
             final_tcp_pose=final_tcp,
             joint_tracking_rmse_rad=tracking,
             execution_time_ms=elapsed_ms,
             task_completion_time_s=simulated_execution_time,
             object_lift_delta_m=object_lift,
         )
+
+    def _physics_settings(self) -> _PhysicsReplaySettings:
+        """Resolve and validate the common physics-replay step counts."""
+        if self.track is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        physics = dict(self.track.config.get("physics", {}))
+        settings = _PhysicsReplaySettings(
+            steps_per_waypoint=int(physics.get("steps_per_waypoint", 4)),
+            hold_steps=int(physics.get("hold_steps", 80)),
+            hold_sim_steps=int(physics.get("hold_sim_steps", 2)),
+            joint_tracking_tolerance_rad=float(
+                physics.get("joint_tracking_tolerance_rad", 0.05)
+            ),
+        )
+        if (
+            settings.steps_per_waypoint < 1
+            or settings.hold_steps < 0
+            or settings.hold_sim_steps < 1
+        ):
+            raise ValueError("Atomic Task physics step counts are invalid.")
+        return settings
+
+    @staticmethod
+    def _is_replayable(compiled: CompiledTrajectory) -> bool:
+        """Return whether a compiled trajectory can be physically replayed."""
+        trajectory = compiled.trajectory.positions
+        return (
+            trajectory.shape[1] > 0
+            and bool(compiled.plan_success.all().item())
+            and bool(torch.isfinite(trajectory).all().item())
+        )
+
+    def _replay_physics(
+        self,
+        compiled: CompiledTrajectory,
+        case: BenchmarkCase,
+        provider: AtomicSkillCaseProvider | None,
+        *,
+        collect_metrics: bool,
+    ) -> tuple[torch.Tensor, int] | None:
+        """Replay one compiled trajectory with the evaluation physics contract."""
+        if self.simulation is None or self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        trajectory = compiled.trajectory.positions
+        object_handle = (
+            None if case.object_id is None else self.object_handle(case.object_id)
+        )
+        settings = self._physics_settings()
+        lift_start = None if provider is None else provider.lift_segment_start(compiled)
+        dynamics_cleared = False
+        squared_tracking_error: torch.Tensor | None = None
+        tracking_value_count = 0
+        if collect_metrics:
+            squared_tracking_error = torch.zeros(
+                case.batch_size, dtype=trajectory.dtype, device=trajectory.device
+            )
+        for waypoint_index in range(trajectory.shape[1]):
+            positions = trajectory[:, waypoint_index]
+            self.robot.set_qpos(positions, target=True)
+            self.simulation.update(step=settings.steps_per_waypoint)
+            if squared_tracking_error is not None:
+                observed = self.robot.get_qpos()
+                squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
+                tracking_value_count += observed.shape[1]
+            if (
+                object_handle is not None
+                and lift_start is not None
+                and not dynamics_cleared
+                and waypoint_index + 1 >= lift_start
+            ):
+                object_handle.entity.clear_dynamics()
+                dynamics_cleared = True
+        final_command = trajectory[:, -1]
+        for _ in range(settings.hold_steps):
+            self.robot.set_qpos(final_command, target=True)
+            self.simulation.update(step=settings.hold_sim_steps)
+            if squared_tracking_error is not None:
+                observed = self.robot.get_qpos()
+                squared_tracking_error += ((observed - final_command) ** 2).sum(dim=1)
+                tracking_value_count += observed.shape[1]
+        if collect_metrics:
+            if squared_tracking_error is None:
+                raise RuntimeError("Timed replay lost its tracking accumulator.")
+            return squared_tracking_error, tracking_value_count
+        return None
+
+    def _hold_static(self) -> None:
+        """Hold the current scene so a failed-case debug video has frames."""
+        if self.simulation is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        settings = self._physics_settings()
+        for _ in range(max(settings.hold_steps, 1)):
+            self.simulation.update(step=settings.hold_sim_steps)
 
     def solve_reference_qpos(
         self, start_qpos: torch.Tensor, target_waypoints: torch.Tensor

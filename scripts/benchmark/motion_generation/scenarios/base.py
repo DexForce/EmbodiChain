@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from embodichain.lab.sim.planners.utils import PlanResult
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from ..config import SuiteCfg, TrackCfg
     from ..models import BenchmarkCase
     from ..planners.base import PlannerAdapter
+    from ..video import VideoRecordCfg
 
 __all__ = ["ScenarioEvaluation", "ScenarioProvider"]
 
@@ -148,3 +150,29 @@ class ScenarioProvider(ABC):
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
         )
         return ScenarioEvaluation(outcomes=outcomes)
+
+    def record_replay(
+        self,
+        result: object,
+        case: "BenchmarkCase",
+        evaluation: ScenarioEvaluation | None,
+        *,
+        output_dir: Path,
+        algorithm_id: str,
+        video: "VideoRecordCfg",
+    ) -> Path | None:
+        """Optionally record a second, untimed replay. Default is a no-op.
+
+        Args:
+            result: Planner or compiled-action artifact from the measured trial.
+            case: Frozen case identity used for the output filename.
+            evaluation: Timed evaluation, or ``None`` after a runner-level failure.
+            output_dir: Directory that should receive the mp4.
+            algorithm_id: Planner id used in the filename.
+            video: Recording policy and encoder settings.
+
+        Returns:
+            Path to a saved video, or ``None`` when this scenario does not record.
+        """
+        del result, case, evaluation, output_dir, algorithm_id, video
+        return None

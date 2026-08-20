@@ -14,12 +14,15 @@ python -m scripts.benchmark.motion_generation.run_benchmark --suite coverage
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_curobo --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_curobo --device cuda --record-video
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
 
 Artifacts land under `outputs/benchmarks/<suite-name>/<timestamp>/`
 (`resolved_suite.yaml`, `case_manifest.json`, `trials.jsonl`, `aggregates.json`,
-`report.md` with exactly three tables).
+`report.md` with exactly three tables). Atomic Task videos, when enabled, land
+in that run's `videos/` directory.
 
 ## Implemented
 
@@ -36,6 +39,8 @@ Artifacts land under `outputs/benchmarks/<suite-name>/<timestamp>/`
   duration, simulated task-completion time, controller tracking RMSE, and
   task-specific object lift
 - One Markdown report: Time & Memory, Success & Other Metrics, Leaderboard
+- Optional Atomic Task headless replay videos after measured evaluation
+  (`--record-video`, `--record-failed-video`)
 
 ## Extend
 

@@ -55,6 +55,11 @@ from .registry import (
 from .reporting import write_markdown_report
 from .scenarios.base import ScenarioEvaluation, ScenarioProvider
 from .scenarios.free_space import FreeSpaceScenario
+from .video import (
+    VideoRecordCfg,
+    should_record_case,
+    summarize_video_recording,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,18 +110,22 @@ class BenchmarkRunner:
         device: str = "auto",
         headless: bool = True,
         output_root: str | Path = "outputs/benchmarks",
+        video: VideoRecordCfg | None = None,
     ) -> None:
         self.suite = suite
         self.planner_specs = planner_specs
         self.device = resolve_device(device)
         self.headless = headless
         self.output_root = Path(output_root)
+        self.video = VideoRecordCfg() if video is None else video
         self.robot_provider = create_robot_provider(suite.robot)
         self.control_part = self.robot_provider.control_part
         self.records: list[TrialRecord] = []
         self.cases: list[BenchmarkCase] = []
         self.metadata: dict[str, PlannerMetadata] = {}
         self.notes: list[str] = []
+        self._run_dir: Path | None = None
+        self._video_paths: list[str] = []
 
     def _create_simulation(self, batch_size: int) -> tuple[SimulationManager, "Robot"]:
         """Create one isolated suite-selected robot for a fixed batch size."""
@@ -279,6 +288,13 @@ class BenchmarkRunner:
                 failure_message = str(exc)
                 outcomes = provider.failure_outcomes(case, failure_code)
 
+        record_metadata = {} if evaluation is None else dict(evaluation.metadata)
+        video_path = self._maybe_record_replay(
+            provider, result, case, evaluation, metadata.algorithm_id, phase
+        )
+        if video_path is not None:
+            record_metadata["video_path"] = str(video_path)
+
         self._append(
             writer,
             TrialRecord(
@@ -302,7 +318,7 @@ class BenchmarkRunner:
                 trajectory_waypoints=(
                     None if evaluation is None else evaluation.trajectory_waypoints
                 ),
-                metadata={} if evaluation is None else evaluation.metadata,
+                metadata=record_metadata,
                 outcomes=outcomes,
             ),
         )
@@ -313,6 +329,44 @@ class BenchmarkRunner:
                 f"{phase.value:<8} {measured.cost_time_ms:>10.3f} ms "
                 f"status={status}"
             )
+
+    def _maybe_record_replay(
+        self,
+        provider: ScenarioProvider,
+        result: object,
+        case: BenchmarkCase,
+        evaluation: ScenarioEvaluation | None,
+        algorithm_id: str,
+        phase: TrialPhase,
+    ) -> Path | None:
+        """Record one measured Atomic Task replay outside planner timing."""
+        if phase is not TrialPhase.MEASURED or not self.video.enabled:
+            return None
+        success = bool(
+            evaluation is not None
+            and evaluation.outcomes
+            and all(bool(outcome.task_success) for outcome in evaluation.outcomes)
+        )
+        if not should_record_case(self.video, len(self._video_paths), success):
+            return None
+        if self._run_dir is None:
+            raise RuntimeError("Benchmark run directory is not initialized.")
+        output_dir = (
+            self.video.output_dir
+            if self.video.output_dir is not None
+            else self._run_dir / "videos"
+        )
+        video_path = provider.record_replay(
+            result,
+            case,
+            evaluation,
+            output_dir=output_dir,
+            algorithm_id=algorithm_id,
+            video=self.video,
+        )
+        if video_path is not None:
+            self._video_paths.append(str(video_path))
+        return video_path
 
     def _run_adapter(
         self,
@@ -444,6 +498,7 @@ class BenchmarkRunner:
     def run(self) -> BenchmarkRunResult:
         """Run the suite and write all required artifacts."""
         run_dir = create_run_directory(self.output_root, self.suite.name)
+        self._run_dir = run_dir
         write_resolved_suite(run_dir / "resolved_suite.yaml", self.suite)
         write_json(run_dir / "environment.json", environment_metadata())
         writer = TrialJsonlWriter(run_dir / "trials.jsonl")
@@ -528,6 +583,7 @@ class BenchmarkRunner:
                     "stability hold for successful tasks.",
                 ]
             )
+        track_notes.extend(summarize_video_recording(self.video, self._video_paths))
         report_path = write_markdown_report(
             run_dir / "report.md",
             self.suite,
