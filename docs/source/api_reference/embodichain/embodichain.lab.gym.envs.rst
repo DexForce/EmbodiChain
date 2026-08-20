@@ -80,3 +80,30 @@ Wrappers
 .. autoclass:: ReplayWrapper
     :members:
     :show-inheritance:
+
+Deprecated Task Compatibility Imports
+-------------------------------------
+
+The deprecated ``embodichain.lab.gym.envs.tasks`` module preserves the task
+class import paths used before official tasks moved to ``embodichain_tasks``.
+New code should import these classes from ``embodichain_tasks`` directly.
+
+.. currentmodule:: embodichain.lab.gym.envs.tasks
+
+.. autosummary::
+
+   BaseAgentEnv
+   PourWaterEnv
+   PourWaterAgentEnv
+   RearrangementEnv
+   RearrangementAgentEnv
+   StackBlocksTwoEnv
+   StackCupsEnv
+   ScoopIce
+   BlocksRankingRGBEnv
+   BlocksRankingSizeEnv
+   MatchObjectContainerEnv
+   PlaceObjectDrawerEnv
+   PushCubeEnv
+   CartPoleEnv
+   SimpleTaskEnv
