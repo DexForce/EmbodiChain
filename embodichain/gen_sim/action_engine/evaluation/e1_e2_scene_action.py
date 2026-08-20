@@ -38,8 +38,17 @@ from typing import Any
 from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
 )
-from embodichain.gen_sim.action_engine.domain.task_contracts import TASK_CONTRACTS
-from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
+from embodichain.gen_sim.action_engine.domain import (
+    TASK_CONTRACTS,
+    task_success_type,
+    validate_scene_requirements,
+    validate_task_spec,
+)
+from embodichain.gen_sim.action_engine.protocol import (
+    SCENE_REQUIREMENTS_SCHEMA,
+    TASK_SPEC_SCHEMA,
+)
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
 from embodichain.gen_sim.task_engine.scene import (
     FeasibilityBroker,
     SceneEngineV1Adapter,
@@ -161,12 +170,81 @@ def _benchmark_scenario(task_type: str, *, iterations: int) -> BenchmarkResult:
 
 
 def _generated_task(task_type: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    factory = TaskFactory(seed=41, executable_only=True)
-    for index in range(100):
-        task, requirements = factory.generate("L1", index)
-        if task["task_instances"][0]["task_type"] == task_type:
-            return task, requirements
-    raise RuntimeError(f"Could not generate deterministic {task_type} fixture.")
+    if task_type not in {"E1", "E2"}:
+        raise ValueError("This benchmark supports only E1 and E2 fixtures.")
+    params: dict[str, Any] = {"object_role": "object"}
+    initial_state = {}
+    if task_type == "E1":
+        params.update({"target_role": "target", "relation": "inside"})
+    else:
+        params.update(
+            {
+                "orientation_goal": "upright",
+                "support_role": "table",
+                "upright_local_axis": "long_axis",
+            }
+        )
+        initial_state = {"orientation": "fallen"}
+    task_id = f"benchmark-{task_type.lower()}"
+    task = validate_task_spec(
+        {
+            "schema_version": TASK_SPEC_SCHEMA,
+            "task_id": task_id,
+            "level": "L1",
+            "instruction": "benchmark-instruction",
+            "reasoning_type": "none",
+            "task_instances": [
+                {
+                    "id": "task_01",
+                    "task_type": task_type,
+                    "params": params,
+                    "depends_on": [],
+                    "role": "primary",
+                }
+            ],
+            "success": {
+                "type": task_success_type(task_type, params),
+                "task_instance_id": "task_01",
+            },
+            "oracle": {},
+            "metadata": {"benchmark_fixture": True},
+        }
+    )
+    objects = [
+        {
+            "role_id": "object",
+            "category": "can",
+            "count": 1,
+            "affordances": sorted(TASK_CONTRACTS[task_type].scene_affordances),
+            "initial_state": initial_state,
+            "attributes": {},
+        }
+    ]
+    if task_type == "E1":
+        objects.append(
+            {
+                "role_id": "target",
+                "category": "container",
+                "count": 1,
+                "affordances": ["container", "support_surface"],
+                "initial_state": {},
+                "attributes": {},
+            }
+        )
+    requirements = validate_scene_requirements(
+        {
+            "schema_version": SCENE_REQUIREMENTS_SCHEMA,
+            "task_id": task_id,
+            "objects": objects,
+            "cameras": [],
+            "spatial_constraints": [
+                {"type": "reachable", "roles": "all_interaction_objects"}
+            ],
+            "distractor_count": 0,
+            "metadata": {"benchmark_fixture": True},
+        }
+    )
+    return task, requirements
 
 
 def _static_manifest(

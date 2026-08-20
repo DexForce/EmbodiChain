@@ -58,6 +58,8 @@ from embodichain.gen_sim.action_engine.runtime import (
 )
 from embodichain.gen_sim.task_engine.scene import SceneEngineV1Adapter
 
+_UPRIGHT_CAN_INSTRUCTION = "test-instruction"
+
 
 def _candidate_set() -> dict:
     selector = {
@@ -95,7 +97,7 @@ def _candidate_set() -> dict:
     draft = {
         "schema_version": TASK_DRAFT_SCHEMA,
         "task_id": "upright_can",
-        "instruction": "扶正红色易拉罐。",
+        "instruction": _UPRIGHT_CAN_INSTRUCTION,
         "steps": [step],
     }
     candidate = {
@@ -133,7 +135,7 @@ def _candidate_set() -> dict:
     return {
         "schema_version": TASK_CANDIDATE_SET_SCHEMA,
         "task_id": "upright_can",
-        "instruction": "扶正红色易拉罐。",
+        "instruction": _UPRIGHT_CAN_INSTRUCTION,
         "candidates": [candidate],
         "requested_candidate_count": 1,
         "valid_response_count": 1,
@@ -353,7 +355,7 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
 
     result = coordinator.prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         tmp_path / "bundle",
         candidate_count=1,
@@ -387,7 +389,7 @@ def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
 
     result = coordinator.prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         tmp_path / "candidate-reuse",
         candidate_set=candidates,
@@ -419,7 +421,7 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
 
     result = coordinator.prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         tmp_path / "ur10-bundle",
         candidate_set=candidates,
@@ -474,7 +476,7 @@ def test_contradicted_feasibility_publishes_audit_without_planning(
         ),
     ).prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         tmp_path / "infeasible-bundle",
         candidate_count=1,
@@ -590,7 +592,7 @@ def test_bound_prepare_uses_sidecar_and_publishes_complete_bundle(
         bundle_generator=generator,
     ).prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         tmp_path / "bundle",
         candidate_count=1,
@@ -651,7 +653,7 @@ def test_prepare_falls_back_after_candidate_action_planning_failure(
         bundle_generator=generator,
     ).prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         tmp_path / "fallback-bundle",
         candidate_count=2,
@@ -695,7 +697,7 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
         ),
     ).prepare(
         "upright_can",
-        "扶正红色易拉罐。",
+        _UPRIGHT_CAN_INSTRUCTION,
         tmp_path / "scene_config.json",
         output,
         candidate_count=2,

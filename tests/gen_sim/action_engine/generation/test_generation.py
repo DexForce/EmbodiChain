@@ -164,7 +164,7 @@ def _existing_v2_task_spec(task_id: str = "direct_task") -> dict[str, object]:
         "schema_version": TASK_SPEC_SCHEMA,
         "task_id": task_id,
         "level": "L1",
-        "instruction": "扶正这个红色易拉罐。",
+        "instruction": "test-instruction",
         "reasoning_type": "none",
         "task_instances": [
             {
@@ -432,15 +432,12 @@ def test_recording_policy_rejects_invalid_generation_defaults(
         )
 
 
-def test_fast_gym_config_uses_task_name_for_lerobot_directory_label(
+def test_fast_gym_config_preserves_unicode_instruction_and_uses_task_name_label(
     gym_export: Path,
 ) -> None:
     scene = prepare_scene(gym_export)
     task_name = "task1000"
-    task_description = (
-        "先用左臂把番茄放到砧板上，然后用左臂把黄瓜放到砧板右边；"
-        "再用左臂把胡萝卜放进碗里。"
-    )
+    task_description = "unicode-λ-instruction"
 
     config = build_fast_gym_config(
         scene,
@@ -467,7 +464,7 @@ def test_ab_config_uses_offline_branch_and_four_vlm_cameras(
     config = build_fast_gym_config(
         scene,
         task_name="ab_task",
-        task_description="扶正易拉罐。",
+        task_description="test-instruction",
         robot_profile="ur10",
         execution_program_hash="d" * 64,
         max_episodes=1,
@@ -915,12 +912,12 @@ def test_generation_calls_interpreter_recipe_and_renderer_once(
         gym_export,
         output_dir,
         task_name="line_task",
-        task_description="扶正红色易拉罐。",
+        task_description="test-instruction",
         robot_profile="franka",
     )
 
     assert planner_call["task_name"] == "line_task"
-    assert planner_call["task_description"] == "扶正红色易拉罐。"
+    assert planner_call["task_description"] == "test-instruction"
     assert planner_call["robot_profile"] == "franka"
     assert len(recipe_calls) == 1
     planner_objects = planner_call["scene_objects"]
@@ -1014,7 +1011,7 @@ def test_existing_v2_task_spec_bypasses_text_planner_and_derives_scene_requireme
     gym_config = json.loads(paths.gym_config.read_text(encoding="utf-8"))
     assert (
         gym_config["env"]["dataset"]["lerobot"]["params"]["instruction"]["lang"]
-        == "扶正这个红色易拉罐。"
+        == "test-instruction"
     )
 
 
@@ -1093,7 +1090,7 @@ def test_task_factory_style_sidecar_binds_roles_without_text_llm(
     input_dir = tmp_path / "task-first-unbound"
     input_dir.mkdir()
     task = _existing_v2_task_spec("task_first_unbound")
-    task["metadata"] = {"generator": "TaskFactory-v2"}
+    task["metadata"] = {"fixture": "abstract-task"}
     requirements = {
         "schema_version": SCENE_REQUIREMENTS_SCHEMA,
         "task_id": "task_first_unbound",
@@ -1335,7 +1332,7 @@ def test_invalid_explicit_task_fails_before_output_asset_materialization(
             gym_export,
             output_dir,
             task_name="invalid_task",
-            task_description="扶正黄色瓶子。",
+            task_description="test-instruction",
             robot_profile="franka",
         )
 
@@ -1436,7 +1433,7 @@ def test_generation_cli_accepts_ab_models() -> None:
             "--task_name",
             "ab",
             "--task_description",
-            "递给另一只手。",
+            "test-instruction",
             "--planning-mode",
             "ab",
             "--llm-model",

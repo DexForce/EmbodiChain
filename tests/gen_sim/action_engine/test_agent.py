@@ -29,7 +29,9 @@ import embodichain.gen_sim.action_engine.agent as module
 from embodichain.gen_sim.action_engine.agent import ActionAgent
 from embodichain.gen_sim.action_engine.domain import seed_graph_hash
 from embodichain.gen_sim.action_engine.runtime import ExecutionResult
-from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
+
+from .task_fixtures import make_task_spec
 
 
 def _bindings(requirements: dict) -> dict[str, str]:
@@ -39,16 +41,11 @@ def _bindings(requirements: dict) -> dict[str, str]:
 
 
 def _task_of_type(task_type: str) -> tuple[dict, dict]:
-    factory = TaskFactory(2026)
-    for index in range(200):
-        task, requirements = factory.generate("L1", index)
-        if task["task_instances"][0]["task_type"] == task_type:
-            return task, requirements
-    raise AssertionError(f"TaskFactory did not generate {task_type}.")
+    return make_task_spec(task_type)
 
 
 def test_plan_hash_matches_direct_seed_graph_instantiation(monkeypatch) -> None:
-    task, requirements = TaskFactory(11, executable_only=True).generate("L1", 0)
+    task, requirements = make_task_spec("E1")
     bindings = _bindings(requirements)
     grounded_plan = {
         "task_spec": task,
@@ -91,7 +88,7 @@ def test_planning_only_graph_is_rejected_before_executor_construction() -> None:
 
 
 def test_execution_report_is_strictly_json_serializable(tmp_path: Path) -> None:
-    task, requirements = TaskFactory(7, executable_only=True).generate("L1", 0)
+    task, requirements = make_task_spec("E1")
     bindings = _bindings(requirements)
     graph = instantiate_seed_graph(task, bindings)
 
@@ -145,7 +142,7 @@ def test_execution_report_is_strictly_json_serializable(tmp_path: Path) -> None:
 
 
 def test_existing_execution_result_can_be_reported_without_reexecution() -> None:
-    task, requirements = TaskFactory(9, executable_only=True).generate("L1", 0)
+    task, requirements = make_task_spec("E1")
     bindings = _bindings(requirements)
     graph = instantiate_seed_graph(task, bindings)
     result = ExecutionResult(
@@ -167,7 +164,7 @@ def test_existing_execution_result_can_be_reported_without_reexecution() -> None
 
 
 def test_runtime_exception_is_reported_as_aborted() -> None:
-    task, requirements = TaskFactory(13, executable_only=True).generate("L1", 0)
+    task, requirements = make_task_spec("E1")
     bindings = _bindings(requirements)
     graph = instantiate_seed_graph(task, bindings)
 

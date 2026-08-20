@@ -40,6 +40,8 @@ from embodichain.gen_sim.task_engine.orchestration.coordinator import (
     lower_task_candidate,
 )
 
+_TEST_INSTRUCTION = "test-instruction"
+
 
 def _selector(kind="none", *, step_id="", reference="", quantifier="one", count=0):
     return {
@@ -98,7 +100,7 @@ def test_task_agent_generates_concurrently_deduplicates_and_counts_votes():
             return _result(_step(step_id=f"arbitrary_{index}"))
         return _result(_step(step_id="different", reference="orange can"))
 
-    result = TaskAgent(interpreter=interpreter).generate("task", "扶正易拉罐")
+    result = TaskAgent(interpreter=interpreter).generate("task", _TEST_INSTRUCTION)
 
     assert result["requested_candidate_count"] == 3
     assert result["valid_response_count"] == 3
@@ -113,7 +115,7 @@ def test_scene_request_and_success_are_deterministic_contract_derivations():
     draft = {
         "schema_version": TASK_DRAFT_SCHEMA,
         "task_id": "upright",
-        "instruction": "扶正所有易拉罐",
+        "instruction": _TEST_INSTRUCTION,
         "steps": [_step(reference="all cans")],
     }
     draft["steps"][0]["object"].update(quantifier="all")
@@ -164,7 +166,7 @@ def test_target_requirements_describe_capabilities_not_concrete_roles(
     draft = {
         "schema_version": TASK_DRAFT_SCHEMA,
         "task_id": "stack",
-        "instruction": "把绿罐放到红罐上",
+        "instruction": _TEST_INSTRUCTION,
         "steps": [step],
     }
 
@@ -186,7 +188,7 @@ def test_lower_task_candidate_expands_success_for_all_binding():
         return _result(step)
 
     candidate = TaskAgent(interpreter=interpreter).generate(
-        "upright", "扶正所有易拉罐", candidate_count=1
+        "upright", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
     grounded = lower_task_candidate(
         candidate,
@@ -226,7 +228,7 @@ def test_draft_rejects_grounded_fields_and_task_agent_fails_closed():
 def test_task_candidate_rejects_scene_constraints_not_derived_from_draft():
     candidate = TaskAgent(
         interpreter=lambda *_args, **_kwargs: _result(_step())
-    ).generate("upright", "扶正易拉罐", candidate_count=1)["candidates"][0]
+    ).generate("upright", _TEST_INSTRUCTION, candidate_count=1)["candidates"][0]
     candidate["scene_request"]["references"][0]["affordances"] = []
 
     with pytest.raises(ValueError, match="derived exactly"):
@@ -261,7 +263,7 @@ def test_task_agent_isolates_invalid_interpreter_results():
         return _result(_step())
 
     result = TaskAgent(interpreter=interpreter).generate(
-        "upright", "扶正易拉罐", candidate_count=2
+        "upright", _TEST_INSTRUCTION, candidate_count=2
     )
 
     assert result["valid_response_count"] == 1

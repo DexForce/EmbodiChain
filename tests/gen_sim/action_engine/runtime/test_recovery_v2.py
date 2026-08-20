@@ -37,20 +37,17 @@ from embodichain.gen_sim.action_engine.runtime import (
 )
 from embodichain.gen_sim.action_engine.runtime.executor import _EdgeResult
 from embodichain.gen_sim.action_engine.runtime.grounding import ActionGrounder
-from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
+
+from ..task_fixtures import make_task_spec
 
 
 def _graph(task_type: str) -> dict:
-    factory = TaskFactory(13, executable_only=True)
-    for index in range(100):
-        task, requirements = factory.generate("L1", index)
-        if task["task_instances"][0]["task_type"] == task_type:
-            bindings = {
-                item["role_id"]: f"uid_{item['role_id']}"
-                for item in requirements["objects"]
-            }
-            return instantiate_seed_graph(task, bindings)
-    raise AssertionError(f"No {task_type} graph generated.")
+    task, requirements = make_task_spec(task_type)
+    bindings = {
+        item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
+    }
+    return instantiate_seed_graph(task, bindings)
 
 
 def _handover_then_place_graph() -> dict:

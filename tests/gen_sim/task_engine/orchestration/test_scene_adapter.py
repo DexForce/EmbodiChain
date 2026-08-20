@@ -44,6 +44,8 @@ from embodichain.gen_sim.task_engine.agent import (
     derive_success_spec,
 )
 
+_UPRIGHT_CAN_INSTRUCTION = "test-instruction"
+
 
 @pytest.fixture
 def scene_export(tmp_path: Path) -> Path:
@@ -190,7 +192,7 @@ def _candidate(candidate_id: str, reference: str, *, votes: int = 1) -> dict:
     draft = {
         "schema_version": TASK_DRAFT_SCHEMA,
         "task_id": "upright_can",
-        "instruction": "扶正指定的易拉罐。",
+        "instruction": _UPRIGHT_CAN_INSTRUCTION,
         "steps": [step],
     }
     return {
@@ -231,7 +233,7 @@ def _candidate_set(candidates: list[dict]) -> dict:
     return {
         "schema_version": TASK_CANDIDATE_SET_SCHEMA,
         "task_id": "upright_can",
-        "instruction": "扶正指定的易拉罐。",
+        "instruction": _UPRIGHT_CAN_INSTRUCTION,
         "candidates": candidates,
         "requested_candidate_count": sum(item["vote_count"] for item in candidates),
         "valid_response_count": sum(item["vote_count"] for item in candidates),

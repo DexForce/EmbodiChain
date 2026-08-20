@@ -25,7 +25,9 @@ import torch
 
 from embodichain.gen_sim.action_engine.evaluation import run_strict_ab, state_digest
 from embodichain.gen_sim.action_engine.evaluation.ab import _graph_difference
-from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
+
+from ..task_fixtures import make_task_level, make_task_spec
 
 
 class _Env:
@@ -60,8 +62,7 @@ class _Executor:
 
 
 def _inputs():
-    factory = TaskFactory(4, executable_only=True)
-    task, requirements = factory.generate("L1", 0)
+    task, requirements = make_task_spec("E1")
     bindings = {
         item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
     }
@@ -401,8 +402,7 @@ def test_strict_ab_closes_prepared_environments_on_graph_validation_error(
 
 
 def test_strict_l4_ab_requires_and_records_private_oracle(tmp_path) -> None:
-    factory = TaskFactory(4, executable_only=True)
-    task, requirements = factory.generate("L4", 0)
+    task, requirements = make_task_level("L4")
     bindings = {
         item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
     }

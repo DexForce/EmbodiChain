@@ -78,7 +78,7 @@ def _chain_program() -> dict[str, object]:
     return compile_task_agent(
         {
             "schema_version": TASK_AGENT_SCHEMA,
-            "task": "中文单链任务",
+            "task": "unicode-λ-task",
             "goal": "Pick up the cup and keep it hovering.",
             "semantic_steps": [
                 {

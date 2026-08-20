@@ -51,7 +51,7 @@ bridges or fallback entry points.
 
 ## Data Flow
 
-1. `TaskFactory` or a caller creates a validated `TaskSpec`.
+1. `TaskAgent` or a caller creates a validated `TaskSpec`.
 2. Action Engine emits `SceneRequirements` for the external Scene Engine.
 3. After scene generation, Task Engine's scene adapter preserves geometry, physics,
    articulation, affordance evidence, and provenance in a versioned

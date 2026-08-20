@@ -89,8 +89,8 @@ def _intent(
             {
                 "id": "move",
                 "task_type": "E1",
-                "object": object_selector or _selector("木质长方体"),
-                "target": target_selector or _selector("桌面"),
+                "object": object_selector or _selector("object-alpha"),
+                "target": target_selector or _selector("target-alpha"),
                 "relation": "on",
             }
         ]
@@ -117,7 +117,7 @@ def _binding(
 def _run(intent: dict, caller) -> object:
     scene = _scene()
     return ground_scene_references(
-        instruction="把木质长方体放到桌面上。",
+        instruction="test-instruction",
         intent=intent,
         inventory=SceneInventory(scene, robot_profile="franka"),
         scene_objects=scene,
@@ -307,7 +307,7 @@ def test_grounding_fails_closed_after_one_repair(response: dict, error: str) -> 
 
 def test_grounding_enforces_count_and_accepts_an_open_world_set() -> None:
     intent = _intent(
-        object_selector=_selector("两个桌面物体", quantifier="count", count=2)
+        object_selector=_selector("object-set", quantifier="count", count=2)
     )
     response = {
         "bindings": [
@@ -326,7 +326,7 @@ def test_grounding_enforces_count_and_accepts_an_open_world_set() -> None:
 
 
 def test_grounding_accepts_a_nonempty_all_binding() -> None:
-    intent = _intent(object_selector=_selector("所有桌面物体", quantifier="all"))
+    intent = _intent(object_selector=_selector("object-set", quantifier="all"))
     response = {
         "bindings": [
             _binding("move.object", ["cutting_board", "salt_shaker"]),

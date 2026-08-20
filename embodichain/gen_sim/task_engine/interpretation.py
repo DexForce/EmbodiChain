@@ -722,7 +722,7 @@ def _validate_task_fields(step: Mapping[str, Any], context: str) -> None:
 def _instruction_prompt(instruction: str) -> str:
     return (
         "Convert the user's explicit L1-L3 instruction into typed E1-E9 task "
-        "intent. Understand synonyms, ellipsis, and pronouns such as it/其, but "
+        "intent. Understand synonyms, ellipsis, and pronouns, but "
         "do not invent missing objects. Use step_result for cross-step pronouns "
         "and explicit references to the result of an earlier manipulation. Keep "
         "an independently selected repeated noun as scene_ref; identical text "
@@ -771,7 +771,7 @@ def _instruction_shape_example() -> dict[str, Any]:
     selector = {
         "kind": "scene_ref",
         "step_id": "",
-        "reference": "示例物体甲",
+        "reference": "example object A",
         "quantifier": "one",
         "count": 0,
     }
@@ -859,10 +859,10 @@ def _instruction_repair_guidance(error: Exception) -> str:
 def _intent_capability_catalog() -> dict[str, dict[str, Any]]:
     """Return the LLM's thin, import-safe E1-E9 capability view.
 
-    ``task_capability_catalog`` also reports runtime availability and therefore
-    imports simulator action classes.  Text interpretation only needs the
-    symbolic E semantics and must remain testable before a simulator backend is
-    installed.
+    Action Engine's online planning catalog also reports runtime availability
+    and therefore imports simulator action classes. Text interpretation only
+    needs symbolic E semantics and must remain testable before a simulator
+    backend is installed.
     """
     return {
         task_type: {

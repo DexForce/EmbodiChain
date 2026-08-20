@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 
 import embodichain.gen_sim.action_engine as action_engine_package
@@ -86,18 +85,6 @@ def test_planner_exposes_exactly_the_first_phase_skill_catalog() -> None:
         "orient_object",
         "place_relative",
     }
-
-
-def test_acceptance_manifest_covers_twenty_supported_tasks() -> None:
-    manifest_path = Path(__file__).with_name("acceptance_tasks.json")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    tasks = manifest["tasks"]
-    names = [task["task_name"] for task in tasks]
-    visible = set(build_default_registry().operator_names())
-
-    assert len(tasks) == 20
-    assert len(names) == len(set(names))
-    assert all(set(task["expected_skills"]) <= visible for task in tasks)
 
 
 def test_atomic_actions_have_one_runtime_capability_catalog() -> None:

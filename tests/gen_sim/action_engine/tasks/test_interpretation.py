@@ -209,7 +209,7 @@ def _handover_intent():
             _step(
                 "orient",
                 "E2",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
                 required_arm="right_arm",
             ),
             _step(
@@ -224,7 +224,7 @@ def _handover_intent():
                 "place",
                 "E1",
                 _selector("step_result", step_id="handover"),
-                target=_selector("scene_ref", reference="橘色易拉罐"),
+                target=_selector("scene_ref", reference="object-beta"),
                 relation="left_of",
                 required_arm="left_arm",
                 depends_on=["handover"],
@@ -239,13 +239,13 @@ def _two_object_handover_intent_with_missing_place_target():
             _step(
                 "orient_purple",
                 "E2",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
                 required_arm="right_arm",
             ),
             _step(
                 "orient_orange",
                 "E2",
-                _selector("scene_ref", reference="橘色易拉罐"),
+                _selector("scene_ref", reference="object-beta"),
                 required_arm="left_arm",
                 depends_on=["orient_purple"],
             ),
@@ -273,7 +273,7 @@ def _two_object_handover_intent():
     intent = _two_object_handover_intent_with_missing_place_target()
     intent["steps"][3]["target"] = _selector(
         "scene_ref",
-        reference="橘色易拉罐",
+        reference="object-beta",
     )
     return intent
 
@@ -287,7 +287,7 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "handover_task",
-        "用右臂扶正紫色易拉罐，然后递给左臂，然后将其橘色罐头的左边。",
+        "instruction-marker",
         _scene(),
         robot_profile="ur10",
         model="test-model",
@@ -357,7 +357,7 @@ def test_llm_intent_handles_handover_pronoun_and_elliptical_place() -> None:
         "E4",
         "E1",
     ]
-    assert "递给" in calls[0]["prompt"]
+    assert "instruction-marker" in calls[0]["prompt"]
     assert calls[0]["model"] == "test-model"
 
 
@@ -367,13 +367,13 @@ def test_six_step_repeated_objects_preserve_two_handover_continuations() -> None
             _step(
                 "orient_purple",
                 "E2",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
                 required_arm="right_arm",
             ),
             _step(
                 "orient_orange",
                 "E2",
-                _selector("scene_ref", reference="橘色罐头"),
+                _selector("scene_ref", reference="object-beta"),
                 required_arm="left_arm",
             ),
             _step(
@@ -388,7 +388,7 @@ def test_six_step_repeated_objects_preserve_two_handover_continuations() -> None
                 "place_orange",
                 "E1",
                 _selector("step_result", step_id="handover_orange"),
-                target=_selector("scene_ref", reference="本子"),
+                target=_selector("scene_ref", reference="target-gamma"),
                 relation="on",
                 required_arm="right_arm",
                 depends_on=["handover_orange"],
@@ -408,7 +408,7 @@ def test_six_step_repeated_objects_preserve_two_handover_continuations() -> None
                 "place_purple",
                 "E1",
                 _selector("step_result", step_id="handover_purple"),
-                target=_selector("scene_ref", reference="橘色罐头"),
+                target=_selector("scene_ref", reference="object-beta"),
                 relation="on",
                 required_arm="left_arm",
                 depends_on=["handover_purple"],
@@ -428,9 +428,7 @@ def test_six_step_repeated_objects_preserve_two_handover_continuations() -> None
 
     grounded = interpret_and_ground_task_spec(
         "two_handover_task",
-        "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用左臂把橘色罐头递给右臂，"
-        "然后用右臂把橘色罐头放到本子上，然后右臂把紫色罐头拿起来递给左臂，"
-        "然后左臂把紫色罐头放到橘色罐头上。",
+        "test-instruction-multi-step",
         scene,
         robot_profile="franka",
         model="test-model",
@@ -521,7 +519,7 @@ def test_e5_relative_transport_emits_pickment_and_optional_release() -> None:
     }
     grounded = interpret_and_ground_task_spec(
         "dual_tray",
-        "用双臂把桌上的盘子移动到左边香蕉的后面",
+        "test-instruction-relative-transport",
         scene,
         robot_profile="franka",
         model="test-model",
@@ -641,7 +639,7 @@ def test_e5_accepts_generic_rigid_object_without_exported_affordances() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "dual_block",
-        "用双臂把桌上的长方体往左移动",
+        "test-instruction-directional-transport",
         scene,
         robot_profile="franka",
         model="test-model",
@@ -695,7 +693,7 @@ def test_task1_2_open_reference_generates_coordinated_pick_move_and_release() ->
             _step(
                 "move_block",
                 "E5",
-                _selector("scene_ref", reference="桌上的长方体"),
+                _selector("scene_ref", reference="object-alpha"),
                 direction="left",
                 terminal_behavior="place",
             )
@@ -704,7 +702,7 @@ def test_task1_2_open_reference_generates_coordinated_pick_move_and_release() ->
 
     grounded = interpret_and_ground_task_spec(
         "task1_2",
-        "用双臂把桌上的长方体往左移动并放下",
+        "test-instruction-directional-place",
         scene,
         robot_profile="franka",
         model="test-model",
@@ -753,7 +751,7 @@ def test_e5_pick_and_hold_defaults_missing_direction_to_up() -> None:
             _step(
                 "lift_tray",
                 "E5",
-                _selector("scene_ref", reference="桌上的木盘"),
+                _selector("scene_ref", reference="object-alpha"),
                 required_arm="none",
                 direction="none",
                 terminal_behavior="hold",
@@ -763,7 +761,7 @@ def test_e5_pick_and_hold_defaults_missing_direction_to_up() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "lift_tray",
-        "用双臂把桌上的木盘端起来",
+        "test-instruction-hold",
         scene,
         robot_profile="franka",
         model="test-model",
@@ -824,7 +822,7 @@ def test_e5_rejects_explicitly_incompatible_scene_evidence(
     with pytest.raises(ValueError, match=error):
         interpret_and_ground_task_spec(
             "invalid_dual_object",
-            "用双臂把物体往左移动",
+            "test-instruction-missing-object",
             [scene_object],
             robot_profile="franka",
             model="test-model",
@@ -864,7 +862,7 @@ def test_articulated_task_uses_structural_and_explicit_affordance_evidence(
             _step(
                 "open_part",
                 "E6",
-                _selector("scene_ref", reference="柜子的活动部件"),
+                _selector("scene_ref", reference="object-alpha"),
                 target_state="open",
             )
         ]
@@ -872,7 +870,7 @@ def test_articulated_task_uses_structural_and_explicit_affordance_evidence(
 
     invoke = lambda: interpret_and_ground_task_spec(
         "open_part",
-        "打开柜子的活动部件。",
+        "test-instruction-articulation",
         [scene_object],
         robot_profile="franka",
         model="test-model",
@@ -912,8 +910,8 @@ def test_open_container_target_is_allowed_until_runtime_when_metadata_is_unknown
             _step(
                 "pour",
                 "E3",
-                _selector("scene_ref", reference="水壶"),
-                target=_selector("scene_ref", reference="手工容器"),
+                _selector("scene_ref", reference="object-alpha"),
+                target=_selector("scene_ref", reference="target-alpha"),
                 relation="above",
             )
         ]
@@ -921,7 +919,7 @@ def test_open_container_target_is_allowed_until_runtime_when_metadata_is_unknown
 
     grounded = interpret_and_ground_task_spec(
         "open_container",
-        "把水壶里的水倒入手工容器。",
+        "test-instruction-pour",
         scene,
         robot_profile="franka",
         model="test-model",
@@ -940,7 +938,7 @@ def test_open_container_target_is_allowed_until_runtime_when_metadata_is_unknown
     with pytest.raises(ValueError, match="none support containment"):
         interpret_and_ground_task_spec(
             "explicit_non_container",
-            "把水壶里的水倒入手工容器。",
+            "test-instruction-pour",
             explicit,
             robot_profile="franka",
             model="test-model",
@@ -960,13 +958,13 @@ def test_open_scene_reference_is_not_limited_by_fixed_selector_fields() -> None:
             _step(
                 "orient",
                 "E2",
-                _selector("scene_ref", reference="右边紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
             )
         ]
     }
     grounded = interpret_and_ground_task_spec(
         "open_reference",
-        "扶正右边紫色易拉罐。",
+        "test-instruction-orient",
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: intent,
@@ -997,7 +995,7 @@ def test_invalid_intent_gets_one_repair_attempt() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "repair",
-        "扶正后递给另一只手，再放到另一罐头左边。",
+        "test-instruction-repair",
         _scene(),
         robot_profile="ur10",
         caller=caller,
@@ -1022,7 +1020,7 @@ def test_interpreter_normalizes_registry_inapplicable_e4_required_arm() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "normalized_handover",
-        "用右臂扶正紫色易拉罐，然后用右臂递给左臂，再放到橘色易拉罐左边。",
+        "test-instruction-handover-repair",
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: deepcopy(intent),
@@ -1051,13 +1049,13 @@ def test_interpreter_resolves_same_arm_handover_from_step_result_ownership() -> 
             _step(
                 "orient_coke",
                 "E2",
-                _selector("scene_ref", reference="可乐"),
+                _selector("scene_ref", reference="object-alpha"),
                 required_arm="right_arm",
             ),
             _step(
                 "orient_sprite",
                 "E2",
-                _selector("scene_ref", reference="雪碧"),
+                _selector("scene_ref", reference="object-beta"),
                 required_arm="left_arm",
             ),
             _step(
@@ -1085,8 +1083,7 @@ def test_interpreter_resolves_same_arm_handover_from_step_result_ownership() -> 
         validate_instruction_intent(intent)
 
     result = task_interpretation_module.interpret_instruction_draft(
-        "用右臂把可乐摆正，同时用左臂把雪碧扶正，然后左臂把雪碧递给左臂，"
-        "然后右臂把雪碧放到可乐上。",
+        "test-instruction-invalid-handover",
         model="test-model",
         caller=lambda **_kwargs: deepcopy(intent),
     )
@@ -1115,13 +1112,13 @@ def test_interpreter_repairs_direct_reference_handover_from_later_arm_semantics(
             _step(
                 "orient_sprite",
                 "E2",
-                _selector("scene_ref", reference="雪碧"),
+                _selector("scene_ref", reference="object-beta"),
                 required_arm="left_arm",
             ),
             _step(
                 "handover_sprite",
                 "E4",
-                _selector("scene_ref", reference="雪碧"),
+                _selector("scene_ref", reference="object-beta"),
                 required_arm="none",
                 transfer_arm="left_arm",
                 receive_arm="left_arm",
@@ -1130,8 +1127,8 @@ def test_interpreter_repairs_direct_reference_handover_from_later_arm_semantics(
             _step(
                 "place_sprite",
                 "E1",
-                _selector("scene_ref", reference="雪碧"),
-                target=_selector("scene_ref", reference="可乐"),
+                _selector("scene_ref", reference="object-beta"),
+                target=_selector("scene_ref", reference="object-alpha"),
                 relation="on",
                 required_arm="right_arm",
                 depends_on=["handover_sprite"],
@@ -1147,7 +1144,7 @@ def test_interpreter_repairs_direct_reference_handover_from_later_arm_semantics(
         return deepcopy(invalid_intent if len(prompts) == 1 else repaired_intent)
 
     result = task_interpretation_module.interpret_instruction_draft(
-        "用左臂把雪碧扶正，然后左臂把雪碧递给左臂，最后右臂把雪碧放到可乐上。",
+        "test-instruction-same-arm-handover",
         model="test-model",
         caller=caller,
     )
@@ -1168,13 +1165,13 @@ def test_interpreter_does_not_merge_repeated_scene_reference_identity() -> None:
             _step(
                 "orient_first_can",
                 "E2",
-                _selector("scene_ref", reference="罐头"),
+                _selector("scene_ref", reference="object-token"),
                 required_arm="left_arm",
             ),
             _step(
                 "handover_second_can",
                 "E4",
-                _selector("scene_ref", reference="罐头"),
+                _selector("scene_ref", reference="object-token"),
                 required_arm="none",
                 transfer_arm="left_arm",
                 receive_arm="left_arm",
@@ -1183,8 +1180,8 @@ def test_interpreter_does_not_merge_repeated_scene_reference_identity() -> None:
             _step(
                 "place_first_can",
                 "E1",
-                _selector("scene_ref", reference="罐头"),
-                target=_selector("scene_ref", reference="托盘"),
+                _selector("scene_ref", reference="object-token"),
+                target=_selector("scene_ref", reference="target-alpha"),
                 relation="on",
                 required_arm="right_arm",
                 depends_on=["handover_second_can"],
@@ -1200,7 +1197,7 @@ def test_interpreter_does_not_merge_repeated_scene_reference_identity() -> None:
 
     with pytest.raises(ValueError, match="after one repair.*arms must differ"):
         task_interpretation_module.interpret_instruction_draft(
-            "扶正一个罐头，然后交接另一个罐头，最后放置前一个罐头。",
+            "test-instruction-repeated-reference",
             model="test-model",
             caller=caller,
         )
@@ -1214,7 +1211,7 @@ def test_interpreter_does_not_guess_an_unconstrained_same_arm_handover() -> None
             _step(
                 "handover",
                 "E4",
-                _selector("scene_ref", reference="雪碧"),
+                _selector("scene_ref", reference="object-beta"),
                 transfer_arm="left_arm",
                 receive_arm="left_arm",
             )
@@ -1229,7 +1226,7 @@ def test_interpreter_does_not_guess_an_unconstrained_same_arm_handover() -> None
 
     with pytest.raises(ValueError, match="after one repair.*arms must differ"):
         task_interpretation_module.interpret_instruction_draft(
-            "左臂把雪碧递给左臂。",
+            "test-instruction-invalid-same-arm",
             model="test-model",
             caller=caller,
         )
@@ -1240,7 +1237,7 @@ def test_interpreter_does_not_guess_an_unconstrained_same_arm_handover() -> None
 def test_invalid_step_result_gets_repair_with_selector_rules() -> None:
     """A malformed cross-step selector should reach the structured repair call."""
     invalid_intent = _handover_intent()
-    invalid_intent["steps"][1]["object"]["reference"] = "紫色易拉罐"
+    invalid_intent["steps"][1]["object"]["reference"] = "object-alpha"
     responses = [invalid_intent, _handover_intent()]
     prompts: list[str] = []
 
@@ -1250,7 +1247,7 @@ def test_invalid_step_result_gets_repair_with_selector_rules() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "repair_step_result",
-        "用右臂扶正紫色易拉罐，然后递给左臂，再放到橘色易拉罐左边。",
+        "test-instruction-step-result-repair",
         _scene(),
         robot_profile="ur10",
         caller=caller,
@@ -1281,8 +1278,7 @@ def test_repeated_missing_e1_target_fails_without_local_guessing() -> None:
     with pytest.raises(ValueError, match="after one repair"):
         interpret_and_ground_task_spec(
             "missing_target",
-            "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
-            "然后右臂撤回，然后左臂将其放到橘色易拉罐的左边。",
+            "test-instruction-missing-target",
             _scene(),
             robot_profile="ur10",
             caller=caller,
@@ -1299,8 +1295,7 @@ def test_missing_target_completion_rejects_other_semantic_disagreement() -> None
     with pytest.raises(ValueError, match="after one repair"):
         interpret_and_ground_task_spec(
             "unsafe_target_completion",
-            "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
-            "然后右臂撤回，然后左臂将其放到橘色易拉罐的左边。",
+            "test-instruction-missing-target",
             _scene(),
             robot_profile="ur10",
             caller=lambda **_kwargs: deepcopy(invalid_intent),
@@ -1311,7 +1306,7 @@ def test_second_invalid_intent_fails_without_rule_fallback() -> None:
     with pytest.raises(ValueError, match="after one repair"):
         interpret_and_ground_task_spec(
             "invalid",
-            "递给。",
+            "test-instruction-invalid",
             _scene(),
             robot_profile="ur10",
             caller=lambda **_kwargs: {"steps": []},
@@ -1324,7 +1319,7 @@ def test_intent_infers_pronoun_dependency_from_canonical_symbols() -> None:
             _step(
                 "handover",
                 "E4",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
                 transfer_arm="right_arm",
                 receive_arm="left_arm",
             ),
@@ -1332,7 +1327,7 @@ def test_intent_infers_pronoun_dependency_from_canonical_symbols() -> None:
                 "place",
                 "E1",
                 _selector("step_result", step_id="handover"),
-                target=_selector("scene_ref", reference="橘色易拉罐"),
+                target=_selector("scene_ref", reference="object-beta"),
                 relation="left_of",
                 required_arm="left_arm",
                 depends_on=["handover"],
@@ -1342,7 +1337,7 @@ def test_intent_infers_pronoun_dependency_from_canonical_symbols() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "implicit_dependency",
-        "递给左臂，再将其放在橘色罐头左边。",
+        "test-instruction-pronoun-dependency",
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: intent,
@@ -1367,14 +1362,14 @@ def test_scene_grounding_rejects_unknown_uid() -> None:
             _step(
                 "orient",
                 "E2",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
             )
         ]
     }
     with pytest.raises(ValueError, match="after one repair.*unknown UIDs"):
         interpret_and_ground_task_spec(
             "unknown_uid",
-            "扶正紫色易拉罐。",
+            "test-instruction-unknown-uid",
             _scene(),
             robot_profile="ur10",
             caller=lambda **_kwargs: intent,
@@ -1411,7 +1406,7 @@ def test_step_result_must_reference_a_preceding_step() -> None:
             _step(
                 "orient",
                 "E2",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
             ),
         ]
     }
@@ -1421,7 +1416,7 @@ def test_step_result_must_reference_a_preceding_step() -> None:
 
 def test_step_result_selector_rejects_object_constraints() -> None:
     intent = _handover_intent()
-    intent["steps"][1]["object"]["reference"] = "紫色易拉罐"
+    intent["steps"][1]["object"]["reference"] = "object-alpha"
 
     with pytest.raises(ValueError, match="may identify only a prior step_id"):
         validate_instruction_intent(intent)
@@ -1464,7 +1459,7 @@ def test_implicit_e1_relation_requires_an_unambiguous_support_target() -> None:
     with pytest.raises(ValueError, match="omitted relation"):
         interpret_and_ground_task_spec(
             "ambiguous_implicit_place",
-            "把紫色罐放到橘色罐。",
+            "test-instruction-implicit-relation",
             _scene(),
             robot_profile="ur10",
             caller=lambda **_kwargs: intent,
@@ -1538,7 +1533,7 @@ def test_grounding_prompt_redacts_nested_scene_geometry() -> None:
 
     interpret_and_ground_task_spec(
         "redacted_inventory",
-        "扶正紫色易拉罐。",
+        "test-instruction-grounding-redaction",
         scene,
         robot_profile="ur10",
         caller=lambda **_kwargs: {
@@ -1546,7 +1541,7 @@ def test_grounding_prompt_redacts_nested_scene_geometry() -> None:
                 _step(
                     "orient",
                     "E2",
-                    _selector("scene_ref", reference="紫色易拉罐"),
+                    _selector("scene_ref", reference="object-alpha"),
                 )
             ]
         },
@@ -1566,7 +1561,7 @@ def test_default_llm_parser_requires_the_documented_model_configuration(
     with pytest.raises(ValueError, match="text LLM model is required"):
         interpret_and_ground_task_spec(
             "missing_model",
-            "扶正紫色易拉罐。",
+            "test-instruction-model-config",
             _scene(),
             robot_profile="ur10",
         )
@@ -1588,7 +1583,7 @@ def test_injected_caller_skips_production_model_resolution(
 
     grounded = interpret_and_ground_task_spec(
         "injected_caller",
-        "扶正紫色易拉罐。",
+        "test-instruction-injected-caller",
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: {
@@ -1596,7 +1591,7 @@ def test_injected_caller_skips_production_model_resolution(
                 _step(
                     "orient",
                     "E2",
-                    _selector("scene_ref", reference="紫色易拉罐"),
+                    _selector("scene_ref", reference="object-alpha"),
                 )
             ]
         },
@@ -1619,7 +1614,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
                 {
                     "id": "orient",
                     "task_type": "E2",
-                    "object": _selector("scene_ref", reference="紫色易拉罐"),
+                    "object": _selector("scene_ref", reference="object-alpha"),
                 }
             ]
         },
@@ -1660,7 +1655,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
 
     grounded = interpret_and_ground_task_spec(
         "mimo_repair",
-        "用右臂扶正紫色易拉罐，然后递给左臂，再放到橘色易拉罐左边。",
+        "test-instruction-json-mode",
         _scene(),
         robot_profile="ur10",
         model="mimo-v2.5",
@@ -1682,7 +1677,7 @@ def test_mimo_instruction_caller_uses_json_mode_and_disables_thinking(
 
 
 def test_instruction_prompt_contains_a_complete_shape_example() -> None:
-    prompt = interpretation_module._instruction_prompt("关闭示例开关。")
+    prompt = interpretation_module._instruction_prompt("instruction-marker")
     selector_rules = interpretation_module._instruction_selector_rules()
     assert '"target_setting": 0' in prompt
     assert '"depends_on": []' in prompt
@@ -1690,8 +1685,8 @@ def test_instruction_prompt_contains_a_complete_shape_example() -> None:
     assert "step_result" in prompt
     assert "open scene_ref.reference" in prompt
     assert "Do not classify it or emit a scene UID" in prompt
-    assert "示例物体甲" in prompt
-    assert "紫色易拉罐" not in prompt
+    assert "example object A" in prompt
+    assert "stale-object-reference" not in prompt
     assert "step_result" in selector_rules
     assert "step_id" in selector_rules
     assert "reference" in selector_rules
@@ -1724,7 +1719,7 @@ def test_scene_export_exact_uids_ground_pick_and_place() -> None:
 
     grounded = interpret_and_ground_task_spec(
         "scene_export_pick_place",
-        "先用左臂把胡萝卜放到砧板上",
+        "test-instruction-exact-uids",
         _scene_export_style_scene(),
         robot_profile="franka",
         model="test-model",
@@ -1754,8 +1749,7 @@ def test_multi_object_handover_keeps_both_order_and_holder_dependencies() -> Non
     intent = _two_object_handover_intent()
     grounded = interpret_and_ground_task_spec(
         "multi_object_handover",
-        "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
-        "然后右臂撤回，然后左臂将其放到橘色易拉罐的左边",
+        "test-instruction-multi-object-handover",
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: deepcopy(intent),
@@ -1824,7 +1818,7 @@ def test_single_arm_e1_propagates_direct_payload_into_goal_and_contracts() -> No
     }
     grounded = interpret_and_ground_task_spec(
         "payload_chain",
-        "用左臂把固体胶递给右臂，然后右臂将固体胶放到纸杯上，再然后右臂把纸杯放到爆米花桶上。",
+        "test-instruction-payload-propagation",
         _payload_scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: deepcopy(intent),
@@ -1864,8 +1858,7 @@ def test_seed_graph_repairs_missing_e2_handover_lifecycle_edge() -> None:
     intent = _two_object_handover_intent()
     grounded = interpret_and_ground_task_spec(
         "missing_lifecycle_edge",
-        "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
-        "然后左臂将其放到橘色易拉罐的左边",
+        "test-instruction-lifecycle-repair",
         _scene(),
         robot_profile="ur10",
         caller=lambda **_kwargs: deepcopy(intent),

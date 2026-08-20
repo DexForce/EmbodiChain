@@ -92,8 +92,6 @@ class TaskContract:
     applicable_intent_fields: frozenset[str]
     source_structure: str
     required_affordances: frozenset[str]
-    example_category: str
-    instruction_template: str
     success_type: str
     scene_affordances: frozenset[str]
 
@@ -106,8 +104,6 @@ def _action_contract(value: SemanticTaskContract) -> TaskContract:
         applicable_intent_fields=value.applicable_intent_fields,
         source_structure=value.source_structure,
         required_affordances=value.required_affordances,
-        example_category=value.example_category,
-        instruction_template=value.instruction_template,
         success_type=value.success_type,
         scene_affordances=value.scene_affordances,
     )

@@ -36,20 +36,17 @@ from embodichain.gen_sim.action_engine.planning import (
     select_seed_graph,
     validate_visual_facts,
 )
-from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
+
+from ..task_fixtures import make_task_level
 
 
 def _task(level: str, *, reasoning: str | None = None):
-    factory = TaskFactory(41, executable_only=True)
-    for index in range(100):
-        task, requirements = factory.generate(level, index)
-        if reasoning is None or task["reasoning_type"] == reasoning:
-            bindings = {
-                item["role_id"]: f"uid_{item['role_id']}"
-                for item in requirements["objects"]
-            }
-            return task, requirements, bindings
-    raise AssertionError(f"No deterministic {reasoning!r} task found.")
+    task, requirements = make_task_level(level, reasoning=reasoning)
+    bindings = {
+        item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
+    }
+    return task, requirements, bindings
 
 
 def test_online_planner_sees_public_task_and_returns_complete_seed_graph() -> None:

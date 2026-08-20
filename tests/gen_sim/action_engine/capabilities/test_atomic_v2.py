@@ -31,7 +31,9 @@ from embodichain.gen_sim.action_engine.runtime.grounding import ActionGrounder
 from embodichain.gen_sim.action_engine.runtime.loader import load_execution_program
 from embodichain.gen_sim.action_engine.runtime.models import GroundedAction
 from embodichain.gen_sim.action_engine.runtime.state import ExecutionState
-from embodichain.gen_sim.action_engine.tasks import TaskFactory, instantiate_seed_graph
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
+
+from ..task_fixtures import make_task_spec
 from embodichain.gen_sim.action_engine.planning.linker import link_seed_graph
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
@@ -134,11 +136,7 @@ def test_new_descriptor_reuses_loader_and_adapter_without_dispatch_changes() -> 
             ).contract_resolver_hook,
         )
     )
-    factory = TaskFactory(3, executable_only=True)
-    for index in range(100):
-        task, requirements = factory.generate("L1", index)
-        if task["task_instances"][0]["task_type"] == "E1":
-            break
+    task, requirements = make_task_spec("E1")
     bindings = {
         item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
     }

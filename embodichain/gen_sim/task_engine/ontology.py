@@ -81,8 +81,6 @@ class TaskContract:
     applicable_intent_fields: frozenset[str]
     source_structure: str
     required_affordances: frozenset[str]
-    example_category: str
-    instruction_template: str
     success_type: str
     scene_affordances: frozenset[str]
 
@@ -93,8 +91,6 @@ def _contract(
     applicable_intent_fields: frozenset[str],
     source_structure: str,
     required_affordances: frozenset[str],
-    example_category: str,
-    instruction_template: str,
     success_type: str,
     *,
     scene_affordances: frozenset[str] | None = None,
@@ -105,8 +101,6 @@ def _contract(
         applicable_intent_fields=applicable_intent_fields,
         source_structure=source_structure,
         required_affordances=required_affordances,
-        example_category=example_category,
-        instruction_template=instruction_template,
         success_type=success_type,
         scene_affordances=scene_affordances or required_affordances,
     )
@@ -129,8 +123,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             ),
             "rigid_object",
             frozenset({"graspable", "placeable"}),
-            "can",
-            "把{object}放到{target}上。",
             "semantic_goal",
         ),
         "E2": _contract(
@@ -139,8 +131,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"required_arm", "orientation_goal"}),
             "rigid_object",
             frozenset({"graspable", "orientable"}),
-            "can",
-            "扶正{object}。",
             "object_upright",
         ),
         "E3": _contract(
@@ -149,8 +139,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"target", "relation", "required_arm"}),
             "rigid_object",
             frozenset({"graspable", "pourable"}),
-            "pourable_container",
-            "把{source}中的内容倒入{target}。",
             "poured",
         ),
         "E4": _contract(
@@ -159,8 +147,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"transfer_arm", "receive_arm", "orientation_goal"}),
             "rigid_object",
             frozenset({"graspable", "handover"}),
-            "cup",
-            "把{object}从左手交接到右手。",
             "handover_complete",
         ),
         "E5": _contract(
@@ -169,8 +155,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"target", "relation", "direction", "terminal_behavior"}),
             "rigid_object",
             frozenset({"dual_graspable"}),
-            "tray",
-            "双臂共同拿起{object}。",
             "held_by_both_grippers",
             scene_affordances=frozenset({"dual_graspable", "rigid"}),
         ),
@@ -180,8 +164,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"required_arm", "target_state"}),
             "articulation",
             frozenset({"pullable"}),
-            "drawer",
-            "拉开{object}。",
             "articulation_joint_near",
             scene_affordances=frozenset({"articulated", "pullable"}),
         ),
@@ -191,8 +173,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"required_arm", "target_state"}),
             "articulation",
             frozenset({"pushable"}),
-            "drawer",
-            "推闭{object}。",
             "articulation_joint_near",
             scene_affordances=frozenset({"articulated", "pushable"}),
         ),
@@ -202,8 +182,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"required_arm", "target_setting"}),
             "articulation",
             frozenset({"turnable"}),
-            "knob",
-            "把{object}旋转到目标档位。",
             "articulation_joint_near",
         ),
         "E9": _contract(
@@ -212,8 +190,6 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"required_arm", "target_state"}),
             "articulation",
             frozenset({"pressable"}),
-            "button",
-            "按下{object}。",
             "pressed",
         ),
     }

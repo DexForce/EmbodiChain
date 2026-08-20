@@ -79,7 +79,7 @@ Hard rules:
   actor={"mode":"auto"} and depends_on=[], then reference their step IDs in one
   allocation_groups entry. The deterministic compiler assigns distinct arms;
   do not guess left/right from object positions.
-- Spatial phrases such as "both sides", "两侧", or "两边" describe object
+- Spatial phrases that place objects on opposite sides describe object
   locations, not an arm-allocation constraint. Emit an allocation group only
   when the user explicitly requests both or distinct arms.
 
@@ -131,7 +131,8 @@ Built-in operator shapes:
      orientation_axis="none"|"x"|"y"|"long_axis"|"short_axis";
      support_object=<runtime_uid>; position_anchor="initial_xy"|"live_xy";
      upright_local_axis="auto"|"long_axis"|"x"|"y"|"z".
-   - Use orientation_goal="upright" for instructions such as Chinese "扶正".
+   - Use orientation_goal="upright" only when the instruction explicitly asks
+     to make the object upright.
    - Use support_object="table" and position_anchor="initial_xy" for an
      in-place tabletop orientation request. Use upright_local_axis="auto"
      unless the scene inventory explicitly supplies a local semantic axis;

@@ -83,10 +83,7 @@ from embodichain.gen_sim.action_engine.protocol import (
     SEED_GRAPH_SCHEMA,
     TASK_SPEC_SCHEMA,
 )
-from embodichain.gen_sim.action_engine.tasks import (
-    TaskFactory,
-    instantiate_seed_graph,
-)
+from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
 from embodichain.lab.gym.envs import EmbodiedEnv
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
@@ -103,6 +100,8 @@ from embodichain.lab.sim.atomic_actions import (
     PressGoal,
     PressOptions,
 )
+
+from ..task_fixtures import make_task_spec
 from embodichain.lab.sim.solvers import URSolverCfg
 
 
@@ -4521,13 +4520,7 @@ def test_resource_ordering_waits_without_propagating_semantic_failure() -> None:
 def test_v2_executor_retries_one_complete_atomic_action_twice(
     monkeypatch: Any,
 ) -> None:
-    factory = TaskFactory(29, executable_only=True)
-    for index in range(100):
-        task, requirements = factory.generate("L1", index)
-        if task["task_instances"][0]["task_type"] == "E9":
-            break
-    else:
-        raise AssertionError("Expected a deterministic E9 task.")
+    task, requirements = make_task_spec("E9")
     bindings = {
         item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
     }
@@ -4569,7 +4562,7 @@ def test_v2_executor_retries_one_complete_atomic_action_twice(
 
 
 def test_v2_executor_stops_at_transition_budget() -> None:
-    task, requirements = TaskFactory(29, executable_only=True).generate("L1", 0)
+    task, requirements = make_task_spec("E1")
     bindings = {
         item["role_id"]: f"uid_{item['role_id']}" for item in requirements["objects"]
     }

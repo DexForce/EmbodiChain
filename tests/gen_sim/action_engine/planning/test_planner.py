@@ -178,7 +178,7 @@ def test_planner_repairs_a_non_visible_skill_once() -> None:
 
     program = plan_task(
         task_name="dual_arm_basket",
-        task_description="用双臂把两侧的方块和纸杯放到篮子里",
+        task_description="test-instruction",
         scene_objects=_dual_arm_scene(),
         llm_caller=caller,
     )
@@ -235,7 +235,7 @@ def test_planner_repairs_build_stack_singular_object_contract() -> None:
 
     program = plan_task(
         task_name="task3_2",
-        task_description="把纸杯叠放到爆米花桶上，然后把蓝色耳机盒叠放到纸杯上",
+        task_description="test-instruction",
         scene_objects=_stack_scene(),
         llm_caller=caller,
     )
@@ -315,7 +315,7 @@ def test_spatial_two_sided_phrase_does_not_invent_arm_constraint() -> None:
 
     program = plan_task(
         task_name="two_sided_upright",
-        task_description="把两边东西扶正",
+        task_description="test-instruction",
         scene_objects=_dual_arm_scene(),
         llm_caller=caller,
     )
@@ -344,7 +344,7 @@ def test_planner_does_not_infer_arm_group_from_instruction_text() -> None:
 
     program = plan_task(
         task_name="explicit_both_arms",
-        task_description="用双臂把两个物体扶正",
+        task_description="test-instruction",
         scene_objects=_dual_arm_scene(),
         llm_caller=caller,
     )
@@ -416,7 +416,7 @@ def test_arrange_line_preserves_structured_orientation_output() -> None:
 
     program = plan_task(
         task_name="neutral_line",
-        task_description="将罐头摆成一排",
+        task_description="test-instruction",
         scene_objects=_scene(),
         llm_caller=caller,
     )
@@ -450,7 +450,7 @@ def test_arrange_line_preserves_structured_axis_output() -> None:
 
     program = plan_task(
         task_name="ambiguous_line_axis",
-        task_description="将罐头摆成一排",
+        task_description="test-instruction",
         scene_objects=_scene(),
         llm_caller=caller,
     )
@@ -482,7 +482,7 @@ def test_instruction_text_does_not_override_structured_axis_output() -> None:
 
     program = plan_task(
         task_name="front_to_back_line_axis",
-        task_description="将罐头沿前后方向摆成一列",
+        task_description="test-instruction",
         scene_objects=_scene(),
         llm_caller=caller,
     )
@@ -515,7 +515,7 @@ def test_arrange_line_preserves_explicit_orientation_request() -> None:
 
     program = plan_task(
         task_name="upright_line",
-        task_description="先把罐头扶正，再摆成一排",
+        task_description="test-instruction",
         scene_objects=_scene(),
         llm_caller=caller,
     )

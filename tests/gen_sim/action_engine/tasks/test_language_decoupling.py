@@ -130,22 +130,22 @@ def test_scene_inventory_preserves_open_category_labels() -> None:
             _step(
                 "place",
                 "E1",
-                "半透明的夹具",
-                target=_selector("scene_ref", reference="黑色承台"),
-                relation="左边",
+                "object-alpha",
+                target=_selector("scene_ref", reference="target-alpha"),
+                relation="invalid-relation",
             ),
             "relation",
         ),
         (
-            _step("orient", "E2", "半透明的夹具", required_arm="左臂"),
+            _step("orient", "E2", "object-alpha", required_arm="invalid-arm"),
             "required_arm",
         ),
         (
             _step(
                 "orient",
                 "E2",
-                "半透明的夹具",
-                orientation_goal="竖直",
+                "object-alpha",
+                orientation_goal="invalid-orientation",
             ),
             "orientation_goal",
         ),
@@ -166,9 +166,9 @@ def test_noncanonical_llm_value_is_repaired_instead_of_locally_normalized() -> N
             _step(
                 "place",
                 "E1",
-                "半透明的夹具",
-                target=_selector("scene_ref", reference="黑色承台"),
-                relation="左边",
+                "object-alpha",
+                target=_selector("scene_ref", reference="target-alpha"),
+                relation="invalid-relation",
             )
         ]
     }
@@ -183,7 +183,7 @@ def test_noncanonical_llm_value_is_repaired_instead_of_locally_normalized() -> N
 
     grounded = interpret_and_ground_task_spec(
         "strict_canonical_repair",
-        "把半透明的夹具搁到黑色承台左边。",
+        "test-instruction-invalid-relation",
         _open_scene(),
         robot_profile="franka",
         model="test-model",
@@ -209,9 +209,9 @@ def test_two_noncanonical_llm_responses_fail_without_grounding_or_rule_fallback(
             _step(
                 "place",
                 "E1",
-                "半透明的夹具",
-                target=_selector("scene_ref", reference="黑色承台"),
-                relation="左边",
+                "object-alpha",
+                target=_selector("scene_ref", reference="target-alpha"),
+                relation="invalid-relation",
             )
         ]
     }
@@ -225,7 +225,7 @@ def test_two_noncanonical_llm_responses_fail_without_grounding_or_rule_fallback(
     with pytest.raises(ValueError, match="after one repair.*relation"):
         interpret_and_ground_task_spec(
             "strict_canonical_failure",
-            "把半透明的夹具搁到黑色承台左边。",
+            "test-instruction-invalid-relation",
             _open_scene(),
             robot_profile="franka",
             model="test-model",
@@ -278,7 +278,7 @@ def test_llm_caller_exception_propagates_without_scene_grounding() -> None:
     with pytest.raises(RuntimeError) as caught:
         interpret_and_ground_task_spec(
             "model_failure",
-            "请把半透明构件安顿在落物台上。",
+            "test-instruction-caller-error",
             _open_scene(),
             robot_profile="franka",
             model="test-model",
@@ -296,8 +296,8 @@ def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() ->
             _step(
                 "relocate_fixture",
                 "E1",
-                "那件带磨砂边的半透明构件",
-                target=_selector("scene_ref", reference="黑色的落物台"),
+                "object-alpha",
+                target=_selector("scene_ref", reference="target-alpha"),
                 relation="on",
                 required_arm="auto",
             )
@@ -306,7 +306,7 @@ def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() ->
 
     grounded = interpret_and_ground_task_spec(
         "open_world_fixture",
-        "请让那件带磨砂边的半透明构件安顿在黑色的落物台上。",
+        "test-instruction-open-reference",
         _open_scene(),
         robot_profile="franka",
         model="test-model",
@@ -334,11 +334,11 @@ def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() ->
     [
         (
             "dual_lift",
-            "用双臂把半透明构件端起来。",
+            "test-instruction-hold",
             _step(
                 "lift_fixture",
                 "E5",
-                "半透明构件",
+                "object-alpha",
                 terminal_behavior="hold",
             ),
             [_binding("lift_fixture.object", "aerogel_fixture_7")],
@@ -347,11 +347,11 @@ def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() ->
         ),
         (
             "dual_move_place",
-            "用双臂把半透明构件往左移动并放下。",
+            "test-instruction-directional-place",
             _step(
                 "move_fixture",
                 "E5",
-                "半透明构件",
+                "object-alpha",
                 direction="left",
                 terminal_behavior="place",
             ),
@@ -361,12 +361,12 @@ def test_unfamiliar_wording_and_categories_flow_through_injected_llm_stages() ->
         ),
         (
             "dual_relative",
-            "用双臂把半透明构件移动到弯曲标记后面。",
+            "test-instruction-relative-place",
             _step(
                 "move_relative",
                 "E5",
-                "半透明构件",
-                target=_selector("scene_ref", reference="弯曲的黄色标记"),
+                "object-alpha",
+                target=_selector("scene_ref", reference="target-alpha"),
                 relation="behind",
                 terminal_behavior="hold",
             ),

@@ -20,53 +20,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-import pytest
-
-from embodichain.gen_sim.action_engine.capabilities import (
-    build_atomic_capability_registry,
-)
 from embodichain.gen_sim.action_engine.tasks import (
-    TaskFactory,
     ground_instruction_draft,
     instantiate_seed_graph,
-    validate_scene_handoff,
 )
-from embodichain.gen_sim.action_engine.runtime.motion_policy import (
-    resolve_motion_policy,
-)
-
-
-def _bindings(requirements: dict) -> dict[str, str]:
-    return {
-        item["role_id"]: f"scene_{item['role_id']}" for item in requirements["objects"]
-    }
-
-
-def _scene(requirements: dict, *, with_camera: bool = True) -> dict:
-    return {
-        "objects": [
-            {
-                "uid": f"scene_{item['role_id']}",
-                "category": item["category"],
-                "affordances": item["affordances"],
-                "initial_state": item["initial_state"],
-                "attributes": item["attributes"],
-            }
-            for item in requirements["objects"]
-        ],
-        "cameras": (
-            [
-                {
-                    "uid": "front_camera",
-                    "modalities": ["rgb", "depth"],
-                    "coverage": "all_interaction_objects",
-                }
-            ]
-            if with_camera
-            else []
-        ),
-        "satisfied_spatial_constraints": requirements["spatial_constraints"],
-    }
 
 
 def _selector(
@@ -130,105 +87,12 @@ def _ground_draft(
     )
 
 
-def test_fixed_seed_batch_of_one_thousand_is_reproducible_and_valid() -> None:
-    first = TaskFactory(1729).generate_batch(1000)
-    second = TaskFactory(1729).generate_batch(1000)
-
-    assert first.tasks == second.tasks
-    assert first.scene_requirements == second.scene_requirements
-    assert len({task["task_id"] for task in first.tasks}) == 1000
-    assert (
-        len(
-            {
-                repr(
-                    {
-                        key: value
-                        for key, value in task.items()
-                        if key not in {"task_id", "metadata"}
-                    }
-                )
-                for task in first.tasks
-            }
-        )
-        == 1000
-    )
-    registry = build_atomic_capability_registry()
-    for task, requirements in zip(first.tasks, first.scene_requirements):
-        graph = instantiate_seed_graph(task, _bindings(requirements))
-        assert graph["task_id"] == task["task_id"]
-        for node in graph["nodes"]:
-            if registry.get(node["atomic_action"]).runtime_available:
-                resolve_motion_policy(
-                    "dual_ur10",
-                    node["atomic_action"],
-                    node["motion_policy"],
-                )
-    assert {task["level"] for task in first.tasks} == {"L1", "L2", "L3", "L4"}
-
-
-def test_executable_only_never_emits_planning_only_task_types() -> None:
-    batch = TaskFactory(31, executable_only=True).generate_batch(200)
-    emitted = {
-        instance["task_type"]
-        for task in batch.tasks
-        for instance in task["task_instances"]
-    }
-
-    assert emitted <= {"E1", "E2", "E4", "E5", "E9"}
-
-
-@pytest.mark.parametrize("level", ["L1", "L2", "L3", "L4"])
-def test_scene_handoff_instantiates_direct_atomic_action_graph(level: str) -> None:
-    task, requirements = TaskFactory(9, executable_only=True).generate(level, 4)
-    bindings = _bindings(requirements)
-    handoff = validate_scene_handoff(requirements, _scene(requirements), bindings)
-    graph = instantiate_seed_graph(task, handoff.role_bindings)
-
-    assert graph["task_id"] == task["task_id"]
-    assert graph["level"] == level
-    assert {group["id"] for group in graph["task_groups"]} == {
-        instance["id"] for instance in task["task_instances"]
-    }
-    assert all("atomic_action" in node for node in graph["nodes"])
-    assert not any("target_pose" in node for node in graph["nodes"])
-
-
-def test_scene_handoff_rejects_affordance_or_camera_mismatch() -> None:
-    _, requirements = TaskFactory(2).generate("L4", 1)
-    bindings = _bindings(requirements)
-    scene = _scene(requirements, with_camera=False)
-    with pytest.raises(ValueError, match="cameras"):
-        validate_scene_handoff(requirements, scene, bindings)
-
-    scene = _scene(requirements)
-    broken = deepcopy(scene)
-    broken["objects"][0]["affordances"] = []
-    with pytest.raises(ValueError, match="lacks affordances"):
-        validate_scene_handoff(requirements, broken, bindings)
-
-
-def test_planning_only_graph_is_generated_but_runtime_preflight_rejects_it() -> None:
-    factory = TaskFactory(10)
-    for index in range(100):
-        task, requirements = factory.generate("L1", index)
-        if task["task_instances"][0]["task_type"] in {"E3", "E6", "E7", "E8"}:
-            break
-    else:
-        raise AssertionError("Expected a planning-only task in deterministic sample.")
-    graph = instantiate_seed_graph(task, _bindings(requirements))
-
-    from embodichain.gen_sim.action_engine.runtime.loader import load_execution_program
-
-    with pytest.raises(ValueError, match="planning-only"):
-        load_execution_program(graph)
-
-
 def test_orient_then_handover_releases_then_reacquires_with_role_side_pickup() -> None:
     task = {
         "schema_version": "action_engine_task_spec_v2",
         "task_id": "orient_then_handover",
         "level": "L3",
-        "instruction": "扶正易拉罐后递给另一只手。",
+        "instruction": "test-instruction-orient-handover",
         "reasoning_type": "none",
         "task_instances": [
             {
@@ -309,7 +173,7 @@ def test_handover_to_place_uses_receiver_hold_without_repickup() -> None:
         "schema_version": "action_engine_task_spec_v2",
         "task_id": "handover_then_place",
         "level": "L3",
-        "instruction": ("用左臂拿起黄色易拉罐并交给右臂，然后放到紫色易拉罐右边。"),
+        "instruction": "test-instruction-handover-place",
         "reasoning_type": "none",
         "task_instances": [
             {
@@ -438,13 +302,13 @@ def test_structured_draft_grounds_handover_then_receiver_placement() -> None:
 
     planned = _ground_draft(
         "handover_then_place",
-        "用左臂把左侧的黄色易拉罐交接到右臂上，然后放到右边紫色易拉罐右边",
+        "test-instruction-handover-place",
         scene,
         [
             _intent_step(
                 "handover",
                 "E4",
-                _selector("scene_ref", reference="黄色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
                 transfer_arm="left_arm",
                 receive_arm="right_arm",
             ),
@@ -452,7 +316,7 @@ def test_structured_draft_grounds_handover_then_receiver_placement() -> None:
                 "place",
                 "E1",
                 _selector("step_result", step_id="handover"),
-                target=_selector("scene_ref", reference="紫色易拉罐"),
+                target=_selector("scene_ref", reference="object-beta"),
                 relation="right_of",
                 required_arm="right_arm",
             ),
@@ -506,20 +370,19 @@ def test_seed_graph_adds_missing_same_object_e2_handover_dependency() -> None:
     ]
     planned = _ground_draft(
         "missing_same_object_edge",
-        "用右臂把紫色易拉罐扶正，然后用左臂把橘色罐头扶正，然后用右臂把紫色罐头递给左臂，"
-        "然后左臂将其放到橘色易拉罐的左边",
+        "test-instruction-multi-step",
         scene,
         [
             _intent_step(
                 "orient_purple",
                 "E2",
-                _selector("scene_ref", reference="紫色易拉罐"),
+                _selector("scene_ref", reference="object-alpha"),
                 required_arm="right_arm",
             ),
             _intent_step(
                 "orient_orange",
                 "E2",
-                _selector("scene_ref", reference="橘色易拉罐"),
+                _selector("scene_ref", reference="object-beta"),
                 required_arm="left_arm",
                 depends_on=["orient_purple"],
             ),
@@ -535,7 +398,7 @@ def test_seed_graph_adds_missing_same_object_e2_handover_dependency() -> None:
                 "place_purple",
                 "E1",
                 _selector("step_result", step_id="handover_purple"),
-                target=_selector("scene_ref", reference="橘色易拉罐"),
+                target=_selector("scene_ref", reference="object-beta"),
                 relation="left_of",
                 required_arm="left_arm",
             ),
@@ -597,7 +460,7 @@ def test_structured_draft_treats_table_as_support_in_generic_line_task() -> None
 
     planned = _ground_draft(
         "arrange_line",
-        "把桌面上的东西摆成一排",
+        "test-instruction-line",
         scene,
         [
             _intent_step(
@@ -605,7 +468,7 @@ def test_structured_draft_treats_table_as_support_in_generic_line_task() -> None
                 "E1",
                 _selector(
                     "scene_ref",
-                    reference="桌面上的东西",
+                    reference="object-set",
                     quantifier="all",
                 ),
                 layout="line",

@@ -29,6 +29,7 @@ from embodichain.gen_sim.action_engine.capabilities import (
     build_atomic_capability_registry,
 )
 from embodichain.gen_sim.action_engine.domain import (
+    TASK_CONTRACTS,
     public_task_spec,
     requested_visual_task_predicates,
     validate_public_task_spec,
@@ -180,7 +181,6 @@ def _prompt(
     robot_profile: str,
 ) -> str:
     from embodichain.gen_sim.action_engine.config import default_runtime_policy
-    from embodichain.gen_sim.action_engine.tasks import task_capability_catalog
 
     runtime_policy = default_runtime_policy(robot_profile)
     motion_modifiers: dict[str, list[dict[str, str]]] = {
@@ -210,7 +210,7 @@ def _prompt(
         "be replaced with invented primitives.\n\n"
         f"Public TaskSpec:\n{json.dumps(public_task_spec(task), ensure_ascii=False, sort_keys=True)}\n\n"
         f"Visual facts:\n{json.dumps(facts, ensure_ascii=False, sort_keys=True)}\n\n"
-        f"E1-E9 task semantics:\n{json.dumps(task_capability_catalog(), ensure_ascii=False, sort_keys=True)}\n\n"
+        f"E1-E9 task semantics:\n{json.dumps(_task_capability_catalog(), ensure_ascii=False, sort_keys=True)}\n\n"
         f"Atomic capabilities:\n{json.dumps(capabilities.catalog(), ensure_ascii=False, sort_keys=True)}\n\n"
         "Every node motion_policy must be an object with a modifiers list; "
         "the AtomicAction selects its base policy implicitly. Use only the "
@@ -218,6 +218,19 @@ def _prompt(
         f"Allowed motion modifiers by AtomicAction:\n"
         f"{json.dumps(motion_modifiers, sort_keys=True)}"
     )
+
+
+def _task_capability_catalog() -> dict[str, dict[str, Any]]:
+    """Return the Action Engine's runtime-aware E-task view."""
+    executable = set(build_atomic_capability_registry().executable_names())
+    return {
+        task_type: {
+            "semantics": contract.semantics,
+            "core_actions": list(contract.core_actions),
+            "runtime_available": set(contract.core_actions) <= executable,
+        }
+        for task_type, contract in TASK_CONTRACTS.items()
+    }
 
 
 def _wrap_graph(

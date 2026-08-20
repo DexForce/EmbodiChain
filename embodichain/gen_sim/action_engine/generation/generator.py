@@ -329,8 +329,8 @@ def _task_spec_role_bindings(
 ) -> dict[str, str]:
     """Resolve v2 roles from explicit hand-off data or a strict sidecar match.
 
-    TaskFactory batch artifacts intentionally contain abstract role IDs rather
-    than scene UIDs.  When their sibling SceneRequirements is available, match
+    Task-first artifacts may contain abstract role IDs rather than scene UIDs.
+    When their sibling SceneRequirements is available, match
     every still-unbound role against the source scene's static category,
     attributes, state, and affordance metadata.  This is a deterministic
     Scene-Engine hand-off, not a text-model fallback: missing or ambiguous
@@ -458,7 +458,7 @@ def _infer_role_bindings_from_scene_requirements(
     existing_bindings: Mapping[str, str],
     robot_profile: str,
 ) -> dict[str, str]:
-    """Bind abstract TaskFactory roles only when static evidence is unique."""
+    """Bind abstract task roles only when static evidence is unique."""
     from embodichain.gen_sim.action_engine.tasks.assembly import SceneInventory
 
     requirements = _requirements_by_role(scene_requirements)
