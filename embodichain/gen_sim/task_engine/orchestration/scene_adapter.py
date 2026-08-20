@@ -32,7 +32,6 @@ from embodichain.gen_sim.action_engine.generation.source_scene import (
     resolve_source_scene,
 )
 from embodichain.gen_sim.action_engine.tasks.assembly import (
-    SceneEntity,
     SceneInventory,
     validate_source_compatibility,
     validate_target_compatibility,
@@ -70,6 +69,7 @@ from .scene_source import SceneSourceRef, fingerprint_scene_source
 
 __all__ = [
     "Adjudicator",
+    "CandidateSelection",
     "SceneAdaptation",
     "SceneAdapter",
     "SceneAdapterProtocolError",
@@ -127,6 +127,26 @@ class SceneAdapterProtocolError(ValueError):
 
 
 @dataclass(frozen=True)
+class CandidateSelection:
+    """Candidate binding against semantic scene data before materialization."""
+
+    scene_manifest: SceneManifest
+    role_bindings: RoleBindings | None
+    binding_report: BindingReport
+    selected_candidate: TaskCandidate | None
+    candidate_bindings: dict[str, RoleBindings] = field(default_factory=dict)
+
+    @property
+    def selected_candidate_id(self) -> str | None:
+        """Return the chosen candidate identifier, when one was bindable."""
+        return (
+            str(self.selected_candidate["candidate_id"])
+            if self.selected_candidate is not None
+            else None
+        )
+
+
+@dataclass(frozen=True)
 class SceneAdaptation:
     """Complete Scene Adapter result, including the reusable prepared scene."""
 
@@ -180,6 +200,7 @@ class SceneAdapter:
         *,
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,
+        force_most_likely: bool = False,
     ) -> SceneAdaptation:
         """Ground all candidates, then deterministically choose a bindable one."""
         task_id, instruction, candidates = _coerce_candidates(candidate_set)
@@ -215,6 +236,89 @@ class SceneAdapter:
         if fingerprint_scene_source(source_ref) != source_fingerprint:
             raise RuntimeError("Source Gym project changed while it was being adapted.")
 
+        selection = self._select_candidates(
+            task_id,
+            instruction,
+            candidates,
+            manifest=manifest,
+            inventory=inventory,
+            scene_objects=prepared.planner_objects,
+            grounding_caller=grounding_caller,
+            adjudicator=adjudicator,
+            force_most_likely=force_most_likely,
+        )
+        return SceneAdaptation(
+            scene_manifest=manifest,
+            role_bindings=selection.role_bindings,
+            binding_report=selection.binding_report,
+            selected_candidate=selection.selected_candidate,
+            prepared_scene=prepared,
+            source_config_path=prepared.source_config_path,
+            conservative_scene_graph=conservative_scene_graph,
+            static_scene_manifest=static_manifest,
+            candidate_bindings=selection.candidate_bindings,
+        )
+
+    def select_objects(
+        self,
+        candidate_set: TaskCandidateSet | Sequence[Mapping[str, Any]],
+        scene_objects: Sequence[Mapping[str, Any]],
+        *,
+        source_format: str = "embodichain.scene-blueprint/v1",
+        robot_profile: str | None = None,
+        grounding_caller: GroundingCaller | None = None,
+        adjudicator: Adjudicator | None = None,
+        force_most_likely: bool = False,
+    ) -> CandidateSelection:
+        """Bind candidates to semantic objects before assets are generated.
+
+        Args:
+            candidate_set: Validated Task Engine candidate set.
+            scene_objects: Blueprint-level semantic object records.
+            source_format: Provenance label included in the semantic manifest.
+            robot_profile: Optional robot profile override.
+            grounding_caller: Optional structured grounding transport.
+            adjudicator: Optional candidate tie-breaker.
+            force_most_likely: Resolve ranked UID hypotheses instead of rejecting
+                low-confidence or ambiguous responses.
+
+        Returns:
+            Audited candidate selection without requiring generated assets.
+        """
+        task_id, instruction, candidates = _coerce_candidates(candidate_set)
+        inventory = SceneInventory(
+            scene_objects,
+            robot_profile=robot_profile or self.robot_profile,
+        )
+        manifest = _build_semantic_manifest(
+            inventory,
+            source_format=source_format,
+        )
+        return self._select_candidates(
+            task_id,
+            instruction,
+            candidates,
+            manifest=manifest,
+            inventory=inventory,
+            scene_objects=scene_objects,
+            grounding_caller=grounding_caller,
+            adjudicator=adjudicator,
+            force_most_likely=force_most_likely,
+        )
+
+    def _select_candidates(
+        self,
+        task_id: str,
+        instruction: str,
+        candidates: Sequence[TaskCandidate],
+        *,
+        manifest: SceneManifest,
+        inventory: SceneInventory,
+        scene_objects: Sequence[Mapping[str, Any]],
+        grounding_caller: GroundingCaller | None,
+        adjudicator: Adjudicator | None,
+        force_most_likely: bool,
+    ) -> CandidateSelection:
         invoke = grounding_caller or self.grounding_caller
         use_default_adjudicator = invoke is None
         if invoke is None:
@@ -229,9 +333,10 @@ class SceneAdapter:
                 candidate,
                 instruction=instruction,
                 inventory=inventory,
-                scene_objects=prepared.planner_objects,
+                scene_objects=scene_objects,
                 model=self.model,
                 caller=invoke,
+                force_most_likely=force_most_likely,
             )
             audits.append(audit)
             if bindings is not None:
@@ -271,23 +376,17 @@ class SceneAdapter:
                     "reference_bindings": {
                         key: list(value) for key, value in sorted(raw_bindings.items())
                     },
-                    # Canonical TaskSpec roles are assigned during lowering by
-                    # GroundedTaskBuilder; reference bindings are authoritative.
                     "role_bindings": {},
                 }
             )
             for candidate_id, raw_bindings in bindings_by_candidate.items()
         }
         role_bindings = None if selected_id is None else candidate_bindings[selected_id]
-        return SceneAdaptation(
+        return CandidateSelection(
             scene_manifest=manifest,
             role_bindings=role_bindings,
             binding_report=report,
             selected_candidate=selected,
-            prepared_scene=prepared,
-            source_config_path=prepared.source_config_path,
-            conservative_scene_graph=conservative_scene_graph,
-            static_scene_manifest=static_manifest,
             candidate_bindings=candidate_bindings,
         )
 
@@ -384,12 +483,26 @@ def _ground_candidate(
     scene_objects: Sequence[Mapping[str, Any]],
     model: str | None,
     caller: GroundingCaller,
+    force_most_likely: bool,
 ) -> tuple[dict[str, Any], dict[str, tuple[str, ...]] | None]:
     responses: list[Any] = []
 
     def audited_caller(**kwargs: Any) -> Mapping[str, Any]:
-        response = caller(**kwargs)
+        call_kwargs = dict(kwargs)
+        if force_most_likely:
+            call_kwargs["prompt"] = (
+                f"{kwargs['prompt']}\n\nFINAL BINDING OVERRIDE: do not return "
+                "ambiguous merely because confidence is low. Choose the most "
+                "likely existing UID that satisfies the supplied structured "
+                "role, affordance, state, and attribute metadata. Return "
+                "candidate UIDs in descending likelihood order. Do not invent, "
+                "add, delete, move, or modify any scene object. Use not_found "
+                "when no structurally compatible existing object is plausible."
+            )
+        response = caller(**call_kwargs)
         responses.append(deepcopy(response))
+        if force_most_likely:
+            return _force_most_likely_response(response, candidate=candidate)
         return response
 
     candidate_id = str(candidate["candidate_id"])
@@ -464,6 +577,53 @@ def _ground_candidate(
     return _candidate_audit(candidate, "resolved", reference_audits, []), dict(
         raw_bindings
     )
+
+
+def _force_most_likely_response(
+    response: Mapping[str, Any],
+    *,
+    candidate: TaskCandidate,
+) -> Mapping[str, Any]:
+    """Turn ranked low-confidence UID hypotheses into explicit selections."""
+    if not isinstance(response, Mapping) or set(response) != {"bindings"}:
+        return response
+    requests = {
+        str(item["reference_id"]): item
+        for item in candidate["scene_request"]["references"]
+    }
+    raw_bindings = response.get("bindings")
+    if not isinstance(raw_bindings, Sequence) or isinstance(raw_bindings, (str, bytes)):
+        return response
+    result = deepcopy(dict(response))
+    values = []
+    for raw in raw_bindings:
+        if not isinstance(raw, Mapping):
+            return response
+        item = deepcopy(dict(raw))
+        request = requests.get(str(item.get("reference_id", "")))
+        uids = item.get("uids")
+        if (
+            request is not None
+            and item.get("status") in {"resolved", "ambiguous"}
+            and isinstance(uids, Sequence)
+            and not isinstance(uids, (str, bytes))
+            and uids
+        ):
+            quantifier = str(request["quantifier"])
+            count = int(request["count"])
+            if quantifier == "one":
+                item["uids"] = list(uids[:1])
+            elif quantifier == "count":
+                item["uids"] = list(uids[:count])
+            item["status"] = "resolved"
+            confidence = item.get("confidence")
+            if isinstance(confidence, (int, float)) and not isinstance(
+                confidence, bool
+            ):
+                item["confidence"] = max(0.5, float(confidence))
+        values.append(item)
+    result["bindings"] = values
+    return result
 
 
 def _response_bindings(
@@ -791,6 +951,38 @@ def _build_manifest(
         {
             "schema_version": SCENE_MANIFEST_SCHEMA,
             "scene_id": scene_id,
+            "source_format": source_format,
+            "robot_profile": inventory.profile,
+            "objects": objects,
+        }
+    )
+
+
+def _build_semantic_manifest(
+    inventory: SceneInventory,
+    *,
+    source_format: str,
+) -> SceneManifest:
+    objects = [
+        {
+            "uid": entity.uid,
+            "role": entity.role,
+            "name": entity.name,
+            "description": entity.description,
+            "category": entity.category,
+            "color": entity.color,
+            "affordances": sorted(entity.affordances),
+            "initial_state": _redact_semantics(entity.initial_state),
+            "attributes": _redact_semantics(entity.attributes),
+        }
+        for entity in sorted(inventory.entities, key=lambda item: item.uid)
+    ]
+    return validate_scene_manifest(
+        {
+            "schema_version": SCENE_MANIFEST_SCHEMA,
+            "scene_id": _canonical_hash(
+                {"source_format": source_format, "objects": objects}
+            ),
             "source_format": source_format,
             "robot_profile": inventory.profile,
             "objects": objects,

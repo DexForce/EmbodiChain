@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,12 @@ from embodichain.gen_sim.action_engine.cli.run_agent import (
     _SerializedABBranch,
     _capture_ab_initial_frame,
     _prepare_ab_branches,
+    _publish_task_engine_report,
+    _task_engine_exit_code,
+)
+from embodichain.gen_sim.action_engine.runtime import (
+    ExecutionReport,
+    build_execution_provenance,
 )
 
 
@@ -154,3 +161,59 @@ def test_ab_serializes_workers_after_startup_oom() -> None:
         if worker.config.route == "offline"
     ]
     assert phases == ["offline", "probe", "preflight", "execute"]
+
+
+@pytest.mark.parametrize(
+    ("status", "success"),
+    [("succeeded", True), ("failed", False)],
+)
+def test_task_engine_report_is_mirrored_into_bundle_only_when_enabled(
+    tmp_path: Path,
+    status: str,
+    success: bool,
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    agent_config = bundle / "agent_config.json"
+    report = ExecutionReport(
+        task_id="task",
+        plan_hash="0" * 64,
+        action_graph_hash="1" * 64,
+        status=status,
+        run_id="run",
+        episode_id="0",
+        provenance=build_execution_provenance(episode_seed=7),
+        environments=(
+            {
+                "env_id": "0",
+                "success": success,
+                "semantic_success": {"task_01": success},
+                "action_count": 3,
+                "retry_count": 0,
+                "recovery_count": 0,
+                "revision_count": 0,
+                "failures": [],
+            },
+        ),
+        action_count=3,
+        record_dir=(tmp_path / "runtime-records").as_posix(),
+    )
+
+    assert _publish_task_engine_report(agent_config, report, enabled=False) is None
+    assert not (bundle / "execution_report.json").exists()
+
+    path = _publish_task_engine_report(agent_config, report, enabled=True)
+
+    assert path == bundle / "execution_report.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["status"] == status
+    assert payload["record_dir"] == report.record_dir
+
+
+def test_task_engine_exit_code_uses_report_status() -> None:
+    success = SimpleNamespace(status="succeeded")
+    failure = SimpleNamespace(status="failed")
+
+    assert _task_engine_exit_code(False, [success]) == 0
+    assert _task_engine_exit_code(False, [success, failure]) == 1
+    assert _task_engine_exit_code(True, []) == 1

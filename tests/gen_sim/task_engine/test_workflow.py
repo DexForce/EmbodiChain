@@ -20,7 +20,12 @@ from pathlib import Path
 
 import pytest
 
-from embodichain.gen_sim.task_engine.config import TaskEngineWorkflowCfg
+from embodichain.gen_sim.task_engine.config import (
+    TaskEngineExecutionCfg,
+    TaskEnginePlanningCfg,
+    TaskEngineWorkflowCfg,
+    load_task_engine_config,
+)
 from embodichain.gen_sim.task_engine.state_machine import (
     StageStatus,
     WorkflowStage,
@@ -116,6 +121,24 @@ def test_candidate_selection_waits_for_both_branches(tmp_path: Path) -> None:
         start_stage(state, WorkflowStage.CANDIDATE_SELECTION)
 
 
+def test_unbound_action_can_run_while_user_scene_edit_is_running(
+    tmp_path: Path,
+) -> None:
+    state = initial_state(_request(tmp_path, image=True, edit=True))
+    for stage in (WorkflowStage.TASK_CANDIDATES, WorkflowStage.SCENE_PREPARATION):
+        state = start_stage(state, stage)
+        state = complete_stage(state, stage)
+    state = start_stage(state, WorkflowStage.CANDIDATE_SELECTION)
+    state = complete_stage(state, WorkflowStage.CANDIDATE_SELECTION)
+    state = start_stage(state, WorkflowStage.SCENE_EDIT)
+    state = start_stage(state, WorkflowStage.UNBOUND_ACTION)
+
+    assert state.stages[WorkflowStage.SCENE_EDIT] == StageStatus.RUNNING
+    assert state.stages[WorkflowStage.UNBOUND_ACTION] == StageStatus.RUNNING
+    with pytest.raises(ValueError, match="incomplete dependencies"):
+        start_stage(state, WorkflowStage.SCENE_FINALIZATION)
+
+
 def test_only_scene_edit_can_be_skipped(tmp_path: Path) -> None:
     state = initial_state(_request(tmp_path, image=True, edit=True))
 
@@ -174,3 +197,75 @@ def test_state_snapshot_mappings_are_immutable(tmp_path: Path) -> None:
 def test_workflow_configuration_rejects_non_positive_limits() -> None:
     with pytest.raises(ValueError, match="max_scene_attempts"):
         TaskEngineWorkflowCfg(max_scene_attempts=0)
+
+
+def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
+    workflow, planning, execution = load_task_engine_config()
+
+    assert workflow.max_scene_attempts == 2
+    assert workflow.max_action_attempts == 3
+    assert planning.candidate_count == 3
+    assert planning.planning_mode == "offline"
+    assert planning.max_episodes == 1
+    assert planning.max_episode_steps == 4000
+    assert execution.num_envs == 1
+    assert execution.required_successes == 1
+
+
+def test_workflow_configuration_can_be_tuned_from_yaml(tmp_path: Path) -> None:
+    config = tmp_path / "task_engine.yaml"
+    config.write_text(
+        """\
+schema_version: embodichain.task-engine-defaults/v1
+workflow:
+  max_parallel_workers: 3
+  max_scene_attempts: 4
+  max_action_attempts: 5
+planning:
+  candidate_count: 7
+  planning_mode: offline
+  max_episodes: 2
+  max_episode_steps: 5000
+execution:
+  num_envs: 6
+  success_policy: at_least
+  min_successful_envs: 2
+""",
+        encoding="utf-8",
+    )
+
+    workflow, planning, execution = load_task_engine_config(config)
+
+    assert workflow.max_parallel_workers == 3
+    assert workflow.max_scene_attempts == 4
+    assert workflow.max_action_attempts == 5
+    assert planning.candidate_count == 7
+    assert planning.max_episodes == 2
+    assert planning.max_episode_steps == 5000
+    assert execution.num_envs == 6
+    assert execution.required_successes == 2
+
+
+def test_execution_configuration_validates_success_policy() -> None:
+    assert TaskEngineExecutionCfg().num_envs == 1
+    assert (
+        TaskEngineExecutionCfg(
+            num_envs=4,
+            success_policy="at_least",
+            min_successful_envs=2,
+        ).required_successes
+        == 2
+    )
+    with pytest.raises(ValueError, match="success_policy=all"):
+        TaskEngineExecutionCfg(
+            num_envs=4,
+            success_policy="all",
+            min_successful_envs=1,
+        )
+
+
+def test_planning_configuration_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="candidate_count"):
+        TaskEnginePlanningCfg(candidate_count=0)
+    with pytest.raises(ValueError, match="planning_mode"):
+        TaskEnginePlanningCfg(planning_mode="unsupported")

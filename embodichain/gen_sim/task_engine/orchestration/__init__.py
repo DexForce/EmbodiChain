@@ -49,12 +49,23 @@ from .coordinator import (
     build_grounded_task_plan,
     lower_task_candidate,
 )
-from .scene_adapter import SceneAdaptation, SceneAdapter, SceneAdapterProtocolError
+from .scene_adapter import (
+    CandidateSelection,
+    SceneAdaptation,
+    SceneAdapter,
+    SceneAdapterProtocolError,
+)
 from .scene_source import (
     SceneSourceFingerprint,
     SceneSourceRef,
     fingerprint_scene_source,
     verify_scene_source_fingerprint,
+)
+from .legacy_scene import (
+    LEGACY_SCENE_CONVERSION_SCHEMA,
+    LegacySceneRevision,
+    convert_legacy_gym_project,
+    restore_locked_scene_entities,
 )
 
 __all__ = [
@@ -78,6 +89,7 @@ __all__ = [
     "SCENE_MANIFEST_SCHEMA",
     "STATIC_SCENE_MANIFEST_FILENAME",
     "SceneAdaptation",
+    "CandidateSelection",
     "SceneAdapter",
     "SceneAdapterProtocolError",
     "SceneManifest",
@@ -86,6 +98,10 @@ __all__ = [
     "build_grounded_task_plan",
     "task_engine_artifact_paths",
     "fingerprint_scene_source",
+    "LEGACY_SCENE_CONVERSION_SCHEMA",
+    "LegacySceneRevision",
+    "convert_legacy_gym_project",
+    "restore_locked_scene_entities",
     "verify_scene_source_fingerprint",
     "lower_task_candidate",
     "write_execution_report",

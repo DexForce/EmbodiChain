@@ -44,6 +44,7 @@ def build_conservative_scene_graph(
     source_path = Path(getattr(prepared_scene, "source_config_path")).resolve()
     uid_map = dict(getattr(prepared_scene, "uid_map", {}) or {})
     exported = _read_exported_graph(source_path.with_name("scene_graph.json"))
+    operational_assumptions = _legacy_operational_assumption_uids(source_path)
     exported_nodes = {
         str(node.get("object_id")): node
         for node in exported.get("nodes", ())
@@ -63,7 +64,11 @@ def build_conservative_scene_graph(
                 "orientation": "unknown",
                 "source": "structural_root",
             }
-        elif known is None:
+        elif (
+            known is None
+            or uid in operational_assumptions
+            or source_uid in operational_assumptions
+        ):
             node = {
                 "uid": uid,
                 "parent_uid": "unknown",
@@ -115,6 +120,28 @@ def build_conservative_scene_graph(
             "relations": relations,
         }
     )
+
+
+def _legacy_operational_assumption_uids(source_path: Path) -> set[str]:
+    manifest_path = source_path.parent.parent / "legacy_conversion.json"
+    if not manifest_path.is_file():
+        return set()
+    try:
+        value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Legacy conversion manifest is invalid JSON: {manifest_path}"
+        ) from exc
+    if not isinstance(value, Mapping):
+        raise ValueError("Legacy conversion manifest must contain an object.")
+    assumptions = value.get("assumptions", ())
+    if not isinstance(assumptions, Sequence) or isinstance(assumptions, (str, bytes)):
+        raise ValueError("Legacy conversion assumptions must be a sequence.")
+    return {
+        str(item["uid"])
+        for item in assumptions
+        if isinstance(item, Mapping) and isinstance(item.get("uid"), str)
+    }
 
 
 def validate_conservative_scene_graph(

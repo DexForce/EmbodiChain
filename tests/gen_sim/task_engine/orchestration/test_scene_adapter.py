@@ -412,6 +412,62 @@ def test_scene_adapter_returns_report_for_business_level_non_binding(
     )
 
 
+def test_semantic_blueprint_selection_forces_ranked_low_confidence_uid() -> None:
+    candidate = _candidate("likely", "the can")
+    scene_objects = [
+        {
+            "uid": "table",
+            "role": "table",
+            "name": "table",
+            "description": "A work table.",
+            "category": "table",
+            "init_pos": [0.0, 0.0, 0.0],
+            "affordances": ["support_surface"],
+            "initial_state": {},
+            "attributes": {},
+        },
+        *[
+            {
+                "uid": f"{color}_can",
+                "role": "rigid_object",
+                "name": f"{color} can",
+                "description": f"A {color} can.",
+                "category": "can",
+                "init_pos": [0.0, offset, 0.1],
+                "affordances": ["graspable", "orientable"],
+                "initial_state": {"orientation": "fallen"},
+                "attributes": {"color": color},
+            }
+            for color, offset in (("red", -0.1), ("blue", 0.1))
+        ],
+    ]
+
+    def ambiguous(**_kwargs):
+        return {
+            "bindings": [
+                {
+                    "reference_id": "upright.object",
+                    "status": "ambiguous",
+                    "uids": ["red_can", "blue_can"],
+                    "confidence": 0.2,
+                }
+            ]
+        }
+
+    result = SceneAdapter(grounding_caller=ambiguous).select_objects(
+        _candidate_set([candidate]),
+        scene_objects,
+        force_most_likely=True,
+    )
+
+    assert result.selected_candidate_id == "likely"
+    assert result.role_bindings["reference_bindings"] == {"upright.object": ["red_can"]}
+    reference = result.binding_report["candidates"][0]["references"][0]
+    assert reference["confidence"] == 0.2
+    assert reference["candidate_uids"] == ["red_can", "blue_can"]
+    assert reference["selected_uids"] == ["red_can"]
+
+
 def test_scene_adapter_uses_unique_bindable_then_injected_adjudication(
     scene_export: Path,
 ) -> None:

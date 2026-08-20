@@ -24,6 +24,13 @@ simulator state.
 
 from __future__ import annotations
 
+from .unbound import (
+    UNBOUND_ACTION_PLAN_SCHEMA,
+    UnboundActionPlan,
+    build_unbound_action_plan,
+    validate_unbound_action_plan,
+)
+
 from .protocol import (
     ACTION_ENGINE_CONFIG_SCHEMA,
     ACTION_ENGINE_ENV_ID,
@@ -36,4 +43,8 @@ __all__ = [
     "ACTION_ENGINE_ENV_ID",
     "EXECUTION_PROGRAM_SCHEMA",
     "TASK_AGENT_SCHEMA",
+    "UNBOUND_ACTION_PLAN_SCHEMA",
+    "UnboundActionPlan",
+    "build_unbound_action_plan",
+    "validate_unbound_action_plan",
 ]

@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .agent import (
     TaskAgent,
     TaskGenerationError,
@@ -58,7 +60,13 @@ from .ontology import (
     task_contract,
     task_success_type,
 )
-from .config import TaskEngineWorkflowCfg
+from .config import (
+    TASK_ENGINE_DEFAULTS_SCHEMA,
+    TaskEngineExecutionCfg,
+    TaskEnginePlanningCfg,
+    TaskEngineWorkflowCfg,
+    load_task_engine_config,
+)
 from .state_machine import (
     StageStatus,
     TaskEngineState,
@@ -101,12 +109,22 @@ __all__ = [
     "TaskDraft",
     "TaskGenerationError",
     "TASK_RUN_REQUEST_SCHEMA",
+    "TASK_ENGINE_DEFAULTS_SCHEMA",
     "SceneInputKind",
+    "SceneAnalysis",
+    "SceneEngineBackend",
+    "SceneRevision",
     "StageStatus",
     "TaskEngineState",
+    "TaskEngineExecutionCfg",
+    "TaskEnginePlanningCfg",
     "TaskEngineWorkflowCfg",
+    "TaskEngineRunResult",
+    "TaskEngineWorkflow",
     "TaskRunRequest",
     "WorkflowStage",
+    "TASK_ENGINE_RUN_MANIFEST_SCHEMA",
+    "SubprocessActionExecutor",
     "canonical_hash",
     "derive_scene_request",
     "derive_success_spec",
@@ -114,10 +132,12 @@ __all__ = [
     "fail_stage",
     "initial_state",
     "interpret_instruction_draft",
+    "load_task_engine_config",
     "replay_events",
     "task_contract",
     "task_success_type",
     "scene_input_kind",
+    "scene_blueprint_objects",
     "skip_stage",
     "start_stage",
     "validate_instruction_intent",
@@ -129,3 +149,29 @@ __all__ = [
     "validate_task_draft",
     "validate_task_run_request",
 ]
+
+_SCENE_BACKEND_EXPORTS = {
+    "SceneAnalysis",
+    "SceneEngineBackend",
+    "SceneRevision",
+    "scene_blueprint_objects",
+}
+_WORKFLOW_EXPORTS = {
+    "TASK_ENGINE_RUN_MANIFEST_SCHEMA",
+    "SubprocessActionExecutor",
+    "TaskEngineRunResult",
+    "TaskEngineWorkflow",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Load orchestration entry points lazily to avoid engine import cycles."""
+    if name in _SCENE_BACKEND_EXPORTS:
+        from . import scene_backend
+
+        return getattr(scene_backend, name)
+    if name in _WORKFLOW_EXPORTS:
+        from . import workflow
+
+        return getattr(workflow, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

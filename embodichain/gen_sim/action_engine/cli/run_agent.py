@@ -39,7 +39,11 @@ from embodichain.gen_sim.action_engine.config import generation_defaults
 from embodichain.gen_sim.action_engine.environment import (  # noqa: F401
     ACTION_ENGINE_ENV_ID,
 )
-from embodichain.gen_sim.action_engine.runtime import load_agent_execution_program
+from embodichain.gen_sim.action_engine.runtime import (
+    ExecutionReport,
+    load_agent_execution_program,
+    write_execution_report,
+)
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -185,6 +189,7 @@ def cli() -> int | None:
         "task_name": str(args.task_name),
     }
     any_failed = False
+    task_engine_reports: list[ExecutionReport] = []
     episode_index = 0
     episode_seed = None
     seed_graph = getattr(execution_program, "seed_graph", None)
@@ -237,6 +242,12 @@ def cli() -> int | None:
                     episode_seed=episode_seed,
                     runtime_arguments=runtime_arguments,
                 )
+                task_engine_reports.append(report)
+                _publish_task_engine_report(
+                    args.agent_config,
+                    report,
+                    enabled=bool(args.task_engine_report),
+                )
                 log_info(
                     "Execution report: "
                     f"status={report.status}, actions={report.action_count}",
@@ -261,10 +272,6 @@ def cli() -> int | None:
                 episode_seed=episode_seed,
                 runtime_arguments=runtime_arguments,
             )
-            from embodichain.gen_sim.action_engine.runtime import (
-                write_execution_report,
-            )
-
             write_execution_report(Path(args.agent_config).resolve().parent, report)
         if args.task_engine_report:
             log_warning(f"Action Engine execution aborted: {type(exc).__name__}: {exc}")
@@ -274,7 +281,31 @@ def cli() -> int | None:
         close = getattr(env, "close", None) if env is not None else None
         if callable(close):
             close()
-    return int(any_failed) if args.task_engine_report else None
+    if not args.task_engine_report:
+        return None
+    return _task_engine_exit_code(any_failed, task_engine_reports)
+
+
+def _publish_task_engine_report(
+    agent_config_path: str | Path,
+    report: ExecutionReport,
+    *,
+    enabled: bool,
+) -> Path | None:
+    """Mirror one normal execution report into its Task Engine bundle."""
+    if not enabled:
+        return None
+    return write_execution_report(Path(agent_config_path).resolve().parent, report)
+
+
+def _task_engine_exit_code(
+    any_failed: bool,
+    reports: list[ExecutionReport],
+) -> int:
+    """Return a report-authoritative exit code for Task Engine execution."""
+    return int(
+        bool(any_failed) or any(report.status != "succeeded" for report in reports)
+    )
 
 
 def _load_grounded_task_plan(agent_config_path: str | Path) -> dict[str, Any] | None:

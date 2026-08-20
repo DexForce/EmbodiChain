@@ -53,6 +53,10 @@ from embodichain.gen_sim.action_engine.runtime import (
     write_execution_report,
 )
 from embodichain.gen_sim.action_engine.tasks import instantiate_seed_graph
+from embodichain.gen_sim.action_engine.unbound import (
+    UnboundActionPlan,
+    build_unbound_action_plan,
+)
 
 __all__ = ["ActionAgent", "ActionGraph"]
 
@@ -96,6 +100,17 @@ class ActionAgent:
         )
         validate_persisted_contracts(graph, self.registry)
         return graph
+
+    def draft(self, candidate: Mapping[str, Any]) -> UnboundActionPlan:
+        """Create an Action-owned draft before final scene UID binding.
+
+        Args:
+            candidate: One validated Task Engine candidate.
+
+        Returns:
+            A scene-independent action plan whose selectors contain no UIDs.
+        """
+        return build_unbound_action_plan(candidate)
 
     def preflight(
         self,

@@ -76,10 +76,11 @@ _DEPENDENCIES: dict[WorkflowStage, frozenset[WorkflowStage]] = {
         {
             WorkflowStage.TASK_CANDIDATES,
             WorkflowStage.SCENE_PREPARATION,
-            WorkflowStage.SCENE_EDIT,
         }
     ),
-    WorkflowStage.SCENE_FINALIZATION: frozenset({WorkflowStage.CANDIDATE_SELECTION}),
+    WorkflowStage.SCENE_FINALIZATION: frozenset(
+        {WorkflowStage.CANDIDATE_SELECTION, WorkflowStage.SCENE_EDIT}
+    ),
     WorkflowStage.UNBOUND_ACTION: frozenset({WorkflowStage.CANDIDATE_SELECTION}),
     WorkflowStage.FINAL_INSPECTION: frozenset({WorkflowStage.SCENE_FINALIZATION}),
     WorkflowStage.FINAL_BINDING: frozenset(

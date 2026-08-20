@@ -14,36 +14,23 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""CLI for Task Engine preparation and execution."""
+"""Unified CLI for complete Task Engine workflows."""
 
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import json
 from pathlib import Path
-import shlex
 import sys
-from typing import Any, Iterator, Sequence
+from typing import Any, Final, Sequence
 
-from embodichain.gen_sim.action_engine.protocol import (
-    AGENT_CONFIG_FILENAME,
-    EXECUTION_PROGRAM_FILENAME,
-    FAST_GYM_CONFIG_FILENAME,
-)
-from embodichain.gen_sim.action_engine.runtime import ExecutionReport
-from embodichain.gen_sim.action_engine.agent import ActionAgent
-
-from .orchestration.artifacts import (
-    GROUNDED_TASK_PLAN_FILENAME,
-    STATIC_SCENE_MANIFEST_FILENAME,
-    write_execution_report,
-)
-from .orchestration.contracts import validate_grounded_task_plan
-from .orchestration.coordinator import TaskEngineCoordinator
 from .orchestration.scene_adapter import SceneAdapter
-from .orchestration.scene_source import SceneSourceRef
-from .orchestration.scene_source import verify_scene_source_fingerprint
+from .run_directory import reserve_run_directory
+from .workflow import TaskEngineWorkflow
+from .workflow_contracts import (
+    TASK_RUN_REQUEST_SCHEMA,
+    validate_scene_output_separation,
+)
 
 __all__ = ["build_parser", "main"]
 
@@ -56,72 +43,89 @@ _ROBOT_PROFILES = (
     "franka",
     "dual_franka",
 )
-_PREPARED_RUN_ARGS = ("--filter_dataset_saving", "--headless")
+_MODES: Final = ("image", "image-edit", "scene", "scene-edit")
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the Task Engine parser."""
     parser = argparse.ArgumentParser(
         prog="embodichain task-engine",
-        description="Prepare and run a Task Engine workflow.",
+        description="Run one complete Scene and Action workflow.",
     )
-    subparsers = parser.add_subparsers(dest="subcommand", required=True)
-
-    prepare_parser = subparsers.add_parser(
-        "prepare",
-        help="Generate, bind, compile, and publish a task bundle.",
-    )
-    prepare_parser.add_argument("--task-id", "--task_id", required=True)
-    instruction = prepare_parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument("--mode", choices=_MODES, required=True)
+    parser.add_argument("--task-id", "--task_id", required=True)
+    instruction = parser.add_mutually_exclusive_group(required=True)
     instruction.add_argument("--instruction")
     instruction.add_argument("--task-file", "--task_file")
-    prepare_parser.add_argument("--scene", required=True)
-    prepare_parser.add_argument("--output", "--output-dir", required=True)
-    prepare_parser.add_argument("--model", default=None)
-    prepare_parser.add_argument("--vlm-model", default=None)
-    prepare_parser.add_argument("--candidate-count", type=int, default=3)
-    prepare_parser.add_argument(
-        "--planning-mode", choices=("offline", "ab"), default="offline"
-    )
-    prepare_parser.add_argument("--max-episodes", type=int, default=None)
-    prepare_parser.add_argument("--max-episode-steps", type=int, default=None)
-    prepare_parser.add_argument("--randomize-scene", action="store_true")
-    prepare_parser.add_argument("--randomize-table-material", action="store_true")
-    prepare_parser.add_argument("--overwrite", action="store_true")
-    prepare_parser.add_argument(
-        "--run-after-prepare",
-        "--run_after_prepare",
+    parser.add_argument("--image")
+    parser.add_argument("--scene")
+    parser.add_argument("--scene-edit", "--scene_edit", default=None)
+    parser.add_argument("--output-root", required=True)
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--vlm-model", default=None)
+    parser.add_argument("--base-seed", type=int, default=0)
+    parser.add_argument(
+        "--dataset_saving",
         action="store_true",
-        help="Run the bound bundle immediately after preparation succeeds.",
+        help="Opt in to the Gym project's dataset recorder during execution.",
     )
-    _add_scene_policy_arguments(prepare_parser)
-
-    run_parser = subparsers.add_parser(
-        "run",
-        help="Run a published bundle with the existing simulator launcher.",
+    parser.add_argument(
+        "--robot-profile",
+        choices=_ROBOT_PROFILES,
+        default="franka",
     )
-    run_parser.add_argument("--bundle", required=True)
-    run_parser.set_defaults(run_args=[])
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch one Task Engine command without retaining global argv state."""
-    arguments = list(sys.argv[1:] if argv is None else argv)
+    """Run one complete workflow and publish it under a new timestamped run."""
     parser = build_parser()
-    if arguments and arguments[0] == "run":
-        args, forwarded = parser.parse_known_args(arguments)
-        args.run_args.extend(forwarded)
-    else:
-        args = parser.parse_args(arguments)
-    if args.subcommand == "prepare":
-        return _prepare(args)
-    if args.subcommand == "run":
-        return _run(args)
-    raise AssertionError(f"Unknown Task Engine command: {args.subcommand}")
+    args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
+    try:
+        image, scene, edit = _mode_inputs(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if scene is not None:
+        validate_scene_output_separation(scene, args.output_root)
+    instruction = _instruction(args)
+    adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
+    workflow = TaskEngineWorkflow(scene_adapter=adapter)
+    with reserve_run_directory(args.output_root) as allocation:
+        result = workflow.run(
+            {
+                "schema_version": TASK_RUN_REQUEST_SCHEMA,
+                "task_id": args.task_id,
+                "task_instruction": instruction,
+                "image_path": image,
+                "gym_project": scene,
+                "scene_edit_prompt": edit,
+                "output_dir": allocation.path.as_posix(),
+            },
+            config_path=args.config,
+            model=args.model,
+            vlm_model=args.vlm_model,
+            base_seed=args.base_seed,
+            dataset_saving=args.dataset_saving,
+            run_id=allocation.run_id,
+            created_at=allocation.created_at,
+        )
+    _print_json(
+        {
+            "run_id": allocation.run_id,
+            "status": result.status,
+            "failure_class": result.failure_class,
+            "output_dir": result.output_dir.as_posix(),
+            "manifest": result.manifest_path.as_posix(),
+            "final_bundle": (
+                None if result.final_bundle is None else result.final_bundle.as_posix()
+            ),
+        }
+    )
+    return 0 if result.succeeded else 2
 
 
-def _prepare(args: argparse.Namespace) -> int:
+def _instruction(args: argparse.Namespace) -> str:
     instruction = (
         str(args.instruction).strip()
         if args.instruction is not None
@@ -129,235 +133,25 @@ def _prepare(args: argparse.Namespace) -> int:
     )
     if not instruction:
         raise ValueError("Task instruction must not be empty.")
-    adapter = SceneAdapter(
-        model=args.model,
-        robot_profile=args.robot_profile,
-    )
-    coordinator = TaskEngineCoordinator(scene_adapter=adapter)
-    source = SceneSourceRef(
-        args.scene,
-        robot_profile=args.robot_profile,
-        z_rotation_degrees=args.source_scene_z_rotation_degrees,
-        body_scale_policy=args.body_scale_policy,
-        body_scale=tuple(args.body_scale),
-    )
-    result = coordinator.prepare(
-        args.task_id,
-        instruction,
-        source,
-        args.output,
-        model=args.model,
-        candidate_count=args.candidate_count,
-        overwrite=args.overwrite,
-        planning_mode=args.planning_mode,
-        vlm_model=args.vlm_model,
-        max_episodes=args.max_episodes,
-        max_episode_steps=args.max_episode_steps,
-        randomize_scene=args.randomize_scene,
-        randomize_table_material=args.randomize_table_material,
-    )
-    _print_json(
-        {
-            "status": result.status,
-            "task_id": args.task_id,
-            "selected_candidate_id": result.selected_candidate_id,
-            "output_dir": str(result.output_dir),
-            "grounded_task_plan": (
-                str(result.artifacts.grounded_task_plan) if result.bound else None
-            ),
-            "preparation_failure": (
-                str(result.artifacts.preparation_failure)
-                if result.artifacts.preparation_failure.is_file()
-                else None
-            ),
-            "run_command": (
-                _bundle_run_command(result.output_dir) if result.bound else None
-            ),
-        }
-    )
-    if not result.bound:
-        return 2
-    if args.run_after_prepare:
-        return _run(
-            argparse.Namespace(
-                bundle=result.output_dir,
-                run_args=list(_PREPARED_RUN_ARGS),
-            )
+    return instruction
+
+
+def _mode_inputs(args: argparse.Namespace) -> tuple[str | None, str | None, str | None]:
+    image = None if args.image is None else str(args.image).strip()
+    scene = None if args.scene is None else str(args.scene).strip()
+    edit = None if args.scene_edit is None else str(args.scene_edit).strip()
+    expected = {
+        "image": (True, False, False),
+        "image-edit": (True, False, True),
+        "scene": (False, True, False),
+        "scene-edit": (False, True, True),
+    }[args.mode]
+    actual = (bool(image), bool(scene), bool(edit))
+    if actual != expected:
+        raise ValueError(
+            f"mode={args.mode!r} requires image/scene/edit={expected}, got {actual}."
         )
-    return 0
-
-
-def _run(args: argparse.Namespace) -> int:
-    bundle = Path(args.bundle).expanduser().resolve()
-    if not bundle.is_dir():
-        raise FileNotFoundError(f"Bundle directory does not exist: {bundle}")
-    agent_config = bundle / AGENT_CONFIG_FILENAME
-    gym_config = bundle / FAST_GYM_CONFIG_FILENAME
-    for path in (agent_config, gym_config):
-        if not path.is_file():
-            raise FileNotFoundError(f"Bundle is missing required artifact: {path}")
-    task_id = _bundle_task_id(bundle, agent_config)
-    forwarded = list(args.run_args)
-    if forwarded and forwarded[0] == "--":
-        forwarded.pop(0)
-    rejection = _preflight_bundle(
-        bundle,
-        agent_config=agent_config,
-        gym_config=gym_config,
-        forwarded=forwarded,
-    )
-    if rejection is not None:
-        write_execution_report(bundle, rejection)
-        _print_json(rejection.as_mapping())
-        return 2
-    legacy_argv = [
-        "--task_name",
-        task_id,
-        "--gym_config",
-        str(gym_config),
-        "--agent_config",
-        str(agent_config),
-        "--task-engine-report",
-        *forwarded,
-    ]
-    from embodichain.gen_sim.action_engine.cli import run_agent
-
-    with _temporary_argv(["run_agent", *legacy_argv]):
-        return int(run_agent.cli() or 0)
-
-
-def _preflight_bundle(
-    bundle: Path,
-    *,
-    agent_config: Path,
-    gym_config: Path,
-    forwarded: Sequence[str],
-) -> ExecutionReport | None:
-    """Return a rejected report, or ``None`` when the graph is executable."""
-    static_manifest_path = bundle / STATIC_SCENE_MANIFEST_FILENAME
-    if static_manifest_path.is_file():
-        static_manifest = _read_json(static_manifest_path)
-        source = static_manifest.get("source", {})
-        if isinstance(source, dict) and isinstance(
-            source.get("source_fingerprint"), dict
-        ):
-            verify_scene_source_fingerprint(source["source_fingerprint"])
-    grounded_path = bundle / GROUNDED_TASK_PLAN_FILENAME
-    if not grounded_path.is_file():
-        return None
-    grounded = validate_grounded_task_plan(_read_json(grounded_path))
-    agent = _read_json(agent_config)
-    graph_value = agent.get("seed_task_graph", EXECUTION_PROGRAM_FILENAME)
-    if not isinstance(graph_value, str) or not graph_value:
-        raise ValueError("Bundle agent_config.seed_task_graph must be a path string.")
-    graph_path = Path(graph_value).expanduser()
-    if not graph_path.is_absolute():
-        graph_path = (bundle / graph_path).resolve()
-    else:
-        graph_path = graph_path.resolve()
-    if graph_path != bundle and bundle not in graph_path.parents:
-        raise ValueError("Bundle SeedGraph path escapes the bundle directory.")
-    if not graph_path.is_file():
-        raise FileNotFoundError(f"Bundle is missing SeedGraph: {graph_path}")
-    action_agent = ActionAgent()
-    try:
-        action_agent.preflight(
-            graph_path,
-            scene_manifest=grounded["scene_manifest"],
-        )
-    except (TypeError, ValueError, OSError) as exc:
-        return action_agent.rejection_report(
-            graph_path,
-            exc,
-            grounded_plan=grounded,
-            environment_count=_environment_count(gym_config, forwarded),
-        )
-    return None
-
-
-def _environment_count(gym_config: Path, forwarded: Sequence[str]) -> int:
-    value: Any = _read_json(gym_config).get("num_envs", 1)
-    for index, argument in enumerate(forwarded):
-        if argument == "--num_envs" and index + 1 < len(forwarded):
-            value = forwarded[index + 1]
-        elif argument.startswith("--num_envs="):
-            value = argument.partition("=")[2]
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return 1
-
-
-def _bundle_task_id(bundle: Path, agent_config: Path) -> str:
-    grounded_path = bundle / GROUNDED_TASK_PLAN_FILENAME
-    if grounded_path.is_file():
-        grounded = _read_json(grounded_path)
-        task_id = grounded.get("task_id")
-    else:
-        task_id = _read_json(agent_config).get("task_name")
-    if not isinstance(task_id, str) or not task_id.strip():
-        raise ValueError("Bundle does not declare a non-empty task ID.")
-    return task_id.strip()
-
-
-def _bundle_run_command(bundle: str | Path) -> str:
-    """Return a shell-safe command for the next Task Engine stage."""
-    return shlex.join(
-        [
-            "python",
-            "-m",
-            "embodichain.gen_sim.task_engine",
-            "run",
-            "--bundle",
-            str(Path(bundle).expanduser().resolve()),
-            *_PREPARED_RUN_ARGS,
-        ]
-    )
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Unable to read JSON artifact {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"JSON artifact must contain an object: {path}")
-    return value
-
-
-@contextmanager
-def _temporary_argv(arguments: list[str]) -> Iterator[None]:
-    original = sys.argv
-    sys.argv = arguments
-    try:
-        yield
-    finally:
-        sys.argv = original
-
-
-def _add_scene_policy_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--robot-profile",
-        choices=_ROBOT_PROFILES,
-        default="franka",
-    )
-    parser.add_argument(
-        "--source-scene-z-rotation-degrees",
-        type=float,
-        default=None,
-    )
-    parser.add_argument(
-        "--body-scale-policy",
-        choices=("preserve", "multiply", "absolute"),
-        default="preserve",
-    )
-    parser.add_argument(
-        "--body-scale",
-        type=float,
-        nargs=3,
-        default=(1.0, 1.0, 1.0),
-        metavar=("X", "Y", "Z"),
-    )
+    return image, scene, edit
 
 
 def _print_json(value: Any) -> None:

@@ -16,17 +16,16 @@
 
 from __future__ import annotations
 
-import argparse
 from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
-import shlex
 from types import SimpleNamespace
 
 import pytest
 
 from embodichain.gen_sim.task_engine import cli
+from embodichain.gen_sim.task_engine import _bundle_runner as bundle_runner
 from embodichain.gen_sim.task_engine.orchestration.artifacts import (
     ArtifactTransaction,
 )
@@ -365,6 +364,33 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     assert not (result.output_dir / FAST_GYM_CONFIG_FILENAME).exists()
 
 
+def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    adaptation = _adaptation(tmp_path, status="ambiguous")
+    task_agent = SimpleNamespace(
+        generate=lambda *args, **kwargs: pytest.fail("Task Agent must not rerun")
+    )
+    coordinator = TaskEngineCoordinator(
+        task_agent=task_agent,
+        scene_adapter=SimpleNamespace(adapt=lambda *args, **kwargs: adaptation),
+        action_agent=object(),
+    )
+
+    result = coordinator.prepare(
+        "upright_can",
+        "扶正红色易拉罐。",
+        tmp_path / "scene_config.json",
+        tmp_path / "candidate-reuse",
+        candidate_set=candidates,
+        force_most_likely=True,
+    )
+
+    assert result.status == "ambiguous"
+    assert result.candidate_set == candidates
+
+
 def test_contradicted_feasibility_publishes_audit_without_planning(
     tmp_path: Path,
 ) -> None:
@@ -648,8 +674,9 @@ def test_prepare_publishes_failure_context_when_all_candidates_fail_planning(
         assert "arm_free" in attempt["error"]["message"]
 
 
-def test_run_bundle_forwards_arguments_without_leaking_sys_argv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_private_bundle_runner_forwards_arguments_without_leaking_sys_argv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -675,124 +702,136 @@ def test_run_bundle_forwards_arguments_without_leaking_sys_argv(
     import sys
 
     original = sys.argv
-    assert cli.main(["run", "--bundle", str(bundle), "--seed", "7"]) == 0
+    assert bundle_runner.main(["--bundle", str(bundle), "--seed", "7"]) == 0
 
     assert sys.argv is original
     assert captured[0][-2:] == ["--seed", "7"]
     assert str(bundle / AGENT_CONFIG_FILENAME) in captured[0]
 
 
-def test_prepare_prints_the_next_run_command(
+@pytest.mark.parametrize(
+    ("mode", "image", "scene", "edit"),
+    [
+        ("image", "input.png", None, None),
+        ("image-edit", "input.png", None, "move the cup left"),
+        ("scene", None, "gym_project", None),
+        ("scene-edit", None, "gym_project", "move the cup left"),
+    ],
+)
+def test_unified_cli_accepts_exactly_four_modes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    mode: str,
+    image: str | None,
+    scene: str | None,
+    edit: str | None,
 ) -> None:
-    output_dir = tmp_path / "bundle with spaces"
-    result = SimpleNamespace(
-        status="bound",
-        bound=True,
-        selected_candidate_id="candidate_01",
-        output_dir=output_dir,
-        artifacts=SimpleNamespace(
-            grounded_task_plan=output_dir / "grounded_task_plan.json",
-            preparation_failure=output_dir / "preparation_failure.json",
-        ),
-    )
+    captured = {}
 
-    class FakeCoordinator:
+    class FakeWorkflow:
         def __init__(self, **_kwargs) -> None:
             pass
 
-        def prepare(self, *_args, **_kwargs):
-            return result
+        def run(self, request, **kwargs):
+            captured["request"] = request
+            captured["kwargs"] = kwargs
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status="succeeded",
+                succeeded=True,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=output / "final" / "bundle",
+            )
 
     monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
-    monkeypatch.setattr(cli, "TaskEngineCoordinator", FakeCoordinator)
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
+    arguments = [
+        "--mode",
+        mode,
+        "--task-id",
+        "task",
+        "--instruction",
+        "place the cup",
+        "--output-root",
+        str(tmp_path / "history"),
+        "--base-seed",
+        "9",
+    ]
+    if image is not None:
+        arguments.extend(["--image", str(tmp_path / image)])
+    if scene is not None:
+        arguments.extend(["--scene", str(tmp_path / scene)])
+    if edit is not None:
+        arguments.extend(["--scene-edit", edit])
+    if mode == "image":
+        arguments.append("--dataset_saving")
 
-    assert (
-        cli.main(
-            [
-                "prepare",
-                "--task-id",
-                "task",
-                "--instruction",
-                "place the carrot",
-                "--scene",
-                str(tmp_path / "scene"),
-                "--output",
-                str(output_dir),
-            ]
-        )
-        == 0
-    )
+    assert cli.main(arguments) == 0
 
+    request = captured["request"]
+    assert request["image_path"] == (None if image is None else str(tmp_path / image))
+    assert request["gym_project"] == (None if scene is None else str(tmp_path / scene))
+    assert request["scene_edit_prompt"] == edit
+    assert captured["kwargs"]["base_seed"] == 9
+    assert captured["kwargs"]["dataset_saving"] is (mode == "image")
     payload = json.loads(capsys.readouterr().out)
-    assert payload["run_command"] == cli._bundle_run_command(output_dir)
-    command = shlex.split(payload["run_command"])
-    assert command[:3] == [
-        "python",
-        "-m",
-        "embodichain.gen_sim.task_engine",
-    ]
-    assert command[-4:] == [
-        "--bundle",
-        str(output_dir.resolve()),
-        "--filter_dataset_saving",
-        "--headless",
-    ]
+    assert payload["status"] == "succeeded"
+    assert payload["run_id"].replace("_", "").isdigit()
+    assert len(payload["run_id"]) == 15
+    assert Path(payload["output_dir"]).parent == tmp_path / "history"
 
 
-def test_prepare_can_run_the_bound_bundle_immediately(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output_dir = tmp_path / "bundle"
-    result = SimpleNamespace(
-        status="bound",
-        bound=True,
-        selected_candidate_id="candidate_01",
-        output_dir=output_dir,
-        artifacts=SimpleNamespace(
-            grounded_task_plan=output_dir / "grounded_task_plan.json",
-            preparation_failure=output_dir / "preparation_failure.json",
-        ),
-    )
-
-    class FakeCoordinator:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def prepare(self, *_args, **_kwargs):
-            return result
-
-    run_args: list[argparse.Namespace] = []
-    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
-    monkeypatch.setattr(cli, "TaskEngineCoordinator", FakeCoordinator)
-    monkeypatch.setattr(cli, "_run", lambda args: run_args.append(args) or 0)
-
-    assert (
+def test_unified_cli_rejects_mode_input_mismatch(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="2"):
         cli.main(
             [
-                "prepare",
+                "--mode",
+                "image",
                 "--task-id",
                 "task",
                 "--instruction",
-                "place the carrot",
+                "place the cup",
+                "--image",
+                str(tmp_path / "input.png"),
                 "--scene",
                 str(tmp_path / "scene"),
-                "--output",
-                str(output_dir),
-                "--run-after-prepare",
+                "--output-root",
+                str(tmp_path / "history"),
             ]
         )
-        == 0
+
+
+def test_public_cli_has_no_prepare_run_or_overwrite_modes() -> None:
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["prepare"])
+    help_text = parser.format_help()
+    assert "--overwrite" not in help_text
+    assert "--run-after-prepare" not in help_text
+    assert "--dataset-saving" not in help_text
+    assert "--dataset_saving" in help_text
+    arguments = parser.parse_args(
+        [
+            "--mode",
+            "image",
+            "--task-id",
+            "task",
+            "--instruction",
+            "place the cup",
+            "--image",
+            "input.png",
+            "--output-root",
+            "history",
+            "--dataset_saving",
+        ]
     )
-    assert len(run_args) == 1
-    assert run_args[0].bundle == output_dir
-    assert run_args[0].run_args == ["--filter_dataset_saving", "--headless"]
+    assert arguments.dataset_saving is True
 
 
-def test_run_bundle_publishes_rejected_preflight_report(
+def test_private_bundle_runner_publishes_rejected_preflight_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -824,9 +863,13 @@ def test_run_bundle_publishes_rejected_preflight_report(
         ),
         error="ValueError: planning-only action",
     )
-    monkeypatch.setattr(cli, "_preflight_bundle", lambda *args, **kwargs: report)
+    monkeypatch.setattr(
+        bundle_runner,
+        "_preflight_bundle",
+        lambda *args, **kwargs: report,
+    )
 
-    assert cli.main(["run", "--bundle", str(bundle)]) == 2
+    assert bundle_runner.main(["--bundle", str(bundle)]) == 2
     payload = json.loads((bundle / "execution_report.json").read_text(encoding="utf-8"))
     assert payload["status"] == "rejected"
     assert payload["action_count"] == 0

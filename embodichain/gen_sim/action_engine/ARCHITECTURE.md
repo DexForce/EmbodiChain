@@ -18,10 +18,12 @@ owners:
    versions, Git commit/dirty state when available, and structured runtime
    arguments alongside the existing plan and graph hashes.
 
-The public CLI is `embodichain task-engine prepare|run`, equivalently
-`python -m embodichain.gen_sim.task_engine prepare|run`. Source projects are
-referenced in place and integrity-hashed; Task Engine does not copy them into a
-scene package store.
+The public CLI is `python -m embodichain.gen_sim.task_engine --mode ...` with
+strict `image`, `image-edit`, `scene`, and `scene-edit` input modes. Every
+invocation runs the complete workflow through real trajectory acceptance and
+publishes an isolated, timestamped child under `--output-root`. Source projects
+are referenced in place and integrity-hashed; Task Engine does not modify them
+or copy them into a scene package store.
 
 ## Package Ownership
 

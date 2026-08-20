@@ -45,6 +45,7 @@ from embodichain.gen_sim.task_engine import (
     TaskCandidateSet,
     validate_scene_output_separation,
     validate_task_candidate,
+    validate_task_candidate_set,
 )
 from embodichain.gen_sim.task_engine.scene import FeasibilityBroker, FeasibilityReport
 
@@ -125,6 +126,7 @@ class PreparationResult:
     action_graph: dict[str, Any] | None = None
     generated_paths: GeneratedConfigPaths | None = None
     feasibility_report: FeasibilityReport | None = None
+    planning_attempts: tuple[dict[str, Any], ...] = ()
 
     @property
     def bound(self) -> bool:
@@ -180,6 +182,8 @@ class TaskEngineCoordinator:
         max_episode_steps: int | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
+        candidate_set: TaskCandidateSet | Mapping[str, Any] | None = None,
+        force_most_likely: bool = False,
     ) -> PreparationResult:
         """Prepare and atomically publish a Task Engine bundle.
 
@@ -192,13 +196,27 @@ class TaskEngineCoordinator:
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging_dir = transaction.staging_dir
             assert staging_dir is not None
-            candidate_set = self.task_agent.generate(
-                task_id,
-                instruction,
-                model=model,
-                candidate_count=candidate_count,
+            if candidate_set is None:
+                normalized_candidates = self.task_agent.generate(
+                    task_id,
+                    instruction,
+                    model=model,
+                    candidate_count=candidate_count,
+                )
+            else:
+                normalized_candidates = validate_task_candidate_set(candidate_set)
+                if normalized_candidates["task_id"] != str(task_id).strip():
+                    raise ValueError("TaskCandidateSet.task_id must match task_id.")
+                if normalized_candidates["instruction"] != str(instruction).strip():
+                    raise ValueError(
+                        "TaskCandidateSet.instruction must match instruction."
+                    )
+            candidate_set = normalized_candidates
+            adaptation = self.scene_adapter.adapt(
+                candidate_set,
+                normalized_source,
+                force_most_likely=force_most_likely,
             )
-            adaptation = self.scene_adapter.adapt(candidate_set, normalized_source)
             status = str(adaptation.binding_report["status"])
 
             if status != "bound":
@@ -218,6 +236,7 @@ class TaskEngineCoordinator:
                     candidate_set=deepcopy(candidate_set),
                     adaptation=adaptation,
                     artifacts=task_engine_artifact_paths(published),
+                    planning_attempts=(),
                 )
 
             selected = adaptation.selected_candidate
@@ -267,6 +286,7 @@ class TaskEngineCoordinator:
                     adaptation=adaptation,
                     artifacts=task_engine_artifact_paths(published),
                     feasibility_report=deepcopy(feasibility_report),
+                    planning_attempts=(),
                 )
             robot_profile = str(adaptation.scene_manifest["robot_profile"])
             planned, planning_failures = self._plan_with_candidate_fallback(
@@ -306,6 +326,7 @@ class TaskEngineCoordinator:
                     adaptation=adaptation,
                     artifacts=task_engine_artifact_paths(published),
                     feasibility_report=deepcopy(feasibility_report),
+                    planning_attempts=tuple(deepcopy(planning_failures)),
                 )
 
             adaptation = planned.adaptation
@@ -379,6 +400,7 @@ class TaskEngineCoordinator:
                     planning_mode=planning_mode,
                 ),
                 feasibility_report=deepcopy(feasibility_report),
+                planning_attempts=tuple(deepcopy(planning_failures)),
             )
 
     def _plan_with_candidate_fallback(
