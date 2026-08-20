@@ -23,8 +23,6 @@ from .demo import *
 from .embodied_env import *
 from .wrapper import *
 
-# Official task environments live in the bundled ``embodichain_tasks`` import
-# package (alongside any third-party ``embodichain.tasks`` entry points).
-# They are no longer re-exported here so that importing the core envs package
-# stays warning-free. Direct imports from ``embodichain.lab.gym.envs.tasks``
-# still work via the deprecation shim in ``tasks/__init__.py``.
+# Official task environments live in the bundled ``embodichain_tasks`` package
+# and register through the same ``embodichain.tasks`` entry-point mechanism as
+# third-party task packages.
