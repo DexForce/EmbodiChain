@@ -30,8 +30,6 @@ import torch
 
 from embodichain.data import get_data_path
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     EntityState,
@@ -191,16 +189,13 @@ def main() -> None:
 
     compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="twist",
-                goal=TwistGoal(
+            engine.make_invocation(
+                "twist",
+                TwistGoal(
                     semantics,
                     SceneEntityPose(KNOB_SCENE_ENTITY_ID),
                 ),
-                binding=ActionBinding(
-                    manipulators={"primary": "arm"},
-                    end_effectors={"primary": "hand"},
-                ),
+                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
                 motion_policy=MotionPolicy(sample_count=TWIST_SAMPLE_INTERVAL),
                 skill_options=TwistOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,

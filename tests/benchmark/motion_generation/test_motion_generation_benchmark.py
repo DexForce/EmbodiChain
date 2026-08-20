@@ -185,7 +185,6 @@ def _timed_plan_result(
         success=success,
         positions=positions,
         dt=dt,
-        duration=dt.sum(dim=1),
     )
 
 

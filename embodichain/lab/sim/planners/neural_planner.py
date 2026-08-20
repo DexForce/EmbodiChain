@@ -483,7 +483,6 @@ class NeuralPlanner(BasePlanner):
             accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
-            duration=dt.sum(dim=1),
         )
 
     def _parse_waypoints(

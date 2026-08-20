@@ -763,13 +763,20 @@ class SceneRegistry:
         """
         effective_mode = self.resolve_collision_world_mode(batch_size=batch_size)
         try:
-            planner_dynamic_ids = motion_generator.dynamic_collision_entity_ids
-            planner_world_ids = motion_generator.collision_world_entity_ids
-            supports_updates = motion_generator.supports_dynamic_collision_world
-            planner_mode = motion_generator.collision_world_batch_mode
+            planner_info = motion_generator.collision_world_info
+            if planner_info is None:
+                planner_dynamic_ids = ()
+                planner_world_ids = ()
+                supports_updates = False
+                planner_mode = None
+            else:
+                planner_dynamic_ids = planner_info.dynamic_entity_ids
+                planner_world_ids = planner_info.entity_ids
+                supports_updates = planner_info.supports_updates
+                planner_mode = planner_info.batch_mode
         except AttributeError as exc:
             raise TypeError(
-                "motion_generator must expose collision-world integration properties."
+                "motion_generator must expose collision_world_info."
             ) from exc
         planner_dynamic_ids = self._validate_integration_ids(
             planner_dynamic_ids,

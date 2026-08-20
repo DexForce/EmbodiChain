@@ -29,6 +29,11 @@ from embodichain.utils.math import (
     pose_inv,
 )
 
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     JointPositionCommand,
@@ -49,15 +54,11 @@ from embodichain.lab.sim.atomic_actions.requirements import (
     FORWARD_KINEMATICS_CAPABILITY,
     SkillBindingContract,
 )
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
-    arm_qpos_from_state,
-    resolve_object_target,
-)
-from embodichain.lab.sim.atomic_actions.state import PlanningContext
-from embodichain.lab.sim.atomic_actions.trajectory_ops import build_pose_plan_states
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -105,8 +106,6 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
     skill_id: ClassVar[str] = "move_held_object"
     GoalType: ClassVar[type] = HeldObjectPoseGoal
     OptionsType: ClassVar[type] = MoveHeldObjectOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -131,12 +130,14 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         target = request.goal
         options = request.skill_options
         binding = request.binding
-        manipulator = binding.manipulator()
-        end_effector = binding.end_effector()
-        control_part = manipulator.name
-        arm_joint_ids = list(manipulator.joint_ids)
-        hand_joint_ids = list(end_effector.joint_ids)
-        hand_grasp_qpos = end_effector.joint_positions(
+        motion = binding.endpoint("primary", "motion")
+        grasp = binding.endpoint("primary", "grasp")
+        motion_target = motion.require_target(JointPositionTarget)
+        grasp_target = grasp.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
+        hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,

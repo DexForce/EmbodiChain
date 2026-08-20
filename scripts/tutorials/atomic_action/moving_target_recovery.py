@@ -31,8 +31,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager, VisualMaterialCfg
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     Affordance,
     AtomicActionEngine,
     ControlPartCommandProfile,
@@ -278,10 +276,6 @@ def main() -> None:
         entity=target,
         entity_id=TARGET_ENTITY_ID,
     )
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
@@ -291,16 +285,16 @@ def main() -> None:
             )
         },
     )
-    pick_invocation = ActionInvocation(
-        skill_id="pick_up",
-        goal=GraspGoal(
+    pick_invocation = engine.make_invocation(
+        "pick_up",
+        GraspGoal(
             semantics,
             grasp_xpos=SceneEntityPose(
                 TARGET_ENTITY_ID,
                 relative_pose=target_to_grasp,
             ),
         ),
-        binding=binding,
+        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=PICK_SAMPLE_COUNT,

@@ -149,9 +149,10 @@ def _snapshot_commands(
         if not isinstance(command, ControlCommand):
             raise TypeError(f"{field_name} values must be ControlCommand instances.")
         snapshot = command.snapshot()
-        if not isinstance(snapshot, ControlCommand):
+        if type(snapshot) is not type(command) or snapshot is command:
             raise TypeError(
-                f"{field_name}[{name!r}].snapshot() must return a ControlCommand."
+                f"{field_name}[{name!r}].snapshot() must return an independently "
+                "owned value of the same ControlCommand type."
             )
         snapshots[name] = snapshot
     return MappingProxyType(snapshots)
@@ -194,68 +195,84 @@ class ControlPartCommandProfile:
         return ControlPartCommandProfile(commands=self.commands)
 
 
-def _snapshot_role_commands(
-    values: Mapping[str, Mapping[str, ControlCommand]],
+def _snapshot_endpoint_commands(
+    values: Mapping[str, Mapping[str, Mapping[str, ControlCommand]]],
     *,
     field_name: str,
-) -> Mapping[str, Mapping[str, ControlCommand]]:
-    """Validate and freeze role-scoped invocation command overrides."""
+) -> Mapping[str, Mapping[str, Mapping[str, ControlCommand]]]:
+    """Validate and freeze slot/endpoint-scoped command overrides."""
     if not isinstance(values, Mapping):
         raise TypeError(f"{field_name} must be a mapping.")
-    snapshots: dict[str, Mapping[str, ControlCommand]] = {}
-    for role, commands in values.items():
-        if not isinstance(role, str) or not role or role != role.strip():
+    slots: dict[str, Mapping[str, Mapping[str, ControlCommand]]] = {}
+    for slot_id, endpoints in values.items():
+        if not isinstance(slot_id, str) or not slot_id or slot_id != slot_id.strip():
             raise ValueError(
-                f"{field_name} roles must be non-empty strings without outer "
+                f"{field_name} slot IDs must be non-empty strings without outer "
                 "whitespace."
             )
-        snapshots[role] = _snapshot_commands(
-            commands,
-            field_name=f"{field_name}[{role!r}]",
-        )
-    return MappingProxyType(snapshots)
+        if not isinstance(endpoints, Mapping):
+            raise TypeError(f"{field_name}[{slot_id!r}] must be a mapping.")
+        endpoint_snapshots: dict[str, Mapping[str, ControlCommand]] = {}
+        for endpoint_id, commands in endpoints.items():
+            if (
+                not isinstance(endpoint_id, str)
+                or not endpoint_id
+                or endpoint_id != endpoint_id.strip()
+            ):
+                raise ValueError(
+                    f"{field_name} endpoint IDs must be non-empty strings without "
+                    "outer whitespace."
+                )
+            endpoint_snapshots[endpoint_id] = _snapshot_commands(
+                commands,
+                field_name=f"{field_name}[{slot_id!r}][{endpoint_id!r}]",
+            )
+        slots[slot_id] = MappingProxyType(endpoint_snapshots)
+    return MappingProxyType(slots)
 
 
 @dataclass(frozen=True, slots=True)
 class ActionControlOverrides:
-    """Per-invocation semantic command overrides keyed by binding role.
+    """Per-invocation semantic commands keyed by slot and endpoint.
 
-    The outer keys are action roles such as ``primary``, ``source`` or
-    ``destination``. The inner keys are semantic command names. The engine
-    applies these values after resolving the role to a concrete control part,
-    and the resulting commands are captured in the invocation revision's
-    immutable planning snapshot.
+    The first two keys match a skill's ``(slot_id, endpoint_id)`` contract.
+    The innermost mapping contains semantic command names. Overrides are
+    captured in the invocation revision's immutable planning snapshot.
     """
 
-    manipulators: Mapping[str, Mapping[str, ControlCommand]] = field(
-        default_factory=dict
-    )
-    end_effectors: Mapping[str, Mapping[str, ControlCommand]] = field(
-        default_factory=dict
+    endpoints: Mapping[
+        str,
+        Mapping[str, Mapping[str, ControlCommand]],
+    ] = field(
+        default_factory=dict,
     )
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
-            "manipulators",
-            _snapshot_role_commands(
-                self.manipulators,
-                field_name="manipulators",
-            ),
-        )
-        object.__setattr__(
-            self,
-            "end_effectors",
-            _snapshot_role_commands(
-                self.end_effectors,
-                field_name="end_effectors",
+            "endpoints",
+            _snapshot_endpoint_commands(
+                self.endpoints,
+                field_name="endpoints",
             ),
         )
 
     @property
     def is_empty(self) -> bool:
         """Whether this invocation defines no command overrides."""
-        return not self.manipulators and not self.end_effectors
+        return not self.endpoints
+
+    def as_flat_mapping(
+        self,
+    ) -> Mapping[tuple[str, str], Mapping[str, ControlCommand]]:
+        """Return immutable overrides keyed by ``(slot_id, endpoint_id)``."""
+        return MappingProxyType(
+            {
+                (slot_id, endpoint_id): commands
+                for slot_id, endpoints in self.endpoints.items()
+                for endpoint_id, commands in endpoints.items()
+            }
+        )
 
 
 __all__ = [

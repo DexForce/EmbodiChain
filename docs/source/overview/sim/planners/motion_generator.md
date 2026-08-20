@@ -13,7 +13,7 @@ explicit cuRobo world.
 * **Explicit strategy**: Accepts only `"motion_gen"` or `"ik_interp"`; no
   planner bypass is inferred from a missing backend-options object.
 * **Strict timed results**: A planner result with positions must include
-  per-waypoint `dt` and matching `duration`. The generator validates that
+  per-waypoint `dt`; `duration` is derived from it. The generator validates that
   contract, preserves total duration when resampling, and holds failed rows at
   `start_qpos`.
 * **Flexible planner selection**: Supports TOPPRA, NeuralPlanner (experimental), and the optional CuroboPlanner backend, which plans on CUDA with either CPU or CUDA physics simulation.
@@ -156,7 +156,8 @@ motion_opts = MotionGenOptions(
 
 Missing interpolation timing is an error; it is never inferred from an engine
 or global default. Custom planners likewise must return `PlanResult.dt` with
-shape `(B, N)` and `duration == dt.sum(dim=1)` whenever they return positions.
+shape `(B, N)` whenever they return positions; `duration` is exposed as the
+derived value `dt.sum(dim=1)`.
 
 #### Cartesian Space Planning
 

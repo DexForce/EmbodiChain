@@ -121,7 +121,6 @@ def _run_case(
     """Run one MoveEndEffector case."""
     torch = ensure_torch()
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -129,6 +128,10 @@ def _run_case(
 
     reset_robot(robot, initial_qpos)
     target_pose = _make_pose(sim.device, pose_case.xyz)
+    binding = atomic_engine.bind_control_parts(
+        "move_end_effector",
+        {"primary": {"motion": "arm"}},
+    )
 
     elapsed, mem_delta, peak_gpu, result = timed_call(
         lambda: atomic_engine.compile(
@@ -136,7 +139,7 @@ def _run_case(
                 ActionInvocation(
                     skill_id="move_end_effector",
                     goal=EndEffectorPoseGoal(xpos=target_pose),
-                    binding=ActionBinding(manipulators={"primary": "arm"}),
+                    binding=binding,
                     motion_policy=MotionPolicy(sample_count=MOVE_SAMPLE_INTERVAL),
                 ),
             )

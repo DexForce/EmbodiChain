@@ -1,9 +1,9 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
-- Status: implementation in progress; Phase 0 and Phase 1 are complete on
-  `main`, and Phase 2 is next
-- Baseline: `main@f4ffb6608f41ea1eaee3020714412e31549dbda7`
-- Last updated: 2026-08-18
+- Status: implementation in progress; Phase 0, PR1, PR2A, and PR2B are
+  complete on `main`, and PR2C is implemented on this feature branch
+- Baseline: `main@dbc6553f11d23a5ab738282fbcde1a7214fca783`
+- Last updated: 2026-08-19
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
 - Related implementation:
@@ -228,11 +228,13 @@ callers.
 
 #### Core/advanced layer
 
-The current action-owned goal dataclasses, `ActionInvocation`, `ActionBinding`,
-policies, `PlanningContext`, `ActionPlan`, `ExecutionSession`,
-`ExecutionRunner`, and provider protocols remain available for framework
-authors and unusual integrations. They are no longer prerequisites for
-ordinary task authoring.
+The current action-owned goal dataclasses, `ActionInvocation`, generic endpoint
+`ActionBinding`, policies, `PlanningContext`, `ActionPlan`,
+`ExecutionSession`, `ExecutionRunner`, and provider protocols remain available
+for framework authors and unusual integrations. `ActionPlan.commands` is the
+runtime authority; a joint-backed plan may additionally retain a
+`TimedTrajectory` for joint feedback and offline compilation. These contracts
+are no longer prerequisites for ordinary task authoring.
 
 ### 6.2 Proposed package ownership
 
@@ -249,7 +251,9 @@ embodichain/lab/sim/skills/
   effects.py            # built-in EffectMonitor contracts/implementations
 
 embodichain/lab/sim/atomic_actions/
-  ...                   # existing typed core and built-in atomic planners
+  runtime_commands.py   # transport-neutral endpoint payloads and timed frames
+  transports.py         # endpoint transport protocol and exact-ID router
+  ...                   # typed core and built-in atomic planners
 
 embodichain/lab/gym/envs/expert_program/
   cfg.py                # strict @configclass schema
@@ -393,11 +397,11 @@ an `arm + tool` schema. It contains a generic resource DAG:
   through a `ResourceEndpoint` implementation; `ControlPartEndpoint` is the
   current joint/control-part declaration, while registered
   `ResourceEndpointAdapter`s resolve any endpoint kind into generic
-  `EndpointResolution` metadata (binding values, commands, physical claim
-  tokens, and optional joint IDs) without changing the graph, matcher, or slot
-  model. Adapters register by exact endpoint type; the built-in control-part
-  adapter is not overrideable, and different controller semantics use a new
-  endpoint subtype;
+  `EndpointResolution` metadata (a typed runtime target, command-profile key,
+  physical claim tokens, and optional joint IDs) without changing the graph,
+  matcher, or slot model. Adapters register by exact endpoint type; the
+  built-in control-part adapter is not overrideable, and different controller
+  semantics use a new endpoint subtype;
 - members describe physical composition and claim closure, not capability
   inheritance. A composite must explicitly declare `motion.whole_body`; it
   does not acquire that capability because it contains a base, torso, or arms;
@@ -427,10 +431,10 @@ combinations such as `left_arm + right_hand`.
 Endpoint names are local protocols, not global robot-part categories. A future
 `navigate` skill can require `body.motion: motion.base.se2`; a
 `whole_body_reach` skill can require `body.motion: motion.whole_body`. Neither
-requires new `RobotSkillProfile` fields. The current `ActionBindingRoute` is a
-transition adapter from generic endpoints to the core's existing
-`manipulators`/`end_effectors` maps; those maps are not part of the Profile
-resource model.
+requires new `RobotSkillProfile` fields. Profile resolution lowers every
+required endpoint directly into an engine-owned `ActionBinding` keyed by
+`(slot_id, endpoint_id)` and carrying its typed runtime target; there is no
+arm/tool-shaped intermediate binding layer.
 
 Binding follows strict rules:
 
@@ -453,11 +457,11 @@ adapter-defined physical/controller claim tokens. It makes `whole_body`
 conflict with `base`, `torso`, or a contained arm even when the underlying
 `Robot.control_parts` names are different, and lets a non-joint base adapter
 claim a controller without inventing joints. PR2B
-exposes deterministic claim/conflict data only. Current runners emit and hold
-full-robot commands, so claims do not imply safe parallel execution. Parallel
-scheduling still requires one coordinator, joint-mask command merge, planner
-serialization or isolation, cancellation semantics, and inter-trajectory
-collision checks.
+exposes deterministic claim/conflict data only. PR2C runners emit endpoint
+command frames and transports own target-scoped safe holds, but claims still do
+not imply safe parallel execution. Parallel scheduling still requires one
+coordinator, deterministic command arbitration/merge, planner serialization or
+isolation, cancellation semantics, and inter-trajectory collision checks.
 
 `AtomicActionEngine.actions` remains the direct-core implementation registry.
 `engine.skills` contains only installed, agent-visible actions whose concrete
@@ -696,8 +700,8 @@ Gym-aware runtime ports:
 
 - observation provider: captures a current planning context from the
   environment and scene registry;
-- command sink: buffers the next full-robot command for the environment action
-  manager;
+- command sink: buffers the next transport-neutral endpoint-command frame for
+  the environment action manager;
 - clock: advances only when the demo executor calls `env.step()`;
 - metadata sink: records compiler decisions, action trajectory segments,
   effects, recovery, scene revisions, and post-policy results.
@@ -715,16 +719,16 @@ fallback `control_dt`. Environment integrations copy `BaseEnv.step_dt` into
 `PlanningContext.control_dt` when an action performs deterministic interpolation.
 
 Timing is a strict producer contract. A planner result with positions includes
-per-waypoint `dt` and a matching per-environment `duration`; an atomic action
+per-waypoint `dt` and derives its per-environment `duration`; an atomic action
 passes a complete `TimedTrajectory` to `build_plan()`. Missing or inconsistent
 timing is rejected at construction. No layer repairs an untimed planner result
 or raw action position tensor with a default period.
 
-Version 1 should require every emitted `JointCommand.hold_duration` to be
-representable by an integer number of environment steps, preferably one step
-per yielded command. An incompatible command is rejected with a clear timing
-error; it is not silently resampled. Explicit timed-command resampling can be a
-later, separately tested feature.
+Version 1 should require every emitted
+`RuntimeCommandFrame.hold_duration` to be representable by an integer number
+of environment steps, preferably one step per yielded frame. An incompatible
+frame is rejected with a clear timing error; it is not silently resampled.
+Explicit timed-command resampling can be a later, separately tested feature.
 
 Recovery timeout and retry budgets are scoped to the enclosing action attempt.
 A `TrajectorySegment` does not start an independent timer or own a recovery
@@ -876,6 +880,10 @@ PR1 snapshot/identity bridge (complete)
         v                       v
 PR2A SceneRegistry      PR2B RobotSkillProfile
    (implemented)          (implemented)
+        |                       |
+        |                       v
+        |              PR2C Runtime Endpoints
+        |                    (in progress)
         +-----------+-----------+
                     v
 Semantic calls/compiler --> SkillRuntime/effect monitors
@@ -966,8 +974,9 @@ documented deprecated fallbacks.
 
 ### Phase 1: unified integration data
 
-Phase 1 is implemented as two focused follow-up PRs that join before the
-semantic facade/compiler work.
+Phase 1 is implemented as three focused follow-up PRs. PR2A and PR2B branch
+from the PR1 foundation; PR2C follows PR2B and joins PR2A before the semantic
+facade/compiler work.
 
 #### PR2A: SceneRegistry (landed in PR #487)
 
@@ -1017,7 +1026,7 @@ Deliverables:
   `EndpointResolution` protocol; `ControlPartEndpointAdapter` is the first
   implementation;
 - action-owned `SkillBindingContract`s with participant-local endpoint,
-  capability, typed-command, lowering-route, and disjoint-claim requirements;
+  capability, typed-command, and disjoint-claim requirements;
 - capability-based candidate filtering, complete per-skill defaults, explicit
   selection overrides, and deterministic ambiguity/unsupported diagnostics;
 - profile-owned semantic commands plus immutable, versioned planning/recovery/
@@ -1026,8 +1035,8 @@ Deliverables:
   parts, joint ownership, endpoint overlap, configured solvers, commands, and
   presets;
 - immutable leaf/joint/adapter-token `ResourceClaim` data and explicit
-  same-slot endpoint disjointness for future conflict analysis without claiming
-  that the current full-robot command runner supports safe parallel execution.
+  same-slot endpoint disjointness for future conflict analysis, without
+  claiming safe parallel execution.
 
 The profile API can represent mobile-base and whole-body resources today. A
 new endpoint kind still needs one shared adapter and a compatible shared atomic
@@ -1038,11 +1047,61 @@ PR2A and PR2B landed together through PR #487. That foundation does not migrate
 official tasks; the repeated-cube vertical slice opts in only after the
 compiler, runtime, and demo bridge are available.
 
+#### PR2C: generic runtime endpoints (implemented on the feature branch)
+
+PR2C removes the temporary arm/tool lowering seam and makes the profile's
+generic endpoint model executable end to end:
+
+- `ActionBinding` is an engine-owned collection keyed only by
+  `(slot_id, endpoint_id)`; `ActionBindingRoute`, arm/tool role maps, and the
+  intermediate resolved-control-part binding types are removed as an
+  intentional clean break;
+- every resolved profile endpoint owns a typed immutable
+  `RuntimeEndpointTarget`, while `EndpointCommand` combines that destination
+  with a transport-specific `RuntimeCommandPayload`;
+- `RuntimeCommandFrame` synchronizes per-environment endpoint commands and
+  timing, and `TimedCommandSequence` becomes the authoritative runtime content
+  of `ActionPlan`;
+- `EndpointCommandTransport` and `EndpointCommandRouter` perform exact-ID
+  registration, preflight payload validation, transport grouping,
+  acknowledgement aggregation, cancellation, and transport-owned safe holds;
+- the framework authorizes planned commands against binding-owned targets and
+  physical claims, requires stable destinations across frames and recovery
+  replans, and retains previously active targets when a failed plan is empty;
+- transports actively neutralize inactive environment rows for every addressed
+  target instead of treating an omitted write as a safe state;
+- `SimulationExecutionAdapter` implements the built-in joint-position
+  transport and writes or holds only the joints claimed by each addressed
+  endpoint;
+- joint-backed planners retain an optional full-robot `TimedTrajectory` for
+  existing joint feedback and `engine.compile()`, while non-joint plans use
+  timed completion plus the existing semantic-effect verification boundary;
+- full-body joint control and a custom planar-velocity endpoint are exercised
+  from binding/profile resolution through planning, session execution, routing,
+  completion, and safe hold without arm/tool-shaped fields.
+- an explicit invocation revision declares the same non-empty runtime
+  destination set and preserves each target's address/safe-hold fingerprint.
+  The runner keeps the active frame deadline and replans from a fresh due-time
+  observation; a pending physical effect must be verified first. Changing a
+  base, arm, whole-body, controller destination, or hold footprint starts a new
+  invocation rather than hot-switching controller ownership in place.
+
+PR2C does not add parallel scheduling, claim merging, transport rollback, or a
+generic endpoint-feedback evaluator. It also does not add cross-destination
+hot revision. Those require separate contracts.
+
+PR2C exit criteria: an installed custom endpoint kind needs one reusable
+endpoint declaration/adapter, payload, transport, and shared atomic skill, but
+no core binding or runner changes; whole-body joint endpoints use the same
+path; unknown transports and incompatible payloads fail before dispatch; and
+cancel/hold behavior remains transport-owned and auditable.
+
 Combined Phase 1 exit criteria: an object is registered once under an
 authoritative ID, aliases cannot introduce ambiguity, dynamic-object
 configuration mismatches fail before execution with an entity-centric
-diagnostic, and robot capabilities resolve bindings/presets without task-owned
-motion code.
+diagnostic, robot capabilities resolve bindings/presets without task-owned
+motion code, and generic resolved endpoints can reach their registered runtime
+transports without adding arm/tool-specific core paths.
 
 ### Phase 2: semantic facade and compiler
 
@@ -1214,6 +1273,9 @@ The design is complete when all of the following hold:
 - [x] Robot capability binding is expressed through generic participant
       resources and endpoints, so mobile-base and whole-body skills do not
       require new arm/tool-shaped profile fields.
+- [x] Runtime binding, command framing, routing, and safe stop are endpoint
+      generic; joint trajectories remain an optional planning/feedback artifact
+      rather than the only runtime carrier.
 - [ ] Each scene entity is registered once under an authoritative registry ID
       across semantics, observation, affordance, and collision handling;
       simulation `uid` values are legacy aliases only.

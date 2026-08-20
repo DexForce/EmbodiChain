@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     GraspGoal,
@@ -156,17 +154,14 @@ def main() -> None:
         sim, args, "Inspect the cube, then press Enter to plan PickUp -> Place..."
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
+    endpoint_mapping = {"primary": {"motion": "arm", "grasp": "hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(semantics),
-                binding,
-                MotionPolicy(
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PICK_SAMPLE_INTERVAL,
                 ),
@@ -176,15 +171,15 @@ def main() -> None:
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "place",
                 PlaceGoal(
                     broadcast_waypoint_pose_batch(
                         place_poses, robot.get_qpos().shape[0]
                     )
                 ),
-                binding,
-                MotionPolicy(
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=PLACE_SAMPLE_INTERVAL,
                 ),

@@ -31,6 +31,7 @@ from embodichain.utils.math import (
 )
 
 from embodichain.lab.sim.atomic_actions.affordance import TwistAffordance
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
     OPEN_COMMAND,
@@ -49,16 +50,14 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.requirements import (
-    ActionBindingRoute,
     CARTESIAN_POSE_CAPABILITY,
-    DisjointSlotEndpoints,
     FORWARD_KINEMATICS_CAPABILITY,
-    GRASP_CAPABILITY,
     SkillBindingContract,
-    SkillEndpointRequirement,
-    SkillResourceSlot,
 )
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
@@ -118,35 +117,21 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
     skill_id: ClassVar[str] = "twist"
     GoalType: ClassVar[type] = TwistGoal
     OptionsType: ClassVar[type] = TwistOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("primary",)
     open_loop: ClassVar[bool] = True
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
-            SkillResourceSlot(
-                slot_id="primary",
-                endpoints=(
-                    SkillEndpointRequirement(
-                        endpoint_id="motion",
-                        capabilities=frozenset(
-                            {
-                                CARTESIAN_POSE_CAPABILITY,
-                                FORWARD_KINEMATICS_CAPABILITY,
-                            }
-                        ),
-                        route=ActionBindingRoute("manipulator", "primary"),
-                    ),
-                    SkillEndpointRequirement(
-                        endpoint_id="grasp",
-                        capabilities=frozenset({GRASP_CAPABILITY}),
-                        required_commands={
-                            OPEN_COMMAND: JointPositionCommand,
-                            GRASP_COMMAND: JointPositionCommand,
-                        },
-                        route=ActionBindingRoute("end_effector", "primary"),
-                    ),
+            make_manipulation_slot(
+                "primary",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
                 ),
-                constraints=(DisjointSlotEndpoints(("motion", "grasp")),),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
             ),
         ),
     )
@@ -186,18 +171,23 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         affordance = self._require_twist_affordance(target.semantics)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
-        manipulator = request.binding.manipulator()
-        end_effector = request.binding.end_effector()
-        arm_joint_ids = list(manipulator.joint_ids)
-        hand_joint_ids = list(end_effector.joint_ids)
+        binding = request.binding
+        motion_target = binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        grasp = binding.endpoint("primary", "grasp")
+        grasp_target = grasp.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        arm_joint_ids = list(motion_target.joint_ids)
+        hand_joint_ids = list(grasp_target.joint_ids)
         start_arm_qpos = arm_qpos_from_state(context, arm_joint_ids)
-        hand_open_qpos = end_effector.joint_positions(
+        hand_open_qpos = grasp.joint_positions(
             OPEN_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )
-        hand_grasp_qpos = end_effector.joint_positions(
+        hand_grasp_qpos = grasp.joint_positions(
             GRASP_COMMAND,
             num_envs=context.batch_size,
             device=self.device,
@@ -215,7 +205,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         grasp_xpos = self._find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
-                qpos=start_arm_qpos, name=manipulator.name, to_matrix=True
+                qpos=start_arm_qpos, name=control_part, to_matrix=True
             ),
         )
         pre_grasp_xpos = translate_pose_world(
@@ -239,7 +229,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         approach_success, approach_arm = self._plan_pose_segment(
             pre_grasp_xpos,
             start_arm_qpos,
-            manipulator.name,
+            control_part,
             request,
             n_approach,
             interpolation_dt=interpolation_dt,
@@ -247,7 +237,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         reach_success, reach_arm = self._plan_pose_segment(
             grasp_xpos,
             approach_arm[:, -1],
-            manipulator.name,
+            control_part,
             request,
             n_reach,
             interpolation_dt=interpolation_dt,
@@ -255,7 +245,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         twist_success, twist_arm = self._plan_pose_segment(
             twist_xpos,
             reach_arm[:, -1],
-            manipulator.name,
+            control_part,
             request,
             n_twist,
             interpolation_dt=interpolation_dt,
@@ -263,7 +253,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         retract_success, retract_arm = self._plan_pose_segment(
             pre_grasp_xpos,
             twist_arm[:, -1],
-            manipulator.name,
+            control_part,
             request,
             n_retract,
             interpolation_dt=interpolation_dt,

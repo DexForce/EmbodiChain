@@ -25,7 +25,12 @@ from itertools import product
 from types import MappingProxyType
 from typing import ClassVar, Mapping, TYPE_CHECKING
 
-from embodichain.lab.sim.atomic_actions.bindings import ActionBinding
+from embodichain.lab.sim.atomic_actions.bindings import (
+    ActionBinding,
+    EndpointBinding,
+    JointPositionTarget,
+    RuntimeEndpointTarget,
+)
 from embodichain.lab.sim.atomic_actions.control import (
     ControlCommand,
     ControlPartCommandProfile,
@@ -109,10 +114,10 @@ def _snapshot_endpoint_commands(
         if not isinstance(command, ControlCommand):
             raise TypeError(f"{field_name} values must be ControlCommand instances.")
         snapshot = command.snapshot()
-        if not isinstance(snapshot, ControlCommand):
+        if type(snapshot) is not type(command) or snapshot is command:
             raise TypeError(
-                f"{field_name}[{command_name!r}].snapshot() must return a "
-                "ControlCommand."
+                f"{field_name}[{command_name!r}].snapshot() must return an "
+                "independently owned value of the same ControlCommand type."
             )
         snapshots[command_name] = snapshot
     return MappingProxyType(snapshots)
@@ -178,10 +183,10 @@ class ControlPartEndpoint(ResourceEndpoint):
 
 @dataclass(frozen=True, slots=True)
 class EndpointResolution:
-    """Adapter-produced physical and lowering metadata for one endpoint."""
+    """Adapter-produced runtime destination and claim metadata for one endpoint."""
 
-    binding_values: Mapping[str, str] = field(default_factory=dict)
-    """Values supported for each current or future binding namespace."""
+    runtime_target: RuntimeEndpointTarget
+    """Typed immutable destination consumed by an endpoint command transport."""
 
     command_profile_key: str | None = None
     """Profile key that owns semantic commands for this endpoint, when any."""
@@ -199,14 +204,28 @@ class EndpointResolution:
     """Whether this execution endpoint must declare a physical claim."""
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "binding_values",
-            _normalize_named_mapping(
-                self.binding_values,
-                field_name="EndpointResolution.binding_values",
-            ),
+        if not isinstance(self.runtime_target, RuntimeEndpointTarget):
+            raise TypeError(
+                "EndpointResolution.runtime_target must be a " "RuntimeEndpointTarget."
+            )
+        target = self.runtime_target.snapshot()
+        if (
+            type(target) is not type(self.runtime_target)
+            or target is self.runtime_target
+        ):
+            raise TypeError(
+                "RuntimeEndpointTarget.snapshot() must return an independently "
+                "owned value of the same target type."
+            )
+        _validate_identifier(
+            target.transport_id,
+            field_name="RuntimeEndpointTarget.transport_id",
         )
+        _validate_identifier(
+            target.target_id,
+            field_name="RuntimeEndpointTarget.target_id",
+        )
+        object.__setattr__(self, "runtime_target", target)
         if self.command_profile_key is not None:
             _validate_identifier(
                 self.command_profile_key,
@@ -238,6 +257,11 @@ class EndpointResolution:
             )
         if len(set(joint_ids)) != len(joint_ids):
             raise ValueError("EndpointResolution.joint_ids must be unique.")
+        if isinstance(target, JointPositionTarget) and joint_ids != target.joint_ids:
+            raise ValueError(
+                "EndpointResolution.joint_ids must exactly match its "
+                "JointPositionTarget."
+            )
         object.__setattr__(self, "joint_ids", joint_ids)
         if not isinstance(self.exclusive, bool):
             raise TypeError("EndpointResolution.exclusive must be a bool.")
@@ -333,10 +357,10 @@ class ControlPartEndpointAdapter(ResourceEndpointAdapter):
                     f"capabilities {sorted(declared)}, but has no configured solver."
                 )
         return EndpointResolution(
-            binding_values={
-                "manipulator": endpoint.control_part,
-                "end_effector": endpoint.control_part,
-            },
+            runtime_target=JointPositionTarget(
+                control_part=endpoint.control_part,
+                joint_ids=joint_ids,
+            ),
             command_profile_key=(
                 endpoint.control_part
                 if endpoint.command_profile is None
@@ -354,7 +378,7 @@ class ResolvedResourceEndpoint:
 
     endpoint: ResourceEndpoint
     adapter_id: str
-    binding_values: Mapping[str, str] = field(default_factory=dict)
+    runtime_target: RuntimeEndpointTarget
     command_profile_key: str | None = None
     requires_command_profile: bool = False
     commands: Mapping[str, ControlCommand] = field(default_factory=dict)
@@ -380,14 +404,14 @@ class ResolvedResourceEndpoint:
             field_name="ResolvedResourceEndpoint.adapter_id",
         )
         resolution = EndpointResolution(
-            binding_values=self.binding_values,
+            runtime_target=self.runtime_target,
             command_profile_key=self.command_profile_key,
             requires_command_profile=self.requires_command_profile,
             claim_tokens=self.claim_tokens,
             joint_ids=self.joint_ids,
             exclusive=self.exclusive,
         )
-        object.__setattr__(self, "binding_values", resolution.binding_values)
+        object.__setattr__(self, "runtime_target", resolution.runtime_target)
         object.__setattr__(
             self,
             "command_profile_key",
@@ -420,7 +444,15 @@ class ResolvedResourceEndpoint:
         if not isinstance(other, ResolvedResourceEndpoint):
             raise TypeError("other must be a ResolvedResourceEndpoint.")
         return bool(
-            self.claim_tokens & other.claim_tokens
+            (
+                self.runtime_target.transport_id,
+                self.runtime_target.target_id,
+            )
+            == (
+                other.runtime_target.transport_id,
+                other.runtime_target.target_id,
+            )
+            or self.claim_tokens & other.claim_tokens
             or set(self.joint_ids) & set(other.joint_ids)
         )
 
@@ -1335,35 +1367,33 @@ class BoundRobotSkillProfile:
                     )
         for resource in self._resources.values():
             for endpoint in resource.endpoints.values():
-                if not endpoint.commands:
+                if not endpoint.commands or not isinstance(
+                    endpoint.runtime_target,
+                    JointPositionTarget,
+                ):
                     continue
-                control_parts = {
-                    value
-                    for target, value in endpoint.binding_values.items()
-                    if target in {"manipulator", "end_effector"}
-                }
-                for control_part in control_parts:
-                    installed = engine_profiles.get(control_part)
-                    if installed is None:
+                control_part = endpoint.runtime_target.control_part
+                installed = engine_profiles.get(control_part)
+                if installed is None:
+                    raise ProfileValidationError(
+                        f"Endpoint command profile "
+                        f"{endpoint.command_profile_key!r} for control part "
+                        f"{control_part!r} is not installed on the "
+                        "AtomicActionEngine."
+                    )
+                for command_name, command in endpoint.commands.items():
+                    installed_command = installed.commands.get(command_name)
+                    if installed_command is None:
                         raise ProfileValidationError(
-                            f"Endpoint command profile "
-                            f"{endpoint.command_profile_key!r} for control part "
-                            f"{control_part!r} is not installed on the "
-                            "AtomicActionEngine."
+                            f"Engine control profile {control_part!r} is missing "
+                            f"profile command {command_name!r}."
                         )
-                    for command_name, command in endpoint.commands.items():
-                        installed_command = installed.commands.get(command_name)
-                        if installed_command is None:
-                            raise ProfileValidationError(
-                                f"Engine control profile {control_part!r} is missing "
-                                f"profile command {command_name!r}."
-                            )
-                        if not command.equivalent_to(installed_command):
-                            raise ProfileValidationError(
-                                f"Engine command {control_part!r}.{command_name} is "
-                                "not semantically equivalent to the profile-owned "
-                                "command."
-                            )
+                    if not command.equivalent_to(installed_command):
+                        raise ProfileValidationError(
+                            f"Engine command {control_part!r}.{command_name} is "
+                            "not semantically equivalent to the profile-owned "
+                            "command."
+                        )
 
     def _resolve_resources(self) -> Mapping[str, ResolvedRobotResource]:
         """Resolve adapter endpoints, graph closure, commands, and claims."""
@@ -1392,6 +1422,18 @@ class BoundRobotSkillProfile:
                         f"Endpoint adapter {adapter.adapter_id!r} returned "
                         f"{type(resolution).__name__}, expected EndpointResolution."
                     )
+                invalid_joint_ids = sorted(
+                    joint_id
+                    for joint_id in resolution.joint_ids
+                    if joint_id >= self._engine.robot.dof
+                )
+                if invalid_joint_ids:
+                    raise ProfileValidationError(
+                        f"Endpoint adapter {adapter.adapter_id!r} resolved resource "
+                        f"{resource_id!r} endpoint {endpoint_id!r} to joint IDs "
+                        f"{invalid_joint_ids} outside robot DOF "
+                        f"{self._engine.robot.dof}."
+                    )
                 command_profile = (
                     None
                     if resolution.command_profile_key is None
@@ -1409,7 +1451,7 @@ class BoundRobotSkillProfile:
                 resource_endpoints[endpoint_id] = ResolvedResourceEndpoint(
                     endpoint=endpoint,
                     adapter_id=adapter.adapter_id,
-                    binding_values=resolution.binding_values,
+                    runtime_target=resolution.runtime_target,
                     command_profile_key=resolution.command_profile_key,
                     requires_command_profile=resolution.requires_command_profile,
                     commands=(
@@ -1523,7 +1565,7 @@ class BoundRobotSkillProfile:
                         )
 
     def _validate_leaf_ownership(self) -> None:
-        """Require physical leaf resources to own disjoint adapter claims."""
+        """Require physical leaves to own disjoint claims and runtime targets."""
         leaves = [
             resource for resource in self._resources.values() if not resource.members
         ]
@@ -1542,6 +1584,28 @@ class BoundRobotSkillProfile:
                         f"{overlapping_joints} or adapter claims "
                         f"{overlapping_tokens}. "
                         "Model one physical leaf and reference it from composites."
+                    )
+                left_targets = {
+                    (
+                        endpoint.runtime_target.transport_id,
+                        endpoint.runtime_target.target_id,
+                    )
+                    for endpoint in left.endpoints.values()
+                }
+                right_targets = {
+                    (
+                        endpoint.runtime_target.transport_id,
+                        endpoint.runtime_target.target_id,
+                    )
+                    for endpoint in right.endpoints.values()
+                }
+                overlapping_targets = sorted(left_targets & right_targets)
+                if overlapping_targets:
+                    raise ProfileValidationError(
+                        f"Leaf resources {left.resource_id!r} and "
+                        f"{right.resource_id!r} share runtime targets "
+                        f"{overlapping_targets}. Model one physical leaf and "
+                        "reference it from composites."
                     )
 
     def _validate_named_skill_configuration(self) -> None:
@@ -1684,15 +1748,6 @@ class BoundRobotSkillProfile:
                     f"endpoint {requirement.endpoint_id!r} missing capabilities "
                     f"{missing_capabilities}"
                 )
-            if (
-                requirement.route is not None
-                and requirement.route.target not in endpoint.binding_values
-            ):
-                reasons.append(
-                    f"endpoint {requirement.endpoint_id!r} adapter "
-                    f"{endpoint.adapter_id!r} cannot lower to binding target "
-                    f"{requirement.route.target!r}"
-                )
             for command_name, command_type in requirement.required_commands.items():
                 command = endpoint.commands.get(command_name)
                 if command is None:
@@ -1722,43 +1777,61 @@ class BoundRobotSkillProfile:
                         set(left.joint_ids) & set(right.joint_ids)
                     )
                     overlapping_tokens = sorted(left.claim_tokens & right.claim_tokens)
+                    shared_target = (
+                        (
+                            left.runtime_target.transport_id,
+                            left.runtime_target.target_id,
+                        )
+                        if (
+                            left.runtime_target.transport_id,
+                            left.runtime_target.target_id,
+                        )
+                        == (
+                            right.runtime_target.transport_id,
+                            right.runtime_target.target_id,
+                        )
+                        else None
+                    )
                     reasons.append(
                         f"endpoints {left_id!r} and {right_id!r} overlap on joints "
                         f"{overlapping_joints} or adapter claims "
-                        f"{overlapping_tokens}"
+                        f"{overlapping_tokens} or share runtime target "
+                        f"{shared_target}"
                     )
         return tuple(reasons)
 
-    @staticmethod
     def _lower_binding(
+        self,
         skill_id: str,
         contract: SkillBindingContract | None,
         assignment: Mapping[str, ResolvedRobotResource],
     ) -> ResolvedSkillBinding:
-        """Lower generic endpoints through the temporary current-core routes."""
+        """Lower every required endpoint to one engine-owned action binding."""
         assert contract is not None
-        manipulators: dict[str, str] = {}
-        end_effectors: dict[str, str] = {}
+        endpoints: list[EndpointBinding] = []
         for slot in contract.slots:
             resource = assignment[slot.slot_id]
             for requirement in slot.endpoints:
-                if requirement.route is None:
-                    continue
                 endpoint = resource.endpoints[requirement.endpoint_id]
-                target = (
-                    manipulators
-                    if requirement.route.target == "manipulator"
-                    else end_effectors
+                endpoints.append(
+                    EndpointBinding(
+                        slot_id=slot.slot_id,
+                        endpoint_id=requirement.endpoint_id,
+                        resource_id=resource.resource_id,
+                        adapter_id=endpoint.adapter_id,
+                        target=endpoint.runtime_target,
+                        capabilities=endpoint.capabilities,
+                        commands=endpoint.commands,
+                        claim_tokens=endpoint.claim_tokens,
+                        joint_ids=endpoint.joint_ids,
+                    )
                 )
-                target[requirement.route.role] = endpoint.binding_values[
-                    requirement.route.target
-                ]
         return ResolvedSkillBinding(
             skill_id=skill_id,
             resources=assignment,
             action_binding=ActionBinding(
-                manipulators=manipulators,
-                end_effectors=end_effectors,
+                owner_id=self._engine.binding_owner_id,
+                endpoints=tuple(endpoints),
             ),
             claim=ResourceClaim.combine(
                 tuple(resource.claim for resource in assignment.values())

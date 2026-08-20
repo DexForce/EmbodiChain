@@ -175,8 +175,7 @@ def old_assemble_result(
         else:
             positions[b, :1] = start[b]
             positions[b, 1:] = start[b]
-    duration = dt.sum(dim=1)
-    return PlanResult(success=alive, positions=positions, dt=dt, duration=duration)
+    return PlanResult(success=alive, positions=positions, dt=dt)
 
 
 # =============================================================================

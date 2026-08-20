@@ -25,9 +25,13 @@ import torch
 
 from embodichain.lab.sim.atomic_actions import (
     CommandAckStatus,
-    JointCommand,
+    EndpointCommand,
+    EndpointCommandTransport,
+    JointPositionPayload,
+    JointPositionTarget,
     RigidObjectSceneProvider,
     RigidObjectSceneProviderCfg,
+    RuntimeCommandFrame,
     SceneSnapshot,
     SimulationExecutionAdapter,
     TaskState,
@@ -53,10 +57,20 @@ def _command(
     *,
     env_ids: torch.Tensor | None = None,
     active_mask: torch.Tensor | None = None,
-) -> JointCommand:
-    return JointCommand(
-        positions=torch.ones(BATCH_SIZE, ROBOT_DOF),
-        velocities=torch.full((BATCH_SIZE, ROBOT_DOF), 0.5),
+) -> RuntimeCommandFrame:
+    return RuntimeCommandFrame(
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget(
+                    control_part="arm",
+                    joint_ids=tuple(range(ROBOT_DOF)),
+                ),
+                payload=JointPositionPayload(
+                    positions=torch.ones(BATCH_SIZE, ROBOT_DOF),
+                    velocities=torch.full((BATCH_SIZE, ROBOT_DOF), 0.5),
+                ),
+            ),
+        ),
         active_mask=(
             torch.tensor([True, False]) if active_mask is None else active_mask
         ),
@@ -78,6 +92,15 @@ def test_simulation_adapter_observes_full_robot_state() -> None:
     assert torch.equal(context.robot.qvel, robot.get_qvel.return_value)
     assert torch.equal(context.robot.qeffort, robot.get_qf.return_value)
     assert context.scene.version == 0
+
+
+def test_simulation_adapter_is_joint_position_transport() -> None:
+    simulation, robot = _simulation_and_robot()
+    adapter = SimulationExecutionAdapter(simulation, robot)
+
+    assert isinstance(adapter, EndpointCommandTransport)
+    assert adapter.transport_id == JointPositionTarget.TRANSPORT_ID
+    assert adapter.payload_type is JointPositionPayload
 
 
 @pytest.mark.parametrize("error", [AttributeError, NotImplementedError])
@@ -115,10 +138,86 @@ def test_simulation_adapter_sends_active_rows_and_inactive_holds_together() -> N
     assert acknowledgement.status is CommandAckStatus.ACCEPTED
     sent_qpos = robot.set_qpos.call_args.args[0]
     sent_qvel = robot.set_qvel.call_args.args[0]
-    assert torch.equal(sent_qpos, command.positions)
-    assert torch.equal(sent_qvel, command.velocities)
+    expected_qpos = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    expected_qpos[0] = 1.0
+    expected_qvel = torch.zeros(BATCH_SIZE, ROBOT_DOF)
+    expected_qvel[0] = 0.5
+    assert torch.equal(sent_qpos, expected_qpos)
+    assert torch.equal(sent_qvel, expected_qvel)
+    endpoint_command = command.commands[0]
+    assert isinstance(endpoint_command.target, JointPositionTarget)
+    assert endpoint_command.target.target_id == "arm"
+    assert endpoint_command.target.joint_ids == tuple(range(ROBOT_DOF))
+    assert isinstance(endpoint_command.payload, JointPositionPayload)
     assert robot.set_qpos.call_args.kwargs["env_ids"] == [0, 1]
+    assert robot.set_qpos.call_args.kwargs["joint_ids"] == [0, 1, 2]
     assert robot.set_qvel.call_args.kwargs["env_ids"] == [0, 1]
+    assert robot.set_qvel.call_args.kwargs["joint_ids"] == [0, 1, 2]
+
+
+def test_simulation_adapter_writes_disjoint_joint_endpoints_independently() -> None:
+    simulation, robot = _simulation_and_robot()
+    adapter = SimulationExecutionAdapter(simulation, robot)
+    command = RuntimeCommandFrame(
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget("arm", (0, 2)),
+                payload=JointPositionPayload(torch.tensor([[1.0, 3.0], [4.0, 6.0]])),
+            ),
+            EndpointCommand(
+                target=JointPositionTarget("tool", (1,)),
+                payload=JointPositionPayload(torch.tensor([[2.0], [5.0]])),
+            ),
+        ),
+        active_mask=torch.ones(BATCH_SIZE, dtype=torch.bool),
+        env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
+        hold_duration=torch.zeros(BATCH_SIZE),
+    )
+
+    acknowledgement = adapter.send(command, timeout=1.0)
+
+    assert acknowledgement.status is CommandAckStatus.ACCEPTED
+    assert robot.set_qpos.call_count == 2
+    arm_call, tool_call = robot.set_qpos.call_args_list
+    assert torch.equal(
+        arm_call.args[0],
+        torch.tensor([[1.0, 3.0], [4.0, 6.0]]),
+    )
+    assert arm_call.kwargs == {"joint_ids": [0, 2], "env_ids": [0, 1]}
+    assert torch.equal(tool_call.args[0], torch.tensor([[2.0], [5.0]]))
+    assert tool_call.kwargs == {"joint_ids": [1], "env_ids": [0, 1]}
+    robot.set_qvel.assert_not_called()
+
+
+def test_simulation_adapter_neutralizes_inactive_rows_without_velocity_payload() -> (
+    None
+):
+    simulation, robot = _simulation_and_robot()
+    robot.get_qvel.return_value = torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+    adapter = SimulationExecutionAdapter(simulation, robot)
+    command = RuntimeCommandFrame(
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget("arm", (0, 2)),
+                payload=JointPositionPayload(torch.ones(BATCH_SIZE, 2)),
+            ),
+        ),
+        active_mask=torch.tensor([True, False]),
+        env_ids=torch.arange(BATCH_SIZE, dtype=torch.long),
+        hold_duration=torch.zeros(BATCH_SIZE),
+    )
+
+    acknowledgement = adapter.send(command, timeout=1.0)
+
+    assert acknowledgement.accepted
+    assert torch.equal(
+        robot.set_qvel.call_args.args[0],
+        torch.tensor([[0.1, 0.3], [0.0, 0.0]]),
+    )
+    assert robot.set_qvel.call_args.kwargs == {
+        "joint_ids": [0, 2],
+        "env_ids": [0, 1],
+    }
 
 
 def test_simulation_adapter_send_writes_a_pure_hold_batch() -> None:
@@ -129,8 +228,18 @@ def test_simulation_adapter_send_writes_a_pure_hold_batch() -> None:
     acknowledgement = adapter.send(command, timeout=1.0)
 
     assert acknowledgement.status is CommandAckStatus.ACCEPTED
-    robot.set_qpos.assert_called_once_with(command.positions, env_ids=[0, 1])
-    robot.set_qvel.assert_called_once_with(command.velocities, env_ids=[0, 1])
+    assert torch.equal(
+        robot.set_qpos.call_args.args[0],
+        torch.zeros(BATCH_SIZE, ROBOT_DOF),
+    )
+    assert torch.equal(
+        robot.set_qvel.call_args.args[0],
+        torch.zeros(BATCH_SIZE, ROBOT_DOF),
+    )
+    assert robot.set_qpos.call_args.kwargs["env_ids"] == [0, 1]
+    assert robot.set_qpos.call_args.kwargs["joint_ids"] == [0, 1, 2]
+    assert robot.set_qvel.call_args.kwargs["env_ids"] == [0, 1]
+    assert robot.set_qvel.call_args.kwargs["joint_ids"] == [0, 1, 2]
 
 
 def test_simulation_adapter_keeps_stable_ids_separate_from_robot_indices() -> None:
@@ -147,14 +256,70 @@ def test_simulation_adapter_keeps_stable_ids_separate_from_robot_indices() -> No
 
 def test_simulation_adapter_hold_targets_every_environment() -> None:
     simulation, robot = _simulation_and_robot()
+    observed_positions = torch.full((BATCH_SIZE, ROBOT_DOF), 0.25)
+    robot.get_qpos.return_value = observed_positions
     adapter = SimulationExecutionAdapter(simulation, robot)
     command = _command()
+    context = adapter.observe(TaskState.empty(BATCH_SIZE, "cpu"))
 
-    acknowledgement = adapter.hold(command, timeout=1.0)
+    acknowledgement = adapter.hold(command.targets, context, timeout=1.0)
 
     assert acknowledgement.status is CommandAckStatus.ACCEPTED
-    robot.set_qpos.assert_called_once_with(command.positions, env_ids=[0, 1])
-    robot.set_qvel.assert_called_once_with(command.velocities, env_ids=[0, 1])
+    assert torch.equal(robot.set_qpos.call_args.args[0], observed_positions)
+    assert torch.equal(
+        robot.set_qvel.call_args.args[0],
+        torch.zeros_like(observed_positions),
+    )
+    assert robot.set_qpos.call_args.kwargs["env_ids"] == [0, 1]
+    assert robot.set_qpos.call_args.kwargs["joint_ids"] == [0, 1, 2]
+    assert robot.set_qvel.call_args.kwargs["env_ids"] == [0, 1]
+    assert robot.set_qvel.call_args.kwargs["joint_ids"] == [0, 1, 2]
+
+
+def test_simulation_adapter_hold_scopes_write_to_target_joint_ids() -> None:
+    simulation, robot = _simulation_and_robot()
+    observed_positions = torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+    robot.get_qpos.return_value = observed_positions
+    adapter = SimulationExecutionAdapter(simulation, robot)
+    context = adapter.observe(TaskState.empty(BATCH_SIZE, "cpu"))
+
+    acknowledgement = adapter.hold(
+        (JointPositionTarget("tool", (1,)),),
+        context,
+        timeout=1.0,
+    )
+
+    assert acknowledgement.status is CommandAckStatus.ACCEPTED
+    assert torch.equal(
+        robot.set_qpos.call_args.args[0],
+        torch.tensor([[0.2], [0.5]]),
+    )
+    assert robot.set_qpos.call_args.kwargs == {
+        "joint_ids": [1],
+        "env_ids": [0, 1],
+    }
+    assert torch.equal(robot.set_qvel.call_args.args[0], torch.zeros(BATCH_SIZE, 1))
+
+
+def test_simulation_adapter_cancel_validates_transport_targets() -> None:
+    simulation, robot = _simulation_and_robot()
+    adapter = SimulationExecutionAdapter(simulation, robot)
+    targets = _command().targets
+
+    acknowledgement = adapter.cancel(targets, timeout=1.0)
+
+    assert acknowledgement.status is CommandAckStatus.ACCEPTED
+    assert [(target.transport_id, target.target_id) for target in targets] == [
+        (JointPositionTarget.TRANSPORT_ID, "arm")
+    ]
+    robot.set_qpos.assert_not_called()
+
+    invalid = adapter.cancel(
+        (JointPositionTarget("invalid", (ROBOT_DOF,)),),
+        timeout=1.0,
+    )
+    assert invalid.status is CommandAckStatus.REJECTED
+    assert "outside robot DOF" in invalid.message
 
 
 def test_simulation_adapter_sleep_advances_integral_physics_steps() -> None:

@@ -29,12 +29,14 @@ import torch
 
 from embodichain.utils import configclass
 
+from .bindings import RuntimeEndpointTarget
 from .execution import (
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
-    JointCommand,
 )
+from .invocation import ActionInvocation, ResolvedActionRequest
+from .runtime_commands import RuntimeCommandFrame
 from .state import PlanningContext, TaskState
 
 
@@ -123,15 +125,17 @@ class CommandSink(Protocol):
 
     def send(
         self,
-        command: JointCommand,
+        command: RuntimeCommandFrame,
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Submit an active joint command and acknowledge its acceptance.
+        """Submit one synchronized endpoint-command frame.
 
         Args:
-            command: Full-robot command with an explicit active mask. Inactive
-                rows contain hold targets and must not retain stale commands.
+            command: Transport-neutral command frame with an active-row mask.
+                The sink must actively neutralize inactive rows for every
+                addressed target; omission is not a safe state for persistent
+                controllers.
             timeout: Maximum acknowledgement latency in seconds.
 
         Returns:
@@ -140,24 +144,32 @@ class CommandSink(Protocol):
 
     def hold(
         self,
-        command: JointCommand,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        context: PlanningContext,
         *,
         timeout: float,
     ) -> CommandAcknowledgement:
-        """Hold the supplied observed position as a safety command.
+        """Apply transport-specific safe state to the supplied targets.
 
         Args:
-            command: Full-robot observed-position hold command.
+            targets: Runtime targets that may retain controller state.
+            context: Latest observation used by position-hold transports.
             timeout: Maximum acknowledgement latency in seconds.
 
         Returns:
             Transport or controller acknowledgement.
         """
 
-    def cancel(self, *, timeout: float) -> CommandAcknowledgement:
+    def cancel(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+        *,
+        timeout: float,
+    ) -> CommandAcknowledgement:
         """Cancel any controller-side command that has not completed.
 
         Args:
+            targets: Runtime targets whose queued work must be cancelled.
             timeout: Maximum acknowledgement latency in seconds.
 
         Returns:
@@ -290,7 +302,8 @@ class ExecutionRunner:
     """Connect an execution session to observation, controller, and time ports.
 
     :meth:`step` is non-blocking. It observes and advances the session only when
-    the next command is due according to :attr:`JointCommand.hold_duration`.
+    the next command is due according to
+    :attr:`RuntimeCommandFrame.hold_duration`.
     :meth:`run_until_blocked` supplies the blocking loop for tutorials and simple
     applications. Controller rejection, timeout, observation failure, and
     session exceptions all trigger a best-effort cancel-then-hold sequence.
@@ -334,10 +347,16 @@ class ExecutionRunner:
         self._message: str | None = None
         self._effect_context: PlanningContext | None = None
         self._effect_tick: ExecutionTick | None = None
+        self._armed_targets: dict[tuple[str, str], RuntimeEndpointTarget] = {}
+        self._pending_revision: ResolvedActionRequest | None = None
 
     @property
     def session(self) -> ExecutionSession:
-        """Execution session advanced by this runner."""
+        """Execution session advanced by this runner.
+
+        Call :meth:`revise_current` on the runner, rather than mutating the
+        session directly, while this runner owns scheduling.
+        """
         return self._session
 
     @property
@@ -357,6 +376,39 @@ class ExecutionRunner:
             self._effect_tick is not None
             and self._effect_tick.pending_effect is not None
         )
+
+    def revise_current(self, invocation: ActionInvocation) -> None:
+        """Stage a newer revision for the next scheduled observation boundary.
+
+        Staging preserves the active frame deadline. When that deadline is due,
+        :meth:`step` observes fresh state, atomically plans and installs the
+        replacement, and dispatches its first command. The submitted invocation
+        is resolved into an owned snapshot immediately, so later caller
+        mutation cannot alter the staged revision.
+
+        Args:
+            invocation: Strictly newer revision of the active logical call.
+
+        Raises:
+            TypeError: If ``invocation`` is not an ActionInvocation.
+            RuntimeError: If this runner or its session is no longer running,
+                or if a physical effect is awaiting verification.
+            ValueError: If session-level revision invariants are violated.
+        """
+        if not isinstance(invocation, ActionInvocation):
+            raise TypeError("invocation must be an ActionInvocation.")
+        if self._status is not RunnerStatus.RUNNING:
+            raise RuntimeError("Only a running execution runner can be revised.")
+        prepared = self._session._prepare_revision(invocation)
+        if (
+            self._pending_revision is not None
+            and prepared.revision <= self._pending_revision.revision
+        ):
+            raise ValueError(
+                "A staged revision must advance beyond the pending revision "
+                f"{self._pending_revision.revision}, got {prepared.revision}."
+            )
+        self._pending_revision = prepared
 
     def step(
         self,
@@ -398,6 +450,12 @@ class ExecutionRunner:
         self._last_context = context
 
         try:
+            if self._pending_revision is not None:
+                self._session._install_prepared_revision(
+                    self._pending_revision,
+                    context,
+                )
+                self._pending_revision = None
             tick = self._session.tick(context, effect_success=effect_success)
         except Exception as exc:
             return self._fail(
@@ -408,12 +466,18 @@ class ExecutionRunner:
 
         dispatches: list[CommandDispatch] = []
         if tick.command is not None:
+            self._remember_targets(tick.command.targets)
             operation = (
                 CommandOperation.SEND
                 if bool(tick.command.active_mask.any().item())
                 else CommandOperation.HOLD
             )
-            dispatch = self._dispatch(operation, tick.command)
+            dispatch = self._dispatch(
+                operation,
+                command=(tick.command if operation is CommandOperation.SEND else None),
+                targets=tick.command.targets,
+                context=context,
+            )
             dispatches.append(dispatch)
             if not dispatch.acknowledgement.accepted:
                 failure = dispatch.acknowledgement
@@ -433,6 +497,29 @@ class ExecutionRunner:
                 self._command_count += 1
             interval = self._command_interval(tick.command)
             self._next_step_at = self._clock_now() + interval
+        elif tick.hold_targets:
+            self._remember_targets(tick.hold_targets)
+            hold_dispatch = self._dispatch(
+                CommandOperation.HOLD,
+                targets=tick.hold_targets,
+                context=context,
+            )
+            dispatches.append(hold_dispatch)
+            if not hold_dispatch.acknowledgement.accepted:
+                failure = hold_dispatch.acknowledgement
+                message = (
+                    "Controller did not accept the requested hold: "
+                    f"{failure.status.value}."
+                )
+                if failure.message:
+                    message += f" {failure.message}"
+                return self._fail(
+                    message,
+                    context=context,
+                    tick=tick,
+                    dispatches=dispatches,
+                )
+            self._next_step_at = self._clock_now() + self.cfg.minimum_cycle_time
         else:
             self._next_step_at = self._clock_now()
 
@@ -440,7 +527,8 @@ class ExecutionRunner:
             if self.cfg.hold_on_completion:
                 hold_dispatch = self._dispatch(
                     CommandOperation.HOLD,
-                    self._hold_command(context),
+                    targets=self._armed_target_snapshots(),
+                    context=context,
                 )
                 dispatches.append(hold_dispatch)
                 if not hold_dispatch.acknowledgement.accepted:
@@ -499,6 +587,7 @@ class ExecutionRunner:
             self._status = RunnerStatus.FAILED
             self._message = f"{reason} Safe stop acknowledgement failed."
         self._clear_effect_boundary()
+        self._pending_revision = None
         self._next_step_at = self._clock_now()
         return self._result(
             timestamp=self._clock_now(),
@@ -630,7 +719,7 @@ class ExecutionRunner:
             raise ValueError("ExecutionClock.now() must be finite and non-negative.")
         return value
 
-    def _command_interval(self, command: JointCommand) -> float:
+    def _command_interval(self, command: RuntimeCommandFrame) -> float:
         """Resolve a synchronized batch interval from per-environment durations."""
         durations = (
             command.hold_duration[command.active_mask]
@@ -649,27 +738,31 @@ class ExecutionRunner:
     def _dispatch(
         self,
         operation: CommandOperation,
-        command: JointCommand | None,
+        command: RuntimeCommandFrame | None = None,
+        *,
+        targets: tuple[RuntimeEndpointTarget, ...] = (),
+        context: PlanningContext | None = None,
     ) -> CommandDispatch:
         """Call one sink operation and convert exceptions to rejection acks."""
         try:
             if operation is CommandOperation.SEND:
                 if command is None:
-                    raise ValueError("SEND requires a JointCommand.")
+                    raise ValueError("SEND requires a RuntimeCommandFrame.")
                 acknowledgement = self._command_sink.send(
                     command,
                     timeout=self.cfg.command_timeout,
                 )
             elif operation is CommandOperation.HOLD:
-                if command is None:
-                    raise ValueError("HOLD requires a JointCommand.")
+                if context is None:
+                    raise ValueError("HOLD requires a PlanningContext.")
                 acknowledgement = self._command_sink.hold(
-                    command,
+                    targets,
+                    context,
                     timeout=self.cfg.safe_stop_timeout,
                 )
             else:
                 acknowledgement = self._command_sink.cancel(
-                    timeout=self.cfg.safe_stop_timeout
+                    targets, timeout=self.cfg.safe_stop_timeout
                 )
             if not isinstance(acknowledgement, CommandAcknowledgement):
                 raise TypeError(
@@ -681,6 +774,19 @@ class ExecutionRunner:
                 f"{type(exc).__name__}: {exc}",
             )
         return CommandDispatch(operation, acknowledgement)
+
+    def _remember_targets(
+        self,
+        targets: tuple[RuntimeEndpointTarget, ...],
+    ) -> None:
+        """Remember every controller destination armed during this run."""
+        for target in targets:
+            key = (target.transport_id, target.target_id)
+            self._armed_targets[key] = target.snapshot()
+
+    def _armed_target_snapshots(self) -> tuple[RuntimeEndpointTarget, ...]:
+        """Return owned armed targets in first-use order."""
+        return tuple(target.snapshot() for target in self._armed_targets.values())
 
     def _observe_for_stop(self) -> PlanningContext | None:
         """Best-effort observation used to build a cancellation hold command."""
@@ -698,31 +804,17 @@ class ExecutionRunner:
         context: PlanningContext | None,
     ) -> list[CommandDispatch]:
         """Attempt controller cancellation followed by an observed-position hold."""
-        dispatches = [self._dispatch(CommandOperation.CANCEL, None)]
+        targets = self._armed_target_snapshots()
+        dispatches = [self._dispatch(CommandOperation.CANCEL, targets=targets)]
         if context is not None:
             dispatches.append(
-                self._dispatch(CommandOperation.HOLD, self._hold_command(context))
+                self._dispatch(
+                    CommandOperation.HOLD,
+                    targets=targets,
+                    context=context,
+                )
             )
         return dispatches
-
-    @staticmethod
-    def _hold_command(context: PlanningContext) -> JointCommand:
-        """Build an all-environment passive hold command from an observation."""
-        return JointCommand(
-            positions=context.robot.qpos,
-            velocities=torch.zeros_like(context.robot.qpos),
-            active_mask=torch.zeros(
-                context.batch_size,
-                dtype=torch.bool,
-                device=context.robot.qpos.device,
-            ),
-            env_ids=context.env_ids,
-            hold_duration=torch.zeros(
-                context.batch_size,
-                dtype=torch.float32,
-                device=context.robot.qpos.device,
-            ),
-        )
 
     def _fail(
         self,
@@ -738,6 +830,7 @@ class ExecutionRunner:
         self._status = RunnerStatus.FAILED
         self._message = message
         self._clear_effect_boundary()
+        self._pending_revision = None
         self._next_step_at = self._clock_now()
         return self._result(
             timestamp=self._clock_now(),

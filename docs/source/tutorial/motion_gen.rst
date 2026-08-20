@@ -128,7 +128,9 @@ API Reference
    ) -> PlanResult
 
 - ``strategy="motion_gen"`` delegates to the configured backend; ``strategy="ik_interp"`` performs deterministic waypoint IK and joint interpolation and requires ``interpolation_dt``.
-- Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt`` and matching ``duration`` whenever positions are present. Missing timing raises immediately.
+- Returns a normalized, environment-batched ``PlanResult`` with explicit ``dt``
+  and derived ``duration`` whenever positions are present. Missing timing raises
+  immediately.
 - Uses ``target_states`` (list of PlanState) and ``options`` (MotionGenOptions) instead of individual parameters.
 
 **interpolate_trajectory**

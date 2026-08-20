@@ -316,9 +316,12 @@ def test_curobo_planner_exposes_collision_world_contract(multi_env, expected_mod
         ),
     )
 
-    assert planner.dynamic_collision_entity_ids == ("registry_cube",)
-    assert planner.collision_world_entity_ids == ("registry_cube",)
-    assert planner.collision_world_batch_mode == expected_mode
+    info = planner.collision_world_info
+
+    assert info.dynamic_entity_ids == ("registry_cube",)
+    assert info.entity_ids == ("registry_cube",)
+    assert info.batch_mode == expected_mode
+    assert info.supports_updates is True
 
 
 def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
@@ -928,7 +931,6 @@ def _make_curobo_engine(
 def test_curobo_reuses_non_graph_backend():
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -939,13 +941,17 @@ def test_curobo_reuses_non_graph_backend():
     try:
         engine = _make_curobo_engine(block)
         target = _target_beyond_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": _SIM_CONTROL_PART}},
+        )
 
         result = engine.compile(
             (
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
@@ -964,7 +970,7 @@ def test_curobo_reuses_non_graph_backend():
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
@@ -982,7 +988,6 @@ def test_curobo_reuses_non_graph_backend():
 def test_curobo_uses_accelerator_with_cpu_physics():
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -993,13 +998,17 @@ def test_curobo_uses_accelerator_with_cpu_physics():
     try:
         engine = _make_curobo_engine(block, use_cuda_graph=True)
         target = _target_beyond_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": _SIM_CONTROL_PART}},
+        )
 
         result = engine.compile(
             (
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
+                    binding,
                     MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
