@@ -43,7 +43,6 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     PoseGoalValue,
     SceneEntityPose,
-    SkillDescriptor,
 )
 from .calls import (
     HandOver,
@@ -155,42 +154,43 @@ class RelationTargetGrounder(ABC):
 class SemanticObjectTarget:
     """One object-space look-ahead target.
 
-    Exactly one source is set. Relation targets remain late-bound and require
-    an explicitly installed typed/versioned grounder. Handover targets defer
-    to the embodiment-selected provider and are used only for workflow
-    look-ahead.
+    Relation targets remain late-bound and require an explicitly installed
+    typed/versioned grounder. Handover targets defer to the
+    embodiment-selected provider and are used only for workflow look-ahead.
     """
 
-    pose: SemanticPose | SceneEntityPose | None = None
-    relation: SemanticRelationTarget | None = None
-    handover: SemanticHandOverTarget | None = None
+    value: (
+        SemanticPose | SceneEntityPose | SemanticRelationTarget | SemanticHandOverTarget
+    )
 
     def __post_init__(self) -> None:
-        selected = sum(
-            value is not None for value in (self.pose, self.relation, self.handover)
-        )
-        if selected != 1:
-            raise ValueError(
-                "SemanticObjectTarget requires exactly one of pose, relation, "
-                "or handover."
+        if type(self.value) in (SemanticPose, SceneEntityPose):
+            object.__setattr__(self, "value", self.value.snapshot())
+        elif type(self.value) not in (
+            SemanticRelationTarget,
+            SemanticHandOverTarget,
+        ):
+            raise TypeError(
+                "value must be exactly SemanticPose, SceneEntityPose, "
+                "SemanticRelationTarget, or SemanticHandOverTarget."
             )
-        if self.pose is not None:
-            if type(self.pose) is SemanticPose:
-                object.__setattr__(self, "pose", self.pose.snapshot())
-            elif type(self.pose) is SceneEntityPose:
-                object.__setattr__(self, "pose", self.pose.snapshot())
-            else:
-                raise TypeError(
-                    "pose must be exactly SemanticPose, SceneEntityPose, or None."
-                )
-        if self.relation is not None and (
-            type(self.relation) is not SemanticRelationTarget
-        ):
-            raise TypeError("relation must be exactly SemanticRelationTarget or None.")
-        if self.handover is not None and (
-            type(self.handover) is not SemanticHandOverTarget
-        ):
-            raise TypeError("handover must be exactly SemanticHandOverTarget or None.")
+
+    @property
+    def pose(self) -> SemanticPose | SceneEntityPose | None:
+        """Return the direct pose variant, when selected."""
+        if type(self.value) in (SemanticPose, SceneEntityPose):
+            return self.value  # type: ignore[return-value]
+        return None
+
+    @property
+    def relation(self) -> SemanticRelationTarget | None:
+        """Return the relation variant, when selected."""
+        return self.value if type(self.value) is SemanticRelationTarget else None
+
+    @property
+    def handover(self) -> SemanticHandOverTarget | None:
+        """Return the deferred handover variant, when selected."""
+        return self.value if type(self.value) is SemanticHandOverTarget else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,9 +238,7 @@ class AnalyzedSemanticCall:
     index: int
     bound: BoundSemanticCall
     effect_kind: SemanticEffectKind
-    downstream_object_targets: tuple[SemanticObjectTarget, ...] = ()
-    requires_verified_held_object: bool = False
-    requires_fresh_observation: bool = True
+    downstream_object_target: SemanticObjectTarget | None = None
 
     def __post_init__(self) -> None:
         if type(self.index) is not int or self.index < 0:
@@ -249,17 +247,13 @@ class AnalyzedSemanticCall:
             raise TypeError("bound must be exactly BoundSemanticCall.")
         if not isinstance(self.effect_kind, SemanticEffectKind):
             raise TypeError("effect_kind must be a SemanticEffectKind.")
-        targets = tuple(self.downstream_object_targets)
-        if not all(type(target) is SemanticObjectTarget for target in targets):
+        if self.downstream_object_target is not None and (
+            type(self.downstream_object_target) is not SemanticObjectTarget
+        ):
             raise TypeError(
-                "downstream_object_targets must contain exact "
-                "SemanticObjectTarget values."
+                "downstream_object_target must be exactly SemanticObjectTarget "
+                "or None."
             )
-        object.__setattr__(self, "downstream_object_targets", targets)
-        if type(self.requires_verified_held_object) is not bool:
-            raise TypeError("requires_verified_held_object must be a bool.")
-        if type(self.requires_fresh_observation) is not bool:
-            raise TypeError("requires_fresh_observation must be a bool.")
 
     @property
     def call(self) -> SemanticCallSpec:
@@ -267,49 +261,14 @@ class AnalyzedSemanticCall:
         return self.bound.linked.call
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class SemanticWorkflow:
-    """Factory-owned immutable result of static workflow analysis."""
+    """Immutable result of static workflow analysis."""
 
     workflow_id: str
     calls: tuple[AnalyzedSemanticCall, ...]
     effect_dependencies: tuple[SemanticEffectDependency, ...] = ()
-    engine_owner_id: str = field(repr=False, compare=False, default="")
-    skill_catalog_revision: int = field(repr=False, compare=False, default=0)
-    compiler_id: str = field(repr=False, compare=False, default="")
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Reject construction outside :class:`SemanticSkillCompiler`."""
-        del args, kwargs
-        raise TypeError(
-            "SemanticWorkflow values are created by " "SemanticSkillCompiler.analyze()."
-        )
-
-    @classmethod
-    def _create(
-        cls,
-        *,
-        workflow_id: str,
-        calls: tuple[AnalyzedSemanticCall, ...],
-        effect_dependencies: tuple[SemanticEffectDependency, ...],
-        engine_owner_id: str,
-        skill_catalog_revision: int,
-        compiler_id: str,
-    ) -> SemanticWorkflow:
-        """Create one owned workflow after compiler analysis."""
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "workflow_id", workflow_id)
-        object.__setattr__(instance, "calls", calls)
-        object.__setattr__(instance, "effect_dependencies", effect_dependencies)
-        object.__setattr__(instance, "engine_owner_id", engine_owner_id)
-        object.__setattr__(
-            instance,
-            "skill_catalog_revision",
-            skill_catalog_revision,
-        )
-        object.__setattr__(instance, "compiler_id", compiler_id)
-        instance.__post_init__()
-        return instance
+    _compiler_id: str = field(repr=False, compare=False, default="")
 
     def __post_init__(self) -> None:
         _validate_identifier(self.workflow_id, field_name="workflow_id")
@@ -328,12 +287,7 @@ class SemanticWorkflow:
                 "effect_dependencies must contain exact "
                 "SemanticEffectDependency values."
             )
-        _validate_identifier(self.engine_owner_id, field_name="engine_owner_id")
-        _validate_identifier(self.compiler_id, field_name="compiler_id")
-        if type(self.skill_catalog_revision) is not int or (
-            self.skill_catalog_revision < 0
-        ):
-            raise ValueError("skill_catalog_revision must be non-negative.")
+        _validate_identifier(self._compiler_id, field_name="compiler_id")
         object.__setattr__(self, "calls", calls)
         object.__setattr__(self, "effect_dependencies", dependencies)
 
@@ -362,7 +316,6 @@ class RegisteredSemanticLowerer(ABC):
 
     call_id: ClassVar[str]
     schema_version: ClassVar[int]
-    target_descriptor: ClassVar[SkillDescriptor]
 
     @abstractmethod
     def lower(
@@ -414,37 +367,13 @@ class HandOverPoseProvider(ABC):
         """
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True)
 class GroundedSemanticCall:
-    """Factory-owned call lowered from the latest observed context."""
+    """Call lowered from the latest observed context."""
 
     analyzed: AnalyzedSemanticCall
     invocation: ActionInvocation
     _eligible_mask: torch.Tensor = field(repr=False, compare=False)
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Reject construction outside :class:`SemanticSkillCompiler`."""
-        del args, kwargs
-        raise TypeError(
-            "GroundedSemanticCall values are created by "
-            "SemanticSkillCompiler.ground()."
-        )
-
-    @classmethod
-    def _create(
-        cls,
-        *,
-        analyzed: AnalyzedSemanticCall,
-        invocation: ActionInvocation,
-        eligible_mask: torch.Tensor,
-    ) -> GroundedSemanticCall:
-        """Create one compiler-owned grounded result."""
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "analyzed", analyzed)
-        object.__setattr__(instance, "invocation", invocation)
-        object.__setattr__(instance, "_eligible_mask", eligible_mask.clone())
-        instance.__post_init__()
-        return instance
 
     def __post_init__(self) -> None:
         if type(self.analyzed) is not AnalyzedSemanticCall:
@@ -459,6 +388,7 @@ class GroundedSemanticCall:
             raise ValueError("eligible_mask must be a one-dimensional bool tensor.")
         if self._eligible_mask.numel() == 0:
             raise ValueError("eligible_mask must contain at least one environment.")
+        object.__setattr__(self, "_eligible_mask", self._eligible_mask.clone())
 
     @property
     def eligible_mask(self) -> torch.Tensor:
@@ -525,14 +455,6 @@ class SemanticSkillCompiler:
                 raise ValueError(
                     f"Lowerer {call_id!r} schema_version must exactly match "
                     f"descriptor version {descriptor.schema_version}."
-                )
-            target_descriptor = getattr(type(lowerer), "target_descriptor", None)
-            if type(target_descriptor) is not SkillDescriptor or (
-                target_descriptor != descriptor.target_descriptor
-            ):
-                raise ValueError(
-                    f"Lowerer {call_id!r} target_descriptor must exactly match "
-                    "the registered catalog target."
                 )
             lowerers[call_id] = lowerer
         if isinstance(relation_grounders, (str, bytes)):
@@ -688,11 +610,11 @@ class SemanticSkillCompiler:
             if type(call) is Place and call.at is None:
                 target = self._relation_target(bound)
                 assert target.relation is not None
-                destination_registration = self._integration.scene_registry.lookup(
+                destination_metadata = self._integration.manifest.scene.lookup(
                     target.relation.affordance,
                     expected_type=SceneAffordanceRef,
                 )
-                if destination_registration.parent == call.object:
+                if destination_metadata.parent == call.object:
                     raise _diagnostic(
                         "place_self_reference",
                         (*path, index, "call", "destination"),
@@ -709,7 +631,6 @@ class SemanticSkillCompiler:
         analyzed: list[AnalyzedSemanticCall] = []
         for index, bound in enumerate(bound_calls):
             call = bound.linked.call
-            requires_held = type(call) in (Place, HandOver)
             if type(call) is Pick:
                 previous = latest_holder.get(call.object.entity_id)
                 if previous is not None:
@@ -772,27 +693,24 @@ class SemanticSkillCompiler:
                 # A registered extension has no declarative state-flow contract
                 # in Version 1. Treat it as an opaque effect boundary.
                 latest_holder.clear()
-            downstream_targets = (
-                self._downstream_targets(index, bound_calls)
+            downstream_target = (
+                self._downstream_target(index, bound_calls)
                 if type(call) is Pick
-                else ()
+                else None
             )
             analyzed.append(
                 AnalyzedSemanticCall(
                     index=index,
                     bound=bound,
                     effect_kind=effect_kind,
-                    downstream_object_targets=downstream_targets,
-                    requires_verified_held_object=requires_held,
+                    downstream_object_target=downstream_target,
                 )
             )
-        return SemanticWorkflow._create(
+        return SemanticWorkflow(
             workflow_id=workflow_id,
             calls=tuple(analyzed),
             effect_dependencies=tuple(dependencies),
-            engine_owner_id=self._integration.engine.binding_owner_id,
-            skill_catalog_revision=self._integration.engine.skill_catalog_revision,
-            compiler_id=self._compiler_id,
+            _compiler_id=self._compiler_id,
         )
 
     def ground(
@@ -808,7 +726,7 @@ class SemanticSkillCompiler:
         """Lower one analyzed call from the latest immutable observation.
 
         Args:
-            workflow: Factory-owned workflow created by this compiler.
+            workflow: Workflow created by this compiler.
             call_index: Zero-based call index to lower.
             context: Latest immutable planning observation.
             eligible_mask: Rows still eligible to execute this call.
@@ -816,7 +734,7 @@ class SemanticSkillCompiler:
             path: Root diagnostic path.
 
         Returns:
-            Compiler-owned invocation and execution eligibility.
+            Invocation and execution eligibility.
 
         Raises:
             SemanticValidationError: If workflow ownership, live integration,
@@ -831,7 +749,7 @@ class SemanticSkillCompiler:
         if type(revision) is not int or revision < 0:
             raise ValueError("revision must be a non-negative integer.")
         self._assert_workflow_current(workflow, path=path)
-        self._validate_context(context)
+        self._integration.engine._validate_context(context)
         eligible = self._normalize_eligible_mask(eligible_mask, context)
         analyzed = workflow.calls[call_index]
         call = analyzed.call
@@ -858,10 +776,10 @@ class SemanticSkillCompiler:
             invocation_id=f"{workflow.workflow_id}:{call_index}",
             revision=revision,
         )
-        return GroundedSemanticCall._create(
+        return GroundedSemanticCall(
             analyzed=analyzed,
             invocation=invocation,
-            eligible_mask=eligible,
+            _eligible_mask=eligible,
         )
 
     def _assert_current(self, *, path: tuple[PathPart, ...]) -> None:
@@ -891,25 +809,11 @@ class SemanticSkillCompiler:
     ) -> None:
         """Ensure a workflow belongs to this still-current engine revision."""
         self._assert_current(path=("integration", "robot_profile"))
-        engine = self._integration.engine
-        if workflow.engine_owner_id != engine.binding_owner_id:
-            raise _diagnostic(
-                "semantic_workflow_owner_mismatch",
-                path,
-                "The workflow belongs to a different action engine.",
-            )
-        if workflow.compiler_id != self._compiler_id:
+        if workflow._compiler_id != self._compiler_id:
             raise _diagnostic(
                 "semantic_program_stale",
                 path,
                 "The workflow belongs to a different compiler/grounder registry.",
-            )
-        if workflow.skill_catalog_revision != engine.skill_catalog_revision:
-            raise _diagnostic(
-                "semantic_catalog_stale",
-                path,
-                "The installed semantic skill catalog changed after workflow "
-                "analysis.",
             )
 
     @staticmethod
@@ -936,33 +840,15 @@ class SemanticSkillCompiler:
             raise ValueError("eligible_mask must use the context device.")
         return eligible_mask.clone()
 
-    def _validate_context(self, context: PlanningContext) -> None:
-        """Require the grounding observation to match the bound engine batch."""
-        engine = self._integration.engine
-        if context.robot.robot_dof != engine.robot.dof:
-            raise ValueError(
-                "PlanningContext robot_dof must match the compiler engine, "
-                f"got {context.robot.robot_dof} and {engine.robot.dof}."
-            )
-        engine_qpos = engine.robot.get_qpos()
-        if context.batch_size != int(engine_qpos.shape[0]):
-            raise ValueError(
-                "PlanningContext batch size must match the compiler engine, "
-                f"got {context.batch_size} and {engine_qpos.shape[0]}."
-            )
-        if context.robot.qpos.device != engine.device:
-            raise ValueError("PlanningContext and compiler engine must share a device.")
-
-    def _downstream_targets(
+    def _downstream_target(
         self,
         pick_index: int,
         bound_calls: list[BoundSemanticCall],
-    ) -> tuple[SemanticObjectTarget, ...]:
-        """Propagate object targets until the picked object is released."""
+    ) -> SemanticObjectTarget | None:
+        """Return the first target at which the picked object is released."""
         pick = bound_calls[pick_index].linked.call
         assert type(pick) is Pick
         object_id = pick.object.entity_id
-        targets: list[SemanticObjectTarget] = []
         for call_index, bound in enumerate(
             bound_calls[pick_index + 1 :],
             start=pick_index + 1,
@@ -982,22 +868,17 @@ class SemanticSkillCompiler:
                     call,
                     path=("workflow", call_index, "call"),
                 )
-                targets.append(
-                    SemanticObjectTarget(
-                        handover=SemanticHandOverTarget(
-                            provider_id=provider_id,
-                            bound=bound,
-                        )
+                return SemanticObjectTarget(
+                    SemanticHandOverTarget(
+                        provider_id=provider_id,
+                        bound=bound,
                     )
                 )
-                break
             if type(call) is Place:
                 if call.at is not None:
-                    targets.append(SemanticObjectTarget(pose=call.at))
-                else:
-                    targets.append(self._relation_target(bound))
-                break
-        return tuple(targets)
+                    return SemanticObjectTarget(call.at)
+                return self._relation_target(bound)
+        return None
 
     def _lower_pick(
         self,
@@ -1017,10 +898,16 @@ class SemanticSkillCompiler:
         return SemanticLowering(
             goal=GraspGoal(semantics=semantics),
             skill_options=PickUpOptions(
-                downstream_object_target_poses=tuple(
-                    self._ground_object_target(target, context)
-                    for target in analyzed.downstream_object_targets
-                )
+                downstream_object_target_poses=(
+                    ()
+                    if analyzed.downstream_object_target is None
+                    else (
+                        self._ground_object_target(
+                            analyzed.downstream_object_target,
+                            context,
+                        ),
+                    )
+                ),
             ),
         )
 
@@ -1040,7 +927,7 @@ class SemanticSkillCompiler:
             context,
             eligible,
             slot_id="primary",
-            path=(*path, analyzed.index, "call", "object"),
+            path=(*path, analyzed.index, "call"),
         )
         del control_part
         if call.at is not None:
@@ -1076,7 +963,7 @@ class SemanticSkillCompiler:
             context,
             eligible,
             slot_id="source",
-            path=(*path, analyzed.index, "call", "object"),
+            path=(*path, analyzed.index, "call"),
         )
         _, provider = self._require_handover_pose_provider(
             call,
@@ -1097,7 +984,7 @@ class SemanticSkillCompiler:
         )
         middle = self._ground_object_target(targets.middle, context)
         final_target = (
-            SemanticObjectTarget(pose=call.final_target)
+            SemanticObjectTarget(call.final_target)
             if call.final_target is not None
             else targets.final
         )
@@ -1174,20 +1061,23 @@ class SemanticSkillCompiler:
         affordance_ref = bound.linked.affordances.get("destination")
         if affordance_ref is None:
             raise AssertionError("Linked relation place lacks destination affordance.")
-        registration = self._integration.scene_registry.lookup(
+        metadata = self._integration.manifest.scene.lookup(
             affordance_ref,
             expected_type=SceneAffordanceRef,
         )
-        if registration.affordance is None or registration.affordance_revision is None:
+        if (
+            metadata.affordance_payload_type is None
+            or metadata.affordance_revision is None
+        ):
             raise AssertionError(
                 "Capability-bearing relation affordance lacks payload metadata."
             )
         return SemanticObjectTarget(
-            relation=SemanticRelationTarget(
+            SemanticRelationTarget(
                 capability=capability,
                 affordance=affordance_ref,
-                payload_type=type(registration.affordance),
-                payload_revision=registration.affordance_revision,
+                payload_type=metadata.affordance_payload_type,
+                payload_revision=metadata.affordance_revision,
             )
         )
 
@@ -1387,7 +1277,7 @@ class SemanticSkillCompiler:
         if held is None or held.semantics.entity_id != call_object.entity_id:
             raise _diagnostic(
                 "verified_held_object_required",
-                path,
+                (*path, "object"),
                 f"Call requires verified object {call_object.entity_id!r} held by "
                 f"{target.control_part!r}.",
             )
@@ -1400,7 +1290,7 @@ class SemanticSkillCompiler:
             )
             raise _diagnostic(
                 "verified_held_object_required",
-                path,
+                (*path, "object"),
                 f"Object {call_object.entity_id!r} is not verified as held in "
                 "every eligible environment.",
                 missing_env_ids,

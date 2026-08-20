@@ -326,11 +326,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             request.skill_options,
             downstream_object_target_poses=tuple(
                 resolve_pose_goal(
-                    target,
+                    downstream_target,
                     context,
                     name=f"downstream_object_target_poses[{index}]",
                 )
-                for index, target in enumerate(
+                for index, downstream_target in enumerate(
                     request.skill_options.downstream_object_target_poses
                 )
             ),
@@ -445,6 +445,15 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             ),
             expected_effects=StateDelta(held_object_updates={control_part: held}),
             segment_lengths=segment_lengths,
+            # Once the approach is dispatched the object can move because of
+            # contact or grasping. That self-induced motion must not look like
+            # an external dynamic-goal update.
+            scene_dependency_end_segment=(
+                "approach"
+                if segment_lengths.get("approach", 0) > 0
+                and self._scene_dependencies(request)
+                else None
+            ),
         )
 
     def _resolve_grasp_pose(

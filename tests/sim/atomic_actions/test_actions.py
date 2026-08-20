@@ -1105,6 +1105,7 @@ def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
     assert held is not None
     assert torch.allclose(held.grasp_xpos, expected_grasp)
     assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependency_end_segment == "approach"
 
 
 def test_pick_session_replans_when_late_bound_target_moves() -> None:

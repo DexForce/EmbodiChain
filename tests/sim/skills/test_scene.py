@@ -24,7 +24,12 @@ from typing import Literal
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import Affordance, EntityState, SceneSnapshot
+from embodichain.lab.sim.atomic_actions import (
+    Affordance,
+    AntipodalAffordance,
+    EntityState,
+    SceneSnapshot,
+)
 from embodichain.lab.sim.planners.base_planner import CollisionWorldInfo
 from embodichain.lab.sim.skills import (
     AmbiguousSceneAffordanceError,

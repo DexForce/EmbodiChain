@@ -33,6 +33,7 @@ from embodichain.lab.sim.atomic_actions import (
     CARTESIAN_POSE_CAPABILITY,
     ControlPartCommandProfile,
     EntityState,
+    ExecutionStatus,
     FORWARD_KINEMATICS_CAPABILITY,
     GRASP_CAPABILITY,
     GraspGoal,
@@ -45,7 +46,6 @@ from embodichain.lab.sim.atomic_actions import (
     PlanningContext,
     RobotObservation,
     SceneEntityPose,
-    SkillDescriptor,
     TaskState,
 )
 from embodichain.lab.sim.skills.calls import (
@@ -58,7 +58,6 @@ from embodichain.lab.sim.skills.calls import (
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.compiler import (
-    GroundedSemanticCall,
     HandOverPoseProvider,
     HandOverPoseTargets,
     RegisteredSemanticLowerer,
@@ -67,7 +66,6 @@ from embodichain.lab.sim.skills.compiler import (
     SemanticObjectTarget,
     SemanticRelationTarget,
     SemanticSkillCompiler,
-    SemanticWorkflow,
 )
 from embodichain.lab.sim.skills.integration import (
     BoundSemanticCall,
@@ -142,7 +140,6 @@ class _InspectLowerer(RegisteredSemanticLowerer):
 
     call_id: ClassVar[str] = "vendor.inspect"
     schema_version: ClassVar[int] = 1
-    target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def lower(
         self,
@@ -177,7 +174,6 @@ class _SubclassOutputLowerer(RegisteredSemanticLowerer):
 
     call_id: ClassVar[str] = "vendor.inspect"
     schema_version: ClassVar[int] = 1
-    target_descriptor: ClassVar[SkillDescriptor] = _PICK_TARGET
 
     def __init__(self, output: str) -> None:
         self.output = output
@@ -224,9 +220,9 @@ class _DualCenterHandOverProvider(HandOverPoseProvider):
         del call, context, bound
         self.calls += 1
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(pose=SceneEntityPose("table_top")),
+            middle=SemanticObjectTarget(SceneEntityPose("table_top")),
             final=SemanticObjectTarget(
-                pose=SemanticPose(
+                SemanticPose(
                     (0.5, 0.0, 0.4),
                     (1.0, 0.0, 0.0, 0.0),
                 )
@@ -386,8 +382,6 @@ def _integration(
             SemanticCallDescriptor(
                 call_id="vendor.inspect",
                 spec_type=RegisteredSemanticCall,
-                skill_id=_PICK_TARGET.skill_id,
-                binding_contract=_PICK_TARGET.binding_contract,
                 target_descriptor=_PICK_TARGET,
             )
         )
@@ -484,7 +478,8 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     )
 
     assert [provider.calls for provider in providers] == [0, 0]
-    assert workflow.calls[0].downstream_object_targets[0].pose is not drop
+    assert workflow.calls[0].downstream_object_target is not None
+    assert workflow.calls[0].downstream_object_target.pose is not drop
     assert workflow.effect_dependencies[0].producer_index == 0
     context = _context(registry)
     grounded = compiler.ground(workflow, 0, context)
@@ -497,6 +492,31 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
         drop.to_matrix(),
     )
     engine.resolve(grounded.invocation)
+
+
+def test_grounded_eligibility_hands_off_to_execution_session() -> None:
+    registry, _ = _scene_registry()
+    compiler, engine = _compiler(registry)
+    context = _context(registry)
+    workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
+    eligible_mask = torch.tensor([False, False])
+
+    grounded = compiler.ground(
+        workflow,
+        0,
+        context,
+        eligible_mask=eligible_mask,
+    )
+    eligible_mask.fill_(True)
+    session = engine.start(
+        (grounded.invocation,),
+        context,
+        eligible_mask=grounded.eligible_mask,
+    )
+
+    assert grounded.eligible_mask.tolist() == [False, False]
+    assert session.status is ExecutionStatus.FAILED
+    assert session.eligible_mask.tolist() == [False, False]
 
 
 def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
@@ -612,7 +632,7 @@ def test_handover_uses_profile_selected_named_provider_and_stops_lookahead() -> 
 
     assert provider.calls == 0
     assert [scene_provider.calls for scene_provider in providers] == [0, 0]
-    assert len(workflow.calls[0].downstream_object_targets) == 1
+    assert workflow.calls[0].downstream_object_target is not None
     pick = compiler.ground(workflow, 0, _context(registry, robot_dof=4))
     assert provider.calls == 1
     pick_options = pick.invocation.skill_options
@@ -798,6 +818,7 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
     with pytest.raises(SemanticValidationError) as wrong_error:
         compiler.ground(workflow, 0, wrong_context)
     assert wrong_error.value.diagnostic.code == "verified_held_object_required"
+    assert wrong_error.value.diagnostic.rendered_path == "workflow[0].call.object"
 
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     semantics = compiler.ground(
@@ -814,6 +835,7 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
     with pytest.raises(SemanticValidationError) as inactive_error:
         compiler.ground(workflow, 0, partial_context)
     assert inactive_error.value.diagnostic.code == "verified_held_object_required"
+    assert inactive_error.value.diagnostic.rendered_path == "workflow[0].call.object"
 
     grounded = compiler.ground(
         workflow,
@@ -822,12 +844,6 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
         eligible_mask=torch.tensor([True, False]),
     )
     assert grounded.eligible_mask.tolist() == [True, False]
-    with pytest.raises(TypeError, match="created by"):
-        GroundedSemanticCall(
-            analyzed=grounded.analyzed,
-            invocation=grounded.invocation,
-            eligible_mask=torch.tensor([True, False]),
-        )
 
 
 def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
@@ -855,7 +871,7 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
         )
     )
 
-    assert workflow.calls[0].downstream_object_targets == ()
+    assert workflow.calls[0].downstream_object_target is None
     assert workflow.effect_dependencies[0].producer_index is None
     grounded = compiler.ground(workflow, 1, _context(registry))
     assert grounded.invocation.skill_id == "pick_up"
@@ -876,17 +892,12 @@ def test_registered_lowerer_cannot_return_target_subclasses(output: str) -> None
         compiler.ground(workflow, 0, _context(registry))
 
 
-def test_workflow_is_factory_owned_and_cannot_cross_compilers() -> None:
+def test_workflow_cannot_cross_compilers() -> None:
     registry, _ = _scene_registry()
     first, _ = _compiler(registry)
     second, _ = _compiler(registry)
     workflow = first.analyze((Pick(object=SceneObjectRef("cube")),))
 
-    with pytest.raises(TypeError, match="created by"):
-        SemanticWorkflow()
     with pytest.raises(SemanticValidationError) as error:
         second.ground(workflow, 0, _context(registry))
-    assert error.value.diagnostic.code in {
-        "semantic_program_stale",
-        "semantic_workflow_owner_mismatch",
-    }
+    assert error.value.diagnostic.code == "semantic_program_stale"

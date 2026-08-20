@@ -64,8 +64,6 @@ def _call_descriptor(
     return SemanticCallDescriptor(
         call_id=call_id,
         spec_type=spec_type,
-        skill_id=target.skill_id,
-        binding_contract=target.binding_contract,
         target_descriptor=target,
     )
 
@@ -341,8 +339,6 @@ def test_catalog_rejects_executable_call_subclasses() -> None:
         SemanticCallDescriptor(
             call_id="vendor.unsafe",
             spec_type=UnsafeRegisteredCall,
-            skill_id="unsafe",
-            binding_contract=SkillBindingContract(),
         )
 
 
@@ -358,12 +354,20 @@ def test_registered_payload_rejects_value_subclasses() -> None:
 
 
 def test_builtin_descriptor_target_cannot_be_remapped() -> None:
+    target = builtin_semantic_call_catalog().discover("pick").target_descriptor
+    assert target is not None
+    remapped = SkillDescriptor(
+        skill_id="move_joints",
+        goal_type=target.goal_type,
+        options_type=target.options_type,
+        binding_contract=SkillBindingContract(),
+    )
+
     with pytest.raises(ValueError, match="exact curated"):
         SemanticCallDescriptor(
             call_id=Pick.call_kind,
             spec_type=Pick,
-            skill_id="move_joints",
-            binding_contract=SkillBindingContract(),
+            target_descriptor=remapped,
         )
 
 
@@ -375,8 +379,6 @@ def test_catalog_rejects_descriptor_subclass_with_live_state() -> None:
     descriptor = LiveDescriptor(
         call_id=source.call_id,
         spec_type=source.spec_type,
-        skill_id=source.skill_id,
-        binding_contract=source.binding_contract,
         target_descriptor=source.target_descriptor,
     )
 
@@ -403,8 +405,6 @@ def test_descriptor_rejects_runtime_bearing_binding_contract_subclasses() -> Non
         SemanticCallDescriptor(
             call_id="vendor.inspect",
             spec_type=RegisteredSemanticCall,
-            skill_id=target.skill_id,
-            binding_contract=contract,
             target_descriptor=remapped_target,
         )
 
@@ -428,7 +428,5 @@ def test_descriptor_rejects_target_descriptor_subclass() -> None:
         SemanticCallDescriptor(
             call_id="vendor.inspect",
             spec_type=RegisteredSemanticCall,
-            skill_id=target.skill_id,
-            binding_contract=target.binding_contract,
             target_descriptor=live_target,
         )

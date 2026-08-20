@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, FrozenInstanceError
+from dataclasses import dataclass, FrozenInstanceError, replace
 from unittest.mock import Mock
 
 import pytest
@@ -862,6 +862,25 @@ def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
         _DependencyAction._authorize_command_targets(
             request,
             TimedCommandSequence(frames=(frame,), env_ids=context.env_ids),
+        )
+
+
+def test_action_plan_rejects_unknown_scene_dependency_end_segment() -> None:
+    plan = _action_plan(
+        _command_sequence(
+            env_ids=torch.tensor([0, 1], dtype=torch.long),
+            frame_count=2,
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="scene_dependency_end_segment must name an ActionPlan segment",
+    ):
+        replace(
+            plan,
+            scene_dependencies=("target",),
+            scene_dependency_end_segment="approach",
         )
 
 

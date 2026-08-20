@@ -70,7 +70,7 @@ Choose the public engine entry point by lifecycle, not by skill type:
 |---|---|---|
 | `engine.plan(invocation, context)` | Inspect or plan one registered action | Returns one `ActionPlan`; does not project a context for another action |
 | `engine.compile(invocations, context)` | Plan an ordered sequence against a fixed scene | Returns a concatenated `CompiledTrajectory`; propagates hypothetical qpos and expected effects through `projected_context` |
-| `engine.start(invocations, context)` | Execute incrementally from observations | Returns an `ExecutionSession`; `tick(latest_context)` emits commands and performs bounded recovery |
+| `engine.start(invocations, context, *, eligible_mask=None)` | Execute incrementally from observations | Returns an `ExecutionSession`; the optional initial cohort is sticky, and `tick(latest_context)` emits commands and performs bounded recovery |
 
 None steps simulation directly. `compile()` never observes physical execution;
 split compilation at observation boundaries when later goals depend on measured
@@ -279,6 +279,82 @@ installed as aliases, and unlisted simulation entities are never scanned.
 Collision participation defaults to `NONE`, and every static/dynamic collision
 registration requires a geometry provider.
 
+`SceneEntityMetadata` is the single provider-free scene declaration model.
+`SceneEntityManifest` specializes that value without redeclaring its fields,
+and both `SceneManifest` and `SceneRegistry` use the same canonical ID, alias,
+parent, native-member, and affordance index. A `SceneManifest` additionally
+snapshots `collision_world_mode`; `SemanticIntegrationManifest.bind()` rejects
+live metadata or collision-mode drift before installing a robot profile.
+
+## Semantic workflow compilation
+
+Semantic calls (`Pick`, `Place`, `HandOver`, and catalog-registered values) are
+robot-independent declarations. `SemanticCallDescriptor` has one canonical
+atomic `target_descriptor`; its `skill_id` and `binding_contract` are derived
+views, not separately stored values. Curated call targets cannot be remapped.
+Registered calls require an explicit agent-visible target plus an installed
+`RegisteredSemanticLowerer` with a matching call ID and schema version.
+
+`SemanticSkillCompiler.analyze()` performs provider-free linking, resource and
+affordance validation, held-object flow analysis, and first-release look-ahead.
+A pick therefore owns zero or one downstream object target rather than an
+arbitrary target tuple. Relation targets retain affordance payload type and
+revision metadata and stay late-bound through an explicitly installed
+`RelationTargetGrounder`; handover poses stay behind a named
+`HandOverPoseProvider` selected by the robot profile.
+
+`SemanticSkillCompiler.ground()` lowers exactly one analyzed call from the
+latest `PlanningContext` and returns a `GroundedSemanticCall`. Its
+`eligible_mask` is an owned snapshot and must be handed to execution together
+with the invocation:
+
+```python
+grounded = compiler.ground(workflow, call_index, context, eligible_mask=cohort)
+session = engine.start(
+    (grounded.invocation,),
+    context,
+    eligible_mask=grounded.eligible_mask,
+)
+```
+
+The compiler identity prevents a workflow from crossing lowerer/grounder
+registries. Engine/profile staleness is checked through the bound integration;
+the workflow does not duplicate engine-owner or catalog-revision fields.
+
+## Semantic runtime facade
+
+`embodichain.lab.sim.skills.SemanticSkillRuntime` is the application-facing
+orchestration layer. `bind()` connects an explicit manifest, registry, engine,
+observation provider, command sink, and clock; `from_simulation()` assembles the
+standard joint-position simulation ports while still requiring an explicit
+registry, robot profile, and motion generator. Its optional `control_dt`
+selects a command cadence independently of the simulation physics period. A
+runtime-level `runner_cfg` overrides all calls; when omitted, each grounded
+call uses the `ExecutionRunnerCfg` owned by its selected `SkillPolicyPreset`.
+The runtime exposes only calls supported by both the semantic catalog and the
+currently bound robot profile, and allows exactly one active `SemanticTask`
+because no resource scheduler or lease manager exists.
+
+`SemanticSkillRuntime.run()` is the blocking one-segment convenience path and
+requires a `SemanticEffectVerifier`. Use `start()` when effect verification is
+asynchronous. A `SemanticTask` retains externally verified `TaskState`, stable
+environment IDs, and the sticky eligible cohort across several independently
+analyzed segments. `run_segment()` supports dynamic application decisions at
+safe semantic-call boundaries; submit all known calls in one segment when Pick
+look-ahead should account for a downstream Place or HandOver target.
+
+`SemanticExecution` always JIT-grounds and starts one invocation at a time. It
+uses a fresh observation before each call, delegates local recovery and safe
+stop to `ExecutionRunner`, commits only verified effects, then carries the
+session's task state and eligibility into the next grounding boundary. Manual
+execution reports `WAITING_FOR_EFFECT` and resumes through `step(effect_success=...)`;
+compatible in-place call changes use `revise_current()`, which reanalyzes the
+workflow and still inherits the runner's same-skill, same-invocation, and
+same-runtime-address restrictions. Runtime failures remain terminal; automatic
+task-level skill replacement or symbolic-state reconciliation is not provided.
+A failed or cancelled segment closes its task and releases runtime ownership;
+successful dynamic segments retain ownership until `finish()` or cancellation.
+
 `registry.make_planning_scene_provider(motion_generator, batch_size=...)`
 returns a fresh `RegistrySceneProvider` with independent baselines and revision
 counters after eager registry/provider/planner validation. Snapshots expose
@@ -341,7 +417,7 @@ Scene dependencies must match the poses each primitive actually consumes:
 |---|---|
 | `MoveEndEffector` | A `SceneEntityPose` in `xpos`. |
 | `MoveJoints` | None; its target is qpos or a named control-profile command. |
-| `PickUp` | Always its semantic `entity_id`, when present, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. |
+| `PickUp` | Always its semantic `entity_id`, when present, because the object pose is grounded once and reused; plus any goal-owned `SceneEntityPose`, such as `grasp_xpos`. These dependencies are monitored only through the `approach` segment. |
 | `CoordinatedPickment` | Goal-owned target/initial `SceneEntityPose` values; the semantic `entity_id` only when `object_initial_pose` is omitted and semantic grounding supplies that pose. |
 | `Place` | A `SceneEntityPose` in ordinary `xpos`; for `AssembleGoal`, `base_pose` when supplied. Omitting `base_pose` uses the deprecated live `AssembleAffordance.base_object_entity` fallback with no dependency. |
 | `MoveHeldObject` | A `SceneEntityPose` in `object_target_pose`; current object orientation is derived from observed EEF pose plus verified `object_to_eef`, not a scene-object read. |
@@ -355,6 +431,12 @@ Scene dependencies must match the poses each primitive actually consumes:
 Therefore, a custom action that consumes a snapshot pose through semantic data
 must override `_scene_dependencies()`, union `super()` dependencies, and add the
 consumed semantic ID. Do not declare an ID merely because semantics are present.
+`ActionPlan.scene_dependency_end_segment` can bound dynamic-goal monitoring to
+the reversible part of a staged action. `PickUp` stops monitoring after its
+approach is dispatched: target motion before contact still replans, while
+contact-, grasp-, and lift-induced object motion is not misclassified as an
+external target update. Collision-world and joint-tracking checks remain
+independent of this boundary.
 
 ## Static compilation
 
@@ -388,7 +470,11 @@ snapshot every time the action plans. Its entity ID is recorded in
 `ActionPlan.scene_dependencies`.
 
 ```python
-session = engine.start(invocations, initial_context)
+session = engine.start(
+    invocations,
+    initial_context,
+    eligible_mask=initial_eligible_mask,
+)
 runner = ExecutionRunner(
     session,
     observation_provider,
@@ -420,6 +506,12 @@ active targets so the caller can still hold them. The session monitors:
   actions;
 - action-attempt timeout;
 - planner and semantic-effect failure.
+
+The optional initial `eligible_mask` is copied onto the engine device and must
+be a boolean tensor with one value per environment. Initially ineligible rows
+never re-enter the cohort. They are excluded from every command, replan, effect
+verification, and later invocation barrier. An all-false cohort creates a
+failed session without invoking any action planner.
 
 It replans from the latest observation within per-environment budgets. The
 budgets and eligibility masks are row-local, while the action waypoint cursor
@@ -538,6 +630,17 @@ Runnable closed-loop examples live under `scripts/tutorials/atomic_action/`:
 `tracking_error_recovery.py`, `moving_target_recovery.py`, and
 `dynamic_obstacle_recovery.py`. Each injects one disturbance, reports the
 structured invalidation/replan events, and requires terminal completion.
+
+Semantic integration tutorials live under `scripts/tutorials/semantic_skill/`.
+`place.py` executes `Pick -> Place` through `SemanticSkillRuntime`, verifying
+the observed lift, planned object-to-EEF relation, release pose, and open hand.
+`hand_over.py` demonstrates disjoint dual-arm resources plus an explicit
+`RegisteredSemanticLowerer`, then verifies source release and receiver
+ownership at the final target. Both report structured recovery events and use
+`--diagnose_plan` only for a separate offline compile that projects
+hypothetical effects without executing them. Release and ownership-transfer
+presets disable whole-action effect retries because those physical changes are
+not safely repeatable without state reconciliation.
 
 The latest validated session context is retained for safe hold if the first
 live observation fails. Environment IDs must remain stable and ordered for the

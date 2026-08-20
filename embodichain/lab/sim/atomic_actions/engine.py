@@ -595,6 +595,8 @@ class AtomicActionEngine:
         self,
         invocations: Iterable[ActionInvocation],
         context: PlanningContext | None = None,
+        *,
+        eligible_mask: torch.Tensor | None = None,
     ) -> ExecutionSession:
         """Start closed-loop execution for a grounded invocation sequence.
 
@@ -602,6 +604,9 @@ class AtomicActionEngine:
             invocations: Grounded action requests in execution order.
             context: Initial measured state and scene snapshot. The engine
                 captures one when omitted.
+            eligible_mask: Optional per-environment cohort allowed to execute.
+                Ineligible rows remain excluded for the whole session. All rows
+                are eligible when omitted.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -609,7 +614,12 @@ class AtomicActionEngine:
         from .execution import ExecutionSession
 
         initial = self.initial_context() if context is None else context
-        return ExecutionSession(self, tuple(invocations), initial)
+        return ExecutionSession(
+            self,
+            tuple(invocations),
+            initial,
+            eligible_mask=eligible_mask,
+        )
 
     def _validate_context(self, context: PlanningContext) -> None:
         """Validate an externally supplied planning context."""
