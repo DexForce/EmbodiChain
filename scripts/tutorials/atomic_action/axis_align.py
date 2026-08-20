@@ -27,7 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
-
+from typing import Sequence
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
@@ -61,12 +61,11 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 OBJECT_SIZE = (0.05, 0.05, 0.05)
 OBJECT_XY = (-0.42, -0.08)
-DEFAULT_INTERNAL_AXIS = (0.0, 0.0, 1.0)
+DEFAULT_INTERNAL_AXIS = (1.0, 0.0, 0.0)
 DEFAULT_TARGET_AXIS = (0.0, 0.0, 1.0)
-UPRIGHT_INTERNAL_AXIS = (1.0, 0.0, 0.0)
 HORIZONTAL_TARGET_AXIS = (0.0, 1.0, 0.0)
 ALIGNMENT_AXES = {
-    "upright": (UPRIGHT_INTERNAL_AXIS, DEFAULT_TARGET_AXIS),
+    "upright": (DEFAULT_INTERNAL_AXIS, DEFAULT_TARGET_AXIS),
     "horizontal_align": (DEFAULT_INTERNAL_AXIS, HORIZONTAL_TARGET_AXIS),
 }
 ALIGN_SAMPLE_INTERVAL = 180
@@ -111,7 +110,7 @@ def create_align_object(sim) -> RigidObject:
 
 
 def create_axis_align_semantics(
-    obj: RigidObject, args: argparse.Namespace
+    obj: RigidObject, args: argparse.Namespace, obj_internal_axis: Sequence[float]
 ) -> ObjectSemantics:
     """Extend the tutorial antipodal affordance with a local alignment axis."""
     semantics = create_antipodal_semantics(
@@ -134,7 +133,7 @@ def create_axis_align_semantics(
             gripper_collision_cfg=antipodal.gripper_collision_cfg,
             force_reannotate=antipodal.force_reannotate,
             internal_axis=torch.tensor(
-                ALIGNMENT_AXES[args.alignment][0], dtype=torch.float32
+                obj_internal_axis, dtype=torch.float32
             ),
         ),
     )
@@ -159,7 +158,11 @@ def main() -> None:
             )
         },
     )
-    semantics = create_axis_align_semantics(obj, args)
+    # apply object internal axis to the semantics creation
+    obj_internal_axis = ALIGNMENT_AXES[args.alignment][0]
+    # apply target axis for the alignment skill
+    align_target_axis = ALIGNMENT_AXES[args.alignment][1]
+    semantics = create_axis_align_semantics(obj, args, obj_internal_axis)
     if not args.no_vis_eef_axis:
         draw_axis_marker(
             sim,
@@ -187,7 +190,7 @@ def main() -> None:
                 ),
                 skill_options=AxisAlignOptions(
                     target_axis=torch.tensor(
-                        ALIGNMENT_AXES[args.alignment][1],
+                        align_target_axis,
                         dtype=torch.float32,
                         device=sim.device,
                     ),

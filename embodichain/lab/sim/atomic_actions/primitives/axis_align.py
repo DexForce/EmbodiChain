@@ -25,7 +25,7 @@ from typing import ClassVar
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
+from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv, get_relative_rotation
 
 from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
 from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
@@ -155,6 +155,23 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             dependencies.add(entity_id)
         return tuple(sorted(dependencies))
 
+    def _find_symmetric_nearest_xpos(
+        self, target_xpos: torch.Tensor, reference_xpos: torch.Tensor
+    ) -> torch.Tensor:
+        """Find the nearest symmetric pose to the reference pose."""
+        symmetric_xpos = target_xpos.clone()
+        symmetric_xpos[:, :3, 0] = -symmetric_xpos[:, :3, 0]
+        symmetric_xpos[:, :3, 1] = -symmetric_xpos[:, :3, 1]
+        angle_a = get_relative_rotation(
+            reference_xpos[:, :3, :3], target_xpos[:, :3, :3]
+        )
+        angle_b = get_relative_rotation(
+            reference_xpos[:, :3, :3], symmetric_xpos[:, :3, :3]
+        )
+        choose_target = (angle_a < angle_b)[..., None, None]
+        target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
+        return target_xpos
+    
     def _plan(
         self,
         request: ResolvedActionRequest[AxisAlignGoal, AxisAlignOptions],
@@ -208,6 +225,12 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             rotation_axis,
             rotation_angle,
             object_part=options.pick_object_part,
+        )
+        grasp_xpos = self._find_symmetric_nearest_xpos(
+            grasp_xpos,
+            reference_xpos=self.robot.compute_fk(
+                qpos=start_arm_qpos, name=manipulator.name, to_matrix=True
+            ),
         )
         grasp_success = normalize_success_mask(
             grasp_success,
@@ -414,11 +437,11 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             if valid:
                 finite_cost = torch.isfinite(costs)
                 if rotation_angle[env_index] > 1.0e-6:
-                    grasp_x_axis = torch.nn.functional.normalize(
-                        candidates[:, :3, 0], dim=1
+                    grasp_y_axis = torch.nn.functional.normalize(
+                        candidates[:, :3, 1], dim=1
                     )
                     perpendicularity_error = torch.abs(
-                        torch.matmul(grasp_x_axis, rotation_axis[env_index])
+                        torch.matmul(grasp_y_axis, rotation_axis[env_index])
                     )
                     best_error = perpendicularity_error[finite_cost].min()
                     preferred = finite_cost & torch.isclose(
