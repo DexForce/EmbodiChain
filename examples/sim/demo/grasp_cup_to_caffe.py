@@ -32,6 +32,7 @@ from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.objects import Robot, RigidObject
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     MarkerCfg,
     JointDrivePropertiesCfg,
@@ -73,8 +74,9 @@ def initialize_simulation(args) -> SimulationManager:
     """
     config = SimulationManagerCfg(
         headless=True,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         physics_dt=1.0 / 100.0,
         num_envs=args.num_envs,
         arena_space=2.5,
@@ -434,9 +436,6 @@ def main():
 
     if not args.headless:
         sim.open_window()
-
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
 
     run_simulation(sim, robot, cup, caffe)
 

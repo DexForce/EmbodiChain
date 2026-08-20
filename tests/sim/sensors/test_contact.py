@@ -43,14 +43,14 @@ CONTACT_TEST_HEIGHT = 240
 
 
 class ContactTest:
-    def setup_simulation(self, sim_device, renderer="hybrid"):
+    def setup_simulation(self, device, renderer="hybrid"):
         sim_cfg = SimulationManagerCfg(
             width=CONTACT_TEST_WIDTH,
             height=CONTACT_TEST_HEIGHT,
             num_envs=2,
             headless=True,
             physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-            sim_device=sim_device,
+            device=device,
             render_cfg=RenderCfg(renderer=renderer),
         )
 

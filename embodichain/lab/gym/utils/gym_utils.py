@@ -411,8 +411,8 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
-        PhysicsCfg,
         RenderCfg,
+        physics_cfg_for_backend,
     )
     from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.visualization import VisualizationCfg, ViserServerCfg
@@ -452,6 +452,8 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
     physics_config = deepcopy(config.get("physics_config", {}))
     if "gravity" in physics_config:
         physics_config["gravity"] = np.asarray(physics_config["gravity"])
+    physics_cfg = physics_cfg_for_backend(config.get("physics", "default"))
+    physics_cfg = type(physics_cfg)(**physics_config)
 
     render_config = deepcopy(config.get("render_cfg", {}))
     if "renderer" in config:
@@ -471,11 +473,11 @@ def config_to_cfg(config: dict, manager_modules: list = None) -> "EmbodiedEnvCfg
 
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=config.get("headless", False),
-        sim_device=config.get("device", "cpu"),
+        device=config.get("device", "cpu"),
         render_cfg=RenderCfg(**render_config),
         gpu_id=config.get("gpu_id", 0),
         arena_space=config.get("arena_space", 5.0),
-        physics_config=PhysicsCfg(**physics_config),
+        physics_cfg=physics_cfg,
         visualization=VisualizationCfg(
             **visualization_config,
             viser_server=viser_server,
@@ -824,6 +826,7 @@ def add_env_launcher_args_to_parser(
         --device: Device to run the environment on (default: 'cpu')
         --headless: Whether to perform the simulation in headless mode (default: False)
         --renderer: Renderer backend to use for the simulation. Options are 'hybrid', 'fast-rt', and 'rt'. (default: 'hybrid')
+        --physics: Physics backend configuration to use. Options are 'default' and 'newton'. (default: 'default')
         --gpu_id: The GPU ID to use for the simulation (default: 0)
         --gym_config: Path to gym config file (default: '')
         --action_config: Path to action config file (default: None)
@@ -869,6 +872,15 @@ def add_env_launcher_args_to_parser(
         help="Renderer backend to use for the simulation. When loading a gym "
         "config, the configured render_cfg.renderer is used unless this option "
         "is provided.",
+    )
+    parser.add_argument(
+        "--physics",
+        type=str,
+        choices=["default", "newton"],
+        default=None if require_gym_config else "default",
+        help="Physics backend configuration to use for the simulation. When "
+        "loading a gym config, the configured backend is used unless this "
+        "option is provided.",
     )
     parser.add_argument(
         "--arena_space",
@@ -974,6 +986,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     merged_config["headless"] = args.headless or viser_enabled
     if args.renderer is not None:
         merged_config["renderer"] = args.renderer
+    if getattr(args, "physics", None) is not None:
+        merged_config["physics"] = args.physics
     merged_config["gpu_id"] = args.gpu_id
     merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:

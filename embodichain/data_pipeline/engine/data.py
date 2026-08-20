@@ -287,7 +287,7 @@ def _run_sim_worker(
     env_cfg.max_episode_steps = int(shared_buffer.batch_size[1])
     env_cfg.sim_cfg = SimulationManagerCfg(
         headless=gym_config.get("headless", True),
-        sim_device=gym_config.get("device", "cpu"),
+        device=gym_config.get("device", "cpu"),
         render_cfg=RenderCfg(renderer=gym_config.get("renderer", "hybrid")),
         gpu_id=gym_config.get("gpu_id", 0),
     )

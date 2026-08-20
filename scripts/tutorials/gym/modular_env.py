@@ -36,6 +36,7 @@ from embodichain.lab.sim.sensors import StereoCameraCfg, SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     LightCfg,
     ArticulationCfg,
     RobotCfg,
@@ -196,7 +197,9 @@ if __name__ == "__main__":
         sim_cfg=SimulationManagerCfg(
             render_cfg=RenderCfg(renderer=args.renderer),
             headless=args.headless,
-            sim_device=args.device,
+            device=args.device,
+            num_envs=args.num_envs,
+            physics_cfg=physics_cfg_for_backend(args.physics),
             visualization=visualization_cfg_from_args(args),
         ),
         num_envs=args.num_envs,

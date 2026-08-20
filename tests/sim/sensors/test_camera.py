@@ -50,7 +50,7 @@ class CameraTest:
         # Setup SimulationManager
         config = SimulationManagerCfg(
             headless=True,
-            sim_device=sim_device,
+            device=sim_device,
             render_cfg=RenderCfg(renderer=renderer),
             num_envs=num_envs,
         )

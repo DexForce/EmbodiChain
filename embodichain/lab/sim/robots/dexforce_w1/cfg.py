@@ -335,7 +335,7 @@ if __name__ == "__main__":
     np.set_printoptions(precision=5, suppress=True)
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 
-    config = SimulationManagerCfg(headless=True, sim_device="cpu", num_envs=4)
+    config = SimulationManagerCfg(headless=True, device="cpu", num_envs=4)
     sim = SimulationManager(config)
 
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})

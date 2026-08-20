@@ -28,6 +28,7 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     RigidObjectCfg,
     RigidBodyAttributesCfg,
@@ -48,6 +49,7 @@ class RandomReachEnv(BaseEnv):
         headless=False,
         device="cpu",
         renderer="hybrid",
+        physics_cfg="default",
         visualization: VisualizationCfg | None = None,
         **kwargs,
     ) -> None:
@@ -55,8 +57,9 @@ class RandomReachEnv(BaseEnv):
             sim_cfg=SimulationManagerCfg(
                 headless=headless,
                 arena_space=2.0,
-                sim_device=device,
+                device=device,
                 render_cfg=RenderCfg(renderer=renderer),
+                physics_cfg=physics_cfg_for_backend(physics_cfg),
                 visualization=visualization or VisualizationCfg(),
             ),
             num_envs=num_envs,
@@ -137,6 +140,7 @@ if __name__ == "__main__":
         headless=args.headless,
         device=args.device,
         renderer=args.renderer,
+        physics_cfg=args.physics,
         visualization=visualization_cfg_from_args(args),
     )
 

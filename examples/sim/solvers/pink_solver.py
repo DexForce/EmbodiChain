@@ -40,10 +40,10 @@ def main(visualization: VisualizationCfg | None = None) -> None:
     torch.set_printoptions(precision=5, sci_mode=False)
 
     # Set up simulation with specified device (CPU or CUDA)
-    sim_device = "cpu"
+    device = "cpu"
     config = SimulationManagerCfg(
         headless=False,
-        sim_device=sim_device,
+        device=device,
         visualization=visualization or VisualizationCfg(),
     )
     sim = SimulationManager(config)
