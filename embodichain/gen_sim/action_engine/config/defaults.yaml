@@ -154,7 +154,7 @@ runtime:
     grasp:
       antipodal_n_sample: 10000
       antipodal_max_angle: 0.2617993877991494
-      max_open_length: 0.115
+      max_open_length: 0.15
       min_open_length: 0.01
       finger_length: 0.13
       point_sample_dense: 0.012
