@@ -29,6 +29,7 @@ from .run_directory import reserve_run_directory
 from .workflow import TaskEngineWorkflow
 from .workflow_contracts import (
     TASK_RUN_REQUEST_SCHEMA,
+    validate_scene_history_root,
     validate_scene_output_separation,
 )
 
@@ -87,11 +88,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         parser.error(str(exc))
     if scene is not None:
-        validate_scene_output_separation(scene, args.output_root)
+        validate_scene_history_root(scene, args.output_root)
     instruction = _instruction(args)
     adapter = SceneAdapter(model=args.model, robot_profile=args.robot_profile)
     workflow = TaskEngineWorkflow(scene_adapter=adapter)
     with reserve_run_directory(args.output_root) as allocation:
+        if scene is not None:
+            validate_scene_output_separation(scene, allocation.path)
         result = workflow.run(
             {
                 "schema_version": TASK_RUN_REQUEST_SCHEMA,

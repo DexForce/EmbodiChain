@@ -784,6 +784,94 @@ def test_unified_cli_accepts_exactly_four_modes(
     assert Path(payload["output_dir"]).parent == tmp_path / "history"
 
 
+def test_unified_cli_reuses_history_root_without_modifying_prior_scene(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history = tmp_path / "task1008"
+    source = (
+        history
+        / "20260820_105939"
+        / "attempts"
+        / "scene_0001"
+        / "scene_revision"
+        / "scene_export"
+    )
+    source.mkdir(parents=True)
+    marker = source / "scene_config.json"
+    marker.write_text('{"source": "unchanged"}\n', encoding="utf-8")
+    captured = {}
+
+    class FakeWorkflow:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def run(self, request, **_kwargs):
+            captured["request"] = request
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status="succeeded",
+                succeeded=True,
+                failure_class=None,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=output / "final" / "bundle",
+            )
+
+    monkeypatch.setattr(cli, "SceneAdapter", lambda **_kwargs: object())
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", FakeWorkflow)
+
+    assert (
+        cli.main(
+            [
+                "--mode",
+                "scene",
+                "--task-id",
+                "task1008",
+                "--scene",
+                str(source),
+                "--instruction",
+                "place the cup on the book",
+                "--output-root",
+                str(history),
+            ]
+        )
+        == 0
+    )
+
+    output_dir = Path(captured["request"]["output_dir"])
+    assert output_dir.parent == history
+    assert output_dir != source
+    assert marker.read_text(encoding="utf-8") == '{"source": "unchanged"}\n'
+    assert list(history.glob(".*.reserve")) == []
+
+
+def test_unified_cli_rejects_history_root_inside_source_before_reservation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "scene_export"
+    source.mkdir()
+    output_root = source / "new_runs"
+
+    with pytest.raises(ValueError, match="read-only source"):
+        cli.main(
+            [
+                "--mode",
+                "scene",
+                "--task-id",
+                "task",
+                "--scene",
+                str(source),
+                "--instruction",
+                "place the cup",
+                "--output-root",
+                str(output_root),
+            ]
+        )
+
+    assert not output_root.exists()
+
+
 def test_unified_cli_rejects_mode_input_mismatch(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="2"):
         cli.main(

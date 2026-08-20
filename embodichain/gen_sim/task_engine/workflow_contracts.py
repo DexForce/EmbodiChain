@@ -29,6 +29,7 @@ __all__ = [
     "SceneInputKind",
     "TaskRunRequest",
     "scene_input_kind",
+    "validate_scene_history_root",
     "validate_scene_output_separation",
     "validate_task_run_request",
 ]
@@ -119,6 +120,35 @@ def validate_scene_output_separation(
     if source == output or source in output.parents or output in source.parents:
         raise ValueError(
             "Task Engine output_dir and source Gym project must not overlap."
+        )
+
+
+def validate_scene_history_root(
+    gym_project: str | Path,
+    output_root: str | Path,
+) -> None:
+    """Protect a source project before reserving a history-directory child.
+
+    A prior run may live below the same history root because every new run is
+    published to a distinct timestamped child. The inverse remains unsafe:
+    creating the history root at or below the source project would write a
+    reservation and output artifacts into the read-only source tree.
+
+    Args:
+        gym_project: Existing Gym project directory or configuration path.
+        output_root: Parent directory under which a new run will be reserved.
+
+    Raises:
+        ValueError: If the history root is equal to or contained by the source
+            project boundary.
+    """
+    source = Path(gym_project).expanduser().resolve()
+    protected_root = source.parent if source.is_file() else source
+    history_root = Path(output_root).expanduser().resolve()
+    if protected_root == history_root or protected_root in history_root.parents:
+        raise ValueError(
+            "Task Engine output_root must not be inside the read-only source "
+            "Gym project."
         )
 
 

@@ -39,6 +39,7 @@ from embodichain.gen_sim.task_engine.state_machine import (
 from embodichain.gen_sim.task_engine.workflow_contracts import (
     TASK_RUN_REQUEST_SCHEMA,
     scene_input_kind,
+    validate_scene_history_root,
     validate_task_run_request,
 )
 
@@ -102,6 +103,56 @@ def test_run_request_rejects_output_containing_explicit_gym_config(
 
     with pytest.raises(ValueError, match="must not overlap"):
         validate_task_run_request(request)
+
+
+def test_scene_history_root_allows_a_source_from_a_prior_run(
+    tmp_path: Path,
+) -> None:
+    history = tmp_path / "task_history"
+    source = history / "20260820_105939" / "attempts" / "scene_export"
+    source.mkdir(parents=True)
+
+    validate_scene_history_root(source, history)
+
+    request = _request(tmp_path, image=False, edit=False)
+    request["gym_project"] = str(source)
+    request["output_dir"] = str(history / "20260820_130000")
+    assert validate_task_run_request(request)["gym_project"] == source.as_posix()
+
+
+@pytest.mark.parametrize("relative_output", [".", "new_runs", "new_runs/task"])
+def test_scene_history_root_rejects_writes_into_source_project(
+    tmp_path: Path,
+    relative_output: str,
+) -> None:
+    source = tmp_path / "scene_export"
+    source.mkdir()
+    output_root = source / relative_output
+
+    with pytest.raises(ValueError, match="read-only source"):
+        validate_scene_history_root(source, output_root)
+
+
+def test_scene_history_root_resolves_symlinks_before_comparison(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "scene_export"
+    source.mkdir()
+    source_link = tmp_path / "scene_link"
+    source_link.symlink_to(source, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="read-only source"):
+        validate_scene_history_root(source_link, source / "new_runs")
+
+
+def test_scene_history_root_protects_explicit_config_parent(tmp_path: Path) -> None:
+    source = tmp_path / "scene_export"
+    source.mkdir()
+    config = source / "scene_config.json"
+    config.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="read-only source"):
+        validate_scene_history_root(config, source)
 
 
 def test_task_and_scene_stages_can_run_concurrently(tmp_path: Path) -> None:

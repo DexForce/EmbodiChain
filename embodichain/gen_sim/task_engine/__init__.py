@@ -83,6 +83,7 @@ from .workflow_contracts import (
     SceneInputKind,
     TaskRunRequest,
     scene_input_kind,
+    validate_scene_history_root,
     validate_scene_output_separation,
     validate_task_run_request,
 )
@@ -137,6 +138,7 @@ __all__ = [
     "task_contract",
     "task_success_type",
     "scene_input_kind",
+    "validate_scene_history_root",
     "scene_blueprint_objects",
     "skip_stage",
     "start_stage",
