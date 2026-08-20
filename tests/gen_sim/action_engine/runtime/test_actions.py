@@ -34,6 +34,8 @@ from embodichain.gen_sim.action_engine.runtime.state import ExecutionState
 from embodichain.lab.sim.atomic_actions import (
     Affordance,
     ActionPlan,
+    AntipodalAffordance,
+    CoordinatedPickGoal,
     EndEffectorPoseGoal,
     GraspGoal,
     HeldObjectState,
@@ -46,6 +48,7 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.planners import CuroboPlannerCfg
+from embodichain.toolkits.graspkit.pg_grasp import GraspGeneratorCfg
 
 
 class _MeshEntity:
@@ -179,8 +182,23 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
         GroundedAction("MoveJoints", "left_arm", "arm", goal, {}),
         adapter.capabilities.get("MoveJoints"),
     )
+    coordinated_goal = CoordinatedPickGoal(
+        semantics=ObjectSemantics(
+            label="tray",
+            geometry={},
+            affordance=AntipodalAffordance(),
+        ),
+        object_target_pose=torch.eye(4),
+        object_initial_pose=torch.eye(4),
+    )
     coordinated = adapter._invocation(
-        GroundedAction("CoordinatedPickment", "coordinated", "arm", goal, {}),
+        GroundedAction(
+            "CoordinatedPickment",
+            "coordinated",
+            "arm",
+            coordinated_goal,
+            {},
+        ),
         adapter.capabilities.get("CoordinatedPickment"),
     )
     hand = adapter._invocation(
@@ -196,6 +214,45 @@ def test_planner_policy_uses_curobo_for_single_arm_and_ik_for_dual_arm() -> None
         torch.tensor([0.0, -1.0, 0.0]),
     )
     assert hand.motion_policy.strategy == "ik_interp"
+
+
+def test_coordinated_pickment_scopes_ground_filter_to_gensim_goal_copy() -> None:
+    adapter = AtomicActionAdapter(_planner_env())
+    original_cfg = GraspGeneratorCfg(is_filter_ground_collision=True)
+    affordance = AntipodalAffordance(generator_cfg=original_cfg)
+    goal = CoordinatedPickGoal(
+        semantics=ObjectSemantics(
+            label="tray",
+            geometry={},
+            affordance=affordance,
+        ),
+        object_target_pose=torch.eye(4),
+        object_initial_pose=torch.eye(4),
+    )
+    grounded = GroundedAction(
+        "CoordinatedPickment",
+        "coordinated",
+        "arm",
+        goal,
+        {
+            "middle_empty_ratio": 0.7,
+            "is_filter_ground_collision": False,
+        },
+    )
+
+    invocation = adapter._invocation(
+        grounded,
+        adapter.capabilities.get("CoordinatedPickment"),
+    )
+
+    scoped_affordance = invocation.goal.semantics.affordance
+    assert isinstance(scoped_affordance, AntipodalAffordance)
+    assert scoped_affordance is not affordance
+    assert affordance.generator_cfg is original_cfg
+    assert original_cfg.is_filter_ground_collision is True
+    assert scoped_affordance.generator_cfg is not original_cfg
+    assert scoped_affordance.generator_cfg.is_filter_ground_collision is False
+    assert invocation.skill_options.middle_empty_ratio == pytest.approx(0.7)
 
 
 def test_retreat_uses_row_local_motion_planner_reachability_search(
