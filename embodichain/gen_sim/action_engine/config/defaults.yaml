@@ -216,6 +216,8 @@ runtime:
         object_motion_keyframes: 6
         pre_grasp_distance: 0.10
         lift_height: 0.08
+        middle_empty_ratio: 0.7
+        is_filter_ground_collision: false
         postcondition_tolerance: 0.06
       HandOver:
         sample_interval: 140

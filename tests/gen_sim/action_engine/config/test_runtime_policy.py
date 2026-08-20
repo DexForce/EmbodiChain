@@ -92,6 +92,12 @@ def test_defaults_cover_current_execution_and_generation_policy() -> None:
         "pick_object_part": "top",
     }
     assert runtime.motion_defaults["HandOver"]["receive_pick_object_part"] == "bottom"
+    assert runtime.motion_defaults["CoordinatedPickment"][
+        "middle_empty_ratio"
+    ] == pytest.approx(0.4)
+    assert runtime.motion_defaults["CoordinatedPickment"][
+        "is_filter_ground_collision"
+    ] is False
     assert runtime.predicate_fallbacks["upright_max_tilt"] == pytest.approx(
         0.2617993877991494
     )

@@ -38,6 +38,7 @@ from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     AtomicActionEngine,
     ControlPartCommandProfile,
+    CoordinatedPickGoal,
     DynamicCollisionMode,
     EndEffectorPoseGoal,
     EntityState,
@@ -975,9 +976,14 @@ class AtomicActionAdapter:
             )
         else:
             dynamic_mode = DynamicCollisionMode.OFF
+        goal = (
+            self._coordinated_pickment_goal(grounded)
+            if capability.config_materializer == "coordinated_pickment"
+            else grounded.target
+        )
         return ActionInvocation(
             skill_id=str(capability.action_type.skill_id),
-            goal=grounded.target,
+            goal=goal,
             binding=self._binding(grounded, capability),
             motion_policy=MotionPolicy(
                 planner=str(self.planner_policy["backend"]),
@@ -991,6 +997,30 @@ class AtomicActionAdapter:
             recovery_policy=RecoveryPolicy(),
             skill_options=self._build_config(grounded, capability),
         )
+
+    @staticmethod
+    def _coordinated_pickment_goal(grounded: GroundedAction) -> CoordinatedPickGoal:
+        """Apply GenSim-only coordinated grasp filtering to an owned goal copy."""
+        target = grounded.target
+        if not isinstance(target, CoordinatedPickGoal):
+            raise TypeError("CoordinatedPickment requires a CoordinatedPickGoal.")
+        requested = grounded.cfg.get("is_filter_ground_collision")
+        if requested is None:
+            return target
+        if not isinstance(requested, bool):
+            raise TypeError("is_filter_ground_collision must be a boolean.")
+        semantics = target.semantics
+        affordance = semantics.affordance
+        if not isinstance(affordance, AntipodalAffordance):
+            raise TypeError(
+                "CoordinatedPickment requires an AntipodalAffordance for GenSim "
+                "grasp filtering."
+            )
+        generator_cfg = deepcopy(affordance.generator_cfg or GraspGeneratorCfg())
+        generator_cfg.is_filter_ground_collision = requested
+        scoped_affordance = replace(affordance, generator_cfg=generator_cfg)
+        scoped_semantics = replace(semantics, affordance=scoped_affordance)
+        return replace(target, semantics=scoped_semantics)
 
     def _binding(
         self,
