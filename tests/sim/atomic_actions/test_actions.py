@@ -889,8 +889,9 @@ def test_pick_explicit_grasp_bypasses_sampling_and_records_grasp() -> None:
     assert plan.segment("close").stop == plan.segment("lift").start
 
 
-def test_axis_align_plans_seven_segments_and_aligns_the_object_axis() -> None:
+def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     generator = _motion_generator()
+    generator.generate = Mock(wraps=generator.generate)
     solved_poses: list[torch.Tensor] = []
 
     def compute_ik(
@@ -936,13 +937,12 @@ def test_axis_align_plans_seven_segments_and_aligns_the_object_axis() -> None:
     assert plan.trajectory.duration.tolist() == pytest.approx([19.0 / 60.0] * NUM_ENVS)
     assert [segment.name for segment in plan.segments] == [
         "approach",
-        "reach",
         "close",
-        "lift",
-        "align",
-        "lower",
+        "manipulate",
         "open",
     ]
+    assert generator.generate.call_count == 2
+    assert len(solved_poses) == 5
     assert plan.expected_effects.is_empty
     assert context.task is original_task
     assert plan.scene_dependencies == ("target",)
@@ -975,10 +975,10 @@ def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> Non
     generator.robot.compute_ik.side_effect = compute_ik
     action = _bind_action(generator, AxisAlign())
     parallel_grasp = torch.eye(4)
-    parallel_grasp[:3, :3] = torch.tensor(
-        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
-    )
     perpendicular_grasp = torch.eye(4)
+    perpendicular_grasp[:3, :3] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+    )
     candidates = torch.stack([parallel_grasp, perpendicular_grasp])
     affordance = AxisAlignAffordance(internal_axis=torch.tensor([1.0, 0.0, 0.0]))
     affordance.get_valid_grasp_poses = Mock(
@@ -1009,8 +1009,9 @@ def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> Non
     )
 
     assert plan.plan_success.all()
-    expected_rotation = axis_angle_to_rotation_matrix(
-        torch.tensor([0.0, math.pi / 4.0, 0.0])
+    expected_rotation = (
+        axis_angle_to_rotation_matrix(torch.tensor([0.0, math.pi / 4.0, 0.0]))
+        @ perpendicular_grasp[:3, :3]
     )
     assert torch.allclose(
         solved_poses[1][:, :3, :3],

@@ -25,7 +25,11 @@ from typing import ClassVar
 import torch
 
 from embodichain.utils import logger
-from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv, get_relative_rotation
+from embodichain.utils.math import (
+    axis_angle_to_rotation_matrix,
+    get_relative_rotation,
+    pose_inv,
+)
 
 from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
 from embodichain.lab.sim.atomic_actions.bindings import ResolvedControlPart
@@ -171,13 +175,13 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         choose_target = (angle_a < angle_b)[..., None, None]
         target_xpos = torch.where(choose_target, target_xpos, symmetric_xpos)
         return target_xpos
-    
+
     def _plan(
         self,
         request: ResolvedActionRequest[AxisAlignGoal, AxisAlignOptions],
         context: PlanningContext,
     ) -> ActionPlan:
-        """Plan all seven segments without stepping the simulator."""
+        """Plan all seven physical actions in two arm-planning phases."""
         target = request.goal
         options = request.skill_options
         affordance = self._require_axis_align_affordance(target.semantics)
@@ -209,6 +213,13 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             context,
             name="axis_align_object_pose",
         )
+
+        # Resolve the shortest object rotation before selecting a grasp.  The
+        # source axis is ``object_rotation @ internal_axis`` in world space;
+        # ``rotation_axis`` is the normalized cross product from that source to
+        # the requested world-space target.  For opposite axes the helper picks
+        # a deterministic perpendicular axis instead of dividing by a near-zero
+        # cross product.
         source_axis, target_axis, rotation_axis, rotation_angle = (
             self._axis_alignment_parameters(
                 object_pose,
@@ -216,6 +227,16 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 options.target_axis,
             )
         )
+
+        # If no explicit grasp was supplied, _resolve_grasp_pose first filters
+        # invalid affordance samples, then gives priority to the candidates whose
+        # TCP y-axis is most perpendicular to ``rotation_axis``.  Grasp-generator
+        # cost only breaks ties between equally perpendicular candidates.  This
+        # orientation keeps the gripper's roll axis away from the object's
+        # rotation axis and generally leaves the arm more room for the alignment
+        # motion.  The antipodal pose has a 180-degree symmetric alternative;
+        # after choosing the sample, select whichever symmetric orientation is
+        # closer to the arm's currently observed FK pose.
         grasp_success, grasp_xpos = self._resolve_grasp_pose(
             target,
             affordance,
@@ -244,6 +265,14 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 request, context, message="Failed to resolve a grasp pose."
             )
 
+        # Upright handling is enabled independently for each environment when
+        # the current object axis is mostly horizontal (|world z| <= 0.5) and
+        # the requested target points mostly upward (within 30 degrees of +Z).
+        # Before deriving the fixed object-to-EEF grasp transform, rotate only
+        # the grasp orientation by 45 degrees *opposite* ``rotation_axis``; its
+        # position is unchanged.  The subsequent alignment still rotates the
+        # object through the full shortest arc, but the arm starts that arc with
+        # a 45-degree bias, reducing the link sweep near the table.
         upright_mask = (
             source_axis[:, 2].abs() <= self._UPRIGHT_HORIZONTAL_MAX_ABS_Z
         ) & (target_axis[:, 2] >= self._UPRIGHT_TARGET_MIN_Z)
@@ -272,12 +301,16 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             options.hand_interp_steps,
         )
         interpolation_dt = context.require_control_dt()
+        # Only the final aligned pose is a planner target.  Supplying n_align
+        # intermediate Cartesian keyframes would make CuRobo call plan_pose once
+        # per keyframe; n_align is instead retained as the output sample budget
+        # for the continuous post-close phase.
         align_xpos = self._axis_alignment_eef_keyframes(
             lifted_object_pose,
             object_to_eef,
             affordance.internal_axis,
             options.target_axis,
-            waypoint_count=n_align,
+            waypoint_count=1,
         )
         lower_xpos = translate_pose_world(
             align_xpos[:, -1],
@@ -288,52 +321,38 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             ),
         )
 
-        approach_success, approach_arm = self._plan_pose_segment(
-            pre_grasp_xpos,
+        # CuRobo planning is grouped by gripper state.  The open-gripper phase
+        # contains both the pre-grasp and grasp waypoints, so one generate call
+        # replaces the former independent approach and reach calls.
+        pre_close_xpos = torch.stack([pre_grasp_xpos, grasp_xpos], dim=1)
+        pre_close_success, pre_close_arm = self._plan_pose_phase(
+            pre_close_xpos,
             start_arm_qpos,
             manipulator,
             request,
-            n_approach,
+            n_approach + n_reach,
             interpolation_dt,
         )
-        reach_success, reach_arm = self._plan_pose_segment(
-            grasp_xpos,
-            approach_arm[:, -1],
-            manipulator,
-            request,
-            n_reach,
-            interpolation_dt,
+
+        # Once the gripper is closed, lifting, alignment, and lowering form one
+        # continuous held-object phase.  Passing only those three semantic
+        # endpoints retains the required ordering without expanding the rotation
+        # into many CuRobo plan_pose calls.  Together with the open-gripper phase,
+        # the action now uses two MotionGenerator.generate calls and five backend
+        # target plans instead of n_align + 4 backend target plans.
+        post_close_xpos = torch.cat(
+            [lift_xpos[:, None], align_xpos, lower_xpos[:, None]], dim=1
         )
-        lift_success, lift_arm = self._plan_pose_segment(
-            lift_xpos,
-            reach_arm[:, -1],
+        post_close_success, post_close_arm = self._plan_pose_phase(
+            post_close_xpos,
+            pre_close_arm[:, -1],
             manipulator,
             request,
-            n_lift,
-            interpolation_dt,
-        )
-        align_success, align_arm = self._plan_pose_segment(
-            align_xpos,
-            lift_arm[:, -1],
-            manipulator,
-            request,
-            n_align,
-            interpolation_dt,
-        )
-        lower_success, lower_arm = self._plan_pose_segment(
-            lower_xpos,
-            align_arm[:, -1],
-            manipulator,
-            request,
-            n_lower,
+            n_lift + n_align + n_lower,
             interpolation_dt,
         )
         success = grasp_success & normalize_success_mask(
-            approach_success
-            & reach_success
-            & lift_success
-            & align_success
-            & lower_success,
+            pre_close_success & post_close_success,
             num_envs=self.num_envs,
             device=self.device,
             name="Axis-align trajectory success",
@@ -349,14 +368,10 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             hand_open_qpos,
             n_waypoints=options.hand_interp_steps,
         )
-        arm_parts = (approach_arm, reach_arm, lift_arm, align_arm, lower_arm)
         segment_lengths = {
-            "approach": approach_arm.shape[1],
-            "reach": reach_arm.shape[1],
+            "approach": pre_close_arm.shape[1],
             "close": hand_close.shape[1],
-            "lift": lift_arm.shape[1],
-            "align": align_arm.shape[1],
-            "lower": lower_arm.shape[1],
+            "manipulate": post_close_arm.shape[1],
             "open": hand_open.shape[1],
         }
         full = torch.empty(
@@ -365,25 +380,18 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             device=self.device,
         )
         full[:] = context.last_qpos.unsqueeze(1)
-        offset = 0
-        for arm, hand in (
-            (arm_parts[0], hand_open_qpos),
-            (arm_parts[1], hand_open_qpos),
-        ):
-            stop = offset + arm.shape[1]
-            full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand.unsqueeze(1)
-            offset = stop
+        offset = pre_close_arm.shape[1]
+        full[:, :offset, arm_joint_ids] = pre_close_arm
+        full[:, :offset, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
         stop = offset + hand_close.shape[1]
-        full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
+        full[:, offset:stop, arm_joint_ids] = pre_close_arm[:, -1].unsqueeze(1)
         full[:, offset:stop, hand_joint_ids] = hand_close
         offset = stop
-        for arm in arm_parts[2:]:
-            stop = offset + arm.shape[1]
-            full[:, offset:stop, arm_joint_ids] = arm
-            full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
-            offset = stop
-        full[:, offset:, arm_joint_ids] = lower_arm[:, -1].unsqueeze(1)
+        stop = offset + post_close_arm.shape[1]
+        full[:, offset:stop, arm_joint_ids] = post_close_arm
+        full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+        offset = stop
+        full[:, offset:, arm_joint_ids] = post_close_arm[:, -1].unsqueeze(1)
         full[:, offset:, hand_joint_ids] = hand_open
 
         return self.build_plan(
@@ -467,7 +475,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             torch.stack(poses),
         )
 
-    def _plan_pose_segment(
+    def _plan_pose_phase(
         self,
         target_pose: torch.Tensor,
         start_qpos: torch.Tensor,
@@ -476,6 +484,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         sample_count: int,
         interpolation_dt: float,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Plan one continuous arm phase with a fixed gripper command."""
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
             options=request.motion_policy.to_motion_gen_options(

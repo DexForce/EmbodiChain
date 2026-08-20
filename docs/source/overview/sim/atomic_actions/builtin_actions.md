@@ -412,11 +412,18 @@ target recovery, see
 
 ## `AxisAlign`
 
-Plans **approach -> reach -> close -> lift -> align -> lower -> open**. The
-object's `AxisAlignAffordance.internal_axis` is expressed in the object-local
-frame, while `AxisAlignOptions.target_axis` is expressed in the world frame.
-The align segment applies the shortest rotation about the lifted object's
-origin so that
+Executes **approach -> reach -> close -> lift -> align -> lower -> open** while
+grouping arm motion into two planner calls: the open-gripper `approach` phase
+contains the pre-grasp and grasp targets, and the closed-gripper `manipulate`
+phase contains lift, alignment, and lowering targets. The `close` and `open`
+segments are local hand interpolation and do not call the motion generator.
+Only the final aligned pose is sent to the planner; the alignment sample budget
+controls trajectory resolution without expanding the rotation into one CuRobo
+`plan_pose` call per intermediate orientation.
+The object's `AxisAlignAffordance.internal_axis` is expressed in the
+object-local frame, while `AxisAlignOptions.target_axis` is expressed in the
+world frame. The final alignment target applies the shortest rotation about
+the lifted object's origin so that
 `aligned_object_rotation @ internal_axis == normalized_target_axis`, then
 derives every end-effector keyframe through the fixed grasp transform.
 
@@ -430,7 +437,7 @@ derives every end-effector keyframe through the fixed grasp transform.
 | Effect | explicitly open-loop; no final object-pose success is claimed |
 
 An explicit `grasp_xpos` accepts the same pose forms as `GraspGoal`; omitting it
-prefers valid antipodal grasps whose TCP x-axis is perpendicular to the object
+prefers valid antipodal grasps whose TCP y-axis is perpendicular to the object
 rotation axis, using grasp cost as the tie-breaker. When a currently horizontal
 object axis is aligned to world-up, the initial grasp orientation is pre-rotated
 45 degrees opposite the alignment rotation. This reduces the arm's table-side

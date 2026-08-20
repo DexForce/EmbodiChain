@@ -132,9 +132,7 @@ def create_axis_align_semantics(
             generator_cfg=antipodal.generator_cfg,
             gripper_collision_cfg=antipodal.gripper_collision_cfg,
             force_reannotate=antipodal.force_reannotate,
-            internal_axis=torch.tensor(
-                obj_internal_axis, dtype=torch.float32
-            ),
+            internal_axis=torch.tensor(obj_internal_axis, dtype=torch.float32),
         ),
     )
 
@@ -214,7 +212,7 @@ def main() -> None:
 
     if wait_for_user:
         input("Press Enter to replay the AxisAlign demo...")
-    clear_after_step = compiled.segment(0, "lift").start
+    clear_after_step = compiled.segment(0, "manipulate").start
     replay_trajectory(
         sim,
         robot,
