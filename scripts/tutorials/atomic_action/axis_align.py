@@ -61,11 +61,32 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 
 OBJECT_SIZE = (0.05, 0.05, 0.05)
 OBJECT_XY = (-0.42, -0.08)
-INTERNAL_AXIS = (1.0, 0.0, 0.0)
-TARGET_AXIS = (0.0, 0.0, 1.0)
+DEFAULT_INTERNAL_AXIS = (0.0, 0.0, 1.0)
+DEFAULT_TARGET_AXIS = (0.0, 0.0, 1.0)
+UPRIGHT_INTERNAL_AXIS = (1.0, 0.0, 0.0)
+HORIZONTAL_TARGET_AXIS = (0.0, 1.0, 0.0)
+ALIGNMENT_AXES = {
+    "upright": (UPRIGHT_INTERNAL_AXIS, DEFAULT_TARGET_AXIS),
+    "horizontal_align": (DEFAULT_INTERNAL_AXIS, HORIZONTAL_TARGET_AXIS),
+}
 ALIGN_SAMPLE_INTERVAL = 180
 HAND_INTERP_STEPS = 12
 POST_TRAJECTORY_STEPS = 240
+
+
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments for the AxisAlign tutorial."""
+    parser = create_tutorial_argument_parser(
+        "Demonstrate upright or horizontal AxisAlign on a cube.",
+        features=("grasp_sampling", "visualize_axes"),
+    )
+    parser.add_argument(
+        "--alignment",
+        choices=tuple(ALIGNMENT_AXES),
+        default="upright",
+        help="Choose the object-axis alignment example.",
+    )
+    return parser.parse_args()
 
 
 def create_align_object(sim) -> RigidObject:
@@ -112,18 +133,16 @@ def create_axis_align_semantics(
             generator_cfg=antipodal.generator_cfg,
             gripper_collision_cfg=antipodal.gripper_collision_cfg,
             force_reannotate=antipodal.force_reannotate,
-            internal_axis=torch.tensor(INTERNAL_AXIS, dtype=torch.float32),
+            internal_axis=torch.tensor(
+                ALIGNMENT_AXES[args.alignment][0], dtype=torch.float32
+            ),
         ),
     )
 
 
 def main() -> None:
     """Plan and replay a grasp, axis alignment, lowering, and release."""
-    parser = create_tutorial_argument_parser(
-        "Demonstrate AxisAlign on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
-    )
-    args = parser.parse_args()
+    args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obj = create_align_object(sim)
@@ -148,7 +167,9 @@ def main() -> None:
             obj.get_local_pose(to_matrix=True),
         )
     wait_for_user = prepare_tutorial_scene(
-        sim, args, "Inspect the cube, then press Enter to plan AxisAlign..."
+        sim,
+        args,
+        f"Inspect the cube, then press Enter to plan {args.alignment} AxisAlign...",
     )
 
     compiled = engine.compile(
@@ -166,7 +187,7 @@ def main() -> None:
                 ),
                 skill_options=AxisAlignOptions(
                     target_axis=torch.tensor(
-                        TARGET_AXIS,
+                        ALIGNMENT_AXES[args.alignment][1],
                         dtype=torch.float32,
                         device=sim.device,
                     ),
@@ -195,7 +216,7 @@ def main() -> None:
         robot,
         compiled.trajectory,
         args,
-        video_prefix="axis_align_cube_auto_play",
+        video_prefix=f"axis_align_{args.alignment}_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
         on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
     )

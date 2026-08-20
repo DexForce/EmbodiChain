@@ -433,7 +433,9 @@ per-environment target axes use shapes `(3,)` and `(B, 3)` respectively. Zero
 or non-finite axes are rejected, and exactly opposite axes use a deterministic
 180-degree rotation rather than an unstable cross-product direction.
 
-**Example:** `scripts/tutorials/atomic_action/axis_align.py`
+**Example:** `scripts/tutorials/atomic_action/axis_align.py` provides
+`--alignment upright` (align object-local X to world Z) and
+`--alignment horizontal_align` (align object-local Z to world Y).
 
 (builtin-move-held-object)=
 

@@ -73,6 +73,7 @@ PGI_TUTORIAL_TCP = torch.tensor(
 )
 ATOMIC_ACTION_TUTORIAL_MODULES = (
     "assemble",
+    "axis_align",
     "coordinated_pickment",
     "coordinated_placement",
     "dynamic_obstacle_recovery",
@@ -403,6 +404,29 @@ def test_all_atomic_action_tutorials_accept_both_robot_choices(
 
     assert default_args.robot == "ur5"
     assert franka_args.robot == "franka"
+
+
+def test_axis_align_tutorial_exposes_upright_and_horizontal_modes() -> None:
+    module = importlib.import_module("scripts.tutorials.atomic_action.axis_align")
+
+    with patch("sys.argv", ["axis_align.py"]):
+        upright_args = module.parse_arguments()
+    with patch(
+        "sys.argv",
+        ["axis_align.py", "--alignment", "horizontal_align"],
+    ):
+        horizontal_args = module.parse_arguments()
+
+    assert upright_args.alignment == "upright"
+    assert horizontal_args.alignment == "horizontal_align"
+    assert module.ALIGNMENT_AXES["upright"] == (
+        (1.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+    assert module.ALIGNMENT_AXES["horizontal_align"] == (
+        (0.0, 0.0, 1.0),
+        (0.0, 1.0, 0.0),
+    )
 
 
 def test_replay_timed_trajectory_uses_arrival_intervals() -> None:
