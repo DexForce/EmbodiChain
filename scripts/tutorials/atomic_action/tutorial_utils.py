@@ -230,16 +230,30 @@ def run_tutorial(main: Callable[[], None]) -> None:
     Args:
         main: Zero-argument tutorial entry point.
     """
+    interrupted = False
     try:
-        main()
+        try:
+            main()
+        except KeyboardInterrupt:
+            # Handle Ctrl+C before native cleanup.  An active traceback keeps
+            # main() locals (including borrowed C++ material wrappers) alive;
+            # destroying World first would make their later destructors unsafe.
+            interrupted = True
+            logger.log_info("Tutorial interrupted; shutting down cleanly.")
     finally:
         if SimulationManager.is_instantiated():
             sim = SimulationManager.get_instance()
-            if sim.is_window_recording():
-                sim.stop_window_record()
-            sim.wait_window_record_saves()
-            sim.destroy(exit_process=False)
-            SimulationManager.flush_cleanup_queue()
+            if not getattr(sim, "_is_constructed", False):
+                SimulationManager.reset(getattr(sim, "instance_id", 0))
+            else:
+                if sim.is_window_recording():
+                    sim.stop_window_record()
+                sim.wait_window_record_saves()
+                sim.destroy(exit_process=False)
+                SimulationManager.flush_cleanup_queue()
+
+    if interrupted:
+        raise SystemExit(130)
 
 
 def add_ur5_gripper_robot(
