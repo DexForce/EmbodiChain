@@ -34,7 +34,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
@@ -51,9 +51,11 @@ from embodichain.utils.math import pose_inv, quat_from_matrix
 from embodichain.lab.sim.planners.base_planner import (
     BasePlanner,
     BasePlannerCfg,
+    CollisionWorldInfo,
     PlanOptions,
     validate_plan_options,
 )
+from embodichain.lab.sim.planners.curobo.curobo_yaml import _named_rigid_objects
 from embodichain.lab.sim.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
@@ -136,6 +138,13 @@ class _RigidObjectRefList(list):
         return _RigidObjectRefList(self)
 
 
+class _RigidObjectRefMapping(dict):
+    """Registry IDs mapped to live objects without deepcopying their handles."""
+
+    def __deepcopy__(self, memo: dict) -> "_RigidObjectRefMapping":  # noqa: ARG002
+        return _RigidObjectRefMapping(self)
+
+
 @configclass
 class CuroboWorldCfg:
     """Static collision-world configuration for the cuRobo backend.
@@ -144,16 +153,19 @@ class CuroboWorldCfg:
     meshes (see :attr:`rigid_objects`); there is no external scene-YAML path.
     """
 
-    rigid_objects: list[RigidObject] | None = None
-    """Live :class:`RigidObject` obstacles to bake into the auto-generated world YAML.
+    rigid_objects: list[RigidObject] | Mapping[str, RigidObject] | None = None
+    """Live :class:`RigidObject` obstacles to bake into the generated world YAML.
 
     The adapter reads each object's mesh (``get_vertices`` / ``get_triangles``)
     and world pose (``get_local_pose``) and writes a cuRobo V2 scene YAML (cached
-    on disk by content hash). Poses are written in the cuRobo world/base frame,
-    so this is exact when the robot base sits at the simulator world origin. For
-    obstacles that move or live in an offset base frame, also list their names in
-    :attr:`dynamic_obstacle_names` to update poses at plan time. ``None`` yields an
-    initially empty collision world.
+    on disk by content hash). A mapping is the registry-backed path: its keys are
+    authoritative obstacle IDs even when they differ from ``RigidObject.uid``.
+    The list form remains available for advanced callers and derives names from
+    ``uid`` (or ``obstacle_<index>`` when absent). Poses are written in the cuRobo
+    world/base frame, so this is exact when the robot base sits at the simulator
+    world origin. For obstacles that move or live in an offset base frame, also
+    list their canonical names in :attr:`dynamic_obstacle_names` to update poses
+    at plan time. ``None`` yields an initially empty collision world.
     """
 
     obstacle_representation: str = "sphere"
@@ -178,7 +190,7 @@ class CuroboWorldCfg:
     """
 
     dynamic_obstacle_names: list[str] = []
-    """Obstacle names whose poses may be updated between plans."""
+    """Canonical obstacle IDs whose poses may be updated between plans."""
 
     multi_env: bool = False
     """Whether cuRobo allocates one collision-world instance per environment.
@@ -211,10 +223,65 @@ class CuroboWorldCfg:
     """
 
     def __post_init__(self) -> None:
+        if isinstance(self.dynamic_obstacle_names, (str, bytes)):
+            raise TypeError(
+                "dynamic_obstacle_names must be an iterable of obstacle IDs, "
+                "not a string."
+            )
+        try:
+            dynamic_names = list(self.dynamic_obstacle_names)
+        except TypeError as exc:
+            raise TypeError(
+                "dynamic_obstacle_names must be an iterable of obstacle IDs."
+            ) from exc
+        if not all(
+            isinstance(name, str) and name and name == name.strip()
+            for name in dynamic_names
+        ):
+            raise ValueError(
+                "dynamic_obstacle_names must contain unique non-empty names "
+                "without outer whitespace."
+            )
+        if len(set(dynamic_names)) != len(dynamic_names):
+            raise ValueError(
+                "dynamic_obstacle_names must contain unique non-empty names "
+                "without outer whitespace."
+            )
+
+        if self.rigid_objects is not None and not isinstance(
+            self.rigid_objects,
+            (list, Mapping),
+        ):
+            raise TypeError("rigid_objects must be a list, mapping, or None.")
+        named_rigid_objects = _named_rigid_objects(self.rigid_objects)
+        rigid_names = [name for name, _ in named_rigid_objects]
+        if not all(
+            isinstance(name, str) and name and name == name.strip()
+            for name in rigid_names
+        ):
+            raise ValueError(
+                "CuroboWorldCfg.rigid_objects must have non-empty string obstacle "
+                "IDs without outer whitespace."
+            )
+        if len(set(rigid_names)) != len(rigid_names):
+            raise ValueError(
+                "CuroboWorldCfg.rigid_objects must have unique obstacle names."
+            )
+        missing = set(dynamic_names).difference(rigid_names)
+        if missing:
+            raise ValueError(
+                "dynamic_obstacle_names reference objects not present in "
+                f"rigid_objects: {sorted(missing)}."
+            )
+        self.dynamic_obstacle_names = dynamic_names
+
         # Wrap live RigidObjects so the @configclass field-deepcopy (run right
         # after this by custom_post_init) shares references instead of trying to
         # pickle non-pickleable C++ dexsim handles held by each RigidObject.
-        if self.rigid_objects is not None and not isinstance(
+        if isinstance(self.rigid_objects, Mapping):
+            if not isinstance(self.rigid_objects, _RigidObjectRefMapping):
+                self.rigid_objects = _RigidObjectRefMapping(self.rigid_objects)
+        elif self.rigid_objects is not None and not isinstance(
             self.rigid_objects, _RigidObjectRefList
         ):
             self.rigid_objects = _RigidObjectRefList(self.rigid_objects)
@@ -376,9 +443,10 @@ class CuroboPlannerCfg(BasePlannerCfg):
     preserve_plan_samples: bool = False
     """Whether callers must retain cuRobo's raw collision-checked samples exactly.
 
-    When ``False`` (default), :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-    resamples the returned trajectory to the atomic action's ``sample_interval``
-    waypoint count - matching the documented contract of
+    When ``False`` (default),
+    :class:`~embodichain.lab.sim.planners.motion_generator.MotionGenerator`
+    resamples the returned trajectory to ``MotionGenOptions.sample_count`` -
+    matching the documented contract of
     :attr:`~embodichain.lab.sim.atomic_actions.MotionPolicy.sample_count`
     and the other planners. The resample is arc-length piecewise-linear along
     cuRobo's joint-space path, so the collision-free path is preserved; only the
@@ -386,7 +454,7 @@ class CuroboPlannerCfg(BasePlannerCfg):
     :attr:`interpolation_dt` and the trajectory duration, e.g. ~82 for a 2 s
     plan at 0.025 s).
 
-    When ``True``, the builder returns cuRobo's own samples unchanged. Use this
+    When ``True``, the generator returns cuRobo's own samples unchanged. Use this
     when you need cuRobo's exact time-parameterized, collision-checked samples
     rather than a fixed waypoint count.
     """
@@ -416,7 +484,7 @@ class CuroboPlanOptions(PlanOptions):
     """EmbodiChain control-part name to plan for."""
 
     dynamic_obstacle_poses: dict[str, torch.Tensor] | None = None
-    """Per-obstacle world poses ``(B, 4, 4)`` keyed by configured name."""
+    """World poses ``(B, 4, 4)`` keyed by canonical dynamic-obstacle ID."""
 
     max_attempts: int | None = None
     """Per-plan override of ``CuroboPlannerCfg.max_attempts``."""
@@ -463,8 +531,8 @@ def _validate_dynamic_obstacles(
     """Validate dynamic-obstacle pose names and shapes.
 
     Args:
-        poses: Mapping of obstacle name -> pose tensor. ``None`` is a no-op.
-        allowed_names: Obstacle names declared in :class:`CuroboWorldCfg`.
+        poses: Mapping of canonical obstacle ID -> pose tensor. ``None`` is a no-op.
+        allowed_names: Canonical IDs declared in :class:`CuroboWorldCfg`.
 
     Raises:
         ValueError: If a name is not configured, or a pose is not ``(B, 4, 4)``.
@@ -753,12 +821,23 @@ class CuroboPlanner(BasePlanner):
     def preserve_plan_samples(self) -> bool:
         """Whether callers must retain this planner's raw samples exactly.
 
-        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by
-        :class:`~embodichain.lab.sim.atomic_actions.trajectory.TrajectoryBuilder`
-        to decide whether to resample the returned trajectory to the action's
-        ``sample_interval``.
+        Mirrors :attr:`CuroboPlannerCfg.preserve_plan_samples`; read by the
+        atomic-action motion adapter to decide whether to resample the returned
+        trajectory to the action's ``sample_interval``.
         """
         return self.cfg.preserve_plan_samples
+
+    @property
+    def collision_world_info(self) -> CollisionWorldInfo:
+        """Return the configured collision-world integration contract."""
+        return CollisionWorldInfo(
+            entity_ids=tuple(
+                name for name, _ in _named_rigid_objects(self.cfg.world.rigid_objects)
+            ),
+            dynamic_entity_ids=tuple(self.cfg.world.dynamic_obstacle_names),
+            batch_mode="per_env" if self.cfg.world.multi_env else "shared",
+            supports_updates=True,
+        )
 
     def __init__(self, cfg: CuroboPlannerCfg) -> None:
         super().__init__(cfg)
@@ -886,6 +965,32 @@ class CuroboPlanner(BasePlanner):
             "multi_env": bool(self.cfg.world.multi_env),
             "use_cuda_graph": backend.use_cuda_graph,
         }
+
+    def with_collision_world(
+        self,
+        options: PlanOptions,
+        *,
+        obstacle_poses: Mapping[str, torch.Tensor],
+    ) -> CuroboPlanOptions:
+        """Bind snapshot obstacle poses to one cuRobo planning attempt.
+
+        Args:
+            options: Reusable caller options copied by the atomic-action layer.
+            obstacle_poses: Batched simulator-world poses keyed by configured
+                dynamic obstacle name.
+
+        Returns:
+            cuRobo options containing an owned obstacle-pose mapping.
+        """
+        if not isinstance(options, CuroboPlanOptions):
+            logger.log_error("CuroboPlanner requires CuroboPlanOptions", TypeError)
+        merged = {
+            name: pose.clone()
+            for name, pose in (options.dynamic_obstacle_poses or {}).items()
+        }
+        merged.update({name: pose.clone() for name, pose in obstacle_poses.items()})
+        options.dynamic_obstacle_poses = merged or None
+        return options
 
     @validate_plan_options(options_cls=CuroboPlanOptions)
     def plan(
@@ -1611,8 +1716,7 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
-        for idx, obj in enumerate(world_cfg.rigid_objects or []):
-            name = getattr(obj, "uid", None) or f"obstacle_{idx}"
+        for name, obj in _named_rigid_objects(world_cfg.rigid_objects):
             hasher.update(name.encode("utf-8"))
             vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
             faces = obj.get_triangles(env_ids=[0])[0]
@@ -1975,12 +2079,10 @@ class CuroboPlanner(BasePlanner):
             else:
                 positions[b, :1] = start[b]
                 positions[b, 1:] = start[b]
-        duration = dt.sum(dim=1)
         return PlanResult(
             success=alive.to(self.device),
             positions=positions.to(self.device),
             dt=dt.to(self.device),
-            duration=duration.to(self.device),
         )
 
     # ------------------------------------------------------------------
@@ -2192,8 +2294,8 @@ class CuroboPlanner(BasePlanner):
         """Update named dynamic obstacle poses on cached cuRobo collision worlds.
 
         Args:
-            poses: Mapping of obstacle name -> ``(B, 4, 4)`` world pose. ``None``
-                is a no-op.
+            poses: Mapping of canonical obstacle ID -> ``(B, 4, 4)`` world pose.
+                ``None`` is a no-op.
             backend: Specific cached backend to update. If ``None``, updates all
                 cached backends.
             sim_base_pose_inv: Precomputed inverse of the live sim base pose for

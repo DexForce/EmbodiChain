@@ -7,10 +7,10 @@ embodichain.lab.sim.atomic_actions
 
    .. autosummary::
 
-      ActionGoal
       ActionBinding
-      ResolvedActionBinding
-      ResolvedControlPart
+      EndpointBinding
+      RuntimeEndpointTarget
+      JointPositionTarget
       ControlCommand
       JointPositionCommand
       ControlPartCommandProfile
@@ -27,10 +27,27 @@ embodichain.lab.sim.atomic_actions
       PlanningContext
       StateDelta
       TimedTrajectory
-      PhaseSpec
-      PlannedPhase
+      RuntimeCommandPayload
+      JointPositionPayload
+      EndpointCommand
+      RuntimeCommandFrame
+      TimedCommandSequence
+      TrajectorySegment
+      PlannerDiagnostics
+      ExecutionFeedbackMode
       ActionPlan
       CompiledTrajectory
+
+   .. rubric:: Semantic resource contracts
+
+   .. autosummary::
+
+      SkillDescriptor
+      SkillBindingContract
+      SkillResourceSlot
+      SkillEndpointRequirement
+      DisjointSlotEndpoints
+      DisjointResourceSlots
 
    .. rubric:: Execution contracts
 
@@ -39,9 +56,25 @@ embodichain.lab.sim.atomic_actions
       AtomicAction
       AtomicActionEngine
       ExecutionSession
+      ExecutionRunner
+      ExecutionRunnerCfg
+      RunnerStep
+      RunnerStatus
+      ObservationProvider
+      CommandSink
+      EndpointCommandTransport
+      EndpointCommandRouter
+      CommandAcknowledgement
+      CommandAckStatus
+      CommandDispatch
+      CommandOperation
+      ExecutionClock
+      SimulationExecutionAdapter
       ExecutionTick
-      JointCommand
+      EffectVerificationRequest
       ExecutionEvent
+      ExecutionEventKind
+      ExecutionStatus
 
    .. rubric:: Built-in goals and actions
 
@@ -54,6 +87,14 @@ embodichain.lab.sim.atomic_actions
       PlaceGoal
       AssembleGoal
       PressGoal
+      PressOptions
+      PressAffordance
+      SlideGoal
+      SlideOptions
+      SlideAffordance
+      TwistGoal
+      TwistOptions
+      TwistAffordance
       CoordinatedPickGoal
       CoordinatedPlacementGoal
       MoveEndEffector
@@ -62,6 +103,8 @@ embodichain.lab.sim.atomic_actions
       MoveHeldObject
       Place
       Press
+      Slide
+      Twist
       CoordinatedPickment
       CoordinatedPlacement
       HandOver
@@ -74,16 +117,55 @@ embodichain.lab.sim.atomic_actions
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions
 
+Semantic resource contracts
+---------------------------
+
+.. autoclass:: SkillDescriptor
+   :members:
+
+.. autoclass:: SkillBindingContract
+   :members:
+
+.. autoclass:: SkillResourceSlot
+   :members:
+
+.. autoclass:: SkillEndpointRequirement
+   :members:
+
+.. autoclass:: DisjointSlotEndpoints
+   :members:
+
+.. autoclass:: DisjointResourceSlots
+   :members:
+
+Standard capability identifiers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autodata:: JOINT_POSITION_CAPABILITY
+
+.. autodata:: CARTESIAN_POSE_CAPABILITY
+
+.. autodata:: FORWARD_KINEMATICS_CAPABILITY
+
+.. autodata:: INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: BATCH_INVERSE_KINEMATICS_CAPABILITY
+
+.. autodata:: GRASP_CAPABILITY
+
 Planning and state
 ------------------
 
 .. autoclass:: ActionBinding
    :members:
 
-.. autoclass:: ResolvedActionBinding
+.. autoclass:: EndpointBinding
    :members:
 
-.. autoclass:: ResolvedControlPart
+.. autoclass:: RuntimeEndpointTarget
+   :members:
+
+.. autoclass:: JointPositionTarget
    :members:
 
 .. autoclass:: ControlCommand
@@ -136,6 +218,24 @@ Planning and state
 .. autoclass:: TimedTrajectory
    :members:
 
+.. autoclass:: RuntimeCommandPayload
+   :members:
+
+.. autoclass:: JointPositionPayload
+   :members:
+
+.. autoclass:: EndpointCommand
+   :members:
+
+.. autoclass:: RuntimeCommandFrame
+   :members:
+
+.. autoclass:: TimedCommandSequence
+   :members:
+
+.. autoclass:: ExecutionFeedbackMode
+   :members:
+
 .. autoclass:: ActionPlan
    :members:
 
@@ -151,13 +251,62 @@ Engine and execution
 .. autoclass:: ExecutionSession
    :members:
 
+.. autoclass:: ExecutionRunner
+   :members:
+
+.. autoclass:: ExecutionRunnerCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict
+
+.. autoclass:: ObservationProvider
+   :members:
+
+.. autoclass:: CommandSink
+   :members:
+
+.. autoclass:: EndpointCommandTransport
+   :members:
+
+.. autoclass:: EndpointCommandRouter
+   :members:
+
+.. autoclass:: ExecutionClock
+   :members:
+
+.. autoclass:: MonotonicExecutionClock
+   :members:
+
+.. autoclass:: SimulationExecutionAdapter
+   :members:
+
+.. autoclass:: CommandAcknowledgement
+   :members:
+
+.. autoclass:: CommandAckStatus
+   :members:
+
+.. autoclass:: CommandDispatch
+   :members:
+
+.. autoclass:: CommandOperation
+   :members:
+
+.. autoclass:: RunnerStep
+   :members:
+
+.. autoclass:: RunnerStatus
+   :members:
+
 .. autoclass:: ExecutionTick
    :members:
 
-.. autoclass:: JointCommand
+.. autoclass:: ExecutionEvent
    :members:
 
-.. autoclass:: ExecutionEvent
+.. autoclass:: ExecutionEventKind
+   :members:
+
+.. autoclass:: ExecutionStatus
    :members:
 
 Semantic objects and helpers
@@ -167,10 +316,4 @@ Semantic objects and helpers
    :members:
 
 .. autoclass:: HeldObjectState
-   :members:
-
-.. autoclass:: CoordinatedHeldObjectState
-   :members:
-
-.. autoclass:: TrajectoryBuilder
    :members:

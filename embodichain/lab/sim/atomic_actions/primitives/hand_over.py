@@ -23,19 +23,51 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 
-from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction, ObjectSemantics
-from ..effects import StateDelta
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..policies import MotionPolicy
-from ..state import HeldObjectState, PlanningContext
-from .pick_up import GraspGoal
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import (
+    AtomicAction,
+    ObjectSemantics,
+    _same_object_identity,
+)
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointResourceSlots,
+    FORWARD_KINEMATICS_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    interpolate_hand_qpos,
+    translate_pose_world,
+)
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    assemble_full_robot_trajectory,
+    plan_named_arm_trajectory,
+    repeat_qpos,
+    resolve_batched_pose,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import GraspGoal
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -48,11 +80,11 @@ class HandOverOptions(ActionOptions):
 
     middle_object_pose: torch.Tensor | None = None
     """Object pose at the handover point where the receiving arm grasps it,
-    shape ``(4, 4)`` or ``(n_envs, 4, 4)``. Must be set by the caller."""
+    shape ``(4, 4)`` or ``(num_envs, 4, 4)``. Must be set by the caller."""
 
     final_object_pose: torch.Tensor | None = None
     """Object pose the receiving arm delivers the object to, shape ``(4, 4)``
-    or ``(n_envs, 4, 4)``. Must be set by the caller."""
+    or ``(num_envs, 4, 4)``. Must be set by the caller."""
 
     receive_approach_direction: torch.Tensor = torch.tensor(
         [0.0, 0.0, -1.0], dtype=torch.float32
@@ -76,7 +108,7 @@ class HandOverOptions(ActionOptions):
     """Number of waypoints to hold the handoff pose before releasing."""
 
     retreat_steps: int = 24
-    """Number of waypoints used for the final deliver/retreat phase."""
+    """Number of waypoints used for the final deliver/retreat segment."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.receive_pick_object_part, str) or not (
@@ -109,10 +141,10 @@ class HandOverOptions(ActionOptions):
 class _HandOverResources:
     """Invocation-bound control parts and compatible hand commands."""
 
-    transfer_arm: ResolvedControlPart
-    receive_arm: ResolvedControlPart
-    transfer_hand: ResolvedControlPart
-    receive_hand: ResolvedControlPart
+    transfer_arm: JointPositionTarget
+    receive_arm: JointPositionTarget
+    transfer_hand: JointPositionTarget
+    receive_hand: JointPositionTarget
     transfer_hand_open_qpos: torch.Tensor
     transfer_hand_close_qpos: torch.Tensor
     receive_hand_open_qpos: torch.Tensor
@@ -131,19 +163,41 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     skill_id: ClassVar[str] = "hand_over"
     GoalType: ClassVar[type] = GraspGoal
     OptionsType: ClassVar[type] = HandOverOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "source",
+                motion_capabilities=frozenset(
+                    {
+                        CARTESIAN_POSE_CAPABILITY,
+                        FORWARD_KINEMATICS_CAPABILITY,
+                    }
+                ),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
+            ),
+            make_manipulation_slot(
+                "destination",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
+            ),
+        ),
+        constraints=(DisjointResourceSlots(("source", "destination")),),
+    )
+    _repeat_qpos = staticmethod(repeat_qpos)
 
-    def __init__(
+    def _scene_dependencies(
         self,
-        default_options: HandOverOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
+        request: ResolvedActionRequest[GraspGoal, HandOverOptions],
+    ) -> tuple[str, ...]:
+        """Return no goal-pose dependency because handover ignores grasp_xpos."""
+        del request
+        return ()
 
     def _resolve_resources(
         self,
@@ -151,16 +205,20 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     ) -> _HandOverResources:
         """Resolve source/destination roles from robot control parts."""
         binding = request.binding
-        transfer_arm = binding.manipulator("source")
-        receive_arm = binding.manipulator("destination")
-        transfer_hand = binding.end_effector("source")
-        receive_hand = binding.end_effector("destination")
-        if transfer_arm.name == receive_arm.name:
+        transfer_motion = binding.endpoint("source", "motion")
+        receive_motion = binding.endpoint("destination", "motion")
+        transfer_grasp = binding.endpoint("source", "grasp")
+        receive_grasp = binding.endpoint("destination", "grasp")
+        transfer_arm = transfer_motion.require_target(JointPositionTarget)
+        receive_arm = receive_motion.require_target(JointPositionTarget)
+        transfer_hand = transfer_grasp.require_target(JointPositionTarget)
+        receive_hand = receive_grasp.require_target(JointPositionTarget)
+        if transfer_arm.control_part == receive_arm.control_part:
             raise ValueError(
                 "HandOver source and destination must use different manipulator "
                 "control parts."
             )
-        if transfer_hand.name == receive_hand.name:
+        if transfer_hand.control_part == receive_hand.control_part:
             raise ValueError(
                 "HandOver source and destination must use different end-effector "
                 "control parts."
@@ -170,27 +228,27 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_arm=receive_arm,
             transfer_hand=transfer_hand,
             receive_hand=receive_hand,
-            transfer_hand_open_qpos=transfer_hand.joint_positions(
+            transfer_hand_open_qpos=transfer_grasp.joint_positions(
                 OPEN_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            transfer_hand_close_qpos=transfer_hand.joint_positions(
+            transfer_hand_close_qpos=transfer_grasp.joint_positions(
                 GRASP_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            receive_hand_open_qpos=receive_hand.joint_positions(
+            receive_hand_open_qpos=receive_grasp.joint_positions(
                 OPEN_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            receive_hand_close_qpos=receive_hand.joint_positions(
+            receive_hand_close_qpos=receive_grasp.joint_positions(
                 GRASP_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
@@ -200,27 +258,47 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     # Public contract
     # ------------------------------------------------------------------
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[GraspGoal, HandOverOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a handover without committing the attachment transfer."""
-        target = self.require_goal(request)
+        target = request.goal
         options = request.skill_options
         self._validate_pose_options(options)
         resources = self._resolve_resources(request)
         if (
-            request.motion_policy.motion_source == "motion_gen"
+            request.motion_policy.strategy == "motion_gen"
             and self.motion_generator.planner.cfg.planner_type == "curobo"
         ):
             raise ValueError(
                 "Coordinated dual-arm planning is not supported by the cuRobo backend."
             )
         state = context
-        semantics = target.semantics
-        transfer_object_to_eef = self._resolve_transfer_object_to_eef(
-            state, resources.transfer_arm.name
+        transfer_control_part = resources.transfer_arm.control_part
+        transfer_held_object = self._resolve_transfer_held_object(
+            state, transfer_control_part
+        )
+        self._validate_requested_object(
+            target.semantics, transfer_held_object.semantics
+        )
+        semantics = transfer_held_object.semantics
+        eligible = context.task.exclusive_held_object_mask(transfer_control_part)
+        if not eligible.any():
+            logger.log_warning("HandOver requires an exclusively held source object.")
+            return self.failed_plan(
+                request,
+                context,
+                message="Source object must be held exclusively.",
+            )
+        transfer_object_to_eef = self._resolve_matrix(
+            transfer_held_object.object_to_eef,
+            "held_object.object_to_eef",
+        )
+        transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
+            state,
+            resources,
         )
         assert options.middle_object_pose is not None
         assert options.final_object_pose is not None
@@ -237,8 +315,17 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             receive_approach_direction
             / torch.linalg.vector_norm(receive_approach_direction)
         )
-        # force object pose to have the same rotation as the current object pose, so that the handover is feasible.
-        current_object_pose = target.semantics.entity.get_local_pose(to_matrix=True)
+        # Keep the requested object orientation consistent with the verified
+        # attachment and the transferring arm's current measured pose.
+        transfer_current_eef = self.robot.compute_fk(
+            qpos=transfer_start_qpos,
+            name=resources.transfer_arm.control_part,
+            to_matrix=True,
+        )
+        current_object_pose = torch.bmm(
+            transfer_current_eef,
+            pose_inv(transfer_object_to_eef),
+        )
         middle_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
         final_object_pose[:, :3, :3] = current_object_pose[:, :3, :3]
 
@@ -252,21 +339,28 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             options.receive_pick_object_part,
             receive_approach_direction,
         )
-        if not self.builder.all_envs_success(grasp_success):
+        success_mask = normalize_success_mask(
+            grasp_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Receiving-grasp success",
+        )
+        success_mask &= eligible
+        if not success_mask.any():
             logger.log_warning("HandOver failed to resolve a receiving grasp pose.")
             return self.failed_plan(request, context, message="No receiving grasp.")
         receive_object_to_eef = torch.bmm(
             pose_inv(middle_object_pose), receive_grasp_xpos
         )
         receive_grasp_z = receive_grasp_xpos[..., :3, 2]
-        receive_pre_grasp_eef = self.builder.apply_local_offset(
+        receive_pre_grasp_eef = translate_pose_world(
             receive_grasp_xpos,
             -receive_grasp_z * options.pre_grasp_distance,
         )
         # 2.4 - receiving arm delivers the object to the final pose.
         receive_final_eef = torch.bmm(final_object_pose, receive_object_to_eef)
         # 2.3 - transferring arm retreats upward after releasing.
-        transfer_retreat_eef = self.builder.apply_local_offset(
+        transfer_retreat_eef = translate_pose_world(
             transfer_middle_eef,
             torch.tensor(
                 [0.0, 0.0, options.lift_height],
@@ -275,32 +369,45 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             ),
         )
 
-        transfer_start_qpos, receive_start_qpos = self._resolve_start_qpos(
-            state, resources
-        )
         segments = self._compute_segment_lengths(
             request.motion_policy.sample_count, options
         )
 
-        ok, transfer_move_traj = self._plan_named_arm_trajectory(
-            resources.transfer_arm.name,
+        segment_success, transfer_move_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.transfer_arm.control_part,
             transfer_start_qpos,
             transfer_middle_eef.unsqueeze(1),
             segments["transfer"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Transfer-move success",
+        )
+        if not success_mask.any():
             logger.log_warning("HandOver failed to plan the transfer move.")
             return self.failed_plan(request, context, message="Transfer move failed.")
 
-        ok, receive_approach_traj = self._plan_named_arm_trajectory(
-            resources.receive_arm.name,
+        segment_success, receive_approach_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.receive_arm.control_part,
             receive_start_qpos,
             torch.stack([receive_pre_grasp_eef, receive_grasp_xpos], dim=1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Receiving-approach success",
+        )
+        if not success_mask.any():
             logger.log_warning("HandOver failed to plan the receiving approach.")
             return self.failed_plan(
                 request, context, message="Receiving approach failed."
@@ -309,36 +416,52 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         transfer_hold_qpos = transfer_move_traj[:, -1]
         receive_grasp_qpos = receive_approach_traj[:, -1]
 
-        ok, transfer_retreat_traj = self._plan_named_arm_trajectory(
-            resources.transfer_arm.name,
+        segment_success, transfer_retreat_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.transfer_arm.control_part,
             transfer_hold_qpos,
             transfer_retreat_eef.unsqueeze(1),
             segments["deliver"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Transfer-retreat success",
+        )
+        if not success_mask.any():
             logger.log_warning("HandOver failed to plan the transfer retreat.")
             return self.failed_plan(
                 request, context, message="Transfer retreat failed."
             )
 
-        ok, receive_deliver_traj = self._plan_named_arm_trajectory(
-            resources.receive_arm.name,
+        segment_success, receive_deliver_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.receive_arm.control_part,
             receive_grasp_qpos,
             receive_final_eef.unsqueeze(1),
             segments["deliver"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Receiving-delivery success",
+        )
+        if not success_mask.any():
             logger.log_warning("HandOver failed to plan the receiving delivery.")
             return self.failed_plan(
                 request, context, message="Receiving delivery failed."
             )
 
-        phases: list[torch.Tensor] = []
+        segment_trajectories: list[torch.Tensor] = []
         # 2.1 transfer: transferring arm carries the object to the middle pose.
-        phases.append(
-            self._assemble_phase(
+        segment_trajectories.append(
+            self._assemble_segment(
                 state,
                 transfer_move_traj,
                 self._repeat_qpos(receive_start_qpos, segments["transfer"]),
@@ -352,8 +475,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             )
         )
         # 2.2 approach: receiving arm moves to the grasp pose; transferring arm holds.
-        phases.append(
-            self._assemble_phase(
+        segment_trajectories.append(
+            self._assemble_segment(
                 state,
                 self._repeat_qpos(transfer_hold_qpos, segments["approach"]),
                 receive_approach_traj,
@@ -367,15 +490,15 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             )
         )
         # 2.2 close: receiving hand closes; transferring arm keeps holding.
-        phases.append(
-            self._assemble_phase(
+        segment_trajectories.append(
+            self._assemble_segment(
                 state,
                 self._repeat_qpos(transfer_hold_qpos, segments["close"]),
                 self._repeat_qpos(receive_grasp_qpos, segments["close"]),
                 self._repeat_qpos(
                     resources.transfer_hand_close_qpos, segments["close"]
                 ),
-                self.builder.interpolate_hand_qpos(
+                interpolate_hand_qpos(
                     resources.receive_hand_open_qpos,
                     resources.receive_hand_close_qpos,
                     n_waypoints=segments["close"],
@@ -384,8 +507,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             )
         )
         if segments["hold"] > 0:
-            phases.append(
-                self._assemble_phase(
+            segment_trajectories.append(
+                self._assemble_segment(
                     state,
                     self._repeat_qpos(transfer_hold_qpos, segments["hold"]),
                     self._repeat_qpos(receive_grasp_qpos, segments["hold"]),
@@ -399,12 +522,12 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 )
             )
         # 2.3 release: transferring hand opens; receiving arm keeps holding.
-        phases.append(
-            self._assemble_phase(
+        segment_trajectories.append(
+            self._assemble_segment(
                 state,
                 self._repeat_qpos(transfer_hold_qpos, segments["release"]),
                 self._repeat_qpos(receive_grasp_qpos, segments["release"]),
-                self.builder.interpolate_hand_qpos(
+                interpolate_hand_qpos(
                     resources.transfer_hand_close_qpos,
                     resources.transfer_hand_open_qpos,
                     n_waypoints=segments["release"],
@@ -416,8 +539,8 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             )
         )
         # 2.4 deliver: receiving arm carries the object away; transferring arm retreats.
-        phases.append(
-            self._assemble_phase(
+        segment_trajectories.append(
+            self._assemble_segment(
                 state,
                 transfer_retreat_traj,
                 receive_deliver_traj,
@@ -430,7 +553,17 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
                 resources=resources,
             )
         )
-        full = torch.cat(phases, dim=1)
+        full = torch.cat(segment_trajectories, dim=1)
+        segment_names = ["transfer", "approach", "close"]
+        if segments["hold"] > 0:
+            segment_names.append("hold")
+        segment_names.extend(("release", "deliver"))
+        segment_lengths = {
+            name: trajectory.shape[1]
+            for name, trajectory in zip(
+                segment_names, segment_trajectories, strict=True
+            )
+        }
         held_object = HeldObjectState(
             semantics=semantics,
             object_to_eef=receive_object_to_eef,
@@ -439,14 +572,19 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         return self.build_plan(
             request,
             context,
-            success=True,
-            trajectory=full,
+            success=success_mask,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.transfer_arm.name: None,
-                    resources.receive_arm.name: held_object,
+                    resources.transfer_arm.control_part: None,
+                    resources.receive_arm.control_part: held_object,
                 }
             ),
+            segment_lengths=segment_lengths,
         )
 
     # ------------------------------------------------------------------
@@ -457,35 +595,40 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     def _validate_pose_options(options: HandOverOptions) -> None:
         for name in ("middle_object_pose", "final_object_pose"):
             if getattr(options, name) is None:
-                logger.log_error(
-                    f"{name} must be specified in HandOverOptions", ValueError
-                )
+                raise ValueError(f"{name} must be specified in HandOverOptions")
 
     def _resolve_matrix(self, matrix: torch.Tensor, name: str) -> torch.Tensor:
-        matrix = matrix.to(device=self.device, dtype=torch.float32)
-        if matrix.shape == (4, 4):
-            matrix = matrix.unsqueeze(0).repeat(self.n_envs, 1, 1)
-        if matrix.shape != (self.n_envs, 4, 4):
-            logger.log_error(
-                f"{name} must have shape (4, 4) or ({self.n_envs}, 4, 4), "
-                f"but got {matrix.shape}",
-                ValueError,
-            )
-        return matrix
+        return resolve_batched_pose(
+            matrix,
+            num_envs=self.num_envs,
+            device=self.device,
+            name=name,
+        )
 
-    def _resolve_transfer_object_to_eef(
+    def _resolve_transfer_held_object(
         self,
         state: PlanningContext,
         transfer_control_part: str,
-    ) -> torch.Tensor:
+    ) -> HeldObjectState:
         held = state.get_held_object(transfer_control_part)
         if held is None:
-            logger.log_error(
+            raise ValueError(
                 "HandOver requires an object held by transfer control part "
-                f"{transfer_control_part!r} (run PickUp first).",
-                ValueError,
+                f"{transfer_control_part!r} (run PickUp first)."
             )
-        return self._resolve_matrix(held.object_to_eef, "held_object.object_to_eef")
+        return held
+
+    @staticmethod
+    def _validate_requested_object(
+        requested: ObjectSemantics,
+        held: ObjectSemantics,
+    ) -> None:
+        """Reject a request that names a different grounded object."""
+        if not _same_object_identity(requested, held):
+            raise ValueError(
+                "HandOver goal semantics must identify the object held by the "
+                "source control part."
+            )
 
     def _resolve_receive_grasp(
         self,
@@ -500,14 +643,14 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
             approach_direction=approach_direction,
             object_part=object_part,
         )
-        n_envs = object_pose.shape[0]
+        num_envs = object_pose.shape[0]
         grasp_xpos = (
             torch.eye(4, device=self.device, dtype=torch.float32)
             .unsqueeze(0)
-            .repeat(n_envs, 1, 1)
+            .repeat(num_envs, 1, 1)
         )
-        is_success = torch.ones(n_envs, dtype=torch.bool, device=self.device)
-        for i in range(n_envs):
+        is_success = torch.ones(num_envs, dtype=torch.bool, device=self.device)
+        for i in range(num_envs):
             poses, costs = grasp_poses_result[i]
             poses = poses.to(device=self.device, dtype=torch.float32)
             costs = costs.to(device=self.device, dtype=torch.float32)
@@ -525,11 +668,11 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         state: PlanningContext,
         resources: _HandOverResources,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if state.last_qpos.shape != (self.n_envs, self.robot_dof):
-            logger.log_error(
+        if state.last_qpos.shape != (self.num_envs, self.robot_dof):
+            raise ValueError(
                 f"PlanningContext.last_qpos must have shape "
-                f"({self.n_envs}, {self.robot_dof}), but got {state.last_qpos.shape}",
-                ValueError,
+                f"({self.num_envs}, {self.robot_dof}), but got "
+                f"{state.last_qpos.shape}"
             )
         start_qpos = state.last_qpos.to(device=self.device, dtype=torch.float32)
         return (
@@ -540,7 +683,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     def _compute_segment_lengths(
         self, sample_count: int, options: HandOverOptions
     ) -> dict[str, int]:
-        """Split the invocation sample budget across handover phases."""
+        """Split the invocation sample budget across handover segments."""
         n_close = max(2, options.hand_interp_steps)
         n_release = max(2, options.hand_interp_steps)
         n_deliver = max(2, options.retreat_steps)
@@ -549,10 +692,9 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         n_transfer = max(2, (sample_count - reserved) // 2)
         n_approach = sample_count - reserved - n_transfer
         if n_approach < 2:
-            logger.log_error(
+            raise ValueError(
                 "Not enough waypoints for handover. Increase sample_count or "
-                "decrease hand_interp_steps/hold_steps/retreat_steps.",
-                ValueError,
+                "decrease hand_interp_steps/hold_steps/retreat_steps."
             )
         return {
             "transfer": n_transfer,
@@ -567,36 +709,7 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
     # Planning / assembly helpers
     # ------------------------------------------------------------------
 
-    def _plan_named_arm_trajectory(
-        self,
-        control_part: str,
-        start_qpos: torch.Tensor,
-        target_poses: torch.Tensor,
-        n_waypoints: int,
-        motion_policy: MotionPolicy,
-    ) -> tuple[bool, torch.Tensor]:
-        target_states_list = [
-            [
-                PlanState(xpos=target_poses[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(target_poses.shape[1])
-            ]
-            for i in range(self.n_envs)
-        ]
-        success, trajectory = self.builder.plan_arm_traj(
-            target_states_list,
-            start_qpos,
-            n_waypoints,
-            control_part=control_part,
-            arm_dof=start_qpos.shape[-1],
-            cfg=motion_policy,
-        )
-        return self.builder.all_envs_success(success), trajectory
-
-    @staticmethod
-    def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
-        return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
-
-    def _assemble_phase(
+    def _assemble_segment(
         self,
         state: PlanningContext,
         transfer_arm_traj: torch.Tensor,
@@ -606,18 +719,15 @@ class HandOver(AtomicAction[GraspGoal, HandOverOptions]):
         *,
         resources: _HandOverResources,
     ) -> torch.Tensor:
-        n_waypoints = transfer_arm_traj.shape[1]
-        base = (
-            state.last_qpos.to(device=self.device, dtype=torch.float32)
-            .unsqueeze(1)
-            .repeat(1, n_waypoints, 1)
-            .clone()
+        return assemble_full_robot_trajectory(
+            state.last_qpos,
+            (
+                (resources.transfer_arm.joint_ids, transfer_arm_traj),
+                (resources.receive_arm.joint_ids, receive_arm_traj),
+                (resources.transfer_hand.joint_ids, transfer_hand_traj),
+                (resources.receive_hand.joint_ids, receive_hand_traj),
+            ),
         )
-        base[:, :, list(resources.transfer_arm.joint_ids)] = transfer_arm_traj
-        base[:, :, list(resources.receive_arm.joint_ids)] = receive_arm_traj
-        base[:, :, list(resources.transfer_hand.joint_ids)] = transfer_hand_traj
-        base[:, :, list(resources.receive_hand.joint_ids)] = receive_hand_traj
-        return base
 
 
 __all__ = ["HandOver", "HandOverOptions"]

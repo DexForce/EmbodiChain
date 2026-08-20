@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Demonstrate object assembly with a dual-arm UR5.
+"""Demonstrate object assembly with a selectable dual-arm robot.
 
 The left arm picks up a soda can (object A) and places it directly above a cube
 (object B). The relative pose of the can with respect to the cube is declared on
@@ -38,8 +38,6 @@ import torch
 
 from embodichain.lab.sim import SimulationManager
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AssembleAffordance,
     AssembleGoal,
     AtomicActionEngine,
@@ -55,16 +53,16 @@ from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
-    add_dual_ur5_robot,
+    add_dual_tutorial_robot,
     add_support_surface,
-    make_dual_ur5_solver_cfg,
     settle_object,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    TutorialRobot,
     broadcast_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -72,6 +70,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     prepare_tutorial_scene,
     publish_tutorial_scene,
     replay_trajectory,
+    run_tutorial,
     serve_tutorial_scene,
 )
 
@@ -87,7 +86,7 @@ SUPPORT_SURFACE_CENTER = (
 
 # --- Adjustable scene placeholders -----------------------------------------
 # Object A (soda can) is staged for the left arm to pick up; object B (cube) is
-# the assembly base the can is placed onto. Tweak these to match the dual-UR5
+# the assembly base the can is placed onto. Tweak these to match the dual-arm
 # reach and the soda-can mesh geometry.
 OBJECT_A_XY = (0.0, 0.02)
 OBJECT_B_XY = (0.0, 0.20)
@@ -132,22 +131,23 @@ def parse_arguments() -> argparse.Namespace:
             "headless_play",
             "visualize_axes",
         ),
-        default_device="cpu",
         default_renderer="hybrid",
     )
     return parser.parse_args()
 
 
-def create_dual_ur5_robot(sim: SimulationManager) -> Robot:
-    """Create a dual-UR5 robot with one PGI gripper on each arm."""
-    return add_dual_ur5_robot(
+def create_dual_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+) -> Robot:
+    """Create the selected dual-arm robot with one PGI gripper per arm."""
+    return add_dual_tutorial_robot(
         sim,
-        uid="DualUR5Assemble",
-        urdf_name="dual_ur5_assemble",
-        solver_cfg=make_dual_ur5_solver_cfg(
-            GRIPPER_TCP_Z,
-            ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
-        ),
+        robot_type=robot_type,
+        uid=f"Dual{robot_type.title()}Assemble",
+        urdf_name=f"dual_{robot_type}_assemble",
+        tcp_z=GRIPPER_TCP_Z,
+        ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
         hand_stiffness=1e2,
         hand_damping=1e1,
         hand_max_effort=1e3,
@@ -258,7 +258,7 @@ def run_assemble_demo(
         n_sample=args.n_sample,
         force_reannotate=args.force_reannotate,
     )
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
     left_open, left_close = get_hand_open_close_qpos(
         robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
     )
@@ -270,12 +270,12 @@ def run_assemble_demo(
     cube_pose = cube.get_local_pose(to_matrix=True)
     assemble_object_target_pose = cube_pose[0] @ assemble_to_base
 
-    n_envs = robot.get_qpos().shape[0]
+    num_envs = robot.get_qpos().shape[0]
     if not args.no_vis_eef_axis:
         draw_axis_marker(
             sim,
             "assemble_target_axis",
-            broadcast_pose_batch(assemble_object_target_pose, n_envs),
+            broadcast_pose_batch(assemble_object_target_pose, num_envs),
         )
 
     # Step 1 - the left arm picks the soda can up by its top part.
@@ -317,27 +317,31 @@ def run_assemble_demo(
         assemble_object_entity=can,
         assemble_to_base_pose=assemble_to_base,
     )
-    binding = ActionBinding(
-        manipulators={"primary": "left_arm"},
-        end_effectors={"primary": "left_hand"},
-    )
+    endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(can_semantics),
-                binding,
-                MotionPolicy(sample_count=PICKUP_SAMPLE_INTERVAL),
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICKUP_SAMPLE_INTERVAL,
+                ),
                 skill_options=pick_up_options,
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "place",
                 AssembleGoal(affordance=assemble_affordance),
-                binding,
-                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PLACE_SAMPLE_INTERVAL,
+                ),
                 skill_options=place_options,
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     success = compiled.plan_success
     traj = compiled.trajectory.positions
@@ -356,7 +360,7 @@ def run_assemble_demo(
     replay_trajectory(
         sim,
         robot,
-        traj,
+        compiled.trajectory,
         args,
         video_prefix="assemble_auto_play",
         hold_steps=0,
@@ -375,13 +379,10 @@ def main() -> None:
         arena_space=3.0,
         light_pos=(0.0, -0.4, 3.0),
     )
-    robot = create_dual_ur5_robot(sim)
-    try:
-        run_assemble_demo(args, sim, robot)
-        serve_tutorial_scene(sim, args)
-    finally:
-        sim.destroy()
+    robot = create_dual_robot(sim, args.robot)
+    run_assemble_demo(args, sim, robot)
+    serve_tutorial_scene(sim, args)
 
 
 if __name__ == "__main__":
-    main()
+    run_tutorial(main)

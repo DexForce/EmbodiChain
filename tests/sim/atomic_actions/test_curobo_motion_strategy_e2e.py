@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Optional DexSim end-to-end test for cuRobo through AtomicActionEngine.
+"""Optional DexSim end-to-end strategy test for cuRobo through AtomicActionEngine.
 
 Skipped when cuRobo or CUDA is unavailable. When both are present, it builds a
 single-arm Franka + static cuboid scene, executes ``MoveEndEffector`` with
@@ -46,7 +46,6 @@ from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboWorldCfg,
 )
 from embodichain.lab.sim.atomic_actions import (  # noqa: E402
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
@@ -128,20 +127,27 @@ def test_atomic_move_end_effector_uses_curobo_v2():
     sim, robot, engine = _make_franka_curobo_engine()
     try:
         target = _reachable_target_beyond_demo_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": CONTROL_PART}},
+        )
         result = engine.compile(
             (
                 ActionInvocation(
                     skill_id="move_end_effector",
                     goal=EndEffectorPoseGoal(xpos=target),
-                    binding=ActionBinding(manipulators={"primary": CONTROL_PART}),
+                    binding=binding,
                     motion_policy=MotionPolicy(
-                        motion_source="motion_gen",
+                        strategy="motion_gen",
                         sample_count=SAMPLE_INTERVAL,
                     ),
                 ),
             )
         )
-        trajectory = result.trajectory.positions
+        plan = result.action_plans[0]
+        assert plan.joint_trajectory is not None
+        assert plan.commands.frame_count == plan.joint_trajectory.waypoint_count
+        trajectory = plan.joint_trajectory.positions
         assert result.plan_success.shape == (1,)
         assert bool(result.plan_success.item())
         assert trajectory.shape[2] == robot.dof

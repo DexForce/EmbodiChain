@@ -23,26 +23,55 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.planners import MoveType, PlanState
 from embodichain.utils import logger
 
-from ._helpers import resolve_object_target
-from ..bindings import ResolvedControlPart
-from ..control import GRASP_COMMAND, OPEN_COMMAND
-from ..core import AtomicAction
-from ..effects import StateDelta
-from ..goals import PoseGoalValue, resolve_pose_goal, validate_pose_goal
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan
-from ..policies import MotionPolicy
-from ..state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.control import (
+    GRASP_COMMAND,
+    OPEN_COMMAND,
+    JointPositionCommand,
+)
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.goals import (
+    PoseGoalValue,
+    resolve_pose_goal,
+    validate_pose_goal,
+)
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    TimedTrajectory,
+    normalize_success_mask,
+)
+from embodichain.lab.sim.atomic_actions.requirements import (
+    CARTESIAN_POSE_CAPABILITY,
+    DisjointResourceSlots,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import HeldObjectState, PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    interpolate_hand_qpos,
+    translate_pose_world,
+)
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    assemble_full_robot_trajectory,
+    plan_named_arm_trajectory,
+    repeat_qpos,
+    resolve_batched_pose,
+    resolve_object_target,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_manipulation_slot,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class CoordinatedPlacementGoal:
     """Object-centric target for dual-arm coordinated placement."""
-
-    goal_kind: ClassVar[str] = "coordinated_placement"
 
     placing_object_target_pose: PoseGoalValue
     """Target pose for the object released by the placing arm."""
@@ -109,10 +138,10 @@ class CoordinatedPlacementOptions(ActionOptions):
 class _CoordinatedPlacementResources:
     """Invocation-bound control parts and compatible hand commands."""
 
-    placing_arm: ResolvedControlPart
-    support_arm: ResolvedControlPart
-    placing_hand: ResolvedControlPart
-    support_hand: ResolvedControlPart
+    placing_arm: JointPositionTarget
+    support_arm: JointPositionTarget
+    placing_hand: JointPositionTarget
+    support_hand: JointPositionTarget
     placing_hand_open_qpos: torch.Tensor
     placing_hand_close_qpos: torch.Tensor
     support_hand_close_qpos: torch.Tensor
@@ -126,19 +155,25 @@ class CoordinatedPlacement(
     skill_id: ClassVar[str] = "coordinated_placement"
     GoalType: ClassVar[type] = CoordinatedPlacementGoal
     OptionsType: ClassVar[type] = CoordinatedPlacementOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
-    end_effector_roles: ClassVar[tuple[str, ...]] = ("placing", "support")
-
-    def __init__(
-        self,
-        default_options: CoordinatedPlacementOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def _on_bind(self) -> None:
-        """Resolve engine-wide resources from the owning engine."""
-        self.n_envs = self.robot.get_qpos().shape[0]
-        self.robot_dof = self.robot.dof
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_manipulation_slot(
+                "placing",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={
+                    OPEN_COMMAND: JointPositionCommand,
+                    GRASP_COMMAND: JointPositionCommand,
+                },
+            ),
+            make_manipulation_slot(
+                "support",
+                motion_capabilities=frozenset({CARTESIAN_POSE_CAPABILITY}),
+                grasp_commands={GRASP_COMMAND: JointPositionCommand},
+            ),
+        ),
+        constraints=(DisjointResourceSlots(("placing", "support")),),
+    )
+    _repeat_qpos = staticmethod(repeat_qpos)
 
     def _resolve_resources(
         self,
@@ -148,16 +183,20 @@ class CoordinatedPlacement(
     ) -> _CoordinatedPlacementResources:
         """Resolve placing/support roles from robot control parts."""
         binding = request.binding
-        placing_arm = binding.manipulator("placing")
-        support_arm = binding.manipulator("support")
-        placing_hand = binding.end_effector("placing")
-        support_hand = binding.end_effector("support")
-        if placing_arm.name == support_arm.name:
+        placing_motion = binding.endpoint("placing", "motion")
+        support_motion = binding.endpoint("support", "motion")
+        placing_grasp = binding.endpoint("placing", "grasp")
+        support_grasp = binding.endpoint("support", "grasp")
+        placing_arm = placing_motion.require_target(JointPositionTarget)
+        support_arm = support_motion.require_target(JointPositionTarget)
+        placing_hand = placing_grasp.require_target(JointPositionTarget)
+        support_hand = support_grasp.require_target(JointPositionTarget)
+        if placing_arm.control_part == support_arm.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
                 "different manipulator control parts."
             )
-        if placing_hand.name == support_hand.name:
+        if placing_hand.control_part == support_hand.control_part:
             raise ValueError(
                 "CoordinatedPlacement placing and support roles must use "
                 "different end-effector control parts."
@@ -167,27 +206,27 @@ class CoordinatedPlacement(
             support_arm=support_arm,
             placing_hand=placing_hand,
             support_hand=support_hand,
-            placing_hand_open_qpos=placing_hand.joint_positions(
+            placing_hand_open_qpos=placing_grasp.joint_positions(
                 OPEN_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            placing_hand_close_qpos=placing_hand.joint_positions(
+            placing_hand_close_qpos=placing_grasp.joint_positions(
                 GRASP_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
-            support_hand_close_qpos=support_hand.joint_positions(
+            support_hand_close_qpos=support_grasp.joint_positions(
                 GRASP_COMMAND,
-                n_envs=self.n_envs,
+                num_envs=self.num_envs,
                 device=self.device,
                 dtype=torch.float32,
             ),
         )
 
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[
             CoordinatedPlacementGoal, CoordinatedPlacementOptions
@@ -195,11 +234,11 @@ class CoordinatedPlacement(
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan coordinated placement without committing attachment changes."""
-        target = self.require_goal(request)
+        target = request.goal
         options = request.skill_options
         resources = self._resolve_resources(request)
         if (
-            request.motion_policy.motion_source == "motion_gen"
+            request.motion_policy.strategy == "motion_gen"
             and self.motion_generator.planner.cfg.planner_type == "curobo"
         ):
             raise ValueError(
@@ -213,6 +252,18 @@ class CoordinatedPlacement(
             placing_held_object,
             support_held_object,
         ) = self._resolve_target(target, state, resources, options)
+        eligible = context.task.exclusive_held_object_mask(
+            resources.placing_arm.control_part
+        ) & context.task.exclusive_held_object_mask(resources.support_arm.control_part)
+        if not eligible.any():
+            logger.log_warning(
+                "CoordinatedPlacement requires two exclusively held objects."
+            )
+            return self.failed_plan(
+                request,
+                context,
+                message="Placing and support objects must be held exclusively.",
+            )
         placing_start_qpos, support_start_qpos = self._resolve_start_qpos(
             state, resources
         )
@@ -220,7 +271,7 @@ class CoordinatedPlacement(
             release, request.motion_policy.sample_count, options
         )
 
-        placing_lift_xpos = self.builder.apply_local_offset(
+        placing_lift_xpos = translate_pose_world(
             placing_xpos,
             torch.tensor(
                 [0.0, 0.0, options.lift_height],
@@ -229,27 +280,44 @@ class CoordinatedPlacement(
             ),
         )
 
-        ok, placing_approach_traj = self._plan_named_arm_trajectory(
-            resources.placing_arm.name,
+        success_mask = eligible.clone()
+        segment_success, placing_approach_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.placing_arm.control_part,
             placing_start_qpos,
             torch.stack([placing_lift_xpos, placing_xpos], dim=1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Placing-approach success",
+        )
+        if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan placing approach.")
             return self.failed_plan(
                 request, context, message="Placing approach failed."
             )
 
-        ok, support_approach_traj = self._plan_named_arm_trajectory(
-            resources.support_arm.name,
+        segment_success, support_approach_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.support_arm.control_part,
             support_start_qpos,
             support_xpos.unsqueeze(1),
             segments["approach"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Support-approach success",
+        )
+        if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan support approach.")
             return self.failed_plan(
                 request, context, message="Support approach failed."
@@ -257,7 +325,7 @@ class CoordinatedPlacement(
 
         placing_place_qpos = placing_approach_traj[:, -1]
         support_place_qpos = support_approach_traj[:, -1]
-        approach_trajectory = self._assemble_phase(
+        approach_trajectory = self._assemble_segment(
             state.last_qpos,
             placing_approach_traj,
             support_approach_traj,
@@ -266,9 +334,9 @@ class CoordinatedPlacement(
             resources=resources,
         )
 
-        hold_trajectory = self._empty_phase()
+        hold_trajectory = self._empty_segment()
         if segments["hold"] > 0:
-            hold_trajectory = self._assemble_phase(
+            hold_trajectory = self._assemble_segment(
                 state.last_qpos,
                 self._repeat_qpos(placing_place_qpos, segments["hold"]),
                 self._repeat_qpos(support_place_qpos, segments["hold"]),
@@ -277,13 +345,13 @@ class CoordinatedPlacement(
                 resources=resources,
             )
 
-        release_trajectory = self._empty_phase()
+        release_trajectory = self._empty_segment()
         if release:
-            release_trajectory = self._assemble_phase(
+            release_trajectory = self._assemble_segment(
                 state.last_qpos,
                 self._repeat_qpos(placing_place_qpos, segments["release"]),
                 self._repeat_qpos(support_place_qpos, segments["release"]),
-                self.builder.interpolate_hand_qpos(
+                interpolate_hand_qpos(
                     resources.placing_hand_close_qpos,
                     resources.placing_hand_open_qpos,
                     n_waypoints=segments["release"],
@@ -294,14 +362,22 @@ class CoordinatedPlacement(
                 resources=resources,
             )
 
-        ok, placing_retreat_traj = self._plan_named_arm_trajectory(
-            resources.placing_arm.name,
+        segment_success, placing_retreat_traj = plan_named_arm_trajectory(
+            self.motion_generator,
+            resources.placing_arm.control_part,
             placing_place_qpos,
             placing_lift_xpos.unsqueeze(1),
             segments["retreat"],
             request.motion_policy,
+            context.control_dt,
         )
-        if not ok:
+        success_mask &= normalize_success_mask(
+            segment_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="Placing-retreat success",
+        )
+        if not success_mask.any():
             logger.log_warning("CoordinatedPlacement failed to plan placing retreat.")
             return self.failed_plan(request, context, message="Placing retreat failed.")
 
@@ -310,7 +386,7 @@ class CoordinatedPlacement(
             if release
             else resources.placing_hand_close_qpos
         )
-        retreat_trajectory = self._assemble_phase(
+        retreat_trajectory = self._assemble_segment(
             state.last_qpos,
             placing_retreat_traj,
             self._repeat_qpos(support_place_qpos, segments["retreat"]),
@@ -328,29 +404,29 @@ class CoordinatedPlacement(
             ],
             dim=1,
         )
-        involved_control_parts = {
-            resources.placing_arm.name,
-            resources.support_arm.name,
-        }
-        coordinated_removals = {
-            key: None
-            for key in state.coordinated_held_objects
-            if not involved_control_parts.isdisjoint(key)
-        }
         return self.build_plan(
             request,
             context,
-            success=True,
-            trajectory=full,
+            success=success_mask,
+            trajectory=TimedTrajectory.from_uniform_step(
+                full,
+                env_ids=context.env_ids,
+                step_dt=context.require_control_dt(),
+            ),
             expected_effects=StateDelta(
                 held_object_updates={
-                    resources.placing_arm.name: (
+                    resources.placing_arm.control_part: (
                         None if release else placing_held_object
                     ),
-                    resources.support_arm.name: support_held_object,
+                    resources.support_arm.control_part: support_held_object,
                 },
-                coordinated_held_object_updates=coordinated_removals,
             ),
+            segment_lengths={
+                "approach": approach_trajectory.shape[1],
+                "hold": hold_trajectory.shape[1],
+                "release": release_trajectory.shape[1],
+                "retreat": retreat_trajectory.shape[1],
+            },
         )
 
     def _resolve_object_pose(
@@ -362,11 +438,11 @@ class CoordinatedPlacement(
     ) -> torch.Tensor:
         object_pose = resolve_object_target(
             resolve_pose_goal(pose, context, name=name),
-            n_envs=self.n_envs,
+            num_envs=self.num_envs,
             device=self.device,
             name=name,
         )
-        return self.builder.apply_local_offset(
+        return translate_pose_world(
             object_pose,
             torch.tensor(
                 [0.0, 0.0, height_offset],
@@ -386,16 +462,12 @@ class CoordinatedPlacement(
         )
 
     def _resolve_held_matrix(self, matrix: torch.Tensor, name: str) -> torch.Tensor:
-        matrix = matrix.to(device=self.device, dtype=torch.float32)
-        if matrix.shape == (4, 4):
-            matrix = matrix.unsqueeze(0).repeat(self.n_envs, 1, 1)
-        if matrix.shape != (self.n_envs, 4, 4):
-            logger.log_error(
-                f"{name} must have shape (4, 4) or ({self.n_envs}, 4, 4), "
-                f"but got {matrix.shape}",
-                ValueError,
-            )
-        return matrix
+        return resolve_batched_pose(
+            matrix,
+            num_envs=self.num_envs,
+            device=self.device,
+            name=name,
+        )
 
     def _resolve_held_state(
         self,
@@ -425,21 +497,19 @@ class CoordinatedPlacement(
         HeldObjectState,
         HeldObjectState,
     ]:
-        placing_control_part = resources.placing_arm.name
-        support_control_part = resources.support_arm.name
+        placing_control_part = resources.placing_arm.control_part
+        support_control_part = resources.support_arm.control_part
         placing_held_object = state.get_held_object(placing_control_part)
         if placing_held_object is None:
-            logger.log_error(
+            raise ValueError(
                 "CoordinatedPlacement requires an object held by placing control "
-                f"part {placing_control_part!r}.",
-                ValueError,
+                f"part {placing_control_part!r}."
             )
         support_held_object = state.get_held_object(support_control_part)
         if support_held_object is None:
-            logger.log_error(
+            raise ValueError(
                 "CoordinatedPlacement requires an object held by support control "
-                f"part {support_control_part!r}.",
-                ValueError,
+                f"part {support_control_part!r}."
             )
         placing_height_offset = (
             options.placing_height_offset
@@ -495,12 +565,11 @@ class CoordinatedPlacement(
         state: PlanningContext,
         resources: _CoordinatedPlacementResources,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        if state.last_qpos.shape != (self.n_envs, self.robot_dof):
-            logger.log_error(
+        if state.last_qpos.shape != (self.num_envs, self.robot_dof):
+            raise ValueError(
                 "PlanningContext.last_qpos must have shape "
-                f"({self.n_envs}, {self.robot_dof}), "
-                f"but got {state.last_qpos.shape}",
-                ValueError,
+                f"({self.num_envs}, {self.robot_dof}), "
+                f"but got {state.last_qpos.shape}"
             )
         start_qpos = state.last_qpos.to(device=self.device, dtype=torch.float32)
         return (
@@ -514,16 +583,15 @@ class CoordinatedPlacement(
         sample_count: int,
         options: CoordinatedPlacementOptions,
     ) -> dict[str, int]:
-        """Split the invocation sample budget across placement phases."""
+        """Split the invocation sample budget across placement segments."""
         n_release = max(2, options.hand_interp_steps) if release else 0
         n_hold = max(0, options.hold_steps)
         n_retreat = max(2, options.retreat_steps)
         n_approach = sample_count - n_hold - n_release - n_retreat
         if n_approach < 2:
-            logger.log_error(
+            raise ValueError(
                 "Not enough waypoints for coordinated placement. Increase "
-                "sample_count or decrease hold/release/retreat steps.",
-                ValueError,
+                "sample_count or decrease hold/release/retreat steps."
             )
         return {
             "approach": n_approach,
@@ -532,43 +600,14 @@ class CoordinatedPlacement(
             "retreat": n_retreat,
         }
 
-    def _plan_named_arm_trajectory(
-        self,
-        control_part: str,
-        start_qpos: torch.Tensor,
-        target_poses: torch.Tensor,
-        n_waypoints: int,
-        motion_policy: MotionPolicy,
-    ) -> tuple[bool, torch.Tensor]:
-        target_states_list = [
-            [
-                PlanState(xpos=target_poses[i, j], move_type=MoveType.EEF_MOVE)
-                for j in range(target_poses.shape[1])
-            ]
-            for i in range(self.n_envs)
-        ]
-        success, trajectory = self.builder.plan_arm_traj(
-            target_states_list,
-            start_qpos,
-            n_waypoints,
-            control_part=control_part,
-            arm_dof=start_qpos.shape[-1],
-            cfg=motion_policy,
-        )
-        return self.builder.all_envs_success(success), trajectory
-
-    @staticmethod
-    def _repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
-        return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
-
-    def _empty_phase(self) -> torch.Tensor:
+    def _empty_segment(self) -> torch.Tensor:
         return torch.empty(
-            (self.n_envs, 0, self.robot_dof),
+            (self.num_envs, 0, self.robot_dof),
             dtype=torch.float32,
             device=self.device,
         )
 
-    def _assemble_phase(
+    def _assemble_segment(
         self,
         base_full_qpos: torch.Tensor,
         placing_arm_traj: torch.Tensor,
@@ -578,14 +617,15 @@ class CoordinatedPlacement(
         *,
         resources: _CoordinatedPlacementResources,
     ) -> torch.Tensor:
-        n_waypoints = placing_arm_traj.shape[1]
-        full = base_full_qpos.to(device=self.device, dtype=torch.float32)
-        full = full.unsqueeze(1).repeat(1, n_waypoints, 1).clone()
-        full[:, :, list(resources.placing_arm.joint_ids)] = placing_arm_traj
-        full[:, :, list(resources.support_arm.joint_ids)] = support_arm_traj
-        full[:, :, list(resources.placing_hand.joint_ids)] = placing_hand_traj
-        full[:, :, list(resources.support_hand.joint_ids)] = support_hand_traj
-        return full
+        return assemble_full_robot_trajectory(
+            base_full_qpos,
+            (
+                (resources.placing_arm.joint_ids, placing_arm_traj),
+                (resources.support_arm.joint_ids, support_arm_traj),
+                (resources.placing_hand.joint_ids, placing_hand_traj),
+                (resources.support_hand.joint_ids, support_hand_traj),
+            ),
+        )
 
 
 __all__ = [

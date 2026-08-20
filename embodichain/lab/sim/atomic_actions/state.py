@@ -18,14 +18,26 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
 if TYPE_CHECKING:
     from .core import ObjectSemantics
+
+
+def _same_physical_object(
+    first: ObjectSemantics,
+    second: ObjectSemantics,
+) -> bool:
+    """Return whether two semantic records identify one physical object."""
+    from .core import _same_object_identity
+
+    return _same_object_identity(first, second)
 
 
 def _resolve_runtime_device(device: torch.device | str) -> torch.device:
@@ -44,7 +56,7 @@ def _validate_pose(value: torch.Tensor, name: str) -> int | None:
         return None
     if value.dim() != 3 or value.shape[-2:] != (4, 4) or value.shape[0] == 0:
         raise ValueError(
-            f"{name} must have shape (4, 4) or (n_envs, 4, 4), "
+            f"{name} must have shape (4, 4) or (num_envs, 4, 4), "
             f"got {tuple(value.shape)}."
         )
     return int(value.shape[0])
@@ -136,49 +148,6 @@ class HeldObjectState:
             )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class CoordinatedHeldObjectState:
-    """Observed or projected relation for an object held by two manipulators."""
-
-    semantics: ObjectSemantics
-    left_object_to_eef: torch.Tensor
-    right_object_to_eef: torch.Tensor
-    left_grasp_xpos: torch.Tensor
-    right_grasp_xpos: torch.Tensor
-    env_mask: torch.Tensor | None = None
-
-    def __post_init__(self) -> None:
-        from .core import ObjectSemantics
-
-        if not isinstance(self.semantics, ObjectSemantics):
-            raise TypeError("semantics must be an ObjectSemantics instance.")
-        poses = {
-            "left_object_to_eef": self.left_object_to_eef,
-            "right_object_to_eef": self.right_object_to_eef,
-            "left_grasp_xpos": self.left_grasp_xpos,
-            "right_grasp_xpos": self.right_grasp_xpos,
-        }
-        batches = {_validate_pose(value, name) for name, value in poses.items()}
-        batches.discard(None)
-        if len(batches) > 1:
-            raise ValueError("Coordinated held-object poses must share a batch size.")
-        if len({value.device for value in poses.values()}) != 1:
-            raise ValueError("Coordinated held-object poses must share a device.")
-        if self.env_mask is not None:
-            mask_batch = int(self.env_mask.shape[0]) if self.env_mask.dim() == 1 else -1
-            batch_size = next(iter(batches), mask_batch)
-            object.__setattr__(
-                self,
-                "env_mask",
-                _normalize_mask(
-                    self.env_mask,
-                    batch_size=batch_size,
-                    device=self.left_object_to_eef.device,
-                    name="env_mask",
-                ),
-            )
-
-
 def _normalize_held(
     value: HeldObjectState,
     *,
@@ -209,48 +178,6 @@ def _normalize_held(
     )
 
 
-def _normalize_coordinated_held(
-    value: CoordinatedHeldObjectState,
-    *,
-    batch_size: int,
-    device: torch.device,
-) -> CoordinatedHeldObjectState:
-    """Normalize a coordinated relation to one task-state batch."""
-    return CoordinatedHeldObjectState(
-        semantics=value.semantics,
-        left_object_to_eef=_broadcast_pose(
-            value.left_object_to_eef,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.left_object_to_eef",
-        ),
-        right_object_to_eef=_broadcast_pose(
-            value.right_object_to_eef,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.right_object_to_eef",
-        ),
-        left_grasp_xpos=_broadcast_pose(
-            value.left_grasp_xpos,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.left_grasp_xpos",
-        ),
-        right_grasp_xpos=_broadcast_pose(
-            value.right_grasp_xpos,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.right_grasp_xpos",
-        ),
-        env_mask=_normalize_mask(
-            value.env_mask,
-            batch_size=batch_size,
-            device=device,
-            name="CoordinatedHeldObjectState.env_mask",
-        ),
-    )
-
-
 @dataclass(frozen=True, slots=True, eq=False)
 class TaskState:
     """Symbolic task state, separate from measured robot state."""
@@ -263,11 +190,6 @@ class TaskState:
 
     held_objects: Mapping[str, HeldObjectState] = field(default_factory=dict)
     """Single-manipulator held-object relations keyed by control resource."""
-
-    coordinated_held_objects: Mapping[tuple[str, str], CoordinatedHeldObjectState] = (
-        field(default_factory=dict)
-    )
-    """Two-manipulator held-object relations keyed by ordered resource pairs."""
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:
@@ -283,32 +205,8 @@ class TaskState:
                 value, batch_size=self.batch_size, device=device
             )
 
-        normalized_coordinated: dict[tuple[str, str], CoordinatedHeldObjectState] = {}
-        for resources, value in self.coordinated_held_objects.items():
-            if (
-                not isinstance(resources, tuple)
-                or len(resources) != 2
-                or not all(isinstance(item, str) and item for item in resources)
-            ):
-                raise TypeError(
-                    "coordinated_held_objects keys must be pairs of non-empty strings."
-                )
-            if not isinstance(value, CoordinatedHeldObjectState):
-                raise TypeError(
-                    "coordinated_held_objects values must be "
-                    "CoordinatedHeldObjectState objects."
-                )
-            normalized_coordinated[resources] = _normalize_coordinated_held(
-                value, batch_size=self.batch_size, device=device
-            )
-
         object.__setattr__(self, "device", device)
         object.__setattr__(self, "held_objects", MappingProxyType(normalized_held))
-        object.__setattr__(
-            self,
-            "coordinated_held_objects",
-            MappingProxyType(normalized_coordinated),
-        )
 
     @classmethod
     def empty(
@@ -331,13 +229,52 @@ class TaskState:
         """Return the object held by ``resource``, if any."""
         return self.held_objects.get(resource)
 
-    def get_coordinated_held_object(
-        self,
-        first_resource: str,
-        second_resource: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return the relation for an ordered resource pair, if any."""
-        return self.coordinated_held_objects.get((first_resource, second_resource))
+    def held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where ``resource`` holds an object.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``. Missing resources
+            produce an all-false mask.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return torch.zeros(
+                self.batch_size,
+                dtype=torch.bool,
+                device=self.device,
+            )
+        assert held.env_mask is not None
+        return held.env_mask.clone()
+
+    def exclusive_held_object_mask(self, resource: str) -> torch.Tensor:
+        """Return environments where only ``resource`` holds its object.
+
+        Object identity is established by the exact semantic record or by a
+        shared non-null simulation entity. Labels and structural equality are
+        deliberately ignored because distinct physical objects may look alike.
+
+        Args:
+            resource: Manipulator control-resource name.
+
+        Returns:
+            Owned boolean mask with shape ``(batch_size,)``.
+        """
+        held = self.get_held_object(resource)
+        if held is None:
+            return self.held_object_mask(resource)
+
+        exclusive = self.held_object_mask(resource)
+        for other_resource, other in self.held_objects.items():
+            if other_resource == resource:
+                continue
+            if not _same_physical_object(held.semantics, other.semantics):
+                continue
+            assert other.env_mask is not None
+            exclusive &= ~other.env_mask
+        return exclusive
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -356,7 +293,7 @@ class RobotObservation:
             raise ValueError("RobotObservation.timestamp must be non-negative.")
         if not isinstance(self.qpos, torch.Tensor) or self.qpos.dim() != 2:
             raise ValueError(
-                "RobotObservation.qpos must have shape (n_envs, robot_dof)."
+                "RobotObservation.qpos must have shape (num_envs, robot_dof)."
             )
         if self.qpos.shape[0] == 0 or self.qpos.shape[1] == 0:
             raise ValueError("RobotObservation.qpos dimensions must be non-zero.")
@@ -423,6 +360,30 @@ class EntityState:
         object.__setattr__(self, "pose", self.pose.clone())
 
 
+class _ImmutableEntityMapping(Mapping[str, EntityState]):
+    """Own entity states and return defensive copies on every public read."""
+
+    __slots__ = ("_states",)
+
+    def __init__(self, states: Mapping[str, EntityState]) -> None:
+        self._states = MappingProxyType(
+            {
+                entity_id: EntityState(state.pose, confidence=state.confidence)
+                for entity_id, state in states.items()
+            }
+        )
+
+    def __getitem__(self, entity_id: str) -> EntityState:
+        state = self._states[entity_id]
+        return EntityState(state.pose, confidence=state.confidence)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._states)
+
+    def __len__(self) -> int:
+        return len(self._states)
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class SceneSnapshot:
     """Versioned scene state used to ground dynamic goals and obstacles."""
@@ -430,12 +391,40 @@ class SceneSnapshot:
     timestamp: float
     version: int
     entities: Mapping[str, EntityState] = field(default_factory=dict)
+    collision_world_revision: int | tuple[int, ...] = 0
+    """Global or per-environment collision-world revision."""
+
+    collision_entity_ids: tuple[str, ...] = ()
+    """Entity IDs whose poses update a planner's dynamic collision world."""
 
     def __post_init__(self) -> None:
         if self.timestamp < 0.0:
             raise ValueError("SceneSnapshot.timestamp must be non-negative.")
         if self.version < 0:
             raise ValueError("SceneSnapshot.version must be non-negative.")
+        revision = self.collision_world_revision
+        if isinstance(revision, bool):
+            raise TypeError("collision_world_revision must contain integers.")
+        if isinstance(revision, int):
+            if revision < 0:
+                raise ValueError(
+                    "collision_world_revision must contain non-negative values."
+                )
+        else:
+            if not isinstance(revision, tuple) or not revision:
+                raise TypeError(
+                    "collision_world_revision must be an integer or a non-empty "
+                    "tuple of integers."
+                )
+            if any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in revision
+            ):
+                raise TypeError("collision_world_revision must contain integers.")
+            if any(value < 0 for value in revision):
+                raise ValueError(
+                    "collision_world_revision must contain non-negative values."
+                )
         normalized: dict[str, EntityState] = {}
         for entity_id, state in self.entities.items():
             if not isinstance(entity_id, str) or not entity_id:
@@ -445,7 +434,78 @@ class SceneSnapshot:
                     "SceneSnapshot entities must contain EntityState values."
                 )
             normalized[entity_id] = state
-        object.__setattr__(self, "entities", MappingProxyType(normalized))
+        collision_entity_ids = tuple(self.collision_entity_ids)
+        if len(set(collision_entity_ids)) != len(collision_entity_ids) or not all(
+            isinstance(entity_id, str) and entity_id
+            for entity_id in collision_entity_ids
+        ):
+            raise ValueError(
+                "collision_entity_ids must contain unique non-empty entity IDs."
+            )
+        missing = set(collision_entity_ids).difference(normalized)
+        if missing:
+            raise ValueError(
+                "collision_entity_ids reference missing scene entities: "
+                f"{sorted(missing)}."
+            )
+        object.__setattr__(self, "entities", _ImmutableEntityMapping(normalized))
+        object.__setattr__(self, "collision_entity_ids", collision_entity_ids)
+
+    def collision_world_revisions(self, batch_size: int) -> tuple[int, ...]:
+        """Expand the collision revision to one value per environment.
+
+        Args:
+            batch_size: Number of environments represented by the planning context.
+
+        Returns:
+            Per-environment monotonic revision tuple.
+
+        Raises:
+            ValueError: If an explicit revision tuple does not match the batch.
+        """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive.")
+        revision = self.collision_world_revision
+        if isinstance(revision, int):
+            return (revision,) * batch_size
+        if len(revision) == 1:
+            return revision * batch_size
+        if len(revision) != batch_size:
+            raise ValueError(
+                "collision_world_revision must be global or have one value per "
+                f"environment; got {len(revision)} values for batch {batch_size}."
+            )
+        return revision
+
+    def collision_obstacle_poses(
+        self,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Mapping[str, torch.Tensor]:
+        """Return collision obstacle poses in planning batch order.
+
+        Args:
+            batch_size: Number of planning environments.
+            device: Planner tensor device.
+            dtype: Planner tensor dtype.
+
+        Returns:
+            Mapping from configured collision entity ID to ``(B, 4, 4)`` pose.
+        """
+        poses: dict[str, torch.Tensor] = {}
+        for entity_id in self.collision_entity_ids:
+            pose = self.entities[entity_id].pose.to(device=device, dtype=dtype)
+            if pose.shape == (4, 4):
+                pose = pose.unsqueeze(0).expand(batch_size, -1, -1)
+            elif pose.shape != (batch_size, 4, 4):
+                raise ValueError(
+                    f"Collision entity {entity_id!r} pose must match planning "
+                    f"batch size {batch_size}."
+                )
+            poses[entity_id] = pose.clone()
+        return MappingProxyType(poses)
 
     @classmethod
     def empty(cls) -> SceneSnapshot:
@@ -461,6 +521,8 @@ class PlanningContext:
     task: TaskState
     scene: SceneSnapshot
     env_ids: torch.Tensor
+    control_dt: float | None = None
+    """Explicit command period used by action-owned interpolation."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.robot, RobotObservation):
@@ -473,6 +535,13 @@ class PlanningContext:
             raise ValueError("TaskState and RobotObservation batch sizes must match.")
         if self.task.device != self.robot.qpos.device:
             raise ValueError("TaskState and RobotObservation must share a device.")
+        self.scene.collision_world_revisions(self.robot.batch_size)
+        for entity_id, state in self.scene.entities.items():
+            if state.pose.dim() == 3 and state.pose.shape[0] != self.robot.batch_size:
+                raise ValueError(
+                    f"Scene entity {entity_id!r} pose batch must match the "
+                    "planning context."
+                )
         if not isinstance(self.env_ids, torch.Tensor):
             raise TypeError("env_ids must be a torch.Tensor.")
         if self.env_ids.dtype != torch.long:
@@ -486,6 +555,14 @@ class PlanningContext:
             raise ValueError("env_ids and robot tensors must share a device.")
         if torch.unique(self.env_ids).numel() != self.env_ids.numel():
             raise ValueError("env_ids must be unique.")
+        if self.control_dt is not None:
+            if isinstance(self.control_dt, bool) or not isinstance(
+                self.control_dt, (int, float)
+            ):
+                raise TypeError("control_dt must be a real number or None.")
+            if not math.isfinite(self.control_dt) or self.control_dt <= 0.0:
+                raise ValueError("control_dt must be finite and greater than zero.")
+            object.__setattr__(self, "control_dt", float(self.control_dt))
         object.__setattr__(self, "env_ids", self.env_ids.clone())
 
     @property
@@ -503,24 +580,22 @@ class PlanningContext:
         """Single-resource held-object relations."""
         return self.task.held_objects
 
-    @property
-    def coordinated_held_objects(
-        self,
-    ) -> Mapping[tuple[str, str], CoordinatedHeldObjectState]:
-        """Coordinated held-object relations."""
-        return self.task.coordinated_held_objects
-
     def get_held_object(self, resource: str) -> HeldObjectState | None:
         """Return the object held by ``resource``, if any."""
         return self.task.get_held_object(resource)
 
-    def get_coordinated_held_object(
-        self,
-        first_resource: str,
-        second_resource: str,
-    ) -> CoordinatedHeldObjectState | None:
-        """Return a coordinated held-object relation, if any."""
-        return self.task.get_coordinated_held_object(first_resource, second_resource)
+    def require_control_dt(self) -> float:
+        """Return the explicit command period required for interpolation.
+
+        Raises:
+            ValueError: If the caller did not provide ``control_dt``.
+        """
+        if self.control_dt is None:
+            raise ValueError(
+                "This action performs interpolation and requires an explicit "
+                "PlanningContext.control_dt."
+            )
+        return self.control_dt
 
     def project(
         self,
@@ -542,11 +617,11 @@ class PlanningContext:
             task=task,
             scene=self.scene,
             env_ids=self.env_ids,
+            control_dt=self.control_dt,
         )
 
 
 __all__ = [
-    "CoordinatedHeldObjectState",
     "EntityState",
     "HeldObjectState",
     "PlanningContext",

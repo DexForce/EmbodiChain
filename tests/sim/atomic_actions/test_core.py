@@ -18,7 +18,8 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import dataclass, FrozenInstanceError
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -26,81 +27,373 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     ActionBinding,
     ActionInvocation,
+    ActionOptions,
+    ActionPlan,
     Affordance,
+    AtomicAction,
+    AtomicActionEngine,
+    DynamicCollisionMode,
+    EndpointBinding,
+    EndpointCommand,
     EndEffectorPoseGoal,
     EntityState,
+    ExecutionFeedbackMode,
     HeldObjectState,
+    JointPositionPayload,
+    JointPositionTarget,
     MotionPolicy,
     ObjectSemantics,
+    PlannerDiagnostics,
     PlanningContext,
     RecoveryPolicy,
+    ResolvedActionRequest,
     RobotObservation,
+    RuntimeCommandFrame,
+    RuntimeEndpointTarget,
     SceneEntityPose,
     SceneSnapshot,
+    SkillBindingContract,
     StateDelta,
     TaskState,
+    TimedCommandSequence,
     TimedTrajectory,
 )
 from embodichain.lab.sim.atomic_actions.goals import (
+    _resolve_object_pose,
     collect_scene_dependencies,
     resolve_pose_goal,
 )
+from embodichain.lab.sim.common import BatchEntity
+from embodichain.lab.sim.planners import ToppraPlanOptions
 
 
-def _semantics(label: str = "object") -> ObjectSemantics:
-    return ObjectSemantics(affordance=Affordance(), geometry={}, label=label)
-
-
-def _held(batch_size: int = 2) -> HeldObjectState:
-    pose = torch.eye(4).repeat(batch_size, 1, 1)
-    return HeldObjectState(
-        semantics=_semantics(),
-        object_to_eef=pose,
-        grasp_xpos=pose,
+def _semantics(
+    label: str = "object",
+    *,
+    entity: BatchEntity | None = None,
+    entity_id: str | None = None,
+) -> ObjectSemantics:
+    return ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label=label,
+        entity=entity,
+        entity_id=entity_id,
     )
 
 
-def _context(scene: SceneSnapshot | None = None) -> PlanningContext:
+def _held(
+    batch_size: int = 2,
+    *,
+    semantics: ObjectSemantics | None = None,
+    env_mask: torch.Tensor | None = None,
+) -> HeldObjectState:
+    pose = torch.eye(4).repeat(batch_size, 1, 1)
+    return HeldObjectState(
+        semantics=semantics or _semantics(),
+        object_to_eef=pose,
+        grasp_xpos=pose,
+        env_mask=env_mask,
+    )
+
+
+def _context(
+    scene: SceneSnapshot | None = None,
+    *,
+    control_dt: float | None = None,
+) -> PlanningContext:
     qpos = torch.zeros(2, 4)
     return PlanningContext(
         robot=RobotObservation(timestamp=1.0, qpos=qpos, qvel=torch.zeros_like(qpos)),
         task=TaskState.empty(batch_size=2, device="cpu"),
         scene=scene or SceneSnapshot.empty(),
         env_ids=torch.tensor([4, 7], dtype=torch.long),
+        control_dt=control_dt,
     )
 
 
-def test_action_binding_is_role_based_and_immutable() -> None:
-    binding = ActionBinding(
-        manipulators={"primary": "left_arm"},
-        end_effectors={"primary": "left_hand"},
+def _command_sequence(
+    *,
+    env_ids: torch.Tensor,
+    frame_count: int,
+    targets: tuple[JointPositionTarget, ...] | None = None,
+    positions: tuple[torch.Tensor, ...] | None = None,
+    velocities: tuple[torch.Tensor | None, ...] | None = None,
+) -> TimedCommandSequence:
+    batch_size = int(env_ids.shape[0])
+    if targets is None:
+        target = JointPositionTarget("arm", (0, 1))
+        targets = (target,) * frame_count
+    if len(targets) != frame_count:
+        raise ValueError("targets must contain one value per command frame.")
+    if positions is not None and len(positions) != frame_count:
+        raise ValueError("positions must contain one value per command frame.")
+    if velocities is not None and len(velocities) != frame_count:
+        raise ValueError("velocities must contain one value per command frame.")
+    frames = tuple(
+        RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target=targets[index],
+                    payload=JointPositionPayload(
+                        (
+                            torch.full(
+                                (batch_size, len(targets[index].joint_ids)),
+                                float(index + 1),
+                                device=env_ids.device,
+                            )
+                            if positions is None
+                            else positions[index]
+                        ),
+                        velocities=(None if velocities is None else velocities[index]),
+                    ),
+                ),
+            ),
+            active_mask=torch.ones(
+                batch_size,
+                dtype=torch.bool,
+                device=env_ids.device,
+            ),
+            env_ids=env_ids,
+            hold_duration=torch.full(
+                (batch_size,),
+                0.1,
+                device=env_ids.device,
+            ),
+        )
+        for index in range(frame_count)
+    )
+    return TimedCommandSequence(frames=frames, env_ids=env_ids)
+
+
+class _AlternateJointPositionTarget(JointPositionTarget):
+    """Distinct exact target type sharing joint-position transport semantics."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimedTarget(RuntimeEndpointTarget):
+    """Non-joint target used to verify binding claim authorization."""
+
+    name: str
+
+    @property
+    def transport_id(self) -> str:
+        return JointPositionTarget.TRANSPORT_ID
+
+    @property
+    def target_id(self) -> str:
+        return self.name
+
+
+def _action_plan(
+    commands: TimedCommandSequence,
+    *,
+    plan_success: torch.Tensor | None = None,
+    joint_trajectory: TimedTrajectory | None = None,
+    feedback_mode: ExecutionFeedbackMode = ExecutionFeedbackMode.TIMED,
+) -> ActionPlan:
+    if plan_success is None:
+        plan_success = torch.ones(
+            commands.batch_size,
+            dtype=torch.bool,
+            device=commands.device,
+        )
+    return ActionPlan(
+        skill_id="test",
+        plan_success=plan_success,
+        commands=commands,
+        recovery_policy=RecoveryPolicy(),
+        planned_scene_version=0,
+        planned_collision_world_revision=(0,) * commands.batch_size,
+        diagnostics=PlannerDiagnostics(backend="test"),
+        feedback_mode=feedback_mode,
+        joint_trajectory=joint_trajectory,
     )
 
-    assert binding.manipulator() == "left_arm"
-    assert binding.end_effector() == "left_hand"
-    with pytest.raises(TypeError):
-        binding.manipulators["primary"] = "right_arm"
-    with pytest.raises(KeyError, match="destination"):
-        binding.manipulator("destination")
+
+class _DependencyAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
+    """Minimal action proving that build_plan delegates dependencies to its hook."""
+
+    skill_id = "dependency_test"
+    GoalType = EndEffectorPoseGoal
+    OptionsType = ActionOptions
+    binding_contract = SkillBindingContract()
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cpu")
+
+    def _uses_collision_world(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> bool:
+        del request, context
+        return False
+
+    def _scene_dependencies(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+    ) -> tuple[str, ...]:
+        dependencies = set(super()._scene_dependencies(request))
+        dependencies.add("extra")
+        return tuple(sorted(dependencies))
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        raise NotImplementedError
 
 
-def test_invocation_rejects_values_without_goal_contract() -> None:
-    with pytest.raises(TypeError, match="goal_kind"):
-        ActionInvocation(
-            skill_id="move_end_effector",
-            goal=object(),  # type: ignore[arg-type]
-            binding=ActionBinding(manipulators={"primary": "arm"}),
+class _RawCommandAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
+    """Action that deliberately bypasses build_command_plan for validation."""
+
+    skill_id = "raw_command_test"
+    GoalType = EndEffectorPoseGoal
+    OptionsType = ActionOptions
+    binding_contract = SkillBindingContract()
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cpu")
+
+    def _uses_collision_world(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> bool:
+        del request, context
+        return False
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        del request
+        return ActionPlan(
+            skill_id=self.skill_id,
+            plan_success=torch.ones(context.batch_size, dtype=torch.bool),
+            commands=_command_sequence(
+                env_ids=context.env_ids,
+                frame_count=1,
+            ),
+            recovery_policy=RecoveryPolicy(),
+            planned_scene_version=context.scene.version,
+            planned_collision_world_revision=(0,) * context.batch_size,
+            diagnostics=PlannerDiagnostics(backend="test"),
         )
 
 
+def test_action_binding_is_endpoint_based_and_immutable() -> None:
+    endpoint = EndpointBinding(
+        slot_id="primary",
+        endpoint_id="motion",
+        resource_id="left_actor",
+        adapter_id="control_part",
+        target=JointPositionTarget("left_arm", (0, 1)),
+        capabilities=frozenset({"motion.test"}),
+        claim_tokens=frozenset({"robot.control_part:left_arm"}),
+    )
+    binding = ActionBinding(
+        owner_id="test-engine",
+        endpoints=(endpoint,),
+    )
+
+    resolved = binding.endpoint("primary", "motion")
+    target = resolved.require_target(JointPositionTarget)
+    assert resolved is not binding.endpoints[0]
+    assert resolved.target is not binding.endpoints[0].target
+    assert target.control_part == "left_arm"
+    assert target.joint_ids == (0, 1)
+    assert resolved.joint_ids == (0, 1)
+    assert resolved.capabilities == frozenset({"motion.test"})
+    with pytest.raises(FrozenInstanceError):
+        binding.owner_id = "other-engine"  # type: ignore[misc]
+    with pytest.raises(KeyError, match="destination.motion"):
+        binding.endpoint("destination", "motion")
+    with pytest.raises(ValueError, match="must match"):
+        EndpointBinding(
+            slot_id="primary",
+            endpoint_id="motion",
+            resource_id="left_actor",
+            adapter_id="control_part",
+            target=JointPositionTarget("left_arm", (0, 1)),
+            joint_ids=(1, 2),
+        )
+
+
+@pytest.mark.parametrize("entity_id", ["", "   ", 7])
+def test_object_semantics_rejects_invalid_entity_id(entity_id: object) -> None:
+    with pytest.raises(ValueError, match="entity_id"):
+        ObjectSemantics(
+            affordance=Affordance(),
+            geometry={},
+            entity_id=entity_id,  # type: ignore[arg-type]
+        )
+
+
+def test_object_semantics_identity_fields_are_frozen() -> None:
+    semantics = _semantics(entity_id="cube")
+
+    with pytest.raises(FrozenInstanceError):
+        semantics.entity_id = "other"  # type: ignore[misc]
+
+
 def test_motion_and_recovery_policy_validate_shared_parameters() -> None:
-    policy = MotionPolicy(sample_count=24, control_dt=0.01)
+    policy = MotionPolicy(sample_count=24)
     assert policy.sample_count == 24
-    assert policy.control_dt == 0.01
+    assert policy.dynamic_collision_mode is DynamicCollisionMode.AUTO
     with pytest.raises(ValueError, match="sample_count"):
         MotionPolicy(sample_count=1)
+    with pytest.raises(ValueError, match="strategy"):
+        MotionPolicy(strategy="planner")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="max_replans"):
         RecoveryPolicy(max_replans=-1)
+
+
+def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
+    assert (
+        MotionPolicy(dynamic_collision_mode="off").dynamic_collision_mode
+        is DynamicCollisionMode.OFF
+    )
+    with pytest.raises(ValueError, match="dynamic_collision_mode"):
+        MotionPolicy(dynamic_collision_mode="unknown")
+    with pytest.raises(TypeError, match="DynamicCollisionMode"):
+        MotionPolicy(dynamic_collision_mode=object())  # type: ignore[arg-type]
+
+
+def test_motion_policy_maps_to_motion_generator_strategy() -> None:
+    planner_options = ToppraPlanOptions(
+        constraints={"velocity": 0.2, "acceleration": 0.5}
+    )
+    policy = MotionPolicy(
+        strategy="ik_interp",
+        sample_count=24,
+        plan_opts=planner_options,
+    )
+    planner_options.constraints["velocity"] = 1.0
+    start_qpos = torch.zeros(2, 6)
+
+    options = policy.to_motion_gen_options(
+        start_qpos=start_qpos,
+        control_part="arm",
+        sample_count=12,
+        interpolation_dt=0.02,
+    )
+
+    assert options.strategy == "ik_interp"
+    assert options.sample_count == 12
+    assert options.start_qpos is not start_qpos
+    assert torch.equal(options.start_qpos, start_qpos)
+    assert options.control_part == "arm"
+    assert options.interpolation_dt == pytest.approx(0.02)
+    assert options.velocity_limit is None
+    assert options.acceleration_limit is None
+    assert isinstance(options.plan_opts, ToppraPlanOptions)
+    assert options.plan_opts.constraints == {"velocity": 0.2, "acceleration": 0.5}
 
 
 def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
@@ -123,6 +416,167 @@ def test_task_state_normalizes_held_relations_and_masks_updates() -> None:
     assert left is not None and left.env_mask.tolist() == [False, True]
     assert right is not None and right.env_mask.tolist() == [True, False]
     assert state.get_held_object("right_arm") is None
+
+
+def test_task_state_reports_per_environment_exclusive_holds() -> None:
+    entity = Mock(spec=BatchEntity)
+    shared = _semantics("shared", entity=entity)
+    same_entity = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        label="same-entity-alias",
+        entity=entity,
+    )
+    independent = _semantics("shared")
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(semantics=shared),
+            "right_arm": _held(
+                semantics=same_entity,
+                env_mask=torch.tensor([True, False]),
+            ),
+            "third_arm": _held(
+                semantics=independent,
+                env_mask=torch.tensor([False, True]),
+            ),
+        },
+    )
+
+    assert state.held_object_mask("left_arm").tolist() == [True, True]
+    assert state.exclusive_held_object_mask("left_arm").tolist() == [False, True]
+    assert state.exclusive_held_object_mask("right_arm").tolist() == [False, False]
+    assert state.exclusive_held_object_mask("third_arm").tolist() == [False, True]
+    assert state.held_object_mask("missing").tolist() == [False, False]
+
+
+def test_task_state_treats_matching_entity_ids_as_shared() -> None:
+    state = TaskState(
+        batch_size=1,
+        device="cpu",
+        held_objects={
+            "left_arm": _held(
+                batch_size=1,
+                semantics=_semantics(entity_id="tray"),
+            ),
+            "right_arm": _held(
+                batch_size=1,
+                semantics=_semantics(entity_id="tray"),
+            ),
+        },
+    )
+
+    assert state.exclusive_held_object_mask("left_arm").tolist() == [False]
+    assert state.exclusive_held_object_mask("right_arm").tolist() == [False]
+
+
+def test_state_delta_merges_distinct_semantics_with_same_entity_id() -> None:
+    previous_semantics = _semantics(entity_id="cube")
+    candidate_semantics = _semantics(entity_id="cube")
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={"arm": _held(semantics=previous_semantics)},
+    )
+
+    updated = StateDelta(
+        held_object_updates={
+            "arm": _held(semantics=candidate_semantics),
+        }
+    ).apply(state, torch.tensor([True, False]))
+
+    held = updated.get_held_object("arm")
+    assert previous_semantics is not candidate_semantics
+    assert held is not None and held.semantics is previous_semantics
+
+
+def test_state_delta_replaces_semantics_when_all_rows_are_updated() -> None:
+    previous_semantics = _semantics(entity_id="cube")
+    candidate_semantics = _semantics(entity_id="cube")
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={"arm": _held(semantics=previous_semantics)},
+    )
+
+    updated = StateDelta(
+        held_object_updates={
+            "arm": _held(semantics=candidate_semantics),
+        }
+    ).apply(state, torch.tensor([True, True]))
+
+    held = updated.get_held_object("arm")
+    assert held is not None and held.semantics is candidate_semantics
+
+
+def test_state_delta_rejects_partial_merge_of_different_entity_ids() -> None:
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={"arm": _held(semantics=_semantics(entity_id="cube"))},
+    )
+    delta = StateDelta(
+        held_object_updates={
+            "arm": _held(semantics=_semantics(entity_id="cup")),
+        }
+    )
+
+    with pytest.raises(ValueError, match="different held-object semantics"):
+        delta.apply(state, torch.tensor([True, False]))
+
+
+def test_state_delta_does_not_match_explicit_id_to_legacy_uid() -> None:
+    shared_entity = Mock(uid="cube")
+    previous_semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=shared_entity,
+        entity_id="cube",
+    )
+    candidate_semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=shared_entity,
+    )
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={"arm": _held(semantics=previous_semantics)},
+    )
+    delta = StateDelta(
+        held_object_updates={"arm": _held(semantics=candidate_semantics)}
+    )
+
+    with pytest.raises(ValueError, match="different held-object semantics"):
+        delta.apply(state, torch.tensor([True, False]))
+
+
+def test_state_delta_merges_legacy_semantics_with_same_uid() -> None:
+    previous_semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=Mock(uid="cube"),
+    )
+    candidate_semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=Mock(uid="cube"),
+    )
+    state = TaskState(
+        batch_size=2,
+        device="cpu",
+        held_objects={"arm": _held(semantics=previous_semantics)},
+    )
+
+    updated = StateDelta(
+        held_object_updates={
+            "arm": _held(semantics=candidate_semantics),
+        }
+    ).apply(state, torch.tensor([True, False]))
+
+    held = updated.get_held_object("arm")
+    assert held is not None and held.semantics is previous_semantics
 
 
 def test_robot_observation_owns_input_tensors() -> None:
@@ -175,12 +629,606 @@ def test_scene_entity_pose_enforces_confidence() -> None:
         )
 
 
-def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
+def test_object_pose_uses_explicit_scene_id_without_live_fallback() -> None:
+    scene_pose = torch.eye(4).repeat(2, 1, 1)
+    scene_pose[:, 0, 3] = torch.tensor([0.2, 0.4])
+    entity = Mock()
+    entity.get_local_pose.return_value = torch.full((2, 4, 4), 9.0)
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=entity,
+        entity_id="cup",
+    )
+    context = _context(
+        SceneSnapshot(
+            timestamp=1.0,
+            version=1,
+            entities={"cup": EntityState(scene_pose)},
+        )
+    )
+
+    resolved = _resolve_object_pose(semantics, context)
+
+    assert torch.equal(resolved, scene_pose)
+    entity.get_local_pose.assert_not_called()
+
+
+def test_object_pose_missing_explicit_scene_id_does_not_fall_back() -> None:
+    entity = Mock()
+    entity.get_local_pose.return_value = torch.eye(4).repeat(2, 1, 1)
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=entity,
+        entity_id="missing",
+    )
+
+    with pytest.raises(KeyError, match="unknown scene entity"):
+        _resolve_object_pose(semantics, _context())
+    entity.get_local_pose.assert_not_called()
+
+
+def test_object_pose_legacy_entity_warns_and_broadcasts() -> None:
+    entity = Mock()
+    entity.get_local_pose.return_value = torch.eye(4)
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        entity=entity,
+    )
+
+    with pytest.warns(DeprecationWarning, match="entity_id"):
+        resolved = _resolve_object_pose(semantics, _context())
+
+    assert resolved.shape == (2, 4, 4)
+    entity.get_local_pose.assert_called_once_with(to_matrix=True)
+
+
+def test_dependency_collection_does_not_descend_object_semantics() -> None:
+    semantics = ObjectSemantics(
+        affordance=Affordance(),
+        geometry={},
+        properties={"unrelated_pose": SceneEntityPose("hidden")},
+        entity_id="object",
+    )
+
+    assert collect_scene_dependencies(semantics) == ()
+
+
+def test_build_plan_uses_action_scene_dependency_hook() -> None:
+    context = _context()
+    generator = Mock()
+    generator.robot = Mock()
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "test"
+    engine = AtomicActionEngine(generator, load_builtins=False)
+    action = _DependencyAction()
+    engine.register(action)
+    request = ResolvedActionRequest(
+        skill_id="dependency_test",
+        goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
+        binding=ActionBinding(owner_id=engine.binding_owner_id),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+
+    with pytest.raises(TypeError, match="TimedTrajectory with explicit dt"):
+        action.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=context.robot.qpos.unsqueeze(1),  # type: ignore[arg-type]
+        )
+
+    plan = action.build_command_plan(
+        request,
+        context,
+        success=True,
+        commands=TimedCommandSequence(frames=(), env_ids=context.env_ids),
+        diagnostics=PlannerDiagnostics(backend="test"),
+    )
+
+    assert plan.scene_dependencies == ("extra", "tracked")
+
+
+def test_build_command_plan_rejects_unbound_runtime_destination() -> None:
+    context = _context()
+    generator = Mock()
+    generator.robot = Mock()
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "test"
+    engine = AtomicActionEngine(generator, load_builtins=False)
+    action = _DependencyAction()
+    engine.register(action)
+    request = ResolvedActionRequest(
+        skill_id="dependency_test",
+        goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
+        binding=ActionBinding(owner_id=engine.binding_owner_id),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+
+    with pytest.raises(ValueError, match="not authorized"):
+        action.build_command_plan(
+            request,
+            context,
+            success=True,
+            commands=_command_sequence(env_ids=context.env_ids, frame_count=1),
+            diagnostics=PlannerDiagnostics(backend="test"),
+        )
+
+
+def test_public_plan_authorizes_raw_action_plan_destinations() -> None:
+    context = _context()
+    generator = Mock()
+    generator.robot = Mock()
+    generator.device = torch.device("cpu")
+    generator.planner.cfg.planner_type = "test"
+    engine = AtomicActionEngine(generator, load_builtins=False)
+    action = _RawCommandAction()
+    engine.register(action)
+    request = ResolvedActionRequest(
+        skill_id=action.skill_id,
+        goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
+        binding=ActionBinding(owner_id=engine.binding_owner_id),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+
+    with pytest.raises(ValueError, match="not authorized"):
+        action.plan(request, context)
+
+
+def test_command_target_authorization_rejects_altered_joint_claims() -> None:
+    context = _context()
+    request = ResolvedActionRequest(
+        skill_id="dependency_test",
+        goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
+        binding=ActionBinding(
+            owner_id="test-engine",
+            endpoints=(
+                EndpointBinding(
+                    slot_id="primary",
+                    endpoint_id="motion",
+                    resource_id="arm",
+                    adapter_id="control_part",
+                    target=JointPositionTarget("arm", (0, 1)),
+                ),
+            ),
+        ),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+    frame = RuntimeCommandFrame(
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget("arm", (2, 3)),
+                payload=JointPositionPayload(torch.ones(2, 2)),
+            ),
+        ),
+        active_mask=torch.ones(2, dtype=torch.bool),
+        env_ids=context.env_ids,
+        hold_duration=torch.full((2,), 0.1),
+    )
+
+    with pytest.raises(ValueError, match="bound joint-position target"):
+        _DependencyAction._authorize_command_targets(
+            request,
+            TimedCommandSequence(frames=(frame,), env_ids=context.env_ids),
+        )
+
+
+def test_command_target_authorization_rejects_custom_claim_conflicts() -> None:
+    context = _context()
+    endpoints = tuple(
+        EndpointBinding(
+            slot_id="primary",
+            endpoint_id=name,
+            resource_id=name,
+            adapter_id="test.claimed",
+            target=_ClaimedTarget(name),
+            claim_tokens=frozenset({"controller:shared"}),
+        )
+        for name in ("first", "second")
+    )
+    request = ResolvedActionRequest(
+        skill_id="dependency_test",
+        goal=EndEffectorPoseGoal(SceneEntityPose("tracked")),
+        binding=ActionBinding(owner_id="test-engine", endpoints=endpoints),
+        motion_policy=MotionPolicy(),
+        recovery_policy=RecoveryPolicy(),
+        skill_options=ActionOptions(),
+    )
+    frame = RuntimeCommandFrame(
+        commands=tuple(
+            EndpointCommand(
+                target=endpoint.target,
+                payload=JointPositionPayload(torch.ones(2, 1)),
+            )
+            for endpoint in endpoints
+        ),
+        active_mask=torch.ones(2, dtype=torch.bool),
+        env_ids=context.env_ids,
+        hold_duration=torch.full((2,), 0.1),
+    )
+
+    with pytest.raises(ValueError, match="claim tokens.*controller:shared"):
+        _DependencyAction._authorize_command_targets(
+            request,
+            TimedCommandSequence(frames=(frame,), env_ids=context.env_ids),
+        )
+
+
+def test_action_plan_owns_commands_and_optional_joint_trajectory() -> None:
+    env_ids = torch.tensor([4, 7], dtype=torch.long)
+    commands = _command_sequence(env_ids=env_ids, frame_count=2)
+    trajectory_positions = torch.stack(
+        (
+            torch.full((2, 2), 1.0),
+            torch.full((2, 2), 2.0),
+        ),
+        dim=1,
+    )
+    trajectory = TimedTrajectory.from_uniform_step(
+        trajectory_positions,
+        env_ids=env_ids,
+        step_dt=0.1,
+    )
+    plan_success = torch.tensor([True, False])
+
+    plan = _action_plan(
+        commands,
+        plan_success=plan_success,
+        joint_trajectory=trajectory,
+        feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+    )
+    payload = commands.frames[0].commands[0].payload
+    assert isinstance(payload, JointPositionPayload)
+    plan_success.zero_()
+    payload.positions.zero_()
+    commands.frames[0].active_mask.zero_()
+    commands.frames[0].hold_duration.zero_()
+    commands.env_ids.zero_()
+    trajectory.positions.zero_()
+
+    owned_payload = plan.commands.frames[0].commands[0].payload
+    assert isinstance(owned_payload, JointPositionPayload)
+    assert plan.plan_success.tolist() == [True, False]
+    assert torch.all(owned_payload.positions == 1.0)
+    assert plan.commands.frames[0].active_mask.tolist() == [True, True]
+    assert torch.all(plan.commands.frames[0].hold_duration == 0.1)
+    assert plan.commands.env_ids.tolist() == [4, 7]
+    assert plan.joint_trajectory is not None
+    assert torch.equal(plan.joint_trajectory.positions, trajectory_positions)
+
+
+def test_action_plan_allows_timed_commands_without_joint_trajectory() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+
+    plan = _action_plan(commands)
+
+    assert plan.commands.frame_count == 1
+    assert plan.joint_trajectory is None
+    assert plan.feedback_mode is ExecutionFeedbackMode.TIMED
+
+
+def test_action_plan_rejects_command_device_mismatch() -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+
+    with pytest.raises(ValueError, match="share a device"):
+        _action_plan(
+            commands,
+            plan_success=torch.ones(1, dtype=torch.bool, device="meta"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("trajectory_env_ids", "trajectory_frame_count", "message"),
+    [
+        (torch.tensor([7], dtype=torch.long), 1, "env_ids must match"),
+        (torch.tensor([4], dtype=torch.long), 2, "waypoints must match"),
+    ],
+)
+def test_action_plan_validates_joint_trajectory_against_commands(
+    trajectory_env_ids: torch.Tensor,
+    trajectory_frame_count: int,
+    message: str,
+) -> None:
+    commands = _command_sequence(
+        env_ids=torch.tensor([4], dtype=torch.long),
+        frame_count=1,
+    )
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.ones(1, trajectory_frame_count, 2),
+        env_ids=trajectory_env_ids,
+        step_dt=0.1,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        _action_plan(
+            commands,
+            joint_trajectory=trajectory,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        )
+
+
+def test_joint_position_plan_rejects_empty_commands_for_successful_rows() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = TimedCommandSequence(frames=(), env_ids=env_ids)
+    trajectory = TimedTrajectory.empty(
+        batch_size=1,
+        robot_dof=2,
+        device=env_ids.device,
+        env_ids=env_ids,
+    )
+
+    with pytest.raises(ValueError, match="requires command frames"):
+        _action_plan(
+            commands,
+            plan_success=torch.tensor([True]),
+            joint_trajectory=trajectory,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        )
+
+
+def test_joint_position_plan_allows_empty_commands_when_all_rows_fail() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = TimedCommandSequence(frames=(), env_ids=env_ids)
+    trajectory = TimedTrajectory.empty(
+        batch_size=1,
+        robot_dof=2,
+        device=env_ids.device,
+        env_ids=env_ids,
+    )
+
+    plan = _action_plan(
+        commands,
+        plan_success=torch.tensor([False]),
+        joint_trajectory=trajectory,
+        feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+    )
+
+    assert plan.commands.frame_count == 0
+
+
+@pytest.mark.parametrize(
+    "feedback_mode",
+    [ExecutionFeedbackMode.TIMED, ExecutionFeedbackMode.JOINT_POSITION],
+)
+def test_action_plan_requires_stable_destination_set(
+    feedback_mode: ExecutionFeedbackMode,
+) -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(
+        env_ids=env_ids,
+        frame_count=2,
+        targets=(
+            JointPositionTarget("arm", (0, 1)),
+            JointPositionTarget("other_arm", (0, 1)),
+        ),
+    )
+    trajectory = (
+        TimedTrajectory.from_uniform_step(
+            torch.tensor([[[1.0, 1.0], [2.0, 2.0]]]),
+            env_ids=env_ids,
+            step_dt=0.1,
+        )
+        if feedback_mode is ExecutionFeedbackMode.JOINT_POSITION
+        else None
+    )
+
+    with pytest.raises(ValueError, match="same destination set"):
+        _action_plan(
+            commands,
+            joint_trajectory=trajectory,
+            feedback_mode=feedback_mode,
+        )
+
+
+def test_action_plan_requires_stable_exact_target_type() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(
+        env_ids=env_ids,
+        frame_count=2,
+        targets=(
+            JointPositionTarget("arm", (0, 1)),
+            _AlternateJointPositionTarget("arm", (0, 1)),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="exact target type"):
+        _action_plan(commands)
+
+
+def test_action_plan_requires_stable_target_address_fingerprint() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(
+        env_ids=env_ids,
+        frame_count=2,
+        targets=(
+            JointPositionTarget("arm", (0, 1)),
+            JointPositionTarget("arm", (1, 0)),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="target address fingerprint"):
+        _action_plan(commands)
+
+
+def test_joint_position_plan_rejects_joint_ids_outside_trajectory() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(
+        env_ids=env_ids,
+        frame_count=1,
+        targets=(JointPositionTarget("arm", (0, 2)),),
+    )
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.ones(1, 1, 2),
+        env_ids=env_ids,
+        step_dt=0.1,
+    )
+
+    with pytest.raises(ValueError, match="outside joint_trajectory robot_dof"):
+        _action_plan(
+            commands,
+            joint_trajectory=trajectory,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        )
+
+
+def test_joint_position_plan_rejects_payload_position_mismatch() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(env_ids=env_ids, frame_count=1)
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.zeros(1, 1, 2),
+        env_ids=env_ids,
+        step_dt=0.1,
+    )
+
+    with pytest.raises(ValueError, match="positions.*exactly match"):
+        _action_plan(
+            commands,
+            joint_trajectory=trajectory,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        )
+
+
+def test_joint_position_plan_rejects_payload_velocity_presence_mismatch() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(
+        env_ids=env_ids,
+        frame_count=1,
+        velocities=(torch.zeros(1, 2),),
+    )
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.ones(1, 1, 2),
+        env_ids=env_ids,
+        step_dt=0.1,
+    )
+
+    with pytest.raises(ValueError, match="same presence"):
+        _action_plan(
+            commands,
+            joint_trajectory=trajectory,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        )
+
+
+def test_joint_position_plan_rejects_payload_velocity_value_mismatch() -> None:
+    env_ids = torch.tensor([4], dtype=torch.long)
+    commands = _command_sequence(
+        env_ids=env_ids,
+        frame_count=1,
+        velocities=(torch.zeros(1, 2),),
+    )
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.ones(1, 1, 2),
+        velocities=torch.ones(1, 1, 2),
+        env_ids=env_ids,
+        step_dt=0.1,
+    )
+
+    with pytest.raises(ValueError, match="velocities.*exactly match"):
+        _action_plan(
+            commands,
+            joint_trajectory=trajectory,
+            feedback_mode=ExecutionFeedbackMode.JOINT_POSITION,
+        )
+
+
+def test_scene_snapshot_expands_global_collision_world_revision() -> None:
+    pose = torch.eye(4).repeat(2, 1, 1)
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"obstacle": EntityState(pose)},
+        collision_world_revision=3,
+        collision_entity_ids=("obstacle",),
+    )
+
+    assert snapshot.collision_world_revisions(2) == (3, 3)
+    obstacle_poses = snapshot.collision_obstacle_poses(
+        batch_size=2,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    assert torch.equal(obstacle_poses["obstacle"], pose)
+
+
+def test_scene_snapshot_owns_entity_state_storage() -> None:
+    pose = torch.eye(4)
+    state = EntityState(pose)
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"object": state},
+    )
+
+    pose.fill_(2.0)
+    state.pose.fill_(3.0)
+
+    assert torch.equal(snapshot.entities["object"].pose, torch.eye(4))
+
+
+def test_scene_snapshot_entity_reads_are_defensive() -> None:
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"object": EntityState(torch.eye(4))},
+    )
+
+    first_read = snapshot.entities["object"]
+    first_read.pose.fill_(7.0)
+
+    assert torch.equal(snapshot.entities["object"].pose, torch.eye(4))
+    with pytest.raises(TypeError):
+        snapshot.entities["other"] = EntityState(torch.eye(4))  # type: ignore[index]
+
+
+def test_scene_snapshot_collision_pose_reads_are_defensive() -> None:
+    snapshot = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={"obstacle": EntityState(torch.eye(4))},
+        collision_entity_ids=("obstacle",),
+    )
+
+    obstacle_poses = snapshot.collision_obstacle_poses(
+        batch_size=1,
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    obstacle_poses["obstacle"].fill_(5.0)
+
+    assert torch.equal(snapshot.entities["obstacle"].pose, torch.eye(4))
+
+
+def test_scene_snapshot_rejects_unknown_collision_entity() -> None:
+    with pytest.raises(ValueError, match="missing scene entities"):
+        SceneSnapshot(
+            timestamp=0.0,
+            version=0,
+            collision_entity_ids=("missing",),
+        )
+
+
+def test_timed_trajectory_uses_explicit_uniform_timing_and_holds_rows() -> None:
     positions = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
-    trajectory = TimedTrajectory.from_positions(
+    trajectory = TimedTrajectory.from_uniform_step(
         positions,
         env_ids=torch.tensor([4, 7]),
-        control_dt=0.02,
+        step_dt=0.02,
     )
     held = trajectory.hold_rows(
         torch.tensor([True, False]),
@@ -192,16 +1240,80 @@ def test_timed_trajectory_synthesizes_timing_and_holds_selected_rows() -> None:
     assert torch.all(held.positions[1] == -1.0)
 
 
+def test_timed_trajectory_constructor_detaches_and_owns_all_tensor_fields() -> None:
+    positions = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]], requires_grad=True)
+    velocities = torch.full_like(positions, 0.5, requires_grad=True)
+    accelerations = torch.full_like(positions, 0.25, requires_grad=True)
+    dt = torch.tensor([[0.0, 0.1]], requires_grad=True)
+    env_ids = torch.tensor([4], dtype=torch.long)
+    inputs = {
+        "positions": positions,
+        "velocities": velocities,
+        "accelerations": accelerations,
+        "dt": dt,
+        "env_ids": env_ids,
+    }
+    expected = {name: value.detach().clone() for name, value in inputs.items()}
+
+    trajectory = TimedTrajectory(**inputs)
+
+    with torch.no_grad():
+        for value in inputs.values():
+            value.zero_()
+    for name, value in expected.items():
+        owned = getattr(trajectory, name)
+        assert torch.equal(owned, value)
+        assert owned.grad_fn is None
+        assert not owned.requires_grad
+
+
+def test_timed_trajectory_rejects_duplicate_environment_ids() -> None:
+    with pytest.raises(ValueError, match="unique"):
+        TimedTrajectory.from_positions(
+            torch.zeros(2, 1, 2),
+            env_ids=torch.tensor([4, 4], dtype=torch.long),
+            dt=torch.zeros(2, 1),
+        )
+
+
+def test_planning_context_requires_explicit_interpolation_period() -> None:
+    with pytest.raises(ValueError, match="explicit PlanningContext.control_dt"):
+        _context().require_control_dt()
+
+    assert _context(control_dt=0.02).require_control_dt() == pytest.approx(0.02)
+    with pytest.raises(ValueError, match="finite and greater than zero"):
+        _context(control_dt=0.0)
+
+
+def test_timed_trajectory_snapshot_owns_its_tensor_storage() -> None:
+    trajectory = TimedTrajectory.from_uniform_step(
+        torch.arange(12, dtype=torch.float32).reshape(1, 3, 4),
+        env_ids=torch.tensor([4]),
+        step_dt=0.02,
+    )
+
+    snapshot = trajectory.snapshot()
+    snapshot.positions.zero_()
+    snapshot.dt.zero_()
+    snapshot.env_ids.zero_()
+
+    assert snapshot.duration.item() == 0.0
+    assert torch.count_nonzero(trajectory.positions).item() > 0
+    assert torch.count_nonzero(trajectory.dt).item() > 0
+    assert trajectory.duration.item() > 0.0
+    assert trajectory.env_ids.tolist() == [4]
+
+
 def test_timed_trajectory_concatenates_metadata() -> None:
-    first = TimedTrajectory.from_positions(
+    first = TimedTrajectory.from_uniform_step(
         torch.zeros(2, 2, 4),
         env_ids=torch.tensor([0, 1]),
-        control_dt=0.1,
+        step_dt=0.1,
     )
-    second = TimedTrajectory.from_positions(
+    second = TimedTrajectory.from_uniform_step(
         torch.ones(2, 3, 4),
         env_ids=torch.tensor([0, 1]),
-        control_dt=0.2,
+        step_dt=0.2,
     )
 
     result = TimedTrajectory.concatenate((first, second))

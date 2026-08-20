@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 import numpy as np
 from dataclasses import dataclass
@@ -29,10 +31,77 @@ __all__ = [
     "MoveType",
     "PlanState",
     "PlanResult",
+    "normalize_success_mask",
     "calculate_point_allocations",
     "interpolate_xpos",
     "interpolate_xpos_batched",
 ]
+
+
+def normalize_success_mask(
+    success: bool | torch.Tensor,
+    *,
+    num_envs: int,
+    device: torch.device | str,
+    name: str,
+) -> torch.Tensor:
+    """Normalize a scalar or batched success value to ``(num_envs,)``.
+
+    Args:
+        success: Scalar success or a boolean/binary-integer tensor.
+        num_envs: Required batch size.
+        device: Device of the resulting tensor.
+        name: Human-readable value name used in validation errors.
+
+    Returns:
+        Independently owned boolean success mask.
+
+    Raises:
+        TypeError: If ``success`` is neither boolean nor binary integer data.
+        ValueError: If a tensor does not match the required batch shape or a
+            CUDA device is requested while CUDA is unavailable.
+    """
+    resolved_device = torch.device(device)
+    if resolved_device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "CUDA device requested for success-mask normalization, but "
+                "torch.cuda.is_available() is False."
+            )
+        if resolved_device.index is None:
+            resolved_device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    if isinstance(success, bool):
+        return torch.full(
+            (num_envs,), success, dtype=torch.bool, device=resolved_device
+        )
+    if not isinstance(success, torch.Tensor):
+        raise TypeError(
+            f"{name} must be a bool or torch.Tensor, got {type(success).__name__}."
+        )
+    success = success.to(resolved_device)
+    if success.dtype != torch.bool:
+        integer_dtypes = {
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        }
+        if success.dtype not in integer_dtypes or not torch.all(
+            (success == 0) | (success == 1)
+        ):
+            raise TypeError(
+                f"{name} must be boolean or a binary integer tensor, "
+                f"got dtype {success.dtype}."
+            )
+        success = success.to(dtype=torch.bool)
+    if success.dim() == 0 or success.shape == (1,):
+        success = success.reshape(1).expand(num_envs)
+    if success.shape != (num_envs,):
+        raise ValueError(
+            f"{name} must have shape ({num_envs},), got {tuple(success.shape)}."
+        )
+    return success.clone()
 
 
 class TrajectorySampleMethod(Enum):
@@ -115,7 +184,12 @@ class MoveType(Enum):
 
 @dataclass
 class PlanResult:
-    r"""Data class representing the result of a motion plan (env-batched)."""
+    r"""Data class representing the result of a motion plan (env-batched).
+
+    A result that contains joint positions must also contain per-sample ``dt``.
+    Per-environment :attr:`duration` is derived from those intervals. Failed
+    plans may omit all trajectory fields by leaving ``positions`` as ``None``.
+    """
 
     success: bool | torch.Tensor = False
     """Per-env success, shape ``(B,)`` bool tensor (or scalar bool)."""
@@ -135,8 +209,32 @@ class PlanResult:
     dt: torch.Tensor | None = None
     """Per-env time deltas, shape ``(B, N)``."""
 
-    duration: float | torch.Tensor = 0.0
-    """Per-env total duration, shape ``(B,)``."""
+    def __post_init__(self) -> None:
+        """Validate the explicit trajectory-timing contract."""
+        if self.positions is None:
+            if self.dt is not None:
+                raise ValueError("PlanResult timing requires positions.")
+            return
+        if not isinstance(self.positions, torch.Tensor) or self.positions.dim() != 3:
+            raise ValueError("PlanResult.positions must have shape (B, N, DOF).")
+        batch_size, waypoint_count, _ = self.positions.shape
+        if not isinstance(self.dt, torch.Tensor):
+            raise ValueError(
+                "PlanResult with positions requires explicit dt with shape (B, N)."
+            )
+        if self.dt.shape != (batch_size, waypoint_count):
+            raise ValueError(
+                "PlanResult.dt must match positions batch and waypoint dimensions."
+            )
+        if self.dt.device != self.positions.device:
+            raise ValueError("PlanResult.dt and positions must share a device.")
+        if not torch.isfinite(self.dt).all() or (self.dt < 0).any():
+            raise ValueError("PlanResult.dt must contain finite non-negative values.")
+
+    @property
+    def duration(self) -> torch.Tensor | None:
+        """Return per-environment duration derived from :attr:`dt`."""
+        return None if self.dt is None else self.dt.sum(dim=1)
 
     def is_all_success(self) -> bool:
         """Return True only when every env succeeded."""

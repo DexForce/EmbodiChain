@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     GraspGoal,
@@ -44,12 +42,12 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     broadcast_pose_batch,
     broadcast_waypoint_pose_batch,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -125,9 +123,9 @@ def main() -> None:
     """Plan and replay PickUp followed by a multi-waypoint Place."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
@@ -157,38 +155,42 @@ def main() -> None:
         sim, args, "Inspect the cube, then press Enter to plan PickUp -> Place..."
     )
 
-    binding = ActionBinding(
-        manipulators={"primary": "arm"},
-        end_effectors={"primary": "hand"},
-    )
+    endpoint_mapping = {"primary": {"motion": "arm", "grasp": "hand"}}
     compiled = engine.compile(
         (
-            ActionInvocation(
+            engine.make_invocation(
                 "pick_up",
                 GraspGoal(semantics),
-                binding,
-                MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICK_SAMPLE_INTERVAL,
+                ),
                 skill_options=PickUpOptions(
                     pre_grasp_distance=0.15,
                     lift_height=0.16,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-            ActionInvocation(
+            engine.make_invocation(
                 "place",
                 PlaceGoal(
                     broadcast_waypoint_pose_batch(
                         place_poses, robot.get_qpos().shape[0]
                     )
                 ),
-                binding,
-                MotionPolicy(sample_count=PLACE_SAMPLE_INTERVAL),
+                control_parts=endpoint_mapping,
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PLACE_SAMPLE_INTERVAL,
+                ),
                 skill_options=PlaceOptions(
                     lift_height=PLACE_LIFT_HEIGHT,
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan Place demo trajectory.")
@@ -196,13 +198,11 @@ def main() -> None:
 
     if wait_for_user:
         input("Press Enter to replay the Place demo...")
-    clear_after_step = (
-        round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
-    )
+    clear_after_step = compiled.segment(0, "lift").start
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory.positions,
+        compiled.trajectory,
         args,
         video_prefix="place_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

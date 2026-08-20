@@ -100,4 +100,4 @@ solver = PinkSolver(cfg)
 
 - [Pinocchio Library](https://github.com/stack-of-tasks/pinocchio)
 - [Pink Library](https://github.com/stephane-caron/pink)
-- [Null Space Posture Task](https://github.com/stephane-caron/pink#null-space-posture-task)
+- [Pink documentation](https://stephane-caron.github.io/pink/)

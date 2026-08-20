@@ -103,10 +103,35 @@ class _MockEnv:
             batch_size=[num_envs, steps],
         )
         actions = torch.zeros(num_envs, steps, num_joints)
+        episode_step = torch.arange(steps).repeat(num_envs, 1)
         self.rollout_buffer = TensorDict(
-            {"obs": obs, "actions": actions}, batch_size=[num_envs, steps]
+            {
+                "obs": obs,
+                "actions": actions,
+                "valid": torch.ones(num_envs, steps, dtype=torch.bool),
+                "episode_step": episode_step,
+                "segment_id": torch.zeros(num_envs, steps, dtype=torch.long),
+                "segment_step": episode_step.clone(),
+                "segment_start": episode_step == 0,
+                "segment_end": torch.zeros(num_envs, steps, dtype=torch.bool),
+                "terminated": torch.zeros(num_envs, steps, dtype=torch.bool),
+                "truncated": torch.zeros(num_envs, steps, dtype=torch.bool),
+            },
+            batch_size=[num_envs, steps],
         )
         self.current_rollout_step = steps
+        self.episode_metadata = {
+            "segments": [
+                {
+                    "start_step": 0,
+                    "end_step": steps,
+                    "instruction": "original segment task",
+                }
+            ]
+        }
+
+    def get_demo_episode_metadata(self, env_id: int):
+        return self.episode_metadata
 
 
 def _make_recorder(env: _MockEnv, mock_dataset: _MockDataset) -> AsyncLeRobotRecorder:
@@ -191,6 +216,8 @@ class TestAsyncLeRobotRecorder:
         # Corrupt the live buffer after enqueue (simulates reset reuse).
         env.rollout_buffer["obs"][0, :3] = 999.0
         env.rollout_buffer["actions"][0, :3] = 999.0
+        env.rollout_buffer["segment_id"][0, :3] = 999
+        env.episode_metadata["segments"][0]["instruction"] = "corrupted"
 
         recorder.finalize()
 
@@ -198,6 +225,11 @@ class TestAsyncLeRobotRecorder:
         for frame in mock_ds.add_frame_calls:
             assert (frame[LeRobotKey.OBS_STATE.value] == 0).all()
             assert (frame[LeRobotKey.ACTION.value] == 0).all()
+            assert frame["annotation.segment_id"].tolist() == [0]
+            assert frame["task"] == "test"
+            assert frame["subtask_index"].tolist() == [0]
+        assert mock_ds.meta.subtasks.index.tolist() == ["original segment task"]
+        assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]
 
     def test_finalize_drains_and_finalizes_dataset(self):
         """finalize() must drain the worker then call dataset.finalize()."""
@@ -208,7 +240,72 @@ class TestAsyncLeRobotRecorder:
         recorder(env, env_ids=torch.tensor([0]))
         env.current_rollout_step = 0  # mirror post-save reset
 
-        recorder.finalize()
+        first_path = recorder.finalize()
+        second_path = recorder.close()
 
         assert mock_ds.save_episode_calls == 1
         assert mock_ds.finalize_calls == 1
+        assert first_path == second_path == recorder.dataset_path
+
+    def test_finalize_does_not_enqueue_uncommitted_live_rollout(self):
+        """A rollout not explicitly passed to the recorder is discarded on close."""
+        env = _MockEnv(num_envs=1, steps=2)
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+
+        recorder.finalize()
+
+        assert mock_ds.save_episode_calls == 0
+        assert mock_ds.finalize_calls == 1
+
+    def test_call_skips_empty_rollout(self):
+        """An initial reset must not enqueue a zero-frame episode."""
+        env = _MockEnv(num_envs=1, steps=0)
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+        recorder._save_single_episode = Mock()
+
+        recorder(env, env_ids=torch.tensor([0]))
+        recorder.finalize()
+
+        recorder._save_single_episode.assert_not_called()
+        assert mock_ds.save_episode_calls == 0
+
+    def test_finalize_aggregates_background_failures_after_draining(self):
+        """All queued commits run and their failures surface at the barrier."""
+        env = _MockEnv(num_envs=2, steps=2)
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(env, mock_ds)
+
+        def fail_save(env_id, *args, **kwargs):
+            if env_id == 0:
+                return False
+            raise OSError("disk unavailable")
+
+        recorder._save_single_episode = Mock(side_effect=fail_save)
+        recorder(env, env_ids=torch.tensor([0, 1]))
+
+        with pytest.raises(RuntimeError) as error_info:
+            recorder.finalize()
+
+        message = str(error_info.value)
+        assert "2 committed episode(s)" in message
+        assert "env 0" in message
+        assert "env 1" in message
+        assert "disk unavailable" in message
+        assert recorder._save_single_episode.call_count == 2
+        assert mock_ds.finalize_calls == 1
+
+        with pytest.raises(RuntimeError, match="2 committed episode"):
+            recorder.close()
+        assert recorder._save_single_episode.call_count == 2
+        assert mock_ds.finalize_calls == 1
+
+    def test_call_after_finalize_is_rejected(self):
+        """No commit may be queued behind the shutdown sentinel."""
+        env = _MockEnv(num_envs=1, steps=1)
+        recorder = _make_recorder(env, _MockDataset())
+        recorder.finalize()
+
+        with pytest.raises(RuntimeError, match="already finalized"):
+            recorder(env, env_ids=torch.tensor([0]))

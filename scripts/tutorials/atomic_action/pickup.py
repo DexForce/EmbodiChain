@@ -29,8 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
-    ActionInvocation,
     AtomicActionEngine,
     ControlPartCommandProfile,
     GraspGoal,
@@ -42,10 +40,10 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
+    add_tutorial_robot,
     clone_local_pose_from_first_env,
     create_antipodal_semantics,
-    create_toppra_motion_generator,
+    create_curobo_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
@@ -127,11 +125,11 @@ def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim)
+    robot = add_tutorial_robot(sim, args.robot)
     obj = create_pick_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_curobo_motion_generator(robot)
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -156,14 +154,14 @@ def main() -> None:
 
     compiled = engine.compile(
         (
-            ActionInvocation(
-                skill_id="pick_up",
-                goal=GraspGoal(semantics),
-                binding=ActionBinding(
-                    manipulators={"primary": "arm"},
-                    end_effectors={"primary": "hand"},
+            engine.make_invocation(
+                "pick_up",
+                GraspGoal(semantics),
+                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=PICK_SAMPLE_INTERVAL,
                 ),
-                motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                 skill_options=PickUpOptions(
                     approach_direction=resolve_approach_direction(args, sim.device),
                     pre_grasp_distance=0.15,
@@ -171,7 +169,8 @@ def main() -> None:
                     hand_interp_steps=HAND_INTERP_STEPS,
                 ),
             ),
-        )
+        ),
+        engine.initial_context(control_dt=sim.sim_config.physics_dt),
     )
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan PickUp demo trajectory.")
@@ -179,13 +178,11 @@ def main() -> None:
 
     if wait_for_user:
         input("Press Enter to replay the PickUp demo...")
-    clear_after_step = (
-        round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6) + HAND_INTERP_STEPS
-    )
+    clear_after_step = compiled.segment(0, "lift").start
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory.positions,
+        compiled.trajectory,
         args,
         video_prefix="pickup_cube_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

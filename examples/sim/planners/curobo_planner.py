@@ -59,7 +59,6 @@ from embodichain.lab.visualization import (
     visualization_cfg_from_args,
 )
 from embodichain.lab.sim.atomic_actions import (
-    ActionBinding,
     ActionInvocation,
     AtomicActionEngine,
     EndEffectorPoseGoal,
@@ -749,9 +748,12 @@ def main() -> None:
             )
         )
         engine = AtomicActionEngine(motion_generator)
-        binding = ActionBinding(manipulators={"primary": control_part})
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": control_part}},
+        )
         motion_policy = MotionPolicy(
-            motion_source="motion_gen",
+            strategy="motion_gen",
             plan_opts=CuroboPlanOptions(
                 dynamic_obstacle_poses=(
                     obstacle_poses if use_independent_worlds else None

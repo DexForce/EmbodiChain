@@ -26,6 +26,7 @@ This page covers structured dataset export. If you only need human-viewable debu
 
     ```json
     {"func": "LeRobotRecorder", "mode": "save",
+     "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
                 "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
@@ -38,6 +39,7 @@ This page covers structured dataset export. If you only need human-viewable debu
 
     ```json
     {"func": "AsyncLeRobotRecorder", "mode": "save",
+     "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
                 "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
@@ -64,6 +66,23 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 
 ### Parameters
 
+``save_failed_episodes`` is a {class}`~cfg.DatasetFunctorCfg` lifecycle option,
+not a recorder constructor parameter. Place it beside ``func`` and ``mode`` in
+JSON/YAML, or pass it directly to ``DatasetFunctorCfg`` in Python. Its default
+is ``false``. During ``run-env`` expert generation:
+
+- ``false`` discards and retries failed or truncated attempts;
+- ``true`` commits a failed/truncated attempt when every selected environment
+  row contains at least one frame. The saved sidecar records ``success=false``
+  and the terminal reason;
+- empty plans and exceptions are always discarded; and
+- a saved failure counts toward ``max_episodes``, so the requested dataset size
+  is not exceeded.
+
+When several save-mode functors are configured, enabling this option on any of
+them makes the Dataset Manager submit failed rows to all save-mode functors so
+their outputs stay aligned.
+
 ```{list-table} LeRobotRecorder Parameters
 :header-rows: 1
 :widths: 30 70
@@ -85,7 +104,7 @@ The ``LeRobotRecorder`` functor enables recording robot learning episodes in the
 * - ``image_writer_processes``
   - Number of background processes for image writing (alternative to threads; higher spawn cost, more isolation). Use 0 to rely on threads only.
 * - ``depth_video``
-  - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See [Compressed depth sidecar](#compressed-depth-sidecar).
+  - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See {ref}`compressed-depth-sidecar`.
 ```
 
 ```{note}
@@ -100,12 +119,73 @@ rather than writing inaccurate metadata.
 
 The LeRobotRecorder saves the following data for each frame:
 
+- ``task``: The episode-level task instruction, constant across its frames
+- ``subtask_index``: Dataset-global index of the active segment instruction;
+  descriptions are stored in ``meta/subtasks.parquet``
 - ``observation.state``: Joint positions (proprioceptive state)
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
 - ``observation.images.{sensor_name}_right``: Right camera images (for stereo cameras)
 - ``observation.mask.{sensor_name}``: Native numeric segmentation-mask arrays
 - ``observation.mask.{sensor_name}_right``: Right-camera segmentation-mask arrays
+- ``annotation.episode_step``: Zero-based frame position inside the episode
+- ``annotation.segment_id``: Episode-local semantic segment identifier
+- ``annotation.segment_step``: Zero-based frame position inside the segment
+- ``annotation.segment_start``: 1 on the segment's first frame, otherwise 0
+- ``annotation.segment_end``: 1 on the segment's final frame, otherwise 0
+- ``annotation.terminated``: Gym termination flag for this frame
+- ``annotation.truncated``: Gym truncation flag for this frame
+
+All ``annotation.*`` fields above and ``subtask_index`` are stored as scalar
+``int64`` features. Booleans therefore appear as 0 or 1. The expert rollout
+buffer also contains an internal ``valid`` mask, but the recorder uses it only
+to select each environment's real frame prefix; there is no
+``annotation.valid`` LeRobot column.
+
+For legacy episodes without explicit segment metadata, the overall task is
+also registered as their single subtask. ``subtask_index`` follows LeRobot
+0.4.4's optional subtask convention, while ``annotation.segment_id`` remains
+episode-local and is therefore not required to have the same numeric value.
+Episode-level completion, success, terminal reason, per-segment status and
+segment metadata are additionally written to
+``meta/embodichain_episodes.jsonl``.
+
+### Previewing Recorded Episodes
+
+Use EmbodiChain's terminal preview when validating both standard LeRobot data
+and EmbodiChain's segment metadata:
+
+```bash
+embodichain preview_lerobot_data \
+    path/to/lerobot_dataset \
+    --episode 0 \
+    --expect-segments 3
+```
+
+The path may be a parent containing auto-numbered datasets when `--latest` is
+added. `--expect-segments` is an optional assertion, not a filter: validation
+fails if the selected episode does not contain exactly that many segments.
+A failed episode can still pass structural validation; in that case the
+preview prints ``Sidecar : success=False`` while checking that its terminal
+annotations and sidecar agree.
+
+Use LeRobot's official Rerun CLI for an interactive view of standard camera,
+state, and action streams:
+
+```bash
+lerobot-dataset-viz \
+    --repo-id organization/local-dataset-name \
+    --root path/to/exact/lerobot_dataset \
+    --mode local \
+    --episode-index 0
+```
+
+The LeRobot 0.4.4 viewer does not render `subtask_index` or EmbodiChain's
+`annotation.*` fields; use the terminal preview to verify segment boundaries,
+episode steps, and terminal flags. See
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for the
+complete three-segment example, exit codes, local-root behavior, and `.rrd`
+export commands.
 
 Depth and mask features keep the dtype and shape declared by the sensor
 observation space. Masks are always stored as numeric LeRobot array features
@@ -119,6 +199,7 @@ Depth has two storage modes:
   ``gray12le``/HEVC MP4s alongside the dataset (see below), and the numeric
   feature is dropped unless ``keep_numeric_fallback=True``.
 
+(compressed-depth-sidecar)=
 ## Compressed depth sidecar
 
 When ``depth_video.enable=True`` and an HEVC encoder (``libx265``) is available,
@@ -229,6 +310,14 @@ The sync stall grows **linearly** with ``num_envs`` (each reset saves N envs ser
 ```{attention}
 - ``AsyncLeRobotRecorder`` clones each finished episode (including camera frames) to CPU before enqueuing. For very high resolutions or many envs, monitor RSS — the worker normally keeps up, but a slow disk can let the queue grow.
 - A single background worker touches the ``LeRobotDataset`` (which is not thread-safe), so episode order is preserved FIFO. Always let ``env.close()`` / ``dataset_manager.finalize()`` run so the worker drains before the dataset is finalized.
+- Finalization is a durability barrier for episodes already submitted through
+  ``mode="save"``. It does not turn a live rollout into an episode; pending
+  frames are discarded. Background and storage failures are raised to the
+  caller, and repeated finalization is safe.
+- Depth video and EmbodiChain metadata sidecars are part of the same durability
+  result: encoder-close or metadata-write failures are surfaced even when the
+  corresponding LeRobot episode has already committed, and its episode index
+  is never reused by a later queued write.
 - ``env.close()`` calls ``sim.destroy()``, which exits the process without returning to Python. In scripts that build multiple envs, run each in its own subprocess and write results before closing.
 ```
 
@@ -241,6 +330,7 @@ from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 dataset = {
     "lerobot_recorder": DatasetFunctorCfg(
         func="embodichain.lab.gym.envs.managers.datasets.LeRobotRecorder",
+        save_failed_episodes=True,
         params={
             "save_path": "/path/to/dataset/root",
             "robot_meta": {
@@ -266,16 +356,17 @@ dataset = {
 
 1. **Initialization**: The Dataset Manager initializes the functor with the configured parameters
 2. **Data Collection**: During episode rollout, the functor receives observations and actions
-3. **Save Trigger**: When an episode completes, call the functor with `mode="save"`
-4. **Finalization**: After all episodes, call `finalize()` to save any remaining data
+3. **Save Trigger**: Reset selected rows to commit them. Successful rows always
+   save; failed rows save only when ``save_failed_episodes=True``
+4. **Finalization**: After all episodes, call `finalize()` to drain committed writes and finalize storage metadata
 
 ```python
 # Inside environment loop
 if episode_done:
     dataset_manager.apply(mode="save", env_ids=completed_env_ids)
 
-# After training completes
-dataset_manager.apply(mode="finalize")
+# After collection completes. This raises if a committed write failed.
+dataset_manager.finalize()
 ```
 
 ### Parallel Collection (async recorder)
@@ -288,6 +379,7 @@ from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 dataset = {
     "lerobot_recorder": DatasetFunctorCfg(
         func="embodichain.lab.gym.envs.managers.async_datasets.AsyncLeRobotRecorder",
+        save_failed_episodes=True,
         params={
             "save_path": "/path/to/dataset/root",
             "robot_meta": {"robot_type": "dexforce_w1"},
@@ -300,7 +392,9 @@ dataset = {
 }
 ```
 
-The async recorder drains its background worker during ``finalize()``, so make sure ``env.close()`` (or ``dataset_manager.finalize()`) runs at the end of collection.
+The async recorder drains its background worker during ``finalize()``, so make
+sure ``env.close()`` (or ``dataset_manager.finalize()``) runs at the end of
+collection. No new episode can be submitted after finalization begins.
 
 ### Compressed depth recording
 
@@ -341,6 +435,6 @@ dataset = {
 The Dataset Manager supports the following modes:
 
 - ``save``: Save completed episodes for specified environment IDs
-- ``finalize``: Finalize the dataset and save any remaining data
+- ``finalize``: Drain explicitly committed writes and finalize dataset resources
 
 See {class}`~managers.dataset_manager.DatasetManager` for more details.

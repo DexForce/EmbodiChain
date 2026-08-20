@@ -25,12 +25,11 @@ from typing import Generic, TypeVar
 
 from embodichain.lab.sim.common import BatchEntity
 
-from .bindings import ActionBinding, ResolvedActionBinding
+from .bindings import ActionBinding
 from .control import ActionControlOverrides
-from .goals import ActionGoal
 from .policies import MotionPolicy, RecoveryPolicy
 
-GoalT = TypeVar("GoalT", bound=ActionGoal)
+GoalT = TypeVar("GoalT")
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -46,7 +45,7 @@ class ActionOptions:
 OptionsT = TypeVar("OptionsT", bound=ActionOptions)
 
 
-def _goal_snapshot_memo(goal: ActionGoal) -> dict[int, object]:
+def _goal_snapshot_memo(goal: object) -> dict[int, object]:
     """Return deepcopy memo entries for live goal references and runtime caches."""
     memo: dict[int, object] = {}
     visited: set[int] = set()
@@ -82,7 +81,7 @@ def _goal_snapshot_memo(goal: ActionGoal) -> dict[int, object]:
 
 @dataclass(frozen=True, slots=True)
 class ActionInvocation(Generic[GoalT, OptionsT]):
-    """One fully typed and embodiment-bound atomic skill request.
+    """One fully typed and endpoint-bound atomic skill request.
 
     This is a runtime-domain object, not the JSON protocol emitted by an MLLM.
     An action compiler is responsible for converting a semantic ``SkillCallSpec``
@@ -96,7 +95,7 @@ class ActionInvocation(Generic[GoalT, OptionsT]):
     """Action-specific goal value object."""
 
     binding: ActionBinding
-    """Semantic-role bindings to keys in the selected robot's control parts."""
+    """Generic skill endpoint bindings owned by the selected engine."""
 
     motion_policy: MotionPolicy = field(default_factory=MotionPolicy)
     """Reusable motion-generation settings."""
@@ -121,12 +120,6 @@ class ActionInvocation(Generic[GoalT, OptionsT]):
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id.strip():
             raise ValueError("skill_id must be a non-empty string.")
-        goal_kind = getattr(type(self.goal), "goal_kind", None)
-        if not isinstance(goal_kind, str) or not goal_kind:
-            raise TypeError(
-                "goal must implement the ActionGoal protocol with a non-empty "
-                "goal_kind class variable."
-            )
         if not isinstance(self.binding, ActionBinding):
             raise TypeError("binding must be an ActionBinding.")
         if not isinstance(self.motion_policy, MotionPolicy):
@@ -159,7 +152,7 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
 
     skill_id: str
     goal: GoalT
-    binding: ResolvedActionBinding
+    binding: ActionBinding
     motion_policy: MotionPolicy
     recovery_policy: RecoveryPolicy
     skill_options: OptionsT
@@ -169,8 +162,8 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id.strip():
             raise ValueError("skill_id must be a non-empty string.")
-        if not isinstance(self.binding, ResolvedActionBinding):
-            raise TypeError("binding must be a ResolvedActionBinding.")
+        if not isinstance(self.binding, ActionBinding):
+            raise TypeError("binding must be an ActionBinding.")
         if not isinstance(self.motion_policy, MotionPolicy):
             raise TypeError("motion_policy must be a MotionPolicy.")
         if not isinstance(self.recovery_policy, RecoveryPolicy):
@@ -187,6 +180,14 @@ class ResolvedActionRequest(Generic[GoalT, OptionsT]):
             self,
             "goal",
             deepcopy(self.goal, _goal_snapshot_memo(self.goal)),
+        )
+        object.__setattr__(
+            self,
+            "binding",
+            ActionBinding(
+                owner_id=self.binding.owner_id,
+                endpoints=self.binding.endpoints,
+            ),
         )
         object.__setattr__(self, "motion_policy", deepcopy(self.motion_policy))
         object.__setattr__(self, "recovery_policy", deepcopy(self.recovery_policy))

@@ -63,7 +63,11 @@ class Affordance:
 
 @dataclass
 class AntipodalAffordance(Affordance):
-    """Antipodal grasp affordance for parallel-jaw grippers."""
+    """Antipodal grasp affordance for parallel-jaw grippers.
+
+    The affordance owns only target-local triangle-mesh data. Simulator entity
+    handles and live poses belong to scene grounding, not semantic geometry.
+    """
 
     mesh_vertices: torch.Tensor | None = None
     """Object mesh vertices, shape [N, 3]."""
@@ -172,15 +176,41 @@ class AntipodalAffordance(Affordance):
             [0, 0, -1], dtype=torch.float32
         ),
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the best antipodal grasp for each object pose.
+
+        Args:
+            obj_poses: Batched object poses with shape ``(B, 4, 4)``.
+            approach_direction: One shared ``(3,)`` world-frame direction or
+                per-object directions with shape ``(B, 3)``.
+
+        Returns:
+            A success mask, best grasp poses, and gripper opening lengths with
+            batch dimension ``B``.
+
+        Raises:
+            ValueError: If ``approach_direction`` has an incompatible shape.
+        """
         if self._generator is None:
             self._init_generator()
         approach_direction = self._resolve_approach_direction(approach_direction)
+        if approach_direction.shape == (3,):
+            approach_directions = approach_direction.unsqueeze(0).expand(
+                obj_poses.shape[0], -1
+            )
+        elif approach_direction.shape == (obj_poses.shape[0], 3):
+            approach_directions = approach_direction
+        else:
+            raise ValueError(
+                "approach_direction must have shape (3,) or "
+                f"({obj_poses.shape[0]}, 3), got "
+                f"{tuple(approach_direction.shape)}."
+            )
         grasp_xpos_list: list[torch.Tensor] = []
         is_success_list: list[bool] = []
         open_length_list: list[float] = []
         for i, obj_pose in enumerate(obj_poses):
             is_success, grasp_xpos, open_length = self._generator.get_grasp_poses(
-                obj_pose, approach_direction
+                obj_pose, approach_directions[i]
             )
             if is_success:
                 grasp_xpos_list.append(grasp_xpos.unsqueeze(0))
@@ -201,6 +231,277 @@ class AntipodalAffordance(Affordance):
             open_length_list, dtype=torch.float32, device=self._generator.device
         )
         return is_success_t, grasp_xpos, open_length_t
+
+
+@dataclass
+class TwistAffordance(Affordance):
+    """Target-local grasp point and rotation-axis geometry for twisting."""
+
+    grasp_position: tuple[float, float, float] = field(kw_only=True)
+    """Explicit target-local center of the gripper contact region."""
+
+    axis_origin: tuple[float, float, float] = field(kw_only=True)
+    """Explicit point on the rotation axis in the target-local frame."""
+
+    twist_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
+    )
+    """Twist axis expressed in the target object's local frame."""
+
+    joint_name: str | None = None
+    """Optional stable articulation-joint name associated with the axis."""
+
+    joint_limits: tuple[float, float] | None = None
+    """Optional lower and upper angular limits in radians."""
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.twist_axis, torch.Tensor)
+            or self.twist_axis.shape != (3,)
+            or not torch.isfinite(self.twist_axis).all()
+        ):
+            raise ValueError("TwistAffordance.twist_axis must be a finite (3,) tensor.")
+        if torch.linalg.vector_norm(self.twist_axis) <= 1.0e-6:
+            raise ValueError("TwistAffordance.twist_axis must be non-zero.")
+        self.twist_axis = self.twist_axis.clone()
+        self.grasp_position = _validate_local_point(
+            self.grasp_position, "TwistAffordance.grasp_position"
+        )
+        self.axis_origin = _validate_local_point(
+            self.axis_origin, "TwistAffordance.axis_origin"
+        )
+        _validate_joint_metadata(self.joint_name, self.joint_limits)
+
+    def get_grasp_pose(self, target_pose: torch.Tensor) -> torch.Tensor:
+        """Construct a deterministic world grasp pose from local geometry.
+
+        The pose z-axis follows :attr:`twist_axis`. The remaining axes are
+        formed with an adaptive reference so the result is always in SO(3).
+
+        Returns:
+            Batched world-frame grasp poses with shape ``(B, 4, 4)``.
+
+        Raises:
+            ValueError: If ``target_pose`` is not a batched pose tensor.
+        """
+        if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
+            raise ValueError("Target pose must have shape (B, 4, 4).")
+        target_pose = target_pose.to(dtype=torch.float32)
+        device = target_pose.device
+        twist_axis = self.twist_axis.to(device=device, dtype=torch.float32)
+        twist_axis = twist_axis / torch.linalg.vector_norm(twist_axis)
+
+        z_axis = torch.matmul(target_pose[:, :3, :3], twist_axis)
+        z_axis = torch.nn.functional.normalize(z_axis, dim=1)
+        x_axis, y_axis = _orthogonal_xy_from_z(z_axis)
+
+        grasp_pose = torch.eye(4, dtype=torch.float32, device=device).repeat(
+            target_pose.shape[0], 1, 1
+        )
+        grasp_pose[:, :3, 0] = x_axis
+        grasp_pose[:, :3, 1] = y_axis
+        grasp_pose[:, :3, 2] = z_axis
+        local_grasp = torch.tensor(
+            self.grasp_position, dtype=torch.float32, device=device
+        )
+        grasp_pose[:, :3, 3] = (
+            torch.matmul(target_pose[:, :3, :3], local_grasp) + target_pose[:, :3, 3]
+        )
+        return grasp_pose
+
+
+@dataclass
+class SlideAffordance(AntipodalAffordance):
+    """Target-local antipodal grasp and translation-axis geometry.
+
+    The positive translation-axis direction denotes approaching and pushing
+    the articulated part closed. Pulling moves in the opposite direction.
+    The mesh describes the actual graspable contact surface. The target pose is
+    supplied separately by :class:`~.goals.SceneEntityPose` or a pose snapshot.
+    """
+
+    mesh_vertices: torch.Tensor = field(kw_only=True)
+    """Target-local vertices for the graspable contact surface."""
+
+    mesh_triangles: torch.Tensor = field(kw_only=True)
+    """Triangle indices for the graspable contact surface."""
+
+    translation_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
+    )
+    """Approach and push/close direction in the articulation-link frame."""
+
+    joint_name: str | None = None
+    """Optional stable prismatic-joint name associated with the link."""
+
+    joint_limits: tuple[float, float] | None = None
+    """Optional lower and upper translation limits in metres."""
+
+    def __post_init__(self) -> None:
+        if self.mesh_vertices.dim() != 2 or self.mesh_vertices.shape[1] != 3:
+            raise ValueError("SlideAffordance.mesh_vertices must have shape (N, 3).")
+        if (
+            self.mesh_vertices.shape[0] == 0
+            or not torch.isfinite(self.mesh_vertices).all()
+        ):
+            raise ValueError(
+                "SlideAffordance.mesh_vertices must be finite and non-empty."
+            )
+        if self.mesh_triangles.dim() != 2 or self.mesh_triangles.shape[1] != 3:
+            raise ValueError("SlideAffordance.mesh_triangles must have shape (M, 3).")
+        if (
+            not isinstance(self.translation_axis, torch.Tensor)
+            or self.translation_axis.shape != (3,)
+            or not torch.isfinite(self.translation_axis).all()
+        ):
+            raise ValueError(
+                "SlideAffordance.translation_axis must be a finite (3,) tensor."
+            )
+        if torch.linalg.vector_norm(self.translation_axis) <= 1.0e-6:
+            raise ValueError("SlideAffordance.translation_axis must be non-zero.")
+        self.translation_axis = self.translation_axis.clone()
+        _validate_joint_metadata(self.joint_name, self.joint_limits)
+
+
+@dataclass
+class PressAffordance(Affordance):
+    """Explicit target-local contact point and pressing direction."""
+
+    press_axis: torch.Tensor = field(
+        default_factory=lambda: torch.tensor([0.0, 0.0, 1.0])
+    )
+    """Press direction expressed in the target object's local frame."""
+
+    press_position: tuple[float, float, float] = field(kw_only=True)
+    """Explicit local-frame point on the pressable contact surface."""
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.press_axis, torch.Tensor)
+            or self.press_axis.shape != (3,)
+            or not torch.isfinite(self.press_axis).all()
+        ):
+            raise ValueError("PressAffordance.press_axis must be a finite (3,) tensor.")
+        if torch.linalg.vector_norm(self.press_axis) <= 1.0e-6:
+            raise ValueError("PressAffordance.press_axis must be non-zero.")
+        self.press_axis = self.press_axis.clone()
+        self.press_position = _validate_local_point(
+            self.press_position, "PressAffordance.press_position"
+        )
+
+    def get_press_pose(
+        self,
+        target_pose: torch.Tensor,
+        press_position: tuple[float, float, float] | None = None,
+    ) -> torch.Tensor:
+        """Construct a press pose at the configured surface point.
+
+        The end-effector z-axis follows :attr:`press_axis` in world space. An
+        adaptive reference produces an orthonormal, right-handed frame.
+
+        Args:
+            target_pose: Current target world pose with shape ``(B, 4, 4)``.
+            press_position: Optional per-call exact local-frame press position.
+                It overrides :attr:`press_position`.
+
+        Returns:
+            Batched world-frame press poses with shape ``(B, 4, 4)``.
+
+        Raises:
+            ValueError: If an input has an invalid shape or value.
+        """
+        if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
+            raise ValueError("Target pose must have shape (B, 4, 4).")
+        target_pose = target_pose.to(dtype=torch.float32)
+        device = target_pose.device
+        press_axis = self.press_axis.to(device=device, dtype=torch.float32)
+        press_axis = press_axis / torch.linalg.vector_norm(press_axis)
+        configured_position = self._validate_press_position(
+            press_position,
+            field_name="press_position",
+        )
+        configured_position = (
+            self.press_position if configured_position is None else configured_position
+        )
+        local_press_position = torch.tensor(
+            configured_position,
+            dtype=torch.float32,
+            device=device,
+        )
+
+        z_axis = torch.matmul(target_pose[:, :3, :3], press_axis)
+        z_axis = torch.nn.functional.normalize(z_axis, dim=1)
+        x_axis, y_axis = _orthogonal_xy_from_z(z_axis)
+
+        press_pose = torch.eye(4, dtype=torch.float32, device=device).repeat(
+            target_pose.shape[0], 1, 1
+        )
+        press_pose[:, :3, 0] = x_axis
+        press_pose[:, :3, 1] = y_axis
+        press_pose[:, :3, 2] = z_axis
+        press_pose[:, :3, 3] = (
+            torch.matmul(target_pose[:, :3, :3], local_press_position)
+            + target_pose[:, :3, 3]
+        )
+        return press_pose
+
+    @staticmethod
+    def _validate_press_position(
+        value: tuple[float, float, float] | None,
+        *,
+        field_name: str,
+    ) -> tuple[float, float, float] | None:
+        """Validate and normalize an optional local-frame press position."""
+        if value is None:
+            return None
+        position = torch.as_tensor(value, dtype=torch.float32)
+        if position.shape != (3,) or not torch.isfinite(position).all():
+            raise ValueError(f"{field_name} must be a finite (x, y, z) tuple.")
+        return tuple(float(component) for component in position)
+
+
+def _orthogonal_xy_from_z(z_axis: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Complete normalized z axes into right-handed orthonormal frames."""
+    basis = torch.eye(3, dtype=z_axis.dtype, device=z_axis.device)
+    reference_indices = torch.argmin(torch.abs(z_axis), dim=1)
+    reference = basis[reference_indices]
+    y_axis = torch.nn.functional.normalize(
+        torch.linalg.cross(reference, z_axis, dim=1), dim=1
+    )
+    x_axis = torch.nn.functional.normalize(
+        torch.linalg.cross(y_axis, z_axis, dim=1), dim=1
+    )
+    return x_axis, y_axis
+
+
+def _validate_local_point(
+    value: tuple[float, float, float], field_name: str
+) -> tuple[float, float, float]:
+    """Validate and normalize one target-local 3D point."""
+    point = torch.as_tensor(value, dtype=torch.float32)
+    if point.shape != (3,) or not torch.isfinite(point).all():
+        raise ValueError(f"{field_name} must be a finite (x, y, z) tuple.")
+    return tuple(float(component) for component in point)
+
+
+def _validate_joint_metadata(
+    joint_name: str | None,
+    joint_limits: tuple[float, float] | None,
+) -> None:
+    """Validate optional articulation joint metadata."""
+    if joint_name is not None and (
+        not isinstance(joint_name, str) or not joint_name.strip()
+    ):
+        raise ValueError("joint_name must be a non-empty string when provided.")
+    if joint_limits is None:
+        return
+    limits = torch.as_tensor(joint_limits, dtype=torch.float32)
+    if (
+        limits.shape != (2,)
+        or not torch.isfinite(limits).all()
+        or limits[0] > limits[1]
+    ):
+        raise ValueError("joint_limits must be finite and ordered (lower, upper).")
 
 
 @dataclass
@@ -240,17 +541,18 @@ class InteractionPoints(Affordance):
 class AssembleAffordance(Affordance):
     """Affordance describing how an assemble object fits onto a base object.
 
-    The base object anchors the assembly: its world pose is read at planning
-    time from :attr:`base_object_entity` so the target tracks a moved base. The
-    assemble object is the part that is picked up and placed; its target pose is
-    ``base_pose @ assemble_to_base_pose``.
+    The affordance stores the relative assembly relation. Canonical planning
+    supplies the base object's snapshot pose through ``AssembleGoal.base_pose``;
+    :attr:`base_object_entity` is retained only as a deprecated direct-core
+    fallback when that goal field is omitted. The assemble object's target pose
+    is ``base_pose @ assemble_to_base_pose``.
     """
 
     base_object_label: str = ""
     """Label of the base object the assemble object is placed onto."""
 
     base_object_entity: BatchEntity | None = None
-    """Simulation entity for the base object; its pose anchors the assembly."""
+    """Legacy live base entity used only when ``AssembleGoal.base_pose`` is absent."""
 
     assemble_object_label: str = ""
     """Label of the assemble object that is picked up and placed."""
@@ -262,7 +564,7 @@ class AssembleAffordance(Affordance):
         default_factory=lambda: torch.eye(4, dtype=torch.float32)
     )
     """Pose of the assemble object relative to the base object frame, shape
-    ``(4, 4)`` or ``(n_envs, 4, 4)``."""
+    ``(4, 4)`` or ``(num_envs, 4, 4)``."""
 
     def get_assemble_object_pose(self, base_pose: torch.Tensor) -> torch.Tensor:
         """Return the assemble-object target pose for a given base-object pose.
@@ -270,28 +572,54 @@ class AssembleAffordance(Affordance):
         The assemble object is placed at ``base_pose @ assemble_to_base_pose``.
 
         Args:
-            base_pose: Base-object pose with shape ``(4, 4)`` or ``(n_envs, 4, 4)``.
+            base_pose: Base-object pose with shape ``(4, 4)`` or ``(num_envs, 4, 4)``.
 
         Returns:
-            Assemble-object target pose with shape ``(n_envs, 4, 4)``.
+            Assemble-object target pose with shape ``(num_envs, 4, 4)``.
+
+        Raises:
+            TypeError: If either pose value is not a tensor.
+            ValueError: If either pose has an unsupported shape or batch size.
         """
+        if not isinstance(base_pose, torch.Tensor):
+            raise TypeError("base_pose must be a torch.Tensor.")
         base_pose = base_pose.to(dtype=torch.float32)
-        if base_pose.dim() == 2:
+        if base_pose.shape == (4, 4):
             base_pose = base_pose.unsqueeze(0)
-        n_envs = base_pose.shape[0]
+        elif (
+            base_pose.dim() != 3
+            or base_pose.shape[0] == 0
+            or base_pose.shape[-2:] != (4, 4)
+        ):
+            raise ValueError("base_pose must have shape (4, 4) or (num_envs, 4, 4).")
+        num_envs = base_pose.shape[0]
+        if not isinstance(self.assemble_to_base_pose, torch.Tensor):
+            raise TypeError("assemble_to_base_pose must be a torch.Tensor.")
         rel = self.assemble_to_base_pose.to(
             device=base_pose.device, dtype=torch.float32
         )
-        if rel.dim() == 2:
-            rel = rel.unsqueeze(0).repeat(n_envs, 1, 1)
+        if rel.shape == (4, 4):
+            rel = rel.unsqueeze(0).repeat(num_envs, 1, 1)
+        elif rel.dim() != 3 or rel.shape[-2:] != (4, 4) or rel.shape[0] == 0:
+            raise ValueError(
+                "assemble_to_base_pose must have shape (4, 4), (1, 4, 4), "
+                "or (num_envs, 4, 4)."
+            )
         elif rel.shape[0] == 1:
-            rel = rel.repeat(n_envs, 1, 1)
+            rel = rel.repeat(num_envs, 1, 1)
+        elif rel.shape[0] != num_envs:
+            raise ValueError(
+                "assemble_to_base_pose batch size must match base_pose batch size."
+            )
         return torch.bmm(base_pose, rel)
 
 
 __all__ = [
     "Affordance",
     "AntipodalAffordance",
+    "SlideAffordance",
+    "PressAffordance",
+    "TwistAffordance",
     "InteractionPoints",
     "AssembleAffordance",
 ]

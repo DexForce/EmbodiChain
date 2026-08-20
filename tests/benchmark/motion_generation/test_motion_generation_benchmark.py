@@ -172,10 +172,26 @@ def _valid_motion_case_and_positions() -> tuple[BenchmarkCase, torch.Tensor]:
     return case, positions
 
 
+def _timed_plan_result(
+    positions: torch.Tensor,
+    *,
+    success: bool | torch.Tensor,
+) -> PlanResult:
+    """Build a synthetic plan with explicit benchmark timing."""
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    if positions.shape[1] > 1:
+        dt[:, 1:] = 0.025
+    return PlanResult(
+        success=success,
+        positions=positions,
+        dt=dt,
+    )
+
+
 def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():
     case, positions = _valid_motion_case_and_positions()
     outcomes = compute_case_outcomes(
-        PlanResult(success=False, positions=positions),
+        _timed_plan_result(positions, success=False),
         case,
         _MetricRobot(),
         "arm",
@@ -245,7 +261,7 @@ def test_missing_positions_and_joint_limit_violation_fail_motion_valid():
     positions = torch.zeros(1, 2, 7)
     positions[0, :, 0] = 2.0
     violated = compute_case_outcomes(
-        PlanResult(success=True, positions=positions),
+        _timed_plan_result(positions, success=True),
         case,
         _MetricRobot(),
         "arm",
@@ -265,7 +281,7 @@ def test_non_finite_trajectory_skips_joint_limit_metrics():
     positions = torch.zeros(1, 2, 7)
     positions[0, 1, 0] = float("inf")
     outcomes = compute_case_outcomes(
-        PlanResult(success=True, positions=positions),
+        _timed_plan_result(positions, success=True),
         case,
         _MetricRobot(),
         "arm",
@@ -1098,7 +1114,7 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         def plan(self, case: BenchmarkCase) -> PlanResult:
             steps = max(case.num_waypoints + 1, 2)
             positions = case.start_qpos.unsqueeze(1).expand(-1, steps, -1).clone()
-            return PlanResult(success=True, positions=positions)
+            return _timed_plan_result(positions, success=True)
 
     class _IncapableFake(PlannerAdapter):
         capabilities = frozenset({"eef_waypoint"})

@@ -27,6 +27,7 @@ from __future__ import annotations
 import importlib
 import logging
 import math
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -216,6 +217,129 @@ def test_curobo_world_cfg_uses_v2_safe_default_collision_cache():
 
     assert cfg.collision_cache == {"cuboid": 8, "mesh": 2}
     assert cfg.obstacle_representation == "sphere"
+
+
+def test_curobo_world_cfg_accepts_registered_dynamic_obstacle():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    cfg = CuroboWorldCfg(
+        rigid_objects=[obstacle],
+        dynamic_obstacle_names=["known"],
+    )
+
+    assert cfg.dynamic_obstacle_names == ["known"]
+
+
+def test_curobo_world_cfg_mapping_uses_registry_id_for_dynamic_obstacle():
+    obstacle = type("NamedObstacle", (), {"uid": "legacy_uid"})()
+
+    cfg = CuroboWorldCfg(
+        rigid_objects={"registry_cube": obstacle},
+        dynamic_obstacle_names=["registry_cube"],
+    )
+
+    assert cfg.dynamic_obstacle_names == ["registry_cube"]
+    assert cfg.rigid_objects["registry_cube"] is obstacle
+
+
+def test_curobo_world_cfg_mapping_does_not_accept_object_uid_as_alias():
+    obstacle = type("NamedObstacle", (), {"uid": "legacy_uid"})()
+
+    with pytest.raises(ValueError, match="not present in rigid_objects"):
+        CuroboWorldCfg(
+            rigid_objects={"registry_cube": obstacle},
+            dynamic_obstacle_names=["legacy_uid"],
+        )
+
+
+def test_curobo_world_cfg_rejects_unregistered_dynamic_obstacle():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(ValueError, match="not present in rigid_objects"):
+        CuroboWorldCfg(
+            rigid_objects=[obstacle],
+            dynamic_obstacle_names=["unknown"],
+        )
+
+
+def test_curobo_world_cfg_rejects_duplicate_dynamic_obstacle_names():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(ValueError, match="unique non-empty"):
+        CuroboWorldCfg(
+            rigid_objects=[obstacle],
+            dynamic_obstacle_names=["known", "known"],
+        )
+
+
+def test_curobo_world_cfg_rejects_outer_whitespace_in_obstacle_ids():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(ValueError, match="without outer whitespace"):
+        CuroboWorldCfg(
+            rigid_objects={"registry_cube": obstacle},
+            dynamic_obstacle_names=[" registry_cube"],
+        )
+    with pytest.raises(ValueError, match="without outer whitespace"):
+        CuroboWorldCfg(rigid_objects={" registry_cube": obstacle})
+
+
+def test_curobo_world_cfg_rejects_string_dynamic_obstacle_collection():
+    obstacle = type("NamedObstacle", (), {"uid": "known"})()
+
+    with pytest.raises(TypeError, match="not a string"):
+        CuroboWorldCfg(
+            rigid_objects={"registry_cube": obstacle},
+            dynamic_obstacle_names="registry_cube",  # type: ignore[arg-type]
+        )
+
+
+def test_curobo_world_cfg_rejects_duplicate_rigid_object_names():
+    obstacle_type = type("NamedObstacle", (), {"uid": "duplicate"})
+
+    with pytest.raises(ValueError, match="unique obstacle names"):
+        CuroboWorldCfg(rigid_objects=[obstacle_type(), obstacle_type()])
+
+
+@pytest.mark.parametrize(
+    ("multi_env", "expected_mode"),
+    [(False, "shared"), (True, "per_env")],
+)
+def test_curobo_planner_exposes_collision_world_contract(multi_env, expected_mode):
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(
+            rigid_objects={"registry_cube": object()},
+            dynamic_obstacle_names=["registry_cube"],
+            multi_env=multi_env,
+        ),
+    )
+
+    info = planner.collision_world_info
+
+    assert info.dynamic_entity_ids == ("registry_cube",)
+    assert info.entity_ids == ("registry_cube",)
+    assert info.batch_mode == expected_mode
+    assert info.supports_updates is True
+
+
+def test_curobo_collision_world_binding_merges_owned_obstacle_poses():
+    planner = object.__new__(CuroboPlanner)
+    configured_pose = torch.eye(4).unsqueeze(0)
+    observed_pose = torch.eye(4).unsqueeze(0)
+    observed_pose[:, 0, 3] = 0.5
+    options = CuroboPlanOptions(dynamic_obstacle_poses={"configured": configured_pose})
+
+    bound = planner.with_collision_world(
+        options,
+        obstacle_poses={"observed": observed_pose},
+    )
+
+    assert bound is options
+    assert set(bound.dynamic_obstacle_poses) == {"configured", "observed"}
+    assert torch.equal(bound.dynamic_obstacle_poses["observed"], observed_pose)
+    assert bound.dynamic_obstacle_poses["observed"] is not observed_pose
 
 
 def test_auto_gen_defaults_keep_sphere_count_low():
@@ -495,6 +619,88 @@ def test_generate_cuboid_world_yaml_assembles_schema(tmp_path):
     assert data["cuboid"]["demo_block"]["pose"][:3] == pytest.approx([0.45, 0.0, 0.18])
 
 
+def test_generate_world_yaml_uses_mapping_key_instead_of_object_uid(tmp_path):
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+    output_path = tmp_path / "registry_world.yml"
+
+    generate_curobo_world_yaml(
+        {"registry_cube": rigid_object},
+        str(output_path),
+        representation="cuboid",
+    )
+    data = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+
+    assert set(data["cuboid"]) == {"registry_cube"}
+
+
+def test_world_yaml_cache_key_includes_registry_id():
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(rigid_objects={"registry_cube": rigid_object}),
+    )
+    registry_key = planner._world_yaml_cache_key(planner.cfg.world)
+    planner.cfg.world = CuroboWorldCfg(
+        rigid_objects={"renamed_registry_cube": rigid_object}
+    )
+
+    renamed_key = planner._world_yaml_cache_key(planner.cfg.world)
+
+    assert registry_key != renamed_key
+
+
+def test_dynamic_update_uses_registry_id_in_curobo_backend():
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+    planner = object.__new__(CuroboPlanner)
+    planner.cfg = CuroboPlannerCfg(
+        robot_uid="robot",
+        world=CuroboWorldCfg(
+            rigid_objects={"registry_cube": rigid_object},
+            obstacle_representation="cuboid",
+            dynamic_obstacle_names=["registry_cube"],
+        ),
+    )
+    planner._curobo_device = torch.device("cpu")
+    planner._bindings = SimpleNamespace(Pose=lambda **kwargs: kwargs)
+    updates = []
+    collision_checker = SimpleNamespace(
+        update_obstacle_pose=lambda name, pose, env_idx: updates.append(
+            (name, pose, env_idx)
+        )
+    )
+    backend = SimpleNamespace(
+        batch_size=1,
+        profile=SimpleNamespace(sim_base_to_curobo_base=None),
+        sim_base_to_curobo_base_matrix=None,
+        planner=SimpleNamespace(scene_collision_checker=collision_checker),
+    )
+    identity = torch.eye(4).unsqueeze(0)
+
+    planner.update_dynamic_obstacles(
+        {"registry_cube": identity},
+        backend=backend,
+        sim_base_pose_inv=identity,
+    )
+
+    assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
+
+
 def test_generate_mesh_world_yaml_assembles_schema(tmp_path):
     rigid_object = _FakeRigidObject(
         "demo_block",
@@ -548,6 +754,21 @@ def test_generate_world_yaml_rejects_empty_input(tmp_path):
         generate_curobo_world_yaml([], str(tmp_path / "world.yml"))
 
 
+def test_registry_world_yaml_rejects_empty_geometry_instead_of_skipping(tmp_path):
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        torch.zeros((0, 3), dtype=torch.float32),
+        torch.zeros((0, 3), dtype=torch.int64),
+        _identity_pose(),
+    )
+
+    with pytest.raises(ValueError, match="Registry-backed obstacle.*no mesh"):
+        generate_curobo_world_yaml(
+            {"registry_cube": rigid_object},
+            str(tmp_path / "world.yml"),
+        )
+
+
 def test_generate_world_yaml_rejects_duplicate_names(tmp_path):
     pose = _identity_pose()
     first = _FakeRigidObject(
@@ -566,6 +787,21 @@ def test_generate_world_yaml_rejects_duplicate_names(tmp_path):
     with pytest.raises(ValueError, match="Duplicate"):
         generate_curobo_world_yaml(
             [first, second],
+            str(tmp_path / "world.yml"),
+        )
+
+
+def test_generate_world_yaml_rejects_outer_whitespace_in_mapping_id(tmp_path):
+    rigid_object = _FakeRigidObject(
+        "legacy_uid",
+        _unit_cube_vertices(),
+        _cube_faces(),
+        _identity_pose(),
+    )
+
+    with pytest.raises(ValueError, match="without outer whitespace"):
+        generate_curobo_world_yaml(
+            {" registry_cube": rigid_object},
             str(tmp_path / "world.yml"),
         )
 
@@ -695,7 +931,6 @@ def _make_curobo_engine(
 def test_curobo_reuses_non_graph_backend():
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -706,14 +941,18 @@ def test_curobo_reuses_non_graph_backend():
     try:
         engine = _make_curobo_engine(block)
         target = _target_beyond_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": _SIM_CONTROL_PART}},
+        )
 
         result = engine.compile(
             (
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    binding,
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )
@@ -731,8 +970,8 @@ def test_curobo_reuses_non_graph_backend():
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    binding,
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )
@@ -749,7 +988,6 @@ def test_curobo_reuses_non_graph_backend():
 def test_curobo_uses_accelerator_with_cpu_physics():
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.atomic_actions import (
-        ActionBinding,
         ActionInvocation,
         EndEffectorPoseGoal,
         MotionPolicy,
@@ -760,14 +998,18 @@ def test_curobo_uses_accelerator_with_cpu_physics():
     try:
         engine = _make_curobo_engine(block, use_cuda_graph=True)
         target = _target_beyond_block(robot)
+        binding = engine.bind_control_parts(
+            "move_end_effector",
+            {"primary": {"motion": _SIM_CONTROL_PART}},
+        )
 
         result = engine.compile(
             (
                 ActionInvocation(
                     "move_end_effector",
                     EndEffectorPoseGoal(xpos=target),
-                    ActionBinding(manipulators={"primary": _SIM_CONTROL_PART}),
-                    MotionPolicy(motion_source="motion_gen", sample_count=80),
+                    binding,
+                    MotionPolicy(strategy="motion_gen", sample_count=80),
                 ),
             )
         )

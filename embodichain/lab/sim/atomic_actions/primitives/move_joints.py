@@ -23,17 +23,31 @@ from typing import ClassVar
 
 import torch
 
-from ..core import AtomicAction
-from ..invocation import ActionOptions, ResolvedActionRequest
-from ..plans import ActionPlan, CompletionConditionKind
-from ..state import PlanningContext
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.core import AtomicAction
+from embodichain.lab.sim.atomic_actions.invocation import (
+    ActionOptions,
+    ResolvedActionRequest,
+)
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.requirements import (
+    JOINT_POSITION_CAPABILITY,
+    SkillBindingContract,
+)
+from embodichain.lab.sim.atomic_actions.state import PlanningContext
+from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+    build_joint_plan_states,
+    resolve_joint_target,
+    to_full_robot_trajectory,
+)
+from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
+    make_motion_slot,
+)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class JointPositionGoal:
     """Explicit or named joint-space goal for a bound robot resource."""
-
-    goal_kind: ClassVar[str] = "joint_position"
 
     target: torch.Tensor | str
     """Joint qpos/waypoints or a named control-part profile command."""
@@ -51,8 +65,8 @@ class JointPositionGoal:
         if self.target.dim() not in (1, 2, 3) or self.target.shape[-1] == 0:
             raise ValueError(
                 "Tensor target must have shape (control_dof,), "
-                "(n_envs, control_dof), "
-                "or (n_envs, n_waypoint, control_dof), "
+                "(num_envs, control_dof), "
+                "or (num_envs, n_waypoint, control_dof), "
                 f"got {tuple(self.target.shape)}."
             )
 
@@ -68,63 +82,59 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     skill_id: ClassVar[str] = "move_joints"
     GoalType: ClassVar[type] = JointPositionGoal
     OptionsType: ClassVar[type] = MoveJointsOptions
-    manipulator_roles: ClassVar[tuple[str, ...]] = ("primary",)
     agent_visible: ClassVar[bool] = False
+    binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+        slots=(
+            make_motion_slot(
+                "primary",
+                capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+            ),
+        ),
+    )
 
-    def __init__(
-        self,
-        default_options: MoveJointsOptions | None = None,
-    ) -> None:
-        super().__init__(default_options)
-
-    def plan(
+    def _plan(
         self,
         request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan a joint-space goal without mutating the robot or task state."""
-        goal = self.require_goal(request)
-        manipulator = request.binding.manipulator("primary")
-        control_part = manipulator.name
-        joint_ids = list(manipulator.joint_ids)
-        joint_dof = manipulator.dof
-        target_qpos = self.builder.resolve_joint_target(
+        goal = request.goal
+        motion = request.binding.endpoint("primary", "motion")
+        motion_target = motion.require_target(JointPositionTarget)
+        control_part = motion_target.control_part
+        joint_ids = list(motion_target.joint_ids)
+        joint_dof = len(motion_target.joint_ids)
+        target_qpos = resolve_joint_target(
             self._resolve_target_qpos(
                 goal,
                 request=request,
                 context=context,
             ),
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             joint_dof=joint_dof,
             control_part=control_part,
+            device=self.device,
         )
-        start_qpos = self.builder.resolve_start_qpos(
-            context.robot.qpos[:, joint_ids],
-            n_envs=context.batch_size,
-            arm_dof=joint_dof,
-            control_part=control_part,
+        start_qpos = context.robot.qpos[:, joint_ids]
+        result = self.motion_generator.generate(
+            build_joint_plan_states(target_qpos),
+            options=request.motion_policy.to_motion_gen_options(
+                start_qpos=start_qpos,
+                control_part=control_part,
+                interpolation_dt=context.control_dt,
+            ),
         )
-        result = self.builder.generate_joint_plan(
-            start_qpos,
-            target_qpos,
-            request.motion_policy.sample_count,
-            control_part=control_part,
-            arm_dof=joint_dof,
-            cfg=request.motion_policy,
-        )
-        success, trajectory = self.builder.to_full_robot_trajectory(
+        success, trajectory = to_full_robot_trajectory(
             result,
             base_qpos=context.robot.qpos,
             joint_ids=joint_ids,
             env_ids=context.env_ids,
-            control_dt=request.motion_policy.control_dt,
         )
         return self.build_plan(
             request,
             context,
             success=success,
             trajectory=trajectory,
-            completion_kind=CompletionConditionKind.JOINT_GOAL_REACHED,
         )
 
     def _resolve_target_qpos(
@@ -137,9 +147,9 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
         """Resolve an explicit or named joint goal to a tensor."""
         if isinstance(goal.target, torch.Tensor):
             return goal.target
-        return request.binding.manipulator("primary").joint_positions(
+        return request.binding.endpoint("primary", "motion").joint_positions(
             goal.target,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             dtype=context.robot.qpos.dtype,
         )

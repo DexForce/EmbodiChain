@@ -173,7 +173,7 @@ def create_obj(sim: SimulationManager):
 
 
 def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tensor):
-    n_envs = sim.num_envs
+    num_envs = sim.num_envs
     rest_arm_qpos = robot.get_qpos("arm")
 
     approach_xpos = grasp_xpos.clone()
@@ -203,12 +203,12 @@ def get_grasp_traj(sim: SimulationManager, robot: Robot, grasp_xpos: torch.Tenso
     )
     hand_trajectory = torch.cat(
         [
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_open_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
-            hand_close_qpos[None, None, :].repeat(n_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_open_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
+            hand_close_qpos[None, None, :].repeat(num_envs, 1, 1),
         ],
         dim=1,
     )

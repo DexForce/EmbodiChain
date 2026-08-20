@@ -142,7 +142,7 @@ Members in a group behave like normal `RigidObject`s: they can be observed by ca
 ## Related Topics
 
 - Rigid objects: See the Rigid Object overview for single-body.
-- Soft bodies: Deformable objects have different observation semantics (vertex-level data). ([Soft Body Simulation Tutorial](https://dexforce.github.io/EmbodiChain/tutorial/create_softbody.html))
+- Soft bodies: Deformable objects have different observation semantics (vertex-level data); see the {doc}`Soft Body Simulation Tutorial </tutorial/create_softbody>`.
 - Examples: `scripts/tutorials/sim/create_rigid_object_group.py` 
 
 
