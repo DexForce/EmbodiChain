@@ -64,7 +64,7 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
 )
 
 OBJECT_MESH_PATH = get_data_path("SodaCan/simple_cola_can.obj")
-GRIPPER_TCP_Z = 0.15
+GRIPPER_TCP_Z = 0.152
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
