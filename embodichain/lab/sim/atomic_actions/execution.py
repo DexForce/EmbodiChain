@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import math
 from typing import TYPE_CHECKING
@@ -26,7 +26,11 @@ from typing import TYPE_CHECKING
 import torch
 
 from .effects import StateDelta
-from .invocation import ActionInvocation, ResolvedActionRequest
+from .invocation import (
+    ActionInvocation,
+    PhaseEffectGateRequirement,
+    ResolvedActionRequest,
+)
 from .bindings import RuntimeEndpointTarget
 from .plans import (
     ActionPlan,
@@ -74,8 +78,13 @@ class ExecutionEventKind(str, Enum):
     EFFECT_VERIFICATION_REQUIRED = "effect_verification_required"
     EFFECT_VERIFICATION_FAILED = "effect_verification_failed"
     EFFECT_VERIFICATION_TIMEOUT = "effect_verification_timeout"
+    PHASE_EFFECT_GATE_REQUIRED = "phase_effect_gate_required"
+    PHASE_EFFECT_GATE_SATISFIED = "phase_effect_gate_satisfied"
+    PHASE_EFFECT_GATE_FAILED = "phase_effect_gate_failed"
+    HELD_OBJECT_LOST = "held_object_lost"
     ACTION_RETRY = "action_retry"
     ACTION_COMPLETED = "action_completed"
+    RECOVERY_REQUIRED = "recovery_required"
     RECOVERY_EXHAUSTED = "recovery_exhausted"
     ROWS_DEACTIVATED = "rows_deactivated"
     SESSION_COMPLETED = "session_completed"
@@ -227,6 +236,8 @@ class EffectVerificationRequest:
     only a newly installed plan starts a new attempt deadline.
     ``attempt_generation`` is session-local and remains stable when partial
     resolution or row deactivation replaces only the request ID.
+    ``failure_invalidation`` is a core-owned removal-only delta; verification
+    results may select failed rows on which to apply it but cannot replace it.
     """
 
     verification_id: int
@@ -241,6 +252,7 @@ class EffectVerificationRequest:
     env_mask: torch.Tensor
     expected_effects: StateDelta
     effect_verification: EffectVerificationRequirement | None = None
+    failure_invalidation: StateDelta = field(default_factory=StateDelta)
 
     def __post_init__(self) -> None:
         if type(self.verification_id) is not int or self.verification_id < 0:
@@ -288,8 +300,32 @@ class EffectVerificationRequest:
                 "Effect verification requires expected symbolic effects or an "
                 "explicit physical-effect requirement."
             )
+        if not isinstance(self.failure_invalidation, StateDelta):
+            raise TypeError("failure_invalidation must be a StateDelta.")
+        if (
+            any(
+                value is not None
+                for value in self.failure_invalidation.held_object_updates.values()
+            )
+            or any(
+                value is not None
+                for value in self.failure_invalidation.coordinated_held_object_updates.values()
+            )
+            or any(
+                value is not None
+                for value in self.failure_invalidation.articulation_joint_updates.values()
+            )
+        ):
+            raise ValueError(
+                "failure_invalidation may only remove previously verified state."
+            )
         object.__setattr__(self, "env_mask", self.env_mask.clone())
         object.__setattr__(self, "expected_effects", self.expected_effects.snapshot())
+        object.__setattr__(
+            self,
+            "failure_invalidation",
+            self.failure_invalidation.snapshot(),
+        )
         object.__setattr__(
             self,
             "effect_verification",
@@ -315,6 +351,74 @@ class EffectVerificationRequest:
             env_mask=self.env_mask,
             expected_effects=self.expected_effects,
             effect_verification=self.effect_verification,
+            failure_invalidation=self.failure_invalidation,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class EffectExpectationResult:
+    """Current-observation outcome for one physical state expectation.
+
+    ``inverse_satisfied_mask`` is stronger than contradiction: every clause
+    must have reached its explicit inverse band for the monitor's complete
+    hysteresis window.  It may therefore be used to retain a pre-existing
+    relation during failure reconciliation, while a single contradictory
+    clause may not.
+    """
+
+    expectation_id: str
+    satisfied_mask: torch.Tensor
+    contradicted_mask: torch.Tensor
+    inverse_satisfied_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.expectation_id) is not str
+            or not self.expectation_id
+            or self.expectation_id != self.expectation_id.strip()
+        ):
+            raise ValueError(
+                "expectation_id must be a non-empty string without outer whitespace."
+            )
+        for name in (
+            "satisfied_mask",
+            "contradicted_mask",
+            "inverse_satisfied_mask",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        masks = (
+            self.satisfied_mask,
+            self.contradicted_mask,
+            self.inverse_satisfied_mask,
+        )
+        if any(mask.shape != masks[0].shape for mask in masks[1:]):
+            raise ValueError("Expectation-result masks must have equal shapes.")
+        if any(mask.device != masks[0].device for mask in masks[1:]):
+            raise ValueError("Expectation-result masks must use the same device.")
+        if (self.satisfied_mask & self.contradicted_mask).any():
+            raise ValueError("satisfied_mask and contradicted_mask must not overlap.")
+        if (self.inverse_satisfied_mask & ~self.contradicted_mask).any():
+            raise ValueError(
+                "inverse_satisfied_mask must be a subset of contradicted_mask."
+            )
+        for name in (
+            "satisfied_mask",
+            "contradicted_mask",
+            "inverse_satisfied_mask",
+        ):
+            object.__setattr__(self, name, getattr(self, name).clone())
+
+    def snapshot(self) -> EffectExpectationResult:
+        """Return an independently owned expectation outcome."""
+        return EffectExpectationResult(
+            expectation_id=self.expectation_id,
+            satisfied_mask=self.satisfied_mask,
+            contradicted_mask=self.contradicted_mask,
+            inverse_satisfied_mask=self.inverse_satisfied_mask,
         )
 
 
@@ -322,32 +426,442 @@ class EffectVerificationRequest:
 class EffectVerificationResult:
     """Correlated per-environment update for one effect boundary.
 
-    Rows absent from both masks remain unresolved. This lets one shared batch
-    barrier commit verified rows while other rows continue observing the same
-    physical effect.
+    Rows absent from both ``success_mask`` and ``failure_mask`` remain
+    unresolved. ``invalidation_mask`` and ``retry_mask`` classify only failed
+    rows: the former selects the request's core-owned removal delta, while the
+    latter authorizes replay of the same invocation. Failed rows outside the
+    retry mask require external recovery. This lets one shared batch barrier
+    commit verified rows while other rows continue observing the same physical
+    effect.
     """
 
     verification_id: int
     success_mask: torch.Tensor
     failure_mask: torch.Tensor
+    invalidation_mask: torch.Tensor
+    retry_mask: torch.Tensor
+    expectation_results: tuple[EffectExpectationResult, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.verification_id) is not int or self.verification_id < 0:
             raise ValueError("verification_id must be a non-negative integer.")
-        for name in ("success_mask", "failure_mask"):
+        for name in (
+            "success_mask",
+            "failure_mask",
+            "invalidation_mask",
+            "retry_mask",
+        ):
             value = getattr(self, name)
             if not isinstance(value, torch.Tensor):
                 raise TypeError(f"{name} must be a torch.Tensor.")
             if value.dtype != torch.bool or value.dim() != 1:
                 raise ValueError(f"{name} must be a one-dimensional bool tensor.")
-        if self.success_mask.shape != self.failure_mask.shape:
-            raise ValueError("success_mask and failure_mask must have equal shapes.")
-        if self.success_mask.device != self.failure_mask.device:
-            raise ValueError("success_mask and failure_mask must use the same device.")
+        masks = (
+            self.success_mask,
+            self.failure_mask,
+            self.invalidation_mask,
+            self.retry_mask,
+        )
+        if any(mask.shape != masks[0].shape for mask in masks[1:]):
+            raise ValueError("Effect-result masks must have equal shapes.")
+        if any(mask.device != masks[0].device for mask in masks[1:]):
+            raise ValueError("Effect-result masks must use the same device.")
         if (self.success_mask & self.failure_mask).any():
             raise ValueError("success_mask and failure_mask must not overlap.")
-        object.__setattr__(self, "success_mask", self.success_mask.clone())
+        if (self.invalidation_mask & ~self.failure_mask).any():
+            raise ValueError("invalidation_mask must be a subset of failure_mask.")
+        if (self.retry_mask & ~self.failure_mask).any():
+            raise ValueError("retry_mask must be a subset of failure_mask.")
+        expectation_results = tuple(self.expectation_results)
+        if not all(
+            type(value) is EffectExpectationResult for value in expectation_results
+        ):
+            raise TypeError(
+                "expectation_results must contain exact EffectExpectationResult values."
+            )
+        expectation_ids = [value.expectation_id for value in expectation_results]
+        if len(set(expectation_ids)) != len(expectation_ids):
+            raise ValueError("Effect expectation-result IDs must be unique.")
+        if expectation_results:
+            expected_success = torch.ones_like(self.success_mask)
+            expected_failure = torch.zeros_like(self.failure_mask)
+            for value in expectation_results:
+                if value.satisfied_mask.shape != self.success_mask.shape:
+                    raise ValueError(
+                        "Expectation and aggregate result masks must have equal shapes."
+                    )
+                if value.satisfied_mask.device != self.success_mask.device:
+                    raise ValueError(
+                        "Expectation and aggregate result masks must use the same device."
+                    )
+                expected_success &= value.satisfied_mask
+                expected_failure |= value.contradicted_mask
+            if not torch.equal(self.success_mask, expected_success):
+                raise ValueError(
+                    "success_mask must equal the conjunction of expectation results."
+                )
+            if not torch.equal(self.failure_mask, expected_failure):
+                raise ValueError(
+                    "failure_mask must equal the union of expectation results."
+                )
+        for name in (
+            "success_mask",
+            "failure_mask",
+            "invalidation_mask",
+            "retry_mask",
+        ):
+            object.__setattr__(self, name, getattr(self, name).clone())
+        object.__setattr__(
+            self,
+            "expectation_results",
+            tuple(value.snapshot() for value in expectation_results),
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PhaseEffectGateRequest:
+    """Correlate a blocking physical-effect check with a segment entry.
+
+    The action's preceding command remains active while the gate is unresolved.
+    A gate is scoped to the enclosing action attempt and does not create a
+    separate planning, recovery, or timeout budget.
+
+    Args:
+        verification_id: Session-local single-use request identity.
+        gate_id: Invocation-local stable gate identity.
+        skill_id: Registered action skill identity.
+        invocation_id: Optional logical invocation correlation identity.
+        invocation_revision: Active invocation revision.
+        invocation_index: Active invocation position in the session.
+        attempt_generation: Installed action-plan attempt generation.
+        next_waypoint_index: First command frame blocked by the gate.
+        segment_name: Named trajectory segment blocked by the gate.
+        requested_at: Request creation time in the observation timestamp domain.
+        deadline: Enclosing action deadline in that same timestamp domain.
+        env_mask: Active rows that must satisfy the gate together.
+    """
+
+    verification_id: int
+    gate_id: str
+    skill_id: str
+    invocation_id: str | None
+    invocation_revision: int
+    invocation_index: int
+    attempt_generation: int
+    next_waypoint_index: int
+    segment_name: str
+    requested_at: float
+    deadline: float
+    env_mask: torch.Tensor
+
+    def __post_init__(self) -> None:
+        for name in (
+            "verification_id",
+            "invocation_revision",
+            "invocation_index",
+            "attempt_generation",
+            "next_waypoint_index",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+        for name in ("gate_id", "skill_id", "segment_name"):
+            value = getattr(self, name)
+            if type(value) is not str or not value or value != value.strip():
+                raise ValueError(
+                    f"{name} must be a non-empty string without outer whitespace."
+                )
+        if self.invocation_id is not None and (
+            type(self.invocation_id) is not str or not self.invocation_id
+        ):
+            raise ValueError("invocation_id must be a non-empty string or None.")
+        if not math.isfinite(self.requested_at) or self.requested_at < 0.0:
+            raise ValueError("requested_at must be finite and non-negative.")
+        if not math.isfinite(self.deadline) or self.deadline < self.requested_at:
+            raise ValueError(
+                "deadline must be finite and no earlier than requested_at."
+            )
+        if not isinstance(self.env_mask, torch.Tensor):
+            raise TypeError("env_mask must be a torch.Tensor.")
+        if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
+            raise ValueError("env_mask must be a one-dimensional bool tensor.")
+        if not self.env_mask.any():
+            raise ValueError("env_mask must contain at least one gated row.")
+        object.__setattr__(self, "env_mask", self.env_mask.clone())
+
+    def snapshot(self) -> PhaseEffectGateRequest:
+        """Return an independently owned gate request."""
+        return PhaseEffectGateRequest(
+            verification_id=self.verification_id,
+            gate_id=self.gate_id,
+            skill_id=self.skill_id,
+            invocation_id=self.invocation_id,
+            invocation_revision=self.invocation_revision,
+            invocation_index=self.invocation_index,
+            attempt_generation=self.attempt_generation,
+            next_waypoint_index=self.next_waypoint_index,
+            segment_name=self.segment_name,
+            requested_at=self.requested_at,
+            deadline=self.deadline,
+            env_mask=self.env_mask,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class PhaseEffectGateResult:
+    """Current-observation decision for one blocking segment-entry gate.
+
+    Rows absent from both decision masks remain unresolved. ``retry_mask`` is
+    a subset of failed rows for which replaying the enclosing action remains
+    valid; no gate outcome mutates verified task state.
+
+    Args:
+        verification_id: Identity copied from the consumed gate request.
+        gate_id: Stable gate identity copied from the request.
+        attempt_generation: Action attempt copied from the request.
+        invocation_index: Session invocation index copied from the request.
+        next_waypoint_index: Blocked waypoint copied from the request.
+        success_mask: Rows whose current evidence satisfies the gate.
+        failure_mask: Rows whose current evidence contradicts the gate.
+        retry_mask: Failed rows allowed to retry the enclosing action.
+        message: Optional physical-failure diagnostic.
+    """
+
+    verification_id: int
+    gate_id: str
+    attempt_generation: int
+    invocation_index: int
+    next_waypoint_index: int
+    success_mask: torch.Tensor
+    failure_mask: torch.Tensor
+    retry_mask: torch.Tensor
+    message: str = ""
+
+    def __post_init__(self) -> None:
+        for name in (
+            "verification_id",
+            "attempt_generation",
+            "invocation_index",
+            "next_waypoint_index",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+        if (
+            type(self.gate_id) is not str
+            or not self.gate_id
+            or self.gate_id != self.gate_id.strip()
+        ):
+            raise ValueError(
+                "gate_id must be a non-empty string without outer whitespace."
+            )
+        masks = (self.success_mask, self.failure_mask, self.retry_mask)
+        for name, value in zip(
+            ("success_mask", "failure_mask", "retry_mask"),
+            masks,
+            strict=True,
+        ):
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        if any(value.shape != masks[0].shape for value in masks[1:]):
+            raise ValueError("Phase-effect gate masks must have equal shapes.")
+        if any(value.device != masks[0].device for value in masks[1:]):
+            raise ValueError("Phase-effect gate masks must use the same device.")
+        if (self.success_mask & self.failure_mask).any():
+            raise ValueError("Gate success and failure masks must not overlap.")
+        if (self.retry_mask & ~self.failure_mask).any():
+            raise ValueError("retry_mask must be a subset of failure_mask.")
+        if type(self.message) is not str:
+            raise TypeError("message must be a string.")
+        for name in ("success_mask", "failure_mask", "retry_mask"):
+            object.__setattr__(self, name, getattr(self, name).clone())
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectGuardRequest:
+    """Describe the next in-flight command boundary for held-object checks.
+
+    A request is correlated to one installed action-plan attempt and one next
+    waypoint. The named segment lets an external verifier select phase-aware
+    physical evidence without teaching the execution core skill-specific
+    phases. ``deadline`` uses the observation timestamp domain.
+    """
+
+    verification_id: int
+    skill_id: str
+    invocation_id: str | None
+    invocation_revision: int
+    invocation_index: int
+    attempt_generation: int
+    next_waypoint_index: int
+    segment_name: str
+    env_mask: torch.Tensor
+    allowed_held_object_relations: tuple[tuple[str, str], ...]
+    allowed_coordinated_held_object_relations: tuple[tuple[str, str, str], ...]
+    deadline: float
+
+    def __post_init__(self) -> None:
+        if type(self.verification_id) is not int or self.verification_id < 0:
+            raise ValueError("verification_id must be a non-negative integer.")
+        if type(self.skill_id) is not str or not self.skill_id:
+            raise ValueError("skill_id must be a non-empty string.")
+        if self.invocation_id is not None and (
+            type(self.invocation_id) is not str or not self.invocation_id
+        ):
+            raise ValueError("invocation_id must be a non-empty string or None.")
+        for name in (
+            "invocation_revision",
+            "invocation_index",
+            "attempt_generation",
+            "next_waypoint_index",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+        if type(self.segment_name) is not str or not self.segment_name:
+            raise ValueError("segment_name must be a non-empty string.")
+        if not isinstance(self.env_mask, torch.Tensor):
+            raise TypeError("env_mask must be a torch.Tensor.")
+        if self.env_mask.dtype != torch.bool or self.env_mask.dim() != 1:
+            raise ValueError("env_mask must be a one-dimensional bool tensor.")
+        if not self.env_mask.any():
+            raise ValueError("env_mask must contain at least one guarded row.")
+        held_relations = tuple(self.allowed_held_object_relations)
+        if len(set(held_relations)) != len(held_relations) or not all(
+            type(value) is tuple
+            and len(value) == 2
+            and all(type(item) is str and item for item in value)
+            for value in held_relations
+        ):
+            raise ValueError(
+                "allowed_held_object_relations must contain unique "
+                "(task_state_key, object_id) pairs."
+            )
+        coordinated_relations = tuple(self.allowed_coordinated_held_object_relations)
+        if len(set(coordinated_relations)) != len(coordinated_relations) or not all(
+            type(value) is tuple
+            and len(value) == 3
+            and all(type(item) is str and item for item in value)
+            for value in coordinated_relations
+        ):
+            raise ValueError(
+                "allowed_coordinated_held_object_relations must contain unique "
+                "(first_key, second_key, object_id) triples."
+            )
+        if not math.isfinite(self.deadline) or self.deadline < 0.0:
+            raise ValueError("deadline must be finite and non-negative.")
+        object.__setattr__(self, "env_mask", self.env_mask.clone())
+        object.__setattr__(self, "allowed_held_object_relations", held_relations)
+        object.__setattr__(
+            self,
+            "allowed_coordinated_held_object_relations",
+            coordinated_relations,
+        )
+
+    def snapshot(self) -> HeldObjectGuardRequest:
+        """Return an independently owned guard request.
+
+        Returns:
+            Request with an independently owned environment mask.
+        """
+        return HeldObjectGuardRequest(
+            verification_id=self.verification_id,
+            skill_id=self.skill_id,
+            invocation_id=self.invocation_id,
+            invocation_revision=self.invocation_revision,
+            invocation_index=self.invocation_index,
+            attempt_generation=self.attempt_generation,
+            next_waypoint_index=self.next_waypoint_index,
+            segment_name=self.segment_name,
+            env_mask=self.env_mask,
+            allowed_held_object_relations=self.allowed_held_object_relations,
+            allowed_coordinated_held_object_relations=(
+                self.allowed_coordinated_held_object_relations
+            ),
+            deadline=self.deadline,
+        )
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class HeldObjectGuardResult:
+    """Correlated in-flight held-object loss and recovery decision.
+
+    ``state_invalidation`` may only remove single-resource or coordinated
+    held-object relations. It is applied to ``failure_mask`` before recovery
+    planning, so a retry always observes reconciled symbolic state.
+    """
+
+    verification_id: int
+    object_id: str
+    attempt_generation: int
+    invocation_index: int
+    next_waypoint_index: int
+    failure_mask: torch.Tensor
+    state_invalidation: StateDelta
+    retry_mask: torch.Tensor
+    message: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.verification_id) is not int or self.verification_id < 0:
+            raise ValueError("verification_id must be a non-negative integer.")
+        if type(self.object_id) is not str or not self.object_id:
+            raise ValueError("object_id must be a non-empty string.")
+        for name in (
+            "attempt_generation",
+            "invocation_index",
+            "next_waypoint_index",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+        for name in ("failure_mask", "retry_mask"):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        if self.failure_mask.shape != self.retry_mask.shape:
+            raise ValueError("failure_mask and retry_mask must have equal shapes.")
+        if self.failure_mask.device != self.retry_mask.device:
+            raise ValueError("failure_mask and retry_mask must use the same device.")
+        if (self.retry_mask & ~self.failure_mask).any():
+            raise ValueError("retry_mask must be a subset of failure_mask.")
+        if not isinstance(self.state_invalidation, StateDelta):
+            raise TypeError("state_invalidation must be a StateDelta.")
+        if any(
+            value is not None
+            for value in self.state_invalidation.held_object_updates.values()
+        ) or any(
+            value is not None
+            for value in self.state_invalidation.coordinated_held_object_updates.values()
+        ):
+            raise ValueError(
+                "state_invalidation may only remove held-object relations."
+            )
+        if self.state_invalidation.articulation_joint_updates:
+            raise ValueError(
+                "state_invalidation cannot update articulation-joint state."
+            )
+        has_invalidation = bool(
+            self.state_invalidation.held_object_updates
+            or self.state_invalidation.coordinated_held_object_updates
+        )
+        if bool(self.failure_mask.any().item()) != has_invalidation:
+            raise ValueError(
+                "state_invalidation must contain relation removals exactly when "
+                "failure_mask contains failed rows."
+            )
+        if type(self.message) is not str:
+            raise TypeError("message must be a string.")
         object.__setattr__(self, "failure_mask", self.failure_mask.clone())
+        object.__setattr__(self, "retry_mask", self.retry_mask.clone())
+        object.__setattr__(
+            self,
+            "state_invalidation",
+            self.state_invalidation.snapshot(),
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -361,6 +875,7 @@ class ExecutionTick:
     events: tuple[ExecutionEvent, ...]
     task_state: TaskState
     pending_effect: EffectVerificationRequest | None = None
+    pending_phase_effect_gate: PhaseEffectGateRequest | None = None
 
     def __post_init__(self) -> None:
         if self.eligible_mask.dtype != torch.bool or self.eligible_mask.dim() != 1:
@@ -370,6 +885,21 @@ class ExecutionTick:
         ):
             raise TypeError(
                 "pending_effect must be an EffectVerificationRequest or None."
+            )
+        if self.pending_phase_effect_gate is not None and not isinstance(
+            self.pending_phase_effect_gate,
+            PhaseEffectGateRequest,
+        ):
+            raise TypeError(
+                "pending_phase_effect_gate must be a PhaseEffectGateRequest or None."
+            )
+        if (
+            self.pending_effect is not None
+            and self.pending_phase_effect_gate is not None
+        ):
+            raise ValueError(
+                "Terminal effect verification and a phase-effect gate cannot be "
+                "pending together."
             )
         if self.command is not None and not isinstance(
             self.command,
@@ -391,6 +921,12 @@ class ExecutionTick:
                 self,
                 "pending_effect",
                 self.pending_effect.snapshot(),
+            )
+        if self.pending_phase_effect_gate is not None:
+            object.__setattr__(
+                self,
+                "pending_phase_effect_gate",
+                self.pending_phase_effect_gate.snapshot(),
             )
         hold_targets: list[RuntimeEndpointTarget] = []
         for target in self.hold_targets:
@@ -481,6 +1017,11 @@ class ExecutionSession:
         self._effect_failures = torch.zeros_like(self._eligible)
         self._effect_requested_at: float | None = None
         self._next_effect_verification_id = 0
+        self._next_held_object_guard_verification_id = 0
+        self._pending_phase_effect_gate: PhaseEffectGateRequest | None = None
+        self._satisfied_phase_effect_gates: set[str] = set()
+        self._reported_phase_effect_gates: set[str] = set()
+        self._next_phase_effect_gate_verification_id = 0
         self._plan_attempt_records: list[_ExecutionPlanAttemptRecord] = []
         self._status = (
             ExecutionStatus.RUNNING if self._eligible.any() else ExecutionStatus.FAILED
@@ -526,6 +1067,33 @@ class ExecutionSession:
     def pending_effect(self) -> EffectVerificationRequest | None:
         """Owned snapshot of the current effect boundary, when present."""
         return None if self._pending_effect is None else self._pending_effect.snapshot()
+
+    @property
+    def phase_effect_gate_request(self) -> PhaseEffectGateRequest | None:
+        """Return the blocking gate at the next trajectory-segment entry.
+
+        Returns:
+            Owned request snapshot, or ``None`` when the next command is not
+            blocked by a physical-effect gate.
+        """
+        request = self._phase_effect_gate_request()
+        return None if request is None else request.snapshot()
+
+    @property
+    def held_object_guard_request(self) -> HeldObjectGuardRequest | None:
+        """Describe the phase that must be checked before the next command.
+
+        The request remains available while terminal acceptance is settling,
+        using the final waypoint and segment identity. Once terminal physical
+        effect verification begins, that verifier owns the boundary and this
+        property returns ``None``.
+
+        Returns:
+            Owned phase-aware guard request, or ``None`` when no command-phase
+            guard is active.
+        """
+        request = self._held_object_guard_request()
+        return None if request is None else request.snapshot()
 
     def deactivate_rows(
         self,
@@ -579,6 +1147,9 @@ class ExecutionSession:
                 )
             else:
                 self._pending_effect = None
+        if self._pending_phase_effect_gate is not None:
+            self._pending_phase_effect_gate = None
+            self._next_phase_effect_gate_verification_id += 1
         terminal_event = self._update_terminal_status()
         if terminal_event is not None:
             self._queued_events.append(terminal_event)
@@ -632,7 +1203,11 @@ class ExecutionSession:
             raise TypeError("invocation must be an ActionInvocation.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
-        if self._pending_effect is not None or self._effect_failures.any():
+        if (
+            self._pending_effect is not None
+            or self._pending_phase_effect_gate is not None
+            or self._effect_failures.any()
+        ):
             raise RuntimeError(
                 "Cannot revise while physical-effect resolution is pending; "
                 "resolve it or cancel and start a new invocation."
@@ -654,7 +1229,11 @@ class ExecutionSession:
             raise TypeError("replacement must be a ResolvedActionRequest.")
         if self._status is not ExecutionStatus.RUNNING:
             raise RuntimeError("Only a running execution session can be revised.")
-        if self._pending_effect is not None or self._effect_failures.any():
+        if (
+            self._pending_effect is not None
+            or self._pending_phase_effect_gate is not None
+            or self._effect_failures.any()
+        ):
             raise RuntimeError(
                 "Cannot revise while physical-effect resolution is pending; "
                 "resolve it or cancel and start a new invocation."
@@ -765,6 +1344,8 @@ class ExecutionSession:
         context: PlanningContext,
         *,
         effect_result: EffectVerificationResult | None = None,
+        phase_effect_gate_result: PhaseEffectGateResult | None = None,
+        held_object_guard_result: HeldObjectGuardResult | None = None,
     ) -> ExecutionTick:
         """Advance execution by one observation/command cycle.
 
@@ -773,6 +1354,12 @@ class ExecutionSession:
                 state is replaced by the session's verified task state.
             effect_result: Optional correlated semantic-effect result for an
                 action waiting at its terminal waypoint.
+            phase_effect_gate_result: Optional correlated physical-effect
+                decision for a blocked trajectory-segment entry.
+            held_object_guard_result: Optional correlated in-flight held-object
+                loss result for the current waypoint phase. ``None`` means the
+                verifier found no applicable guard for this phase or no result
+                was supplied.
 
         Returns:
             Status, optional command, events, and current verified task state.
@@ -791,10 +1378,95 @@ class ExecutionSession:
                     "effect_result verification_id does not match the pending "
                     "effect boundary."
                 )
+        phase_gate_request = self._phase_effect_gate_request()
+        if phase_effect_gate_result is not None:
+            if type(phase_effect_gate_result) is not PhaseEffectGateResult:
+                raise TypeError(
+                    "phase_effect_gate_result must be exactly "
+                    "PhaseEffectGateResult or None."
+                )
+            if phase_gate_request is None:
+                raise ValueError("No phase-effect gate is awaiting verification.")
+            if phase_effect_gate_result.verification_id != (
+                phase_gate_request.verification_id
+            ):
+                raise ValueError(
+                    "phase_effect_gate_result verification_id does not match "
+                    "the pending gate."
+                )
+            for name in (
+                "gate_id",
+                "attempt_generation",
+                "invocation_index",
+                "next_waypoint_index",
+            ):
+                if getattr(phase_effect_gate_result, name) != getattr(
+                    phase_gate_request,
+                    name,
+                ):
+                    raise ValueError(
+                        f"phase_effect_gate_result {name} does not match the "
+                        "pending gate."
+                    )
+            self._next_phase_effect_gate_verification_id += 1
+            self._pending_phase_effect_gate = None
+        guard_request = self._held_object_guard_request()
+        if held_object_guard_result is not None:
+            if type(held_object_guard_result) is not HeldObjectGuardResult:
+                raise TypeError(
+                    "held_object_guard_result must be exactly "
+                    "HeldObjectGuardResult or None."
+                )
+            if guard_request is None:
+                raise ValueError("No held-object guard is active for this phase.")
+            if held_object_guard_result.verification_id != (
+                guard_request.verification_id
+            ):
+                raise ValueError(
+                    "held_object_guard_result verification_id does not match the "
+                    "active guard request."
+                )
+            for name in (
+                "attempt_generation",
+                "invocation_index",
+                "next_waypoint_index",
+            ):
+                if getattr(held_object_guard_result, name) != getattr(
+                    guard_request,
+                    name,
+                ):
+                    raise ValueError(
+                        f"held_object_guard_result {name} does not match the "
+                        "active guard request."
+                    )
+        if guard_request is not None:
+            self._next_held_object_guard_verification_id += 1
         if self._status is not ExecutionStatus.RUNNING:
             return self._tick_result(command=None, events=events)
 
         assert self._plan is not None
+        if phase_effect_gate_result is not None:
+            assert phase_gate_request is not None
+            events.extend(
+                self._apply_phase_effect_gate_result(
+                    phase_effect_gate_result,
+                    phase_gate_request,
+                )
+            )
+            if self._status is not ExecutionStatus.RUNNING:
+                return self._tick_result(command=None, events=events)
+            assert self._plan is not None
+        if held_object_guard_result is not None:
+            assert guard_request is not None
+            events.extend(
+                self._apply_held_object_guard_result(
+                    held_object_guard_result,
+                    guard_request,
+                )
+            )
+            if self._status is not ExecutionStatus.RUNNING:
+                return self._tick_result(command=None, events=events)
+            assert self._plan is not None
         if not self._pending.any():
             command, hold_targets, completion_events = self._finish_action(
                 self._pending,
@@ -812,12 +1484,36 @@ class ExecutionSession:
                 self._pending_effect.env_mask & self._pending & self._plan.plan_success
             )
             if self._action_timed_out(self._plan, execution_mask):
+                pending_request = self._pending_effect
                 timed_out = execution_mask.clone()
                 known_failures = self._effect_failures.clone()
                 planning_failed = self._pending & ~self._plan.plan_success
-                retry_mask = timed_out | known_failures | planning_failed
+                invalidation_presence = self._failure_invalidation_presence_mask(
+                    pending_request.failure_invalidation
+                )
+                external_recovery = timed_out & invalidation_presence
+                retry_mask = (
+                    (timed_out & ~external_recovery) | known_failures | planning_failed
+                )
+                self._apply_effect_failure_invalidation(
+                    pending_request.failure_invalidation,
+                    timed_out,
+                )
                 self._pending_effect = None
                 self._effect_failures.zero_()
+                if external_recovery.any():
+                    self._eligible &= ~external_recovery
+                    self._pending &= ~external_recovery
+                    self._last_command_mask &= ~external_recovery
+                    events.append(
+                        self._event(
+                            ExecutionEventKind.RECOVERY_REQUIRED,
+                            external_recovery,
+                            "Effect evidence remained unresolved at the action "
+                            "deadline, so previously verified state was "
+                            "invalidated before external recovery.",
+                        )
+                    )
                 if known_failures.any():
                     events.append(
                         self._event(
@@ -938,6 +1634,13 @@ class ExecutionSession:
                 hold_targets=hold_targets,
                 events=events,
             )
+
+        phase_gate_request = self._phase_effect_gate_request()
+        if phase_gate_request is not None:
+            events.extend(self._phase_effect_gate_required_events(phase_gate_request))
+            preceding_waypoint = phase_gate_request.next_waypoint_index - 1
+            command = self._command_at(plan, preceding_waypoint, execution_mask)
+            return self._tick_result(command=command, events=events)
 
         commands = plan.commands
         if self._waypoint_index < commands.frame_count:
@@ -1114,6 +1817,7 @@ class ExecutionSession:
         replacement_tracking_routes = self._tracking_routes(plan)
         self._validate_destination_continuity(plan, event_kind)
         self._validate_tracking_continuity(plan, event_kind)
+        self._validate_phase_effect_gates(plan)
         if (
             event_kind
             not in (
@@ -1146,6 +1850,9 @@ class ExecutionSession:
         self._pending_effect = None
         self._effect_failures.zero_()
         self._effect_requested_at = None
+        self._pending_phase_effect_gate = None
+        self._satisfied_phase_effect_gates.clear()
+        self._reported_phase_effect_gates.clear()
         planned_mask = self._pending & plan.plan_success
         self._plan_attempt_records.append(
             _ExecutionPlanAttemptRecord(
@@ -1167,6 +1874,29 @@ class ExecutionSession:
         self._queued_events.append(
             self._event(event_kind, planned_mask, "Planned from the latest context.")
         )
+
+    def _validate_phase_effect_gates(self, plan: ActionPlan) -> None:
+        """Bind invocation-owned gates to non-initial named plan segments."""
+        request = self._requests[self._invocation_index]
+        for requirement in request.phase_effect_gates:
+            if type(requirement) is not PhaseEffectGateRequirement:
+                raise TypeError(
+                    "Resolved phase-effect gates must be exact "
+                    "PhaseEffectGateRequirement values."
+                )
+            try:
+                segment = plan.segment(requirement.segment_name)
+            except KeyError as exc:
+                raise ValueError(
+                    f"Phase-effect gate {requirement.gate_id!r} references "
+                    f"missing segment {requirement.segment_name!r}."
+                ) from exc
+            if segment.start == 0:
+                raise ValueError(
+                    f"Phase-effect gate {requirement.gate_id!r} cannot block the "
+                    "first trajectory segment because no preceding command exists "
+                    "to preserve while evidence is acquired."
+                )
 
     def _validate_destination_continuity(
         self,
@@ -1511,6 +2241,8 @@ class ExecutionSession:
                 )
             return None, active_targets, events
         else:
+            assert self._pending_effect is not None
+            pending_request = self._pending_effect
             success_input = self._normalize_mask(
                 effect_result.success_mask,
                 "effect_result.success_mask",
@@ -1519,17 +2251,67 @@ class ExecutionSession:
                 effect_result.failure_mask,
                 "effect_result.failure_mask",
             )
+            invalidation_input = self._normalize_mask(
+                effect_result.invalidation_mask,
+                "effect_result.invalidation_mask",
+            )
+            retry_input = self._normalize_mask(
+                effect_result.retry_mask,
+                "effect_result.retry_mask",
+            )
             reported = success_input | failure_input
             if (reported & ~execution_mask).any():
                 raise ValueError(
                     "Effect verification masks must be subsets of the pending "
                     "effect request env_mask."
                 )
+            for outcome in effect_result.expectation_results:
+                for name in (
+                    "satisfied_mask",
+                    "contradicted_mask",
+                    "inverse_satisfied_mask",
+                ):
+                    outcome_mask = self._normalize_mask(
+                        getattr(outcome, name),
+                        f"effect_result.expectation_results.{name}",
+                    )
+                    if (outcome_mask & ~execution_mask).any():
+                        raise ValueError(
+                            "Effect expectation-result masks must be subsets "
+                            "of the pending effect request env_mask."
+                        )
             verified = execution_mask & success_input
             failed_effect = execution_mask & failure_input
             unresolved = execution_mask & ~reported
             made_progress = bool(reported.any().item())
-            self._effect_failures |= failed_effect
+            invalidated = failed_effect & invalidation_input
+            retryable_failure = failed_effect & retry_input
+            external_recovery = failed_effect & ~retry_input
+            self._apply_effect_failure_invalidation(
+                pending_request.failure_invalidation,
+                invalidated,
+            )
+            self._effect_failures |= retryable_failure
+            if external_recovery.any():
+                self._eligible &= ~external_recovery
+                self._pending &= ~external_recovery
+                self._effect_failures &= ~external_recovery
+                self._last_command_mask &= ~external_recovery
+                events.extend(
+                    (
+                        self._event(
+                            ExecutionEventKind.EFFECT_VERIFICATION_FAILED,
+                            external_recovery,
+                            "Required physical effects were contradicted.",
+                        ),
+                        self._event(
+                            ExecutionEventKind.RECOVERY_REQUIRED,
+                            external_recovery,
+                            "The reconciled effect failure cannot safely replay "
+                            "the current invocation.",
+                        ),
+                    )
+                )
             if not unresolved.any():
                 self._pending_effect = None
 
@@ -1549,8 +2331,12 @@ class ExecutionSession:
             if made_progress:
                 self._pending_effect = self._effect_verification_request(unresolved)
             return None, active_targets, events
-        retry_mask = self._effect_failures | planning_failed
-        if retry_mask.any():
+        terminal_event = self._update_terminal_status()
+        if terminal_event is not None:
+            events.append(terminal_event)
+            return None, active_targets, events
+        retry_candidates = self._effect_failures | planning_failed
+        if retry_candidates.any():
             effect_failure_mask = self._effect_failures.clone()
             self._effect_failures.zero_()
             reason = (
@@ -1559,7 +2345,7 @@ class ExecutionSession:
                 else ExecutionEventKind.ACTION_PLANNING_FAILED
             )
             reason_mask = (
-                effect_failure_mask if effect_failure_mask.any() else retry_mask
+                effect_failure_mask if effect_failure_mask.any() else retry_candidates
             )
             if effect_failure_mask.any() and planning_failed.any():
                 events.append(
@@ -1571,7 +2357,7 @@ class ExecutionSession:
                 )
             events.extend(
                 self._attempt_action_retry(
-                    retry_mask,
+                    retry_candidates,
                     reason,
                     "Planning or expected-effect verification failed.",
                     reason_mask=reason_mask,
@@ -1849,6 +2635,365 @@ class ExecutionSession:
             raise ValueError("Scene entity pose batch does not match the session.")
         return pose
 
+    def _phase_effect_gate_requirement(
+        self,
+    ) -> PhaseEffectGateRequirement | None:
+        """Resolve a gate exactly at the next named segment's first frame."""
+        if (
+            self._status is not ExecutionStatus.RUNNING
+            or self._plan is None
+            or self._pending_effect is not None
+            or self._effect_failures.any()
+            or self._plan.commands.frame_count == 0
+            or self._waypoint_index >= self._plan.commands.frame_count
+        ):
+            return None
+        segment = self._plan.segment_at(self._waypoint_index)
+        if self._waypoint_index != segment.start:
+            return None
+        request = self._requests[self._invocation_index]
+        return next(
+            (
+                value
+                for value in request.phase_effect_gates
+                if value.segment_name == segment.name
+                and value.gate_id not in self._satisfied_phase_effect_gates
+            ),
+            None,
+        )
+
+    def _phase_effect_gate_request(self) -> PhaseEffectGateRequest | None:
+        """Build or retain the current blocking segment-entry gate request."""
+        requirement = self._phase_effect_gate_requirement()
+        if requirement is None:
+            self._pending_phase_effect_gate = None
+            return None
+        assert self._plan is not None
+        env_mask = self._pending & self._plan.plan_success
+        if not env_mask.any():
+            self._pending_phase_effect_gate = None
+            return None
+        current = self._pending_phase_effect_gate
+        if (
+            current is not None
+            and current.gate_id == requirement.gate_id
+            and current.attempt_generation == self._attempt_generation
+            and current.next_waypoint_index == self._waypoint_index
+            and torch.equal(current.env_mask, env_mask)
+        ):
+            return current
+        invocation = self._requests[self._invocation_index]
+        deadline = self._action_started_at + self._plan.recovery_policy.action_timeout
+        current = PhaseEffectGateRequest(
+            verification_id=self._next_phase_effect_gate_verification_id,
+            gate_id=requirement.gate_id,
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            invocation_revision=invocation.revision,
+            invocation_index=self._invocation_index,
+            attempt_generation=self._attempt_generation,
+            next_waypoint_index=self._waypoint_index,
+            segment_name=requirement.segment_name,
+            requested_at=min(self._context.robot.timestamp, deadline),
+            deadline=deadline,
+            env_mask=env_mask,
+        )
+        self._pending_phase_effect_gate = current
+        return current
+
+    def _phase_effect_gate_required_events(
+        self,
+        request: PhaseEffectGateRequest,
+    ) -> list[ExecutionEvent]:
+        """Emit the gate boundary once per installed action attempt."""
+        if request.gate_id in self._reported_phase_effect_gates:
+            return []
+        self._reported_phase_effect_gates.add(request.gate_id)
+        return [
+            self._event(
+                ExecutionEventKind.PHASE_EFFECT_GATE_REQUIRED,
+                request.env_mask,
+                f"Physical-effect gate {request.gate_id!r} blocks segment "
+                f"{request.segment_name!r} until current evidence succeeds.",
+            )
+        ]
+
+    def _apply_phase_effect_gate_result(
+        self,
+        result: PhaseEffectGateResult,
+        request: PhaseEffectGateRequest,
+    ) -> list[ExecutionEvent]:
+        """Resolve one gate observation without mutating verified task state."""
+        success = self._normalize_mask(
+            result.success_mask,
+            "phase_effect_gate_result.success_mask",
+        )
+        failure = self._normalize_mask(
+            result.failure_mask,
+            "phase_effect_gate_result.failure_mask",
+        )
+        retry = self._normalize_mask(
+            result.retry_mask,
+            "phase_effect_gate_result.retry_mask",
+        )
+        request_mask = request.env_mask.to(self._eligible.device)
+        if ((success | failure | retry) & ~request_mask).any():
+            raise ValueError(
+                "Phase-effect gate result masks must be subsets of the pending "
+                "request env_mask."
+            )
+        events = self._phase_effect_gate_required_events(request)
+        message = result.message or (
+            f"Physical evidence contradicted gate {request.gate_id!r} before "
+            f"segment {request.segment_name!r}."
+        )
+        non_retry = failure & ~retry
+        if non_retry.any():
+            self._eligible &= ~non_retry
+            self._pending &= ~non_retry
+            self._last_command_mask &= ~non_retry
+            events.extend(
+                (
+                    self._event(
+                        ExecutionEventKind.PHASE_EFFECT_GATE_FAILED,
+                        non_retry,
+                        message,
+                    ),
+                    self._event(
+                        ExecutionEventKind.RECOVERY_REQUIRED,
+                        non_retry,
+                        "The failed segment-entry gate requires recovery outside "
+                        "the current action retry policy.",
+                    ),
+                )
+            )
+        previous_generation = self._attempt_generation
+        if retry.any():
+            events.extend(
+                self._attempt_action_retry(
+                    retry,
+                    ExecutionEventKind.PHASE_EFFECT_GATE_FAILED,
+                    message,
+                )
+            )
+        else:
+            terminal_event = self._update_terminal_status()
+            if terminal_event is not None:
+                events.append(terminal_event)
+        if (
+            self._status is not ExecutionStatus.RUNNING
+            or self._attempt_generation != previous_generation
+        ):
+            return events
+        assert self._plan is not None
+        remaining = request_mask & self._pending & self._plan.plan_success
+        if remaining.any() and torch.equal(success & remaining, remaining):
+            self._satisfied_phase_effect_gates.add(request.gate_id)
+            events.append(
+                self._event(
+                    ExecutionEventKind.PHASE_EFFECT_GATE_SATISFIED,
+                    remaining,
+                    f"Physical-effect gate {request.gate_id!r} released segment "
+                    f"{request.segment_name!r}.",
+                )
+            )
+        return events
+
+    def _held_object_guard_request(self) -> HeldObjectGuardRequest | None:
+        """Build the current command-phase held-object guard request."""
+        if (
+            self._status is not ExecutionStatus.RUNNING
+            or self._plan is None
+            or self._pending_effect is not None
+            or self._phase_effect_gate_request() is not None
+            or self._effect_failures.any()
+            or self._plan.commands.frame_count == 0
+        ):
+            return None
+        env_mask = self._pending & self._plan.plan_success
+        if not env_mask.any():
+            return None
+        next_waypoint_index = min(
+            self._waypoint_index,
+            self._plan.commands.frame_count - 1,
+        )
+        segment = self._plan.segment_at(next_waypoint_index)
+        invocation = self._requests[self._invocation_index]
+        (
+            allowed_held_object_relations,
+            allowed_coordinated_held_object_relations,
+        ) = self._authorized_held_object_invalidation_relations(
+            invocation=invocation,
+        )
+        return HeldObjectGuardRequest(
+            verification_id=self._next_held_object_guard_verification_id,
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            invocation_revision=invocation.revision,
+            invocation_index=self._invocation_index,
+            attempt_generation=self._attempt_generation,
+            next_waypoint_index=next_waypoint_index,
+            segment_name=segment.name,
+            env_mask=env_mask,
+            allowed_held_object_relations=allowed_held_object_relations,
+            allowed_coordinated_held_object_relations=(
+                allowed_coordinated_held_object_relations
+            ),
+            deadline=(
+                self._action_started_at + self._plan.recovery_policy.action_timeout
+            ),
+        )
+
+    def _apply_held_object_guard_result(
+        self,
+        result: HeldObjectGuardResult,
+        request: HeldObjectGuardRequest,
+    ) -> list[ExecutionEvent]:
+        """Reconcile lost relations and enter row-local bounded recovery."""
+        failure_mask = self._normalize_mask(
+            result.failure_mask,
+            "held_object_guard_result.failure_mask",
+        )
+        retry_mask = self._normalize_mask(
+            result.retry_mask,
+            "held_object_guard_result.retry_mask",
+        )
+        request_mask = request.env_mask.to(self._eligible.device)
+        if (failure_mask & ~request_mask).any():
+            raise ValueError(
+                "Held-object guard failure_mask must be a subset of the active "
+                "request env_mask."
+            )
+        if (retry_mask & ~request_mask).any():
+            raise ValueError(
+                "Held-object guard retry_mask must be a subset of the active "
+                "request env_mask."
+            )
+        self._validate_held_object_invalidation_authorization(
+            result.state_invalidation,
+            object_id=result.object_id,
+            allowed_held_object_relations=request.allowed_held_object_relations,
+            allowed_coordinated_held_object_relations=(
+                request.allowed_coordinated_held_object_relations
+            ),
+        )
+        if not failure_mask.any():
+            return []
+
+        self._task_state = result.state_invalidation.apply(
+            self._task_state,
+            failure_mask,
+        )
+        self._context = PlanningContext(
+            robot=self._context.robot,
+            task=self._task_state,
+            scene=self._context.scene,
+            env_ids=self._context.env_ids,
+        )
+        message = result.message or (
+            "Physical evidence contradicted the verified held-object relation."
+        )
+        non_retry_mask = failure_mask & ~retry_mask
+        events: list[ExecutionEvent] = []
+        if non_retry_mask.any():
+            self._eligible &= ~non_retry_mask
+            self._pending &= ~non_retry_mask
+            self._effect_failures &= ~non_retry_mask
+            self._last_command_mask &= ~non_retry_mask
+            events.extend(
+                (
+                    self._event(
+                        ExecutionEventKind.HELD_OBJECT_LOST,
+                        non_retry_mask,
+                        message,
+                    ),
+                    self._event(
+                        ExecutionEventKind.RECOVERY_REQUIRED,
+                        non_retry_mask,
+                        "Held-object loss requires recovery outside the current "
+                        "action retry policy.",
+                    ),
+                )
+            )
+        if retry_mask.any():
+            events.extend(
+                self._attempt_action_retry(
+                    retry_mask,
+                    ExecutionEventKind.HELD_OBJECT_LOST,
+                    message,
+                )
+            )
+        else:
+            terminal_event = self._update_terminal_status()
+            if terminal_event is not None:
+                events.append(terminal_event)
+        return events
+
+    def _authorized_held_object_invalidation_relations(
+        self,
+        *,
+        invocation: ResolvedActionRequest | None = None,
+    ) -> tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str, str], ...]]:
+        """Return action-owned key/object identities eligible for removal."""
+        assert self._plan is not None
+        active_invocation = (
+            self._requests[self._invocation_index] if invocation is None else invocation
+        )
+        binding_task_state_keys = {
+            endpoint.task_state_key for endpoint in active_invocation.binding.endpoints
+        }
+        held_relations: set[tuple[str, str]] = set()
+        for key, candidate in self._task_state.held_objects.items():
+            object_id = candidate.semantics.entity_id
+            if key in binding_task_state_keys and object_id is not None:
+                held_relations.add((key, object_id))
+        for key, candidate in self._plan.expected_effects.held_object_updates.items():
+            if candidate is not None and candidate.semantics.entity_id is not None:
+                held_relations.add((key, candidate.semantics.entity_id))
+
+        related_keys = {key for key, _ in held_relations}
+        coordinated_relations: set[tuple[str, str, str]] = set()
+        for resources, candidate in self._task_state.coordinated_held_objects.items():
+            object_id = candidate.semantics.entity_id
+            if not set(resources).isdisjoint(related_keys) and object_id is not None:
+                coordinated_relations.add((*resources, object_id))
+        for (
+            resources,
+            candidate,
+        ) in self._plan.expected_effects.coordinated_held_object_updates.items():
+            if candidate is not None and candidate.semantics.entity_id is not None:
+                coordinated_relations.add((*resources, candidate.semantics.entity_id))
+        return tuple(sorted(held_relations)), tuple(sorted(coordinated_relations))
+
+    def _validate_held_object_invalidation_authorization(
+        self,
+        state_invalidation: StateDelta,
+        *,
+        object_id: str,
+        allowed_held_object_relations: tuple[tuple[str, str], ...],
+        allowed_coordinated_held_object_relations: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        """Reject removals outside the action-owned key/object identity set."""
+        invalidated_held_relations = {
+            (key, object_id) for key in state_invalidation.held_object_updates
+        }
+        if not invalidated_held_relations.issubset(allowed_held_object_relations):
+            raise ValueError(
+                "Held-object state invalidation contains a key/object identity "
+                "outside the active action's authorized relation set."
+            )
+        invalidated_coordinated_relations = {
+            (*resources, object_id)
+            for resources in state_invalidation.coordinated_held_object_updates
+        }
+        if not invalidated_coordinated_relations.issubset(
+            allowed_coordinated_held_object_relations
+        ):
+            raise ValueError(
+                "Held-object state invalidation contains a coordinated key/object "
+                "identity outside the active action's authorized relation set."
+            )
+
     def _normalize_mask(self, value: torch.Tensor, name: str) -> torch.Tensor:
         """Validate and copy a per-environment boolean mask."""
         if not isinstance(value, torch.Tensor):
@@ -1887,7 +3032,68 @@ class ExecutionSession:
             env_mask=env_mask,
             expected_effects=self._plan.expected_effects,
             effect_verification=self._plan.effect_verification,
+            failure_invalidation=self._effect_failure_invalidation(),
         )
+
+    def _effect_failure_invalidation(self) -> StateDelta:
+        """Build the core-owned fail-closed state removal for this effect."""
+        assert self._plan is not None
+        expected = self._plan.expected_effects
+        held_keys = set(expected.held_object_updates)
+        coordinated_keys = set(expected.coordinated_held_object_updates)
+        coordinated_keys.update(
+            resources
+            for resources in self._task_state.coordinated_held_objects
+            if not set(resources).isdisjoint(held_keys)
+        )
+        return StateDelta(
+            held_object_updates={key: None for key in held_keys},
+            coordinated_held_object_updates={
+                resources: None for resources in coordinated_keys
+            },
+            articulation_joint_updates={
+                key: None for key in expected.articulation_joint_updates
+            },
+        )
+
+    def _apply_effect_failure_invalidation(
+        self,
+        state_invalidation: StateDelta,
+        env_mask: torch.Tensor,
+    ) -> None:
+        """Apply a request-owned failure delta and refresh planning context."""
+        if not env_mask.any() or state_invalidation.is_empty:
+            return
+        self._task_state = state_invalidation.apply(self._task_state, env_mask)
+        self._context = PlanningContext(
+            robot=self._context.robot,
+            task=self._task_state,
+            scene=self._context.scene,
+            env_ids=self._context.env_ids,
+        )
+
+    def _failure_invalidation_presence_mask(
+        self,
+        state_invalidation: StateDelta,
+    ) -> torch.Tensor:
+        """Return rows whose verified state would actually be removed."""
+        present = torch.zeros_like(self._eligible)
+        for key in state_invalidation.held_object_updates:
+            value = self._task_state.held_objects.get(key)
+            if value is not None:
+                assert value.env_mask is not None
+                present |= value.env_mask.to(present.device)
+        for key in state_invalidation.coordinated_held_object_updates:
+            value = self._task_state.coordinated_held_objects.get(key)
+            if value is not None:
+                assert value.env_mask is not None
+                present |= value.env_mask.to(present.device)
+        for key in state_invalidation.articulation_joint_updates:
+            value = self._task_state.articulation_joints.get(key)
+            if value is not None:
+                assert value.env_mask is not None
+                present |= value.env_mask.to(present.device)
+        return present
 
     def _event(
         self,
@@ -1933,6 +3139,7 @@ class ExecutionSession:
         if not self._eligible.any() and self._status is ExecutionStatus.RUNNING:
             self._status = ExecutionStatus.FAILED
             self._pending_effect = None
+            self._pending_phase_effect_gate = None
             self._effect_failures.zero_()
             self._effect_requested_at = None
             return self._event(
@@ -1950,6 +3157,9 @@ class ExecutionSession:
         hold_targets: tuple[RuntimeEndpointTarget, ...] = (),
     ) -> ExecutionTick:
         """Build an immutable tick result."""
+        phase_gate = self._phase_effect_gate_request()
+        if phase_gate is not None:
+            events.extend(self._phase_effect_gate_required_events(phase_gate))
         return ExecutionTick(
             status=self._status,
             eligible_mask=self._eligible,
@@ -1958,10 +3168,12 @@ class ExecutionSession:
             events=tuple(events),
             task_state=self._task_state,
             pending_effect=self._pending_effect,
+            pending_phase_effect_gate=phase_gate,
         )
 
 
 __all__ = [
+    "EffectExpectationResult",
     "EffectVerificationRequest",
     "EffectVerificationResult",
     "ExecutionEvent",
@@ -1970,4 +3182,8 @@ __all__ = [
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
+    "HeldObjectGuardRequest",
+    "HeldObjectGuardResult",
+    "PhaseEffectGateRequest",
+    "PhaseEffectGateResult",
 ]

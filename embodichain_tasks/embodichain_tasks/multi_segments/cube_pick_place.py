@@ -66,7 +66,10 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.robots import URRobotCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.skills import SceneCollisionRole, SceneDynamics
-from embodichain.lab.sim.skills.profiles import SkillPolicyPreset
+from embodichain.lab.sim.skills.profiles import (
+    SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
+)
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalSamplerCfg,
     GraspGeneratorCfg,
@@ -301,6 +304,9 @@ def create_cube_robot_profile_binding() -> SimulationRobotSkillProfileBinding:
                     "place": PlaceOptions(),
                 },
                 recovery_policy=RecoveryPolicy(),
+                workflow_recovery_policy=WorkflowRecoveryPolicy(
+                    max_recovery_attempts=2,
+                ),
                 tracking_policy=TrackingPolicy.joint_position(
                     in_flight_max_abs_error=0.08,
                     terminal_max_abs_error=0.08,

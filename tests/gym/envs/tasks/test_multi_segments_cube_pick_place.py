@@ -133,6 +133,7 @@ def test_robot_profile_calibrates_physical_tracking_tolerance() -> None:
     assert tracking.in_flight is not None
     assert tracking.in_flight.metrics[0].tolerance == 0.08
     assert tracking.terminal.metrics[0].tolerance == 0.08
+    assert binding.presets[0].workflow_recovery_policy.max_recovery_attempts == 2
 
 
 def test_task_initialization_delegates_to_shared_simulation_factory(
@@ -185,7 +186,8 @@ def test_task_config_compiles_through_real_simulation_factory(
         uid = "UR5"
 
         @staticmethod
-        def get_qpos() -> torch.Tensor:
+        def get_qpos(*, target: bool = False) -> torch.Tensor:
+            del target
             return torch.zeros((1, 8), dtype=torch.float32)
 
     class FakeCube:

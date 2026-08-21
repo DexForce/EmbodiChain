@@ -57,6 +57,7 @@ from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
 from .engine import AtomicActionEngine
 from .execution import (
+    EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEvent,
@@ -65,6 +66,10 @@ from .execution import (
     ExecutionSession,
     ExecutionStatus,
     ExecutionTick,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
+    PhaseEffectGateRequest,
+    PhaseEffectGateResult,
 )
 from .goals import (
     ActionGoal,
@@ -73,7 +78,12 @@ from .goals import (
     SceneArticulationOperationGeometry,
     SceneEntityPose,
 )
-from .invocation import ActionInvocation, ActionOptions, ResolvedActionRequest
+from .invocation import (
+    ActionInvocation,
+    ActionOptions,
+    PhaseEffectGateRequirement,
+    ResolvedActionRequest,
+)
 from .plans import (
     ActionPlan,
     CompiledTrajectory,
@@ -194,8 +204,10 @@ from .runner import (
     ExecutionClock,
     ExecutionRunner,
     ExecutionRunnerCfg,
+    HeldObjectGuardVerifier,
     MonotonicExecutionClock,
     ObservationProvider,
+    PhaseEffectGateVerifier,
     RunnerStatus,
     RunnerStep,
     RunnerStepCallback,
@@ -261,6 +273,7 @@ __all__ = [
     "EndpointCommandRouter",
     "EndpointCommandTransport",
     "EntityState",
+    "EffectExpectationResult",
     "EffectVerificationRequest",
     "EffectVerificationRequirement",
     "EffectVerificationResult",
@@ -274,6 +287,13 @@ __all__ = [
     "ExecutionSession",
     "ExecutionStatus",
     "ExecutionTick",
+    "HeldObjectGuardRequest",
+    "HeldObjectGuardResult",
+    "PhaseEffectGateRequest",
+    "PhaseEffectGateRequirement",
+    "PhaseEffectGateResult",
+    "PhaseEffectGateVerifier",
+    "HeldObjectGuardVerifier",
     "EndpointTrackingChannelBinding",
     "EndpointTrackingFeedbackAddress",
     "FeedbackTerminalAcceptance",

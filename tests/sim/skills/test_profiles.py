@@ -87,6 +87,7 @@ from embodichain.lab.sim.skills import (
     RobotSkillProfile,
     SkillPolicyPreset,
     UnsupportedSkillError,
+    WorkflowRecoveryPolicy,
 )
 
 _JOINT_IDS = {
@@ -1430,7 +1431,7 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     second = bound.preset()
 
     assert first is not second
-    assert first.schema_version == 2
+    assert first.schema_version == 3
     assert first.motion_policy.sample_count == 80
     assert first.tracking_policy is not second.tracking_policy
     assert first.action_option_templates["pick"] is not (
@@ -1451,8 +1452,8 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
         bound.preset(skill_id="typo")
     with pytest.raises(KeyError, match="not an installed"):
         bound.preset("safe", skill_id="typo")
-    with pytest.raises(ValueError, match=r"supported versions are \[2\]"):
-        SkillPolicyPreset("legacy", action_option_templates={}, schema_version=1)
+    with pytest.raises(ValueError, match=r"supported versions are \[3\]"):
+        SkillPolicyPreset("legacy", action_option_templates={}, schema_version=2)
 
     incompatible = RobotSkillProfile(
         "bad_preset",
@@ -1468,6 +1469,35 @@ def test_presets_are_versioned_snapshots_and_validate_planner() -> None:
     )
     with pytest.raises(ProfileValidationError, match="requires planner"):
         incompatible.bind(_engine(control_profiles=_command_profiles()))
+
+
+def test_workflow_recovery_policy_is_bounded_and_snapshotted() -> None:
+    source = WorkflowRecoveryPolicy(max_recovery_attempts=2)
+    preset = SkillPolicyPreset(
+        "recovering",
+        action_option_templates={},
+        workflow_recovery_policy=source,
+    )
+
+    first = preset.workflow_recovery_policy
+    second = preset.snapshot().workflow_recovery_policy
+
+    assert first.max_recovery_attempts == 2
+    assert second == first
+    assert first is not source
+    assert second is not first
+    assert (
+        SkillPolicyPreset(
+            "disabled", action_option_templates={}
+        ).workflow_recovery_policy.max_recovery_attempts
+        == 0
+    )
+    for invalid in (True, 1.5, "2"):
+        with pytest.raises(TypeError, match="must be an integer"):
+            WorkflowRecoveryPolicy(invalid)  # type: ignore[arg-type]
+    for invalid in (-1, 101):
+        with pytest.raises(ValueError, match=r"\[0, 100\]"):
+            WorkflowRecoveryPolicy(invalid)
 
 
 def test_policy_preset_defaults_exact_builtin_effect_monitor_refs() -> None:

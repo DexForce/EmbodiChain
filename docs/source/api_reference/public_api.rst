@@ -316,6 +316,15 @@ embodichain.lab.gym.envs.expert_program.simulation_policies
    SimulationSegmentPolicyPort
    default_simulation_settle_presets
 
+embodichain.lab.gym.envs.expert_program.simulation_handover
+------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_handover
+
+.. autosummary::
+
+   ConfiguredHandOverPoseProvider
+
 embodichain.lab.gym.envs.settling
 ---------------------------------
 
@@ -532,6 +541,7 @@ embodichain.lab.sim.atomic_actions
    EntityState
    EffectVerificationRequirement
    EffectVerificationResult
+   EffectExpectationResult
    EffectVerifier
    ExecutionPlanAttempt
    FeedbackTerminalAcceptance
@@ -543,6 +553,7 @@ embodichain.lab.sim.atomic_actions
    JointPositionTrackingProjector
    JointPositionTrackingState
    HandOverOptions
+   HeldObjectGuardVerifier
    InteractionPoints
    MoveEndEffectorOptions
    MoveHeldObjectOptions
@@ -555,6 +566,7 @@ embodichain.lab.sim.atomic_actions
    OperateArticulationOptions
    PickUpOptions
    PlaceOptions
+   PhaseEffectGateVerifier
    PlanningContextTrackingFeedbackProvider
    PoseTrackingEvaluator
    PoseTrackingMetric
@@ -676,12 +688,17 @@ embodichain.lab.sim.atomic_actions.execution
 
    EffectVerificationRequest
    EffectVerificationResult
+   EffectExpectationResult
    ExecutionEvent
    ExecutionEventKind
    ExecutionPlanAttempt
    ExecutionSession
    ExecutionStatus
    ExecutionTick
+   HeldObjectGuardRequest
+   HeldObjectGuardResult
+   PhaseEffectGateRequest
+   PhaseEffectGateResult
 
 embodichain.lab.sim.atomic_actions.goals
 ----------------------------------------
@@ -711,6 +728,7 @@ embodichain.lab.sim.atomic_actions.invocation
    ActionOptions
    GoalT
    OptionsT
+   PhaseEffectGateRequirement
    ResolvedActionRequest
 
 embodichain.lab.sim.atomic_actions.plans
@@ -798,8 +816,10 @@ embodichain.lab.sim.atomic_actions.runner
    ExecutionClock
    ExecutionRunner
    ExecutionRunnerCfg
+   HeldObjectGuardVerifier
    MonotonicExecutionClock
    ObservationProvider
+   PhaseEffectGateVerifier
    RunnerStatus
    RunnerStep
    RunnerStepCallback
@@ -1248,8 +1268,11 @@ embodichain.lab.sim.skills.compiler
 
    AnalyzedSemanticCall
    GroundedSemanticCall
+   GroundedHeldObjectGuard
+   GroundedPhaseEffectGate
    HandOverPoseProvider
    HandOverPoseTargets
+   HeldObjectGuardBaseline
    RelationTargetGrounder
    RegisteredSemanticLowerer
    SemanticEffectDependency
@@ -1287,6 +1310,7 @@ embodichain.lab.sim.skills.effects
    EffectEvidenceAddress
    EffectEvidenceBatch
    EffectEvidenceSourceRef
+   EffectExpectationDecision
    EffectMonitor
    EffectMonitorDecision
    EffectMonitorFactory
@@ -1415,6 +1439,7 @@ embodichain.lab.sim.skills.profiles
    RobotResource
    RobotSkillProfile
    SkillPolicyPreset
+   WorkflowRecoveryPolicy
    UnsupportedSkillError
 
 embodichain.lab.sim.skills.runtime
@@ -1438,6 +1463,8 @@ embodichain.lab.sim.skills.runtime
    SkillRuntimeProvider
    SkillScene
    SkillStatus
+   SkillWorkflowRecoveryRole
+   SkillWorkflowRecoveryTrace
    task_state_to_metadata
 
 embodichain.lab.sim.skills.scene
@@ -2196,7 +2223,21 @@ embodichain_tasks.tableware
 
 .. autosummary::
 
+   HandOverEnv
    OpenDrawerEnv
+
+embodichain_tasks.tableware.hand_over
+-------------------------------------
+
+.. currentmodule:: embodichain_tasks.tableware.hand_over
+
+.. autosummary::
+
+   HandOverEnv
+   HAND_OVER_EXPERT_PROGRAM_REGISTRATION
+   HAND_OVER_POSE_PROVIDER
+   create_hand_over_robot_profile_binding
+   create_hand_over_scene_binding
 
 embodichain_tasks.tableware.blocks_ranking_rgb
 ----------------------------------------------

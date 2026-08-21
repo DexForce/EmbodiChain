@@ -118,6 +118,7 @@ from embodichain.lab.sim.skills import (
     SemanticPose,
     SemanticRelationTarget,
     SkillPolicyPreset,
+    WorkflowRecoveryPolicy,
 )
 from embodichain.lab.sim.skills.effects import (
     CONSTRAINT_EFFECT_CHANNEL,
@@ -149,6 +150,7 @@ from embodichain.lab.sim.skills.scene import SceneObjectRef
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
 _STEP_DT = 0.04
+_UNALIGNED_PROFILE_DT = 0.01
 _TRACKER_ENV_IDS = torch.tensor((7, 3, 11), dtype=torch.long)
 _HAND_OPEN_POSITION = 0.0
 _HAND_GRASP_POSITION = 0.8
@@ -714,8 +716,8 @@ class _ForwardedHandOverPoseProvider(HandOverPoseProvider):
             quaternion_wxyz=(1.0, 0.0, 0.0, 0.0),
         )
         return HandOverPoseTargets(
-            middle=SemanticObjectTarget(pose=pose),
-            final=SemanticObjectTarget(pose=pose),
+            middle=SemanticObjectTarget(pose),
+            final=SemanticObjectTarget(pose),
         )
 
 
@@ -1008,8 +1010,9 @@ class _MobileRobot:
     def __init__(self) -> None:
         self.qpos = torch.zeros(_BATCH_SIZE, _ROBOT_DOF)
 
-    def get_qpos(self) -> torch.Tensor:
+    def get_qpos(self, *, target: bool = False) -> torch.Tensor:
         """Return the full controller hold state."""
+        del target
         return self.qpos
 
     def get_qvel(self) -> torch.Tensor:
@@ -1126,7 +1129,7 @@ def _profile_binding() -> SimulationRobotSkillProfileBinding:
                 runner_cfg=ExecutionRunnerCfg(
                     command_timeout=0.37,
                     safe_stop_timeout=0.61,
-                    minimum_cycle_time=0.04,
+                    minimum_cycle_time=_UNALIGNED_PROFILE_DT,
                     hold_on_completion=False,
                 ),
             ),
@@ -1272,17 +1275,22 @@ def _motion_generator(robot: _Robot) -> MotionGenerator:
     return generator
 
 
-def _factory() -> tuple[SimulationExpertProgramFactory, _Robot]:
+def _factory(
+    robot_profile_binding: SimulationRobotSkillProfileBinding | None = None,
+) -> tuple[SimulationExpertProgramFactory, _Robot]:
     """Create one production factory around CPU-only test doubles."""
     robot = _Robot()
     simulation = _Simulation(robot)
+    selected_profile_binding = (
+        _profile_binding() if robot_profile_binding is None else robot_profile_binding
+    )
     return (
         SimulationExpertProgramFactory(
             simulation,  # type: ignore[arg-type]
             robot,  # type: ignore[arg-type]
             SimulationExpertProgramRegistration(
                 scene_binding=SimulationSceneBinding(registry_id="scene"),
-                robot_profile_binding=_profile_binding(),
+                robot_profile_binding=selected_profile_binding,
             ),
             step_dt=_STEP_DT,
             motion_generator_factory=lambda: _motion_generator(robot),
@@ -1379,8 +1387,8 @@ def _evidence_profile_binding() -> SimulationRobotSkillProfileBinding:
 def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one grasp frame and an identity object-to-endpoint expectation."""
     goal = action.require_goal(request)
-    trajectory = context.robot.qpos.unsqueeze(1).clone()
-    trajectory[:, 0, 1] = _HAND_GRASP_POSITION
+    trajectory = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
+    trajectory[:, :, 1] = _HAND_GRASP_POSITION
     relation = torch.eye(4).repeat(context.batch_size, 1, 1)
     held = HeldObjectState(
         semantics=goal.semantics,
@@ -1400,14 +1408,15 @@ def _pick_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": held},
         ),
         replannable=False,
+        segment_lengths={"close": 1, "lift": 1},
         scene_dependency_monitor_until={"cube": 0},
     )
 
 
 def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
     """Build one open frame and the matching held-object removal delta."""
-    trajectory = context.robot.qpos.unsqueeze(1).clone()
-    trajectory[:, 0, 1] = _HAND_OPEN_POSITION
+    trajectory = context.robot.qpos.unsqueeze(1).repeat(1, 2, 1)
+    trajectory[:, :, 1] = _HAND_OPEN_POSITION
     return action.build_plan(
         request,
         context,
@@ -1421,6 +1430,7 @@ def _place_evidence_plan(action: Any, request: Any, context: Any) -> Any:
             held_object_updates={"manipulator": None},
         ),
         replannable=False,
+        segment_lengths={"release": 1, "retract": 1},
     )
 
 
@@ -1528,11 +1538,17 @@ def _sample_effect(
     """Advance one fresh environment tick and return its production trace."""
     if advance_clock:
         assembly.clock.advance_after_env_step()
-    result = assembly.runtime.step()
-    assert len(result.effects) == expected_trace_count
-    while assembly.command_sink.pending_count:
-        _consume_buffered_action(assembly, robot)
-    return result, result.effects[-1]
+    for _ in range(4):
+        result = assembly.runtime.step()
+        while assembly.command_sink.pending_count:
+            _consume_buffered_action(assembly, robot)
+        if len(result.effects) == expected_trace_count:
+            return result, result.effects[-1]
+        assert len(result.effects) < expected_trace_count
+        assembly.clock.advance_after_env_step()
+    raise AssertionError(
+        f"Expected {expected_trace_count} effect traces, got {len(result.effects)}."
+    )
 
 
 class _SynchronousEvidenceClock:
@@ -1786,6 +1802,14 @@ def _run_evidence_pick_place(
     assert result.status is SkillStatus.COMPLETED
     assert verified_pick is not None
     assert result.task_state.get_held_object("manipulator") is None
+    assert {
+        (effect.call_index, effect.gate_id, effect.segment_name)
+        for effect in result.effects
+        if effect.boundary_kind == "phase_effect_gate"
+    } == {
+        (0, "destination_acquired", "lift"),
+        (1, "source_released", "retract"),
+    }
     return result, verified_pick
 
 
@@ -1871,16 +1895,48 @@ def _assert_invocation_equivalent(
     )
 
 
-def test_simulation_factory_preserves_policy_and_tracking_contract() -> None:
-    """Gym cadence does not mutate the registered planner or tracking policy."""
-    factory, _ = _factory()
+def test_simulation_factory_aligns_runner_policy_to_gym_step() -> None:
+    """Runner cadence lowering preserves source declarations and policy."""
+    binding = _profile_binding()
+    base_preset = binding.presets[0]
+    source_preset = SkillPolicyPreset(
+        base_preset.preset_id,
+        schema_version=base_preset.schema_version,
+        action_option_templates=base_preset.action_option_templates,
+        motion_policy=base_preset.motion_policy,
+        tracking_policy=base_preset.tracking_policy,
+        recovery_policy=base_preset.recovery_policy,
+        workflow_recovery_policy=WorkflowRecoveryPolicy(
+            max_recovery_attempts=2,
+        ),
+        runner_cfg=base_preset.runner_cfg,
+        effect_monitors=base_preset.effect_monitors,
+    )
+    binding = replace(binding, presets=(source_preset,))
+    source_runner_cfg = source_preset.runner_cfg
+    factory, _ = _factory(binding)
 
     profile = factory.create_robot_skill_profile()
 
-    assert profile.presets["safe"].motion_policy.sample_count == 17
-    assert profile.presets["safe"].tracking_policy == TrackingPolicy.joint_position(
+    aligned_preset = profile.presets["safe"]
+    aligned_runner_cfg = aligned_preset.runner_cfg
+    assert aligned_preset.motion_policy.sample_count == 17
+    assert aligned_runner_cfg.minimum_cycle_time == pytest.approx(_STEP_DT)
+    assert aligned_runner_cfg.command_timeout == source_runner_cfg.command_timeout
+    assert aligned_runner_cfg.safe_stop_timeout == source_runner_cfg.safe_stop_timeout
+    assert aligned_runner_cfg.hold_on_completion is source_runner_cfg.hold_on_completion
+    assert (
+        aligned_runner_cfg.hold_during_effect_verification
+        is source_runner_cfg.hold_during_effect_verification
+    )
+    assert aligned_preset.tracking_policy == TrackingPolicy.joint_position(
         in_flight_max_abs_error=0.037,
         terminal_max_abs_error=0.019,
+    )
+    assert aligned_preset.workflow_recovery_policy.max_recovery_attempts == 2
+    assert binding.presets[0].motion_policy.sample_count == 17
+    assert binding.presets[0].runner_cfg.minimum_cycle_time == pytest.approx(
+        _UNALIGNED_PROFILE_DT
     )
 
 
@@ -2624,8 +2680,38 @@ def test_standard_factory_rejects_adapter_live_route_declaration_drift(
 
 
 def test_pick_place_effects_require_accepted_hand_state_and_live_pose() -> None:
-    """Production Pick/Place evidence stays conjunctive through runtime traces."""
+    """Terminal Pick/Place evidence stays conjunctive through runtime traces."""
     assembly, robot, cube = _evidence_runtime()
+
+    def without_phase_gates(
+        self: Any,
+        analyzed: Any,
+        effect_spec: Any,
+        *,
+        path: tuple[Any, ...],
+    ) -> tuple[()]:
+        del self, analyzed, effect_spec, path
+        return ()
+
+    def without_in_flight_guards(
+        self: Any,
+        analyzed: Any,
+        effect_spec: Any,
+        context: Any,
+        *,
+        path: tuple[Any, ...],
+    ) -> tuple[()]:
+        del self, analyzed, effect_spec, context, path
+        return ()
+
+    assembly.compiler._ground_phase_effect_gates = MethodType(
+        without_phase_gates,
+        assembly.compiler,
+    )
+    assembly.compiler._ground_held_object_guards = MethodType(
+        without_in_flight_guards,
+        assembly.compiler,
+    )
     assert type(assembly.accepted_command_observer) is (
         ControlCommandStateEvidenceTracker
     )

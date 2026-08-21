@@ -6,8 +6,15 @@
   tests are explicitly enabled. Open Drawer has completed its
   supported-simulation physical run; repeated cube pick/place has completed one
   Pick/Place/settle/validator cycle, while the full three-cycle run remains in
-  threshold calibration.
-- Baseline: `main@bcccb787e8f9165e9c8acf6f39f165ba6ac752a4`
+  threshold calibration. Dual-UR5/PGI HandOver has completed three consecutive
+  supported-simulation Pick/transfer/settle/validator runs using contact
+  dynamics only. Named trajectory-segment effect gates now block Pick lift,
+  Place retract, and HandOver source release until fresh physical evidence
+  confirms the required acquisition or release. Preset-owned, row-local
+  workflow recovery now executes a real re-acquisition `Pick` when the source
+  relation is lost, or directly retries the failed semantic call when verified
+  state proves the source relation remains.
+- Baseline: `main@bcccb787dcafdafd7b944ba210e5e85f9cd1d0cb`
 - Last updated: 2026-08-11
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
@@ -416,8 +423,8 @@ an `arm + tool` schema. It contains a generic resource DAG:
   embodiment data owned by generic profile IDs selected by each endpoint
   adapter; only the current core bridge lowers applicable profiles to robot
   control-part keys;
-- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy,
-  plus an optional required-planner compatibility constraint;
+- versioned `SkillPolicyPreset` values own motion, atomic recovery, bounded
+  workflow recovery, and runner policy;
 - per-skill defaults map every skill-local slot to one resource ID.
 
 Resource and endpoint declarations are owned snapshots. A custom endpoint with
@@ -582,6 +589,90 @@ Simulation integrations should provide standard monitors for grasp, release,
 handover, and articulation-joint progress. Hardware can implement the same
 contract with perception, force, or controller feedback. Custom monitors stay
 an advanced extension point.
+
+Grasp and handover must remain real dynamics outcomes. A simulation effect
+monitor is observational: it must not create a fixed joint, managed attachment,
+kinematic parent, frozen body, or pose override to make a held-object relation
+persist. Grasp retention comes from embodiment-owned drive settings, collision
+geometry, material/contact parameters, solver settings, and the commands sent
+through the normal controller path. An accepted semantic ``grasp`` command is
+controller intent, not physical proof.
+
+``HeldObjectState`` records a relation only after live physical evidence has
+passed the selected monitor. The target contract must treat contradictory
+evidence, including object-to-endpoint slip, as a real effect failure, invalidate
+the affected row's assumed relation, and enter bounded recovery instead of
+repairing the scene. The runtime now exposes the active named trajectory
+segment, observes segment-scoped held-object invariants from fresh physical
+evidence, and
+applies removal-only ``StateDelta`` reconciliation to failed rows before any
+retry or recovery hand-off. The monitor publishes one current-observation
+outcome per physical expectation, including the stronger proof that every
+clause reached its inverse band. ``Pick`` can use the existing bounded action
+retry. ``Place`` retries only when that complete inverse proof shows the source
+is still attached; otherwise it invalidates the relation and emits a typed
+``RECOVERY_REQUIRED`` boundary. ``HandOver`` always hands terminal failure to
+workflow recovery, retaining the source relation only when complete inverse
+evidence proves it is still attached. A verifier selects row-local retry versus
+external recovery, but the core owns the removal-only invalidation delta and
+applies it before either path. Evidence that remains unresolved at the action
+deadline is reconciled fail-closed: any active verified state covered by the
+pending effect is removed before external recovery. Workflow-level
+re-acquisition is owned by the same ``SkillRuntime`` and may not repair the
+scene implicitly. ``SkillPolicyPreset`` schema version 3 adds a
+``WorkflowRecoveryPolicy`` whose per-row attempt budget defaults to zero. The
+runtime consults it only after the atomic core emits ``RECOVERY_REQUIRED``. A
+row whose reconciled ``TaskState`` still proves the source held-object relation
+retries the failed semantic call from a fresh observation. A row whose source
+relation was invalidated executes a real semantic ``Pick`` using the failed
+call's resolved source resource, then retries the original call. Each recovery
+call receives normal analysis, grounding, planning, command dispatch, physical
+effect verification, and trace metadata; it is not a state edit or simulator
+repair. Attempts are bounded independently per row, while already successful
+rows wait at the existing shared call barrier. This is runtime policy, not an
+Expert Program ``Retry`` node or a second workflow executor.
+
+Blocking physical-effect gates are enforced at named trajectory-segment
+entries. ``Pick`` requires destination attachment before ``lift``; ``Place``
+requires source detachment before ``retract``; and ``HandOver`` requires
+destination attachment before the source ``release`` segment. While a gate is
+unresolved, the session does not advance its waypoint cursor and replays the
+preceding command for the complete synchronized active cohort, so gripper
+preload or open intent remains active under real dynamics. Gate success only
+unlocks motion and never commits ``TaskState``; terminal effect verification
+remains authoritative. Contradiction uses the enclosing action's bounded retry
+policy, stale request IDs are rejected, and the action deadline covers gate
+polling. Every gate owns a fresh monitor instance independent from the terminal
+monitor and in-flight loss guard. For handover, terminal success transfers the
+verified relation from source to destination while the destination remains
+physically closed. Releasing the destination is a separate ``Place`` or
+``Release`` semantic call.
+
+The first pure-dynamics rollout uses the staged **B** continuation policy. The
+standard simulation factory lowers both trajectory ``control_dt`` and runner
+``minimum_cycle_time`` to the authoritative Gym step. A persistent
+joint-position task may disable observed-position holds during terminal effect
+verification and on successful completion; bridge wait steps then replay the
+last accepted environment action, and a following ``wait_stable`` policy keeps
+eligible rows on their live drive targets. Cancellation and failure retain the
+normal cancel-then-observed-position safe stop. This split preserves physical
+gripper preload without converting a success continuation into a universal
+safe-state policy.
+
+The validated dual-UR5/PGI slice drives only each PGI master joint (the mimic
+child drive is disabled), uses a ``0.011`` close target with
+``stiffness=2000``, ``damping=50``, and ``max_effort=140``, models the can at
+``0.33 kg``, and executes a 200-sample motion policy. These values are task and
+embodiment calibration, not effect-monitor success shortcuts: the normal
+``0.05 rad`` tracking gate, bounded replanning, physical effect evidence, and
+settling thresholds remain enabled.
+
+The B policy is the complete continuation scope of this refactor. A generic
+mobile-base or whole-body continuation abstraction is deliberately excluded
+from the implementation plan and acceptance checklist. If a later transport
+requires persistence beyond its normal command contract, it should be proposed
+and validated independently instead of becoming a blocker for the declarative
+expert-program rollout.
 
 ## 8. Expert Program configuration
 
@@ -1170,10 +1261,19 @@ The backend-neutral typed state expectations, evidence addresses and sources,
 pose/binary/scalar/joint evidence clauses, versioned monitor registry,
 profile-owned monitor selection, grounded Pick/Place/HandOver/articulation
 effects, row-local composite hysteresis kernel, canonical `SkillRuntime`, and
-production simulation evidence ports are wired end to end. Physical simulation
-acceptance is partial: Open Drawer and one cube Pick/Place/settle/validator
-cycle have completed, while the full repeated-cube run and embodiment-owned
-HandOver pose integration remain validation work.
+production simulation evidence ports are wired end to end. Segment-scoped
+held-object guard requests, live evidence collection, row-local symbolic
+invalidation, bounded Pick retry, and typed external-recovery hand-off are also
+implemented. Physical simulation acceptance is partial: Open Drawer and one
+cube Pick/Place/settle/validator cycle have completed. The embodiment-owned
+dual-UR5/PGI HandOver slice now completes Pick, transfer, terminal
+physical-effect verification, settling, and target validation through real
+contact dynamics. Per-expectation terminal outcomes, core-owned failure
+invalidation, row-local retry/recovery decisions, fail-closed deadline
+reconciliation, and blocking named-segment effect gates are implemented.
+Workflow-level re-acquisition is implemented through the preset-owned bounded
+policy and canonical runtime. Real-simulation fault-injection coverage and the
+full repeated-cube run remain validation work.
 
 Deliverables:
 
@@ -1276,7 +1376,7 @@ migration is outside the current scope because it would require modifying
 Action Bank code.
 
 The current follow-up also makes task registration the sole standard-runtime
-extension owner. `SkillPolicyPreset` schema version 2 requires exact typed
+extension owner. `SkillPolicyPreset` schema version 3 requires exact typed
 action-option templates for every reachable semantic call; lowering may fill
 only explicitly compiler-owned dynamic target fields. Endpoint adapters,
 ordered Gym transports, and a parallel-safety factory are declared on
@@ -1421,7 +1521,21 @@ The design is complete when all of the following hold:
       goals without caller duplication.
 - [x] `Place` is object-centric and consumes verified held-object state.
 - [ ] Built-in grasp, release, handover, and supported articulation effect
-      monitors work in simulation.
+      monitors work in simulation. The dual-UR5/PGI HandOver vertical slice is
+      physically validated; remaining skill/embodiment coverage keeps this
+      aggregate item open.
+- [ ] Grasp and handover simulation gates retain objects through configured
+      drive/contact dynamics only; no monitor or runtime path creates a
+      synthetic attachment, freezes the object, or overrides its pose.
+- [ ] Physical held-object loss is observed as effect failure, invalidates the
+      affected symbolic relation, and exercises bounded recovery rather than
+      being hidden by a simulator-side attachment. The segment-aware observation,
+      row-local core-owned invalidation, per-expectation terminal
+      reconciliation, fail-closed deadline handling, bounded Pick/retained-Place
+      retry, typed recovery boundary, and blocking acquisition/release gates are
+      implemented. Preset-owned per-row workflow re-acquisition now performs
+      real `Pick` and semantic-call retries; real-simulation fault injection
+      remains open.
 - [x] Repeated sub-threshold motion eventually publishes the correct scene
       revision.
 - [x] Custom actions have a documented and tested intentional hard-break

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
@@ -29,11 +30,18 @@ import torch
 
 from ..atomic_actions.bindings import EndpointBinding
 from ..atomic_actions.engine import AtomicActionEngine
+from ..atomic_actions.effects import StateDelta
 from ..atomic_actions.execution import (
+    EffectExpectationResult,
     EffectVerificationRequest,
     EffectVerificationResult,
     ExecutionEvent,
+    ExecutionEventKind,
     ExecutionPlanAttempt,
+    HeldObjectGuardRequest,
+    HeldObjectGuardResult,
+    PhaseEffectGateRequest,
+    PhaseEffectGateResult,
 )
 from ..atomic_actions.plans import TrajectorySegment
 from ..atomic_actions.policies import MotionPolicy, RecoveryPolicy
@@ -47,20 +55,29 @@ from ..atomic_actions.runner import (
     RunnerStatus,
     RunnerStep,
 )
-from ..atomic_actions.state import PlanningContext, TaskState
+from ..atomic_actions.state import HeldObjectState, PlanningContext, TaskState
 from ..atomic_actions.tracking import (
     FeedbackTerminalAcceptance,
     TimedTrackingSequence,
     TrackingMetricCfg,
     TrackingPolicy,
 )
-from .calls import SemanticCallSpec
-from .compiler import SemanticSkillCompiler
+from .calls import HandOver, Pick, Place, SemanticCallSpec
+from .compiler import (
+    GroundedHeldObjectGuard,
+    GroundedPhaseEffectGate,
+    HeldObjectGuardBaseline,
+    SemanticSkillCompiler,
+)
 from .effects import (
     BinaryEffectEvidenceBatch,
     EffectEvidenceBatch,
+    EffectExpectationDecision,
     EffectMonitor,
+    EffectMonitorDecision,
     EffectMonitorRef,
+    HeldObjectRelation,
+    HeldObjectStateExpectation,
     JointStateEvidenceBatch,
     PoseRelationEvidenceBatch,
     ScalarEffectEvidenceBatch,
@@ -74,6 +91,7 @@ from .scene import (
     SceneObjectRef,
     SceneRegistry,
 )
+from .profiles import WorkflowRecoveryPolicy
 
 
 def _snapshot_task_state(state: TaskState) -> TaskState:
@@ -234,6 +252,14 @@ class SkillStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class SkillWorkflowRecoveryRole(str, Enum):
+    """Role of one real semantic call inside workflow recovery."""
+
+    RETRY_RETAINED = "retry_retained"
+    REACQUIRE = "reacquire"
+    RETRY_REACQUIRED = "retry_reacquired"
 
 
 @dataclass(frozen=True, slots=True)
@@ -943,12 +969,17 @@ class SkillEffectTrace:
     timestamp: float
     success_mask: torch.Tensor
     failure_mask: torch.Tensor
+    expectation_decisions: tuple[EffectExpectationDecision, ...]
     effect_spec: SemanticEffectSpec
     monitor_id: str
     monitor_revision: str | None
     configured_monitor_params: Mapping[str, object]
     resolved_monitor_params: Mapping[str, object]
     evidence: Mapping[str, EffectEvidenceBatch]
+    boundary_kind: str = "terminal"
+    guard_id: str | None = None
+    gate_id: str | None = None
+    segment_name: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.call_index) is not int or self.call_index < 0:
@@ -957,6 +988,44 @@ class SkillEffectTrace:
             raise ValueError("verification_id must be a non-negative integer.")
         if type(self.observation_revision) is not int or self.observation_revision < 0:
             raise ValueError("observation_revision must be non-negative.")
+        if self.boundary_kind not in {
+            "terminal",
+            "in_flight_guard",
+            "phase_effect_gate",
+        }:
+            raise ValueError(
+                "boundary_kind must be 'terminal', 'in_flight_guard', or "
+                "'phase_effect_gate'."
+            )
+        for name in ("guard_id", "gate_id", "segment_name"):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not str or not value):
+                raise ValueError(f"{name} must be a non-empty string or None.")
+        if self.boundary_kind == "terminal":
+            if (
+                self.guard_id is not None
+                or self.gate_id is not None
+                or self.segment_name is not None
+            ):
+                raise ValueError(
+                    "Terminal effect traces cannot declare segment-boundary metadata."
+                )
+        elif self.boundary_kind == "in_flight_guard" and (
+            self.guard_id is None
+            or self.gate_id is not None
+            or self.segment_name is None
+        ):
+            raise ValueError(
+                "In-flight guard traces require only guard_id and segment_name."
+            )
+        elif self.boundary_kind == "phase_effect_gate" and (
+            self.gate_id is None
+            or self.guard_id is not None
+            or self.segment_name is None
+        ):
+            raise ValueError(
+                "Phase-effect gate traces require only gate_id and segment_name."
+            )
         if not math.isfinite(self.timestamp) or self.timestamp < 0.0:
             raise ValueError("timestamp must be finite and non-negative.")
         for name in ("success_mask", "failure_mask"):
@@ -973,6 +1042,54 @@ class SkillEffectTrace:
             raise ValueError("Effect trace masks must not overlap.")
         if not isinstance(self.effect_spec, SemanticEffectSpec):
             raise TypeError("effect_spec must be a SemanticEffectSpec.")
+        expectation_decisions = tuple(self.expectation_decisions)
+        if not all(
+            type(value) is EffectExpectationDecision for value in expectation_decisions
+        ):
+            raise TypeError(
+                "expectation_decisions must contain exact "
+                "EffectExpectationDecision values."
+            )
+        for value in expectation_decisions:
+            if value.satisfied_mask.shape != self.success_mask.shape:
+                raise ValueError(
+                    "Expectation and aggregate trace masks must have equal shapes."
+                )
+            if value.satisfied_mask.device != self.success_mask.device:
+                raise ValueError(
+                    "Expectation and aggregate trace masks must share a device."
+                )
+        physical_ids = tuple(
+            expectation.expectation_id
+            for expectation in self.effect_spec.state_expectations
+            if any(
+                clause.expectation_id == expectation.expectation_id
+                for clause in self.effect_spec.clauses
+            )
+        )
+        outcome_ids = tuple(value.expectation_id for value in expectation_decisions)
+        if outcome_ids != physical_ids:
+            raise ValueError(
+                "Effect trace must contain one ordered outcome for every "
+                f"physical expectation; expected={physical_ids}, "
+                f"got={outcome_ids}."
+            )
+        if expectation_decisions:
+            expected_success = torch.ones_like(self.success_mask)
+            expected_failure = torch.zeros_like(self.failure_mask)
+            for value in expectation_decisions:
+                expected_success &= value.satisfied_mask
+                expected_failure |= value.contradicted_mask
+            if not torch.equal(self.success_mask, expected_success):
+                raise ValueError(
+                    "success_mask must equal the conjunction of expectation "
+                    "trace outcomes."
+                )
+            if not torch.equal(self.failure_mask, expected_failure):
+                raise ValueError(
+                    "failure_mask must equal the union of expectation trace "
+                    "outcomes."
+                )
         if type(self.monitor_id) is not str or not self.monitor_id:
             raise ValueError("monitor_id must be a non-empty string.")
         if self.monitor_revision is not None and (
@@ -996,6 +1113,11 @@ class SkillEffectTrace:
             evidence[evidence_id] = batch.snapshot()
         object.__setattr__(self, "success_mask", self.success_mask.clone())
         object.__setattr__(self, "failure_mask", self.failure_mask.clone())
+        object.__setattr__(
+            self,
+            "expectation_decisions",
+            tuple(value.snapshot() for value in expectation_decisions),
+        )
         object.__setattr__(self, "effect_spec", self.effect_spec.snapshot())
         object.__setattr__(
             self,
@@ -1018,17 +1140,22 @@ class SkillEffectTrace:
             timestamp=self.timestamp,
             success_mask=self.success_mask,
             failure_mask=self.failure_mask,
+            expectation_decisions=self.expectation_decisions,
             effect_spec=self.effect_spec,
             monitor_id=self.monitor_id,
             monitor_revision=self.monitor_revision,
             configured_monitor_params=self.configured_monitor_params,
             resolved_monitor_params=self.resolved_monitor_params,
             evidence=self.evidence,
+            boundary_kind=self.boundary_kind,
+            guard_id=self.guard_id,
+            gate_id=self.gate_id,
+            segment_name=self.segment_name,
         )
 
     def to_metadata(self) -> dict[str, object]:
         """Return monitor contract, evidence, thresholds, and decision metadata."""
-        return {
+        metadata = {
             "call_index": self.call_index,
             "verification_id": self.verification_id,
             "observation_revision": self.observation_revision,
@@ -1047,8 +1174,35 @@ class SkillEffectTrace:
             "decision": {
                 "success_mask": _metadata_value(self.success_mask),
                 "failure_mask": _metadata_value(self.failure_mask),
+                "expectations": [
+                    {
+                        "expectation_id": value.expectation_id,
+                        "satisfied_mask": _metadata_value(value.satisfied_mask),
+                        "contradicted_mask": _metadata_value(value.contradicted_mask),
+                        "inverse_satisfied_mask": _metadata_value(
+                            value.inverse_satisfied_mask
+                        ),
+                    }
+                    for value in self.expectation_decisions
+                ],
             },
         }
+        metadata["boundary"] = {"kind": self.boundary_kind}
+        if self.boundary_kind == "in_flight_guard":
+            metadata["boundary"].update(
+                {
+                    "guard_id": self.guard_id,
+                    "segment_name": self.segment_name,
+                }
+            )
+        elif self.boundary_kind == "phase_effect_gate":
+            metadata["boundary"].update(
+                {
+                    "gate_id": self.gate_id,
+                    "segment_name": self.segment_name,
+                }
+            )
+        return metadata
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -1261,6 +1415,211 @@ class SkillCallTrace:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
+class SkillWorkflowRecoveryTrace:
+    """One auditable real semantic call within bounded workflow recovery.
+
+    Args:
+        recovery_id: Monotonic runtime-local trace identifier.
+        trigger_call_index: Original workflow call held at the shared barrier.
+        trigger_semantic_id: Semantic ID of the original failed call.
+        attempt_index: One-based per-row recovery-cycle index.
+        max_recovery_attempts: Configured per-row recovery-cycle budget.
+        role: Whether this call retries, re-acquires, or retries after pickup.
+        source_resource_id: Resolved robot resource that owns the source object.
+        source_task_state_key: Verified held-object state key for that resource.
+        entered_mask: Rows that entered this real recovery call.
+        completed_mask: Entered rows that completed this call.
+        failed_mask: Entered rows that failed this call.
+        call: Nested semantic-call trace, or ``None`` when preparation failed.
+        message: Optional terminal or preparation diagnostic.
+    """
+
+    recovery_id: int
+    trigger_call_index: int
+    trigger_semantic_id: str
+    attempt_index: int
+    max_recovery_attempts: int
+    role: SkillWorkflowRecoveryRole
+    source_resource_id: str
+    source_task_state_key: str
+    entered_mask: torch.Tensor
+    completed_mask: torch.Tensor
+    failed_mask: torch.Tensor
+    call: SkillCallTrace | None
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.recovery_id) is not int or self.recovery_id < 0:
+            raise ValueError("recovery_id must be a non-negative integer.")
+        if type(self.trigger_call_index) is not int or self.trigger_call_index < 0:
+            raise ValueError("trigger_call_index must be non-negative.")
+        for name in (
+            "trigger_semantic_id",
+            "source_resource_id",
+            "source_task_state_key",
+        ):
+            value = getattr(self, name)
+            if type(value) is not str or not value:
+                raise ValueError(f"{name} must be a non-empty string.")
+        if type(self.attempt_index) is not int or self.attempt_index <= 0:
+            raise ValueError("attempt_index must be a positive integer.")
+        if (
+            type(self.max_recovery_attempts) is not int
+            or self.max_recovery_attempts <= 0
+            or self.attempt_index > self.max_recovery_attempts
+        ):
+            raise ValueError(
+                "max_recovery_attempts must cover the positive attempt_index."
+            )
+        if not isinstance(self.role, SkillWorkflowRecoveryRole):
+            raise TypeError("role must be a SkillWorkflowRecoveryRole.")
+        for name in ("entered_mask", "completed_mask", "failed_mask"):
+            value = getattr(self, name)
+            if not isinstance(value, torch.Tensor):
+                raise TypeError(f"{name} must be a torch.Tensor.")
+            if value.dtype != torch.bool or value.dim() != 1:
+                raise ValueError(f"{name} must be a one-dimensional bool tensor.")
+        if not (
+            self.entered_mask.shape
+            == self.completed_mask.shape
+            == self.failed_mask.shape
+        ) or not (
+            self.entered_mask.device
+            == self.completed_mask.device
+            == self.failed_mask.device
+        ):
+            raise ValueError("Workflow-recovery masks must share shape and device.")
+        if (self.completed_mask & self.failed_mask).any():
+            raise ValueError("Recovery completion and failure masks cannot overlap.")
+        if ((self.completed_mask | self.failed_mask) & ~self.entered_mask).any():
+            raise ValueError("Recovery outcomes must be subsets of entered_mask.")
+        if self.call is not None:
+            if type(self.call) is not SkillCallTrace:
+                raise TypeError("call must be a SkillCallTrace or None.")
+            if not torch.equal(self.call.entered_mask, self.entered_mask):
+                raise ValueError("Recovery call entered_mask must match the trace.")
+            if not torch.equal(self.call.completed_mask, self.completed_mask):
+                raise ValueError("Recovery call completed_mask must match the trace.")
+            if not torch.equal(self.call.failed_mask, self.failed_mask):
+                raise ValueError("Recovery call failed_mask must match the trace.")
+        elif not torch.equal(self.failed_mask, self.entered_mask):
+            raise ValueError(
+                "A recovery preparation failure must fail every entered row."
+            )
+        if self.message is not None and (
+            type(self.message) is not str or not self.message
+        ):
+            raise ValueError("message must be a non-empty string or None.")
+        for name in ("entered_mask", "completed_mask", "failed_mask"):
+            object.__setattr__(self, name, getattr(self, name).clone())
+        if self.call is not None:
+            object.__setattr__(self, "call", self.call.snapshot())
+
+    def snapshot(self) -> SkillWorkflowRecoveryTrace:
+        """Return an independently owned workflow-recovery trace."""
+        return SkillWorkflowRecoveryTrace(
+            recovery_id=self.recovery_id,
+            trigger_call_index=self.trigger_call_index,
+            trigger_semantic_id=self.trigger_semantic_id,
+            attempt_index=self.attempt_index,
+            max_recovery_attempts=self.max_recovery_attempts,
+            role=self.role,
+            source_resource_id=self.source_resource_id,
+            source_task_state_key=self.source_task_state_key,
+            entered_mask=self.entered_mask,
+            completed_mask=self.completed_mask,
+            failed_mask=self.failed_mask,
+            call=self.call,
+            message=self.message,
+        )
+
+    def to_metadata(self) -> dict[str, object]:
+        """Return deterministic JSON-safe workflow-recovery metadata."""
+        return {
+            "recovery_id": self.recovery_id,
+            "trigger_call_index": self.trigger_call_index,
+            "trigger_semantic_id": self.trigger_semantic_id,
+            "attempt_index": self.attempt_index,
+            "max_recovery_attempts": self.max_recovery_attempts,
+            "role": self.role.value,
+            "source_resource_id": self.source_resource_id,
+            "source_task_state_key": self.source_task_state_key,
+            "masks": {
+                "entered": _metadata_value(self.entered_mask),
+                "completed": _metadata_value(self.completed_mask),
+                "failed": _metadata_value(self.failed_mask),
+            },
+            "call": None if self.call is None else self.call.to_metadata(),
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _WorkflowRecoveryWorkItem:
+    """One cohort scheduled at a shared semantic-call recovery barrier."""
+
+    role: SkillWorkflowRecoveryRole
+    call: SemanticCallSpec
+    env_mask: torch.Tensor
+    attempt_index: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.role, SkillWorkflowRecoveryRole):
+            raise TypeError("role must be a SkillWorkflowRecoveryRole.")
+        if not isinstance(self.call, SemanticCallSpec):
+            raise TypeError("call must be a SemanticCallSpec.")
+        if (
+            not isinstance(self.env_mask, torch.Tensor)
+            or self.env_mask.dtype != torch.bool
+            or self.env_mask.dim() != 1
+            or not self.env_mask.any()
+        ):
+            raise ValueError(
+                "env_mask must be a non-empty one-dimensional bool tensor."
+            )
+        if type(self.attempt_index) is not int or self.attempt_index <= 0:
+            raise ValueError("attempt_index must be a positive integer.")
+        object.__setattr__(self, "env_mask", self.env_mask.clone())
+
+
+@dataclass(slots=True)
+class _WorkflowRecoveryBarrier:
+    """Mutable per-call barrier while failed rows recover and rejoin."""
+
+    trigger_call_index: int
+    trigger_call: SemanticCallSpec
+    policy: WorkflowRecoveryPolicy
+    source_resource_id: str
+    source_task_state_key: str
+    entered_mask: torch.Tensor
+    success_mask: torch.Tensor
+    final_failure_mask: torch.Tensor
+    attempt_counts: torch.Tensor
+    work_items: deque[_WorkflowRecoveryWorkItem]
+    failure_messages: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _FinishedCallAttempt:
+    """Internal terminal projection of one execution session."""
+
+    trace: SkillCallTrace
+    completed_mask: torch.Tensor
+    failed_mask: torch.Tensor
+    status: RunnerStatus
+    message: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkflowRecoveryTrigger:
+    """Resolved workflow policy and source identity for one original call."""
+
+    policy: WorkflowRecoveryPolicy
+    source_resource_id: str
+    source_task_state_key: str
+
+
+@dataclass(frozen=True, slots=True, eq=False)
 class SkillResult:
     """Immutable workflow snapshot returned by sync and step-wise execution."""
 
@@ -1276,6 +1635,7 @@ class SkillResult:
     events: tuple[ExecutionEvent, ...] = ()
     calls: tuple[SkillCallTrace, ...] = ()
     effects: tuple[SkillEffectTrace, ...] = ()
+    workflow_recoveries: tuple[SkillWorkflowRecoveryTrace, ...] = ()
     failures: tuple[SkillFailure, ...] = ()
     wait_duration: float = 0.0
     message: str | None = None
@@ -1331,6 +1691,13 @@ class SkillResult:
             raise ValueError("wait_duration must be finite and non-negative.")
         if self.message is not None and type(self.message) is not str:
             raise TypeError("message must be a string or None.")
+        if not all(
+            type(recovery) is SkillWorkflowRecoveryTrace
+            for recovery in self.workflow_recoveries
+        ):
+            raise TypeError(
+                "workflow_recoveries must contain SkillWorkflowRecoveryTrace values."
+            )
         object.__setattr__(self, "env_ids", self.env_ids.clone())
         for name in (
             "success_mask",
@@ -1357,6 +1724,11 @@ class SkillResult:
         )
         object.__setattr__(
             self,
+            "workflow_recoveries",
+            tuple(recovery.snapshot() for recovery in self.workflow_recoveries),
+        )
+        object.__setattr__(
+            self,
             "failures",
             tuple(failure.snapshot() for failure in self.failures),
         )
@@ -1373,13 +1745,15 @@ class SkillResult:
     def to_metadata(self) -> dict[str, object]:
         """Return a fresh deterministic JSON-safe workflow result.
 
-        Recovery remains represented by the ordered :class:`ExecutionEvent`
-        stream and by each call's complete plan-attempt history.  The returned
-        object owns only Python scalars, lists, and dictionaries and can be
-        serialized with ``json.dumps(..., allow_nan=False)``.
+        Core recovery remains represented by the ordered
+        :class:`ExecutionEvent` stream and each call's plan-attempt history.
+        Workflow re-acquisition additionally appears in
+        ``workflow_recoveries``. The returned object owns only Python scalars,
+        lists, and dictionaries and can be serialized with
+        ``json.dumps(..., allow_nan=False)``.
         """
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "skill_result",
             "status": self.status.value,
             "workflow_id": self.workflow_id,
@@ -1395,6 +1769,9 @@ class SkillResult:
             "events": [_event_to_metadata(event) for event in self.events],
             "calls": [call.to_metadata() for call in self.calls],
             "effects": [effect.to_metadata() for effect in self.effects],
+            "workflow_recoveries": [
+                recovery.to_metadata() for recovery in self.workflow_recoveries
+            ],
             "failures": [failure.to_metadata() for failure in self.failures],
             "wait_duration": self.wait_duration,
             "message": self.message,
@@ -1520,6 +1897,9 @@ class SkillRuntime:
         self._current_call_index: int | None = None
         self._runner: ExecutionRunner | None = None
         self._grounded: object | None = None
+        self._active_call: SemanticCallSpec | None = None
+        self._active_recovery_item: _WorkflowRecoveryWorkItem | None = None
+        self._recovery_barrier: _WorkflowRecoveryBarrier | None = None
         self._call_entered_mask = torch.zeros(
             self._task_state.batch_size,
             dtype=torch.bool,
@@ -1532,10 +1912,14 @@ class SkillRuntime:
         self._events: list[ExecutionEvent] = []
         self._call_traces: list[SkillCallTrace] = []
         self._effect_traces: list[SkillEffectTrace] = []
+        self._workflow_recovery_traces: list[SkillWorkflowRecoveryTrace] = []
         self._failures: list[SkillFailure] = []
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
+        self._next_guard_verification_id = 0
+        self._next_gate_verification_id = 0
+        self._next_workflow_recovery_id = 0
         self._wait_duration = 0.0
         self._message: str | None = None
 
@@ -1644,6 +2028,7 @@ class SkillRuntime:
             events=tuple(self._events),
             calls=tuple(self._call_traces),
             effects=tuple(self._effect_traces),
+            workflow_recoveries=tuple(self._workflow_recovery_traces),
             failures=tuple(self._failures),
             wait_duration=self._wait_duration,
             message=self._message,
@@ -1701,7 +2086,15 @@ class SkillRuntime:
         grounded = self._require_grounded()
         monitor = getattr(grounded, "effect_monitor", None)
         verifier = self._effect_verifier if monitor is not None else None
-        runner_step = runner.step(effect_verifier=verifier)
+        guards = tuple(getattr(grounded, "effect_guards", ()))
+        guard_verifier = self._held_object_guard_verifier if guards else None
+        gates = tuple(getattr(grounded, "effect_gates", ()))
+        gate_verifier = self._phase_effect_gate_verifier if gates else None
+        runner_step = runner.step(
+            effect_verifier=verifier,
+            phase_effect_gate_verifier=gate_verifier,
+            held_object_guard_verifier=guard_verifier,
+        )
         self._consume_runner_step(runner_step)
         if (
             runner_step.status is RunnerStatus.RUNNING
@@ -1714,38 +2107,31 @@ class SkillRuntime:
                 "semantic call did not install an effect monitor."
             )
             return self.result
+        if (
+            runner_step.status is RunnerStatus.RUNNING
+            and runner_step.tick is not None
+            and runner_step.tick.pending_phase_effect_gate is not None
+            and not gates
+        ):
+            self._abort(
+                "The atomic invocation requested a phase-effect gate, but the "
+                "grounded semantic call did not install its monitor."
+            )
+            return self.result
         if runner_step.status is RunnerStatus.RUNNING:
             return self.result
-        self._finish_current_call(runner_step)
-        if runner_step.status is RunnerStatus.COMPLETED:
-            if self._eligible.any() and self._has_next_call:
-                assert self._current_call_index is not None
-                next_index = self._current_call_index + 1
-                try:
-                    self._prepare_call(next_index)
-                except Exception as exc:  # noqa: BLE001 - preserve workflow trace
-                    self._fail_preparation(next_index, exc)
-            elif self._eligible.any():
-                self._success = self._eligible.clone()
-                self._status = SkillStatus.COMPLETED
-                self._current_call_index = None
-                self._wait_duration = 0.0
-            else:
-                self._status = (
-                    SkillStatus.CANCELLED
-                    if self._cancelled.any() and not self._failed.any()
-                    else SkillStatus.FAILED
-                )
-                self._current_call_index = None
-                self._wait_duration = 0.0
-        elif runner_step.status is RunnerStatus.CANCELLED:
-            self._status = SkillStatus.CANCELLED
-            self._current_call_index = None
-            self._wait_duration = 0.0
+        recovery_item = self._active_recovery_item
+        trigger = (
+            self._workflow_recovery_trigger()
+            if recovery_item is None and self._active_call_requires_workflow_recovery()
+            else None
+        )
+        finished = self._finish_active_call(runner_step)
+        if recovery_item is None:
+            self._call_traces.append(finished.trace)
+            self._handle_original_call_finished(finished, trigger=trigger)
         else:
-            self._status = SkillStatus.FAILED
-            self._current_call_index = None
-            self._wait_duration = 0.0
+            self._handle_recovery_call_finished(recovery_item, finished)
         return self.result
 
     def run(
@@ -1782,21 +2168,34 @@ class SkillRuntime:
             raise ValueError("reason must be a non-empty string.")
         if self._status is not SkillStatus.RUNNING:
             return self.result
+        pending = self._eligible.clone()
+        recovery_item = self._active_recovery_item
         runner_step = self._require_runner().cancel(reason)
         self._consume_runner_step(runner_step)
-        active = self._eligible & ~self._failed
         self._message = runner_step.message or reason
-        self._finish_current_call(runner_step)
-        self._cancelled |= active
-        self._eligible &= ~active
+        finished = self._finish_active_call(runner_step)
+        if recovery_item is None:
+            self._call_traces.append(finished.trace)
+        else:
+            self._append_workflow_recovery_trace(
+                recovery_item,
+                call=finished.trace,
+                completed_mask=finished.completed_mask,
+                failed_mask=finished.failed_mask,
+                message=finished.message,
+            )
         self._status = (
             SkillStatus.CANCELLED
             if runner_step.status is RunnerStatus.CANCELLED
             else SkillStatus.FAILED
         )
         if self._status is SkillStatus.FAILED:
-            self._failed |= active
-            self._cancelled &= ~active
+            self._failed |= pending
+            self._cancelled &= ~pending
+        else:
+            self._cancelled |= pending
+        self._eligible &= ~pending
+        self._recovery_barrier = None
         self._current_call_index = None
         self._wait_duration = 0.0
         return self.result
@@ -1834,16 +2233,44 @@ class SkillRuntime:
             )
         if type(reason) is not str or not reason:
             raise ValueError("reason must be a non-empty string.")
-        changed = self._require_runner().deactivate_rows(
-            env_mask & self._eligible,
+        changed = env_mask & self._eligible
+        self._require_runner().deactivate_rows(
+            changed,
             reason=reason,
         )
         self._cancelled |= changed
         self._eligible &= ~changed
+        barrier = self._recovery_barrier
+        if barrier is not None and changed.any():
+            barrier.success_mask &= ~changed
+            retained_items: deque[_WorkflowRecoveryWorkItem] = deque()
+            for item in barrier.work_items:
+                retained = item.env_mask & ~changed
+                if retained.any():
+                    retained_items.append(
+                        _WorkflowRecoveryWorkItem(
+                            role=item.role,
+                            call=item.call,
+                            env_mask=retained,
+                            attempt_index=item.attempt_index,
+                        )
+                    )
+            barrier.work_items = retained_items
         if not self._eligible.any():
+            recovery_item = self._active_recovery_item
             runner_step = self._require_runner().cancel(reason)
             self._consume_runner_step(runner_step)
-            self._finish_current_call(runner_step)
+            finished = self._finish_active_call(runner_step)
+            if recovery_item is None:
+                self._call_traces.append(finished.trace)
+            else:
+                self._append_workflow_recovery_trace(
+                    recovery_item,
+                    call=finished.trace,
+                    completed_mask=finished.completed_mask,
+                    failed_mask=finished.failed_mask,
+                    message=finished.message,
+                )
             self._status = (
                 SkillStatus.CANCELLED
                 if runner_step.status is RunnerStatus.CANCELLED
@@ -1852,6 +2279,7 @@ class SkillRuntime:
             if self._status is SkillStatus.FAILED:
                 failed = self._call_entered_mask & ~self._cancelled
                 self._failed |= failed
+            self._recovery_barrier = None
             self._current_call_index = None
             self._wait_duration = 0.0
         return self.result
@@ -1956,6 +2384,9 @@ class SkillRuntime:
         self._current_call_index = 0
         self._runner = None
         self._grounded = None
+        self._active_call = None
+        self._active_recovery_item = None
+        self._recovery_barrier = None
         self._eligible = eligible
         self._success = torch.zeros_like(eligible)
         self._failed = torch.zeros_like(eligible)
@@ -1963,10 +2394,14 @@ class SkillRuntime:
         self._events = []
         self._call_traces = []
         self._effect_traces = []
+        self._workflow_recovery_traces = []
         self._failures = []
         self._call_event_offset = 0
         self._call_effect_offset = 0
         self._observation_revision = 0
+        self._next_guard_verification_id = 0
+        self._next_gate_verification_id = 0
+        self._next_workflow_recovery_id = 0
         self._wait_duration = 0.0
         self._message = None
         self._status = SkillStatus.RUNNING
@@ -2007,22 +2442,72 @@ class SkillRuntime:
     def _prepare_call(self, call_index: int) -> None:
         """Freshly ground and create exactly one session and runner."""
         assert self._workflow is not None
+        self._prepare_grounded_call(
+            self._workflow,
+            analysis_call_index=call_index,
+            workflow_call_index=call_index,
+            call=self._calls[call_index],
+            active_mask=self._eligible,
+            recovery_item=None,
+        )
+
+    def _prepare_recovery_work_item(
+        self,
+        item: _WorkflowRecoveryWorkItem,
+    ) -> None:
+        """Analyze and ground one real recovery call with fresh observation."""
+        barrier = self._require_recovery_barrier()
+        suffix = self._calls[barrier.trigger_call_index :]
+        analysis_calls = (
+            (item.call, *suffix)
+            if item.role is SkillWorkflowRecoveryRole.REACQUIRE
+            else suffix
+        )
+        workflow = self._compiler.analyze(
+            analysis_calls,
+            workflow_id=(
+                f"{self._workflow_id}:workflow_recovery:"
+                f"{self._next_workflow_recovery_id}"
+            ),
+        )
+        self._prepare_grounded_call(
+            workflow,
+            analysis_call_index=0,
+            workflow_call_index=barrier.trigger_call_index,
+            call=item.call,
+            active_mask=item.env_mask,
+            recovery_item=item,
+        )
+
+    def _prepare_grounded_call(
+        self,
+        workflow: object,
+        *,
+        analysis_call_index: int,
+        workflow_call_index: int,
+        call: SemanticCallSpec,
+        active_mask: torch.Tensor,
+        recovery_item: _WorkflowRecoveryWorkItem | None,
+    ) -> None:
+        """Install one original or recovery semantic call in a fresh session."""
         context = self._observe_for_grounding()
         grounded = self._compiler.ground(
-            self._workflow,
-            call_index,
+            workflow,
+            analysis_call_index,
             context,
-            eligible_mask=self._eligible,
+            eligible_mask=active_mask,
         )
         invocation = getattr(grounded, "invocation", None)
         grounded_eligible = getattr(grounded, "eligible_mask", None)
         effect_spec = getattr(grounded, "effect_spec", None)
         effect_monitor = getattr(grounded, "effect_monitor", None)
+        effect_guards = tuple(getattr(grounded, "effect_guards", ()))
+        effect_gates = tuple(getattr(grounded, "effect_gates", ()))
         if invocation is None:
             raise TypeError("Semantic compiler ground() must return an invocation.")
         if not isinstance(grounded_eligible, torch.Tensor) or not torch.equal(
             grounded_eligible,
-            self._eligible,
+            active_mask,
         ):
             raise ValueError("Grounded call must preserve runtime eligibility.")
         if (effect_spec is None) != (effect_monitor is None):
@@ -2039,12 +2524,26 @@ class SkillRuntime:
                 context.env_ids,
             ):
                 raise ValueError("Grounded effect env_ids must match the call context.")
+        if not all(type(value) is GroundedHeldObjectGuard for value in effect_guards):
+            raise TypeError(
+                "Grounded effect_guards must contain exact "
+                "GroundedHeldObjectGuard values."
+            )
+        if effect_guards and effect_spec is None:
+            raise ValueError("Grounded held-object guards require an effect spec.")
+        if not all(type(value) is GroundedPhaseEffectGate for value in effect_gates):
+            raise TypeError(
+                "Grounded effect_gates must contain exact "
+                "GroundedPhaseEffectGate values."
+            )
+        if effect_gates and effect_spec is None:
+            raise ValueError("Grounded phase-effect gates require an effect spec.")
 
         self._grounded = grounded
         session = self._engine.start(
             (invocation,),
             context,
-            eligible_mask=self._eligible,
+            eligible_mask=active_mask,
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
         runner = ExecutionRunner(
@@ -2054,9 +2553,11 @@ class SkillRuntime:
             clock=self._clock,
             cfg=self._runner_cfg,
         )
-        self._current_call_index = call_index
+        self._current_call_index = workflow_call_index
         self._runner = runner
-        self._call_entered_mask = self._eligible.clone()
+        self._active_call = call
+        self._active_recovery_item = recovery_item
+        self._call_entered_mask = active_mask.clone()
         self._call_event_offset = len(self._events)
         self._call_effect_offset = len(self._effect_traces)
         self._wait_duration = 0.0
@@ -2086,6 +2587,342 @@ class SkillRuntime:
             )
         if request.invocation_revision != spec.invocation_revision:
             raise ValueError("Effect request revision does not match the effect spec.")
+        decision = self._observe_effect_monitor(
+            context,
+            request,
+            spec=spec,
+            monitor=monitor,
+        )
+        expectation_decisions = self._validated_expectation_decisions(
+            spec,
+            decision,
+        )
+        invalidation_mask, retry_mask = self._terminal_failure_policy(
+            grounded,
+            decision.failure_mask,
+            expectation_decisions,
+        )
+        return EffectVerificationResult(
+            verification_id=request.verification_id,
+            success_mask=decision.success_mask,
+            failure_mask=decision.failure_mask,
+            invalidation_mask=invalidation_mask,
+            retry_mask=retry_mask,
+            expectation_results=tuple(
+                EffectExpectationResult(
+                    expectation_id=value.expectation_id,
+                    satisfied_mask=value.satisfied_mask,
+                    contradicted_mask=value.contradicted_mask,
+                    inverse_satisfied_mask=value.inverse_satisfied_mask,
+                )
+                for value in expectation_decisions
+            ),
+        )
+
+    @staticmethod
+    def _validated_expectation_decisions(
+        spec: SemanticEffectSpec,
+        decision: EffectMonitorDecision,
+    ) -> tuple[EffectExpectationDecision, ...]:
+        """Require one current-observation outcome per physical expectation."""
+        physical_ids = tuple(
+            expectation.expectation_id
+            for expectation in spec.state_expectations
+            if any(
+                clause.expectation_id == expectation.expectation_id
+                for clause in spec.clauses
+            )
+        )
+        outcomes = tuple(decision.expectation_decisions)
+        if not outcomes and len(physical_ids) == 1:
+            outcomes = (
+                EffectExpectationDecision(
+                    expectation_id=physical_ids[0],
+                    satisfied_mask=decision.success_mask,
+                    contradicted_mask=decision.failure_mask,
+                    inverse_satisfied_mask=torch.zeros_like(decision.failure_mask),
+                ),
+            )
+        outcome_ids = tuple(value.expectation_id for value in outcomes)
+        if outcome_ids != physical_ids:
+            raise ValueError(
+                "Effect monitor must return one ordered outcome for every "
+                f"physical expectation; expected={physical_ids}, got={outcome_ids}."
+            )
+        return outcomes
+
+    @staticmethod
+    def _terminal_failure_policy(
+        grounded: object,
+        failure_mask: torch.Tensor,
+        expectation_decisions: tuple[EffectExpectationDecision, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select fail-closed invalidation and safe local retry rows."""
+        call = getattr(getattr(grounded, "analyzed", None), "call", None)
+        invalidation = failure_mask.clone()
+        retry = failure_mask.clone()
+        if type(call) is Pick:
+            return invalidation, retry
+        if type(call) is Place:
+            source = next(
+                value
+                for value in expectation_decisions
+                if value.expectation_id == "source"
+            )
+            retained = failure_mask & source.inverse_satisfied_mask
+            return failure_mask & ~retained, retained
+        if type(call) is HandOver:
+            source = next(
+                value
+                for value in expectation_decisions
+                if value.expectation_id == "source"
+            )
+            retained = failure_mask & source.inverse_satisfied_mask
+            return failure_mask & ~retained, torch.zeros_like(failure_mask)
+        return invalidation, retry
+
+    def _phase_effect_gate_verifier(
+        self,
+        context: PlanningContext,
+        request: PhaseEffectGateRequest,
+    ) -> PhaseEffectGateResult:
+        """Observe one blocking segment-entry effect on a fresh due cycle."""
+        grounded = self._require_grounded()
+        gates = tuple(getattr(grounded, "effect_gates", ()))
+        matches = tuple(value for value in gates if value.gate_id == request.gate_id)
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Grounded call must own exactly one phase-effect gate "
+                f"{request.gate_id!r}."
+            )
+        gate = matches[0]
+        if gate.segment_name != request.segment_name:
+            raise ValueError(
+                "Phase-effect gate request segment does not match its grounded "
+                "monitor."
+            )
+        session = self._require_runner().session
+        monitor_request = EffectVerificationRequest(
+            verification_id=self._next_gate_verification_id,
+            skill_id=request.skill_id,
+            invocation_id=request.invocation_id,
+            invocation_revision=request.invocation_revision,
+            invocation_index=request.invocation_index,
+            attempt_generation=request.attempt_generation,
+            terminal_segment=request.segment_name,
+            requested_at=request.requested_at,
+            deadline=request.deadline,
+            env_mask=request.env_mask,
+            expected_effects=self._phase_effect_gate_expected_effects(
+                gate,
+                session.active_plan.expected_effects,
+            ),
+        )
+        self._next_gate_verification_id += 1
+        decision = self._observe_effect_monitor(
+            context,
+            monitor_request,
+            spec=gate.effect_spec,
+            monitor=gate.effect_monitor,
+            boundary_kind="phase_effect_gate",
+            gate_id=gate.gate_id,
+            segment_name=gate.segment_name,
+        )
+        return PhaseEffectGateResult(
+            verification_id=request.verification_id,
+            gate_id=request.gate_id,
+            attempt_generation=request.attempt_generation,
+            invocation_index=request.invocation_index,
+            next_waypoint_index=request.next_waypoint_index,
+            success_mask=decision.success_mask,
+            failure_mask=decision.failure_mask,
+            retry_mask=(
+                decision.failure_mask
+                if gate.retry_action
+                else torch.zeros_like(decision.failure_mask)
+            ),
+            message=(
+                f"Physical evidence contradicted gate {gate.gate_id!r} before "
+                f"segment {gate.segment_name!r}."
+                if decision.failure_mask.any()
+                else ""
+            ),
+        )
+
+    @staticmethod
+    def _phase_effect_gate_expected_effects(
+        gate: GroundedPhaseEffectGate,
+        action_effects: StateDelta,
+    ) -> StateDelta:
+        """Project the action-owned held relation required by one gate."""
+        expectation = gate.effect_spec.state_expectations[0]
+        if type(expectation) is not HeldObjectStateExpectation:
+            raise TypeError("Built-in phase-effect gates require held-object state.")
+        key = expectation.task_state_key
+        if key not in action_effects.held_object_updates:
+            raise ValueError(f"Active action does not declare gate state key {key!r}.")
+        candidate = action_effects.held_object_updates[key]
+        if expectation.relation is HeldObjectRelation.ATTACHED:
+            if not isinstance(candidate, HeldObjectState):
+                raise ValueError(
+                    f"Attached gate {gate.gate_id!r} requires an action-owned "
+                    "HeldObjectState candidate."
+                )
+        elif candidate is not None:
+            raise ValueError(
+                f"Detached gate {gate.gate_id!r} requires an action-owned removal."
+            )
+        return StateDelta(held_object_updates={key: candidate})
+
+    def _held_object_guard_verifier(
+        self,
+        context: PlanningContext,
+        request: HeldObjectGuardRequest,
+    ) -> HeldObjectGuardResult | None:
+        """Observe a phase-scoped held-object invariant before dispatch.
+
+        Args:
+            context: Fresh due-cycle physical observation.
+            request: Core-owned phase and correlation identity.
+
+        Returns:
+            Correlated row-local loss decision, or ``None`` when this named
+            action segment has no held-object invariant.
+        """
+        if context.robot.timestamp > request.deadline:
+            return None
+        grounded = self._require_grounded()
+        guards = tuple(getattr(grounded, "effect_guards", ()))
+        active = tuple(
+            guard for guard in guards if request.segment_name in guard.active_segments
+        )
+        if not active:
+            return None
+        if len(active) != 1:
+            raise RuntimeError(
+                "At most one held-object guard may own an action segment; "
+                f"segment={request.segment_name!r}, guards="
+                f"{[guard.guard_id for guard in active]}."
+            )
+        guard = active[0]
+        session = self._require_runner().session
+        if guard.baseline is HeldObjectGuardBaseline.VERIFIED_TASK_STATE:
+            candidate = session.task_state.get_held_object(guard.task_state_key)
+        else:
+            candidate = session.active_plan.expected_effects.held_object_updates.get(
+                guard.task_state_key
+            )
+        covered = torch.zeros_like(request.env_mask)
+        if isinstance(candidate, HeldObjectState):
+            covered = (
+                torch.ones_like(request.env_mask)
+                if candidate.env_mask is None
+                else candidate.env_mask.to(request.env_mask.device)
+            )
+            if candidate.semantics.entity_id != self._guard_object_id(
+                guard.effect_spec
+            ):
+                covered.zero_()
+        observed_mask = request.env_mask & covered
+        failure_mask = request.env_mask & ~covered
+        if observed_mask.any():
+            assert isinstance(candidate, HeldObjectState)
+            verification_id = self._next_guard_verification_id
+            self._next_guard_verification_id += 1
+            monitor_request = EffectVerificationRequest(
+                verification_id=verification_id,
+                skill_id=request.skill_id,
+                invocation_id=request.invocation_id,
+                invocation_revision=request.invocation_revision,
+                invocation_index=request.invocation_index,
+                attempt_generation=request.attempt_generation,
+                terminal_segment=request.segment_name,
+                requested_at=context.robot.timestamp,
+                deadline=request.deadline,
+                env_mask=observed_mask,
+                expected_effects=StateDelta(
+                    held_object_updates={guard.task_state_key: candidate}
+                ),
+            )
+            decision = self._observe_effect_monitor(
+                context,
+                monitor_request,
+                spec=guard.effect_spec,
+                monitor=guard.effect_monitor,
+                boundary_kind="in_flight_guard",
+                guard_id=guard.guard_id,
+                segment_name=request.segment_name,
+            )
+            failure_mask |= decision.failure_mask
+        invalidation = self._held_object_invalidation(
+            guard.invalidation_task_state_keys,
+            failure_mask,
+            session.task_state,
+        )
+        retry_mask = (
+            failure_mask.clone()
+            if guard.retry_action
+            else torch.zeros_like(failure_mask)
+        )
+        return HeldObjectGuardResult(
+            verification_id=request.verification_id,
+            object_id=self._guard_object_id(guard.effect_spec),
+            attempt_generation=request.attempt_generation,
+            invocation_index=request.invocation_index,
+            next_waypoint_index=request.next_waypoint_index,
+            failure_mask=failure_mask,
+            state_invalidation=invalidation,
+            retry_mask=retry_mask,
+            message=(
+                f"Held-object invariant {guard.guard_id!r} failed during "
+                f"segment {request.segment_name!r}."
+                if failure_mask.any()
+                else ""
+            ),
+        )
+
+    @staticmethod
+    def _guard_object_id(spec: SemanticEffectSpec) -> str:
+        """Return the canonical object ID from a single guard expectation."""
+        expectation = spec.state_expectations[0]
+        object_id = getattr(expectation, "object_id", None)
+        if type(object_id) is not str or not object_id:
+            raise TypeError("Held-object guard expectation must own an object_id.")
+        return object_id
+
+    @staticmethod
+    def _held_object_invalidation(
+        task_state_keys: tuple[str, ...],
+        failure_mask: torch.Tensor,
+        task_state: TaskState,
+    ) -> StateDelta:
+        """Build conservative removal-only reconciliation for failed rows."""
+        if not failure_mask.any():
+            return StateDelta()
+        related = set(task_state_keys)
+        return StateDelta(
+            held_object_updates={key: None for key in task_state_keys},
+            coordinated_held_object_updates={
+                resources: None
+                for resources in task_state.coordinated_held_objects
+                if not set(resources).isdisjoint(related)
+            },
+        )
+
+    def _observe_effect_monitor(
+        self,
+        context: PlanningContext,
+        request: EffectVerificationRequest,
+        *,
+        spec: SemanticEffectSpec,
+        monitor: EffectMonitor,
+        boundary_kind: str = "terminal",
+        guard_id: str | None = None,
+        gate_id: str | None = None,
+        segment_name: str | None = None,
+    ) -> EffectMonitorDecision:
+        """Collect evidence, run one monitor, and append an auditable trace."""
+        grounded = self._require_grounded()
         observation_revision = self._observation_revision
         self._observation_revision += 1
         selected_env_ids = spec.env_ids[request.env_mask.to(spec.env_ids.device)]
@@ -2095,7 +2932,16 @@ class SkillRuntime:
             observation_revision=observation_revision,
             env_ids=selected_env_ids,
         )
-        decision = monitor.observe(request, evidence)
+        observed = monitor.observe(request, evidence)
+        expectation_decisions = self._validated_expectation_decisions(
+            spec,
+            observed,
+        )
+        decision = EffectMonitorDecision(
+            success_mask=observed.success_mask,
+            failure_mask=observed.failure_mask,
+            expectation_decisions=expectation_decisions,
+        )
         analyzed = getattr(grounded, "analyzed", None)
         monitor_ref = getattr(analyzed, "effect_monitor_ref", None)
         if monitor_ref is not None and not isinstance(monitor_ref, EffectMonitorRef):
@@ -2118,19 +2964,20 @@ class SkillRuntime:
             timestamp=context.robot.timestamp,
             success_mask=decision.success_mask,
             failure_mask=decision.failure_mask,
+            expectation_decisions=decision.expectation_decisions,
             effect_spec=spec,
             monitor_id=monitor_id,
             monitor_revision=monitor_revision,
             configured_monitor_params=configured_monitor_params,
             resolved_monitor_params=resolved_monitor_params,
             evidence=evidence,
+            boundary_kind=boundary_kind,
+            guard_id=guard_id,
+            gate_id=gate_id,
+            segment_name=segment_name,
         )
         self._effect_traces.append(trace)
-        return EffectVerificationResult(
-            verification_id=request.verification_id,
-            success_mask=decision.success_mask,
-            failure_mask=decision.failure_mask,
-        )
+        return decision
 
     def _consume_runner_step(self, runner_step: RunnerStep) -> None:
         """Merge one runner update into workflow-level traces."""
@@ -2143,11 +2990,14 @@ class SkillRuntime:
         if runner_step.message:
             self._message = runner_step.message
 
-    def _finish_current_call(self, runner_step: RunnerStep) -> None:
-        """Commit terminal row masks and append exactly one call trace."""
+    def _finish_active_call(self, runner_step: RunnerStep) -> _FinishedCallAttempt:
+        """Project one terminal session without deciding workflow eligibility."""
         runner = self._require_runner()
         grounded = self._require_grounded()
         call_index = self._require_call_index()
+        call = self._active_call
+        if not isinstance(call, SemanticCallSpec):
+            raise RuntimeError("No semantic call is associated with the active runner.")
         self._task_state = _snapshot_task_state(runner.session.task_state)
         after = runner.session.eligible_mask
         invocation = getattr(grounded, "invocation")
@@ -2160,20 +3010,6 @@ class SkillRuntime:
         else:
             completed = torch.zeros_like(self._call_entered_mask)
             failed = self._call_entered_mask & ~self._cancelled
-            after = self._eligible & ~failed
-
-        self._eligible = after.clone()
-        self._failed |= failed
-        if failed.any():
-            message = runner_step.message or "Semantic call failed for these rows."
-            self._failures.append(
-                SkillFailure(
-                    call_index=call_index,
-                    semantic_id=self._calls[call_index].semantic_id,
-                    env_mask=failed,
-                    message=message,
-                )
-            )
         plan_attempts = tuple(
             SkillPlanAttemptTrace.from_execution_attempt(
                 attempt,
@@ -2183,27 +3019,419 @@ class SkillRuntime:
             )
             for attempt in runner.session.plan_attempts
         )
-        self._call_traces.append(
-            SkillCallTrace(
-                call_index=call_index,
-                semantic_id=self._calls[call_index].semantic_id,
-                call_metadata=self._calls[call_index].to_metadata(),
-                skill_id=invocation.skill_id,
-                invocation_id=invocation.invocation_id,
-                invocation_revision=invocation.revision,
-                status=runner_step.status,
-                entered_mask=self._call_entered_mask,
-                completed_mask=completed,
-                failed_mask=failed,
-                command_count=runner_step.command_count,
-                resolved_core_policy=plan_attempts[-1].resolved_core_policy,
-                plan_attempts=plan_attempts,
-                events=tuple(self._events[self._call_event_offset :]),
-                effects=tuple(self._effect_traces[self._call_effect_offset :]),
-            )
+        trace = SkillCallTrace(
+            call_index=call_index,
+            semantic_id=call.semantic_id,
+            call_metadata=call.to_metadata(),
+            skill_id=invocation.skill_id,
+            invocation_id=invocation.invocation_id,
+            invocation_revision=invocation.revision,
+            status=runner_step.status,
+            entered_mask=self._call_entered_mask,
+            completed_mask=completed,
+            failed_mask=failed,
+            command_count=runner_step.command_count,
+            resolved_core_policy=plan_attempts[-1].resolved_core_policy,
+            plan_attempts=plan_attempts,
+            events=tuple(self._events[self._call_event_offset :]),
+            effects=tuple(self._effect_traces[self._call_effect_offset :]),
         )
         self._runner = None
         self._grounded = None
+        self._active_call = None
+        self._active_recovery_item = None
+        return _FinishedCallAttempt(
+            trace=trace,
+            completed_mask=completed,
+            failed_mask=failed,
+            status=runner_step.status,
+            message=runner_step.message,
+        )
+
+    def _workflow_recovery_trigger(self) -> _WorkflowRecoveryTrigger | None:
+        """Resolve preset policy and the failed call's physical source endpoint."""
+        call = self._active_call
+        if type(call) is Place:
+            source_slot = "primary"
+        elif type(call) is HandOver:
+            source_slot = "source"
+        else:
+            return None
+        grounded = self._require_grounded()
+        preset = grounded.analyzed.bound.preset
+        policy = preset.workflow_recovery_policy
+        if type(policy) is not WorkflowRecoveryPolicy:
+            raise TypeError("Grounded preset workflow_recovery_policy must be exact.")
+        if policy.max_recovery_attempts == 0:
+            return None
+        endpoints = tuple(
+            endpoint
+            for endpoint in grounded.invocation.binding.endpoints
+            if endpoint.slot_id == source_slot
+        )
+        resource_ids = {endpoint.resource_id for endpoint in endpoints}
+        task_state_keys = {endpoint.task_state_key for endpoint in endpoints}
+        if not endpoints or len(resource_ids) != 1 or len(task_state_keys) != 1:
+            raise RuntimeError(
+                f"Workflow recovery requires one physical source resource and "
+                f"task-state key for slot {source_slot!r}."
+            )
+        return _WorkflowRecoveryTrigger(
+            policy=policy,
+            source_resource_id=next(iter(resource_ids)),
+            source_task_state_key=next(iter(task_state_keys)),
+        )
+
+    def _active_call_requires_workflow_recovery(self) -> bool:
+        """Whether the active call emitted a row-local external-recovery hand-off."""
+        entered = self._call_entered_mask
+        return any(
+            event.kind is ExecutionEventKind.RECOVERY_REQUIRED
+            and bool((event.env_mask.to(entered.device) & entered).any().item())
+            for event in self._events[self._call_event_offset :]
+        )
+
+    @staticmethod
+    def _recovery_required_mask(trace: SkillCallTrace) -> torch.Tensor:
+        """Return failed rows explicitly handed to workflow recovery by core."""
+        required = torch.zeros_like(trace.failed_mask)
+        for event in trace.events:
+            if event.kind is ExecutionEventKind.RECOVERY_REQUIRED:
+                required |= event.env_mask.to(required.device)
+        return required & trace.failed_mask
+
+    def _handle_original_call_finished(
+        self,
+        finished: _FinishedCallAttempt,
+        *,
+        trigger: _WorkflowRecoveryTrigger | None,
+    ) -> None:
+        """Either advance one call barrier or start bounded row-local recovery."""
+        if finished.status is RunnerStatus.CANCELLED:
+            cancelled = finished.trace.entered_mask & self._eligible
+            self._cancelled |= cancelled
+            self._eligible &= ~cancelled
+            self._finish_workflow_terminal()
+            return
+        recovery_required = self._recovery_required_mask(finished.trace)
+        recoverable = (
+            torch.zeros_like(recovery_required)
+            if trigger is None
+            else recovery_required
+        )
+        if not recoverable.any():
+            self._complete_original_call_barrier(
+                success_mask=finished.completed_mask,
+                failure_mask=finished.failed_mask,
+                message=finished.message,
+            )
+            return
+        assert trigger is not None
+        permanent_failure = finished.failed_mask & ~recoverable
+        call_index = self._require_call_index()
+        barrier = _WorkflowRecoveryBarrier(
+            trigger_call_index=call_index,
+            trigger_call=self._calls[call_index],
+            policy=trigger.policy,
+            source_resource_id=trigger.source_resource_id,
+            source_task_state_key=trigger.source_task_state_key,
+            entered_mask=finished.trace.entered_mask.clone(),
+            success_mask=finished.completed_mask.clone(),
+            final_failure_mask=permanent_failure.clone(),
+            attempt_counts=torch.zeros_like(
+                finished.trace.entered_mask,
+                dtype=torch.long,
+            ),
+            work_items=deque(),
+            failure_messages=(
+                [finished.message or "Semantic call failed for some rows."]
+                if permanent_failure.any()
+                else []
+            ),
+        )
+        self._recovery_barrier = barrier
+        self._eligible = (barrier.success_mask | recoverable) & ~self._cancelled
+        self._failed |= permanent_failure
+        self._schedule_recovery_cycle(recoverable)
+        self._start_next_recovery_work_item_or_finish()
+
+    def _handle_recovery_call_finished(
+        self,
+        item: _WorkflowRecoveryWorkItem,
+        finished: _FinishedCallAttempt,
+    ) -> None:
+        """Update one recovery cohort and retain the shared call barrier."""
+        barrier = self._require_recovery_barrier()
+        self._append_workflow_recovery_trace(
+            item,
+            call=finished.trace,
+            completed_mask=finished.completed_mask,
+            failed_mask=finished.failed_mask,
+            message=finished.message,
+        )
+        if finished.status is RunnerStatus.CANCELLED:
+            cancelled = item.env_mask & self._eligible
+            self._cancelled |= cancelled
+            self._eligible &= ~cancelled
+        elif item.role is SkillWorkflowRecoveryRole.REACQUIRE:
+            if finished.completed_mask.any():
+                barrier.work_items.append(
+                    _WorkflowRecoveryWorkItem(
+                        role=SkillWorkflowRecoveryRole.RETRY_REACQUIRED,
+                        call=barrier.trigger_call,
+                        env_mask=finished.completed_mask,
+                        attempt_index=item.attempt_index,
+                    )
+                )
+            if finished.failed_mask.any():
+                self._schedule_recovery_cycle(finished.failed_mask)
+        else:
+            barrier.success_mask |= finished.completed_mask
+            if finished.failed_mask.any():
+                recovery_required = self._recovery_required_mask(finished.trace)
+                permanent = finished.failed_mask & ~recovery_required
+                self._record_permanent_recovery_failure(
+                    permanent,
+                    finished.message
+                    or "The retried semantic call failed without a recovery hand-off.",
+                )
+                self._schedule_recovery_cycle(recovery_required)
+        self._start_next_recovery_work_item_or_finish()
+
+    def _schedule_recovery_cycle(self, requested_mask: torch.Tensor) -> None:
+        """Consume one per-row budget and enqueue retained/reacquire cohorts."""
+        barrier = self._require_recovery_barrier()
+        requested = requested_mask & self._eligible & ~self._cancelled
+        allowed = requested & (
+            barrier.attempt_counts < barrier.policy.max_recovery_attempts
+        )
+        exhausted = requested & ~allowed
+        self._record_permanent_recovery_failure(
+            exhausted,
+            "Workflow recovery exhausted its per-row attempt budget.",
+        )
+        if not allowed.any():
+            return
+        barrier.attempt_counts[allowed] += 1
+        for attempt_index in range(1, barrier.policy.max_recovery_attempts + 1):
+            cohort = allowed & (barrier.attempt_counts == attempt_index)
+            if not cohort.any():
+                continue
+            retained = self._retained_source_mask(cohort)
+            reacquire = cohort & ~retained
+            if retained.any():
+                barrier.work_items.append(
+                    _WorkflowRecoveryWorkItem(
+                        role=SkillWorkflowRecoveryRole.RETRY_RETAINED,
+                        call=barrier.trigger_call,
+                        env_mask=retained,
+                        attempt_index=attempt_index,
+                    )
+                )
+            if reacquire.any():
+                barrier.work_items.append(
+                    _WorkflowRecoveryWorkItem(
+                        role=SkillWorkflowRecoveryRole.REACQUIRE,
+                        call=self._reacquisition_call(barrier),
+                        env_mask=reacquire,
+                        attempt_index=attempt_index,
+                    )
+                )
+
+    def _retained_source_mask(self, env_mask: torch.Tensor) -> torch.Tensor:
+        """Return rows whose reconciled symbolic state proves source retention."""
+        barrier = self._require_recovery_barrier()
+        held = self._task_state.get_held_object(barrier.source_task_state_key)
+        if not isinstance(held, HeldObjectState):
+            return torch.zeros_like(env_mask)
+        trigger_object = getattr(barrier.trigger_call, "object", None)
+        object_id = getattr(trigger_object, "entity_id", None)
+        if held.semantics.entity_id != object_id:
+            return torch.zeros_like(env_mask)
+        active = (
+            torch.ones_like(env_mask)
+            if held.env_mask is None
+            else held.env_mask.to(env_mask.device)
+        )
+        return env_mask & active
+
+    def _reacquisition_call(self, barrier: _WorkflowRecoveryBarrier) -> Pick:
+        """Derive a real Pick using the failed call's resolved source resource."""
+        trigger_object = getattr(barrier.trigger_call, "object", None)
+        if type(trigger_object) is not SceneObjectRef:
+            raise TypeError("Curated workflow recovery requires a SceneObjectRef.")
+        grasp: SceneAffordanceRef | None = None
+        for candidate in reversed(self._calls[: barrier.trigger_call_index]):
+            if (
+                type(candidate) is Pick
+                and candidate.object.entity_id == trigger_object.entity_id
+            ):
+                grasp = candidate.grasp
+                break
+        return Pick(
+            object=SceneObjectRef(trigger_object.entity_id),
+            grasp=(None if grasp is None else SceneAffordanceRef(grasp.entity_id)),
+            resources={"primary": barrier.source_resource_id},
+        )
+
+    def _start_next_recovery_work_item_or_finish(self) -> None:
+        """Start the next non-empty cohort or close the recovered call barrier."""
+        barrier = self._require_recovery_barrier()
+        while barrier.work_items:
+            queued = barrier.work_items.popleft()
+            active = queued.env_mask & self._eligible & ~self._cancelled
+            if not active.any():
+                continue
+            item = _WorkflowRecoveryWorkItem(
+                role=queued.role,
+                call=queued.call,
+                env_mask=active,
+                attempt_index=queued.attempt_index,
+            )
+            try:
+                self._prepare_recovery_work_item(item)
+            except Exception as exc:  # noqa: BLE001 - row-local recovery failure
+                message = (
+                    f"Could not prepare workflow recovery call "
+                    f"{item.call.semantic_id!r}: {type(exc).__name__}: {exc}"
+                )
+                self._append_workflow_recovery_trace(
+                    item,
+                    call=None,
+                    completed_mask=torch.zeros_like(item.env_mask),
+                    failed_mask=item.env_mask,
+                    message=message,
+                )
+                self._record_permanent_recovery_failure(item.env_mask, message)
+                self._runner = None
+                self._grounded = None
+                self._active_call = None
+                self._active_recovery_item = None
+                continue
+            return
+        self._finish_recovery_barrier()
+
+    def _append_workflow_recovery_trace(
+        self,
+        item: _WorkflowRecoveryWorkItem,
+        *,
+        call: SkillCallTrace | None,
+        completed_mask: torch.Tensor,
+        failed_mask: torch.Tensor,
+        message: str | None,
+    ) -> None:
+        """Append one immutable recovery-call trace with stable correlation."""
+        barrier = self._require_recovery_barrier()
+        self._workflow_recovery_traces.append(
+            SkillWorkflowRecoveryTrace(
+                recovery_id=self._next_workflow_recovery_id,
+                trigger_call_index=barrier.trigger_call_index,
+                trigger_semantic_id=barrier.trigger_call.semantic_id,
+                attempt_index=item.attempt_index,
+                max_recovery_attempts=barrier.policy.max_recovery_attempts,
+                role=item.role,
+                source_resource_id=barrier.source_resource_id,
+                source_task_state_key=barrier.source_task_state_key,
+                entered_mask=item.env_mask,
+                completed_mask=completed_mask,
+                failed_mask=failed_mask,
+                call=call,
+                message=message,
+            )
+        )
+        self._next_workflow_recovery_id += 1
+
+    def _record_permanent_recovery_failure(
+        self,
+        env_mask: torch.Tensor,
+        message: str,
+    ) -> None:
+        """Remove exhausted rows while leaving other recovery cohorts active."""
+        if not env_mask.any():
+            return
+        barrier = self._require_recovery_barrier()
+        barrier.final_failure_mask |= env_mask
+        barrier.failure_messages.append(message)
+        self._failed |= env_mask
+        self._eligible &= ~env_mask
+
+    def _finish_recovery_barrier(self) -> None:
+        """Rejoin recovered rows and advance the original program counter once."""
+        barrier = self._require_recovery_barrier()
+        unresolved = (
+            barrier.entered_mask
+            & ~barrier.success_mask
+            & ~barrier.final_failure_mask
+            & ~self._cancelled
+        )
+        if unresolved.any():
+            self._record_permanent_recovery_failure(
+                unresolved,
+                "Workflow recovery ended with unresolved rows.",
+            )
+        success = barrier.success_mask & ~self._cancelled
+        failure = barrier.final_failure_mask & ~self._cancelled
+        message = (
+            None
+            if not failure.any()
+            else "; ".join(dict.fromkeys(barrier.failure_messages))
+        )
+        self._recovery_barrier = None
+        self._complete_original_call_barrier(
+            success_mask=success,
+            failure_mask=failure,
+            message=message,
+        )
+
+    def _complete_original_call_barrier(
+        self,
+        *,
+        success_mask: torch.Tensor,
+        failure_mask: torch.Tensor,
+        message: str | None,
+    ) -> None:
+        """Commit final row outcomes and advance exactly one original call."""
+        call_index = self._require_call_index()
+        call = self._calls[call_index]
+        failure = failure_mask & ~self._cancelled
+        self._failed |= failure
+        self._eligible = success_mask & ~self._failed & ~self._cancelled
+        if failure.any():
+            failure_message = message or "Semantic call failed for these rows."
+            self._failures.append(
+                SkillFailure(
+                    call_index=call_index,
+                    semantic_id=call.semantic_id,
+                    env_mask=failure,
+                    message=failure_message,
+                )
+            )
+            self._message = failure_message
+        elif self._workflow_recovery_traces:
+            self._message = None
+        if self._eligible.any() and self._has_next_call:
+            next_index = call_index + 1
+            try:
+                self._prepare_call(next_index)
+            except Exception as exc:  # noqa: BLE001 - preserve workflow trace
+                self._fail_preparation(next_index, exc)
+        elif self._eligible.any():
+            self._success = self._eligible.clone()
+            self._status = SkillStatus.COMPLETED
+            self._current_call_index = None
+            self._wait_duration = 0.0
+        else:
+            self._finish_workflow_terminal()
+
+    def _finish_workflow_terminal(self) -> None:
+        """Choose one terminal status from final row-local outcomes."""
+        self._status = (
+            SkillStatus.CANCELLED
+            if self._cancelled.any() and not self._failed.any()
+            else SkillStatus.FAILED
+        )
+        self._current_call_index = None
+        self._wait_duration = 0.0
 
     def _fail_preparation(self, call_index: int, exc: Exception) -> None:
         """Convert a post-barrier grounding failure to a terminal result."""
@@ -2222,6 +3450,9 @@ class SkillRuntime:
         self._current_call_index = None
         self._runner = None
         self._grounded = None
+        self._active_call = None
+        self._active_recovery_item = None
+        self._recovery_barrier = None
         self._wait_duration = 0.0
 
     def _append_preparation_failure_trace(
@@ -2295,6 +3526,7 @@ class SkillRuntime:
     def _abort(self, reason: str) -> None:
         """Safe-stop the active runner and mark remaining rows failed."""
         if self._runner is not None:
+            recovery_item = self._active_recovery_item
             safe_stop_step = self._runner.cancel(reason)
             runner_step = replace(
                 safe_stop_step,
@@ -2302,7 +3534,17 @@ class SkillRuntime:
                 message=reason,
             )
             self._consume_runner_step(runner_step)
-            self._finish_current_call(runner_step)
+            finished = self._finish_active_call(runner_step)
+            if recovery_item is None:
+                self._call_traces.append(finished.trace)
+            elif self._recovery_barrier is not None:
+                self._append_workflow_recovery_trace(
+                    recovery_item,
+                    call=finished.trace,
+                    completed_mask=finished.completed_mask,
+                    failed_mask=finished.failed_mask,
+                    message=reason,
+                )
         failed = self._eligible.clone()
         self._failed |= failed
         self._eligible &= ~failed
@@ -2321,6 +3563,7 @@ class SkillRuntime:
             )
         self._message = reason
         self._status = SkillStatus.FAILED
+        self._recovery_barrier = None
         self._current_call_index = None
         self._wait_duration = 0.0
 
@@ -2333,6 +3576,11 @@ class SkillRuntime:
         if self._grounded is None:
             raise RuntimeError("No grounded semantic call is active.")
         return self._grounded
+
+    def _require_recovery_barrier(self) -> _WorkflowRecoveryBarrier:
+        if self._recovery_barrier is None:
+            raise RuntimeError("No workflow-recovery barrier is active.")
+        return self._recovery_barrier
 
     def _require_call_index(self) -> int:
         if self._current_call_index is None:
@@ -2511,5 +3759,7 @@ __all__ = [
     "SkillRuntimeProvider",
     "SkillScene",
     "SkillStatus",
+    "SkillWorkflowRecoveryRole",
+    "SkillWorkflowRecoveryTrace",
     "task_state_to_metadata",
 ]

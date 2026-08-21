@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from .hand_over import HandOverEnv
 from .open_drawer import OpenDrawerEnv
 
-__all__ = ["OpenDrawerEnv"]
+__all__ = ["HandOverEnv", "OpenDrawerEnv"]
