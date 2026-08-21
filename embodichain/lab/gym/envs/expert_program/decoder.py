@@ -571,15 +571,10 @@ def _decode_call(
     if kind == "hand_over":
         _validate_fields(
             mapping,
-            allowed=frozenset(
-                {"kind", "object", "receiver", "final_target", "resources"}
-            ),
+            allowed=frozenset({"kind", "object", "final_target", "resources"}),
             required=frozenset({"kind", "object"}),
             path=path,
         )
-        receiver = mapping.get("receiver")
-        if receiver is not None:
-            receiver = _expect_identifier(receiver, path=(*path, "receiver"))
         final_target = (
             None
             if mapping.get("final_target") is None
@@ -594,7 +589,6 @@ def _decode_call(
             path=path,
             kind=kind,
             object=_expect_identifier(mapping["object"], path=(*path, "object")),
-            receiver=receiver,
             final_target=final_target,
             resources=resources,
         )  # type: ignore[return-value]
@@ -1137,8 +1131,6 @@ def encode_semantic_call(call: SemanticCallCfg) -> dict[str, object]:
             result["inside"] = call.inside
     elif type(call) is HandOverCfg:
         result["object"] = call.object
-        if call.receiver is not None:
-            result["receiver"] = call.receiver
         if call.final_target is not None:
             result["final_target"] = {
                 "kind": call.final_target.kind,

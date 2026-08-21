@@ -356,7 +356,6 @@ class HandOverCfg:
     """Declarative request to transfer one held object between resources."""
 
     object: str = MISSING
-    receiver: str | None = None
     final_target: TargetRefCfg | None = None
     resources: dict[str, str] = field(default_factory=dict)
     kind: str = "hand_over"
@@ -364,20 +363,12 @@ class HandOverCfg:
     def __post_init__(self) -> None:
         """Validate object, destination resource, and optional target."""
         _validate_identifier(self.object, field_name="object")
-        if self.receiver is not None:
-            _validate_identifier(self.receiver, field_name="receiver")
         if (
             self.final_target is not None
             and type(self.final_target) is not TargetRefCfg
         ):
             raise TypeError("final_target must be exactly TargetRefCfg or None.")
-        resources = _validate_resources(self.resources, field_name="resources")
-        if self.receiver is not None:
-            selected = resources.get("destination")
-            if selected is not None and selected != self.receiver:
-                raise ValueError("receiver conflicts with resources['destination'].")
-            resources["destination"] = self.receiver
-        self.resources = resources
+        self.resources = _validate_resources(self.resources, field_name="resources")
         _validate_kind(self.kind, expected="hand_over", field_name="kind")
 
 

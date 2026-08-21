@@ -258,7 +258,6 @@ def _snapshot_semantic_call(call: SemanticCallSpec) -> SemanticCallSpec:
     if type(call) is HandOver:
         return HandOver(
             object=_copy_scene_ref(call.object),
-            receiver=call.receiver,
             final_target=(
                 None if call.final_target is None else call.final_target.snapshot()
             ),
@@ -563,7 +562,6 @@ class _CallTemplate:
     at_target_id: str | None = None
     on: SceneObjectRef | SceneAffordanceRef | None = None
     inside: SceneObjectRef | SceneAffordanceRef | None = None
-    receiver: str | None = None
     final_target_id: str | None = None
     articulation: SceneArticulationRef | None = None
     handle: SceneAffordanceRef | None = None
@@ -730,7 +728,6 @@ def _instantiate_call(
             selections.append(selection)
         call = HandOver(
             object=_copy_scene_ref(template.object),
-            receiver=template.receiver,
             final_target=final_target,
             resources=resources,
         )
@@ -1493,7 +1490,6 @@ class ExpertProgramCompiler:
                 kind="hand_over",
                 source_path=path,
                 object=object_ref,
-                receiver=cfg.receiver,
                 final_target_id=final_target_id,
                 resources=tuple(sorted(cfg.resources.items())),
             )

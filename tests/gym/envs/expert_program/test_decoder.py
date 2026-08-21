@@ -143,7 +143,7 @@ def _invoke(call: dict[str, object]) -> dict[str, object]:
         {
             "kind": "hand_over",
             "object": "cube",
-            "receiver": "right",
+            "resources": {"destination": "right"},
             "final_target": {"kind": "target_ref", "target": "drop_pose"},
         },
         {
@@ -225,7 +225,7 @@ def test_decoder_supports_every_version_one_semantic_call() -> None:
                 {
                     "kind": "hand_over",
                     "object": "cube",
-                    "receiver": "right_actor",
+                    "resources": {"destination": "right_actor"},
                     "final_target": {
                         "kind": "target_ref",
                         "target": "drop_pose",
