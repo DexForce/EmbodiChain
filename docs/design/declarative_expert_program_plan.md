@@ -1,13 +1,15 @@
 # Declarative Expert Programs and Unified Semantic Skill Runtime
 
-- Status: implementation in progress; Phase 0 and PR1 complete, and PR2A,
-  PR2B, and PR2C implemented on stacked feature branches
-- Baseline: `main@bcccb787e8f9165e9c8acf6f39f165ba6ac752a4`
-- Last updated: 2026-08-11
+- Status: implementation in progress; Phase 0, PR1, PR2A, and PR2B are
+  complete on `main`, and PR2C is implemented on this feature branch
+- Baseline: `main@dbc6553f11d23a5ab738282fbcde1a7214fca783`
+- Last updated: 2026-08-19
 - Related issues: [#471](https://github.com/DexForce/EmbodiChain/issues/471),
   [#474](https://github.com/DexForce/EmbodiChain/issues/474)
 - Related implementation:
-  [#475](https://github.com/DexForce/EmbodiChain/pull/475)
+  [#475](https://github.com/DexForce/EmbodiChain/pull/475),
+  [#517](https://github.com/DexForce/EmbodiChain/pull/517),
+  [#487](https://github.com/DexForce/EmbodiChain/pull/487)
 
 ## 1. Executive summary
 
@@ -91,12 +93,12 @@ sessions, or verifiers.
 
 ## 4. Baseline on current `main`
 
-This plan is updated against committed `main@e445133c` after PR #475. The
-implementation series is stacked from that baseline: PR1 is complete on
-`refactor/atomic-actions-phase0`, PR2A is implemented by
-`feat/atomic-action-pr2a-scene-registry`, and PR2B is implemented by
-`feat/atomic-action-pr2b-robot-skill-profile`. These status statements do not
-imply that the stacked changes have landed on `main`.
+This plan is updated against committed `main@dbc6553f`. PR #517 simplified the
+atomic-action core, PR #487 landed the complete Phase 1 foundation, and PR #523
+simplified that foundation without changing its contracts. The scene registry
+and robot skill profile APIs are available, but official task environments have
+not adopted them yet; that rollout starts only after the semantic compiler and
+runtime exist.
 
 | Capability | Current main | Design consequence |
 |---|---|---|
@@ -105,8 +107,10 @@ imply that the stacked changes have landed on `main`.
 | Closed-loop `ExecutionRunner` and simulator ports (#449) | Available | `SkillRuntime` wraps/reuses the runner rather than scheduling commands itself. |
 | Dynamic scene recovery and `DynamicCollisionMode` (#450) | Available | Profiles select precise collision semantics and fail early when required capabilities are unavailable. |
 | Refined planning architecture (#475) | `MotionGenerator.generate()` is the single planning facade; each `ActionPlan` owns one trajectory and one recovery boundary; named `TrajectorySegment`s are metadata | Do not reintroduce `TrajectoryBuilder`, `MotionPlanningAdapter`, or trajectory-segment recovery. |
-| Environment cadence through `BaseEnv.step_dt` (#472) | Available | Expert configuration does not expose a separate control period. |
+| Environment cadence through `BaseEnv.step_dt` (#472) | Available; planner and action trajectories now require explicit timing | Expert configuration, `MotionPolicy`, and the engine do not own a fallback period. Environment integrations put `BaseEnv.step_dt` on `PlanningContext` only for action-owned interpolation. |
 | Adaptive dynamic-object settling (#470) | Reset/event implementation exists | Extract a reusable monitor; demo post-policies must advance through `env.step()`. |
+| Authoritative scene registry (#487) | Foundation available; official environments not migrated | Reuse it from the semantic compiler and opt in task scenes explicitly. |
+| Declarative robot skill profiles (#487) | Foundation available; official profiles not yet installed | Bind reusable embodiment profiles through the semantic integration layer; put optional backend compatibility in `SkillPolicyPreset.required_planner`, not `MotionPolicy`. |
 | Repeated cube pick/place demo | Manually constructs invocations and transform math | First configuration-only vertical slice. |
 | Open Drawer task (#473) | Manually builds approach, grasp, pull, and command trajectories | Evidence that the semantic layer needs articulation/link/affordance references and a reusable articulation skill. |
 | Action Bank | Configuration plus task-specific Python node/edge functions | Keep only as a compatibility path while semantic coverage is built. |
@@ -119,27 +123,16 @@ hard break: the project will not provide a compatibility adapter or deprecation
 window for that former extension contract. Custom actions must migrate to
 `_plan()` so framework-owned scene binding cannot be bypassed.
 
-The remaining #474 prerequisites on `main` are:
+Phase 1 closes the core identity, registry-backed collision integration, and
+embodiment-owned capability/profile prerequisites. The remaining #474 work is
+adoption and semantic orchestration:
 
-- scene pose, semantics, affordance, and collision registration still have
-  multiple sources of truth;
 - ordinary callers still see a large low-level public surface and must perform
   semantic transform and verifier plumbing;
-- robot capability declarations, resource selection, semantic commands, and
-  stable policies do not yet have an embodiment-owned source of truth;
-- dynamic-obstacle validation is planner-local; provider collision entity IDs
-  and planner-declared names are not yet fully cross-validated at integration
-  construction time;
-- `MotionPolicy` still exposes implementation-level tuning that should be
-  hidden behind semantic presets for ordinary users.
-
-PR1 closes the snapshot-grounding and stable-identity bridge. PR2A closes the
-first and third gaps for registry-backed integrations by introducing one
-authoritative registration boundary, a registry-derived scene provider, and
-construction-time collision-world validation. PR2B closes the robot-profile
-gap on its stacked branch with generic resources, deterministic binding,
-profile-owned commands, and named policy presets. The semantic facade remains
-later-phase work.
+- official environments do not yet provide authoritative registry population;
+- official robot configurations do not yet install reusable skill profiles;
+- named presets are not yet selected by a semantic facade/runtime; and
+- effect monitoring and the configuration/demo path remain later-phase work.
 
 One #474 finding has changed since its review branch: the ambiguous
 `collision_check` switch has been replaced by `DynamicCollisionMode.OFF`,
@@ -235,7 +228,7 @@ callers.
 
 #### Core/advanced layer
 
-The current `ActionGoal`, `ActionInvocation`, generic endpoint
+The current action-owned goal dataclasses, `ActionInvocation`, generic endpoint
 `ActionBinding`, policies, `PlanningContext`, `ActionPlan`,
 `ExecutionSession`, `ExecutionRunner`, and provider protocols remain available
 for framework authors and unusual integrations. `ActionPlan.commands` is the
@@ -416,7 +409,8 @@ an `arm + tool` schema. It contains a generic resource DAG:
   embodiment data owned by generic profile IDs selected by each endpoint
   adapter; only the current core bridge lowers applicable profiles to robot
   control-part keys;
-- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy;
+- versioned `SkillPolicyPreset` values own motion, recovery, and runner policy,
+  plus an optional required-planner compatibility constraint;
 - per-skill defaults map every skill-local slot to one resource ID.
 
 Resource and endpoint declarations are owned snapshots. A custom endpoint with
@@ -487,14 +481,17 @@ Version 1 should provide first-class calls for:
 
 - `Pick(object, grasp?, resources?)`;
 - `Place(object, pose?|on?|in?, resources?)`;
-- `HandOver(object, receiver?, final_target?, resources?)`;
+- `HandOver(object, final_target?, resources?)`;
 - a registered semantic call for shared extensions.
 
 `resources`, when present, is a mapping from the selected skill's local slot
 IDs to profile resource IDs (for example, `{"primary": "left_actor"}` or
 `{"body": "mobile_base"}`). It is an explicit ambiguity override, not a
 fixed arm/tool field. Ordinary calls omit it and use unique or profile-default
-resolution.
+resolution. Within one analyzed workflow, an omitted `Place.primary` or
+`HandOver.source` inherits the known resource holding that object. Explicit
+consumer selections remain authoritative constraints and fail if they conflict
+with the known holder; inference never crosses a registered-call boundary.
 
 `Place` consumes verified held-object state. The compiler computes the release
 EEF pose from the requested object-space target and the verified
@@ -720,7 +717,15 @@ normally, then resume with a fresh observation.
 ### 9.2 Timing
 
 `BaseEnv.step_dt` is the authoritative control cadence. Semantic task
-configuration does not expose `control_dt`.
+configuration, `MotionPolicy`, and `AtomicActionEngine` do not expose or own a
+fallback `control_dt`. Environment integrations copy `BaseEnv.step_dt` into
+`PlanningContext.control_dt` when an action performs deterministic interpolation.
+
+Timing is a strict producer contract. A planner result with positions includes
+per-waypoint `dt` and derives its per-environment `duration`; an atomic action
+passes a complete `TimedTrajectory` to `build_plan()`. Missing or inconsistent
+timing is rejected at construction. No layer repairs an untimed planner result
+or raw action position tensor with a default period.
 
 Version 1 should require every emitted
 `RuntimeCommandFrame.hold_duration` to be representable by an integer number
@@ -842,22 +847,23 @@ approach, gripper close, pull trajectory, and command assembly.
 
 The integration model should therefore support articulation, link, and
 affordance references from the beginning, while implementation remains phased.
-A reusable semantic call can be shaped as:
+A reusable semantic call should reuse the existing slide primitive:
 
 ```text
-OperateArticulation(
-  articulation=drawer,
-  affordance=handle,
-  target={joint_position or semantic state},
-  operation=pull,
+Slide(
+  target=drawer_handle,
+  direction=pull,
+  translation_distance=0.15,
 )
 ```
 
-Its compiler selects an affordance pose, resolves one participant resource and
-its required motion/interaction endpoints, builds the approach and constrained
-operation, and installs an articulation effect monitor. Once implemented once
-in the shared layer, Open Drawer variants should differ only in
-scene/affordance data, target state, resource defaults, presets, and validators.
+Its compiler resolves the handle pose and ``SlideAffordance``, selects one
+participant resource and its required motion/grasp endpoints, then builds the
+approach, grasp, and axis-constrained pull. ``Slide`` remains motion-centric and
+open-loop; task-level articulation completion belongs to the application
+verifier or validator. Open Drawer variants should differ only in
+scene/affordance data, direction and distance options, resource defaults,
+presets, and validators.
 
 This is the precise meaning of "almost no action-layer code": task expansion is
 configuration-only when a compatible semantic capability already exists; new
@@ -920,8 +926,8 @@ Landed on `main` through #475:
   core check. Complete provider/planner cross-validation is deliberately owned
   by the authoritative `SceneRegistry` integration in Phase 1.
 
-Exit criteria are met on `main@e445133c`; this remains the foundation for the
-completed PR1 bridge. That bridge adds neither a legacy `plan()` adapter nor a
+Exit criteria were met by PR #475 and remain the foundation for the completed
+Phase 1 bridge. That bridge adds neither a legacy `plan()` adapter nor a
 pre-registry duplicate of the integration-level obstacle validator.
 
 ### PR1: core snapshot and identity bridge (complete)
@@ -964,11 +970,11 @@ cross-source uniqueness or collision validation, a `RobotSkillProfile`, or
 semantic presets. It does not require official task environments to migrate;
 they remain on the compatibility path until a later opt-in vertical slice.
 
-Exit criteria are met on `refactor/atomic-actions-phase0`: canonical object
-grounding never mixes snapshot and live poses; explicit missing IDs fail;
-dependency metadata matches the poses actually consumed; stable-identity merges
-are deterministic; and existing direct-core callers remain usable only through
-the documented deprecated fallbacks.
+Exit criteria are met on `main` through PR #487: canonical object grounding
+never mixes snapshot and live poses; explicit missing IDs fail; dependency
+metadata matches the poses actually consumed; stable-identity merges are
+deterministic; and existing direct-core callers remain usable only through the
+documented deprecated fallbacks.
 
 ### Phase 1: unified integration data
 
@@ -976,7 +982,7 @@ Phase 1 is implemented as three focused follow-up PRs. PR2A and PR2B branch
 from the PR1 foundation; PR2C follows PR2B and joins PR2A before the semantic
 facade/compiler work.
 
-#### PR2A: SceneRegistry (implemented on the feature branch)
+#### PR2A: SceneRegistry (landed in PR #487)
 
 Deliverables:
 
@@ -1015,7 +1021,7 @@ dynamic registry/provider/planner subsets are validated before execution, the
 collision-world batch mode agrees, and cuRobo uses canonical mapping keys end
 to end as logical source IDs (and as physical keys for cuboid/mesh worlds).
 
-#### PR2B: RobotSkillProfile (implemented on the feature branch)
+#### PR2B: RobotSkillProfile (landed in PR #487)
 
 Deliverables:
 
@@ -1041,9 +1047,9 @@ new endpoint kind still needs one shared adapter and a compatible shared atomic
 skill before the current core can execute it; adding tasks that reuse that
 capability then remains configuration-only.
 
-PR2B may proceed in parallel with PR2A after the PR1 bridge. Neither follow-up
-requires official task migration; the repeated-cube vertical slice opts in only
-after the registry, profile, compiler, runtime, and demo bridge are available.
+PR2A and PR2B landed together through PR #487. That foundation does not migrate
+official tasks; the repeated-cube vertical slice opts in only after the
+compiler, runtime, and demo bridge are available.
 
 #### PR2C: generic runtime endpoints (implemented on the feature branch)
 

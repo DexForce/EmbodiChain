@@ -27,6 +27,7 @@ from typing import ClassVar, TypeAlias
 
 import torch
 
+from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.sim.atomic_actions import (
     DisjointResourceSlots,
     DisjointSlotEndpoints,
@@ -285,25 +286,13 @@ class SemanticPose:
             position = self._position.unsqueeze(0)
         else:
             position = self._position
-        w, x, y, z = quaternion.unbind(dim=-1)
-        output = torch.zeros(
-            quaternion.shape[0],
-            4,
+        output = torch.eye(
             4,
             dtype=quaternion.dtype,
             device=quaternion.device,
-        )
-        output[:, 0, 0] = 1.0 - 2.0 * (y * y + z * z)
-        output[:, 0, 1] = 2.0 * (x * y - z * w)
-        output[:, 0, 2] = 2.0 * (x * z + y * w)
-        output[:, 1, 0] = 2.0 * (x * y + z * w)
-        output[:, 1, 1] = 1.0 - 2.0 * (x * x + z * z)
-        output[:, 1, 2] = 2.0 * (y * z - x * w)
-        output[:, 2, 0] = 2.0 * (x * z - y * w)
-        output[:, 2, 1] = 2.0 * (y * z + x * w)
-        output[:, 2, 2] = 1.0 - 2.0 * (x * x + y * y)
+        ).repeat(quaternion.shape[0], 1, 1)
+        output[:, :3, :3] = matrix_from_quat(quaternion)
         output[:, :3, 3] = position
-        output[:, 3, 3] = 1.0
         return output[0] if was_unbatched else output
 
 
@@ -411,32 +400,19 @@ class HandOver(SemanticCallSpec):
 
     Args:
         object: Authoritative held-object reference.
-        receiver: Optional destination resource ID. It is equivalent to the
-            ``destination`` resource slot and must agree with an explicit map.
         final_target: Optional final object-space delivery pose.
-        resources: Optional skill-local resource overrides.
+        resources: Optional ``source`` and ``destination`` resource overrides.
     """
 
     call_kind: ClassVar[str] = "hand_over"
 
     object: SceneObjectRef
-    receiver: str | None = None
     final_target: SemanticPose | None = None
 
     def __post_init__(self) -> None:
         SemanticCallSpec.__post_init__(self)
         if type(self.object) is not SceneObjectRef:
             raise TypeError("HandOver.object must be a SceneObjectRef.")
-        resources = dict(self.resources)
-        if self.receiver is not None:
-            _validate_identifier(self.receiver, field_name="HandOver.receiver")
-            selected = resources.get("destination")
-            if selected is not None and selected != self.receiver:
-                raise ValueError(
-                    "HandOver.receiver conflicts with resources['destination']."
-                )
-            resources["destination"] = self.receiver
-        object.__setattr__(self, "resources", _snapshot_resources(resources))
         if self.final_target is not None:
             if type(self.final_target) is not SemanticPose:
                 raise TypeError("HandOver.final_target must be a SemanticPose or None.")
@@ -588,8 +564,6 @@ class SemanticCallDescriptor:
     Args:
         call_id: Stable semantic call identifier.
         spec_type: Exact public call value type.
-        skill_id: Atomic skill identifier installed separately on an engine.
-        binding_contract: Robot-independent resource requirements.
         schema_version: Explicit configuration payload schema version.
         target_descriptor: Exact atomic goal/options/resource contract. It is
             inferred and non-overridable for curated calls and required for
@@ -598,26 +572,17 @@ class SemanticCallDescriptor:
 
     call_id: str
     spec_type: type[SemanticCallSpec]
-    skill_id: str
-    binding_contract: SkillBindingContract
     schema_version: int = 1
     target_descriptor: SkillDescriptor | None = None
 
     def __post_init__(self) -> None:
         _validate_identifier(self.call_id, field_name="SemanticCallDescriptor.call_id")
-        _validate_identifier(
-            self.skill_id, field_name="SemanticCallDescriptor.skill_id"
-        )
         if self.spec_type not in (Pick, Place, HandOver, RegisteredSemanticCall):
             raise TypeError(
                 "spec_type must be exactly Pick, Place, HandOver, or "
                 "RegisteredSemanticCall; extensions use the registered payload "
                 "contract rather than executable call subclasses."
             )
-        _validate_static_binding_contract(
-            self.binding_contract,
-            field_name="SemanticCallDescriptor.binding_contract",
-        )
         if not isinstance(self.schema_version, int) or isinstance(
             self.schema_version, bool
         ):
@@ -638,12 +603,8 @@ class SemanticCallDescriptor:
         if self.spec_type is not RegisteredSemanticCall:
             expected = _builtin_call_target(self.spec_type)
             if (
-                self.skill_id != expected.skill_id
-                or (self.binding_contract != expected.binding_contract)
-                or (
-                    self.target_descriptor is not None
-                    and self.target_descriptor != expected
-                )
+                self.target_descriptor is not None
+                and self.target_descriptor != expected
             ):
                 raise ValueError(
                     f"Built-in semantic call {self.call_id!r} must target skill "
@@ -661,14 +622,12 @@ class SemanticCallDescriptor:
                 field_name="SemanticCallDescriptor.target_descriptor",
             )
             if (
-                self.target_descriptor.skill_id != self.skill_id
-                or self.target_descriptor.binding_contract != self.binding_contract
-                or not self.target_descriptor.agent_visible
+                not self.target_descriptor.agent_visible
                 or self.target_descriptor.binding_contract is None
             ):
                 raise ValueError(
-                    "Registered target_descriptor must be agent-visible and match "
-                    "skill_id plus binding_contract exactly."
+                    "Registered target_descriptor must be agent-visible and "
+                    "declare a binding contract."
                 )
         if self.spec_type is RegisteredSemanticCall and self.call_id in {
             Pick.call_kind,
@@ -681,6 +640,20 @@ class SemanticCallDescriptor:
             )
         if self.spec_type is RegisteredSemanticCall:
             _validate_registered_call_id(self.call_id)
+
+    @property
+    def skill_id(self) -> str:
+        """Return the atomic skill ID from the canonical target descriptor."""
+        assert self.target_descriptor is not None
+        return self.target_descriptor.skill_id
+
+    @property
+    def binding_contract(self) -> SkillBindingContract:
+        """Return the resource contract from the canonical target descriptor."""
+        assert self.target_descriptor is not None
+        contract = self.target_descriptor.binding_contract
+        assert contract is not None
+        return contract
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -799,8 +772,6 @@ def builtin_semantic_call_catalog() -> SemanticCallCatalog:
         SemanticCallDescriptor(
             call_id=spec_type.call_kind,
             spec_type=spec_type,
-            skill_id=_builtin_call_target(spec_type).skill_id,
-            binding_contract=_builtin_call_target(spec_type).binding_contract,
         )
         for spec_type in (Pick, Place, HandOver)
     )

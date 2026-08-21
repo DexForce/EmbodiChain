@@ -189,9 +189,6 @@ class EndpointBinding:
     resource_id: str
     adapter_id: str
     target: RuntimeEndpointTarget
-    task_state_key: str | None = None
-    """Symbolic task-state key; direct-core defaults to ``target.target_id``."""
-
     capabilities: frozenset[str] = frozenset()
     commands: Mapping[str, ControlCommand] = field(default_factory=dict)
     claim_tokens: frozenset[str] = frozenset()
@@ -238,14 +235,6 @@ class EndpointBinding:
                 "fingerprint."
             )
         object.__setattr__(self, "target", target)
-        task_state_key = (
-            target.target_id if self.task_state_key is None else self.task_state_key
-        )
-        _validate_identifier(
-            task_state_key,
-            field_name="EndpointBinding.task_state_key",
-        )
-        object.__setattr__(self, "task_state_key", task_state_key)
         object.__setattr__(
             self,
             "capabilities",
@@ -321,7 +310,7 @@ class EndpointBinding:
         self,
         name: str,
         *,
-        n_envs: int,
+        num_envs: int,
         device: torch.device | str,
         dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
@@ -336,7 +325,7 @@ class EndpointBinding:
                 "JointPositionCommand."
             )
         return command.resolve(
-            n_envs=n_envs,
+            num_envs=num_envs,
             control_dof=len(target.joint_ids),
             device=device,
             dtype=dtype,
@@ -355,7 +344,6 @@ class EndpointBinding:
             resource_id=self.resource_id,
             adapter_id=self.adapter_id,
             target=self.target,
-            task_state_key=self.task_state_key,
             capabilities=self.capabilities,
             commands=merged,
             claim_tokens=self.claim_tokens,
@@ -370,7 +358,6 @@ class EndpointBinding:
             resource_id=self.resource_id,
             adapter_id=self.adapter_id,
             target=self.target,
-            task_state_key=self.task_state_key,
             capabilities=self.capabilities,
             commands=self.commands,
             claim_tokens=self.claim_tokens,

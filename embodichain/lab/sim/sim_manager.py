@@ -213,6 +213,16 @@ class _WindowRecordState:
     loop_handle: object | None = None
 
 
+@dataclass(frozen=True)
+class _AxisMarkerGroup:
+    """Native axis handles and their backend-neutral display dimensions."""
+
+    handles: tuple[MeshObject, ...]
+    arena_index: int
+    axis_length: float
+    axis_radius: float
+
+
 class SimulationManager:
     r"""Global Embodied AI simulation manager.
 
@@ -245,6 +255,7 @@ class SimulationManager:
         instance = super(SimulationManager, cls).__new__(cls)
         # Store sim_config in the instance for use in __init__ or elsewhere
         instance.sim_config = sim_config
+        instance._is_constructed = False
         cls._instances[n_instance] = instance
         return instance
 
@@ -326,7 +337,7 @@ class SimulationManager:
         self._gizmos: Dict[str, object] = dict()  # Store active gizmos
 
         # marker management
-        self._markers: Dict[str, MeshObject] = dict()
+        self._markers: dict[str, _AxisMarkerGroup] = {}
 
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._constraints: Dict[str, RigidConstraint] = dict()
@@ -367,6 +378,8 @@ class SimulationManager:
 
         if sim_config.headless is False:
             self._window = self._world.get_windows()
+
+        self._is_constructed = True
 
     @classmethod
     def get_instance(cls, instance_id: int = 0) -> SimulationManager:
@@ -2369,7 +2382,12 @@ class SimulationManager:
         #     # Create point markers
         #     pass
 
-        self._markers[name] = (marker_handles, cfg.arena_index)
+        self._markers[name] = _AxisMarkerGroup(
+            handles=tuple(marker_handles),
+            arena_index=cfg.arena_index,
+            axis_length=cfg.axis_len,
+            axis_radius=cfg.axis_size,
+        )
 
         if self.is_physics_manually_update:
             self.update(step=1)
@@ -2388,9 +2406,9 @@ class SimulationManager:
             logger.log_warning(f"Marker {name} not found.")
             return False
         try:
-            env = self.get_env(self._markers[name][1])
-            marker_handles, arena_index = self._markers[name]
-            for marker_handle in marker_handles:
+            marker_group = self._markers[name]
+            env = self.get_env(marker_group.arena_index)
+            for marker_handle in marker_group.handles:
                 if marker_handle is not None:
                     env.remove_actor(marker_handle.get_name())
             self._markers.pop(name)
@@ -2398,6 +2416,25 @@ class SimulationManager:
         except Exception as e:
             logger.log_warning(f"Failed to remove marker {name}: {str(e)}")
             return False
+
+    def get_axis_marker_items(
+        self,
+    ) -> tuple[tuple[str, tuple[MeshObject, ...], float, float], ...]:
+        """Return active axes for backend-neutral visualization.
+
+        Returns:
+            Tuples containing the marker name, native handles, axis length, and
+            axis radius for each active marker group.
+        """
+        return tuple(
+            (
+                name,
+                group.handles,
+                group.axis_length,
+                group.axis_radius,
+            )
+            for name, group in self._markers.items()
+        )
 
     def add_custom_window_control(self, controls: list[ObjectManipulator]) -> None:
         """Add one or more custom window input controls.
@@ -3082,6 +3119,12 @@ class SimulationManager:
         if self.is_window_recording():
             self.stop_window_record()
         self.wait_window_record_saves()
+
+        # Stop the render loop before releasing scene resources. Vulkan window
+        # presentation may otherwise continue acquiring swapchain images while
+        # Env::Clean tears down render objects used by the in-flight frame.
+        if getattr(self, "is_window_opened", False):
+            self.close_window()
 
         import sys, gc
 

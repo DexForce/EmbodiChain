@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import Any, ClassVar, Generic, TYPE_CHECKING
 
 import torch
@@ -158,6 +159,8 @@ class SkillDescriptor:
     goal_type: type[Any] | tuple[type[Any], ...]
     options_type: type[ActionOptions]
     agent_visible: bool = True
+    open_loop: bool = False
+    """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by the semantic skill layer."""
 
@@ -175,6 +178,8 @@ class SkillDescriptor:
             raise TypeError(
                 "SkillDescriptor.options_type must be an ActionOptions subclass."
             )
+        if not isinstance(self.open_loop, bool):
+            raise TypeError("SkillDescriptor.open_loop must be a bool.")
         if self.binding_contract is not None:
             if not isinstance(self.binding_contract, SkillBindingContract):
                 raise TypeError(
@@ -202,6 +207,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
 
     agent_visible: ClassVar[bool] = True
     """Whether an Action Agent should expose this skill by default."""
+
+    open_loop: ClassVar[bool] = False
+    """Whether the skill intentionally declares no verified physical effect."""
 
     binding_contract: ClassVar[SkillBindingContract | None] = None
     """Explicit robot-independent requirements for semantic discovery.
@@ -258,7 +266,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         if self._planning_services is None:
             raise RuntimeError(
                 f"Atomic action {self.skill_id!r} is not bound to an "
-                "AtomicActionEngine. Register it or call engine.plan_action()."
+                "AtomicActionEngine. Register it with engine.register()."
             )
         return self._planning_services
 
@@ -277,6 +285,16 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         """Return the concrete runtime device associated with the engine."""
         return self.planning_services.device
 
+    @cached_property
+    def num_envs(self) -> int:
+        """Number of environments owned by the bound robot."""
+        return int(self.robot.get_qpos().shape[0])
+
+    @cached_property
+    def robot_dof(self) -> int:
+        """Number of full-robot degrees of freedom."""
+        return int(self.robot.dof)
+
     def _bind(self, services: ActionPlanningServices) -> None:
         """Bind engine-owned planning services exactly once."""
         if self._planning_services is services:
@@ -287,14 +305,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
                 "AtomicActionEngine."
             )
         self._planning_services = services
-        try:
-            self._on_bind()
-        except Exception:
-            self._planning_services = None
-            raise
-
-    def _on_bind(self) -> None:
-        """Initialize implementation state that depends on engine resources."""
 
     @classmethod
     def descriptor(cls) -> SkillDescriptor:
@@ -304,6 +314,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             goal_type=cls.GoalType,
             options_type=cls.OptionsType,
             agent_visible=cls.agent_visible,
+            open_loop=cls.open_loop,
             binding_contract=cls.__dict__.get("binding_contract"),
         )
 
@@ -354,13 +365,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise TypeError(
                 f"Skill {self.skill_id!r} expects options "
                 f"{self.OptionsType.__name__}, got {type(options).__name__}."
-            )
-        required_planner = invocation.motion_policy.planner
-        configured_planner_name = self.planning_services.planner_name
-        if required_planner is not None and required_planner != configured_planner_name:
-            raise ValueError(
-                f"Motion policy requires planner {required_planner!r}, but this "
-                f"action uses {configured_planner_name!r}."
             )
         return ResolvedActionRequest(
             skill_id=invocation.skill_id,
@@ -501,7 +505,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         context: PlanningContext,
         *,
         success: bool | torch.Tensor,
-        trajectory: TimedTrajectory | torch.Tensor,
+        trajectory: TimedTrajectory,
         expected_effects: StateDelta | None = None,
         effect_verification: EffectVerificationRequirement | None = None,
         replannable: bool = True,
@@ -515,7 +519,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             request: Resolved invocation snapshot being planned.
             context: Planning input used for the plan.
             success: Per-environment planning success or scalar planner result.
-            trajectory: Full-robot timed trajectory or position tensor.
+            trajectory: Full-robot trajectory with explicit timing.
             expected_effects: Symbolic effects to verify after execution.
             effect_verification: Optional explicit physical-effect boundary.
                 Use this when verification is required without a symbolic task-
@@ -534,24 +538,19 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         Returns:
             Side-effect-free action plan.
         """
-        self.require_goal(request)
         success_mask = normalize_success_mask(
             success,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             name="Planning success",
         )
 
-        if isinstance(trajectory, torch.Tensor):
-            timed = TimedTrajectory.from_positions(
-                trajectory,
-                env_ids=context.env_ids,
-                control_dt=request.motion_policy.control_dt,
+        if not isinstance(trajectory, TimedTrajectory):
+            raise TypeError(
+                "trajectory must be a TimedTrajectory with explicit dt; atomic "
+                "actions may not return untimed position tensors."
             )
-        elif isinstance(trajectory, TimedTrajectory):
-            timed = trajectory
-        else:
-            raise TypeError("trajectory must be TimedTrajectory or torch.Tensor.")
+        timed = trajectory
         if timed.batch_size != context.batch_size:
             raise ValueError("Trajectory and planning context batch sizes must match.")
         if timed.robot_dof != context.robot.robot_dof:
@@ -624,7 +623,6 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         Returns:
             Side-effect-free action plan.
         """
-        self.require_goal(request)
         if not isinstance(commands, TimedCommandSequence):
             raise TypeError("commands must be a TimedCommandSequence.")
         if commands.batch_size != context.batch_size:
@@ -633,23 +631,20 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             )
         if not torch.equal(commands.env_ids, context.env_ids):
             raise ValueError("Command sequence env_ids must match the context.")
-        commands = self._authorize_command_targets(request, commands)
         success_mask = normalize_success_mask(
             success,
-            n_envs=context.batch_size,
+            num_envs=context.batch_size,
             device=self.device,
             name="Planning success",
         )
-        masked_commands = TimedCommandSequence(
-            frames=tuple(
-                frame.with_active_mask(frame.active_mask & success_mask)
-                for frame in commands.frames
-            ),
-            env_ids=commands.env_ids,
+        commands = self._authorize_command_targets(
+            request,
+            commands,
+            active_mask=success_mask,
         )
         segments = self._build_segments(
             segment_lengths,
-            frame_count=masked_commands.frame_count,
+            frame_count=commands.frame_count,
         )
         if diagnostics is None:
             diagnostics = PlannerDiagnostics(
@@ -658,7 +653,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         return ActionPlan(
             skill_id=self.skill_id,
             plan_success=success_mask,
-            commands=masked_commands,
+            commands=commands,
             recovery_policy=request.recovery_policy,
             planned_scene_version=context.scene.version,
             planned_collision_world_revision=(
@@ -686,6 +681,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     def _authorize_command_targets(
         request: ResolvedActionRequest[GoalT, OptionsT],
         commands: TimedCommandSequence,
+        *,
+        active_mask: torch.Tensor | None = None,
     ) -> TimedCommandSequence:
         """Bind every emitted command to an endpoint authorized by the request.
 
@@ -693,7 +690,8 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
         they cannot synthesize a destination outside the resolved resource
         binding. The returned sequence replaces caller-provided target metadata
         with the engine-owned binding snapshot, so transports never receive
-        altered joint claims or other target fields.
+        altered joint claims or other target fields. When ``active_mask`` is
+        provided, authorization and failed-row masking share the same rebuild.
         """
         authorized: dict[tuple[str, str], list[EndpointBinding]] = {}
         for endpoint in request.binding.endpoints:
@@ -772,7 +770,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             frames.append(
                 RuntimeCommandFrame(
                     commands=tuple(endpoint_commands),
-                    active_mask=frame.active_mask,
+                    active_mask=(
+                        frame.active_mask
+                        if active_mask is None
+                        else frame.active_mask & active_mask
+                    ),
                     env_ids=frame.env_ids,
                     hold_duration=frame.hold_duration,
                 )

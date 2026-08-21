@@ -42,7 +42,6 @@ from embodichain.lab.sim.skills.calls import (
     builtin_semantic_call_catalog,
 )
 from embodichain.lab.sim.skills.integration import (
-    BoundSemanticCall,
     SceneEntityManifest,
     SceneManifest,
     SemanticIntegrationManifest,
@@ -59,6 +58,7 @@ from embodichain.lab.sim.skills.scene import (
     GRASP_AFFORDANCE_CAPABILITY,
     PLACE_ON_AFFORDANCE_CAPABILITY,
     SceneAffordanceRef,
+    SceneCollisionWorldMode,
     SceneEntityRegistration,
     SceneObjectRef,
     SceneRegistry,
@@ -341,6 +341,20 @@ def test_scene_manifest_detects_grounding_metadata_drift() -> None:
     assert error.value.diagnostic.code == "scene_manifest_mismatch"
 
 
+def test_scene_manifest_detects_collision_world_mode_drift() -> None:
+    manifest = SceneManifest.from_registry(
+        SceneRegistry((), collision_world_mode=SceneCollisionWorldMode.SHARED)
+    )
+
+    with pytest.raises(SemanticValidationError) as error:
+        manifest.validate_registry(
+            SceneRegistry((), collision_world_mode=SceneCollisionWorldMode.PER_ENV)
+        )
+
+    assert error.value.diagnostic.code == "scene_manifest_mismatch"
+    assert error.value.diagnostic.rendered_path.endswith("collision_world_mode")
+
+
 def test_scene_manifest_rejects_impossible_typed_topology() -> None:
     affordance = SceneAffordanceRef("self")
 
@@ -467,8 +481,6 @@ def test_registered_payload_scene_refs_are_statically_resolved() -> None:
     extension = SemanticCallDescriptor(
         call_id="vendor.inspect",
         spec_type=RegisteredSemanticCall,
-        skill_id=pick.skill_id,
-        binding_contract=pick.binding_contract,
         target_descriptor=pick.target_descriptor,
     )
     integration = SemanticIntegrationManifest(
@@ -492,7 +504,7 @@ def test_registered_payload_scene_refs_are_statically_resolved() -> None:
     assert provider.calls == 0
 
 
-def test_bound_semantic_call_is_factory_owned_by_installed_profile() -> None:
+def test_bound_semantic_call_retains_installed_profile_ownership() -> None:
     registry, _ = _scene_registry(with_default=True)
     integration = _semantic_integration(registry)
     engine = _engine_for_integration(integration)
@@ -502,8 +514,6 @@ def test_bound_semantic_call_is_factory_owned_by_installed_profile() -> None:
 
     assert result.robot_profile is bound_integration.robot_profile
     assert result.binding.action_binding.owner_id == engine.binding_owner_id
-    with pytest.raises(TypeError, match="created by"):
-        BoundSemanticCall()
 
 
 def test_bound_semantic_integration_rejects_engine_profile_rebind() -> None:
