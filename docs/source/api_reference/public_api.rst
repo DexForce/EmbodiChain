@@ -856,6 +856,63 @@ embodichain.lab.sim.sim_manager
    CONVEX_DECOMP_DIR
    REACHABLE_XPOS_DIR
 
+embodichain.lab.sim.skills.calls
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.calls
+
+.. autosummary::
+
+   DeclarativeValue
+   HandOver
+   Pick
+   Place
+   PlaceRelationTarget
+   RegisteredSemanticCall
+   SemanticCallCatalog
+   SemanticCallDescriptor
+   SemanticCallSpec
+   SemanticPose
+   builtin_semantic_call_catalog
+
+embodichain.lab.sim.skills.compiler
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.compiler
+
+.. autosummary::
+
+   AnalyzedSemanticCall
+   GroundedSemanticCall
+   HandOverPoseProvider
+   HandOverPoseTargets
+   RelationTargetGrounder
+   RegisteredSemanticLowerer
+   SemanticEffectDependency
+   SemanticEffectKind
+   SemanticHandOverTarget
+   SemanticLowering
+   SemanticObjectTarget
+   SemanticRelationTarget
+   SemanticSkillCompiler
+   SemanticWorkflow
+
+embodichain.lab.sim.skills.integration
+--------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.integration
+
+.. autosummary::
+
+   BoundSemanticCall
+   LinkedSemanticCall
+   PathPart
+   SceneEntityManifest
+   SceneManifest
+   SemanticDiagnostic
+   SemanticIntegrationManifest
+   SemanticValidationError
+
 embodichain.lab.sim.skills.profiles
 -----------------------------------
 
@@ -881,6 +938,24 @@ embodichain.lab.sim.skills.profiles
    SkillPolicyPreset
    UnsupportedSkillError
 
+embodichain.lab.sim.skills.runtime
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.skills.runtime
+
+.. autosummary::
+
+   SemanticCallRecord
+   SemanticEffectVerifier
+   SemanticExecution
+   SemanticExecutionStatus
+   SemanticExecutionStep
+   SemanticSegmentResult
+   SemanticSkillRuntime
+   SemanticTask
+   SemanticTaskResult
+   SemanticTaskStatus
+
 embodichain.lab.sim.skills.scene
 --------------------------------
 
@@ -895,12 +970,18 @@ embodichain.lab.sim.skills.scene
    SceneCollisionWorldMode
    SceneDynamics
    SceneEntityRef
+   SceneEntityMetadata
    SceneEntityRegistration
    SceneEntityStateProvider
    SceneGeometryProvider
    SceneLinkRef
    SceneObjectRef
    SceneRegistry
+   AmbiguousSceneAffordanceError
+   GRASP_AFFORDANCE_CAPABILITY
+   PLACE_IN_AFFORDANCE_CAPABILITY
+   PLACE_ON_AFFORDANCE_CAPABILITY
+   UnsupportedSceneAffordanceError
 
 embodichain.lab.sim.solvers.neural_ik_solver
 --------------------------------------------

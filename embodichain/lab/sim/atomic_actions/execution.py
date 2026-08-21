@@ -194,6 +194,8 @@ class ExecutionSession:
         engine: AtomicActionEngine,
         invocations: tuple[ActionInvocation, ...],
         context: PlanningContext,
+        *,
+        eligible_mask: torch.Tensor | None = None,
     ) -> None:
         if not invocations:
             raise ValueError("ExecutionSession requires at least one invocation.")
@@ -218,16 +220,23 @@ class ExecutionSession:
         self._last_command_mask = torch.zeros(
             context.batch_size, dtype=torch.bool, device=context.robot.qpos.device
         )
-        self._eligible = torch.ones_like(self._last_command_mask)
+        self._eligible = (
+            torch.ones_like(self._last_command_mask)
+            if eligible_mask is None
+            else self._normalize_mask(eligible_mask, "eligible_mask")
+        )
         self._pending = self._eligible.clone()
         self._action_retries = torch.zeros(
             context.batch_size, dtype=torch.long, device=context.robot.qpos.device
         )
         self._replans = torch.zeros_like(self._action_retries)
         self._pending_effect: EffectVerificationRequest | None = None
-        self._status = ExecutionStatus.RUNNING
+        self._status = (
+            ExecutionStatus.RUNNING if self._eligible.any() else ExecutionStatus.FAILED
+        )
         self._queued_events: list[ExecutionEvent] = []
-        self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
+        if self._status is ExecutionStatus.RUNNING:
+            self._plan_current(context, ExecutionEventKind.ACTION_PLANNED)
 
     @property
     def status(self) -> ExecutionStatus:
@@ -982,8 +991,13 @@ class ExecutionSession:
         """Detect material motion of entities referenced by the action goal."""
         dependencies = plan.scene_dependencies
         changed = torch.zeros_like(self._eligible)
+        dependency_end = plan.scene_dependency_end_segment
         if (
             not dependencies
+            or (
+                dependency_end is not None
+                and self._waypoint_index >= plan.segment(dependency_end).stop
+            )
             or self._context.scene.version == self._planned_scene.version
         ):
             return changed
@@ -1042,6 +1056,8 @@ class ExecutionSession:
 
     def _normalize_mask(self, value: torch.Tensor, name: str) -> torch.Tensor:
         """Validate and copy a per-environment boolean mask."""
+        if not isinstance(value, torch.Tensor):
+            raise TypeError(f"{name} must be a torch.Tensor.")
         if value.dtype != torch.bool or value.shape != (self._context.batch_size,):
             raise ValueError(
                 f"{name} must be bool with shape ({self._context.batch_size},)."

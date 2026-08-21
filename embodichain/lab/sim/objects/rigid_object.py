@@ -502,12 +502,17 @@ class RigidObject(BatchEntity):
             """Helper function to get local pose on CPU."""
             if to_matrix:
                 pose = torch.as_tensor(
-                    [entity.get_local_pose() for entity in entities],
+                    np.array([entity.get_local_pose() for entity in entities]),
+                    dtype=torch.float32,
                 )
             else:
-                xyzs = torch.as_tensor([entity.get_location() for entity in entities])
+                xyzs = torch.as_tensor(
+                    np.array([entity.get_location() for entity in entities]),
+                    dtype=torch.float32,
+                )
                 quats = torch.as_tensor(
-                    [entity.get_rotation_quat() for entity in entities]
+                    np.array([entity.get_rotation_quat() for entity in entities]),
+                    dtype=torch.float32,
                 )
                 quats = convert_quat(quats, to="wxyz")
                 pose = torch.cat((xyzs, quats), dim=-1)
@@ -856,7 +861,9 @@ class RigidObject(BatchEntity):
             )
             inertias.append(inertia)
 
-        return torch.as_tensor(inertias, dtype=torch.float32, device=self.device)
+        return torch.as_tensor(
+            np.array(inertias), dtype=torch.float32, device=self.device
+        )
 
     def set_visual_material(
         self,
@@ -1074,7 +1081,7 @@ class RigidObject(BatchEntity):
         """
         ids = env_ids if env_ids is not None else range(self.num_instances)
         return torch.as_tensor(
-            [self._entities[id].get_body_scale() for id in ids],
+            np.array([self._entities[id].get_body_scale() for id in ids]),
             dtype=torch.float32,
             device=self.device,
         )

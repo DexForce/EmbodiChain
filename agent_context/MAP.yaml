@@ -541,6 +541,10 @@ topics:
       - resource graph
       - resource DAG
       - semantic skill catalog
+      - semantic skill compiler
+      - semantic call
+      - semantic workflow
+      - semantic integration manifest
       - capability binding
       - AtomicAction
       - ActionInvocation
@@ -627,6 +631,32 @@ topics:
       - ResolvedSkillBinding
       - SkillPolicyPreset
       - SkillPolicyPreset.required_planner
+      - SemanticCallSpec
+      - SemanticPose
+      - Pick
+      - Place
+      - HandOver
+      - RegisteredSemanticCall
+      - SemanticCallCatalog
+      - SceneManifest
+      - SemanticIntegrationManifest
+      - BoundSemanticIntegration
+      - SemanticSkillCompiler
+      - SemanticSkillRuntime
+      - SemanticTask
+      - SemanticExecution
+      - SemanticTaskResult
+      - SemanticWorkflow
+      - SemanticLowering
+      - GroundedSemanticCall
+      - RelationTargetGrounder
+      - HandOverPoseProvider
+      - SemanticDiagnostic
+      - SemanticValidationError
+      - affordance_capabilities
+      - default_affordances
+      - grounding_providers
+      - skill_catalog_revision
       - binding_contract
       - engine.skills
       - skill_profile
@@ -686,6 +716,7 @@ topics:
       - engine.plan
       - engine.compile
       - engine.start
+      - eligible_mask
     paths:
       - topics/atomic-actions/atomic-actions.md
     source_of_truth:
@@ -713,7 +744,12 @@ topics:
       - embodichain/lab/sim/atomic_actions/__init__.py
       - embodichain/lab/sim/skills/scene.py
       - embodichain/lab/sim/skills/profiles.py
+      - embodichain/lab/sim/skills/calls.py
+      - embodichain/lab/sim/skills/integration.py
+      - embodichain/lab/sim/skills/compiler.py
+      - embodichain/lab/sim/skills/runtime.py
       - embodichain/lab/sim/skills/__init__.py
+      - scripts/tutorials/semantic_skill/
     related_topics:
       - simulation-system
       - motion-planning

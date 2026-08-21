@@ -537,6 +537,27 @@ def test_action_options_do_not_contain_embodiment_resources(options: object) -> 
     assert not any(name.endswith("_qpos") for name in field_names)
 
 
+def test_pose_options_own_late_bound_relative_transforms() -> None:
+    relative_pose = torch.eye(4)
+    target = SceneEntityPose("target", relative_pose=relative_pose)
+    pick_options = PickUpOptions(downstream_object_target_poses=(target,))
+    handover_options = HandOverOptions(
+        middle_object_pose=target,
+        final_object_pose=target,
+    )
+
+    assert target.relative_pose is not None
+    target.relative_pose[0, 3] = 9.0
+
+    pick_target = pick_options.downstream_object_target_poses[0]
+    assert type(pick_target) is SceneEntityPose
+    assert pick_target.relative_pose is not None
+    assert pick_target.relative_pose[0, 3].item() == 0.0
+    assert type(handover_options.middle_object_pose) is SceneEntityPose
+    assert handover_options.middle_object_pose.relative_pose is not None
+    assert handover_options.middle_object_pose.relative_pose[0, 3].item() == 0.0
+
+
 def test_joint_position_goal_rejects_unsupported_target_type() -> None:
     with pytest.raises(TypeError, match="torch.Tensor or str"):
         JointPositionGoal(target=1.0)  # type: ignore[arg-type]
@@ -1084,6 +1105,7 @@ def test_pick_resolves_late_bound_scene_grasp_and_declares_dependency() -> None:
     assert held is not None
     assert torch.allclose(held.grasp_xpos, expected_grasp)
     assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependency_end_segment == "approach"
 
 
 def test_pick_session_replans_when_late_bound_target_moves() -> None:
@@ -2087,6 +2109,65 @@ def test_handover_does_not_mutate_cached_final_pose(
         "release",
         "deliver",
     ]
+
+
+def test_handover_replan_resolves_named_targets_from_latest_snapshot() -> None:
+    generator = _dual_motion_generator()
+    action = _bind_action(
+        generator,
+        HandOver(
+            default_options=HandOverOptions(
+                middle_object_pose=SceneEntityPose("target"),
+                final_object_pose=SceneEntityPose("target"),
+            )
+        ),
+    )
+    semantics = _semantics(entity_id="handover_object")
+    task = TaskState(
+        batch_size=NUM_ENVS,
+        device="cpu",
+        held_objects={"left_arm": _held(semantics)},
+    )
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=GraspGoal(semantics=semantics),
+        binding=_dual_binding(action, "source", "destination"),
+    )
+    request = action.resolve_request(invocation)
+    assert action._scene_dependencies(request) == ("target",)
+    captured: list[torch.Tensor] = []
+    original_resolve_matrix = action._resolve_matrix
+
+    def capture_middle(matrix: torch.Tensor, name: str) -> torch.Tensor:
+        if name == "middle_object_pose":
+            captured.append(matrix.clone())
+            raise RuntimeError("captured target")
+        return original_resolve_matrix(matrix, name)
+
+    action._resolve_matrix = capture_middle  # type: ignore[method-assign]
+    first_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    first_pose[:, 0, 3] = 0.3
+    with pytest.raises(RuntimeError, match="captured target"):
+        action.plan(
+            request,
+            _dual_context(
+                task,
+                scene=_target_scene(first_pose, timestamp=0.0, version=0),
+            ),
+        )
+    second_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    second_pose[:, 0, 3] = 0.7
+    with pytest.raises(RuntimeError, match="captured target"):
+        action.plan(
+            request,
+            _dual_context(
+                task,
+                scene=_target_scene(second_pose, timestamp=0.0, version=1),
+            ),
+        )
+
+    torch.testing.assert_close(captured[0], first_pose)
+    torch.testing.assert_close(captured[1], second_pose)
 
 
 def test_handover_holds_only_environment_with_ik_failure() -> None:

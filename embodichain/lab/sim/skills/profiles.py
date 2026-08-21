@@ -989,6 +989,8 @@ class RobotSkillProfile:
     presets: Mapping[str, SkillPolicyPreset] = field(default_factory=dict)
     default_preset: str | None = None
     skill_presets: Mapping[str, str] = field(default_factory=dict)
+    grounding_providers: Mapping[str, str] = field(default_factory=dict)
+    """Semantic call ID to embodiment-owned named grounding provider ID."""
 
     def __post_init__(self) -> None:
         _validate_identifier(self.profile_id, field_name="RobotSkillProfile.profile_id")
@@ -1022,6 +1024,14 @@ class RobotSkillProfile:
                 f"skill_presets references unknown presets {unknown_presets}."
             )
         object.__setattr__(self, "skill_presets", skill_presets)
+        object.__setattr__(
+            self,
+            "grounding_providers",
+            _normalize_named_mapping(
+                self.grounding_providers,
+                field_name="grounding_providers",
+            ),
+        )
         self._validate_resource_graph(resources)
         self.action_control_profiles()
 
@@ -1150,6 +1160,7 @@ class BoundRobotSkillProfile:
         self._resources = self._resolve_resources()
         self._validate_engine_control_profiles()
         self._validate_leaf_ownership()
+        self._skill_catalog_revision = engine.skill_catalog_revision
         self._installed_skills = MappingProxyType(dict(engine.skills))
         self._validate_named_skill_configuration()
         self._validate_defaults()
@@ -1165,6 +1176,16 @@ class BoundRobotSkillProfile:
     def profile_id(self) -> str:
         """Return the stable profile identifier."""
         return self._profile.profile_id
+
+    @property
+    def engine(self) -> AtomicActionEngine:
+        """Return the exact action engine that owns this bound profile."""
+        return self._engine
+
+    @property
+    def source_profile(self) -> RobotSkillProfile:
+        """Return the immutable profile object used to create this binding."""
+        return self._profile
 
     @property
     def resources(self) -> Mapping[str, ResolvedRobotResource]:
@@ -1293,7 +1314,7 @@ class BoundRobotSkillProfile:
 
     def _assert_catalog_current(self) -> None:
         """Prevent stale contracts after engine registration or replacement."""
-        if dict(self._engine.skills) != dict(self._installed_skills):
+        if self._engine.skill_catalog_revision != self._skill_catalog_revision:
             raise RuntimeError(
                 "AtomicActionEngine semantic skills changed after the robot skill "
                 "profile was bound; bind the profile again before discovery or "
