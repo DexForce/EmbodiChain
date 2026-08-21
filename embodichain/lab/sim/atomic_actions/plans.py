@@ -430,6 +430,8 @@ class ActionPlan:
     joint_trajectory: TimedTrajectory | None = None
     segments: tuple[TrajectorySegment, ...] = ()
     scene_dependencies: tuple[str, ...] = ()
+    scene_dependency_end_segment: str | None = None
+    """Stop dynamic-goal monitoring after this segment is dispatched."""
     collision_world_sensitive: bool = False
     replannable: bool = True
     expected_effects: StateDelta = field(default_factory=StateDelta)
@@ -670,6 +672,21 @@ class ActionPlan:
                 "ActionPlan segments must cover the command sequence exactly without "
                 "gaps or overlaps."
             )
+        dependency_end = self.scene_dependency_end_segment
+        if dependency_end is not None:
+            if not isinstance(dependency_end, str) or not dependency_end:
+                raise ValueError(
+                    "scene_dependency_end_segment must be a non-empty segment "
+                    "name or None."
+                )
+            if dependency_end not in names:
+                raise ValueError(
+                    "scene_dependency_end_segment must name an ActionPlan segment."
+                )
+            if not dependencies:
+                raise ValueError(
+                    "scene_dependency_end_segment requires scene_dependencies."
+                )
         object.__setattr__(self, "plan_success", self.plan_success.clone())
         object.__setattr__(self, "commands", self.commands.snapshot())
         object.__setattr__(

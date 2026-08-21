@@ -61,6 +61,7 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
     TimedCommandSequence,
     TimedTrajectory,
+    TrajectorySegment,
 )
 from embodichain.lab.sim.common import BatchEntity
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
@@ -142,6 +143,28 @@ class EffectAction(DynamicAction):
             success=True,
             trajectory=trajectory,
             expected_effects=StateDelta(held_object_updates={"arm": held}),
+        )
+
+
+class StagedDynamicAction(DynamicAction):
+    """Monitor its scene target only during a pre-contact segment."""
+
+    skill_id: ClassVar[str] = "staged_dynamic"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        plan = super()._plan(request, context)
+        return replace(
+            plan,
+            segments=(
+                TrajectorySegment("approach", 0, 1),
+                TrajectorySegment("manipulate", 1, 2),
+            ),
+            scene_dependency_end_segment="approach",
         )
 
 
@@ -480,6 +503,64 @@ def test_session_completes_incremental_command_sequence() -> None:
     assert final.eligible_mask.tolist() == [True]
 
 
+def test_initial_eligibility_is_owned_and_masks_commands() -> None:
+    engine, _ = _engine(batch_size=2)
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+    eligible_mask = torch.tensor([True, False])
+
+    session = engine.start(
+        (_invocation(engine),),
+        initial,
+        eligible_mask=eligible_mask,
+    )
+    eligible_mask.fill_(False)
+    tick = session.tick(initial)
+
+    assert session.eligible_mask.tolist() == [True, False]
+    assert tick.command is not None
+    assert tick.command.active_mask.tolist() == [True, False]
+
+
+def test_empty_initial_eligibility_fails_without_planning() -> None:
+    engine, action = _engine(batch_size=2)
+    initial = _context(0.0, (0.0, 0.0), (0.2, 0.4), 0)
+
+    session = engine.start(
+        (_invocation(engine),),
+        initial,
+        eligible_mask=torch.tensor([False, False]),
+    )
+    tick = session.tick(initial)
+
+    assert action.plan_count == 0
+    assert tick.status is ExecutionStatus.FAILED
+    assert tick.command is None
+    assert tick.eligible_mask.tolist() == [False, False]
+
+
+@pytest.mark.parametrize(
+    ("eligible_mask", "exception", "message"),
+    [
+        ([True], TypeError, "torch.Tensor"),
+        (torch.tensor([1, 0]), ValueError, "bool with shape"),
+        (torch.tensor([True]), ValueError, "bool with shape"),
+    ],
+)
+def test_initial_eligibility_is_validated(
+    eligible_mask: object,
+    exception: type[Exception],
+    message: str,
+) -> None:
+    engine, _ = _engine(batch_size=2)
+
+    with pytest.raises(exception, match=message):
+        engine.start(
+            (_invocation(engine),),
+            _context(0.0, (0.0, 0.0), (0.2, 0.4), 0),
+            eligible_mask=eligible_mask,  # type: ignore[arg-type]
+        )
+
+
 def test_session_commands_schedule_arrivals_and_final_settling() -> None:
     engine, _ = _engine()
     engine.register(NonuniformTimingAction())
@@ -553,6 +634,27 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert action.plan_count == 2
     assert action.requests[0] is action.requests[1]
     assert tick.command is not None
+
+
+def test_scene_motion_is_ignored_after_dependency_segment_is_dispatched() -> None:
+    engine, _ = _engine()
+    action = StagedDynamicAction()
+    engine.register(action)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start(
+        (_invocation(engine, skill_id=StagedDynamicAction.skill_id),),
+        initial,
+    )
+
+    approach = session.tick(initial)
+    after_contact = session.tick(_context(0.1, 0.0, 0.4, 1))
+
+    assert approach.command is not None
+    assert after_contact.command is not None
+    assert ExecutionEventKind.DYNAMIC_GOAL_CHANGED not in {
+        event.kind for event in after_contact.events
+    }
+    assert action.plan_count == 1
 
 
 def test_recovery_replan_rejects_runtime_destination_change() -> None:
