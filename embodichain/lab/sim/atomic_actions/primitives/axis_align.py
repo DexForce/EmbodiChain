@@ -438,7 +438,16 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         sampled = affordance.get_valid_grasp_poses(
             obj_poses=object_pose,
             approach_direction=approach_direction,
-            object_part=object_part,
+            obj_longest_axis=(
+                None
+                if object_part == "center"
+                else torch.tensor(
+                    [0.0, 0.0, 1.0],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            ),
+            is_positive_part=object_part == "top",
         )
         poses: list[torch.Tensor] = []
         success: list[bool] = []

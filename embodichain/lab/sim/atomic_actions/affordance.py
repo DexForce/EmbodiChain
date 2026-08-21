@@ -16,9 +16,10 @@
 
 from __future__ import annotations
 
-import torch
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
+
+import torch
 
 from embodichain.toolkits.graspkit.pg_grasp import (
     GraspGenerator,
@@ -86,6 +87,9 @@ class AntipodalAffordance(Affordance):
 
     _generator: GraspGenerator | None = field(default=None, init=False, repr=False)
 
+    MAX_SURFACE_POINT_COUNT: ClassVar[int] = 1000
+    """Maximum point-cloud size used for geometry-distribution analysis."""
+
     def _init_generator(self) -> None:
         if self.mesh_vertices is None or self.mesh_triangles is None:
             logger.log_error(
@@ -117,17 +121,35 @@ class AntipodalAffordance(Affordance):
         approach_direction: torch.Tensor = torch.tensor(
             [0, 0, -1], dtype=torch.float32
         ),
-        object_part: str = "center",
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return valid grasps, optionally restricted to one end of an axis.
+
+        Args:
+            obj_poses: Batched object poses with shape ``(B, 4, 4)``.
+            approach_direction: Shared world-frame approach direction.
+            obj_longest_axis: Optional shared ``(3,)`` or batched ``(B, 3)``
+                world-frame object axis. ``None`` keeps the default center mode
+                and does not partition grasp candidates.
+            is_positive_part: Select the positive or negative projected half of
+                ``obj_longest_axis``. May be one bool or a ``(B,)`` bool tensor.
+
+        Returns:
+            Per-object ``(grasp_poses, costs)`` tuples.
+        """
         if self._generator is None:
             self._init_generator()
         approach_direction = self._resolve_approach_direction(approach_direction)
+        axes = self._resolve_grasp_region_axes(obj_poses, obj_longest_axis)
+        positive_parts = self._resolve_positive_parts(obj_poses, is_positive_part)
         results = []
         for i, obj_pose in enumerate(obj_poses):
             is_success, grasp_poses, _, costs = self._generator.get_valid_grasp_poses(
                 object_pose=obj_pose,
                 approach_direction=approach_direction,
-                object_part=object_part,
+                obj_longest_axis=None if axes is None else axes[i],
+                is_positive_part=bool(positive_parts[i].item()),
             )
             if grasp_poses.shape == (4, 4):
                 grasp_poses = grasp_poses.unsqueeze(0)
@@ -145,6 +167,190 @@ class AntipodalAffordance(Affordance):
                 )
             results.append((grasp_poses, costs))
         return results
+
+    def sample_surface_points(self, max_points: int = 1000) -> torch.Tensor:
+        """Deterministically sample at most 1000 target-local surface points.
+
+        Triangle faces are selected proportionally to area and barycentric
+        coordinates use deterministic low-discrepancy sequences. Degenerate or
+        triangle-free meshes fall back to an evenly subsampled vertex cloud.
+
+        Args:
+            max_points: Requested point cap in ``[1, 1000]``.
+
+        Returns:
+            Target-local surface points with shape ``(N, 3)``.
+
+        Raises:
+            ValueError: If mesh geometry or ``max_points`` is invalid.
+        """
+        if not isinstance(max_points, int) or isinstance(max_points, bool):
+            raise TypeError("max_points must be an integer.")
+        if not 1 <= max_points <= self.MAX_SURFACE_POINT_COUNT:
+            raise ValueError(
+                f"max_points must be between 1 and {self.MAX_SURFACE_POINT_COUNT}."
+            )
+        if self.mesh_vertices is None:
+            raise ValueError("AntipodalAffordance requires mesh_vertices.")
+        vertices = self.mesh_vertices.to(dtype=torch.float32)
+        if vertices.ndim != 2 or vertices.shape[1] != 3 or vertices.shape[0] == 0:
+            raise ValueError("mesh_vertices must have shape (N, 3) with N > 0.")
+
+        triangles = self.mesh_triangles
+        if triangles is None or triangles.numel() == 0:
+            return self._evenly_subsample_points(vertices, max_points)
+        triangles = triangles.to(device=vertices.device, dtype=torch.long)
+        if triangles.ndim != 2 or triangles.shape[1] != 3:
+            raise ValueError("mesh_triangles must have shape (M, 3).")
+        if triangles.min() < 0 or triangles.max() >= vertices.shape[0]:
+            raise ValueError("mesh_triangles contains an invalid vertex index.")
+
+        face_vertices = vertices[triangles]
+        face_areas = 0.5 * torch.linalg.vector_norm(
+            torch.cross(
+                face_vertices[:, 1] - face_vertices[:, 0],
+                face_vertices[:, 2] - face_vertices[:, 0],
+                dim=1,
+            ),
+            dim=1,
+        )
+        valid_faces = face_areas > torch.finfo(vertices.dtype).eps
+        if not valid_faces.any():
+            return self._evenly_subsample_points(vertices, max_points)
+        face_vertices = face_vertices[valid_faces]
+        face_areas = face_areas[valid_faces]
+
+        sample_index = torch.arange(
+            max_points, device=vertices.device, dtype=vertices.dtype
+        )
+        area_quantiles = (sample_index + 0.5) / max_points
+        cumulative_area = torch.cumsum(face_areas / face_areas.sum(), dim=0)
+        face_indices = torch.searchsorted(cumulative_area, area_quantiles).clamp_max(
+            face_vertices.shape[0] - 1
+        )
+        sampled_faces = face_vertices[face_indices]
+
+        barycentric_u = torch.frac((sample_index + 0.5) * 0.7548776662466927)
+        barycentric_v = torch.frac((sample_index + 0.5) * 0.5698402909980532)
+        sqrt_u = torch.sqrt(barycentric_u)
+        weights = torch.stack(
+            (
+                1.0 - sqrt_u,
+                sqrt_u * (1.0 - barycentric_v),
+                sqrt_u * barycentric_v,
+            ),
+            dim=1,
+        )
+        return torch.sum(sampled_faces * weights.unsqueeze(2), dim=1)
+
+    def get_object_longest_axis(
+        self,
+        obj_poses: torch.Tensor,
+        *,
+        max_points: int = 1000,
+    ) -> torch.Tensor:
+        """Find the widest surface-point distribution axis in world space.
+
+        Args:
+            obj_poses: Current object poses with shape ``(B, 4, 4)``.
+            max_points: Surface point cap, never greater than 1000.
+
+        Returns:
+            Normalized first right-singular vectors with shape ``(B, 3)``.
+
+        Raises:
+            ValueError: If poses or sampled geometry are invalid or degenerate.
+        """
+        if obj_poses.ndim != 3 or obj_poses.shape[1:] != (4, 4):
+            raise ValueError("obj_poses must have shape (B, 4, 4).")
+        points = self.sample_surface_points(max_points=max_points).to(
+            device=obj_poses.device,
+            dtype=torch.float32,
+        )
+        poses = obj_poses.to(dtype=torch.float32)
+        world_points = (
+            torch.matmul(points.unsqueeze(0), poses[:, :3, :3].transpose(1, 2))
+            + poses[:, None, :3, 3]
+        )
+        centered = world_points - world_points.mean(dim=1, keepdim=True)
+        if torch.any(torch.linalg.vector_norm(centered, dim=2).amax(dim=1) <= 1.0e-8):
+            raise ValueError("Object surface point distribution is degenerate.")
+        _, singular_values, vh = torch.linalg.svd(centered, full_matrices=False)
+        if torch.any(singular_values[:, 0] <= 1.0e-8):
+            raise ValueError("Object surface point distribution has no principal axis.")
+        return torch.nn.functional.normalize(vh[:, 0, :], dim=1)
+
+    @staticmethod
+    def _evenly_subsample_points(
+        points: torch.Tensor,
+        max_points: int,
+    ) -> torch.Tensor:
+        """Return an evenly spaced deterministic subset of ``points``."""
+        if points.shape[0] <= max_points:
+            return points.clone()
+        indices = (
+            torch.linspace(
+                0,
+                points.shape[0] - 1,
+                max_points,
+                device=points.device,
+            )
+            .round()
+            .to(torch.long)
+        )
+        return points[indices]
+
+    def _resolve_grasp_region_axes(
+        self,
+        obj_poses: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        """Validate and broadcast optional world-frame grasp-region axes."""
+        if obj_longest_axis is None:
+            return None
+        axes = torch.as_tensor(
+            obj_longest_axis,
+            dtype=torch.float32,
+            device=self._generator.device,
+        )
+        if axes.shape == (3,):
+            axes = axes.unsqueeze(0).expand(obj_poses.shape[0], -1)
+        if axes.shape != (obj_poses.shape[0], 3):
+            raise ValueError(
+                "obj_longest_axis must have shape (3,) or "
+                f"({obj_poses.shape[0]}, 3)."
+            )
+        if not torch.isfinite(axes).all() or torch.any(
+            torch.linalg.vector_norm(axes, dim=1) <= 1.0e-8
+        ):
+            raise ValueError("obj_longest_axis must be finite and non-zero.")
+        return torch.nn.functional.normalize(axes, dim=1)
+
+    def _resolve_positive_parts(
+        self,
+        obj_poses: torch.Tensor,
+        is_positive_part: bool | torch.Tensor,
+    ) -> torch.Tensor:
+        """Validate and broadcast positive/negative grasp-region selections."""
+        if isinstance(is_positive_part, bool):
+            return torch.full(
+                (obj_poses.shape[0],),
+                is_positive_part,
+                dtype=torch.bool,
+                device=self._generator.device,
+            )
+        positive_parts = torch.as_tensor(
+            is_positive_part,
+            device=self._generator.device,
+        )
+        if positive_parts.dtype != torch.bool or positive_parts.shape != (
+            obj_poses.shape[0],
+        ):
+            raise ValueError(
+                "is_positive_part must be a bool or a bool tensor with shape "
+                f"({obj_poses.shape[0]},)."
+            )
+        return positive_parts
 
     def get_dual_arm_valid_grasp_poses(
         self,

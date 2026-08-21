@@ -810,11 +810,23 @@ Both grasp endpoints must provide `open` and `grasp`. The two binding slots
 are candidate motion/grasp pairs rather than a caller-selected transfer
 direction. For every environment, the action compares the observed object
 position with both configured solver root-link positions. The nearer arm picks
-the `top` object part; the other arm receives the `bottom` part. For both arms,
-the approach direction uses the horizontal projection from the acting arm's
-current TCP toward the object and tilts it downward by 45 degrees. Pickup uses
-the observed object position, while receiving uses the predicted middle object
-position because that pose is not observed again during open-loop planning.
+up the object; the other arm receives it.
+
+To keep both grasps spatially separated, HandOver deterministically samples at
+most 1000 points from the object's triangle-mesh surface, transforms them by
+the current object pose, and uses SVD to find the widest distribution direction
+(`obj_longest_axis`). The handover arm selects the projected end nearest its
+current TCP, and the receiving arm selects the opposite end. Grasp generation
+receives this world-frame axis plus `is_positive_part`; a `None` axis retains
+the ordinary unpartitioned center behavior for other callers.
+
+When the longest axis is within 45 degrees of world Z, HandOver uses vertical
+mode: each approach's horizontal projection points from the acting arm's
+current TCP toward the corresponding object position and is tilted downward
+by 45 degrees. Otherwise it uses horizontal mode and both approaches are
+world-Z downward. Pickup uses the observed object position, while receiving
+uses the predicted middle object position because that pose is not observed
+again during open-loop planning.
 
 After pickup, the action lifts in world Z and computes the middle object pose
 by finding the root-link separation's largest-magnitude coordinate and setting

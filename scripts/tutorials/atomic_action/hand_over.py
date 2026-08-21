@@ -75,6 +75,8 @@ SUPPORT_SURFACE_CENTER = (
 # The object starts on one side and is delivered to the other. HandOver chooses
 # the nearer arm for pickup and computes the middle handover position itself.
 OBJECT_INIT_XY = (0.0, 0.02)
+OBJECT_ROT_VERTICAL = (90.0, 0.0, 0.0)
+OBJECT_ROT_HORIZONTAL = (0.0, 0.0, 0.0)
 FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
@@ -150,7 +152,7 @@ def create_handover_object(sim: SimulationManager) -> RigidObject:
             ),
             max_convex_hull_num=1,
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
-            init_rot=[90.0, 0.0, 0.0],
+            init_rot=OBJECT_ROT_HORIZONTAL,
             body_scale=(0.56, 0.56, 0.56),
         )
     )

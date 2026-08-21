@@ -145,10 +145,16 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     """Pick an object with the nearer arm, hand it over, and place it.
 
     For each environment, the action chooses the arm whose root link is closer
-    to the observed object pose. Both grasp approaches point horizontally from
-    the acting arm's current TCP toward the corresponding observed or predicted
-    object position and tilt downward by 45 degrees. The handover arm grasps the
-    object's top half, while the receiving arm grasps its bottom half.
+    to the observed object pose. It samples at most 1000 mesh-surface points and
+    applies SVD in the current object pose to find ``obj_longest_axis``. When
+    that axis is closer to world Z than to the horizontal plane, both grasp
+    approaches point toward the object horizontally and tilt downward by 45
+    degrees. Otherwise both approaches are world-Z downward.
+
+    The first arm grasps the projected end of ``obj_longest_axis`` nearest its
+    current TCP; the receiving arm grasps the opposite end at the predicted
+    middle object pose. This keeps the two hands from selecting the same object
+    region regardless of whether a long object is standing or lying down.
 
     After each grasp waypoint, subsequent EEF waypoints preserve that grasp
     rotation and change translation only. In particular, placement first moves
@@ -162,6 +168,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
     manipulator_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
     end_effector_roles: ClassVar[tuple[str, ...]] = ("source", "destination")
     open_loop: ClassVar[bool] = True
+    _SURFACE_POINT_COUNT: ClassVar[int] = 1000
+    _VERTICAL_MODE_MIN_ABS_Z: ClassVar[float] = math.sqrt(0.5)
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -275,6 +283,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             context,
             name="handover_object_pose",
         )
+        obj_longest_axis = goal.semantics.affordance.get_object_longest_axis(
+            object_pose,
+            max_points=self._SURFACE_POINT_COUNT,
+        )
         final_object_pose = resolve_batched_pose(
             resolve_pose_goal(
                 goal.target_pose,
@@ -324,6 +336,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 request,
                 goal.semantics.affordance,
                 object_pose,
+                obj_longest_axis,
                 final_object_pose,
                 first_root_pose,
                 second_root_pose,
@@ -340,6 +353,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 request,
                 goal.semantics.affordance,
                 object_pose,
+                obj_longest_axis,
                 final_object_pose,
                 second_root_pose,
                 first_root_pose,
@@ -356,6 +370,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 request,
                 goal.semantics.affordance,
                 object_pose,
+                obj_longest_axis,
                 final_object_pose,
                 first_root_pose,
                 second_root_pose,
@@ -369,6 +384,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 request,
                 goal.semantics.affordance,
                 object_pose,
+                obj_longest_axis,
                 final_object_pose,
                 second_root_pose,
                 first_root_pose,
@@ -431,6 +447,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         request: ResolvedActionRequest[HandOverGoal, HandOverOptions],
         affordance: AntipodalAffordance,
         object_pose: torch.Tensor,
+        obj_longest_axis: torch.Tensor,
         final_object_pose: torch.Tensor,
         handover_root_pose: torch.Tensor,
         receive_root_pose: torch.Tensor,
@@ -443,7 +460,9 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
 
         The pickup grasp is sampled on the observed object pose, whereas the
         receiving grasp is sampled on the predicted pose after lift and middle
-        transfer. Both use the same 45-degree downward approach construction.
+        transfer. Vertical-mode approaches tilt down by 45 degrees; horizontal
+        mode approaches vertically downward. The two grasps use opposite ends
+        of the SVD-derived longest object axis.
         """
         options = request.skill_options
         state = context
@@ -461,19 +480,46 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             to_matrix=True,
         )
 
-        # Horizontally, the pickup approach points from the handover arm's
-        # current TCP toward the observed object. Its equally sized downward
-        # component tilts the normalized direction 45 degrees below horizontal.
-        handover_direction, handover_direction_valid = (
+        vertical_mode = (
+            torch.abs(obj_longest_axis[:, 2]) >= self._VERTICAL_MODE_MIN_ABS_Z
+        )
+        vertical_down = torch.tensor(
+            [0.0, 0.0, -1.0],
+            dtype=torch.float32,
+            device=self.device,
+        ).expand(self.num_envs, -1)
+
+        # In vertical mode, point from the pickup TCP toward the observed
+        # object horizontally and tilt down by 45 degrees. In horizontal mode,
+        # approach vertically downward. Only vertical rows require nonzero
+        # horizontal TCP-to-object separation.
+        handover_diagonal, handover_diagonal_valid = (
             self._downward_diagonal_approach_direction(
                 handover_start_eef[:, :3, 3], object_pose[:, :3, 3]
             )
+        )
+        handover_direction = torch.where(
+            vertical_mode[:, None], handover_diagonal, vertical_down
+        )
+        handover_direction_valid = ~vertical_mode | handover_diagonal_valid
+
+        # SVD axes have arbitrary sign. Selecting the sign whose projected end
+        # points toward the pickup TCP makes the physical choice sign-invariant;
+        # the receiving arm always takes the opposite projected end.
+        handover_is_positive_part = (
+            torch.sum(
+                (handover_start_eef[:, :3, 3] - object_pose[:, :3, 3])
+                * obj_longest_axis,
+                dim=1,
+            )
+            >= 0.0
         )
         handover_grasp, handover_grasp_success = self._resolve_grasp(
             affordance,
             object_pose,
             handover_direction,
-            object_part="top",
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=handover_is_positive_part,
         )
         handover_grasp = self._find_symmetric_nearest_xpos(
             handover_grasp, handover_start_eef
@@ -505,20 +551,23 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         handover_lift_eef[:, :3, :3] = handover_grasp[:, :3, :3]
         handover_middle_eef[:, :3, :3] = handover_grasp[:, :3, :3]
 
-        # Horizontally, the receiving approach points from its current TCP to
-        # the predicted middle object position. Vertically, it points downward
-        # by 45 degrees, so the normalized horizontal and downward components
-        # have equal magnitude.
-        receive_direction, receive_direction_valid = (
+        # Apply the same mode to receiving. The object rotation is unchanged by
+        # lift and middle transfer, so its world-space longest axis is unchanged.
+        receive_diagonal, receive_diagonal_valid = (
             self._downward_diagonal_approach_direction(
                 receive_start_eef[:, :3, 3], middle_object_pose[:, :3, 3]
             )
         )
+        receive_direction = torch.where(
+            vertical_mode[:, None], receive_diagonal, vertical_down
+        )
+        receive_direction_valid = ~vertical_mode | receive_diagonal_valid
         receive_grasp, receive_grasp_success = self._resolve_grasp(
             affordance,
             middle_object_pose,
             receive_direction,
-            object_part="bottom",
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=~handover_is_positive_part,
         )
         receive_grasp = self._find_symmetric_nearest_xpos(
             receive_grasp, receive_start_eef
@@ -553,7 +602,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             context,
             "pickup_grasp",
             active_mask & ~handover_grasp_success,
-            "no finite top-half grasp candidate for arm "
+            "no finite grasp candidate on the pickup-side object end for arm "
             f"{handover.arm.control_part!r}",
         )
         self._report_waypoint_failure(
@@ -574,7 +623,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             context,
             "receive_grasp",
             active_mask & ~receive_grasp_success,
-            "no finite bottom-half grasp candidate for arm "
+            "no finite grasp candidate on the opposite object end for arm "
             f"{receive.arm.control_part!r}",
         )
         self._report_waypoint_failure(
@@ -955,9 +1004,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         *,
-        object_part: str,
+        obj_longest_axis: torch.Tensor,
+        is_positive_part: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Select the lowest-cost grasp for one required object part."""
+        """Select the lowest-cost grasp on one projected end of the object."""
         if object_pose.shape != (self.num_envs, 4, 4):
             raise ValueError(
                 "HandOver grasp object_pose must have shape "
@@ -967,6 +1017,17 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             raise ValueError(
                 "HandOver grasp approach_direction must have shape "
                 f"({self.num_envs}, 3)."
+            )
+        if obj_longest_axis.shape != (self.num_envs, 3):
+            raise ValueError(
+                f"HandOver obj_longest_axis must have shape ({self.num_envs}, 3)."
+            )
+        if is_positive_part.dtype != torch.bool or is_positive_part.shape != (
+            self.num_envs,
+        ):
+            raise ValueError(
+                "HandOver is_positive_part must be a bool tensor with shape "
+                f"({self.num_envs},)."
             )
 
         # AntipodalAffordance iterates over object poses but its underlying
@@ -978,7 +1039,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             env_sampled = affordance.get_valid_grasp_poses(
                 obj_poses=object_pose[env_index : env_index + 1],
                 approach_direction=approach_direction[env_index],
-                object_part=object_part,
+                obj_longest_axis=obj_longest_axis[env_index],
+                is_positive_part=bool(is_positive_part[env_index].item()),
             )
             if len(env_sampled) != 1:
                 raise ValueError(

@@ -132,8 +132,10 @@ class PickUpOptions(ActionOptions):
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
-        if not isinstance(self.pick_object_part, str) or not self.pick_object_part:
-            raise ValueError("pick_object_part must be a non-empty string.")
+        if self.pick_object_part not in {"center", "top", "bottom"}:
+            raise ValueError(
+                "pick_object_part must be one of 'center', 'top', or 'bottom'."
+            )
         if self.lift_height < 0.0:
             raise ValueError("lift_height must be non-negative.")
         if self.pre_grasp_distance < 0.0:
@@ -428,10 +430,20 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         options: PickUpOptions,
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        obj_longest_axis = None
+        is_positive_part = True
+        if options.pick_object_part != "center":
+            obj_longest_axis = torch.tensor(
+                [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            is_positive_part = options.pick_object_part == "top"
         grasp_poses_result = semantics.affordance.get_valid_grasp_poses(
             obj_poses=object_pose,
             approach_direction=approach_direction,
-            object_part=options.pick_object_part,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
         )
         num_envs = object_pose.shape[0]
         n_max_pose = max(r[0].shape[0] for r in grasp_poses_result)

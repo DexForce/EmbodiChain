@@ -2424,32 +2424,43 @@ def test_slide_options_reject_invalid_direction() -> None:
         SlideOptions(direction="open")  # type: ignore[arg-type]
 
 
-def _handover_semantics() -> tuple[ObjectSemantics, AntipodalAffordance]:
+def _handover_semantics(
+    longest_axis: torch.Tensor = torch.tensor([0.0, 0.0, 1.0]),
+) -> tuple[ObjectSemantics, AntipodalAffordance]:
     affordance = AntipodalAffordance()
+
+    def get_object_longest_axis(
+        obj_poses: torch.Tensor,
+        *,
+        max_points: int,
+    ) -> torch.Tensor:
+        assert max_points <= 1000
+        return longest_axis.to(dtype=torch.float32).expand(obj_poses.shape[0], -1)
 
     def sample_grasps(
         obj_poses: torch.Tensor,
         approach_direction: torch.Tensor,
-        object_part: str,
+        obj_longest_axis: torch.Tensor,
+        is_positive_part: bool,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         assert obj_poses.shape == (1, 4, 4)
         assert approach_direction.shape == (3,)
+        assert obj_longest_axis.shape == (3,)
         grasp_poses = obj_poses.clone()
-        if object_part == "top":
+        if is_positive_part:
             grasp_poses[:, :3, :3] = torch.tensor(
                 [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
             )
-        elif object_part == "bottom":
+        else:
             grasp_poses[:, :3, :3] = torch.tensor(
                 [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
             )
-        else:
-            raise AssertionError(f"Unexpected object part: {object_part}")
         return [
             (grasp_poses[index].unsqueeze(0), torch.zeros(1))
             for index in range(obj_poses.shape[0])
         ]
 
+    affordance.get_object_longest_axis = Mock(side_effect=get_object_longest_axis)
     affordance.get_valid_grasp_poses = Mock(side_effect=sample_grasps)
     semantics = ObjectSemantics(
         affordance=affordance,
@@ -2495,11 +2506,12 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         sampled_object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         *,
-        object_part: str,
+        obj_longest_axis: torch.Tensor,
+        is_positive_part: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        del sampled_affordance, approach_direction
+        del sampled_affordance, approach_direction, obj_longest_axis
         grasp_pose = sampled_object_pose.clone()
-        if object_part == "top":
+        if bool(is_positive_part[0].item()):
             grasp_pose[:, :3, :3] = torch.tensor(
                 [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
             )
@@ -2562,8 +2574,10 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
         "receive_release",
     ]
 
-    top_call, bottom_call = action._resolve_grasp.call_args_list
-    assert top_call.kwargs["object_part"] == "top"
+    pickup_call, receive_call = action._resolve_grasp.call_args_list
+    expected_axis = torch.tensor([[0.0, 0.0, 1.0]]).expand(NUM_ENVS, -1)
+    assert torch.equal(pickup_call.kwargs["obj_longest_axis"], expected_axis)
+    assert pickup_call.kwargs["is_positive_part"].tolist() == [False, False]
     diagonal_component = math.sqrt(0.5)
     pickup_horizontal = object_pose[:, :2, 3]
     pickup_horizontal = pickup_horizontal / torch.linalg.vector_norm(
@@ -2572,9 +2586,10 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     expected_pickup_direction = torch.zeros(NUM_ENVS, 3)
     expected_pickup_direction[:, :2] = pickup_horizontal * diagonal_component
     expected_pickup_direction[:, 2] = -diagonal_component
-    assert torch.allclose(top_call.args[2], expected_pickup_direction)
-    assert bottom_call.kwargs["object_part"] == "bottom"
-    predicted_middle_pose = bottom_call.args[1]
+    assert torch.allclose(pickup_call.args[2], expected_pickup_direction)
+    assert torch.equal(receive_call.kwargs["obj_longest_axis"], expected_axis)
+    assert receive_call.kwargs["is_positive_part"].tolist() == [True, True]
+    predicted_middle_pose = receive_call.args[1]
     assert torch.allclose(
         predicted_middle_pose[:, :3, 3],
         torch.tensor([[0.0, 0.1, 0.7], [0.0, 0.1, 0.7]]),
@@ -2585,7 +2600,7 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
             [0.0, diagonal_component, -diagonal_component],
         ]
     )
-    assert torch.allclose(bottom_call.args[2], expected_receive_direction)
+    assert torch.allclose(receive_call.args[2], expected_receive_direction)
 
     pickup_grasp_rotation = planned_targets[0][:, 1, :3, :3]
     assert torch.allclose(
@@ -2628,6 +2643,47 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     assert plan.expected_effects.is_empty
     assert context.task is original_task
     assert plan.scene_dependencies == ("handover_object",)
+
+
+def test_handover_horizontal_mode_uses_downward_opposite_end_grasps() -> None:
+    generator = _dual_motion_generator()
+    action = _bind_action(generator, HandOver())
+    semantics, _ = _handover_semantics(torch.tensor([1.0, 0.0, 0.0]))
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, :3, 3] = torch.tensor([-0.8, 0.2, 0.5])
+
+    def resolve_grasp(
+        affordance: AntipodalAffordance,
+        sampled_object_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        *,
+        obj_longest_axis: torch.Tensor,
+        is_positive_part: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del affordance, approach_direction, obj_longest_axis, is_positive_part
+        return sampled_object_pose.clone(), torch.ones(NUM_ENVS, dtype=torch.bool)
+
+    action._resolve_grasp = Mock(side_effect=resolve_grasp)
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
+        binding=_dual_binding(action, "source", "destination"),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=HandOverOptions(hand_interp_steps=2),
+    )
+
+    plan = _plan_action(action, invocation, _handover_context(object_pose))
+
+    assert plan.plan_success.tolist() == [True, True]
+    pickup_call, receive_call = action._resolve_grasp.call_args_list
+    downward = torch.tensor([0.0, 0.0, -1.0])
+    expected_axis = torch.tensor([[1.0, 0.0, 0.0]]).expand(NUM_ENVS, -1)
+    assert torch.equal(pickup_call.args[2], downward.expand(NUM_ENVS, -1))
+    assert torch.equal(pickup_call.kwargs["obj_longest_axis"], expected_axis)
+    assert pickup_call.kwargs["is_positive_part"].tolist() == [True, True]
+    assert torch.equal(receive_call.args[2], downward.expand(NUM_ENVS, -1))
+    assert torch.equal(receive_call.kwargs["obj_longest_axis"], expected_axis)
+    assert receive_call.kwargs["is_positive_part"].tolist() == [False, False]
 
 
 def test_handover_selects_arm_per_environment() -> None:
@@ -2705,10 +2761,11 @@ def test_handover_reports_failed_semantic_waypoint(
         sampled_object_pose: torch.Tensor,
         approach_direction: torch.Tensor,
         *,
-        object_part: str,
+        obj_longest_axis: torch.Tensor,
+        is_positive_part: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         nonlocal grasp_call_count
-        del affordance, approach_direction, object_part
+        del affordance, approach_direction, obj_longest_axis, is_positive_part
         grasp_call_count += 1
         success = torch.ones(NUM_ENVS, dtype=torch.bool)
         if grasp_call_count == 2:
