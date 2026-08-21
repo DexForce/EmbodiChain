@@ -75,6 +75,7 @@ embodichain.lab.gym.envs.demo
    DemoEpisodeResult
    DemoSegment
    DemoSegmentResult
+   ProcessedEnvAction
    execute_demo_episode
    resolve_demo_segments
 
@@ -87,6 +88,204 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.gym.envs.expert_program.bridge
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.bridge
+
+.. autosummary::
+
+   AcceptedRuntimeCommandObserver
+   AtomicDemoBridge
+   BufferedGymCommandSink
+   CompiledProgramPort
+   CurrentQposProvider
+   DemoBridgeError
+   EnvironmentStepClock
+   EnvironmentStepTimingError
+   GymPlanningObservationProvider
+   JointPositionGymTransportEncoder
+   ParallelCommandSafetyValidator
+   RuntimeCommandFrameEncoder
+   RuntimeTransportActionEncoder
+   SegmentPostPolicyMetadataPort
+   SegmentPostPolicyPort
+   SegmentPostPolicyResultPort
+   SegmentValidatorMetadataPort
+   SegmentValidatorPort
+   SequentialSkillRuntimePort
+   UnsupportedRuntimeTransportError
+
+embodichain.lab.gym.envs.expert_program.cfg
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.cfg
+
+.. autosummary::
+
+   BarrierCfg
+   CyclicPoseTargetCfg
+   DeclarativeCfgValue
+   EXPERT_PROGRAM_SCHEMA_VERSION
+   EXPERT_PROGRAM_SCHEMA_VERSION_V2
+   ExpertProgramCfg
+   ExpertProgramIntegrationCfg
+   HandOverCfg
+   InvokeCfg
+   MAX_DECLARATIVE_DEPTH
+   MAX_DECLARATIVE_NODES
+   MAX_EXPANDED_CALLS
+   MAX_PROGRAM_DEPTH
+   MAX_PROGRAM_NODES
+   MAX_REPEAT_COUNT
+   ObjectNearTargetValidatorCfg
+   OperateArticulationCfg
+   ParallelCfg
+   PickCfg
+   PlaceCfg
+   PoseCfg
+   PostPolicyCfg
+   ProgramNodeCfg
+   RegisteredSemanticCallCfg
+   RepeatCfg
+   SUPPORTED_EXPERT_PROGRAM_SCHEMA_VERSIONS
+   SegmentCfg
+   SemanticCallCfg
+   SequenceCfg
+   TargetCfg
+   TargetRefCfg
+   ValidatorCfg
+   WaitStablePostCfg
+
+embodichain.lab.gym.envs.expert_program.compiler
+--------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.compiler
+
+.. autosummary::
+
+   CompiledBarrier
+   CompiledParallelBlock
+   CompiledParallelBranch
+   CompiledPostPolicy
+   CompiledProgram
+   CompiledProgramAnalysis
+   CompiledProgramCall
+   CompiledProgramSegment
+   CompiledProgramValidator
+   CompiledRepeatFrame
+   CompiledTargetSelection
+   ExpertProgramCompileError
+   ExpertProgramCompiler
+   ExpertProgramSceneResolver
+   MaterializedCompiledProgram
+   SceneRegistryProgramResolver
+
+embodichain.lab.gym.envs.expert_program.decoder
+-------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.decoder
+
+.. autosummary::
+
+   ConfigPath
+   ConfigPathPart
+   ExpertProgramConfigError
+   ExpertProgramDecodeError
+   ExpertProgramValidationContext
+   ExpertProgramValidationError
+   SceneReferenceRole
+   decode_expert_program
+   decode_semantic_call
+   encode_semantic_call
+   render_config_path
+   validate_expert_program
+
+embodichain.lab.gym.envs.expert_program.environment
+-----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.environment
+
+.. autosummary::
+
+   AcceptedRuntimeCommandObserverFactory
+   ExpertProgramEnvironmentAdapter
+   ExpertProgramEnvironmentFactory
+   ExpertProgramEnvironmentMixin
+   ExpertProgramRuntimeAssembly
+   PlanningObservationPort
+   SkillRuntimeAssemblyPort
+
+embodichain.lab.gym.envs.expert_program.loader
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.loader
+
+.. autosummary::
+
+   MAX_EXPERT_PROGRAM_BYTES
+   load_expert_program
+   loads_expert_program_json
+   parse_expert_program_json
+
+embodichain.lab.gym.envs.expert_program.simulation
+----------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation
+
+.. autosummary::
+
+   AntipodalGraspAffordanceBinding
+   ArticulationOperationAffordanceBinding
+   ArticulationOperationTargetBinding
+   ControlPartCommandPreset
+   ControlPartEndpointBinding
+   ControlPartResourceBinding
+   RobotResourceBinding
+   SimulationArticulationBinding
+   SimulationArticulationLinkBinding
+   SimulationResourceEndpointBinding
+   SimulationRigidObjectBinding
+   SimulationRobotResourceBinding
+   SimulationRobotSkillProfileBinding
+   SimulationSceneBinding
+
+embodichain.lab.gym.envs.expert_program.simulation_environment
+----------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_environment
+
+.. autosummary::
+
+   ControlCommandStateEvidenceTracker
+   MotionGeneratorFactory
+   SharedTickSceneProvider
+   SimulationExpertProgramEnvironment
+   SimulationExpertProgramFactory
+   SimulationPlanningObservationProvider
+   create_simulation_expert_program_adapter
+
+embodichain.lab.gym.envs.expert_program.simulation_policies
+-------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.expert_program.simulation_policies
+
+.. autosummary::
+
+   SimulationSegmentPolicyPort
+
+embodichain.lab.gym.envs.settling
+---------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.settling
+
+.. autosummary::
+
+   DynamicSettleMonitor
+   DynamicSettleMonitorCfg
+   DynamicSettleSample
+   DynamicSettleState
 
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
@@ -1771,6 +1970,18 @@ embodichain.workspace_cache_cli
 .. autosummary::
 
    main
+
+embodichain.utils
+-----------------
+
+.. currentmodule:: embodichain.utils
+
+.. autosummary::
+
+   GLOBAL_SEED
+   is_configclass
+   resolve_config_path
+   set_seed
 
 embodichain_tasks.configs
 -------------------------

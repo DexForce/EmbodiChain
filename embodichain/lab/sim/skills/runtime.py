@@ -1229,6 +1229,7 @@ class _PrimedObservationProvider:
             task=task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
 
 
@@ -1765,6 +1766,7 @@ class SkillRuntime:
             task=self._task_state,
             scene=context.scene,
             env_ids=context.env_ids,
+            control_dt=context.control_dt,
         )
         if normalized.batch_size != self._task_state.batch_size:
             raise ValueError(
